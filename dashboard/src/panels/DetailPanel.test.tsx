@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render } from "@testing-library/react";
+import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { dashboardStore } from "../data/store";
@@ -420,8 +420,16 @@ function stubCounters() {
   vi.stubGlobal(
     "fetch",
     vi.fn(
-      async () =>
-        ({
+      async (url: string) => {
+        if (url.startsWith("/api/task-document")) {
+          const params = new URLSearchParams(url.split("?", 2)[1] ?? "");
+          const docPath = params.get("path") ?? "";
+          const doc =
+            dashboardStore.getState().analytics?.taskDocuments.find((item) => item.docPath === docPath) ??
+            taskDoc({ kind: docPath.endsWith("/task.json") ? "master" : "subTask", docPath });
+          return { ok: true, status: 200, json: async () => doc } as unknown as Response;
+        }
+        return {
           ok: true,
           status: 200,
           json: async () => ({
@@ -430,7 +438,8 @@ function stubCounters() {
               memory: { files: 0, insertions: 0, deletions: 0 },
             },
           }),
-        }) as unknown as Response,
+        } as unknown as Response;
+      },
     ),
   );
 }
@@ -643,8 +652,8 @@ describe("DetailPanel master series navigation (6g)", () => {
       <DetailPanel selectedId="taskdoc:/tasks/repo-a/planning/ids.json" />,
     );
 
-    expect(getAllByText("S11 — Make Operations disappearance archive/delete-based")).toHaveLength(2);
-    expect(getAllByText("S11.1 — Exclude archived task documents")).toHaveLength(2);
+    expect(getAllByText("S11 — Make Operations disappearance archive/delete-based")).toHaveLength(1);
+    expect(getAllByText("S11.1 — Exclude archived task documents")).toHaveLength(1);
     expect(getByText("E4 — Master leaf list uses task-specific numbers")).toBeTruthy();
     expect(queryByText("Make Operations disappearance archive/delete-based")).toBeNull();
     expect(queryByText("Master leaf list uses task-specific numbers")).toBeNull();
@@ -675,7 +684,7 @@ describe("DetailPanel master series navigation (6g)", () => {
 
     fireEvent.click(getByTestId("subtask-open-1"));
     expect(getByText("Slice objective text")).toBeTruthy(); // the slice's full reader
-    expect(getAllByText("S1 — do the thing")).toHaveLength(2); // top + implementation steps
+    expect(getAllByText("S1 — do the thing")).toHaveLength(1);
 
     fireEvent.click(getByTestId("series-breadcrumb"));
     expect(getByTestId("subtask-open-1")).toBeTruthy(); // back to the master index
@@ -778,9 +787,70 @@ describe("DetailPanel master series navigation (6g)", () => {
     const { getAllByText, getByText, queryByText } = render(<DetailPanel selectedId="LEAF_TASK" />);
 
     expect(getByText("Slice objective text")).toBeTruthy();
-    expect(getAllByText("S1 — do the thing")).toHaveLength(2);
+    expect(getAllByText("S1 — do the thing")).toHaveLength(1);
     expect(queryByText("Series objective text")).toBeNull();
     expect(queryByText("Current State")).toBeNull();
+  });
+
+  it("renders the complete on-demand task-document body while retaining its summary", async () => {
+    const summary = taskDoc({
+      kind: "subTask",
+      docPath: "/tasks/agents-remember/260628_operations-integration/16_reader.json",
+      title: "Reader residual",
+      objective: "Summary objective.",
+      steps: [{ id: "S1", title: "Render once", status: "inProgress", substeps: [] }],
+    });
+    seedTaskDocuments([summary]);
+    const body = {
+      ...summary,
+      objective: "Complete objective.",
+      requirements: ["Show the complete body."],
+      decisions: [{ at: "2026-07-10", decision: "Use the on-demand body.", rationale: "It is authoritative." }],
+      references: ["notes/reader.md"],
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        if (url.startsWith("/api/task-document")) {
+          return { ok: true, status: 200, json: async () => body } as unknown as Response;
+        }
+        return { ok: true, status: 200, json: async () => ({ counters: { code: { files: 0, insertions: 0, deletions: 0 }, memory: { files: 0, insertions: 0, deletions: 0 } } }) } as unknown as Response;
+      }),
+    );
+
+    const { getByText, getAllByText } = render(
+      <DetailPanel selectedId={`taskdoc:${summary.docPath}`} />,
+    );
+    expect(getByText("Summary objective.")).toBeTruthy();
+    await waitFor(() => expect(getByText("Complete objective.")).toBeTruthy());
+    expect(getByText("Show the complete body.")).toBeTruthy();
+    expect(getByText("Use the on-demand body.")).toBeTruthy();
+    expect(getByText("notes/reader.md")).toBeTruthy();
+    expect(getAllByText("S1 — Render once")).toHaveLength(1);
+  });
+
+  it("shows the available summary when the on-demand task-document body is absent", async () => {
+    const doc = taskDoc({
+      kind: "subTask",
+      docPath: "/tasks/agents-remember/260628_operations-integration/17_reader.json",
+      objective: "Available summary objective.",
+    });
+    seedTaskDocuments([doc]);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        if (url.startsWith("/api/task-document")) {
+          return { ok: false, status: 404, json: async () => ({}) } as unknown as Response;
+        }
+        return { ok: true, status: 200, json: async () => ({}) } as unknown as Response;
+      }),
+    );
+
+    const { getByText } = render(<DetailPanel selectedId={`taskdoc:${doc.docPath}`} />);
+    await waitFor(() =>
+      expect(getByText("Full task document details are unavailable; showing the available summary.")).toBeTruthy(),
+    );
+    expect(getByText("Available summary objective.")).toBeTruthy();
   });
 });
 
@@ -795,7 +865,7 @@ describe("DetailPanel promoted lifecycle identity", () => {
     expect(getByText("subTask")).toBeTruthy();
     expect(getByText("Engine Room Stack Entry Height")).toBeTruthy();
     expect(getByText("Keep a single Engine Room enclosure entry visually bounded.")).toBeTruthy();
-    expect(getAllByText("S1 — Fix the stack entry height")).toHaveLength(2);
+    expect(getAllByText("S1 — Fix the stack entry height")).toHaveLength(1);
     expect(getByText("Notes")).toBeTruthy();
     expect(getByText("This is the authored leaf task document.")).toBeTruthy();
     expect(queryByText("Lifecycle Finalize Task")).toBeNull();
@@ -864,6 +934,14 @@ function stubNotes(
   body = "note body",
 ) {
   const fn = vi.fn(async (url: string) => {
+    if (url.startsWith("/api/task-document")) {
+      const params = new URLSearchParams(url.split("?", 2)[1] ?? "");
+      const docPath = params.get("path") ?? "";
+      const doc =
+        dashboardStore.getState().analytics?.taskDocuments.find((item) => item.docPath === docPath) ??
+        taskDoc({ kind: docPath.endsWith("/task.json") ? "master" : "subTask", docPath });
+      return { ok: true, status: 200, json: async () => doc } as unknown as Response;
+    }
     if (url.startsWith("/api/notes/list")) {
       const payload = { repo: "agents-remember", master: "m", notes, truncated: false };
       return { ok: true, status: 200, json: async () => payload } as unknown as Response;

@@ -30,6 +30,7 @@ from agents_remember.models.providers import (
 )
 from agents_remember.providers import lifecycle
 from agents_remember.providers.current_state import write_current_provider_state
+from agents_remember.providers.metrics import ProviderMetricsStore
 from agents_remember.providers.recovery import PROVIDER_WATCHER_RESTART_RECOVERY
 from agents_remember.providers.settings import write_lifecycle_settings
 
@@ -62,10 +63,25 @@ def provider_status_packet(
         detail_limit=detail_limit,
         target_repo_id=target_repo_id,
     )
-    return ProviderStatusResponse(ok=True, providers=summary).model_dump(
+    packet = ProviderStatusResponse(ok=True, providers=summary).model_dump(
         mode="json",
         exclude_none=True,
     )
+    # Containment R4 (260707-HFX-L1): the daemon-sampled containment metrics ride
+    # the status packet even when providers are disabled — leftover stacks from a
+    # dead session are exactly what must stay observable. Read-only; None until
+    # the serving daemon's first sample lands.
+    store = ProviderMetricsStore(config.coordination_root)
+    metrics = store.read_current()
+    if metrics is not None:
+        packet["metrics"] = metrics
+    # 260707-HFX-L2: index staleness is a reportable STATE — the newest
+    # index-lifecycle rows (seed catch-up, staleIndex, watcher readiness)
+    # surface here so an operator sees behind-ness without reading logs.
+    index_states = store.read_recent_index_states(limit=10)
+    if index_states:
+        packet["indexState"] = index_states
+    return packet
 
 
 def provider_summary_packet(

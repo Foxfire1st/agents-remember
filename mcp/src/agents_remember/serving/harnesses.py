@@ -30,8 +30,8 @@ Per-harness knob application (260703-L16): each entry may also carry the mapping
 delivery vehicles (empirical, 2026-07-07): ``low|medium|high|xhigh|max`` are LAUNCH-FLAG values,
 while ``ultracode`` is a SESSION-LEVEL value the ``--effort`` flag rejects (warn-then-silently-
 degrade) but the interactive ``/effort`` command accepts -- it is delivered post-launch as a pasted
-session command. A harness without a mapping (Codex, Pi.dev) stays **env-only**: the knobs ride the
-spawn env untouched and no effort vocabulary is enforced for it. Knob values are appended as
+session command. Codex maps its model and effort explicitly onto ``--model`` and
+``--config model_reasoning_effort=<value>``; Pi.dev remains env-only. Knob values are appended as
 discrete argv elements (never shell-interpolated), preserving the fixed-argv posture.
 """
 
@@ -44,6 +44,14 @@ from typing import Literal
 
 Which = Callable[[str], str | None]
 """A :func:`shutil.which`-shaped lookup: a command name -> its resolved path, or ``None`` if absent."""
+
+CODEX_EFFORT_VALUES = ("none", "minimal", "low", "medium", "high", "xhigh")
+"""Codex reasoning-effort enum proven by a first-turn API probe on 2026-07-10.
+
+``max`` was accepted by the local launcher but absent from the API's reported enum; the L15 owner
+ruled that it stays excluded together with ``ultracode`` and ``auto`` so dispatch validation matches
+the values a real turn accepts, not merely values the boot banner will echo.
+"""
 
 
 @dataclass(frozen=True)
@@ -72,6 +80,7 @@ class Harness:
     # command rendered from ``effort_session_command`` (``{value}`` placeholder), before the brief.
     effort_session_values: tuple[str, ...] = ()
     effort_session_command: str | None = None
+    effort_flag_value_template: str | None = None
     # Where this entry came from. ``registry`` = these curated defaults (a settings OVERRIDE of a
     # builtin keeps it); ``settings`` = a NEW ``orchestration.harnesses`` id. Mapping-less builtins
     # are documented env-only, while a mapping-less settings harness REFUSES the model/effort knobs
@@ -93,13 +102,22 @@ HARNESSES: tuple[Harness, ...] = (
         effort_session_values=("ultracode",),
         effort_session_command="/effort {value}",
     ),
-    Harness(id="codex", name="Codex", command="codex", argv=("codex",)),
+    Harness(
+        id="codex",
+        name="Codex",
+        command="codex",
+        argv=("codex",),
+        model_flag="--model",
+        effort_flag="--config",
+        effort_flag_values=CODEX_EFFORT_VALUES,
+        effort_flag_value_template="model_reasoning_effort={value}",
+    ),
     Harness(id="pi", name="Pi.dev", command="pi", argv=("pi",)),
 )
 """The developer-curated max set (2026-06-18): the TUI coding agents AR supports. Display order.
 
-Codex and Pi.dev carry no knob mapping yet: for them the model/effort knobs are env-only (documented
-in ``docs/reference/settings-json.md``); growing a mapping is a one-line registry edit here."""
+Codex carries an explicit model/effort argv mapping; Pi.dev remains env-only (documented in
+``docs/reference/settings-json.md``)."""
 
 _BY_ID: dict[str, Harness] = {harness.id: harness for harness in HARNESSES}
 
@@ -177,7 +195,7 @@ def invalid_effort_detail(harness: Harness, effort: str) -> str | None:
     """The dispatch-time refusal text for ``effort``, or ``None`` when the value is fine.
 
     A value inside the harness's vocabulary (flag OR session set) passes; a MAPPING-LESS BUILTIN
-    (codex, pi) passes everything -- its knobs are documented env-only. A mapping-less
+    (currently pi) passes everything -- its knobs are documented env-only. A mapping-less
     SETTINGS-DEFINED harness refuses the effort knob outright with guidance: declare the mapping or
     use the free-form escape -- explicit over guessing a flag that might mean something else
     (developer ruling 2026-07-07). Everything else is refused LOUDLY, naming the harness and BOTH
@@ -234,7 +252,12 @@ def knob_argv(
     if model and harness.model_flag:
         extra += [harness.model_flag, model]
     if effort and harness.effort_flag and effort in harness.effort_flag_values:
-        extra += [harness.effort_flag, effort]
+        value = (
+            harness.effort_flag_value_template.format(value=effort)
+            if harness.effort_flag_value_template
+            else effort
+        )
+        extra += [harness.effort_flag, value]
     return extra
 
 

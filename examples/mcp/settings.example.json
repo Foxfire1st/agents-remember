@@ -20,5 +20,15 @@
   "dashboard": {
     "autoStart": false,
     "port": 8765
+  },
+  "providerDegradation": {
+    "enabled": true,
+    "failSafeEnabled": true,
+    "memoryDegradedRatio": 0.8,
+    "memoryCriticalRatio": 0.92
+  },
+  "retirement": {
+    "autoLandOnIntegration": true,
+    "autoLandOnFinalize": true
   }
 }

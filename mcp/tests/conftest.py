@@ -22,6 +22,14 @@ clones, automated evaluation runs).
 from __future__ import annotations
 
 import os
+import sys
+from pathlib import Path
+
+# Pin the checkout under test ahead of any editable-install ``.pth`` entry. Without this, invoking
+# the canonical ``pytest mcp/tests`` command from a worktree can import the main checkout instead of
+# the worktree candidate and report green against the wrong source tree.
+MCP_SRC = Path(__file__).resolve().parents[1] / "src"
+sys.path.insert(0, str(MCP_SRC))
 
 # git's repo-pointer / object-store environment. Any of these, if inherited,
 # redirects a `git` subprocess away from its `cwd` and onto another repository.

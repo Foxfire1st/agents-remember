@@ -1,35 +1,18 @@
 import type { EnclosureNode, TaskDocNode } from "../types/projection";
-import { hasLiveWorktree } from "./selectors";
-import type { OpenSession } from "./sessions";
-import {
-  isOrchestrationDoc,
-  masterCommandNames,
-  orchestratorParentKey,
-  pathDir,
-} from "./taskHierarchy";
+import { sessionSeatRole, type OpenSession } from "./sessions";
+import { isOrchestrationDoc, pathDir } from "./taskHierarchy";
 import { qualifiedLeafKey } from "./taskIdentity";
 
-// The G1 COMMAND TREE for the Chats pane (L14): the chats sidebar mirrors operations. Membership,
-// in precedence order, per session:
-//   1. COMMAND DECK (gold, top; exists ONLY when an orchestration task exists — D3): sessions with
-//      command-role spawn provenance (AR_SPAWN_ROLE orchestrator/strategist/manager recorded on the
-//      catalog row) plus any session whose leaf claim resolves INTO the orchestration task itself
-//      (its own qualified leaf, or a leaf in its folder) — the developer-facing orchestrator chat.
-//   2. MASTER GROUPS (one per claimed master folder): sessions whose qualified leaf key
-//      (`repo/master/leaf-id`) resolves to a live enclosure of that master; the group takes the
-//      purple management badge + one 22px indent step only when that master is commanded by an
-//      orchestration task — mirroring the tasks-tab grammar exactly.
-//   3. LANDED ARCHIVE (one group, collapsed by default, unmarked): sessions attached to a leaf
-//      whose enclosure is gone or absent — landed work rolls up instead of cluttering the rail.
-//   4. UNGROUPED: sessions with no leaf claim keep today's flat placement below the groups.
-// Pure derivation — no persistence; collapse state is UI-local in the SessionList.
+// L16 derives one rail box per repo-qualified sprint. Sessions with a valid leaf claim stay in
+// that sprint regardless of worktree liveness; landed sessions use the existing archive, while
+// malformed claims use an explicit error box. Pure derivation; collapse state remains UI-local.
 
 /** The l-01 seats whose chats belong on the command deck. */
-const COMMAND_ROLES = new Set(["orchestrator", "strategist", "manager"]);
+const COMMAND_ROLES = new Set(["architect", "orchestrator", "strategist", "manager"]);
 
 export interface SessionGroup {
-  key: string; // "command" | `master:${folder}` | "landed"
-  kind: "command" | "master" | "landed";
+  key: string; // `sprint:${repo}/${master}` | "landed" | "error"
+  kind: "command" | "master" | "landed" | "error";
   label: string;
   /** Rank insignia tier for the group header; unset = unmarked (landed / uncommanded master). */
   tier?: "orchestration" | "management";
@@ -71,22 +54,6 @@ function leafKeySegments(
   return { repo: parts[0], master: parts[1], leafId: parts[parts.length - 1] };
 }
 
-// The enclosure a leaf claim resolves to: master folder = basename(taskRoot), leaf ids compared
-// case-insensitively (enclosure leaf ids are slugified lowercase, doc ids authored uppercase —
-// the same normalization the tasks tab uses), repo checked when the enclosure carries one.
-function enclosureForLeafKey(
-  leafKey: string,
-  enclosures: EnclosureNode[],
-): EnclosureNode | undefined {
-  const segments = leafKeySegments(leafKey);
-  if (!segments) return undefined;
-  return enclosures.find((enclosure) => {
-    if (folderOf(enclosure.taskRoot) !== segments.master) return false;
-    if (enclosure.repoName && enclosure.repoName !== segments.repo) return false;
-    return enclosure.leafId.toLowerCase() === segments.leafId.toLowerCase();
-  });
-}
-
 export function groupSessions(input: {
   sessions: OpenSession[];
   taskDocuments: TaskDocNode[];
@@ -95,94 +62,98 @@ export function groupSessions(input: {
   const docs = input.taskDocuments;
   const orchestrationDocs = docs.filter(isOrchestrationDoc);
   const deckExists = orchestrationDocs.length > 0;
-  const orchestrationFolders = new Set(orchestrationDocs.map((doc) => folderOf(pathDir(doc.docPath))));
-  const orchestrationLeafKeys = new Set(
+  const orchestrationKeys = new Set(
     orchestrationDocs.map((doc) => qualifiedLeafKey(doc)).filter(Boolean),
   );
-  const masterDocsByFolder = new Map<string, TaskDocNode>();
+  const masterDocsBySprint = new Map<string, TaskDocNode>();
   for (const doc of docs) {
     if (doc.kind !== "master") continue;
     const folder = folderOf(pathDir(doc.docPath));
-    if (folder && !masterDocsByFolder.has(folder)) masterDocsByFolder.set(folder, doc);
+    const key = folder && doc.repository ? `${doc.repository}/${folder}` : undefined;
+    if (key && !masterDocsBySprint.has(key)) masterDocsBySprint.set(key, doc);
   }
 
-  const deck: OpenSession[] = [];
   const landed: OpenSession[] = [];
   const ungrouped: OpenSession[] = [];
-  const byMaster = new Map<string, OpenSession[]>();
+  const invalid: OpenSession[] = [];
+  const bySprint = new Map<string, OpenSession[]>();
 
   for (const session of input.sessions) {
+    if (session.status === "landed") {
+      landed.push(session);
+      continue;
+    }
     const segments = session.leafKey ? leafKeySegments(session.leafKey) : undefined;
-    const claimsOrchestration =
-      (session.leafKey !== undefined && orchestrationLeafKeys.has(session.leafKey)) ||
-      (segments !== undefined && orchestrationFolders.has(segments.master));
-    if (
-      deckExists &&
-      ((session.spawnRole !== undefined && COMMAND_ROLES.has(session.spawnRole)) ||
-        claimsOrchestration)
-    ) {
-      deck.push(session);
+    if (session.leafKey && !segments) {
+      invalid.push(session);
       continue;
     }
     if (!segments) {
       ungrouped.push(session);
       continue;
     }
-    const enclosure = enclosureForLeafKey(session.leafKey as string, input.enclosures);
-    if (enclosure && hasLiveWorktree(enclosure)) {
-      const members = byMaster.get(segments.master);
-      if (members) members.push(session);
-      else byMaster.set(segments.master, [session]);
-    } else {
-      // Landed or absent enclosure: the work left the hangar, the chat rolls into the archive.
-      landed.push(session);
-    }
+    const key = `${segments.repo}/${segments.master}`;
+    const members = bySprint.get(key);
+    if (members) members.push(session);
+    else bySprint.set(key, [session]);
   }
 
   const groups: SessionGroup[] = [];
-  if (deck.length > 0) {
-    const sprint = orchestrationDocs[0];
-    groups.push({
-      key: "command",
-      kind: "command",
-      label: sprint?.title ? `${sprint.title} · command deck` : "command deck",
-      tier: "orchestration",
-      nested: false,
-      defaultCollapsed: false,
-      sessions: deck,
-      countLabel: countLabel(deck, "command"),
+  const sprintGroups = [...bySprint.entries()].map(([sprintKey, members]) => {
+    const [repo, folder] = sprintKey.split("/");
+    const masterDoc = masterDocsBySprint.get(sprintKey);
+    // `orchestrates` contains bare folder names, so it is safe only when the declaring
+    // orchestration document belongs to this same repository. Never let a same-named folder in
+    // another repository inherit command styling or indentation.
+    const commanded = orchestrationDocs.some((doc) => {
+      const key = qualifiedLeafKey(doc);
+      return key?.startsWith(`${sprintKey}/`) ||
+        (doc.repository === repo && (doc.orchestrates ?? []).includes(folder));
     });
-  }
-  const masterGroups = [...byMaster.entries()].map(([folder, members]) => {
-    const masterDoc = masterDocsByFolder.get(folder);
-    const commanded = masterDoc
-      ? orchestratorParentKey(masterCommandNames(masterDoc), docs, masterDoc.docPath) !== undefined
-      : orchestrationDocs.some((doc) => (doc.orchestrates ?? []).includes(folder));
+    const hasCommand = deckExists && members.some((session) =>
+      COMMAND_ROLES.has(sessionSeatRole(session)) ||
+      (session.leafKey !== undefined && orchestrationKeys.has(session.leafKey)),
+    );
+    const kind = hasCommand ? "command" : "master";
     const group: SessionGroup = {
-      key: `master:${folder}`,
-      kind: "master",
-      label: masterDoc?.title || folder,
-      ...(commanded ? { tier: "management" as const } : {}),
+      key: `sprint:${sprintKey}`,
+      kind,
+      label: hasCommand
+        ? `${masterDoc?.title || `${repo}/${folder}`} · command deck`
+        : masterDoc?.title || `${repo}/${folder}`,
+      ...(hasCommand ? { tier: "orchestration" as const } : commanded ? { tier: "management" as const } : {}),
       nested: commanded,
       defaultCollapsed: false,
       sessions: members,
-      countLabel: countLabel(members, "master"),
+      countLabel: countLabel(members, kind),
     };
-    return { order: masterDoc?.createdAt ?? "", folder, group };
+    return { order: masterDoc?.createdAt ?? "", sprintKey, group };
   });
-  masterGroups.sort(
-    (left, right) => left.order.localeCompare(right.order) || left.folder.localeCompare(right.folder),
+  sprintGroups.sort(
+    (left, right) => left.order.localeCompare(right.order) || left.sprintKey.localeCompare(right.sprintKey),
   );
-  for (const entry of masterGroups) groups.push(entry.group);
+  for (const entry of sprintGroups) groups.push(entry.group);
   if (landed.length > 0) {
     groups.push({
       key: "landed",
       kind: "landed",
-      label: "landed",
+      label: "landed archive",
       nested: false,
       defaultCollapsed: true,
       sessions: landed,
       countLabel: countLabel(landed, "landed"),
+    });
+  }
+  if (invalid.length > 0) {
+    groups.push({
+      key: "error",
+      kind: "error",
+      label: "unresolvable session claims",
+      tier: "management",
+      nested: false,
+      defaultCollapsed: false,
+      sessions: invalid,
+      countLabel: `${invalid.length} error${invalid.length === 1 ? "" : "s"}`,
     });
   }
   return { groups, ungrouped };

@@ -1,6 +1,6 @@
-# Lifecycle — Designer (the hat)
+# Lifecycle — Designer (the architect hat)
 
-> The design lifecycle the **orchestrator pulls inline** whenever design is needed — front of the
+> The design lifecycle the **architect pulls inline** whenever design is needed — front of the
 > pipeline or mid-flight. **A hat, not a seat**: it cannot sit in a coordination leaf because the
 > task is what it exists to create — no leaf, no worktree, no branch, no spawn required. A heavy
 > design may run this same hat in a separate session (`AR_SPAWN_ROLE=designer` — chair logistics,
@@ -12,7 +12,7 @@
 
 Task design is **its own job** (developer decision 2026-07-04). Before orchestration one implicit
 do-it-all role did design, features, and fixes; the roles now diversify, and design routes
-**through the orchestrator, which wears this hat** — at the front of the pipeline AND mid-flight
+**through the architect, which wears this hat** — at the front of the pipeline AND mid-flight
 (most leaves of a live series are designed mid-flight). It is the `tasks/AGENTS.md` collaboration
 doctrine (meta-questioning, reframe-before-execution, evidence-first) given a distinct, optimized
 shape as a job. Nothing here assumes a master exists yet — producing one is the point.
@@ -21,8 +21,16 @@ The designer shares the orchestrator's **bird's-eye toolkit** — route indexes,
 `grepai_search` MCP tool, the code-graph (`cgc_*`) MCP tools, blast-radius analysis — but is **scoped
 to one master**. Collisions with *other* — especially **future** — masters can slip past a
 single-master view. That residual risk is **owned downstream, not here**: at portfolio streamlining the
-**orchestrator doubles as the designer's adversarial reviewer** (planned-vs-planned and
+**backend orchestrator doubles as the designer's adversarial reviewer** (planned-vs-planned and
 planned-vs-past). The designer's duty is to *declare* the limit, not to close it.
+
+## Role-Seat Immutability
+
+In dashboard-owned sessions, a designer seat stays designer for its lifetime. A pasted brief for a
+different role is refused and escalated to the architect via inbox. Roles expand horizontally into
+new chats; sub-agents drill vertically inside this design context for evidence gathering. When the
+architect wears this file inline, that is architect hat-collapse; a spawned designer seat never
+absorbs architect, orchestrator, manager, worker, strategist, or reviewer work.
 
 ## Lens
 
@@ -67,14 +75,13 @@ planned-vs-past). The designer's duty is to *declare* the limit, not to close it
 
 ## Comms Protocol
 
-- **Primary channel:** the developer, directly, in the designer's attached chat — this seat is a
-  co-thinking loop, so the developer is the standing interlocutor here (unlike the deeper seats, which
-  relay through the ladder).
-- **Handover:** the finished design **joins the portfolio**. At streamlining the orchestrator
+- **Primary channel:** the architect. When worn inline, the developer conversation happens in the
+  architect chat; when spawned separately, the designer returns design artifacts to the architect.
+- **Handover:** the finished design **joins the portfolio**. At streamlining the backend orchestrator
   adversarially reviews it; hand the task_doc + the designer-limits note over via the inbox
   (`operator_inbox_post`) and, for a hosted orchestrator, stdin push.
 - **Escalation:** the hat's "escalation" is simply the handover into the portfolio job — the
-  orchestrator that wears it is already the last resolver before the developer.
+  architect that wears it is already the developer-facing resolver.
 
 ## Knobs
 

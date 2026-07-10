@@ -91,7 +91,7 @@ describe("SessionList (6e-2c)", () => {
         leafNameFor={() => "Sidebar chat"}
       />,
     );
-    expect(getByTitle("Claude Code 1 · Sidebar chat")).not.toBeNull();
+    expect(getByTitle("Claude Code 1 · Sidebar chat · master: master · leaf: leaf-1")).not.toBeNull();
   });
 
   it("the row terminate action reports the destructive action separately", () => {
@@ -111,10 +111,9 @@ describe("SessionList (6e-2c)", () => {
   });
 });
 
-// The G1 command tree (L14): grouped rendering — collapsible headers with insignia + counts, the
-// landed archive collapsed by default, unattached sessions flat below, and a group-less model
-// falling back to today's flat list.
-describe("SessionList command tree (L14)", () => {
+// The L16 command tree: grouped rendering — per-sprint headers, complete spawn-edge forests,
+// landed archive behavior, and explicit ungrouped/error surfaces.
+describe("SessionList command tree (L16)", () => {
   const group = (over: Partial<SessionGroup>) => ({
     key: "master:m",
     kind: "master" as const,
@@ -181,7 +180,7 @@ describe("SessionList command tree (L14)", () => {
             group({
               key: "landed",
               kind: "landed",
-              label: "landed",
+              label: "landed archive",
               defaultCollapsed: true,
               sessions: [{ id: "a", label: "Terminal 1", status: "exited" }],
               countLabel: "1 chat · archived",
@@ -217,7 +216,7 @@ describe("SessionList command tree (L14)", () => {
             group({
               key: "landed",
               kind: "landed",
-              label: "landed",
+              label: "landed archive",
               defaultCollapsed: true,
               sessions: [{ id: "a", label: "Terminal 1", status: "exited" }],
               countLabel: "1 chat · archived",
@@ -255,6 +254,40 @@ describe("SessionList command tree (L14)", () => {
     expect(flatRow.closest("[data-testid^='chats-group-']")).toBeNull(); // outside every group
   });
 
+  it("runs landed cleanup without toggling the archive group or selecting a row", () => {
+    const onCleanupLanded = vi.fn();
+    const onSelect = vi.fn();
+    const members = [{ id: "a", label: "Terminal 1", status: "landed" as const }];
+    const { getByTestId, queryByTestId } = render(
+      <SessionList
+        sessions={members}
+        activeId={null}
+        onSelect={onSelect}
+        onTerminate={() => {}}
+        onCleanupLanded={onCleanupLanded}
+        grouped={{
+          groups: [
+            group({
+              key: "landed",
+              kind: "landed",
+              label: "landed archive",
+              defaultCollapsed: true,
+              sessions: members,
+              countLabel: "1 chat · archived",
+            }),
+          ],
+          ungrouped: [],
+        }}
+      />,
+    );
+    const toggle = getByTestId("chats-group-toggle-landed");
+    fireEvent.click(getByTestId("chats-group-cleanup-landed"));
+    expect(onCleanupLanded).toHaveBeenCalledWith(members);
+    expect(onSelect).not.toHaveBeenCalled();
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    expect(queryByTestId("chats-session-a")).toBeNull();
+  });
+
   it("renders today's flat list when the grouped model derives zero groups", () => {
     const { getByTestId, queryByTestId } = render(
       <SessionList
@@ -283,5 +316,119 @@ describe("SessionList command tree (L14)", () => {
     );
     expect(getByTestId("chats-session-role-a").textContent).toBe("manager");
     expect(queryByTestId("chats-session-role-b")).toBeNull();
+  });
+
+  it("renders the current binding role ahead of stale spawn provenance", () => {
+    const { getByTestId } = render(
+      <SessionList
+        sessions={[
+          { id: "moved", label: "Moved seat", spawnRole: "worker", seatRole: "reviewer" },
+        ]}
+        activeId={null}
+        onSelect={() => {}}
+        onTerminate={() => {}}
+      />,
+    );
+    expect(getByTestId("chats-session-role-moved").textContent).toBe("reviewer");
+  });
+
+  it("renders architect spawn-role as a known owner-tier chip", () => {
+    const { getByTestId } = render(
+      <SessionList
+        sessions={[
+          { id: "architect", label: "Architect", spawnRole: "architect" },
+          { id: "custom", label: "Custom", spawnRole: "custom-role" },
+        ]}
+        activeId={null}
+        onSelect={() => {}}
+        onTerminate={() => {}}
+      />,
+    );
+    const architect = getByTestId("chats-session-role-architect");
+    expect(architect.textContent).toBe("architect");
+    expect(architect.getAttribute("data-known-role")).toBe("true");
+    expect(getByTestId("chats-session-role-custom").getAttribute("data-known-role")).toBe("false");
+  });
+
+  it("renders curator spawn-role as a known role chip", () => {
+    const { getByTestId } = render(
+      <SessionList
+        sessions={[
+          { id: "curator", label: "Curator", spawnRole: "curator" },
+          { id: "custom", label: "Custom", spawnRole: "custom-role" },
+        ]}
+        activeId={null}
+        onSelect={() => {}}
+        onTerminate={() => {}}
+      />,
+    );
+    const curator = getByTestId("chats-session-role-curator");
+    expect(curator.textContent).toBe("curator");
+    expect(curator.getAttribute("data-known-role")).toBe("true");
+    expect(getByTestId("chats-session-role-custom").getAttribute("data-known-role")).toBe("false");
+  });
+
+  it("emits an orchestrator-parented manager subtree exactly once", () => {
+    const members: OpenSession[] = [
+      { id: "worker", label: "Worker", spawnRole: "worker", spawnedBySession: "manager" },
+      { id: "manager", label: "Manager", spawnRole: "manager", spawnedBySession: "orchestrator" },
+      { id: "orchestrator", label: "Orchestrator", spawnRole: "orchestrator" },
+    ];
+    const { getByTestId } = render(
+      <SessionList
+        sessions={members}
+        activeId={null}
+        onSelect={() => {}}
+        onTerminate={() => {}}
+        grouped={{ groups: [group({ key: "sprint:repo/master", sessions: members })], ungrouped: [] }}
+      />,
+    );
+    for (const member of members) expect(getByTestId(`chats-session-${member.id}`)).toBeTruthy();
+    expect(getByTestId("chats-session-manager").getAttribute("data-depth")).toBe("1");
+    expect(getByTestId("chats-session-worker").getAttribute("data-depth")).toBe("1");
+    expect(getByTestId("chats-session-manager").querySelector("button[aria-expanded]")).not.toBeNull();
+  });
+
+  it.each(["16rem", "24rem"])("keeps the rail bounded and hover-complete at %s", (width) => {
+    const longId = "lifecycle-0123456789-0123456789";
+    const longStatus = "waiting-for-a-very-long-turn-state";
+    const longRole = "system-specialist";
+    const { getByTestId, getByTitle, rerender } = render(
+      <div style={{ width }}>
+        <SessionList
+          sessions={[{
+            id: "wide",
+            label: "A deliberately long session label that must recalculate when the rail changes size",
+            spawnRole: longRole,
+            lifecycleId: longId,
+            turnState: longStatus,
+            status: "exited",
+          }]}
+          activeId="wide"
+          onSelect={() => {}}
+          onTerminate={() => {}}
+        />
+      </div>,
+    );
+    const row = getByTestId("chats-session-wide");
+    const list = row.parentElement;
+    expect(list?.getAttribute("data-overflow-x")).toBe("hidden");
+    expect(getByTitle(longRole)).toBeTruthy();
+    expect(getByTitle(longId)).toBeTruthy();
+    expect(getByTitle(longStatus)).toBeTruthy();
+    expect(getByTitle("exited")).toBeTruthy();
+
+    rerender(
+      <div style={{ width: "16rem" }}>
+        <SessionList
+          sessions={[{ id: "wide", label: "short" }]}
+          activeId="wide"
+          onSelect={() => {}}
+          onTerminate={() => {}}
+        />
+      </div>,
+    );
+    expect(getByTitle("short")).toBeTruthy();
+    expect(getByTestId("chats-session-wide")).toBeTruthy();
   });
 });

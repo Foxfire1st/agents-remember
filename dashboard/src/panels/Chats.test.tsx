@@ -30,10 +30,21 @@ function secondLeafDoc(): TaskDocNode {
   } as unknown as TaskDocNode;
 }
 
+function pointerEvent(type: string, clientX: number, pointerId = 1): Event {
+  const event = new Event(type, { bubbles: true });
+  Object.defineProperties(event, {
+    clientX: { value: clientX },
+    pointerId: { value: pointerId },
+  });
+  return event;
+}
+
 // Mock the lazy Terminal so opening a session never pulls xterm (a canvas probe) into jsdom; the stub
 // just marks its sessionId so a test can assert which session terminals stay mounted.
 vi.mock("./Terminal", () => ({
-  Terminal: ({ sessionId }: { sessionId: string }) => <div data-testid={`term-${sessionId}`} />,
+  Terminal: ({ sessionId, readOnly }: { sessionId: string; readOnly?: boolean }) => (
+    <div data-testid={`term-${sessionId}`} data-readonly={readOnly ? "true" : "false"} />
+  ),
 }));
 
 class FakeBroadcastChannel {
@@ -111,6 +122,45 @@ describe("Chats harness launch buttons (6e-2b)", () => {
     const { findByTestId, queryByTestId } = render(<Chats />);
     expect(await findByTestId("chats-new-terminal")).not.toBeNull();
     expect(queryByTestId("chats-new-harness-claude")).toBeNull();
+  });
+});
+
+describe("Chats sidebar resize", () => {
+  it("restores the persisted width and exposes the bounded separator value", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("no backend")));
+    window.localStorage.setItem("chats.sidebar-width", "420");
+    sessionStore.getState().add("Terminal", "s1");
+
+    const { findByTestId } = render(<Chats />);
+
+    expect((await findByTestId("chats-sidebar")).style.width).toBe("420px");
+    expect((await findByTestId("chats-sidebar-resize")).getAttribute("aria-valuenow")).toBe(
+      "420",
+    );
+  });
+
+  it("resizes with pointer drag and keyboard arrows, persisting each width", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("no backend")));
+    sessionStore.getState().add("Terminal", "s1");
+
+    const { findByTestId } = render(<Chats />);
+    const sidebar = await findByTestId("chats-sidebar");
+    const handle = await findByTestId("chats-sidebar-resize");
+    handle.setPointerCapture = vi.fn();
+
+    fireEvent(handle, pointerEvent("pointerdown", 300));
+    fireEvent(window, pointerEvent("pointermove", 360));
+    fireEvent(window, pointerEvent("pointerup", 360));
+    expect(sidebar.style.width).toBe("316px");
+    expect(window.localStorage.getItem("chats.sidebar-width")).toBe("316");
+
+    fireEvent.keyDown(handle, { key: "ArrowRight" });
+    expect(sidebar.style.width).toBe("340px");
+    expect(window.localStorage.getItem("chats.sidebar-width")).toBe("340");
+
+    fireEvent.keyDown(handle, { key: "ArrowLeft" });
+    expect(sidebar.style.width).toBe("316px");
+    expect(window.localStorage.getItem("chats.sidebar-width")).toBe("316");
   });
 });
 
@@ -323,6 +373,132 @@ describe("Chats session-tab persistence (6e-4)", () => {
     expect(queryByTestId("term-s1")).toBeNull();
   });
 
+  it("renders a landed restored session as a read-only terminal attachment", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.endsWith("/api/harnesses")) {
+          return Promise.resolve({ ok: true, json: () => Promise.resolve({ harnesses: [] }) });
+        }
+        if (url.endsWith("/api/terminal/sessions")) {
+          return Promise.resolve({
+            ok: true,
+            json: () =>
+              Promise.resolve({
+                sessions: [
+                  {
+                    id: "s1",
+                    label: "Terminal 1",
+                    kind: "terminal",
+                    cwd: "/ws",
+                    tmuxName: "ar-s1",
+                    createdAt: "2026-06-26T00:00:00Z",
+                    lastAttachedAt: "2026-06-26T00:00:00Z",
+                    status: "landed",
+                    landedReason: "leaf integrated",
+                  },
+                ],
+              }),
+          });
+        }
+        return Promise.reject(new Error(`unexpected url ${url}`));
+      }),
+    );
+
+    const { findByTestId, queryByTestId } = render(<Chats />);
+
+    const terminal = await findByTestId("term-s1");
+    expect(terminal.getAttribute("data-readonly")).toBe("true");
+    expect(queryByTestId("chats-session-status-s1")).toBeNull();
+    expect(queryByTestId("chats-composer")).toBeNull();
+  });
+
+  it("cleans up the landed archive group and reports closed/skipped counts", async () => {
+    vi.stubGlobal("BroadcastChannel", FakeBroadcastChannel);
+    let catalogSessions = [
+      {
+        id: "landed",
+        label: "Worker",
+        kind: "harness",
+        harness: "claude",
+        leafKey: LEAF_KEY,
+        cwd: "/ws",
+        tmuxName: "ar-landed",
+        createdAt: "2026-07-02T00:00:00Z",
+        lastAttachedAt: "2026-07-02T00:00:00Z",
+        status: "landed",
+      },
+      {
+        id: "active",
+        label: "Active",
+        kind: "harness",
+        harness: "claude",
+        leafKey: SECOND_LEAF_KEY,
+        cwd: "/ws",
+        tmuxName: "ar-active",
+        createdAt: "2026-07-02T00:01:00Z",
+        lastAttachedAt: "2026-07-02T00:01:00Z",
+        status: "running",
+      },
+    ];
+    let cleanupPayload: unknown;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url.endsWith("/api/harnesses")) {
+          return Promise.resolve({ ok: true, json: () => Promise.resolve({ harnesses: [] }) });
+        }
+        if (url.endsWith("/api/terminal/sessions")) {
+          return Promise.resolve({
+            ok: true,
+            json: () => Promise.resolve({ sessions: catalogSessions }),
+          });
+        }
+        if (url.endsWith("/api/terminal/landed-cleanup")) {
+          cleanupPayload = JSON.parse(String(init?.body ?? "{}"));
+          catalogSessions = catalogSessions.filter((session) => session.id !== "landed");
+          return Promise.resolve({
+            ok: true,
+            json: () =>
+              Promise.resolve({
+                closed: 1,
+                skipped: 0,
+                closedSessions: ["landed"],
+                skippedSessions: [],
+              }),
+          });
+        }
+        return Promise.reject(new Error(`unexpected url ${url}`));
+      }),
+    );
+    sessionStore.getState().hydrate([
+      { id: "landed", label: "Worker", leafKey: LEAF_KEY, status: "landed" },
+      { id: "active", label: "Active", leafKey: SECOND_LEAF_KEY, status: "running" },
+    ]);
+
+    const { findByTestId } = render(
+      <Chats taskDocuments={[leafDoc(), secondLeafDoc()]} />,
+    );
+
+    fireEvent.click(await findByTestId("chats-group-cleanup-landed"));
+
+    await waitFor(() =>
+      expect(sessionStore.getState().sessions.map((session) => session.id)).toEqual(["active"]),
+    );
+    expect(cleanupPayload).toEqual({ sessionIds: ["landed"] });
+    expect((await findByTestId("chats-landed-cleanup-status")).textContent).toContain(
+      "1 closed · 0 skipped",
+    );
+    expect(FakeBroadcastChannel.messages).toEqual([
+      expect.objectContaining({
+        type: "terminal-catalog-changed",
+        reason: "terminate",
+      }),
+    ]);
+  });
+
   it("lists projected leaves in the picker and binds the picked leaf on 200 with NO leaf selected", async () => {
     // The decoupling contract: an unattached chat made anywhere (no `selectedLeafKey`) can still be
     // attached to ANY projected leaf through the picker — not only the leaf currently being viewed.
@@ -342,6 +518,7 @@ describe("Chats session-tab persistence (6e-4)", () => {
     // Drill-down picker: open it, then pick the leaf (a lone leaf with no master doc shows at top level),
     // labelled by its task-doc title.
     fireEvent.click(await findByTestId("chats-attach-leaf-picker"));
+    fireEvent.click(await findByTestId("chats-attach-leaf-picker-role-worker"));
     const leaf = await findByTestId("chats-attach-leaf-picker-leaf");
     expect(leaf.getAttribute("data-leaf-key")).toBe(LEAF_KEY);
     expect(leaf.textContent).toContain("Sidebar chat attachment");
@@ -372,6 +549,7 @@ describe("Chats session-tab persistence (6e-4)", () => {
 
     expect(await findByTestId("chats-leaf-badge")).not.toBeNull();
     fireEvent.click(await findByTestId("chats-attach-leaf-picker"));
+    fireEvent.click(await findByTestId("chats-attach-leaf-picker-role-worker"));
     const leaves = await findAllByTestId("chats-attach-leaf-picker-leaf");
     const next = leaves.find((leaf) => leaf.getAttribute("data-leaf-key") === SECOND_LEAF_KEY);
     expect(next).not.toBeUndefined();
@@ -395,10 +573,11 @@ describe("Chats session-tab persistence (6e-4)", () => {
 
     const { findByTestId } = render(<Chats taskDocuments={[leafDoc()]} />);
     fireEvent.click(await findByTestId("chats-attach-leaf-picker"));
+    fireEvent.click(await findByTestId("chats-attach-leaf-picker-role-worker"));
     fireEvent.click(await findByTestId("chats-attach-leaf-picker-leaf"));
 
     const note = await findByTestId("chats-leaf-attach-error");
-    expect(note.textContent).toContain("leaf already has a chat");
+    expect(note.textContent).toContain("leaf already has a worker seat");
     expect(sessionStore.getState().sessions[0]?.leafKey).toBeUndefined();
   });
 

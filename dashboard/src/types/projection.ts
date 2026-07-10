@@ -230,6 +230,7 @@ export interface TaskDocNode {
   stepsTotal: number;
   currentStep?: string;
   docPath: string;
+  bodyRevision?: string;
   createdAt?: string;
   ageSeconds?: number;
   steps: TaskStepNode[];
@@ -432,6 +433,23 @@ export interface ServingBuild {
   commit?: string;
 }
 
+// The supervisor sweep's self-liveness tick (260707-HFX2-L2 R5, serving/supervisor_heartbeat.py):
+// "the watcher must be code AND watched" (#15). Injected app-side onto /api/state and the SSE
+// snapshot at RESPONSE time (deliberately volatile — never gates the projection's ETag change
+// revision), so `lastTickAt`/`ageSeconds` are as-of-request, not as-of-last-projection-change.
+// `lastTickAt: null` means the supervisor has never ticked in this workspace (dashboard/supervisor
+// autostart is opt-in) — that is NOT the same as `stale: true`, and the header renders nothing for
+// it rather than a false alarm.
+export interface SupervisorHeartbeat {
+  lastTickAt: string | null;
+  ageSeconds: number | null;
+  staleCutoffSeconds: number;
+  stale: boolean;
+  pendingInboxCount: number;
+  redeliverableInboxCount: number;
+  lastSweepDurationSeconds: number | null;
+}
+
 export interface WorkspaceProjection {
   version: number;
   generatedAt: string;
@@ -446,4 +464,5 @@ export interface WorkspaceProjection {
   metrics: Metrics;
   analytics: Analytics;
   servingBuild?: ServingBuild; // app-injected on the wire only — see ServingBuild
+  supervisorHeartbeat?: SupervisorHeartbeat; // app-injected on the wire only — see SupervisorHeartbeat
 }

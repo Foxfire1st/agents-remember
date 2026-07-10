@@ -54,6 +54,7 @@ describe("LeafAttachPicker drill-down", () => {
     const { getByTestId, getAllByTestId } = render(<LeafAttachPicker tree={TREE} onPick={onPick} />);
 
     fireEvent.click(getByTestId(TID)); // open → top level
+    fireEvent.click(getByTestId(`${TID}-role-worker`));
     fireEvent.click(getByTestId(`${TID}-master`)); // drill into Operations Integration
     const engine = getAllByTestId(`${TID}-master`).find(
       (node) => node.getAttribute("data-master") === "engine",
@@ -61,7 +62,22 @@ describe("LeafAttachPicker drill-down", () => {
     fireEvent.click(engine as HTMLElement); // drill into the NESTED master
     fireEvent.click(getByTestId(`${TID}-leaf`)); // its only leaf
 
-    expect(onPick).toHaveBeenCalledWith("repo/engine/E1");
+    expect(onPick).toHaveBeenCalledWith("repo/engine/E1", "worker");
+  });
+
+  it("requires an explicit role for an untyped hand-opened chat", () => {
+    const onPick = vi.fn();
+    const { getByTestId } = render(<LeafAttachPicker tree={TREE} onPick={onPick} />);
+
+    fireEvent.click(getByTestId(TID));
+    fireEvent.click(getByTestId(`${TID}-master`));
+    const leaf = getByTestId(`${TID}-leaf`) as HTMLButtonElement;
+    expect(leaf.disabled).toBe(true);
+
+    fireEvent.click(getByTestId(`${TID}-role-reviewer`));
+    expect(leaf.disabled).toBe(false);
+    fireEvent.click(leaf);
+    expect(onPick).toHaveBeenCalledWith("repo/ops/L5", "reviewer");
   });
 
   it("pre-drills to the in-context master so its leaves show immediately on open", () => {

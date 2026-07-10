@@ -3,11 +3,11 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from agents_remember.worktrees.leaf_refs import resolve_leaf_enclosure_contract_for_ref
 from agents_remember.worktrees.task_resolver import (
     SERIES_CONTRACT_FILENAME,
     is_archived_path,
     resolve_active_task_root,
-    resolve_leaf_enclosure_contract,
     series_contract_path,
 )
 from agents_remember.worktrees.worktree_contract import (
@@ -56,7 +56,7 @@ def find_task_contract(
     leaf_id: str | None = None,
 ) -> Path | None:
     if leaf_id:
-        return resolve_leaf_enclosure_contract(
+        return resolve_leaf_enclosure_contract_for_ref(
             coordination_root,
             code_repository_name,
             task_name,

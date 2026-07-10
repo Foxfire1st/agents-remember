@@ -3,14 +3,16 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Literal
+from typing import Literal, Protocol
 
-from agents_remember.serving.terminal_catalog import (
-    TerminalCatalog,
-    TerminalSessionRole,
-)
+from agents_remember.serving.seat_binding import attach_seat_role
+from agents_remember.serving.terminal_catalog import TerminalCatalog
 
-LeafAssignmentStatus = Literal["attached", "leaf-taken", "unknown-session"]
+LeafAssignmentStatus = Literal["attached", "leaf-taken", "unknown-session", "role-required"]
+
+
+class LeafAssignmentHost(Protocol):
+    def has_session(self, tmux_name: str) -> bool: ...
 
 
 @dataclass(frozen=True)
@@ -22,7 +24,9 @@ class LeafAssignmentResult:
     leaf_key: str
     previous_leaf_key: str | None = None
     owner_session_id: str | None = None
-    role: TerminalSessionRole | None = None
+    role: str | None = None
+    seat_role: str | None = None
+    previous_seat_role: str | None = None
 
 
 def leaf_conflict_owner(
@@ -30,38 +34,60 @@ def leaf_conflict_owner(
     *,
     leaf_key: str | None,
     session_id: str,
-    role: TerminalSessionRole,
+    seat_role: str,
+    host: LeafAssignmentHost,
 ) -> str | None:
-    """Return the different running owner of ``leaf_key`` for ``role``, if one exists."""
+    """Return the different live owner of ``(leaf_key, seat_role)``, if one exists."""
 
     if not leaf_key:
         return None
-    owner = catalog.active_for_leaf(leaf_key, role=role)
+    owner = catalog.active_for_leaf(leaf_key, seat_role=seat_role)
     if owner is None or owner.id == session_id:
+        return None
+    if not host.has_session(owner.tmux_name):
+        catalog.mark_exited(owner.id)
         return None
     return owner.id
 
 
 def assign_terminal_session_to_leaf(
     catalog: TerminalCatalog,
+    host: LeafAssignmentHost,
     *,
     session_id: str,
     leaf_key: str,
+    role: str | None = None,
 ) -> LeafAssignmentResult:
-    """Move an existing catalog session to ``leaf_key`` using catalog uniqueness rules."""
+    """Move a running catalog session to one live-arbitrated ``(leaf, role)`` binding."""
 
     entry = catalog.get(session_id)
-    if entry is None or entry.status == "terminated":
+    if entry is None or entry.status != "running":
         return LeafAssignmentResult(
             status="unknown-session",
             session_id=session_id,
             leaf_key=leaf_key,
         )
+    seat_role = attach_seat_role(
+        requested=role,
+        spawn_role=entry.spawn_role,
+        current=entry.seat_role,
+        kind=entry.kind,
+    )
+    if seat_role is None:
+        return LeafAssignmentResult(
+            status="role-required",
+            session_id=session_id,
+            leaf_key=leaf_key,
+            previous_leaf_key=entry.leaf_key,
+            previous_seat_role=entry.binding_role,
+            role=entry.role,
+        )
     owner = leaf_conflict_owner(
         catalog,
         leaf_key=leaf_key,
         session_id=session_id,
-        role=entry.role,
+        seat_role=seat_role,
+        host=host,
     )
     if owner is not None:
         return LeafAssignmentResult(
@@ -71,13 +97,18 @@ def assign_terminal_session_to_leaf(
             previous_leaf_key=entry.leaf_key,
             owner_session_id=owner,
             role=entry.role,
+            seat_role=seat_role,
+            previous_seat_role=entry.binding_role,
         )
     previous_leaf_key = entry.leaf_key
-    catalog.upsert(entry.with_leaf_key(leaf_key))
+    previous_seat_role = entry.binding_role
+    catalog.upsert(entry.with_leaf_binding(leaf_key, seat_role))
     return LeafAssignmentResult(
         status="attached",
         session_id=session_id,
         leaf_key=leaf_key,
         previous_leaf_key=previous_leaf_key,
         role=entry.role,
+        seat_role=seat_role,
+        previous_seat_role=previous_seat_role,
     )

@@ -295,7 +295,7 @@ worktree and thrown away with it.
 Memory is only as good as the discipline that keeps it honest, and that
 discipline is the second half of the product. Sessions route by role through
 one skill (`l-01-agent-lifecycles`): a spawned agent follows the role brief
-that spawned it, and a developer-facing session is the **orchestrator**, whose
+that spawned it, and a developer-facing session is the **architect**, whose
 lifecycle runs
 
 ```text

@@ -169,8 +169,9 @@ class ReopenResetTests(unittest.TestCase):
                 ),
                 ("pending-review", False, "not-started", "not-started", "reopened", "", "", ""),
             )
-            # The leaf id NEVER changes — that is the whole point.
-            self.assertEqual(reopened.leaf_id, "260698-l1")
+            # The leaf identity stays on the same task-doc id; legacy stem contracts
+            # load through the resolver once the doc exists.
+            self.assertEqual(reopened.leaf_id, "260698-L1")
 
             doc = read_task_doc(doc_path)
             self.assertEqual((doc.status, doc.lifecycleId), ("planning", None))

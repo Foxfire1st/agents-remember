@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import Any
 
+from agents_remember.kernel.agentic_settings import DEFAULT_SUPERVISOR_STALE_CUTOFF_SECONDS
 from agents_remember.models.tokens import finalize_payload_tokens
 from agents_remember.models.tool_registry import TOOL_RESPONSE_MODELS
 from agents_remember.observer.ambient import ambient
+from agents_remember.serving.supervisor_heartbeat import supervisor_staleness_banner
 
 from .next_step import next_step_for
 
@@ -18,6 +21,8 @@ PUBLIC_TOOLS = (
     "read_ar_files",
     "attach_terminal_session_to_leaf",
     "spawn_agent_session",
+    "session_retire",
+    "session_rename",
     "runtime_install",
     "resolve_context",
     "drift_check",
@@ -96,4 +101,16 @@ def _tool_payload(tool_name: str, payload: dict[str, Any]) -> dict[str, Any]:
         next_step = next_step_for(amb, tool_name)
         if next_step is not None:
             finalized["nextStep"] = next_step
+        # 260707-HFX2-L2 R5: "the watcher must be code AND watched" (#15) -- a stale supervisor
+        # surfaces a fail-loud banner at ANY seat's next AR call, opportunistically, off the
+        # heartbeat row it writes on every sweep. Exception-safe (an unreadable heartbeat file
+        # degrades to "never ticked", never blocks the tool response).
+        try:
+            banner = supervisor_staleness_banner(
+                amb.root, now=datetime.now(UTC), stale_cutoff_seconds=DEFAULT_SUPERVISOR_STALE_CUTOFF_SECONDS
+            )
+        except Exception:
+            banner = None
+        if banner is not None:
+            finalized["supervisorBanner"] = banner
     return finalized

@@ -29,7 +29,17 @@ export interface OpenSession {
   leafKey?: string;
   /** The AR_SPAWN_ROLE recorded at spawn (L14) — the Chats command-tree grouping key. */
   spawnRole?: string;
+  /** The role occupying the leaf binding; authoritative for grouping and seat identity. */
+  seatRole?: string;
   status?: TerminalSessionStatus;
+  landedAt?: string;
+  landedReason?: string;
+  landedEdge?: string;
+  spawnedBySession?: string;
+  spawnedByLifecycle?: string;
+  spawnedLabel?: string;
+  turnState?: string;
+  turnStateChangedAt?: string;
 }
 
 type SessionCatalogChangeReason = "create" | "terminate" | "leaf";
@@ -106,15 +116,14 @@ interface SessionState {
   setLifecycle: (id: string, lifecycleId: string | null) => void;
   /**
    * Bind a hosted session to one durable leaf (qualified leaf id), or clear it (`null`). Advisory
-   * uniqueness: a non-null bind is REJECTED (no-op) if another LIVE session already owns that leaf —
-   * the server's `409 leaf-taken` is the real arbiter, this just avoids an obvious local double-claim.
+   * uniqueness is scoped to the session's current role; the server remains the real arbiter.
    */
   setLeaf: (id: string, leafKey: string | null) => void;
   /**
    * Apply a server/catalog-authoritative leaf assignment after a successful backend attach or hydrate.
    * Same-role local owners of the destination leaf are cleared because the catalog result wins.
    */
-  applyLeafAssignment: (id: string, leafKey: string | null) => void;
+  applyLeafAssignment: (id: string, leafKey: string | null, seatRole: string) => void;
 }
 
 /** A session's leaf-uniqueness role: a plain shell is a TERMINAL, any agent harness is a CHAT. */
@@ -123,6 +132,21 @@ export type SessionRole = "chat" | "terminal";
 /** Derive a session's role from its kind (mirrors the backend `role_for_kind`). */
 export function sessionRole(session: Pick<OpenSession, "kind">): SessionRole {
   return session.kind === "terminal" ? "terminal" : "chat";
+}
+
+/** The role occupying a leaf binding; legacy rows fall back to origin provenance, then transport. */
+export function sessionSeatRole(
+  session: Pick<OpenSession, "kind" | "seatRole" | "spawnRole">,
+): string {
+  return session.seatRole ?? session.spawnRole ?? sessionRole(session);
+}
+
+/** Preselect only a declared/typed attach role; a legacy generic chat must be chosen explicitly. */
+export function attachSeatRole(
+  session: Pick<OpenSession, "kind" | "seatRole" | "spawnRole">,
+): string | undefined {
+  if (session.kind === "terminal") return "terminal";
+  return session.spawnRole ?? (session.seatRole && session.seatRole !== "chat" ? session.seatRole : undefined);
 }
 
 function clearLifecycle(session: OpenSession): OpenSession {
@@ -155,7 +179,7 @@ function maxOrdinal(labels: string[]): number {
 }
 
 function isLiveSession(session: OpenSession): boolean {
-  return session.status !== "exited" && session.status !== "terminated";
+  return (session.status ?? "running") === "running";
 }
 
 function liveLabels(sessions: OpenSession[]): string[] {
@@ -276,13 +300,13 @@ export const sessionStore = createStore<SessionState>((set) => ({
         // Advisory guard, scoped to the binding session's role (chat vs. terminal): a live session of
         // the SAME role already owning this leaf wins — the new bind is a no-op. A chat and a terminal
         // can both bind one leaf, so they never block each other. The server's 409 is the real arbiter.
-        const role = sessionRole(state.sessions.find((session) => session.id === id) ?? {});
+        const role = sessionSeatRole(state.sessions.find((session) => session.id === id) ?? {});
         const owner = state.sessions.find(
           (session) =>
             session.id !== id &&
             session.leafKey === leafKey &&
             isLiveSession(session) &&
-            sessionRole(session) === role,
+            sessionSeatRole(session) === role,
         );
         if (owner) return state;
       }
@@ -296,21 +320,20 @@ export const sessionStore = createStore<SessionState>((set) => ({
         ),
       };
     }),
-  applyLeafAssignment: (id, leafKey) =>
+  applyLeafAssignment: (id, leafKey, seatRole) =>
     set((state) => {
       const target = state.sessions.find((session) => session.id === id);
       if (!target) return state;
-      const role = sessionRole(target);
       return {
         sessions: state.sessions.map((session) => {
           if (session.id === id) {
-            return leafKey ? { ...session, leafKey } : clearLeaf(session);
+            return leafKey ? { ...session, leafKey, seatRole } : clearLeaf(session);
           }
           if (
             leafKey &&
             session.leafKey === leafKey &&
             isLiveSession(session) &&
-            sessionRole(session) === role
+            sessionSeatRole(session) === seatRole
           ) {
             return clearLeaf(session);
           }
@@ -353,6 +376,15 @@ export function fromTerminalSessionInfo(info: TerminalSessionInfo): OpenSession 
     ...(info.lifecycleId ? { lifecycleId: info.lifecycleId } : {}),
     ...(info.leafKey ? { leafKey: info.leafKey } : {}),
     ...(info.spawnRole ? { spawnRole: info.spawnRole } : {}),
+    ...(info.seatRole ? { seatRole: info.seatRole } : {}),
+    ...(info.landedAt ? { landedAt: info.landedAt } : {}),
+    ...(info.landedReason ? { landedReason: info.landedReason } : {}),
+    ...(info.landedEdge ? { landedEdge: info.landedEdge } : {}),
+    ...(info.spawnedBySession ? { spawnedBySession: info.spawnedBySession } : {}),
+    ...(info.spawnedByLifecycle ? { spawnedByLifecycle: info.spawnedByLifecycle } : {}),
+    ...(info.spawnedLabel ? { spawnedLabel: info.spawnedLabel } : {}),
+    ...(info.turnState ? { turnState: info.turnState } : {}),
+    ...(info.turnStateChangedAt ? { turnStateChangedAt: info.turnStateChangedAt } : {}),
     status: info.status,
   };
 }

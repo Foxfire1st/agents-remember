@@ -30,6 +30,13 @@ function stubNotesApi(notes: NoteEntry[], contents: Record<string, NoteContent> 
     "fetch",
     vi.fn(async (url: string) => {
       const params = new URLSearchParams(url.split("?")[1] ?? "");
+      if (url.startsWith("/api/task-document")) {
+        const docPath = params.get("path") ?? "";
+        const doc =
+          dashboardStore.getState().analytics?.taskDocuments.find((item) => item.docPath === docPath) ??
+          masterDoc();
+        return { ok: true, status: 200, json: async () => doc } as unknown as Response;
+      }
       if (url.startsWith("/api/notes/list")) {
         const payload = { repo: params.get("repo"), master: params.get("master"), notes, truncated };
         return { ok: true, status: 200, json: async () => payload } as unknown as Response;

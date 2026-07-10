@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import warnings
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
@@ -15,6 +15,11 @@ from agents_remember.kernel.agentic_settings import (
     agentic_settings_path,
     load_agentic_settings,
     parse_gate_delegation,
+)
+from agents_remember.mcp.provider_degradation_settings import (
+    ProviderDegradationSettings,
+    ProviderDegradationSettingsError,
+    parse_provider_degradation_settings,
 )
 from agents_remember.providers.identity import (
     explicit_provider_instance_id,
@@ -37,6 +42,17 @@ DEFAULT_DASHBOARD_PORT = 8765
 # Same fail-loud discipline as timeoutCaps: a typo ("autostart") must surface at
 # boot, not silently leave the daemon unsupervised.
 KNOWN_DASHBOARD_FIELDS = frozenset({"autoStart", "port"})
+# 260707-HFX2-L11: the auto-land hooks are boot-snapshot, MCP-authority-file settings (unlike
+# orchestration.gateDelegation, which moved to the global agentic settings file). The legacy
+# autoRetire* names are accepted as migration aliases for existing local authority files.
+KNOWN_RETIREMENT_FIELDS = frozenset(
+    {
+        "autoLandOnIntegration",
+        "autoLandOnFinalize",
+        "autoRetireOnIntegration",
+        "autoRetireOnFinalize",
+    }
+)
 # The agentic orchestration family moved to the coordinator's global settings
 # file (260703-L13); the authority file keeps ONLY the one-cycle gateDelegation
 # legacy fallback. loops/roles/concurrency/spawn here fail loud, pointing at
@@ -83,6 +99,18 @@ class OrchestrationSettings:
 
 
 @dataclass(frozen=True)
+class RetirementSettings:
+    """The optional ``retirement`` settings object: auto-land hook gates.
+
+    Both default ON: a completed leaf/master lands spent chats into an inspectable non-active
+    archive. Explicit retire / group cleanup remains the path that closes sessions.
+    """
+
+    auto_land_on_integration: bool = True
+    auto_land_on_finalize: bool = True
+
+
+@dataclass(frozen=True)
 class McpRuntimeConfig:
     config_path: Path
     coordination_root: Path
@@ -95,6 +123,10 @@ class McpRuntimeConfig:
     benchmarks_enabled: bool = False
     dashboard: DashboardSettings = field(default_factory=DashboardSettings)
     orchestration: OrchestrationSettings = field(default_factory=OrchestrationSettings)
+    provider_degradation: ProviderDegradationSettings = field(
+        default_factory=ProviderDegradationSettings
+    )
+    retirement: RetirementSettings = field(default_factory=RetirementSettings)
 
     @property
     def allowed_repo_ids(self) -> tuple[str, ...]:
@@ -114,6 +146,77 @@ def load_config(config_path: str | Path) -> McpRuntimeConfig:
     if not isinstance(data, dict):
         raise ConfigError(f"MCP settings must be a JSON object: {path}")
     return config_from_mapping(data, path)
+
+
+@dataclass(frozen=True)
+class ProviderAuthority:
+    """The providers map re-read from the on-disk authority settings.
+
+    Containment R1 (260707-HFX-L1): the boot-snapshot config is NOT launch
+    authority. A server process loads its config once and closes over it, so
+    editing the authority file to ``"providers": {}`` — the operator's only
+    fleet-wide kill-switch — previously changed nothing until every running
+    server restarted. Launch-capable operations re-read the file through this
+    type instead. ``error`` carries the fail-closed reason when the file could
+    not be read or parsed: callers must treat that as "no launch authority",
+    never fall back to the snapshot. Stopping and cleanup are never gated.
+    """
+
+    providers: dict[str, ProviderScope]
+    source_path: Path
+    error: str | None = None
+
+    def apply(self, config: McpRuntimeConfig) -> McpRuntimeConfig:
+        """The boot config with the live providers map swapped in."""
+        return replace(config, providers=dict(self.providers))
+
+
+def reload_provider_authority(config: McpRuntimeConfig) -> ProviderAuthority:
+    """Re-read only the providers map from the authority settings file."""
+    path = config.config_path
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        return ProviderAuthority(
+            providers={},
+            source_path=path,
+            error=f"cannot re-read MCP authority settings: {path}: {error}",
+        )
+    if not isinstance(data, dict):
+        return ProviderAuthority(
+            providers={},
+            source_path=path,
+            error=f"MCP authority settings must be a JSON object: {path}",
+        )
+    try:
+        providers = parse_providers(
+            data.get("providers", {}),
+            config.coordination_root,
+            config.workspace_root,
+        )
+    except ConfigError as error:
+        return ProviderAuthority(providers={}, source_path=path, error=str(error))
+    return ProviderAuthority(providers=providers, source_path=path)
+
+
+def require_provider_launch_authority(config: McpRuntimeConfig, *, operation: str) -> McpRuntimeConfig:
+    """Gate a provider-launching operation on the on-disk authority (fail-closed).
+
+    Returns the boot config with the live providers map applied; raises
+    ``ConfigError`` when the authority file disables providers or cannot be
+    read. Stop/status/cleanup paths must not call this — stopping is always
+    legal.
+    """
+    authority = reload_provider_authority(config)
+    if authority.error is not None:
+        raise ConfigError(f"{operation} refused (containment R1, fail-closed): {authority.error}")
+    if not authority.providers:
+        raise ConfigError(
+            f"{operation} refused: providers are disabled in the on-disk authority settings "
+            f"({authority.source_path}); the boot snapshot ({sorted(config.providers)}) is not "
+            "launch authority (containment R1). stop/status/cleanup remain available."
+        )
+    return authority.apply(config)
 
 
 def require_config_path(config_path: str | Path) -> Path:
@@ -157,11 +260,16 @@ def config_from_mapping(data: dict[str, Any], config_path: Path) -> McpRuntimeCo
     timeout_caps = parse_timeout_caps(data.get("timeoutCaps", {}))
     benchmarks_enabled = parse_benchmarks_enabled(data.get("benchmarksEnabled", False))
     dashboard = parse_dashboard_settings(data.get("dashboard"))
+    try:
+        provider_degradation = parse_provider_degradation_settings(data.get("providerDegradation"))
+    except ProviderDegradationSettingsError as error:
+        raise ConfigError(str(error)) from error
     orchestration = parse_orchestration_settings(
         data.get("orchestration"),
         coordination_root=coordination_root,
         config_path=config_path,
     )
+    retirement = parse_retirement_settings(data.get("retirement"))
 
     return McpRuntimeConfig(
         config_path=config_path,
@@ -175,6 +283,8 @@ def config_from_mapping(data: dict[str, Any], config_path: Path) -> McpRuntimeCo
         benchmarks_enabled=benchmarks_enabled,
         dashboard=dashboard,
         orchestration=orchestration,
+        provider_degradation=provider_degradation,
+        retirement=retirement,
     )
 
 
@@ -339,6 +449,29 @@ def parse_dashboard_settings(raw: object) -> DashboardSettings:
     if isinstance(port, bool) or not isinstance(port, int) or not 0 < port < 65536:
         raise ConfigError("dashboard.port must be an integer in 1..65535")
     return DashboardSettings(auto_start=auto_start, port=port)
+
+
+def parse_retirement_settings(raw: object) -> RetirementSettings:
+    if raw is None:
+        return RetirementSettings()
+    if not isinstance(raw, dict):
+        raise ConfigError("retirement settings must be an object")
+    unknown = sorted(set(raw) - KNOWN_RETIREMENT_FIELDS)
+    if unknown:
+        allowed = ", ".join(sorted(KNOWN_RETIREMENT_FIELDS))
+        unknown_text = ", ".join(unknown)
+        raise ConfigError(f"unsupported retirement setting(s): {unknown_text}; allowed: {allowed}")
+    for key in sorted(KNOWN_RETIREMENT_FIELDS):
+        if key in raw and not isinstance(raw[key], bool):
+            raise ConfigError(f"retirement.{key} must be a boolean")
+    auto_land_on_integration = raw.get(
+        "autoLandOnIntegration", raw.get("autoRetireOnIntegration", True)
+    )
+    auto_land_on_finalize = raw.get("autoLandOnFinalize", raw.get("autoRetireOnFinalize", True))
+    return RetirementSettings(
+        auto_land_on_integration=auto_land_on_integration,
+        auto_land_on_finalize=auto_land_on_finalize,
+    )
 
 
 def parse_orchestration_settings(

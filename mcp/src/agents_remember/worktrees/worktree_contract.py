@@ -8,12 +8,14 @@ top-level fields and one-level nested sections.
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 from agents_remember.errors import AgentsRememberError
+from agents_remember.worktrees.leaf_refs import LeafRefResolutionError, resolve_leaf_ref
 from agents_remember.worktrees.task_resolver import (
     SERIES_CONTRACT_FILENAME,
+    TaskResolutionError,
     leaf_enclosure_path,
     resolve_active_task_root,
     series_contract_path,
@@ -117,6 +119,7 @@ def default_contract(
     task_id = slugify(task_name).upper()
     task_root = resolve_active_task_root(coordination_root, repo_name, task_name)
     leaf = leaf_id or worktree_name
+    persisted_leaf = leaf_id or slugify(worktree_name)
     contract_path = leaf_enclosure_path(task_root, leaf)
     task_artifact = task_root / "task.md"
     worktree_group = worktree_group_for(coordination_root, repo_name, worktree_name)
@@ -150,7 +153,7 @@ def default_contract(
         ledger_path=ledger_path,
         memory_state="disabled" if memory_mode == "disabled" else "",
         lifecycle_id=lifecycle_id,
-        leaf_id=slugify(leaf),
+        leaf_id=persisted_leaf,
         parent_task_name=parent_task_name,
         parent_contract_path=parent_contract_path or series_contract_path(task_root),
     )
@@ -213,15 +216,42 @@ def load_contract(path: Path) -> WorktreeContract:
         raise ContractError(f"worktree contract does not exist: {path}")
     front_matter = _extract_front_matter(path.read_text(encoding="utf-8"))
     data = _parse_limited_yaml(front_matter)
-    contract = _contract_from_data(data, path)
+    contract = normalize_contract_leaf_id(_contract_from_data(data, path), keep_unresolved=True)
     validate_contract(contract)
     return contract
 
 
 def write_contract(path: Path, contract: WorktreeContract) -> None:
+    contract = normalize_contract_leaf_id(contract)
     validate_contract(contract)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(contract_to_text(contract), encoding="utf-8")
+
+
+def normalize_contract_leaf_id(
+    contract: WorktreeContract, *, keep_unresolved: bool = False
+) -> WorktreeContract:
+    """Map legacy stem-shaped leaf ids to doc ids when the task tree proves the mapping."""
+
+    if contract.kind != "leaf" or not contract.leaf_id:
+        return contract
+    try:
+        resolved = resolve_leaf_ref(
+            contract.coordination_root,
+            contract.repo_name,
+            contract.leaf_id,
+            task_name=contract.task_name,
+            parent_task=contract.parent_task_name or None,
+        )
+    except LeafRefResolutionError:
+        return contract
+    except TaskResolutionError:
+        if keep_unresolved:
+            return contract
+        raise
+    if resolved.doc_id == contract.leaf_id:
+        return contract
+    return replace(contract, leaf_id=resolved.doc_id)
 
 
 def _memory_lines(contract: WorktreeContract) -> list[str]:

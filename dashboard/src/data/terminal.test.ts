@@ -1,7 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  attachSessionToLeaf,
   bracketedPaste,
+  cleanupLandedTerminalSessions,
   connectTerminal,
   fetchHarnesses,
   fetchTerminalSessions,
@@ -304,6 +306,61 @@ describe("terminateTerminalSession", () => {
     expect(await terminateTerminalSession("s1")).toBe(false);
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("offline")));
     expect(await terminateTerminalSession("s1")).toBe(false);
+    vi.unstubAllGlobals();
+  });
+});
+
+describe("cleanupLandedTerminalSessions", () => {
+  it("POSTs selected session ids and normalizes the cleanup result", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () =>
+        Promise.resolve({
+          closed: 1,
+          skipped: 1,
+          closedSessions: ["landed"],
+          skippedSessions: [{ session: "active", reason: "status:running" }],
+        }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(cleanupLandedTerminalSessions(["landed", "active"])).resolves.toEqual({
+      closed: 1,
+      skipped: 1,
+      closedSessions: ["landed"],
+      skippedSessions: [{ session: "active", reason: "status:running" }],
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/terminal/landed-cleanup",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ sessionIds: ["landed", "active"] }),
+      }),
+    );
+    vi.unstubAllGlobals();
+  });
+
+  it("returns null on a non-ok response or network error", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false }));
+    expect(await cleanupLandedTerminalSessions(["s1"])).toBeNull();
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("offline")));
+    expect(await cleanupLandedTerminalSessions(["s1"])).toBeNull();
+    vi.unstubAllGlobals();
+  });
+});
+
+describe("attachSessionToLeaf", () => {
+  it("posts the leaf and explicit seat role as one binding move", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(attachSessionToLeaf("s 1", "repo/master/leaf", "curator")).resolves.toBe("ok");
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/terminal/s%201/attach-leaf",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ leafKey: "repo/master/leaf", role: "curator" }),
+      }),
+    );
     vi.unstubAllGlobals();
   });
 });

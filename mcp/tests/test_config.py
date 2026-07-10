@@ -479,6 +479,138 @@ class DashboardSettingsTests(unittest.TestCase):
             self._load(["autoStart"])
 
 
+class ProviderDegradationSettingsTests(unittest.TestCase):
+    def _load(self, degradation: object | None) -> McpRuntimeConfig:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            payload = settings_payload(root)
+            if degradation is not None:
+                payload["providerDegradation"] = degradation
+            path = root / "mcp-settings.json"
+            write_json(path, payload)
+            return load_config(path)
+
+    def test_defaults_to_enabled_failsafe_thresholds(self) -> None:
+        config = self._load(None)
+
+        self.assertTrue(config.provider_degradation.enabled)
+        self.assertTrue(config.provider_degradation.fail_safe_enabled)
+        self.assertEqual(config.provider_degradation.memory_degraded_ratio, 0.80)
+        self.assertEqual(config.provider_degradation.memory_critical_ratio, 0.92)
+
+    def test_parses_explicit_thresholds(self) -> None:
+        config = self._load(
+            {
+                "enabled": False,
+                "failSafeEnabled": False,
+                "memoryDegradedRatio": 0.70,
+                "memoryCriticalRatio": 0.95,
+                "degradedSamples": 4,
+                "criticalSamples": 3,
+                "healthySamples": 5,
+                "watcherLagDegradedCommits": 7,
+                "watcherLagCriticalCommits": 30,
+                "watcherLagDegradedMinutes": 11,
+                "watcherLagCriticalMinutes": 45,
+                "probeDegradedMs": 3000,
+                "probeCriticalMs": 12000,
+                "setupFailureDegradedStreak": 3,
+                "setupFailureCriticalStreak": 4,
+                "recentSampleLimit": 240,
+            }
+        )
+
+        settings = config.provider_degradation
+        self.assertFalse(settings.enabled)
+        self.assertFalse(settings.fail_safe_enabled)
+        self.assertEqual(settings.memory_degraded_ratio, 0.70)
+        self.assertEqual(settings.memory_critical_ratio, 0.95)
+        self.assertEqual(settings.degraded_samples, 4)
+        self.assertEqual(settings.critical_samples, 3)
+        self.assertEqual(settings.healthy_samples, 5)
+        self.assertEqual(settings.watcher_lag_degraded_commits, 7)
+        self.assertEqual(settings.watcher_lag_critical_commits, 30)
+        self.assertEqual(settings.watcher_lag_degraded_minutes, 11)
+        self.assertEqual(settings.watcher_lag_critical_minutes, 45)
+        self.assertEqual(settings.probe_degraded_ms, 3000)
+        self.assertEqual(settings.probe_critical_ms, 12000)
+        self.assertEqual(settings.setup_failure_degraded_streak, 3)
+        self.assertEqual(settings.setup_failure_critical_streak, 4)
+        self.assertEqual(settings.recent_sample_limit, 240)
+
+    def test_unknown_provider_degradation_key_is_rejected(self) -> None:
+        with self.assertRaisesRegex(ConfigError, "memoryDegradedRato"):
+            self._load({"memoryDegradedRato": 0.75})
+
+    def test_provider_degradation_shape_is_rejected(self) -> None:
+        with self.assertRaisesRegex(ConfigError, "providerDegradation settings"):
+            self._load(["enabled"])
+
+    def test_provider_degradation_values_are_typed(self) -> None:
+        bad_cases = (
+            {"enabled": 1},
+            {"memoryCriticalRatio": 1.2},
+            {"criticalSamples": 0},
+            {"recentSampleLimit": True},
+        )
+        for case in bad_cases:
+            with self.assertRaises(ConfigError):
+                self._load(case)
+
+
+class RetirementSettingsTests(unittest.TestCase):
+    """260707-HFX2-L11: the auto-land hook gates, both default ON."""
+
+    def _load(self, retirement: object | None) -> McpRuntimeConfig:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            payload = settings_payload(root)
+            if retirement is not None:
+                payload["retirement"] = retirement
+            path = root / "mcp-settings.json"
+            write_json(path, payload)
+            return load_config(path)
+
+    def test_defaults_are_both_on_when_the_key_is_absent(self) -> None:
+        config = self._load(None)
+        self.assertTrue(config.retirement.auto_land_on_integration)
+        self.assertTrue(config.retirement.auto_land_on_finalize)
+
+    def test_parses_both_flags_explicitly_off(self) -> None:
+        config = self._load(
+            {"autoLandOnIntegration": False, "autoLandOnFinalize": False}
+        )
+        self.assertFalse(config.retirement.auto_land_on_integration)
+        self.assertFalse(config.retirement.auto_land_on_finalize)
+
+    def test_parses_legacy_auto_retire_flags_as_aliases(self) -> None:
+        config = self._load(
+            {"autoRetireOnIntegration": False, "autoRetireOnFinalize": False}
+        )
+        self.assertFalse(config.retirement.auto_land_on_integration)
+        self.assertFalse(config.retirement.auto_land_on_finalize)
+
+    def test_unknown_retirement_key_is_rejected(self) -> None:
+        with self.assertRaisesRegex(ConfigError, "unsupported retirement setting"):
+            self._load({"autoRetireOnLaunch": True})
+
+    def test_auto_land_on_integration_must_be_a_boolean(self) -> None:
+        with self.assertRaisesRegex(ConfigError, "autoLandOnIntegration must be a boolean"):
+            self._load({"autoLandOnIntegration": "yes"})
+
+    def test_auto_land_on_finalize_must_be_a_boolean(self) -> None:
+        with self.assertRaisesRegex(ConfigError, "autoLandOnFinalize must be a boolean"):
+            self._load({"autoLandOnFinalize": 1})
+
+    def test_legacy_auto_retire_alias_must_be_a_boolean(self) -> None:
+        with self.assertRaisesRegex(ConfigError, "autoRetireOnIntegration must be a boolean"):
+            self._load({"autoRetireOnIntegration": "yes"})
+
+    def test_non_object_retirement_settings_are_rejected(self) -> None:
+        with self.assertRaisesRegex(ConfigError, "retirement settings must be an object"):
+            self._load(["autoLandOnIntegration"])
+
+
 class OrchestrationSettingsTests(unittest.TestCase):
     """gateDelegation boot sourcing (260703-L13, GQ1).
 

@@ -11,7 +11,9 @@ from typing import Any
 from agents_remember.controllers._guards import require_repo
 from agents_remember.mcp.config import (
     DEFAULT_DOCKER_CONTROL_SECONDS,
+    ConfigError,
     McpRuntimeConfig,
+    require_provider_launch_authority,
 )
 from agents_remember.providers import lifecycle_service
 from agents_remember.providers.current_state import write_current_provider_state
@@ -60,6 +62,12 @@ def provider_watchers_tool(
         raise ValueError(
             "action must be status, start, stop, restart, invalidate-indexes, or shutdown-all"
         )
+    if action in {"start", "restart", "invalidate-indexes"}:
+        # Containment R1 (260707-HFX-L1): launching (and rebuilding, which
+        # launches indexers) runs on the LIVE on-disk authority, never the boot
+        # snapshot. Disabled-on-disk refuses loudly; stop/status/shutdown-all
+        # stay available — stopping is always legal.
+        config = require_provider_launch_authority(config, operation=f"provider_watchers {action}")
     if action == "restart":
         # Stop then start only. 'start' re-attaches the watchers and lets them pick up changes
         # via their incremental scan; it never passes --force, so indexes are preserved.
@@ -212,6 +220,8 @@ def grepai_search_tool(
         operation="grepai_search",
         dry_run=dry_run,
         timeout=timeout,
+        launch_capable=True,
+        launch_capable_provider="grepai-memory",
         settings_path_override=_worktree_settings_override(target),
         run=lambda service_config: lifecycle_service.run_grepai_lifecycle(
             service_config,
@@ -266,6 +276,8 @@ def grepai_trace_tool(
         operation="grepai_trace",
         dry_run=dry_run,
         timeout=timeout,
+        launch_capable=True,
+        launch_capable_provider="grepai-memory",
         settings_path_override=_worktree_settings_override(target),
         run=lambda service_config: lifecycle_service.run_grepai_lifecycle(
             service_config,
@@ -399,6 +411,8 @@ def cgc_visualize_tool(
         operation="cgc_visualize",
         dry_run=dry_run,
         timeout=timeout,
+        launch_capable=True,
+        launch_capable_provider="codegraphcontext-code",
         settings_path_override=_worktree_settings_override(target),
         run=lambda service_config: lifecycle_service.run_cgc_lifecycle(
             service_config,
@@ -427,6 +441,8 @@ def _cgc_run_tool(
         operation=operation,
         dry_run=dry_run,
         timeout=timeout,
+        launch_capable=True,
+        launch_capable_provider="codegraphcontext-code",
         settings_path_override=_worktree_settings_override(target),
         run=lambda service_config: lifecycle_service.run_cgc_lifecycle(
             service_config,
@@ -697,7 +713,24 @@ def _provider_operation_result(
     timeout: int | None = None,
     run: ProviderLifecycleRunner,
     settings_path_override: Path | None = None,
+    launch_capable: bool = False,
+    launch_capable_provider: str | None = None,
 ) -> dict[str, Any]:
+    if launch_capable:
+        # Containment R1 (260707-HFX-L1): query/run ops spin one-shot runner
+        # containers, and a worktree's persisted settings file is stamped
+        # enabled:true forever — neither is launch authority. The live on-disk
+        # providers map gates both; with an override the worktree's own stack
+        # settings still drive the run, but only under an armed authority.
+        # Review note: the SPECIFIC provider must be armed, not just any.
+        live = require_provider_launch_authority(config, operation=operation)
+        if launch_capable_provider and launch_capable_provider not in live.providers:
+            raise ConfigError(
+                f"{operation} refused: provider {launch_capable_provider!r} is not enabled "
+                f"in the on-disk authority settings ({config.config_path}) (containment R1)"
+            )
+        if settings_path_override is None:
+            config = live
     # When a worktree target resolves, run against its already-persisted lifecycle
     # settings (do NOT delete that file). Otherwise write a temp workspace settings
     # file and clean it up.

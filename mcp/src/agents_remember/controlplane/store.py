@@ -117,6 +117,29 @@ class GateStore:
         self._replace(lifecycle_id, kept)
         return len(records) - len(kept)
 
+    def compact_current(
+        self, lifecycle_id: str | None, *, now: datetime, rewrite: bool = True
+    ) -> dict[str, GateRecord]:
+        """Fold + reclaim in ONE read: the live gate set with expired/consumed rows filtered out.
+
+        260707-HFX2-L12 F8/CS-6 D2: the projection previously did ``compact()`` (a full read + rewrite)
+        **then** ``current()`` (a second full read) per lifecycle per 1s tick. This folds and applies the
+        same keep-filter from a SINGLE read, so the projection sees the identical live set with no
+        double-fold. ``rewrite`` gates the (expensive) physical prune to a low cadence — the projection
+        output is keep-filtered every tick regardless, so on-disk reclamation lagging a tick is harmless.
+        """
+        records = self.read(lifecycle_id)
+        if not records:
+            return {}
+        keep_ids = gate_keep_ids(records, now=now)
+        kept = [record for record in records if record.id in keep_ids]
+        if rewrite and len(kept) != len(records):
+            self._replace(lifecycle_id, kept)
+        latest: dict[str, GateRecord] = {}
+        for record in kept:
+            latest[record.id] = record
+        return latest
+
     def lifecycle_ids(self) -> list[str | None]:
         """Lifecycle ids with gate logs, plus workspace when present."""
         ids: list[str | None] = []

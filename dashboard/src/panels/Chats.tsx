@@ -1,7 +1,15 @@
-import { lazy, Suspense, useEffect, useState } from "react";
+import {
+  lazy,
+  Suspense,
+  useEffect,
+  useState,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type PointerEvent as ReactPointerEvent,
+} from "react";
 
 import { css } from "../../styled-system/css";
 import {
+  attachSeatRole,
   createSession,
   fromTerminalSessionInfo,
   notifySessionCatalogChanged,
@@ -14,6 +22,7 @@ import {
 import {
   attachSessionToLeaf,
   bracketedPaste,
+  cleanupLandedTerminalSessions,
   fetchHarnesses,
   fetchTerminalSessionsOrNull,
   sanitizeForInjection,
@@ -25,6 +34,7 @@ import { useDashboard } from "../data/store";
 import { buildTaskTree, leafIdFromKey, leafTitleForKey } from "../data/taskIdentity";
 import type { TaskDocNode } from "../types/projection";
 import { EmptyStateBackdrop } from "./EmptyStateBackdrop";
+import { usePersistedNumber } from "./file-viewer/usePersistedFlag";
 import { LeafAttachPicker } from "./LeafAttachPicker";
 import { SessionComposer } from "./SessionComposer";
 import { SessionList } from "./SessionList";
@@ -104,23 +114,38 @@ const attachError = css({
   paddingInline: "0.2rem",
 });
 const harnessIcon = css({ flexShrink: 0, display: "block" });
-const body = css({ display: "flex", flex: "1", minHeight: "0", gap: "0.5rem" });
+const body = css({ display: "flex", flex: "1", minHeight: "0", minWidth: "0", gap: "0.5rem" });
 const sidebar = css({
+  position: "relative",
   display: "flex",
   flexDirection: "column",
   flexShrink: 0,
-  width: "16rem",
   minHeight: "0",
+  minWidth: "0",
+  maxWidth: "calc(100% - 20rem)",
   borderRightWidth: "1px",
   borderRightStyle: "solid",
   borderRightColor: "grid",
   paddingRight: "0.4rem",
 });
+const sidebarResizeHandle = css({
+  position: "absolute",
+  top: "0",
+  right: "0",
+  bottom: "0",
+  width: "7px",
+  zIndex: "3",
+  cursor: "col-resize",
+  background: "transparent",
+  transition: "background 0.15s ease",
+  _hover: { background: "amber" },
+  _focusVisible: { outline: "1px solid token(colors.amber)", outlineOffset: "-1px" },
+});
 const terminalArea = css({
   display: "flex",
   flexDirection: "column",
   flex: "1",
-  minWidth: "0",
+  minWidth: "min(20rem, 100%)",
   minHeight: "0",
   gap: "0.4rem",
 });
@@ -157,6 +182,64 @@ const statusPanel = css({
 
 const LAST_ACTIVE_SESSION_KEY = "ar-dashboard:last-active-chat-session";
 const CATALOG_REFRESH_INTERVAL_MS = 2500;
+const SIDEBAR_WIDTH_KEY = "chats.sidebar-width";
+const SIDEBAR_DEFAULT_WIDTH = 256;
+const SIDEBAR_MIN_WIDTH = 220;
+const SIDEBAR_MAX_WIDTH = 560;
+const SIDEBAR_KEYBOARD_STEP = 24;
+
+function clampSidebarWidth(width: number): number {
+  return Math.max(SIDEBAR_MIN_WIDTH, Math.min(SIDEBAR_MAX_WIDTH, Math.round(width)));
+}
+
+function SidebarResizeHandle({
+  width,
+  onResize,
+}: {
+  width: number;
+  onResize: (next: number) => void;
+}) {
+  const onPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    const startX = event.clientX;
+    const startWidth = width;
+    event.currentTarget.setPointerCapture(event.pointerId);
+    const move = (moveEvent: globalThis.PointerEvent) => {
+      onResize(clampSidebarWidth(startWidth + moveEvent.clientX - startX));
+    };
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  };
+  const onKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    const direction = event.key === "ArrowRight" ? 1 : event.key === "ArrowLeft" ? -1 : 0;
+    if (!direction) return;
+    event.preventDefault();
+    onResize(clampSidebarWidth(width + direction * SIDEBAR_KEYBOARD_STEP));
+  };
+  return (
+    <div
+      role="separator"
+      aria-orientation="vertical"
+      aria-label="Resize chats sidebar"
+      aria-valuemin={SIDEBAR_MIN_WIDTH}
+      aria-valuemax={SIDEBAR_MAX_WIDTH}
+      aria-valuenow={width}
+      tabIndex={0}
+      className={sidebarResizeHandle}
+      onPointerDown={onPointerDown}
+      onKeyDown={onKeyDown}
+      data-testid="chats-sidebar-resize"
+    />
+  );
+}
+
+function isInspectableSession(status: string | undefined): boolean {
+  return (status ?? "running") === "running" || status === "landed";
+}
 
 function readLastActiveSessionId(): string | null {
   try {
@@ -223,6 +306,12 @@ export function Chats({
   const sessions = useSessions((state) => state.sessions);
   const activeId = useSessions((state) => state.activeId);
   const activeSession = sessions.find((session) => session.id === activeId);
+  const activeSessionIsRunning = (activeSession?.status ?? "running") === "running";
+  const [persistedSidebarWidth, setPersistedSidebarWidth] = usePersistedNumber(
+    SIDEBAR_WIDTH_KEY,
+    SIDEBAR_DEFAULT_WIDTH,
+  );
+  const sidebarWidth = clampSidebarWidth(persistedSidebarWidth);
   const [mountedSessionIds, setMountedSessionIds] = useState<Set<string>>(() => new Set());
   const [harnesses, setHarnesses] = useState<HarnessInfo[]>([]);
   // The attached-leaf name resolver for the session list ("who works on what"): the bound leaf's task-doc
@@ -231,6 +320,7 @@ export function Chats({
     leafTitleForKey(taskDocuments, leafKey) ?? leafIdFromKey(leafKey);
   // A transient note for a refused leaf attach (the server's 409 leaf-taken).
   const [leafAttachError, setLeafAttachError] = useState<string | null>(null);
+  const [landedCleanupNote, setLandedCleanupNote] = useState<string | null>(null);
 
   // Detection-driven: the server reports which supported harnesses are installed; a button appears
   // only for detected ones. `[]` (no backend / failure) just leaves ＋ Terminal alone.
@@ -284,7 +374,7 @@ export function Chats({
     setMountedSessionIds((current) => {
       const sessionIds = new Set(sessions.map((session) => session.id));
       const next = new Set([...current].filter((id) => sessionIds.has(id)));
-      if (activeSession && (activeSession.status ?? "running") === "running") {
+      if (activeSession && isInspectableSession(activeSession.status)) {
         next.add(activeSession.id);
       }
       if (next.size === current.size && [...next].every((id) => current.has(id))) return current;
@@ -298,22 +388,22 @@ export function Chats({
       : createSession(label, kind, harness);
 
   const attachActive = () => {
-    if (!activeSession || activeSession.lifecycleId || !selectedLifecycleId) return;
+    if (!activeSession || !activeSessionIsRunning || activeSession.lifecycleId || !selectedLifecycleId) return;
     sessionStore.getState().setLifecycle(activeSession.id, selectedLifecycleId);
   };
 
   // Attach or move the active session to ANY chosen leaf via the server (the uniqueness arbiter) — NOT
   // just the leaf you happen to be viewing. On success bind the leaf locally + broadcast the catalog
   // change; on 409 the leaf already has a same-role running session, so surface a note instead of binding.
-  const attachActiveLeaf = async (leafKey: string) => {
-    if (!activeSession || !leafKey || activeSession.leafKey === leafKey) return;
+  const attachActiveLeaf = async (leafKey: string, seatRole: string) => {
+    if (!activeSession || !activeSessionIsRunning || !leafKey || activeSession.leafKey === leafKey) return;
     setLeafAttachError(null);
-    const result = await attachSessionToLeaf(activeSession.id, leafKey);
+    const result = await attachSessionToLeaf(activeSession.id, leafKey, seatRole);
     if (result === "ok") {
-      sessionStore.getState().applyLeafAssignment(activeSession.id, leafKey);
+      sessionStore.getState().applyLeafAssignment(activeSession.id, leafKey, seatRole);
       notifySessionCatalogChanged("leaf", activeSession.id);
     } else if (result === "leaf-taken") {
-      setLeafAttachError("leaf already has a chat");
+      setLeafAttachError(`leaf already has a ${seatRole} seat`);
     } else {
       setLeafAttachError("could not attach to leaf");
     }
@@ -332,6 +422,22 @@ export function Chats({
       sessionStore.getState().close(id);
       notifySessionCatalogChanged("terminate", id);
     }
+  };
+
+  const cleanupLandedSessions = async (members: { id: string }[]) => {
+    setLandedCleanupNote(null);
+    const result = await cleanupLandedTerminalSessions(members.map((member) => member.id));
+    if (!result) {
+      setLandedCleanupNote("cleanup failed");
+      return;
+    }
+    for (const id of result.closedSessions) {
+      sessionStore.getState().setStatus(id, "terminated");
+      sessionStore.getState().close(id);
+    }
+    notifySessionCatalogChanged("terminate");
+    void hydrateTerminalSessionsFromCatalog(true, new Set(result.closedSessions));
+    setLandedCleanupNote(`${result.closed} closed · ${result.skipped} skipped`);
   };
 
   // The G1 command tree (L14): group the sidebar by claim + spawn-role provenance. Enclosures come
@@ -371,7 +477,7 @@ export function Chats({
           ))}
         {selectedLifecycleId && activeSession?.lifecycleId === selectedLifecycleId ? (
           <span className={attachBadge}>task {selectedLifecycleId}</span>
-        ) : selectedLifecycleId && activeSession && !activeSession.lifecycleId ? (
+        ) : selectedLifecycleId && activeSessionIsRunning && activeSession && !activeSession.lifecycleId ? (
           <button
             type="button"
             className={launchButton}
@@ -388,14 +494,16 @@ export function Chats({
             leaf {leafNameFor(activeSession.leafKey)}
           </span>
         ) : null}
-        {activeSession && leafTree.length > 0 ? (
+        {activeSession && activeSessionIsRunning && leafTree.length > 0 ? (
           <LeafAttachPicker
             tree={leafTree}
             contextMaster={pickerContextMaster}
-            onPick={(leafKey) => void attachActiveLeaf(leafKey)}
+            onPick={(leafKey, seatRole) => void attachActiveLeaf(leafKey, seatRole)}
             testId="chats-attach-leaf-picker"
             label={activeSession.leafKey ? "Move leaf" : "Attach to leaf"}
             align="left"
+            seatRole={attachSeatRole(activeSession)}
+            roleOptions={activeSession.kind === "terminal" ? ["terminal"] : undefined}
           />
         ) : null}
         {leafAttachError ? (
@@ -403,18 +511,29 @@ export function Chats({
             {leafAttachError}
           </span>
         ) : null}
+        {landedCleanupNote ? (
+          <span className={attachBadge} data-testid="chats-landed-cleanup-status">
+            {landedCleanupNote}
+          </span>
+        ) : null}
       </header>
       <div className={body}>
         {sessions.length > 0 && (
-          <aside className={sidebar}>
+          <aside
+            className={sidebar}
+            style={{ width: `${sidebarWidth}px` }}
+            data-testid="chats-sidebar"
+          >
             <SessionList
               sessions={sessions}
               activeId={activeId}
               onSelect={(id) => sessionStore.getState().setActive(id)}
               onTerminate={(id) => void terminateSession(id)}
+              onCleanupLanded={(members) => void cleanupLandedSessions(members)}
               leafNameFor={leafNameFor}
               grouped={grouped}
             />
+            <SidebarResizeHandle width={sidebarWidth} onResize={setPersistedSidebarWidth} />
           </aside>
         )}
         <div className={terminalArea}>
@@ -432,10 +551,11 @@ export function Chats({
                       aria-hidden={!visible}
                       data-testid={`chats-terminal-layer-${session.id}`}
                     >
-                      {(session.status ?? "running") === "running" ? (
+                      {isInspectableSession(session.status) ? (
                         <Suspense fallback={<div className={empty}>Opening terminal…</div>}>
                           <Terminal
                             sessionId={session.id}
+                            readOnly={session.status === "landed"}
                             onConnection={(conn) => registerConnection(session.id, conn)}
                           />
                         </Suspense>
@@ -447,11 +567,13 @@ export function Chats({
                     </div>
                   );
                 })}
-              <SessionComposer
-                onSend={(text) =>
-                  sendToSession(activeSession.id, bracketedPaste(sanitizeForInjection(text)))
-                }
-              />
+              {activeSessionIsRunning ? (
+                <SessionComposer
+                  onSend={(text) =>
+                    sendToSession(activeSession.id, bracketedPaste(sanitizeForInjection(text)))
+                  }
+                />
+              ) : null}
             </>
           ) : (
             <EmptyStateBackdrop src="/assets/sc2-adjutant-boomerang.mp4">

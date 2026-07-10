@@ -149,10 +149,14 @@ describe("sessionStore (6e hardening)", () => {
     expect(sessionStore.getState().count).toBe(2);
   });
 
-  it("does not route lifecycle injections to exited or terminated sessions", () => {
+  it("does not route lifecycle injections to non-live sessions", () => {
     sessionStore
       .getState()
       .hydrate([{ id: "dead", label: "Claude Code 1", lifecycleId: "LC1", status: "exited" }]);
+    expect(findSessionForLifecycle("LC1")).toBeUndefined();
+    sessionStore
+      .getState()
+      .hydrate([{ id: "landed", label: "Claude Code 1", lifecycleId: "LC1", status: "landed" }]);
     expect(findSessionForLifecycle("LC1")).toBeUndefined();
   });
 
@@ -205,10 +209,28 @@ describe("sessionStore (6e hardening)", () => {
     sessionStore.getState().add("Chat", "seeker");
     sessionStore.getState().setLeaf("owner", leaf);
 
-    sessionStore.getState().applyLeafAssignment("seeker", leaf);
+    sessionStore.getState().applyLeafAssignment("seeker", leaf, "chat");
 
     expect(findSessionForLeaf(leaf)?.id).toBe("seeker");
     expect(sessionStore.getState().sessions.find((s) => s.id === "owner")?.leafKey).toBeUndefined();
+  });
+
+  it("keeps different role seats on the same leaf while replacing only the matching role", () => {
+    const leaf = "repo/master/leaf-1";
+    sessionStore.getState().hydrate([
+      { id: "worker-old", label: "Worker", leafKey: leaf, seatRole: "worker", status: "running" },
+      { id: "reviewer", label: "Reviewer", leafKey: leaf, seatRole: "reviewer", status: "running" },
+      { id: "worker-new", label: "Replacement worker", status: "running" },
+    ]);
+
+    sessionStore.getState().applyLeafAssignment("worker-new", leaf, "worker");
+
+    expect(sessionStore.getState().sessions.find((s) => s.id === "worker-old")?.leafKey).toBeUndefined();
+    expect(sessionStore.getState().sessions.find((s) => s.id === "reviewer")?.leafKey).toBe(leaf);
+    expect(sessionStore.getState().sessions.find((s) => s.id === "worker-new")).toMatchObject({
+      leafKey: leaf,
+      seatRole: "worker",
+    });
   });
 
   it("frees a leaf so an exited owner no longer blocks a new bind", () => {
@@ -217,6 +239,15 @@ describe("sessionStore (6e hardening)", () => {
     expect(findSessionForLeaf(leaf)).toBeUndefined(); // an exited chat does not own the leaf
     sessionStore.getState().add("Chat", "fresh");
     sessionStore.getState().setLeaf("fresh", leaf); // not blocked by the dead owner
+    expect(findSessionForLeaf(leaf)?.id).toBe("fresh");
+  });
+
+  it("frees a leaf so a landed owner no longer blocks a new bind", () => {
+    const leaf = "repo/master/leaf-1";
+    sessionStore.getState().hydrate([{ id: "landed", label: "Chat 1", leafKey: leaf, status: "landed" }]);
+    expect(findSessionForLeaf(leaf)).toBeUndefined();
+    sessionStore.getState().add("Chat", "fresh");
+    sessionStore.getState().setLeaf("fresh", leaf);
     expect(findSessionForLeaf(leaf)?.id).toBe("fresh");
   });
 
@@ -237,13 +268,21 @@ describe("sessionStore (6e hardening)", () => {
         label: "Chat 1",
         kind: "terminal",
         leafKey: leaf,
+        seatRole: "terminal",
         cwd: "/ws",
         tmuxName: "ar-s1",
         createdAt: "2026-06-26T00:00:00Z",
         lastAttachedAt: "2026-06-26T00:00:00Z",
         status: "running",
       }),
-    ).toEqual({ id: "s1", label: "Chat 1", kind: "terminal", leafKey: leaf, status: "running" });
+    ).toEqual({
+      id: "s1",
+      label: "Chat 1",
+      kind: "terminal",
+      leafKey: leaf,
+      seatRole: "terminal",
+      status: "running",
+    });
 
     // No leafKey on the row → no leafKey on the session (omitted, not undefined-valued).
     expect(
@@ -281,6 +320,52 @@ describe("sessionStore (6e hardening)", () => {
       harness: "claude",
       lifecycleId: "LC1",
       status: "running",
+    });
+  });
+
+  it("converts landed catalog metadata into store sessions", () => {
+    expect(
+      fromTerminalSessionInfo({
+        id: "s1",
+        label: "Claude Code 2",
+        kind: "harness",
+        harness: "claude",
+        lifecycleId: "LC1",
+        leafKey: "repo/master/leaf-1",
+        spawnRole: "worker",
+        seatRole: "reviewer",
+        cwd: "/ws",
+        tmuxName: "ar-s1",
+        createdAt: "2026-06-26T00:00:00Z",
+        lastAttachedAt: "2026-06-26T00:00:00Z",
+        status: "landed",
+        landedAt: "2026-07-09T00:00:00Z",
+        landedReason: "leaf integrated",
+        landedEdge: "leaf-integration",
+        spawnedBySession: "manager",
+        spawnedByLifecycle: "LC0",
+        spawnedLabel: "Worker",
+        turnState: "turn-ended",
+        turnStateChangedAt: "2026-07-09T00:01:00Z",
+      }),
+    ).toEqual({
+      id: "s1",
+      label: "Claude Code 2",
+      kind: "harness",
+      harness: "claude",
+      lifecycleId: "LC1",
+      leafKey: "repo/master/leaf-1",
+      spawnRole: "worker",
+      seatRole: "reviewer",
+      status: "landed",
+      landedAt: "2026-07-09T00:00:00Z",
+      landedReason: "leaf integrated",
+      landedEdge: "leaf-integration",
+      spawnedBySession: "manager",
+      spawnedByLifecycle: "LC0",
+      spawnedLabel: "Worker",
+      turnState: "turn-ended",
+      turnStateChangedAt: "2026-07-09T00:01:00Z",
     });
   });
 

@@ -33,7 +33,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from pathlib import Path
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 SERVED_RECORD_SCHEMA = "ar-served-record/v1"
 
@@ -92,15 +92,23 @@ class ServedStore:
             handle.write(line + "\n")
 
     def read(self, lifecycle_id: str) -> list[ServedRecord]:
-        """Read a served log back as validated records (empty when absent)."""
+        """Read a served log back as validated records (empty when absent).
+
+        260707-HFX2-L12 F12: skip a torn/legacy line rather than raise — a served ledger read that
+        feeds ``read_ar_files`` dedup + the dashboard must degrade to "re-serve once" on one bad row,
+        not crash the read."""
         path = self.log_path(lifecycle_id)
         if not path.exists():
             return []
-        return [
-            ServedRecord.model_validate_json(line)
-            for line in path.read_text(encoding="utf-8").splitlines()
-            if line.strip()
-        ]
+        records: list[ServedRecord] = []
+        for line in path.read_text(encoding="utf-8").splitlines():
+            if not line.strip():
+                continue
+            try:
+                records.append(ServedRecord.model_validate_json(line))
+            except ValidationError:
+                continue
+        return records
 
     def served_set(self, lifecycle_id: str) -> set[str]:
         """Fold the log into the set of ``"<kind>:<path>:<hash>"`` keys served."""

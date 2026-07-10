@@ -23,6 +23,9 @@ class OperatorInboxPostResponse(ToolResponse):
     senderAgentId: str | None = None
     senderRole: AgentRole | None = None
     recipientRole: AgentRole | None = None
+    ownerRole: AgentRole | None = None
+    ownerAgentId: str | None = None
+    ownerLifecycleId: str | None = None
     gateId: str | None = None
     messageKind: InboxMessageKind
     artifactPath: str | None = None

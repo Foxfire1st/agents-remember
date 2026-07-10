@@ -381,8 +381,11 @@ class TypedModelTests(unittest.TestCase):
         settings = self._load(
             {
                 "roles": {
+                    "architect": {"harness": "claude", "effort": "high"},
+                    "curator": {"harness": "codex", "effort": "medium"},
                     "worker": {"harness": "codex", "model": "gpt-5", "effort": "medium"},
                     "orchestrator": {"effort": "high"},
+                    "system-specialist": {"harness": "claude", "model": "fable"},
                 }
             }
         )
@@ -392,6 +395,15 @@ class TypedModelTests(unittest.TestCase):
             RoleKnobs(harness="codex", model="gpt-5", effort="medium"),
         )
         self.assertEqual(settings.roles["orchestrator"], RoleKnobs(effort="high"))
+        self.assertEqual(
+            settings.roles["architect"], RoleKnobs(harness="claude", effort="high")
+        )
+        self.assertEqual(
+            settings.roles["curator"], RoleKnobs(harness="codex", effort="medium")
+        )
+        self.assertEqual(
+            settings.roles["system-specialist"], RoleKnobs(harness="claude", model="fable")
+        )
         # Unconfigured roles resolve to empty knobs (role-file defaults apply).
         self.assertEqual(settings.role_knobs("manager"), RoleKnobs())
 
@@ -424,6 +436,61 @@ class TypedModelTests(unittest.TestCase):
         with self.assertRaisesRegex(AgenticSettingsError, "maxSubAgents"):
             self._load({"concurrency": {"maxSubAgents": 0}})
 
+    def test_supervisor_defaults_when_absent(self) -> None:
+        settings = self._load({})
+
+        self.assertTrue(settings.supervisor.enabled)
+        self.assertEqual(settings.supervisor.interval_seconds, 10.0)
+        self.assertEqual(settings.supervisor.stale_cutoff_seconds, 60.0)
+        self.assertIsNone(settings.supervisor.redeliver_rate_limit_seconds)
+        self.assertEqual(settings.supervisor.signal_cooldown_seconds, 900.0)
+        self.assertEqual(settings.supervisor.redeliver_budget, 1)
+
+    def test_supervisor_knobs_parse(self) -> None:
+        settings = self._load(
+            {
+                "supervisor": {
+                    "enabled": False,
+                    "intervalSeconds": 5,
+                    "staleCutoffSeconds": 30,
+                    "redeliverRateLimitSeconds": 900,
+                    "signalCooldownSeconds": 1200,
+                    "redeliverBudget": 75,
+                }
+            }
+        )
+
+        self.assertFalse(settings.supervisor.enabled)
+        self.assertEqual(settings.supervisor.interval_seconds, 5.0)
+        self.assertEqual(settings.supervisor.stale_cutoff_seconds, 30.0)
+        self.assertEqual(settings.supervisor.redeliver_rate_limit_seconds, 900.0)
+        self.assertEqual(settings.supervisor.signal_cooldown_seconds, 1200.0)
+        self.assertEqual(settings.supervisor.redeliver_budget, 75)
+
+    def test_supervisor_enabled_must_be_a_boolean(self) -> None:
+        with self.assertRaisesRegex(AgenticSettingsError, "supervisor.enabled"):
+            self._load({"supervisor": {"enabled": "yes"}})
+
+    def test_supervisor_interval_must_be_positive(self) -> None:
+        with self.assertRaisesRegex(AgenticSettingsError, "intervalSeconds"):
+            self._load({"supervisor": {"intervalSeconds": 0}})
+
+    def test_supervisor_redeliver_budget_must_be_positive(self) -> None:
+        with self.assertRaisesRegex(AgenticSettingsError, "redeliverBudget"):
+            self._load({"supervisor": {"redeliverBudget": 0}})
+
+    def test_supervisor_redelivery_floor_must_be_at_least_15_minutes(self) -> None:
+        with self.assertRaisesRegex(AgenticSettingsError, "redeliverRateLimitSeconds"):
+            self._load({"supervisor": {"redeliverRateLimitSeconds": 899}})
+
+    def test_supervisor_signal_cooldown_must_be_at_least_15_minutes(self) -> None:
+        with self.assertRaisesRegex(AgenticSettingsError, "signalCooldownSeconds"):
+            self._load({"supervisor": {"signalCooldownSeconds": 899}})
+
+    def test_unknown_supervisor_key_fails_loud(self) -> None:
+        with self.assertRaisesRegex(AgenticSettingsError, "sweepSeconds"):
+            self._load({"supervisor": {"sweepSeconds": 5}})
+
     def test_gate_delegation_parses_in_its_new_home(self) -> None:
         settings = self._load(
             {
@@ -453,6 +520,72 @@ class TypedModelTests(unittest.TestCase):
             self._load(
                 {"gateDelegation": {"kinds": {"agent-question": {"role": "manager"}}}}
             )
+
+
+class EscalationSettingsTests(unittest.TestCase):
+    """R1 (260707-HFX2-L4): the escalation ladder's ``orchestration.escalation`` knobs."""
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.coordination_root = Path(self.tmp.name) / "ar-coordination"
+        self.coordination_root.mkdir(parents=True)
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def _load(self, orchestration: dict):
+        write_settings(self.coordination_root, {"orchestration": orchestration})
+        return load_agentic_settings(self.coordination_root)
+
+    def test_defaults_when_absent(self) -> None:
+        settings = self._load({})
+
+        self.assertEqual(settings.escalation.sla_for("nudge"), 300.0)
+        self.assertEqual(settings.escalation.rung_dwell(1), 300.0)
+        self.assertEqual(settings.escalation.rung_dwell(2), 900.0)
+        self.assertEqual(settings.escalation.nudge_rate_limit_seconds, 900)
+        self.assertEqual(settings.escalation.respawn_after_rung, 2)
+
+    def test_sla_and_rung_seconds_parse(self) -> None:
+        settings = self._load(
+            {
+                "escalation": {
+                    "slaSeconds": {"escalation": 120, "turn-report": 3600},
+                    "rungSeconds": {"1": 60, "2": 240, "3": 600},
+                    "nudgeRateLimitSeconds": 30,
+                    "respawnAfterRung": 2,
+                }
+            }
+        )
+
+        self.assertEqual(settings.escalation.sla_for("escalation"), 120.0)
+        self.assertEqual(settings.escalation.sla_for("turn-report"), 3600.0)
+        # An unconfigured kind keeps its documented default.
+        self.assertEqual(settings.escalation.sla_for("nudge"), 300.0)
+        self.assertEqual(settings.escalation.rung_dwell(1), 60.0)
+        self.assertEqual(settings.escalation.rung_dwell(2), 240.0)
+        self.assertEqual(settings.escalation.rung_dwell(3), 600.0)
+        self.assertEqual(settings.escalation.nudge_rate_limit_seconds, 30)
+
+    def test_unknown_message_kind_in_sla_seconds_fails_loud(self) -> None:
+        with self.assertRaisesRegex(AgenticSettingsError, "not a known"):
+            self._load({"escalation": {"slaSeconds": {"bogus-kind": 60}}})
+
+    def test_sla_seconds_value_must_be_positive(self) -> None:
+        with self.assertRaisesRegex(AgenticSettingsError, "slaSeconds.nudge"):
+            self._load({"escalation": {"slaSeconds": {"nudge": 0}}})
+
+    def test_rung_seconds_key_must_be_a_known_rung(self) -> None:
+        with self.assertRaisesRegex(AgenticSettingsError, "rungSeconds"):
+            self._load({"escalation": {"rungSeconds": {"4": 60}}})
+
+    def test_respawn_after_rung_must_be_a_known_rung(self) -> None:
+        with self.assertRaisesRegex(AgenticSettingsError, "respawnAfterRung"):
+            self._load({"escalation": {"respawnAfterRung": 5}})
+
+    def test_unknown_escalation_key_fails_loud(self) -> None:
+        with self.assertRaisesRegex(AgenticSettingsError, "wobble"):
+            self._load({"escalation": {"wobble": True}})
 
 
 class FreeFormRoleKnobTests(unittest.TestCase):
@@ -609,6 +742,32 @@ class RolesPerLevelTests(unittest.TestCase):
         with self.assertRaisesRegex(AgenticSettingsError, "wroker"):
             self._load({"rolesPerLevel": {"master": {"wroker": {"model": "opus"}}}})
 
+    def test_architect_is_allowed_inside_a_level(self) -> None:
+        settings = self._load(
+            {
+                "roles": {"architect": {"harness": "claude", "effort": "high"}},
+                "rolesPerLevel": {"portfolio": {"architect": {"model": "opus"}}},
+            }
+        )
+
+        self.assertEqual(
+            settings.resolved_role_knobs("architect", "portfolio"),
+            RoleKnobs(harness="claude", model="opus", effort="high"),
+        )
+
+    def test_curator_is_allowed_inside_a_level(self) -> None:
+        settings = self._load(
+            {
+                "roles": {"curator": {"harness": "codex", "effort": "medium"}},
+                "rolesPerLevel": {"leaf": {"curator": {"model": "gpt-5"}}},
+            }
+        )
+
+        self.assertEqual(
+            settings.resolved_role_knobs("curator", "leaf"),
+            RoleKnobs(harness="codex", model="gpt-5", effort="medium"),
+        )
+
     def test_level_override_free_form_lists_replace(self) -> None:
         settings = self._load(
             {
@@ -684,6 +843,22 @@ class HarnessesFamilyTests(unittest.TestCase):
         self.assertEqual(claude.command, "claude")
         self.assertEqual(claude.effort_flag, "--effort")
         self.assertEqual(claude.defined_in, "registry")
+
+    def test_replacing_codex_effort_flag_drops_its_config_value_template(self) -> None:
+        settings = self._load(
+            {
+                "harnesses": {
+                    "codex": {
+                        "effortFlag": "--reasoning-effort",
+                        "effortFlagValues": ["high", "xhigh"],
+                    }
+                }
+            }
+        )
+        codex = settings.find_harness("codex")
+        assert codex is not None
+        self.assertEqual(codex.effort_flag, "--reasoning-effort")
+        self.assertIsNone(codex.effort_flag_value_template)
 
     def test_new_id_without_command_or_argv_fails_loud(self) -> None:
         with self.assertRaisesRegex(AgenticSettingsError, "command and/or argv"):

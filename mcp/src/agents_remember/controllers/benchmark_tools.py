@@ -10,7 +10,7 @@ from typing import Any
 from agents_remember.benchmarks import runner as benchmark_runner
 from agents_remember.controllers._guards import require_within_coordination
 from agents_remember.install.assets import packaged_source_root
-from agents_remember.mcp.config import McpRuntimeConfig
+from agents_remember.mcp.config import McpRuntimeConfig, reload_provider_authority
 
 
 def codex_benchmark_prepare_tool(
@@ -36,6 +36,7 @@ def codex_benchmark_prepare_tool(
                 skill_exposure_mode=skill_exposure_mode,
                 force_clone=force_clone,
                 provider_timeout=provider_timeout,
+                allowed_provider_ids=_live_provider_ids(config),
             )
         )
 
@@ -92,11 +93,22 @@ def codex_benchmark_run_tool(
                 force_clone=force_clone,
                 provider_timeout=provider_timeout,
                 codex_sandbox=codex_sandbox,
+                allowed_provider_ids=_live_provider_ids(config),
             )
         )
     result["codexExecutable"] = codex_executable
     result["codexResolution"] = "PATH"
     return result
+
+
+def _live_provider_ids(config: McpRuntimeConfig) -> tuple[str, ...]:
+    """The live on-disk authority's provider ids (containment R1, 260707-HFX-L1).
+
+    Benchmark provider synthesis is filtered to this set; a fail-closed read
+    error yields an empty set, so no manifest can arm providers the developer
+    has disabled on disk.
+    """
+    return tuple(sorted(reload_provider_authority(config).providers))
 
 
 @contextmanager

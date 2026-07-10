@@ -91,7 +91,8 @@ describe("groupSessions (L14 G1 command tree)", () => {
   it("groups command-role provenance onto the deck together with the orchestration-claiming chat", () => {
     const grouped = groupSessions({
       sessions: [
-        session({ id: "dev", leafKey: "agents-remember/sprint-02/SPRINT-02" }),
+        session({ id: "architect", leafKey: "agents-remember/sprint-02/SPRINT-02" }),
+        session({ id: "orch", spawnRole: "orchestrator" }),
         session({ id: "strat", spawnRole: "strategist" }),
         session({ id: "mgr", spawnRole: "manager", leafKey: "agents-remember/260706_management-repo/260706" }),
         session({ id: "worker", spawnRole: "worker", leafKey: "agents-remember/260706_management-repo/260706-L1" }),
@@ -100,19 +101,16 @@ describe("groupSessions (L14 G1 command tree)", () => {
       enclosures: [LIVE_ENCLOSURE],
     });
 
-    const deck = grouped.groups.find((group) => group.kind === "command");
-    expect(deck).toBeTruthy();
+    const deck = grouped.groups.find((group) => group.key === "sprint:agents-remember/sprint-02");
     expect(deck?.label).toBe("SPRINT 02 · management-repo rollout · command deck");
     expect(deck?.tier).toBe("orchestration");
-    // The developer-facing orchestrator chat (the orchestration task's own leaf claim) sits on the
-    // deck with the spawned command seats; the worker does NOT (role provenance is the gate).
-    expect(deck?.sessions.map((member) => member.id)).toEqual(["dev", "strat", "mgr"]);
-    expect(deck?.countLabel).toBe("3 chats · 3 live");
+    expect(deck?.sessions.map((member) => member.id)).toEqual(["architect"]);
 
-    const master = grouped.groups.find((group) => group.key === "master:260706_management-repo");
-    expect(master?.sessions.map((member) => member.id)).toEqual(["worker"]);
-    expect(master?.tier).toBe("management"); // commanded by the sprint → purple badge
-    expect(master?.nested).toBe(true); // + one indent step
+    const master = grouped.groups.find((group) => group.key === "sprint:agents-remember/260706_management-repo");
+    expect(master?.sessions.map((member) => member.id)).toEqual(["mgr", "worker"]);
+    expect(master?.tier).toBe("orchestration");
+    expect(master?.nested).toBe(true);
+    expect(grouped.ungrouped.map((member) => member.id)).toEqual(["orch", "strat"]);
   });
 
   it("groups by leaf claim under the master, unmarked and un-nested when no orchestration commands it", () => {
@@ -125,11 +123,29 @@ describe("groupSessions (L14 G1 command tree)", () => {
     });
     expect(grouped.groups).toHaveLength(1);
     const master = grouped.groups[0];
-    expect(master.key).toBe("master:260707_settings-page");
+    expect(master.key).toBe("sprint:agents-remember/260707_settings-page");
     expect(master.label).toBe("260707 settings page");
     expect(master.tier).toBeUndefined();
     expect(master.nested).toBe(false);
     expect(grouped.ungrouped).toEqual([]);
+  });
+
+  it("uses the current binding role rather than stale spawn provenance for command styling", () => {
+    const grouped = groupSessions({
+      sessions: [
+        session({
+          id: "moved-manager",
+          spawnRole: "worker",
+          seatRole: "manager",
+          leafKey: "agents-remember/260706_management-repo/260706-L1",
+        }),
+      ],
+      taskDocuments: [SPRINT, COMMANDED_MASTER],
+      enclosures: [LIVE_ENCLOSURE],
+    });
+
+    expect(grouped.groups[0]?.kind).toBe("command");
+    expect(grouped.groups[0]?.tier).toBe("orchestration");
   });
 
   it("keeps command-role sessions out of the deck when NO orchestration task exists (D3 flat run)", () => {
@@ -145,7 +161,7 @@ describe("groupSessions (L14 G1 command tree)", () => {
     expect(grouped.ungrouped.map((member) => member.id)).toEqual(["mgr", "plain"]);
   });
 
-  it("rolls sessions on landed or absent enclosures into one archive group, collapsed by default", () => {
+  it("rolls only landed rows into the archive group", () => {
     const landedEnclosure = enclosure({
       enclosure: "/contracts/landed",
       leafId: "260706-l0",
@@ -155,33 +171,37 @@ describe("groupSessions (L14 G1 command tree)", () => {
     });
     const grouped = groupSessions({
       sessions: [
-        session({ id: "landed-chat", leafKey: "agents-remember/260706_management-repo/260706-L0", status: "exited" }),
-        session({ id: "absent-chat", leafKey: "agents-remember/260799_unknown/260799-L9" }),
+        session({ id: "landed-chat", leafKey: "agents-remember/260706_management-repo/260706-L0", status: "landed" }),
+        session({ id: "legacy-exited", leafKey: "agents-remember/260799_unknown/260799-L9", status: "exited" }),
+        session({ id: "active-absent", leafKey: "agents-remember/260799_unknown/260799-L10" }),
       ],
       taskDocuments: [COMMANDED_MASTER],
       enclosures: [landedEnclosure],
     });
-    expect(grouped.groups).toHaveLength(1);
-    const archive = grouped.groups[0];
-    expect(archive.kind).toBe("landed");
-    expect(archive.tier).toBeUndefined(); // unmarked
-    expect(archive.defaultCollapsed).toBe(true);
-    expect(archive.sessions.map((member) => member.id)).toEqual(["landed-chat", "absent-chat"]);
-    expect(archive.countLabel).toBe("2 chats · archived");
+    expect(grouped.groups).toHaveLength(2);
+    const archive = grouped.groups.find((group) => group.kind === "landed");
+    expect(archive).toBeTruthy();
+    expect(archive?.label).toBe("landed archive");
+    expect(archive?.tier).toBeUndefined(); // unmarked
+    expect(archive?.defaultCollapsed).toBe(true);
+    expect(archive?.sessions.map((member) => member.id)).toEqual(["landed-chat"]);
+    expect(archive?.countLabel).toBe("1 chat · archived");
+    expect(grouped.groups.find((group) => group.key === "sprint:agents-remember/260799_unknown")?.sessions.map((member) => member.id))
+      .toEqual(["legacy-exited", "active-absent"]);
   });
 
-  it("matches enclosure leaf ids case-insensitively (doc ids are uppercase, enclosure ids slugified)", () => {
+  it("groups a qualified leaf without consulting enclosure casing or liveness", () => {
     const grouped = groupSessions({
       sessions: [session({ id: "w", leafKey: "agents-remember/260706_management-repo/260706-L1" })],
       taskDocuments: [COMMANDED_MASTER],
       enclosures: [LIVE_ENCLOSURE], // leafId "260706-l1"
     });
-    expect(grouped.groups[0]?.key).toBe("master:260706_management-repo");
+    expect(grouped.groups[0]?.key).toBe("sprint:agents-remember/260706_management-repo");
   });
 
   it("reads at a glance at 30-chat scale: deck + per-master groups + one archive", () => {
     const sessions: OpenSession[] = [
-      session({ id: "orch", spawnRole: "orchestrator" }),
+      session({ id: "architect", spawnRole: "architect" }),
       session({ id: "strategist", spawnRole: "strategist", status: "exited" }),
       session({ id: "m1", spawnRole: "manager" }),
       session({ id: "m2", spawnRole: "manager", status: "exited" }),
@@ -208,7 +228,7 @@ describe("groupSessions (L14 G1 command tree)", () => {
     }
     for (let i = 0; i < 13; i += 1) {
       sessions.push(
-        session({ id: `old${i}`, leafKey: `agents-remember/260650_landed/260650-L${i}`, status: "exited" }),
+        session({ id: `old${i}`, leafKey: `agents-remember/260650_landed/260650-L${i}`, status: "landed" }),
       );
     }
     expect(sessions).toHaveLength(30);
@@ -224,20 +244,53 @@ describe("groupSessions (L14 G1 command tree)", () => {
     });
 
     expect(grouped.groups.map((group) => group.key)).toEqual([
-      "command",
-      "master:260706_management-repo",
-      "master:260707_settings-page",
+      "sprint:agents-remember/260706_management-repo",
+      "sprint:agents-remember/260707_settings-page",
       "landed",
     ]);
-    const [deck, masterA, masterB, archive] = grouped.groups;
-    expect(deck.sessions).toHaveLength(4);
-    expect(deck.countLabel).toBe("4 chats · 2 live");
+    const [masterA, masterB, archive] = grouped.groups;
     expect(masterA.sessions).toHaveLength(6);
     expect(masterA.countLabel).toBe("6 chats · 2 live");
     expect(masterB.sessions).toHaveLength(7);
     expect(masterB.countLabel).toBe("7 chats · 1 live");
     expect(archive.sessions).toHaveLength(13);
     expect(archive.countLabel).toBe("13 chats · archived");
+    expect(grouped.ungrouped.map((member) => member.id)).toEqual(["architect", "strategist", "m1", "m2"]);
+  });
+
+  it("keeps identical master folders isolated by repository and groups without a live enclosure", () => {
+    const deviceDoc = doc({
+      id: "device-leaf",
+      repository: "device-management",
+      title: "device sprint",
+      docPath: "/tasks/device-management/260706_management-repo/task.json",
+    });
+    const grouped = groupSessions({
+      sessions: [
+        session({ id: "ar", leafKey: "agents-remember/260706_management-repo/ar-leaf" }),
+        session({ id: "device", leafKey: "device-management/260706_management-repo/device-leaf" }),
+      ],
+      taskDocuments: [SPRINT, COMMANDED_MASTER, deviceDoc],
+      enclosures: [],
+    });
+    expect(grouped.groups.map((group) => group.key)).toEqual([
+      "sprint:device-management/260706_management-repo",
+      "sprint:agents-remember/260706_management-repo",
+    ]);
+    expect(grouped.groups.map((group) => group.sessions[0]?.id)).toEqual(["device", "ar"]);
+    expect(grouped.groups[0]?.nested).toBe(false);
+    expect(grouped.groups[1]?.nested).toBe(true);
+    expect(grouped.ungrouped).toEqual([]);
+  });
+
+  it("surfaces malformed leaf claims instead of silently rendering an orphan row", () => {
+    const grouped = groupSessions({
+      sessions: [session({ id: "broken", leafKey: "260706_management-repo" })],
+      taskDocuments: [COMMANDED_MASTER],
+      enclosures: [],
+    });
+    expect(grouped.groups[0]?.kind).toBe("error");
+    expect(grouped.groups[0]?.sessions.map((member) => member.id)).toEqual(["broken"]);
     expect(grouped.ungrouped).toEqual([]);
   });
 });

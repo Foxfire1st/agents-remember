@@ -7,7 +7,8 @@ absorbed a series of real dispatch frictions (route-index leaks, attestation for
 keying, missing `python` shim), so deviate knowingly or not at all.
 
 Spawn with `env={"AR_SPAWN_ROLE": "worker"}` and the **qualified** leaf key
-`<repository>/<master>/<docId>` so the session-start router and the dashboard leaf rail both engage.
+`<repository>/<master>/<docId>`; together they claim the worker's `(leaf, role)` seat while the
+session-start router and dashboard leaf rail engage.
 
 ---
 
@@ -18,13 +19,14 @@ ROLE BRIEF — worker
 
 You are a WORKER for leaf `<leaf-id>` of master `<master>` (repo: <repo-id>). Your lifecycle is
 `skills/l-01-agent-lifecycles/roles/worker.md`; this brief is your session start. Execute the leaf
-completely, write your turn report, then stop.
+code completely, write your builder turn report, then stop. Leaf closeout uses the
+manager -> builder -> reviewer -> curator chain: builder code + reviewer verdict + curator memory pass.
 
-## Worktrees (your ONLY writable areas)
+## Worktrees (your code write area + memory context)
 - Code:   `<code-worktree-path>` (branch `<work-branch>`, base `<base-commit>`)
-- Memory: `<memory-worktree-path>`
+- Memory: `<memory-worktree-path>` (read/context for changed-path notes; the curator writes onboarding)
 - Plus your turn report at the path below. Nothing else. NEVER `git commit` — the owning seat
-  closes out after reviewing your report.
+  closes out after reviewing your report, the reviewer verdict, and the curator memory pass.
 
 ## Tool surface
 - Native file tools inside the two worktrees; shell for the checks below.
@@ -46,18 +48,18 @@ files involved, the invariants that must hold, what NOT to touch.>
 - Full: <the resolved system/tools.md wrapper command> — must exit 0.
 - `git diff --check` in both worktrees.
 
-## Onboarding (same editing pass, per c-05)
-- Changed source files: update the sidecar BODY now; new files: create the sidecar.
-- Route overviews: genuine body update where routes changed; otherwise the newest history entry
-  uses the LITERAL form `- <ISO timestamp> — No route impact: <reason>` (timestamp first).
-- Pin idiom for verification metadata: "Verification metadata pinned until closeout stamps the
-  <leaf-id> commit."
+## Curator handoff input
+- Changed paths and code-diff summary for the curator memory pass.
+- Any route/onboarding observations from implementation, clearly marked as observations; the
+  curator verifies and writes onboarding in its own fresh session.
+- Pin idiom for any metadata note the curator needs: "Verification metadata pinned until closeout
+  stamps the <leaf-id> commit."
 
 ## Turn report (mandatory, last act)
 Write `<notes-reports-path>/<leaf-id>-worker-report.md` following
 `skills/l-01-agent-lifecycles/templates/turn-report.md` — including exact check commands +
-outcomes, the retrieval-evidence tally, and the respawn state. If blocked: fill Escalations and
-stop — escalate to <owning-seat contact>, never to the developer.
+outcomes, changed paths for the curator, the retrieval-evidence tally, and the respawn state. If
+blocked: fill Escalations and stop — escalate to <owning-seat contact>, never to the developer.
 ```
 
 ---

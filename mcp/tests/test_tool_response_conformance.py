@@ -43,6 +43,7 @@ from agents_remember.observer import (
     install_ambient,
     reset_ambient,
 )
+from agents_remember.tasks import TaskDocument, write_task_doc
 from test_config import settings_payload
 from test_worktree_support import (
     commit_file,
@@ -66,6 +67,53 @@ def _run_git(repo: Path, args: list[str]) -> None:
         raise AssertionError(result.stderr or result.stdout)
 
 
+def _write_leaf_task(
+    coordination_root: Path,
+    *,
+    repo: str = REPO,
+    master: str = "master",
+    doc_id: str = "leaf-1",
+    slug: str | None = None,
+) -> None:
+    slug = slug or doc_id
+    task_root = coordination_root / "tasks" / repo / master
+    write_task_doc(
+        task_root,
+        TaskDocument.model_validate(
+            {
+                "id": master.upper(),
+                "slug": "task",
+                "title": "Master",
+                "kind": "master",
+                "repo": repo,
+                "createdAt": "2026-07-07T10:00",
+                "subTasks": [
+                    {
+                        "number": doc_id,
+                        "name": "Leaf",
+                        "file": f"{slug}.md",
+                        "status": "inProgress",
+                    }
+                ],
+            }
+        ),
+    )
+    write_task_doc(
+        task_root,
+        TaskDocument.model_validate(
+            {
+                "id": doc_id,
+                "slug": slug,
+                "title": "Leaf",
+                "kind": "subTask",
+                "repo": repo,
+                "createdAt": "2026-07-07T10:01",
+                "master": "task.md",
+            }
+        ),
+    )
+
+
 def _base_fixture(root: Path):
     """Code repo + memory layer + ``.codex/mcp`` settings for the simple tools."""
     repo = root / "workspace" / REPO
@@ -73,6 +121,7 @@ def _base_fixture(root: Path):
     (memory / "system").mkdir(parents=True, exist_ok=True)
     (memory / "onboarding").mkdir(parents=True, exist_ok=True)
     (memory / "system" / "settings.md").write_text("# Settings\n", encoding="utf-8")
+    _write_leaf_task(root / "ar-coordination")
     repo.mkdir(parents=True, exist_ok=True)
     _run_git(repo, ["init", "-b", "main"])
     _run_git(repo, ["config", "user.email", "agents-remember@example.invalid"])
@@ -97,13 +146,25 @@ def _simple_payloads(config) -> dict[str, dict]:
         "attach_terminal_session_to_leaf": tools.attach_terminal_session_to_leaf_payload(
             config,
             session_id="missing-session",
-            leaf_key="repo/master/leaf-1",
+            leaf_key=f"{REPO}/master/leaf-1",
         ),
-        # Representative refusal payload: an unknown harness id short-circuits before any tmux spawn,
-        # so the conformance fixture never touches a real terminal host.
+        # Representative refusal payload: a legacy caller-supplied harness short-circuits before any
+        # tmux spawn, so the conformance fixture never touches a real terminal host.
         "spawn_agent_session": tools.spawn_agent_session_payload(
             config,
             harness="definitely-not-a-real-harness",
+        ),
+        # Representative refusal payloads: neither session id has a catalog row, so both
+        # short-circuit before touching a real tmux host.
+        "session_retire": tools.session_retire_payload(
+            config,
+            actor_session_id="missing-actor",
+            session_id="missing-session",
+        ),
+        "session_rename": tools.session_rename_payload(
+            config,
+            session_id="missing-session",
+            label="New Label",
         ),
         "runtime_install": tools.runtime_install_payload(config, install_provider_deps=False),
         "resolve_context": tools.resolve_context_payload(config, REPO),
@@ -139,6 +200,8 @@ def _worktree_payloads(root: Path) -> dict[str, dict]:
     (memory_root / "memory.md").write_text("# Memory ledger\n", encoding="utf-8")
     _run_git(memory_root, ["add", "-A"])
     _run_git(memory_root, ["commit", "-m", "seed"])
+    _write_leaf_task(config.coordination_root, master="demo-task", doc_id="demo-wt")
+    _write_leaf_task(config.coordination_root, master="abandon-task", doc_id="abandon-wt")
 
     payloads: dict[str, dict] = {}
     payloads["worktree_start"] = tools.worktree_start_payload(
@@ -148,6 +211,7 @@ def _worktree_payloads(root: Path) -> dict[str, dict]:
         "demo-wt",
         dry_run=False,
         skip_provider_setup=True,
+        memory_mode="disabled",
         memory_choice="disabled-memory",
     )
     contract_path = payloads["worktree_start"]["contract_path"]
@@ -166,6 +230,7 @@ def _worktree_payloads(root: Path) -> dict[str, dict]:
     payloads["worktree_closeout_apply"] = tools.worktree_closeout_apply_payload(
         config, contract_path, "intent note", "code commit message", dry_run=False
     )
+    _run_git(config.workspace_root / REPO, ["checkout", "ar/demo-task"])
     payloads["worktree_integrate"] = tools.worktree_integrate_payload(
         config, contract_path, dry_run=False
     )
@@ -182,6 +247,7 @@ def _worktree_payloads(root: Path) -> dict[str, dict]:
         "abandon-wt",
         dry_run=False,
         skip_provider_setup=True,
+        memory_mode="disabled",
         memory_choice="disabled-memory",
     )
     payloads["worktree_abandon"] = tools.worktree_abandon_payload(

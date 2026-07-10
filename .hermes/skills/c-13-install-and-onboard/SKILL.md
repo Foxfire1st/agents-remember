@@ -152,8 +152,8 @@ preference):
 4. **Harness preference + role knobs** (`orchestration.spawn.harness`,
    per-role `orchestration.roles.<role>`, per-level
    `orchestration.rolesPerLevel.<level>.<role>`) - which installed harness
-   `spawn_agent_session` uses when the spawning seat passes none, per-role
-   harness/model/effort overrides, and per-LEVEL overrides
+   `spawn_agent_session` uses when no role/level knob supplies one, per-role
+   harness/model/effort settings, and per-LEVEL settings
    (leaf|master|portfolio) for tiered economics (e.g. a cheap leaf reviewer,
    a smarter master-seam reviewer). Harness values must be known ids: the
    builtin registry (`claude`, `codex`, `pi`) or an `orchestration.harnesses`
@@ -163,8 +163,10 @@ preference):
    `ultracode`); mention the FREE-FORM escape hatch for anything outside the
    vocabularies - `launchArgs` (verbatim argv), `sessionCommands` (pasted
    before the brief), `promptKeywords` (prepended to the brief) - never
-   validated, recorded in spawn provenance. Default: detection-gated (the
-   first detected harness). The full spawn-surface manual is
+   validated, recorded in spawn provenance. Ordinary spawning seats cannot
+   pass `harness`/`model`/`effort`, launch/session spend controls, or harness-native
+   spend/endpoint env keys directly; settings are the spend surface. Default:
+   detection-gated (the first detected harness). The full spawn-surface manual is
    `docs/reference/harnesses.md`.
 
 If the developer wants to skip the interview, confirm the seeded defaults

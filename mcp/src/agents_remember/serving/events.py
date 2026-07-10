@@ -35,6 +35,11 @@ from agents_remember.observer.event_retention import (
     prune_expired_lifecycle_event_logs,
 )
 from agents_remember.observer.paths import observer_root
+from agents_remember.observer.store import (
+    WORKSPACE_SOURCE,
+    workspace_base_offset,
+    workspace_river_lock,
+)
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
@@ -43,7 +48,7 @@ if TYPE_CHECKING:
 
 # The workspace log has no lifecycle id; this reserved cursor key routes it. A lifecycle
 # id can never collide (lifecycle ids are ULIDs -- Crockford base32, never "workspace").
-_WORKSPACE = "workspace"
+_WORKSPACE = WORKSPACE_SOURCE
 
 # Heartbeats are a liveness signal (already carried by the projection's status file), not agent
 # activity, so the river never streams them. The compact on-disk wire form (``model_dump_json``)
@@ -140,6 +145,28 @@ def _read_lines_from(path: Path, start: int) -> tuple[list[tuple[str, int]], int
     return lines, start + consumed
 
 
+def _read_source_lines(root: Path, source: str, virtual_start: int) -> tuple[list[tuple[str, int]], int]:
+    """Read complete lines and return offsets in the source's cursor coordinate system.
+
+    Lifecycle logs remain physical-offset streams. The workspace river is physically compacted while
+    live, so its SSE cursor is virtual: ``baseOffset`` (bytes already reclaimed) + current file offset.
+    The same lock used by append/compact makes the base sidecar and the file a consistent pair while
+    this read maps a client cursor to the current physical file.
+    """
+    path = _source_path(root, source)
+    if source != _WORKSPACE:
+        return _read_lines_from(path, virtual_start)
+    with workspace_river_lock(root):
+        base = workspace_base_offset(root)
+        try:
+            size = path.stat().st_size
+        except OSError:
+            size = 0
+        physical_start = min(max(virtual_start - base, 0), size)
+        lines, physical_end = _read_lines_from(path, physical_start)
+        return [(text, base + offset_after) for text, offset_after in lines], base + physical_end
+
+
 def _is_heartbeat_line(text: str) -> bool:
     """True when a raw JSONL line is a ``lifecycle.heartbeat`` (liveness, not activity).
 
@@ -172,8 +199,7 @@ def read_new_events(
     current = dict(offsets)
     events: list[RawEvent] = []
     for source in _discover_sources(root):
-        path = _source_path(root, source)
-        lines, end = _read_lines_from(path, current.get(source, 0))
+        lines, end = _read_source_lines(root, source, current.get(source, 0))
         for text, offset_after in lines:
             current[source] = offset_after
             if not text or _is_heartbeat_line(text):
@@ -198,15 +224,22 @@ async def stream_raw_events(
     """
     root = observer_root(config)
     now = datetime.now(UTC)
-    prune_expired_lifecycle_event_logs(root, now=now)
+    # CS-6 D1 (260707-HFX2-L12): the prune + initial-offset scan read the whole workspace river
+    # backlog from byte 0. Run them in a worker thread so a large events.jsonl on a fresh connect
+    # never blocks the shared asyncio loop (which serves every SSE stream + every API request),
+    # matching how ``read_new_events`` below is already offloaded.
+    await asyncio.to_thread(prune_expired_lifecycle_event_logs, root, now=now)
     cursor_offsets = decode_cursor(last_event_id)
-    offsets = cursor_offsets or initial_event_offsets(root, now=now)
+    if cursor_offsets:
+        offsets = cursor_offsets
+    else:
+        offsets = await asyncio.to_thread(initial_event_offsets, root, now=now)
     ready_sent = False
     last_prune = now
     while True:
         moment = datetime.now(UTC)
         if (moment - last_prune).total_seconds() >= PRUNE_INTERVAL_SECONDS:
-            prune_expired_lifecycle_event_logs(root, now=moment)
+            await asyncio.to_thread(prune_expired_lifecycle_event_logs, root, now=moment)
             last_prune = moment
         events, offsets = await asyncio.to_thread(
             read_new_events, root, offsets, limit=DEFAULT_EVENT_BATCH

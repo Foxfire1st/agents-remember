@@ -8,6 +8,7 @@ import tempfile
 import threading
 import unittest
 from dataclasses import replace
+from datetime import datetime
 from pathlib import Path
 
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
@@ -76,7 +77,9 @@ class TerminalCatalogTests(unittest.TestCase):
         self.catalog.mark_terminated("b", "2026-06-26T00:01:00Z")
 
         self.assertEqual([entry.id for entry in self.catalog.list()], ["a"])
-        self.assertEqual([entry.id for entry in self.catalog.list(include_terminated=True)], ["a", "b"])
+        self.assertEqual(
+            [entry.id for entry in self.catalog.list(include_terminated=True)], ["a", "b"]
+        )
         exited = self.catalog.get("a")
         terminated = self.catalog.get("b")
         assert exited is not None
@@ -104,6 +107,51 @@ class TerminalCatalogTests(unittest.TestCase):
         self.assertEqual(updated.status, "terminated")
         self.assertEqual(updated.terminated_at, "2026-06-26T00:03:00Z")
         self.assertEqual(self.catalog.list(), [])
+
+    def test_mark_landed_keeps_row_visible_and_non_active(self) -> None:
+        leaf = "repo/master/leaf-1"
+        self.catalog.upsert(_entry("a", leaf_key=leaf, kind="harness"))
+
+        updated = self.catalog.mark_landed(
+            "a",
+            at="2026-07-09T00:00:00+00:00",
+            reason="leaf integrated",
+            edge="leaf-integration",
+        )
+
+        assert updated is not None
+        self.assertEqual(updated.status, "landed")
+        self.assertEqual(updated.landed_reason, "leaf integrated")
+        self.assertEqual([entry.id for entry in self.catalog.list()], ["a"])
+        self.assertIsNone(self.catalog.active_for_leaf(leaf, seat_role="chat"))
+
+    def test_landed_state_round_trips_and_is_not_reanimated(self) -> None:
+        self.catalog.upsert(_entry("a"))
+        self.catalog.mark_landed(
+            "a",
+            at="2026-07-09T00:00:00+00:00",
+            reason="done",
+            edge="leaf-integration",
+        )
+
+        raw = json.loads(self.catalog.path.read_text(encoding="utf-8"))
+        row = raw["sessions"][0]
+        self.assertEqual(row["status"], "landed")
+        self.assertEqual(row["landedAt"], "2026-07-09T00:00:00+00:00")
+        self.assertEqual(row["landedReason"], "done")
+        self.assertEqual(row["landedEdge"], "leaf-integration")
+
+        attached = self.catalog.mark_attached("a", "2026-07-09T00:01:00+00:00")
+        assert attached is not None
+        self.assertEqual(attached.status, "landed")
+        liveness = self.catalog.record_liveness_probe(
+            "a", alive=True, checked_at=datetime.fromisoformat("2026-07-09T00:02:00+00:00")
+        )
+        assert liveness is not None
+        self.assertEqual(liveness.status, "landed")
+        exited = self.catalog.mark_exited("a")
+        assert exited is not None
+        self.assertEqual(exited.status, "landed")
 
     def test_leaf_key_round_trips_through_json(self) -> None:
         leaf = "agents-remember/260628_operations-integration/260628-L5"
@@ -138,6 +186,122 @@ class TerminalCatalogTests(unittest.TestCase):
         assert unset is not None
         self.assertIsNone(unset.spawn_role)
 
+    def test_legacy_catalog_migrates_seat_roles_in_place_without_row_loss(self) -> None:
+        rows = [
+            replace(_entry("worker", kind="harness"), spawn_role="worker").to_json(),
+            _entry("legacy-chat", kind="harness").to_json(),
+            _entry("terminal", kind="terminal").to_json(),
+        ]
+        for row in rows:
+            row.pop("seatRole")
+        self.catalog.path.write_text(
+            json.dumps({"schema": "ar-dashboard-terminal-sessions/v1", "sessions": rows}),
+            encoding="utf-8",
+        )
+
+        migrated = self.catalog.list(include_terminated=True)
+
+        self.assertEqual([entry.id for entry in migrated], ["worker", "legacy-chat", "terminal"])
+        self.assertEqual(
+            {entry.id: entry.binding_role for entry in migrated},
+            {"worker": "worker", "legacy-chat": "chat", "terminal": "terminal"},
+        )
+        persisted = json.loads(self.catalog.path.read_text(encoding="utf-8"))["sessions"]
+        self.assertEqual(len(persisted), len(rows))
+        self.assertEqual(len({row["id"] for row in persisted}), len(rows))
+        self.assertTrue(all("seatRole" in row for row in persisted))
+
+    def test_dispatch_binding_fields_round_trip(self) -> None:
+        leaf = "repo/master/leaf-1"
+        self.catalog.upsert(
+            replace(
+                _entry("a", kind="harness"),
+                replacement_for_leaf=leaf,
+                session_log_entry_id="brief-1",
+                session_log_path=Path("/tmp/session.jsonl"),
+            )
+        )
+
+        entry = self.catalog.get("a")
+        assert entry is not None
+        self.assertEqual(entry.replacement_for_leaf, leaf)
+        self.assertEqual(entry.session_log_entry_id, "brief-1")
+        self.assertEqual(entry.session_log_path, Path("/tmp/session.jsonl"))
+        self.assertEqual(entry.to_json()["replacementForLeaf"], leaf)
+        self.assertEqual(entry.to_json()["sessionLogEntryId"], "brief-1")
+
+    def test_complete_optional_projection_round_trips_without_contract_loss(self) -> None:
+        entry = replace(
+            _entry("full", kind="harness"),
+            lifecycle_id="LC-full",
+            status="exited",
+            terminated_at="2026-07-10T10:00:00+00:00",
+            leaf_key="repo/master/leaf-1",
+            seat_role="reviewer",
+            replacement_for_leaf="repo/master/leaf-0",
+            spawned_by_session="manager-1",
+            spawned_by_lifecycle="LC-manager",
+            spawn_role="reviewer",
+            launch_args=("--verbose",),
+            prompt_keywords=("strict", "review"),
+            session_commands=("/effort high",),
+            spawn_level="leaf",
+            spawn_level_source="explicit",
+            resolved_model="review-model",
+            resolved_effort="high",
+            session_log_entry_id="brief-1",
+            session_log_path=Path("/tmp/session.jsonl"),
+            liveness_failures=2,
+            liveness_first_failed_at="2026-07-10T10:01:00+00:00",
+            liveness_last_failed_at="2026-07-10T10:02:00+00:00",
+            liveness_evidence="pane-gone",
+            exit_evidence="pane-gone",
+            retired_at="2026-07-10T10:03:00+00:00",
+            retired_by_session="manager-1",
+            retired_reason="done",
+            retired_edge="leaf-closeout",
+            landed_at="2026-07-10T10:04:00+00:00",
+            landed_reason="integrated",
+            landed_edge="leaf-integration",
+            spawned_label="Original reviewer",
+            turn_state="turn-ended",
+            turn_state_changed_at="2026-07-10T10:05:00+00:00",
+        )
+
+        projected = entry.to_json()
+
+        self.assertEqual(TerminalCatalogEntry.from_json(projected), entry)
+        self.assertEqual(projected["seatRole"], "reviewer")
+        self.assertEqual(projected["launchArgs"], ["--verbose"])
+        self.assertEqual(projected["sessionLogPath"], "/tmp/session.jsonl")
+        self.assertEqual(projected["exitEvidence"], "pane-gone")
+
+    def test_bind_session_log_preserves_newer_liveness_state(self) -> None:
+        self.catalog.upsert(_entry("a", kind="harness"))
+        stale_snapshot = self.catalog.get("a")
+        assert stale_snapshot is not None
+        exited = self.catalog.record_liveness_probe(
+            "a",
+            alive=False,
+            evidence="pane-gone",
+            checked_at=datetime.fromisoformat("2026-07-10T10:00:00+00:00"),
+        )
+        assert exited is not None
+        self.assertEqual(exited.status, "exited")
+
+        bound = self.catalog.bind_session_log(
+            stale_snapshot.id,
+            entry_id="brief-1",
+            path=Path("/tmp/session.jsonl"),
+        )
+
+        assert bound is not None
+        self.assertEqual(bound.status, "exited")
+        self.assertEqual(bound.liveness_failures, 1)
+        self.assertEqual(bound.exit_evidence, "pane-gone")
+        self.assertEqual(bound.session_log_entry_id, "brief-1")
+        self.assertEqual(bound.session_log_path, Path("/tmp/session.jsonl"))
+
     def test_legacy_row_without_leaf_key_reads_as_none(self) -> None:
         # A v1 row written before L5 has no leafKey; it must read back as None (migration-safe).
         self.catalog.path.parent.mkdir(parents=True, exist_ok=True)
@@ -169,18 +333,18 @@ class TerminalCatalogTests(unittest.TestCase):
     def test_active_for_leaf_returns_running_owner(self) -> None:
         leaf = "repo/master/leaf-1"
         self.catalog.upsert(_entry("a", leaf_key=leaf, kind="harness"))
-        owner = self.catalog.active_for_leaf(leaf)  # defaults to the chat role
+        owner = self.catalog.active_for_leaf(leaf, seat_role="chat")
         assert owner is not None
         self.assertEqual(owner.id, "a")
-        self.assertIsNone(self.catalog.active_for_leaf("repo/master/other"))
+        self.assertIsNone(self.catalog.active_for_leaf("repo/master/other", seat_role="chat"))
 
     def test_active_for_leaf_is_scoped_by_role(self) -> None:
         # A chat and a terminal can both own the same leaf; the probe resolves each independently.
         leaf = "repo/master/leaf-1"
         self.catalog.upsert(_entry("chat", leaf_key=leaf, kind="harness"))
         self.catalog.upsert(_entry("term", leaf_key=leaf, kind="terminal"))
-        chat = self.catalog.active_for_leaf(leaf, role="chat")
-        term = self.catalog.active_for_leaf(leaf, role="terminal")
+        chat = self.catalog.active_for_leaf(leaf, seat_role="chat")
+        term = self.catalog.active_for_leaf(leaf, seat_role="terminal")
         assert chat is not None
         assert term is not None
         self.assertEqual(chat.id, "chat")
@@ -191,12 +355,12 @@ class TerminalCatalogTests(unittest.TestCase):
         self.catalog.upsert(_entry("exited", leaf_key=leaf, kind="harness"))
         self.catalog.mark_exited("exited")
         # An exited chat frees its leaf.
-        self.assertIsNone(self.catalog.active_for_leaf(leaf))
+        self.assertIsNone(self.catalog.active_for_leaf(leaf, seat_role="chat"))
 
         self.catalog.upsert(_entry("terminated", leaf_key=leaf, kind="harness"))
         self.catalog.mark_terminated("terminated", "2026-06-26T00:05:00Z")
         # A terminated chat frees its leaf too.
-        self.assertIsNone(self.catalog.active_for_leaf(leaf))
+        self.assertIsNone(self.catalog.active_for_leaf(leaf, seat_role="chat"))
 
     def test_with_leaf_key_copies_binding(self) -> None:
         entry = _entry("a")
@@ -238,7 +402,9 @@ class TerminalCatalogTests(unittest.TestCase):
 
         def _add(session_id: str) -> None:
             barrier.wait()  # maximize overlap on the read-modify-write
-            self.catalog.upsert(_entry(session_id, created_at=f"2026-06-26T00:00:{session_id[-2:]}Z"))
+            self.catalog.upsert(
+                _entry(session_id, created_at=f"2026-06-26T00:00:{session_id[-2:]}Z")
+            )
 
         threads = [threading.Thread(target=_add, args=(session_id,)) for session_id in ids]
         for thread in threads:
@@ -248,7 +414,9 @@ class TerminalCatalogTests(unittest.TestCase):
 
         stored = {entry.id for entry in self.catalog.list()}
         self.assertEqual(stored, set(ids))  # no lost updates
-        json.loads(self.catalog.path.read_text(encoding="utf-8"))  # still valid JSON (no torn write)
+        json.loads(
+            self.catalog.path.read_text(encoding="utf-8")
+        )  # still valid JSON (no torn write)
 
 
 if __name__ == "__main__":

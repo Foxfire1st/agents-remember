@@ -2856,7 +2856,9 @@ class TaskDocumentsReaderTests(unittest.TestCase):
         [series] = read_series_documents(self.coord, now=FRESH)
         self.assertEqual(series.seriesId, "series")
         self.assertEqual([ref.number for ref in series.subTasks], ["1"])
-        self.assertEqual([section.kind for section in series.sections], ["subTasks"])
+        # F6: the always-on series surface is a bounded summary; authored sections are fetched
+        # through the task-document body endpoint.
+        self.assertEqual(series.sections, [])
 
     def test_nested_masters_stay_on_series_surface(self) -> None:
         parent_dir = self.coord / "tasks" / "repo-a" / "parent"
@@ -2944,8 +2946,8 @@ class TaskDocumentsReaderTests(unittest.TestCase):
 
     def test_read_series_documents_projects_master(self) -> None:
         # The master is a checklist: each subtask is one checkbox; doneCount = declared
-        # Completed subtasks, totalCount = number of subtasks. The full render (sections +
-        # decisions) is carried so the dashboard is the reader.
+        # Completed subtasks, totalCount = number of subtasks. Full prose/decisions are omitted
+        # from the always-on broadcast and fetched through the task-document body endpoint.
         root = self.coord / "tasks" / "repo-a" / "series-x"
         master = TaskDocument.model_validate(
             {
@@ -2971,14 +2973,14 @@ class TaskDocumentsReaderTests(unittest.TestCase):
         self.assertEqual(len(nodes), 1)
         node = nodes[0]
         self.assertEqual(node.seriesId, "series-x")
-        self.assertEqual(node.objective, "Series X objective")
+        self.assertEqual(node.objective, "")
         self.assertEqual((node.doneCount, node.totalCount), (2, 3))
         self.assertEqual(
             [(s.number, s.status) for s in node.subTasks],
             [("01", "Completed"), ("02", "Completed"), ("03", "inProgress")],
         )
-        self.assertEqual(node.sections[0].heading, "Objective")
-        self.assertEqual(node.decisions[0].decision, "d")
+        self.assertEqual(node.sections, [])
+        self.assertEqual(node.decisions, [])
 
     def test_read_series_documents_orders_subtasks_by_leaf_creation(self) -> None:
         root = self.coord / "tasks" / "repo-a" / "series-z"

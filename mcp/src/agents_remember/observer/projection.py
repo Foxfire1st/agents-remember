@@ -278,7 +278,13 @@ class SetupProgressNode(BaseModel):
 
 
 class AgentPickupNode(BaseModel):
-    """A pending dashboard response waiting for an agent to consume it."""
+    """A pending dashboard response waiting for an agent to consume it.
+
+    R5 (260707-HFX2-L1): every pending row here IS an unacked signal -- consume=ack is the only
+    terminal outcome, so this list already surfaces "pending/unacked" for the dashboard. The
+    attempt/backoff/escalation fields ride along so the panel can show redelivery state without a
+    second surface; an L2 predicate reads the stores directly and never this projection.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
@@ -289,14 +295,40 @@ class AgentPickupNode(BaseModel):
     senderAgentId: str | None = None
     senderRole: str | None = None
     recipientRole: str | None = None
+    ownerRole: str | None = None
+    ownerAgentId: str | None = None
+    ownerLifecycleId: str | None = None
     gateId: str | None = None
     messageKind: str = "message"
     artifactPath: str | None = None
     deliveryState: str = "queued"
     deliveredToSession: str | None = None
+    attemptCount: int = 0
+    lastAttemptAt: str | None = None
+    nextAttemptAt: str | None = None
+    escalatedAt: str | None = None
     state: str
     ageSeconds: float | None = None
     ttlSeconds: float
+
+
+class ExpectationRowNode(BaseModel):
+    """A durable what-must-happen-by-when row (R2/R5, 260707-HFX2-L1): projected for dashboard/
+    architect observability. An L2 predicate reads ``ExpectationRowStore`` directly, never this
+    node -- surfacing only, never the correctness path."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    kind: str
+    state: str
+    sourceId: str
+    subjectAgentId: str | None = None
+    subjectLifecycleId: str | None = None
+    leafKey: str | None = None
+    dueAt: str
+    overdue: bool = False
+    note: str | None = None
 
 
 class RouteCoverageNode(BaseModel):
@@ -473,6 +505,9 @@ class TaskDocNode(BaseModel):
     stepsTotal: int = 0
     currentStep: str | None = None
     docPath: str
+    # Hash of the reader body fields omitted from the always-on summary. Dashboard readers use it
+    # to refetch an already-open task document only when the on-demand body changed.
+    bodyRevision: str = ""
     createdAt: str = ""
     ageSeconds: float | None = None
     steps: list[TaskStepNode] = Field(default_factory=list)
@@ -764,6 +799,33 @@ class EngineProcessFacts:
     ledger_row_count: int = 0
 
 
+# 260707-HFX2-L13 F6/CS-6 D2+D1: ``TaskDocNode`` in the always-on projection is a bounded summary.
+# The full reader body is fetched through the on-demand task-document endpoint. This budget remains as
+# a regression guardrail: the write path should now measure 0 body bytes for broadcast task documents.
+TASK_DOCUMENTS_PAYLOAD_BUDGET_BYTES = 256 * 1024
+
+
+def task_documents_body_bytes(docs: list[TaskDocNode]) -> int:
+    """Approximate byte cost of task-doc reader bodies still present in the broadcast (F6 guardrail).
+
+    For summary nodes this returns zero; tests seed full nodes to prove the guard still catches any
+    regression that reintroduces body fields to the always-on path.
+    """
+    total = 0
+    for doc in docs:
+        total += len(doc.objective) + len(doc.design or "") + len(doc.currentStep or "")
+        total += sum(len(item) for item in doc.requirements)
+        total += sum(len(item) for item in doc.openQuestions)
+        total += sum(len(item) for item in doc.references)
+        total += sum(len(section.heading) + len(section.body) for section in doc.sections)
+        total += sum(
+            len(example.distinctChange) + len(example.why) + len(example.snippet) + len(example.title)
+            for example in doc.codeExamples
+        )
+        total += sum(len(decision.decision) + len(decision.rationale) for decision in doc.decisions)
+    return total
+
+
 class Analytics(BaseModel):
     """The slice-3b analytical surfaces: charts/feeds for specific cockpit panels.
 
@@ -786,6 +848,7 @@ class Analytics(BaseModel):
     routeCoverage: list[RouteCoverageNode] = Field(default_factory=list)
     toolReports: list[ToolReportNode] = Field(default_factory=list)
     agentPickups: list[AgentPickupNode] = Field(default_factory=list)
+    expectationRows: list[ExpectationRowNode] = Field(default_factory=list)
     ledgers: list[LedgerNode] = Field(default_factory=list)
     taskDocuments: list[TaskDocNode] = Field(default_factory=list)
     attentionQueue: list[AttentionItem] = Field(default_factory=list)

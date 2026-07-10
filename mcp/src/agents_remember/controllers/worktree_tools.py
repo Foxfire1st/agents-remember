@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from agents_remember.controllers._guards import require_repo, require_within_coordination
@@ -9,12 +10,18 @@ from agents_remember.mcp.config import (
     DEFAULT_PROVIDER_SETUP_SECONDS,
     McpRuntimeConfig,
     RepositoryScope,
+    reload_provider_authority,
 )
 from agents_remember.observer.ambient import AmbientLifecycle, ambient
+from agents_remember.observer.events import now_iso
 from agents_remember.observer.save_gate import coerce_save_decision
 from agents_remember.observer.ulid import new_ulid
 from agents_remember.providers.settings import write_lifecycle_settings
+from agents_remember.serving.landing import land_seats_for_leaf
+from agents_remember.serving.seat_events import log_landed_event
+from agents_remember.serving.terminal_catalog import TerminalCatalog, terminal_catalog_path
 from agents_remember.worktrees import git_worktree_manager
+from agents_remember.worktrees.worktree_contract import load_contract
 
 
 def worktree_start_tool(
@@ -40,7 +47,16 @@ def worktree_start_tool(
     # worktree_start promotes the active lifecycle to persistent (design §1.3); with
     # no active lifecycle, mint a fresh anchor so the contract always carries one.
     lifecycle_id = amb.current.id if amb is not None and amb.current is not None else new_ulid()
-    settings_path = None if skip_provider_setup else write_lifecycle_settings(config)
+    # Containment R1 (260707-HFX-L1): the on-disk authority file — not the boot
+    # snapshot — decides whether provider setup may launch. An empty (or
+    # unreadable: fail-closed) live providers map skips setup outright; the
+    # worktree itself is still created. Launch runs on the LIVE providers map.
+    authority = None if skip_provider_setup else reload_provider_authority(config)
+    settings_path = (
+        write_lifecycle_settings(authority.apply(config))
+        if authority is not None and authority.providers and authority.error is None
+        else None
+    )
     provider_setup_config = (
         None
         if settings_path is None
@@ -82,6 +98,18 @@ def worktree_start_tool(
     result: dict[str, Any] | None = None
     try:
         result = _worktree_result("worktree_start", git_worktree_manager.start_result(args))
+        if authority is not None and (
+            authority.error is not None or (config.providers and not authority.providers)
+        ):
+            # Surface the veto so a stale-snapshot session sees WHY setup was
+            # skipped instead of silently diverging from its boot config.
+            veto: dict[str, Any] = {
+                "source": str(authority.source_path),
+                "bootSnapshotProviders": sorted(config.providers),
+            }
+            if authority.error is not None:
+                veto["error"] = authority.error
+            result["providersAuthority"] = veto
         _attribute_start(amb, result, repo_id)
         return result
     finally:
@@ -252,8 +280,9 @@ def worktree_integrate_tool(
     ledger_commit_message: str = "",
     dry_run: bool = False,
 ) -> dict[str, Any]:
+    confined_contract = require_within_coordination(config, contract_path, "contract_path")
     args = git_worktree_manager.WorktreeArgs(
-        contract_path=require_within_coordination(config, contract_path, "contract_path"),
+        contract_path=confined_contract,
         strategy=strategy,
         approved=not dry_run,
         ledger_commit_message=ledger_commit_message,
@@ -263,7 +292,16 @@ def worktree_integrate_tool(
         # exact delegated approval the master-handover channel produces.
         gate_policy=config.orchestration.gate_policy,
     )
-    return _worktree_result("worktree_integrate", git_worktree_manager.integrate_result(args))
+    result = _worktree_result("worktree_integrate", git_worktree_manager.integrate_result(args))
+    if result["ok"] and not dry_run and config.retirement.auto_land_on_integration:
+        result["autoLandedSeats"] = _auto_land_completed_seats(
+            config,
+            confined_contract,
+            roles=frozenset({"worker", "reviewer"}),
+            reason="leaf integrated into master",
+            edge="leaf-integration",
+        )
+    return result
 
 
 def worktree_cleanup_tool(
@@ -337,7 +375,51 @@ def lifecycle_finalize_task_tool(
         dry_run=dry_run,
         teardown_providers=teardown_providers,
     )
-    return _worktree_result("lifecycle_finalize_task", git_worktree_manager.finalize_result(args))
+    result = _worktree_result(
+        "lifecycle_finalize_task", git_worktree_manager.finalize_result(args)
+    )
+    if result["ok"] and not dry_run and config.retirement.auto_land_on_finalize:
+        result["autoLandedSeats"] = _auto_land_completed_seats(
+            config,
+            confined_contract,
+            roles=frozenset({"manager", "reviewer"}),
+            reason="master finalized into super",
+            edge="master-finalization",
+        )
+    return result
+
+
+def _auto_land_completed_seats(
+    config: McpRuntimeConfig,
+    contract_path: Path,
+    *,
+    roles: frozenset[str],
+    reason: str,
+    edge: str,
+) -> list[str]:
+    """The completion-edge auto-land hook: resolve the contract's qualified leaf key and archive seats.
+
+    Best-effort, END TO END: an unreadable/already-archived contract, a catalog read/write failure,
+    or any other failure in the landing body skips the auto-land rather than failing the completion
+    edge itself -- landing is a cleanup courtesy, never a gate on the edge it rides. The whole body
+    is guarded, not just ``load_contract``: ``land_seats_for_leaf``
+    does catalog file I/O that can raise just as easily as a missing contract file, and a raise from
+    there must never propagate out of an already-succeeded ``worktree_integrate`` /
+    ``lifecycle_finalize_task`` call.
+    """
+    try:
+        contract = load_contract(contract_path)
+        leaf_key = f"{contract.repo_name}/{contract.task_root.name}/{contract.task_id}"
+        catalog = TerminalCatalog(terminal_catalog_path(config.coordination_root))
+        at = now_iso()
+        landed = land_seats_for_leaf(
+            catalog, leaf_key=leaf_key, roles=roles, reason=reason, edge=edge, at=at
+        )
+        for entry in landed:
+            log_landed_event(config, entry)
+        return [entry.id for entry in landed]
+    except Exception:
+        return []
 
 
 def _worktree_namespace(

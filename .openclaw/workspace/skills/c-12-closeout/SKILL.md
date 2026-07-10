@@ -1,6 +1,6 @@
 ---
 name: c-12-closeout
-description: "Close out approved Agents Remember edits by preserving explicit commit approval, missing-onboarding checks, external-memory onboarding refresh, memory quality, ledger alignment, and no automatic push for worktree-backed tasks."
+description: "Close out approved Agents Remember edits by preserving the applicable approval authority, missing-onboarding checks, external-memory onboarding refresh, memory quality, ledger alignment, and no automatic push for worktree-backed tasks."
 ---
 
 # c-12-closeout Closeout
@@ -14,6 +14,18 @@ The `c-12-closeout` skill owns closeout sequencing for worktree-backed tasks.
 direct-checkout closeout path. Use the `c-09-git-worktree-manager` skill for
 worktree start, attach, status, integration, lifecycle finalization, and cleanup;
 use this skill for the closeout gate and code-memory-ledger commit order.
+
+**Seat note (manager -> builder -> reviewer -> curator chain):** in that chain, the builder produces
+code and a turn report only — it does not author onboarding. The dedicated curator seat
+(`l-01-agent-lifecycles` `roles/curator.md`) runs the `c-05-create-or-update-onboarding-files` skill
+as its own fresh pass, fed the leaf's landed change set, task doc, and notes/, BEFORE the owning
+seat (the manager) runs this skill's closeout preview. Everywhere below that says "create" or
+"refresh" onboarding, that authoring already happened in the curator's pass; the seat running
+closeout **verifies** the curator's output against the checks in this skill, it does not author
+onboarding inline to make a failing check pass. A check that still fails after the curator pass is a
+closeout failure — respawn/rerun the curator, do not patch onboarding from the closeout seat. This
+distinction does not apply outside that chain (e.g. a solo flat session with no separate curator
+seat still runs `c-05-create-or-update-onboarding-files` itself before closing out).
 
 ## MCP Tools
 
@@ -29,18 +41,31 @@ Worktree closeout records closeout state in the contract the
 `c-09-git-worktree-manager` skill owns later integration, lifecycle finalization,
 cleanup, and task-document completion.
 
-## Approval Hand-off
+## Approval Authority
 
-Closeout is explicitly human-gated. Agents must request the matching preview
-tool first, relay the proposed code, memory, and ledger commit messages to the
-developer, and ask for explicit commit approval.
+Closeout is always authority-gated, but the authority is contextual.
 
-Real closeout uses the matching apply tool with an `intent_note`. The note
-records the developer's explicit commit approval. Agents must not treat
-implementation approval, a previous "looks good", or their own judgment as
-commit approval.
+For standalone work, final super-branch landing, or any closeout where the accepted task/series
+authority is unclear, agents must request the matching preview tool first, relay the proposed code,
+memory, and ledger commit messages to the developer, and ask for explicit commit approval.
 
-The relay follows the `l-01-agent-lifecycles` orchestrator hand-off protocol: run the
+For subordinate work inside an accepted orchestrated series, the owning seat may apply closeout
+under delegated series authority after the preview/checks are clean. Managers govern leaf commits;
+the orchestrator governs manager/master edges and direct flat work when it is wearing the manager
+or worker hat itself. Do not stop for the developer merely because closeout will create code,
+memory, and ledger commits. The `intent_note` records the authority source, e.g. the accepted
+planner/series task and the owning seat's review of the preview.
+
+Closeout still stops for the developer when the work reaches the final completed super branch /
+PR-carryover gate, when a `closeout-approval` gate has been deliberately raised, when the change is
+outside the accepted scope, when checks remain red outside the task, when onboarding/memory quality
+cannot be repaired inside the leaf, or when a quo-vadis decision is required.
+
+Real closeout uses the matching apply tool with an `intent_note`. The note records the applicable
+authority: either explicit developer commit approval or delegated accepted-series authority. Agents
+must not treat a vague "looks good" or their own preference as authority.
+
+For a developer-gated closeout, the relay follows the `l-01-agent-lifecycles` orchestrator hand-off protocol: run the
 preview/dry-run first, then call
 `lifecycle_turn_end_notification(summary={…the preview facts + the commit ask…})` as the **last tool
 call**, then deliver the preview facts and proposed messages as plain
@@ -66,10 +91,11 @@ the dashboard and a `closeout-approval` gate is explicitly raised, closeout is *
 server-side through that durable gate, so a developer can approve from the cockpit and the
 mutating tool — not a UI button — is the security boundary.
 
-`closeout-approval` **is** the commit gate — closeout is the single
-commit-of-record for code, memory, and ledger, so there is no separate
-`commit-approval` kind; every commit routes through this gate. The dashboard
-junction uses the preview/dry-run -> chat report -> `lifecycle_gate` order above.
+`closeout-approval` **is** the human commit gate when it is deliberately raised — closeout is the
+single commit-of-record for code, memory, and ledger, so there is no separate `commit-approval`
+kind. Subordinate orchestrated-series closeouts normally do not raise this gate; they use the
+accepted-series authority recorded in the `intent_note`. The dashboard junction uses the
+preview/dry-run -> chat report -> `lifecycle_gate` order above.
 
 How it binds:
 
@@ -99,16 +125,19 @@ How it binds:
 
 Rules:
 
-1. **Never self-approve.** A model-attributed approval is rejected by
-   enforcement. Wait for the developer's dashboard decision or Chat response, and
-   never pass your own judgment off as commit approval.
+1. **Never self-approve a human-pinned gate.** A model-attributed approval is rejected by
+   enforcement. Wait for the developer's dashboard decision or chat response when a
+   `closeout-approval` gate exists, and never pass your own judgment off as developer approval.
+   Delegated-series closeout without a raised gate is different: it records the accepted series
+   authority and the owning seat's review in `intent_note`.
 2. **Opening a gate is opt-in and deliberate.** Open a `closeout-approval` gate
    **only** when a developer is driving approval from the dashboard. Do **not**
    open one in a pure-chat session with no cockpit watching — an `open` gate blocks
    your own closeout until it is decided.
-3. **Gateless lifecycles are unchanged.** With no `closeout-approval` gate the chat
-   commit gate (`intent_note` after an explicit "commit") governs exactly as before;
-   enforcement is additive, never a new requirement on every closeout.
+3. **Gateless lifecycles use the applicable authority.** With no `closeout-approval` gate,
+   standalone/final work still needs explicit developer commit approval, while accepted
+   orchestrated-series subordinate work may proceed under delegated series authority. Enforcement is
+   additive, never a requirement to raise a gate on every closeout.
 4. The closeout preview/apply payload carries a `closeout_gate` block
    (`enforced` / `permitted` / `gateId` / `reason`); relay it at the commit-approval
    gate so the developer sees whether a dashboard gate is open, approved, or absent.
@@ -130,17 +159,22 @@ python -m agents_remember.memory_quality.integrity.check_missing_onboarding --co
 ```
 
 The check only evaluates files that are new in the current checkout or
-worktree, not the whole historical repository. If it reports missing
-onboarding, create those sidecars through the `c-05-create-or-update-onboarding-files` skill before committing code. After
-the code commit exists, refresh the new sidecars' verification metadata to that
-commit during the normal post-code-commit memory refresh.
+worktree, not the whole historical repository. In the manager -> builder ->
+reviewer -> curator chain, this check is expected to already pass by the time the owning seat runs
+it, because the curator's memory pass created those sidecars through the
+`c-05-create-or-update-onboarding-files` skill before this precondition is checked; running the
+check here confirms that pass, it is not the trigger to author onboarding from the closing seat. If
+it still reports missing onboarding, do not create the sidecars inline — escalate to run (or rerun)
+the curator's memory pass, then rerun this check. After the code commit exists, refresh the new
+sidecars' verification metadata to that commit during the normal post-code-commit memory refresh.
 
 Changed (already-onboarded) source files have a parallel requirement: their
 sidecar content must be updated to approved current state before closeout. The
 closeout gate rejects any changed source file whose existing sidecar body was
 not modified in the current task, because advancing verification metadata over
-stale content defeats the commit-hash-based drift check. Update changed sidecars
-during implementation, not at the metadata-refresh step.
+stale content defeats the commit-hash-based drift check. In the curator chain, changed sidecars are
+updated during the curator's memory pass, not at the metadata-refresh step, and not by the builder
+during implementation.
 
 The closeout worklist covers the working tree plus the leaf contract-recorded
 committed range: every path changed between the last verified commit (the
@@ -159,11 +193,15 @@ deliberately through the `c-05-create-or-update-onboarding-files` skill.
 
 External-memory closeout order is:
 
-1. run `check_missing_onboarding` against current additions
-2. create missing onboarding for newly added eligible source files before committing code
+1. run `check_missing_onboarding` against current additions (in the curator chain, this confirms the
+   curator's pass already covered them — it is not the cue to author onboarding here)
+2. if onboarding is still missing, escalate to run/rerun the curator's memory pass through the
+   `c-05-create-or-update-onboarding-files` skill before committing code (solo flat sessions with no
+   separate curator seat create it directly)
 3. commit code changes and capture `C2` plus its commit date
 4. run the `c-02-memory-quality-control` skill's drift check against `C2` to produce the full memory update worklist
-5. verify each changed source file's sidecar content was updated in this task, then refresh affected onboarding `lastVerifiedCommitHash` and `lastVerifiedCommitDate` to `C2`; a changed source file with an unmodified sidecar body fails the closeout instead of receiving a metadata-only refresh
+5. verify each changed source file's sidecar content was updated in this task (by the curator's pass
+   in the chain above), then refresh affected onboarding `lastVerifiedCommitHash` and `lastVerifiedCommitDate` to `C2`; a changed source file with an unmodified sidecar body fails the closeout instead of receiving a metadata-only refresh
 6. refresh affected repo entity catalog `git-blob-set-v1` fingerprints against `C2` when changed source paths are listed as entity evidence
 7. refresh affected route overview `lastVerifiedCommitHash` / `lastVerifiedCommitDate` metadata to `C2`
 8. refresh generated route indexes so `overview.index.json` matches the updated onboarding tree
@@ -214,16 +252,20 @@ preview and apply payloads for the commit-approval relay.
 Worktree closeout also fails when the recorded code or external-memory source
 branch moved since task start.
 
-Missing onboarding is the expected hard failure when the implementation/update
-pass did not produce a required onboarding file. The next step is to run the `c-05-create-or-update-onboarding-files` skill
-for that source file, then rerun the closeout preview.
+Missing onboarding is the expected hard failure when the required onboarding file was not produced —
+in the manager -> builder -> reviewer -> curator chain that means the curator's memory pass did not
+cover it. The next step is to run (or rerun) the curator's `c-05-create-or-update-onboarding-files`
+pass for that source file, then rerun the closeout preview; a solo flat session with no separate
+curator seat runs that skill itself.
 
 ## Boundaries
 
 1. The `c-12-closeout` skill owns closeout approval and code-memory-ledger commit sequencing.
 2. The `c-12-closeout` skill does not create worktrees, integrate worktrees, finalize lifecycles, or clean up worktrees.
 3. The `c-12-closeout` skill does not initialize memory roots; use the `c-00-initialize-memory-repo` skill.
-4. The `c-12-closeout` skill must not commit without explicit commit approval after a closeout preview.
+4. The `c-12-closeout` skill must not commit without the applicable authority after a closeout
+   preview: explicit developer commit approval for standalone/final work, or recorded delegated
+   series authority for subordinate accepted-series work.
 5. The `c-12-closeout` skill must not create a memory content commit whose affected onboarding metadata still points at pre-closeout code.
 6. The `c-12-closeout` skill must not create a memory content commit before route overview metadata, generated route indexes, and `memory_quality_check` are clean for the new code commit.
 7. The `c-12-closeout` skill must not push automatically.

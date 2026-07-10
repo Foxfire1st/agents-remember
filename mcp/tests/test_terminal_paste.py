@@ -1,144 +1,210 @@
-"""Tests for the server-side echo-confirmed paste helper (``serving.terminal_paste``, slice L2).
-
-The paster mirrors the frontend ``pasteAndConfirm`` / ``submitAndConfirm`` over tmux primitives. Every
-tmux operation is injectable, so the confirmation loop is driven against an in-memory fake pane -- no
-real tmux server and no real sleeping (an injected clock + no-op sleep make the timeouts deterministic).
-"""
-
 from __future__ import annotations
 
-import sys
-import unittest
-from pathlib import Path
-
-MCP_SRC = Path(__file__).resolve().parents[1] / "src"
-sys.path.insert(0, str(MCP_SRC))
-
-from agents_remember.serving.terminal_paste import (
-    TerminalPaster,
-    sanitize_for_injection,
-)
-
-
-class _FakePane:
-    """An in-memory tmux pane: buffers, paste/key sinks, and a growing visible-content string."""
-
-    def __init__(self, *, echo: bool = True, submit_echo: bool = True) -> None:
-        self.content = "prompt> "
-        self.buffers: dict[str, str] = {}
-        self.pasted: list[tuple[str, str, str | None]] = []
-        self.keys: list[tuple[str, str]] = []
-        self.echo = echo
-        self.submit_echo = submit_echo
-
-    def set_buffer(self, name: str, text: str) -> None:
-        self.buffers[name] = text
-
-    def paste_buffer(self, tmux_name: str, buffer_name: str) -> None:
-        self.pasted.append((tmux_name, buffer_name, self.buffers.get(buffer_name)))
-        if self.echo:
-            self.content += "\n[Pasted text #1]"
-
-    def send_key(self, tmux_name: str, key: str) -> None:
-        self.keys.append((tmux_name, key))
-        if key == "Enter" and self.submit_echo:
-            self.content += "\nassistant: working"
-
-    def capture(self, _tmux_name: str) -> str:
-        return self.content
-
-
-class _BootingPane(_FakePane):
-    """A pane that repaints boot output while discarding pasted stdin."""
-
-    def paste_buffer(self, tmux_name: str, buffer_name: str) -> None:
-        self.pasted.append((tmux_name, buffer_name, self.buffers.get(buffer_name)))
-        self.content += "\nloading MCP servers"
+import pytest
+from agents_remember.serving.terminal_paste import TerminalPaster, sanitize_for_injection
 
 
 class _Clock:
-    """A monotonic stand-in that advances a fixed step per call so timeouts are hit deterministically."""
-
-    def __init__(self, step: float = 1.0) -> None:
-        self.t = 0.0
+    def __init__(self, step: float = 0.5) -> None:
+        self.value = 0.0
         self.step = step
 
     def __call__(self) -> float:
-        self.t += self.step
-        return self.t
+        self.value += self.step
+        return self.value
 
 
-def _paster(pane: _FakePane) -> TerminalPaster:
+class _Tmux:
+    def __init__(self, *, capture_values: list[str] | None = None) -> None:
+        self.loads: list[str] = []
+        self.pastes = 0
+        self.keys: list[str] = []
+        self.captures = 0
+        self.capture_values = list(capture_values or [])
+        self.sleeps: list[float] = []
+
+    def load(self, _name: str, text: str) -> bool:
+        self.loads.append(text)
+        return True
+
+    def paste(self, _tmux: str, _name: str) -> bool:
+        self.pastes += 1
+        return True
+
+    def key(self, _tmux: str, key: str) -> bool:
+        self.keys.append(key)
+        return True
+
+    def capture(self, _tmux: str) -> str:
+        self.captures += 1
+        if self.capture_values:
+            return self.capture_values.pop(0)
+        return "failure pane"
+
+    def sleep(self, seconds: float) -> None:
+        self.sleeps.append(seconds)
+
+
+def _paster(tmux: _Tmux) -> TerminalPaster:
     return TerminalPaster(
-        set_buffer=pane.set_buffer,
-        paste_buffer=pane.paste_buffer,
-        send_key=pane.send_key,
-        capture_pane=pane.capture,
-        sleep=lambda _seconds: None,
+        load_buffer=tmux.load,
+        paste_buffer=tmux.paste,
+        send_key=tmux.key,
+        capture_pane=tmux.capture,
+        sleep=tmux.sleep,
         monotonic=_Clock(),
     )
 
 
-class SanitizeTests(unittest.TestCase):
-    def test_strips_suspend_byte_and_paste_markers_keeps_newline_and_tab(self) -> None:
-        raw = "line1\n\ttab\x1asuspend\x1b[200~marker\x1b[201~\rend"
-        cleaned = sanitize_for_injection(raw)
-        self.assertNotIn("\x1a", cleaned)
-        self.assertNotIn("\x1b[200~", cleaned)
-        self.assertNotIn("\x1b[201~", cleaned)
-        self.assertNotIn("\r", cleaned)
-        self.assertIn("\n", cleaned)
-        self.assertIn("\ttab", cleaned)
-        self.assertIn("marker", cleaned)
+def test_sanitize_strips_control_noise_and_nested_paste_markers() -> None:
+    clean = sanitize_for_injection("a\x1a\x1b[200~b\x1b[201~\r\n\tc")
+    assert clean == "ab\n\tc"
 
 
-class PasteTests(unittest.TestCase):
-    def test_paste_echo_confirmed_without_submit_leaves_draft(self) -> None:
-        pane = _FakePane(echo=True)
-        result = _paster(pane).paste("ar-worker", "context packet", submit=False)
-        self.assertTrue(result.delivered)
-        self.assertFalse(result.submitted)
-        # One bracketed paste of the sanitized text; no Enter (draft stays a draft).
-        self.assertEqual(len(pane.pasted), 1)
-        self.assertEqual(pane.pasted[0][2], "context packet")
-        self.assertEqual(pane.keys, [])
-
-    def test_paste_and_submit_presses_enter_and_confirms(self) -> None:
-        pane = _FakePane(echo=True, submit_echo=True)
-        result = _paster(pane).paste("ar-worker", "go", submit=True)
-        self.assertTrue(result.delivered)
-        self.assertTrue(result.submitted)
-        self.assertEqual(pane.keys, [("ar-worker", "Enter")])
-
-    def test_unechoed_paste_reports_unconfirmed_delivery_after_boot_deadline(self) -> None:
-        pane = _FakePane(echo=False)
-        result = _paster(pane).paste(
-            "ar-worker", "discarded", submit=True, echo_timeout=1, boot_deadline=8
-        )
-        self.assertFalse(result.delivered)
-        self.assertFalse(result.submitted)
-        # A discarded paste is retried across the boot window (more than one attempt).
-        self.assertGreaterEqual(len(pane.pasted), 2)
-        # Never submit an unconfirmed paste.
-        self.assertEqual(pane.keys, [])
-
-    def test_boot_output_advance_without_paste_echo_does_not_confirm_delivery(self) -> None:
-        pane = _BootingPane(echo=False)
-        result = _paster(pane).paste(
-            "ar-worker", "discarded", submit=True, echo_timeout=1, boot_deadline=8
-        )
-        self.assertFalse(result.delivered)
-        self.assertFalse(result.submitted)
-        self.assertGreaterEqual(len(pane.pasted), 2)
-        self.assertEqual(pane.keys, [])
-
-    def test_submit_unconfirmed_when_enter_produces_no_output(self) -> None:
-        pane = _FakePane(echo=True, submit_echo=False)
-        result = _paster(pane).paste("ar-worker", "go", submit=True, submit_timeout=2)
-        self.assertTrue(result.delivered)
-        self.assertFalse(result.submitted)
-        self.assertEqual(pane.keys, [("ar-worker", "Enter")])
+def test_success_uses_log_probe_and_never_captures_pane() -> None:
+    tmux = _Tmux()
+    result = _paster(tmux).paste("ar-1", "brief", submit=True, accepted=lambda: True)
+    assert result.submitted
+    assert tmux.loads == []
+    assert tmux.keys == []
+    assert tmux.captures == 0
 
 
-if __name__ == "__main__":
-    unittest.main()
+def test_first_absence_waits_full_window_before_enter_repress() -> None:
+    tmux = _Tmux()
+
+    def accepted() -> bool:
+        return len(tmux.keys) >= 2
+
+    result = _paster(tmux).paste(
+        "ar-1",
+        "brief",
+        submit=True,
+        accepted=accepted,
+        flush_window=1.0,
+        poll_interval=0.1,
+    )
+    assert result.submitted
+    assert tmux.keys == ["Enter", "Enter"]
+    assert tmux.pastes == 1
+    assert tmux.captures == 1
+
+
+def test_repaste_happens_only_after_enter_repress_window() -> None:
+    tmux = _Tmux()
+
+    def accepted() -> bool:
+        return tmux.pastes >= 2
+
+    result = _paster(tmux).paste(
+        "ar-1",
+        "brief",
+        submit=True,
+        accepted=accepted,
+        flush_window=1.0,
+    )
+    assert result.submitted
+    assert tmux.pastes == 2
+    assert tmux.keys == ["Enter", "Enter", "Enter"]
+    assert tmux.captures == 2
+
+
+def test_exhausted_ladder_returns_the_final_failure_capture() -> None:
+    tmux = _Tmux()
+    result = _paster(tmux).paste(
+        "ar-1",
+        "brief",
+        submit=True,
+        accepted=lambda: False,
+        flush_window=1.0,
+    )
+    assert result.delivered
+    assert not result.submitted
+    assert result.capture == "failure pane"
+    assert tmux.captures == 3
+    assert tmux.pastes == 2
+
+
+def test_duplicate_chip_blocks_repaste_when_clear_does_not_remove_it() -> None:
+    tmux = _Tmux(
+        capture_values=[
+            "codex >",
+            "[Pasted Content 5 chars]\ncodex >",
+            "[Pasted Content 5 chars]\ncodex >",
+        ]
+    )
+    result = _paster(tmux).paste(
+        "ar-1",
+        "brief",
+        submit=True,
+        accepted=lambda: False,
+        flush_window=1.0,
+    )
+    assert result.delivered
+    assert not result.submitted
+    assert result.capture == "[Pasted Content 5 chars]\ncodex >"
+    assert tmux.pastes == 1
+    assert tmux.loads == ["brief"]
+    assert tmux.keys == ["Enter", "Enter", "C-u"]
+    assert "Escape" not in tmux.keys
+
+
+def test_visible_composer_chip_is_cleared_before_replacement() -> None:
+    tmux = _Tmux(
+        capture_values=[
+            "codex >",
+            "[Pasted Content 5 chars]\ncodex >",
+            "codex >",
+        ]
+    )
+
+    result = _paster(tmux).paste(
+        "ar-1",
+        "brief",
+        submit=True,
+        accepted=lambda: tmux.pastes >= 2,
+        flush_window=1.0,
+    )
+    assert result.submitted
+    assert tmux.pastes == 2
+    assert tmux.loads == ["brief", "brief"]
+    assert tmux.keys == ["Enter", "Enter", "C-u", "Enter"]
+    assert "Escape" not in tmux.keys
+
+
+def test_unobservable_pane_blocks_repaste() -> None:
+    tmux = _Tmux(capture_values=["codex >", ""])
+    result = _paster(tmux).paste(
+        "ar-1",
+        "brief",
+        submit=True,
+        accepted=lambda: False,
+        flush_window=1.0,
+    )
+    assert result.delivered
+    assert not result.submitted
+    assert result.capture == ""
+    assert tmux.pastes == 1
+    assert tmux.keys == ["Enter", "Enter"]
+
+
+def test_settle_guard_is_at_least_100ms() -> None:
+    tmux = _Tmux()
+    _paster(tmux).paste("ar-1", "brief", submit=True, accepted=lambda: True, settle_delay=0)
+    # Pre-existing acceptance skips transport. Exercise the transport-only command path instead.
+    _paster(tmux).paste("ar-1", "/effort ultracode", submit=True, accepted=None, settle_delay=0)
+    assert 0.1 in tmux.sleeps
+
+
+def test_unbound_command_never_claims_log_acceptance() -> None:
+    tmux = _Tmux()
+    result = _paster(tmux).paste("ar-1", "/effort ultracode", submit=True, accepted=None)
+    assert result.delivered
+    assert not result.submitted
+    assert tmux.keys == ["Enter"]
+    assert tmux.captures == 0
+
+
+def test_escape_is_refused() -> None:
+    with pytest.raises(ValueError, match="never sends Escape"):
+        _paster(_Tmux())._press("ar-1", "Escape")

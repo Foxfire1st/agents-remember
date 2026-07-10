@@ -4,13 +4,17 @@ from __future__ import annotations
 
 import sys
 import tempfile
+import threading
 import unittest
+from concurrent.futures import ThreadPoolExecutor
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from unittest import mock
 
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
+from agents_remember.controlplane.interaction_retention import INBOX_MAX_CURRENT_ROWS
 from agents_remember.controlplane.operator_inbox_records import (
     OperatorInboxEntry,
     consume_operator_inbox_entry,
@@ -205,7 +209,7 @@ class OperatorInboxStoreTests(unittest.TestCase):
             now=T2,
             delivery_state="delivered",
             delivered_to_session="agent-a",
-            delivery_detail="echo-confirmed",
+            delivery_detail="harness-log-confirmed",
         )
         self.assertEqual(delivered.deliveryState, "delivered")
         self.assertEqual(delivered.deliveredAt, T2)
@@ -215,6 +219,172 @@ class OperatorInboxStoreTests(unittest.TestCase):
     def test_poll_requires_mailbox_address(self) -> None:
         with self.assertRaises(ValueError):
             self.store.list_pending(lifecycle_id=None, agent_id=None)
+
+    def test_record_delivery_bumps_attempt_and_schedules_next_attempt(self) -> None:
+        # R1/R3: every attempt -- including a confirmed 'delivered' paste -- bumps attemptCount
+        # and schedules a durable nextAttemptAt, because consume=ack is the only terminal outcome.
+        self.store.append(self._entry("A"))
+        delivered = self.store.record_delivery(
+            "A", now=T2, delivery_state="delivered", delivered_to_session="agent-a"
+        )
+        self.assertEqual(delivered.attemptCount, 1)
+        self.assertEqual(delivered.lastAttemptAt, T2)
+        self.assertIsNotNone(delivered.nextAttemptAt)
+        assert delivered.nextAttemptAt is not None
+        self.assertGreaterEqual(
+            (
+                datetime.fromisoformat(delivered.nextAttemptAt)
+                - datetime.fromisoformat(T2)
+            ).total_seconds(),
+            900.0,
+        )
+        # A second delivery attempt (e.g. a redelivery pass) bumps again and re-schedules further out.
+        second = self.store.record_delivery(
+            "A", now="2026-06-23T10:10:00+00:00", delivery_state="unconfirmed"
+        )
+        self.assertEqual(second.attemptCount, 2)
+        assert second.nextAttemptAt is not None
+        self.assertGreater(second.nextAttemptAt, delivered.nextAttemptAt)
+
+    def test_record_delivery_clears_schedule_only_via_consume(self) -> None:
+        self.store.append(self._entry("A"))
+        self.store.record_delivery("A", now=T2, delivery_state="delivered")
+        consumed, _ = self.store.consume("A", now=T2, consumed_by="model", consumed_via="cli")
+        self.assertEqual(consumed.state, "consumed")
+
+    def test_list_redeliverable_returns_pending_rows_past_backoff(self) -> None:
+        self.store.append(self._entry("A"))
+        self.store.record_delivery(
+            "A", now="2026-06-23T09:00:00+00:00", delivery_state="no-hosted-session"
+        )
+        now = datetime.fromisoformat("2026-06-24T09:00:00+00:00")
+        redeliverable = self.store.list_redeliverable(now=now)
+        self.assertEqual([entry.id for entry in redeliverable], ["A"])
+
+    def test_list_redeliverable_excludes_consumed_rows(self) -> None:
+        self.store.append(self._entry("A"))
+        self.store.record_delivery("A", now=T1, delivery_state="delivered")
+        self.store.consume("A", now=T2, consumed_by="model", consumed_via="cli")
+        now = datetime.fromisoformat("2026-06-24T09:00:00+00:00")
+        self.assertEqual(self.store.list_redeliverable(now=now), [])
+
+    def test_mark_escalated_stamps_the_reserved_field(self) -> None:
+        self.store.append(self._entry("A"))
+        escalated = self.store.mark_escalated("A", now=T2)
+        self.assertEqual(escalated.escalatedAt, T2)
+
+    def test_advance_rung_stamps_rung_and_reanchors_escalated_at(self) -> None:
+        self.store.append(self._entry("A"))
+        advanced = self.store.advance_rung("A", rung=1, now=T2)
+        self.assertEqual(advanced.rung, 1)
+        self.assertEqual(advanced.escalatedAt, T2)
+        self.assertEqual(advanced.rungTransitionAt, T2)
+        T3 = "2026-06-23T10:20:00+00:00"
+        advanced_again = self.store.advance_rung("A", rung=2, now=T3)
+        self.assertEqual(advanced_again.rung, 2)
+        self.assertEqual(advanced_again.escalatedAt, T3)
+        self.assertEqual(advanced_again.rungTransitionAt, T3)
+
+    def test_advance_rung_unknown_entry_raises(self) -> None:
+        with self.assertRaises(KeyError):
+            self.store.advance_rung("missing", rung=1, now=T2)
+
+    def test_ladder_resolved_is_terminal_without_ack(self) -> None:
+        self.store.append(self._entry("A"))
+        resolved, resolved_now = self.store.mark_ladder_resolved(
+            "A",
+            now=T2,
+            reason="terminal ladder rung reached for non-live target seat",
+        )
+        self.assertTrue(resolved_now)
+        self.assertEqual(resolved.state, "ladder-resolved")
+        self.assertEqual(resolved.ladderResolvedAt, T2)
+        self.assertIsNone(resolved.nextAttemptAt)
+        consumed, consumed_now = self.store.consume(
+            "A", now="2026-06-23T10:10:00+00:00", consumed_by="model", consumed_via="cli"
+        )
+        self.assertFalse(consumed_now)
+        self.assertEqual(consumed.state, "ladder-resolved")
+
+    def test_compaction_purges_pending_rows_past_the_pending_ttl(self) -> None:
+        # Ruled invariant (developer, 2026-07-09): no row outranks system health -- a pending row
+        # past INBOX_PENDING_TTL_SECONDS is stale noise and is physically dropped. The durable
+        # record is the artifact on disk, never the inbox row. Supersedes the HFX2-L1 R1
+        # immortal-pending rule that let the 2026-07-09 escalation storm fill the store.
+        ancient = create_operator_inbox_entry(
+            entry_id="OLD",
+            now="2020-01-01T00:00:00+00:00",
+            lifecycle_id="L1",
+            agent_id="agent-a",
+            ask="Ancient ask",
+            response="Ancient response",
+            created_by="developer",
+            created_via="dashboard",
+        )
+        self.store.append(ancient)
+        removed = self.store.compact(now=datetime.now(UTC))
+        self.assertEqual(removed, 1)
+        self.assertEqual(self.store.read(), [])
+
+    def test_compaction_keeps_a_fresh_pending_row(self) -> None:
+        fresh = create_operator_inbox_entry(
+            entry_id="FRESH",
+            now=datetime.now(UTC).isoformat(),
+            lifecycle_id="L1",
+            agent_id="agent-a",
+            ask="Fresh ask",
+            response="Fresh response",
+            created_by="developer",
+            created_via="dashboard",
+        )
+        self.store.append(fresh)
+        removed = self.store.compact(now=datetime.now(UTC))
+        self.assertEqual(removed, 0)
+        self.assertEqual([entry.id for entry in self.store.read()], ["FRESH"])
+
+    def test_compaction_enforces_the_hard_health_cap_keeping_newest(self) -> None:
+        # The health-cap backstop: even fresh pending rows are evicted oldest-first past
+        # INBOX_MAX_CURRENT_ROWS -- a store that size means a producer is misbehaving, and the
+        # host matters more than any row.
+        now = datetime.now(UTC)
+        total = INBOX_MAX_CURRENT_ROWS + 25
+        for index in range(total):
+            self.store.append(
+                create_operator_inbox_entry(
+                    entry_id=f"row-{index:04d}",
+                    now=(now - timedelta(seconds=total - index)).isoformat(),
+                    lifecycle_id="L1",
+                    agent_id="agent-a",
+                    ask=f"ask {index}",
+                    response="resp",
+                    created_by="developer",
+                    created_via="dashboard",
+                )
+            )
+        removed = self.store.compact(now=now)
+        self.assertEqual(removed, 25)
+        kept_ids = {entry.id for entry in self.store.read()}
+        self.assertEqual(len(kept_ids), INBOX_MAX_CURRENT_ROWS)
+        self.assertNotIn("row-0000", kept_ids)
+        self.assertIn(f"row-{total - 1:04d}", kept_ids)
+
+    def test_compaction_prunes_ladder_resolved_rows(self) -> None:
+        self.store.append(self._entry("A"))
+        self.store.mark_ladder_resolved(
+            "A",
+            now=T2,
+            reason="terminal ladder rung reached for non-live target seat",
+        )
+        removed = self.store.compact(now=datetime.now(UTC))
+        self.assertEqual(removed, 2)
+        self.assertEqual(self.store.read(), [])
+
+    def test_compaction_still_prunes_a_stale_consumed_row(self) -> None:
+        self.store.append(self._entry("A"))
+        self.store.consume("A", now="2020-01-01T00:00:00+00:00", consumed_by="model", consumed_via="cli")
+        removed = self.store.compact(now=datetime.now(UTC))
+        self.assertGreater(removed, 0)
+        self.assertEqual(self.store.read(), [])
 
 
 class OperatorInboxToolTests(unittest.TestCase):
@@ -264,7 +434,7 @@ class OperatorInboxToolTests(unittest.TestCase):
         )
         self.assertTrue(consumed["consumedNow"])
         self.assertEqual(consumed["state"], "consumed")
-        self.assertEqual(self.store.read(), [])
+        self.assertEqual([entry.state for entry in self.store.read()], ["pending", "consumed"])
 
     def test_poll_without_address_raises(self) -> None:
         with self.assertRaises(ValueError):
@@ -274,6 +444,164 @@ class OperatorInboxToolTests(unittest.TestCase):
                 agent_id=None,
                 recipient_role=None,
             )
+
+    def test_decision_item_relay_round_trip_between_orchestrator_and_architect(self) -> None:
+        # HFX-L6 doctrine (architect.md/orchestrator.md/SKILL.md) mandates this exact call shape.
+        # Master-exit Finding 1: the schema rejected it with a ValidationError before this leaf.
+        posted_item = inbox_tools.operator_inbox_post_payload(
+            None,  # type: ignore[arg-type]
+            lifecycle_id="L1",
+            agent_id=None,
+            ask="Ratify the escalation-ladder change?",
+            response="See notes/reports/decision-context.md",
+            created_by="orchestrator",
+            created_via="cli",
+            sender_role="orchestrator",
+            recipient_role="architect",
+            message_kind="decision-item",
+            deliver_to_hosted=False,
+        )
+        self.assertEqual(posted_item["messageKind"], "decision-item")
+        self.assertEqual(posted_item["recipientRole"], "architect")
+
+        polled = inbox_tools.operator_inbox_poll_payload(
+            None,  # type: ignore[arg-type]
+            lifecycle_id="L1",
+            agent_id=None,
+            recipient_role="architect",
+        )
+        self.assertEqual(polled["entryCount"], 1)
+        self.assertEqual(polled["entries"][0]["messageKind"], "decision-item")
+
+        posted_ruling = inbox_tools.operator_inbox_post_payload(
+            None,  # type: ignore[arg-type]
+            lifecycle_id="L1",
+            agent_id=None,
+            ask="Ruling on the escalation-ladder change",
+            response="Ratified as proposed.",
+            created_by="architect",
+            created_via="cli",
+            sender_role="architect",
+            recipient_role="orchestrator",
+            message_kind="decision-ruling",
+            deliver_to_hosted=False,
+        )
+        self.assertEqual(posted_ruling["messageKind"], "decision-ruling")
+        self.assertEqual(posted_ruling["recipientRole"], "orchestrator")
+
+    def test_plain_message_addressed_to_architect_and_curator_succeeds(self) -> None:
+        for role in ("architect", "curator"):
+            posted = inbox_tools.operator_inbox_post_payload(
+                None,  # type: ignore[arg-type]
+                lifecycle_id="L1",
+                agent_id=None,
+                ask="FYI",
+                response="Nothing to action.",
+                created_by="developer",
+                created_via="dashboard",
+                sender_role="developer",
+                recipient_role=role,
+                message_kind="message",
+                deliver_to_hosted=False,
+            )
+            self.assertEqual(posted["recipientRole"], role)
+            self.assertEqual(posted["messageKind"], "message")
+
+    def test_reviewer_completion_targets_and_wakes_current_manager(self) -> None:
+        """Live halt regression: a completed reviewer with stale manager provenance must address
+        and paste the existing turn-report signal into the current manager session."""
+        catalog = TerminalCatalog(self.store.root / "terminal-sessions.json")
+        leaf_key = "repo-a/260707_master/leaf-9"
+        catalog.upsert(
+            TerminalCatalogEntry(
+                id="manager-old",
+                label="Old manager",
+                kind="harness",
+                harness="codex",
+                lifecycle_id="L-old",
+                cwd=self.store.root,
+                tmux_name="ar-manager-old",
+                command=("codex",),
+                created_at=T1,
+                last_attached_at=T1,
+                status="terminated",
+                leaf_key="repo-a/260707_master/old-manager-anchor",
+                spawn_role="manager",
+            )
+        )
+        catalog.upsert(
+            TerminalCatalogEntry(
+                id="manager-current",
+                label="Current manager",
+                kind="harness",
+                harness="codex",
+                lifecycle_id="L-current",
+                cwd=self.store.root,
+                tmux_name="ar-manager-current",
+                command=("codex",),
+                created_at=T1,
+                last_attached_at=T2,
+                status="running",
+                leaf_key="repo-a/260707_master/current-manager-anchor",
+                spawn_role="manager",
+            )
+        )
+        catalog.upsert(
+            TerminalCatalogEntry(
+                id="reviewer-1",
+                label="Reviewer",
+                kind="harness",
+                harness="codex",
+                lifecycle_id="L-reviewer",
+                cwd=self.store.root,
+                tmux_name="ar-reviewer-1",
+                command=("codex",),
+                created_at=T1,
+                last_attached_at=T2,
+                status="running",
+                leaf_key=leaf_key,
+                spawned_by_session="manager-old",
+                spawn_role="reviewer",
+            )
+        )
+        pasted_to: list[str] = []
+
+        class _Paster:
+            def paste(
+                self,
+                tmux_name: str,
+                _text: str,
+                *,
+                submit: bool = False,
+                **_kwargs: object,
+            ) -> PasteResult:
+                pasted_to.append(tmux_name)
+                return PasteResult(delivered=True, submitted=submit)
+
+        posted = inbox_tools.operator_inbox_post_payload(
+            None,  # type: ignore[arg-type]  # temp store/catalog are injected
+            lifecycle_id="L-old",
+            agent_id="manager-old",
+            ask="Reviewer report complete",
+            response="See notes/reports/reviewer-report.md",
+            created_by="reviewer-1",
+            created_via="cli",
+            sender_agent_id="reviewer-1",
+            sender_role="reviewer",
+            recipient_role="manager",
+            message_kind="turn-report",
+            artifact_path="notes/reports/reviewer-report.md",
+            terminal_catalog=catalog,
+            terminal_host=TerminalHost(tmux_probe=lambda _name: True),
+            terminal_paster=_Paster(),  # type: ignore[arg-type]
+        )
+
+        self.assertEqual(posted["recipientRole"], "manager")
+        self.assertEqual(posted["agentId"], "manager-current")
+        self.assertEqual(posted["ownerAgentId"], "manager-current")
+        self.assertEqual(posted["deliveryState"], "delivered")
+        self.assertEqual(posted["deliveredToSession"], "manager-current")
+        self.assertEqual(pasted_to, ["ar-manager-current"])
 
 
 class OperatorInboxDeliveryTests(unittest.TestCase):
@@ -317,7 +645,14 @@ class OperatorInboxDeliveryTests(unittest.TestCase):
         calls: list[tuple[str, str, bool]] = []
 
         class _Paster:
-            def paste(self, tmux_name: str, text: str, *, submit: bool = False) -> PasteResult:
+            def paste(
+                self,
+                tmux_name: str,
+                text: str,
+                *,
+                submit: bool = False,
+                **_kwargs: object,
+            ) -> PasteResult:
                 calls.append((tmux_name, text, submit))
                 return PasteResult(delivered=True, submitted=True)
 
@@ -334,12 +669,81 @@ class OperatorInboxDeliveryTests(unittest.TestCase):
         self.assertTrue(calls[0][2])
         self.assertIn("[Agents Remember inbox:message]", calls[0][1])
 
-    def test_deliver_inbox_entry_records_unconfirmed_when_paste_is_not_echoed(self) -> None:
-        # FINDING 3 (260703-L18, pins friction F-A's echo-confirm seam): a paste the target session
-        # did NOT echo back must record deliveryState 'unconfirmed', never 'delivered'. This is the
-        # exact boot-discard failure echo-confirmation was built to catch (a booting harness silently
-        # drops stdin). If someone collapses inbox_delivery's branch to always-'delivered' this test
-        # FAILS -- the reachable session with an un-echoed paste is the only thing separating the two.
+    def test_consume_during_in_flight_delivery_cannot_resurrect_pending_entry(self) -> None:
+        entry = create_operator_inbox_entry(
+            entry_id="A",
+            now=T1,
+            lifecycle_id="L1",
+            agent_id="agent-a",
+            sender_role="manager",
+            recipient_role="worker",
+            ask="Please continue.",
+            response="Review the report.",
+            created_by="manager-1",
+            created_via="cli",
+        )
+        self.store.append(entry)
+        stale_current = self.store.current()
+        delivery_started = threading.Event()
+        finish_delivery = threading.Event()
+
+        class _InFlightPaster:
+            def paste(
+                self,
+                _tmux_name: str,
+                _text: str,
+                *,
+                submit: bool = False,
+                **_kwargs: object,
+            ) -> PasteResult:
+                delivery_started.set()
+                if not finish_delivery.wait(timeout=2):
+                    raise AssertionError("test did not release the in-flight delivery")
+                return PasteResult(delivered=True, submitted=submit)
+
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            delivery = executor.submit(
+                deliver_inbox_entry,
+                store=self.store,
+                catalog=self.catalog,
+                host=self.host,
+                paster=_InFlightPaster(),  # type: ignore[arg-type]
+                entry=entry,
+                current=stale_current,
+                delivery_at=T2,
+            )
+            self.assertTrue(delivery_started.wait(timeout=2))
+            with mock.patch.object(inbox_tools, "_store", return_value=self.store):
+                consumed = inbox_tools.operator_inbox_consume_payload(
+                    None,  # type: ignore[arg-type]
+                    entry_id=entry.id,
+                    consumed_by="model",
+                    consumed_via="cli",
+                )
+            self.assertTrue(consumed["consumedNow"])
+            finish_delivery.set()
+            delivered = delivery.result(timeout=2)
+
+        self.assertEqual(delivered.deliveryState, "delivered")
+        self.assertEqual(
+            [record.state for record in self.store.read()],
+            ["pending", "consumed", "pending"],
+        )
+        self.assertEqual(self.store.current()[entry.id].state, "consumed")
+        self.assertEqual(
+            self.store.list_pending(lifecycle_id="L1", agent_id="agent-a"),
+            [],
+        )
+        self.assertEqual(
+            self.store.list_redeliverable(
+                now=datetime.fromisoformat("2026-06-24T10:05:00+00:00")
+            ),
+            [],
+        )
+
+    def test_deliver_inbox_entry_records_unconfirmed_without_log_acceptance(self) -> None:
+        # A reachable harness that accepts tmux bytes but never records the id must remain
+        # unconfirmed. The pane is retained only as failure evidence.
         entry = create_operator_inbox_entry(
             entry_id="A",
             now=T1,
@@ -355,22 +759,74 @@ class OperatorInboxDeliveryTests(unittest.TestCase):
         self.store.append(entry)
         attempts: list[tuple[str, str]] = []
 
-        class _UnechoedPaster:
-            def paste(self, tmux_name: str, text: str, *, submit: bool = False) -> PasteResult:
-                # A booting harness accepts the keystrokes but never echoes them back.
+        class _UnconfirmedPaster:
+            def paste(
+                self,
+                tmux_name: str,
+                text: str,
+                *,
+                _submit: bool = False,
+                **_kwargs: object,
+            ) -> PasteResult:
+                # A booting harness accepts the keystrokes but never records them. The paster
+                # attaches its final failure capture.
                 attempts.append((tmux_name, text))
-                return PasteResult(delivered=False, submitted=submit)
+                return PasteResult(delivered=False, submitted=False, capture="claude> (booting)")
 
         recorded = deliver_inbox_entry(
             store=self.store,
             catalog=self.catalog,
             host=self.host,
-            paster=_UnechoedPaster(),  # type: ignore[arg-type]
+            paster=_UnconfirmedPaster(),  # type: ignore[arg-type]
             entry=entry,
         )
-        # The paste WAS attempted into the reachable session -- delivery just was not echo-confirmed.
+        # The paste WAS attempted into the reachable session -- delivery just was not verified.
         self.assertEqual(attempts[0][0], "ar-agent-a")
         self.assertEqual(recorded.deliveryState, "unconfirmed")
         self.assertNotEqual(recorded.deliveryState, "delivered")
         self.assertEqual(recorded.deliveredToSession, "agent-a")
-        self.assertEqual(recorded.deliveryDetail, "paste was not echoed")
+        # 260707-HFX-L3: the durable row carries the pane capture as forensic evidence, never a
+        # bare generic failure -- the re-briefing operator reads what the pane actually showed.
+        assert recorded.deliveryDetail is not None
+        self.assertIn("not harness-log-confirmed", recorded.deliveryDetail)
+        self.assertIn("claude> (booting)", recorded.deliveryDetail)
+
+    def test_unverified_delivery_with_empty_capture_still_records_a_loud_detail(self) -> None:
+        entry = create_operator_inbox_entry(
+            entry_id="B",
+            now=T1,
+            lifecycle_id="L1",
+            agent_id="agent-a",
+            sender_role="manager",
+            recipient_role="worker",
+            ask="Please continue.",
+            response="Review the report.",
+            created_by="manager-1",
+            created_via="cli",
+        )
+        self.store.append(entry)
+
+        class _GonePaster:
+            def paste(
+                self,
+                _tmux_name: str,
+                _text: str,
+                *,
+                _submit: bool = False,
+                **_kwargs: object,
+            ) -> PasteResult:
+                # capture-pane against a vanished session yields an empty capture.
+                return PasteResult(delivered=False, submitted=False, capture="")
+
+        recorded = deliver_inbox_entry(
+            store=self.store,
+            catalog=self.catalog,
+            host=self.host,
+            paster=_GonePaster(),  # type: ignore[arg-type]
+            entry=entry,
+        )
+        self.assertEqual(recorded.deliveryState, "unconfirmed")
+        self.assertEqual(
+            recorded.deliveryDetail,
+            "input was not harness-log-confirmed; empty failure capture",
+        )

@@ -39,6 +39,7 @@ from agents_remember.providers.identity import provider_instance_id
 from agents_remember.tasks import TaskDocument, write_task_doc
 from agents_remember.worktrees import git_worktree_manager as worktree_manager
 from agents_remember.worktrees.modules import start as worktree_start
+from agents_remember.worktrees.modules import start_contract
 from agents_remember.worktrees.modules.integrate import _merge_integrated_commits
 from agents_remember.worktrees.modules.models import (
     PATH_SAMPLE_LIMIT,
@@ -476,11 +477,11 @@ class WorktreeSupportTests(unittest.TestCase):
             head_tip = commit_file(memory_repo, "memory.md", "other\n", "unrelated in-flight work")
             self.assertNotEqual(main_tip, head_tip)
             # repo HEAD is on 'other-task', but the base for a 'main'-sourced worktree is main's tip
-            self.assertEqual(worktree_start._memory_base_for_source(memory_repo, "main"), main_tip)
+            self.assertEqual(start_contract.memory_base_for_source(memory_repo, "main"), main_tip)
             # no source branch (internal/disabled memory) -> falls back to current HEAD
-            self.assertEqual(worktree_start._memory_base_for_source(memory_repo, ""), head_tip)
+            self.assertEqual(start_contract.memory_base_for_source(memory_repo, ""), head_tip)
             # no memory repo -> empty
-            self.assertEqual(worktree_start._memory_base_for_source(None, "main"), "")
+            self.assertEqual(start_contract.memory_base_for_source(None, "main"), "")
 
     def test_master_start_creates_integration_contract_and_leaf_enclosure(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -533,13 +534,13 @@ class WorktreeSupportTests(unittest.TestCase):
 
             self.assertEqual(result.returncode, 0)
             root_contract = load_contract(series_contract_path(task_root))
-            leaf_contract = load_contract(leaf_enclosure_path(task_root, "15_leaf"))
+            leaf_contract = load_contract(leaf_enclosure_path(task_root, "15"))
             self.assertEqual(
                 (root_contract.kind, root_contract.code_source_branch), ("series", "main")
             )
             self.assertEqual(root_contract.code_work_branch, "ar/260624_master")
             self.assertEqual(root_contract.code_worktree, code_repo)
-            self.assertEqual((leaf_contract.kind, leaf_contract.leaf_id), ("leaf", "15_leaf"))
+            self.assertEqual((leaf_contract.kind, leaf_contract.leaf_id), ("leaf", "15"))
             self.assertEqual(leaf_contract.code_source_branch, "ar/260624_master")
             self.assertEqual(leaf_contract.code_work_branch, "ar/15_leaf")
             self.assertEqual(leaf_contract.parent_contract_path, root_contract.contract_path)
@@ -550,6 +551,94 @@ class WorktreeSupportTests(unittest.TestCase):
                 "ar/260624_master", git(code_repo, "branch", "--list", "ar/260624_master")
             )
             self.assertIn("ar/15_leaf", git(code_repo, "branch", "--list", "ar/15_leaf"))
+
+    def test_light_task_start_defaults_to_doc_id_leaf(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            code_repo = workspace / "repo-a"
+            init_repo(code_repo, "main")
+            coordination_root = workspace / "ar-coordination"
+            (coordination_root / "memory-repos" / "ar-repo-a" / "system").mkdir(parents=True)
+            (coordination_root / "memory-repos" / "ar-repo-a" / "onboarding").mkdir()
+            task_root = coordination_root / "tasks" / "repo-a" / "fix-thing"
+            write_task_doc(
+                task_root,
+                TaskDocument.model_validate(
+                    {
+                        "id": "260707-T1",
+                        "slug": "fix-thing",
+                        "title": "Fix Thing",
+                        "kind": "light",
+                        "status": "inProgress",
+                        "repo": "repo-a",
+                        "createdAt": "2026-07-07T10:00",
+                    }
+                ),
+            )
+
+            result = worktree_manager.start_result(
+                worktree_manager.WorktreeArgs(
+                    code_repository_name="repo-a",
+                    workspace_root=workspace,
+                    coordination_root=coordination_root,
+                    code_repository_root=code_repo,
+                    topology="external",
+                    task_name="fix thing",
+                    worktree_name="fix-thing",
+                    memory_mode="disabled",
+                    skip_provider_setup=True,
+                    lifecycle_id="LC-LIGHT",
+                )
+            )
+
+            self.assertEqual(result.returncode, 0)
+            contract = load_contract(leaf_enclosure_path(task_root, "260707-T1"))
+            self.assertEqual((contract.kind, contract.leaf_id), ("leaf", "260707-T1"))
+            self.assertEqual(result.payload["leaf_id"], "260707-T1")
+
+    def test_light_task_start_rejects_wrong_default_ref_with_candidate(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            code_repo = workspace / "repo-a"
+            init_repo(code_repo, "main")
+            coordination_root = workspace / "ar-coordination"
+            (coordination_root / "memory-repos" / "ar-repo-a" / "system").mkdir(parents=True)
+            (coordination_root / "memory-repos" / "ar-repo-a" / "onboarding").mkdir()
+            task_root = coordination_root / "tasks" / "repo-a" / "fix-thing"
+            write_task_doc(
+                task_root,
+                TaskDocument.model_validate(
+                    {
+                        "id": "260707-T1",
+                        "slug": "fix-thing",
+                        "title": "Fix Thing",
+                        "kind": "light",
+                        "status": "inProgress",
+                        "repo": "repo-a",
+                        "createdAt": "2026-07-07T10:00",
+                    }
+                ),
+            )
+
+            result = worktree_manager.start_result(
+                worktree_manager.WorktreeArgs(
+                    code_repository_name="repo-a",
+                    workspace_root=workspace,
+                    coordination_root=coordination_root,
+                    code_repository_root=code_repo,
+                    topology="external",
+                    task_name="fix thing",
+                    worktree_name="wrong-ref",
+                    memory_mode="disabled",
+                    skip_provider_setup=True,
+                )
+            )
+
+            self.assertEqual(result.returncode, 2)
+            self.assertEqual(result.payload["state"], "leaf-ref-not-found")
+            candidates = result.payload.get("candidates")
+            assert isinstance(candidates, list)
+            self.assertIn("repo-a/fix-thing/260707-T1", candidates)
 
     def test_memory_ledger_roundtrip_and_prepend(self) -> None:
         ledger = create_initial_ledger("repo-a", "c1", "m1")

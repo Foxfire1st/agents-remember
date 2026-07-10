@@ -2,11 +2,11 @@
 
 Sessions route by role through the **`l-01-agent-lifecycles`** skill — one lifecycle per agent
 type, selected by exactly three conditions: a spawn-role environment variable runs that role's
-lifecycle, otherwise a role brief as the first message runs that role, otherwise the session is
-developer-facing and runs the **orchestrator** lifecycle. The orchestrator's phase axis is
+lifecycle, otherwise a fresh-session role brief as the first message runs that role, otherwise the
+session is developer-facing and runs the **architect** lifecycle. The architect's phase axis is
 request → trust-checkpoint → reframe-research → decide → build → close. The job type
 (bug / feature / triage / research) is a lens during reframe-research, not a gate.
-The only task-format decision is the orchestrator lifecycle's build-mode step.
+The only task-format decision is the architect lifecycle's build-mode step.
 
 ## Shared Discipline
 
@@ -14,13 +14,13 @@ Every build keeps these rules:
 
 1. Resolve the active context with `c-08-ar-coordination-context-resolver`.
 2. Run drift detection before planning against onboarding.
-3. Wait for developer approval before implementation (the orchestrator lifecycle's plan gate).
+3. Wait for developer approval before implementation (the architect lifecycle's plan gate).
 4. Update onboarding only after approved changes, live per completed plan-section.
 5. Run the checks listed in the resolved memory layer's `system/tools.md` when available.
 
 ## Build Modes
 
-At `decide`, the orchestrator lifecycle picks one of:
+At `decide`, the architect lifecycle picks one of:
 
 ### Research-only exit
 

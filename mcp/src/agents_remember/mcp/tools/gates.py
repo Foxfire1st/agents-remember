@@ -24,8 +24,10 @@ from __future__ import annotations
 
 import time
 from collections.abc import Callable
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, cast
 
+from agents_remember.controlplane.expectation_rows import ExpectationRowStore, write_expectation_row
 from agents_remember.controlplane.gate_policy import (
     DEFAULT_GATE_POLICY,
     SEAM_GATE_KINDS,
@@ -49,6 +51,10 @@ from agents_remember.controlplane.records import (
     expire_gate,
 )
 from agents_remember.controlplane.store import GateStore
+from agents_remember.kernel.agentic_settings import (
+    DEFAULT_EXPECTATION_SLA_SECONDS,
+    load_agentic_settings,
+)
 from agents_remember.observer import observer_root
 from agents_remember.observer.ambient import ambient, build_ask, require_ambient
 from agents_remember.observer.events import now_iso
@@ -67,6 +73,33 @@ def _store(config: McpRuntimeConfig) -> GateStore:
 
 def _inbox_store(config: McpRuntimeConfig) -> OperatorInboxStore:
     return OperatorInboxStore(observer_root(config))
+
+
+def _expectation_store(config: McpRuntimeConfig) -> ExpectationRowStore:
+    return ExpectationRowStore(observer_root(config))
+
+
+def _expectation_sla_seconds(config: McpRuntimeConfig, kind: str) -> float:
+    if getattr(config, "coordination_root", None) is None:
+        return DEFAULT_EXPECTATION_SLA_SECONDS[kind]
+    return load_agentic_settings(config.coordination_root).expectations.sla_for(kind)
+
+
+def _write_verdict_by_row(config: McpRuntimeConfig, gate: GateRecord) -> None:
+    """R2: a gate open atomically writes its ``verdict-by`` expectation row (same call, never a
+    forgettable follow-up)."""
+    if getattr(config, "coordination_root", None) is None:
+        return
+    write_expectation_row(
+        _expectation_store(config),
+        row_id=new_ulid(),
+        now=datetime.now(UTC),
+        kind="verdict-by",
+        sla_seconds=_expectation_sla_seconds(config, "verdict-by"),
+        source_id=gate.id,
+        subject_lifecycle_id=gate.lifecycleId,
+        note=f"verdict-by: {gate.kind} gate {gate.id}",
+    )
 
 
 def _resolve_gate_lifecycle_id(lifecycle_id: str | None) -> str:
@@ -157,6 +190,7 @@ def gate_create_payload(
         evidence_refs=evidence_refs,
     )
     store.append(gate)
+    _write_verdict_by_row(config, gate)
     return _tool_payload(
         "gate_create",
         {
@@ -266,6 +300,7 @@ def lifecycle_gate_payload(
         evidence_refs=evidence_refs,
     )
     store.append(gate)
+    _write_verdict_by_row(config, gate)
     if not wait:
         return _tool_payload(
             "lifecycle_gate",
@@ -397,6 +432,13 @@ def gate_decide_payload(
     if decision == "cancel":
         store.delete(updated.id, updated.lifecycleId)
         _inbox_store(config).delete_by_gate(updated.id)
+    if getattr(config, "coordination_root", None) is not None:
+        # R2 fulfillment: any terminal decision (approve/reject/cancel) meets the gate's
+        # verdict-by expectation row, stopping the L2 sweep from flagging it overdue.
+        expectations = _expectation_store(config)
+        row = expectations.find_by_source(updated.id, kind="verdict-by")
+        if row is not None:
+            expectations.mark_met(row.id, now=now_iso())
     return _tool_payload(
         "gate_decide",
         {

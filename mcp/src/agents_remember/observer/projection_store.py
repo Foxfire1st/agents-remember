@@ -28,10 +28,12 @@ from agents_remember.observer.events import Event
 from agents_remember.observer.lifecycle_state import TERMINAL_STATES
 from agents_remember.observer.paths import observer_root
 from agents_remember.observer.projection import (
+    TASK_DOCUMENTS_PAYLOAD_BUDGET_BYTES,
     LedgerNode,
     RouteCoverageNode,
     SidecarStaleNode,
     WorkspaceProjection,
+    task_documents_body_bytes,
 )
 from agents_remember.observer.reducer import project_workspace
 from agents_remember.observer.snapshots import (
@@ -39,6 +41,7 @@ from agents_remember.observer.snapshots import (
     read_drift_snapshots,
     read_enclosures,
     read_engine_process_facts,
+    read_expectation_rows,
     read_gates,
     read_ledger,
     read_providers,
@@ -67,8 +70,15 @@ LATEST_STATE = "latest-state.json"
 LATEST_METRICS = "latest-metrics.json"
 PROVIDER_REFRESH_TTL_SECONDS = 10.0
 REPO_SURFACE_REFRESH_TTL_SECONDS = 15.0
+# F6 guardrail: the projection ticks every 1s, so a per-tick over-budget warning would be pure spam.
+# Log at most this often -- enough to surface a body-heavy broadcast in the logs without flooding them.
+TASK_DOCUMENTS_PAYLOAD_WARN_INTERVAL_SECONDS = 300.0
 
 logger = logging.getLogger(__name__)
+
+# F6: last time the over-budget task-doc payload warning fired, keyed "at" (an in-place-mutated dict --
+# the codebase idiom for cross-tick module state, e.g. _task_doc_cache -- so no rebinding `global`).
+_last_task_payload_warn: dict[str, datetime] = {}
 
 
 @dataclass(frozen=True)
@@ -80,19 +90,59 @@ class _RepoSurfaceCacheEntry:
 _repo_surface_cache: dict[tuple[tuple[str, str, str], ...], _RepoSurfaceCacheEntry] = {}
 
 
+@dataclass
+class _LifecycleLogCacheEntry:
+    mtime_ns: int
+    size: int
+    log_events: list[Event]
+
+
+# 260707-HFX2-L12 F9/F7: the projection re-read + re-validated EVERY lifecycle's full events.jsonl
+# each 1s tick. Heartbeats append only every 15s (and stop entirely once a leaf is parked past its
+# inactivity cutoff), so most logs are byte-identical between ticks. This cache reuses the parsed
+# event list when a log's (mtime_ns, size) is unchanged, bounding per-tick parse cost to the logs
+# that actually changed. Keyed by log path; pruned to the live set each tick so it cannot leak.
+_lifecycle_log_cache: dict[str, _LifecycleLogCacheEntry] = {}
+
+
 def read_lifecycle_logs(root: Path) -> list[list[Event]]:
-    """Every per-lifecycle log under ``lifecycles/<id>/events.jsonl``, validated."""
+    """Every per-lifecycle log under ``lifecycles/<id>/events.jsonl``, validated (F9/F7-cached).
+
+    Heartbeats are coalesced into ``heartbeat.json`` sidecars, so a heartbeat tick changes one tiny
+    JSON file instead of invalidating the cached parse of the full event log.
+    """
     store = EventStore(root)
     lifecycles_dir = root / "lifecycles"
     if not lifecycles_dir.is_dir():
         return []
     logs: list[list[Event]] = []
+    seen: set[str] = set()
     for entry in sorted(lifecycles_dir.iterdir()):
         if not entry.is_dir():
             continue
-        events = store.read(entry.name)
+        path = entry / "events.jsonl"
+        try:
+            stat = path.stat()
+        except OSError:
+            continue
+        key = str(path)
+        seen.add(key)
+        cached = _lifecycle_log_cache.get(key)
+        if cached is not None and cached.mtime_ns == stat.st_mtime_ns and cached.size == stat.st_size:
+            log_events = cached.log_events
+        else:
+            log_events = store.read_log(entry.name)
+            _lifecycle_log_cache[key] = _LifecycleLogCacheEntry(
+                mtime_ns=stat.st_mtime_ns, size=stat.st_size, log_events=log_events
+            )
+        events = list(log_events)
+        heartbeat = store.read_heartbeat(entry.name)
+        if heartbeat is not None and (not events or heartbeat.ts >= events[-1].ts):
+            events.append(heartbeat)
         if events:
             logs.append(events)
+    for stale in [key for key in _lifecycle_log_cache if key not in seen]:
+        _lifecycle_log_cache.pop(stale, None)
     return logs
 
 
@@ -180,11 +230,12 @@ def project_and_write(
         route_coverage=route_coverage,
         tool_reports=read_tool_reports(coordination_root, now=moment),
         agent_pickups=read_agent_pickups(coordination_root, now=moment),
+        expectation_rows=read_expectation_rows(coordination_root, now=moment),
         ledgers=ledgers,
         task_documents=read_task_documents(coordination_root, enclosures=enclosures, now=moment),
         series=read_series_documents(coordination_root, now=moment),
         engine_process_facts=read_engine_process_facts(
-            coordination_root, active_worktree_groups=engine_groups
+            coordination_root, active_worktree_groups=engine_groups, now=moment
         ),
         engine_start_progress=read_start_progress_entries(coordination_root, now=moment),
         gates=read_gates(coordination_root, now=moment),
@@ -197,8 +248,38 @@ def project_and_write(
     attention_store.prune_lifecycles(
         {lifecycle.id for lifecycle in projection.lifecycles if lifecycle.state not in TERMINAL_STATES}
     )
+    _warn_if_task_documents_payload_over_budget(projection, now=moment)
     write_projection(root, projection)
     return projection
+
+
+def _warn_if_task_documents_payload_over_budget(
+    projection: WorkspaceProjection, *, now: datetime
+) -> int:
+    """Flag (rate-limited) when the broadcast serialises a body-heavy task-doc payload (F6/CS-6 D1).
+
+    Returns the measured body-byte cost so callers/tests can assert on it. This is observability only --
+    no truncation, no contract change -- surfacing the unbounded ``analytics.taskDocuments`` payload that
+    the escalated F6 windowing follow-up will bound, so the growth is visible in logs instead of silent.
+    """
+    payload_bytes = task_documents_body_bytes(projection.analytics.taskDocuments)
+    if payload_bytes <= TASK_DOCUMENTS_PAYLOAD_BUDGET_BYTES:
+        return payload_bytes
+    last = _last_task_payload_warn.get("at")
+    if last is not None:
+        age = (now - last).total_seconds()
+        if 0 <= age < TASK_DOCUMENTS_PAYLOAD_WARN_INTERVAL_SECONDS:
+            return payload_bytes
+    _last_task_payload_warn["at"] = now
+    logger.warning(
+        "analytics.taskDocuments broadcast body payload %d bytes exceeds budget %d across %d docs; "
+        "task-doc bodies are serialised into every projection tick -- F6 windowing (bodies on-demand) "
+        "is the follow-up that bounds this",
+        payload_bytes,
+        TASK_DOCUMENTS_PAYLOAD_BUDGET_BYTES,
+        len(projection.analytics.taskDocuments),
+    )
+    return payload_bytes
 
 
 def _gather_repo_surfaces(

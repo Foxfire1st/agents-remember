@@ -11,16 +11,27 @@ throwaway event log can always be cleaned up regardless of lifecycle type.
 from __future__ import annotations
 
 import json
+import os
+import shutil
 from collections.abc import Iterator
 from contextlib import suppress
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+from agents_remember.observer.store import (
+    HEARTBEAT_KIND,
+    WORKSPACE_SOURCE,
+    set_workspace_base_offset,
+    workspace_base_offset,
+    workspace_river_lock,
+)
+
 # Legacy terminal grace, kept for the explicit ``lifecycle.ended`` reader and the
 # workspace TTL below.
 LIFECYCLE_EVENT_GRACE_SECONDS = 60 * 60
 WORKSPACE_EVENT_TTL_SECONDS = 60 * 60
+WORKSPACE_EVENT_COMPACT_INTERVAL_SECONDS = 60.0
 # Inactivity TTLs: how long a log may sit with no real (non-heartbeat) activity
 # before the dashboard retires it. Fleeting sessions and enclosure-backed
 # (promoted) lifecycles get their own knob even though they currently match.
@@ -29,8 +40,6 @@ ENCLOSURE_INACTIVE_GRACE_SECONDS = 60 * 60
 # A fresh connection replays at most this much recent history per active source,
 # so a reload never re-streams an entire long-lived log from byte zero.
 REPLAY_WINDOW_SECONDS = 60 * 60
-WORKSPACE_SOURCE = "workspace"
-HEARTBEAT_KIND = "lifecycle.heartbeat"
 
 
 def initial_event_offsets(root: Path, *, now: datetime) -> dict[str, int]:
@@ -55,7 +64,8 @@ def initial_event_offsets(root: Path, *, now: datetime) -> dict[str, int]:
 
     workspace = root / WORKSPACE_SOURCE / "events.jsonl"
     if workspace.is_file():
-        offsets[WORKSPACE_SOURCE] = _first_retained_offset(
+        base_offset = workspace_base_offset(root)
+        offsets[WORKSPACE_SOURCE] = base_offset + _first_retained_offset(
             workspace, cutoff=now - timedelta(seconds=WORKSPACE_EVENT_TTL_SECONDS)
         )
     return offsets
@@ -88,11 +98,66 @@ def prune_expired_lifecycle_event_logs(
             continue  # part of a live master series -> never pruned by inactivity
         if not lifecycle_is_dormant(path, now=now):
             continue
-        path.unlink()
+        # F7 reclamation owns the whole dormant lifecycle directory, not only events.jsonl.
+        # Heartbeats are coalesced into heartbeat.json and served-onboarding state may also live
+        # beside the log; unlinking only the log makes every such directory permanently
+        # unreapable. The lifecycle is dormant and unprotected at this point, so reclaim the
+        # complete directory through the same project-and-prune boundary.
+        shutil.rmtree(entry)
         removed.append(path)
-        with suppress(OSError):
-            entry.rmdir()
     return removed
+
+
+def compact_workspace_river(
+    root: Path, *, now: datetime, ttl_seconds: float = WORKSPACE_EVENT_TTL_SECONDS
+) -> int:
+    """Reclaim ``workspace/events.jsonl`` rows older than the replay TTL (F3/CS-6 D3).
+
+    The per-lifecycle logs are reclaimed wholesale by :func:`prune_expired_lifecycle_event_logs`, but
+    the shared workspace river is a single append-only file that is never deleted -- so it is the one
+    river that grows unbounded on disk, even though a fresh connection already only replays its last
+    ``WORKSPACE_EVENT_TTL_SECONDS`` (:func:`initial_event_offsets`). Rows older than that window are
+    therefore never streamed to any client and are safe to drop physically.
+
+    CURSOR-SAFETY: live ``/api/events`` clients carry a VIRTUAL byte offset for the workspace source.
+    Physical compaction increases ``events.cursor.json::baseOffset`` by the bytes dropped, so a cursor
+    issued before compaction still maps onto the same retained tail after the rewrite. The compactor and
+    the two workspace writers share ``events.lock`` through :func:`workspace_river_lock`, so no process
+    appends into a file another process is replacing.
+
+    Returns the number of rows reclaimed.
+    """
+    path = root / WORKSPACE_SOURCE / "events.jsonl"
+    if not path.is_file():
+        return 0
+    with workspace_river_lock(root):
+        cutoff = now - timedelta(seconds=ttl_seconds)
+        retained_start: int | None = None
+        dropped = 0
+        for start, _offset_after, payload in _iter_event_payloads(path):
+            ts = _event_time(payload)
+            if ts is None or ts >= cutoff:
+                retained_start = start
+                break
+            dropped += 1
+        if dropped == 0:
+            return 0
+        if retained_start is None:
+            # Every row aged out -> truncate to an empty (but present) source file.
+            retained_start = path.stat().st_size
+        with path.open("rb") as handle:
+            handle.seek(retained_start)
+            retained = handle.read()
+        tmp = path.with_name(f".{path.name}.compact.{os.getpid()}.tmp")
+        try:
+            tmp.write_bytes(retained)
+            os.replace(tmp, path)
+            set_workspace_base_offset(root, workspace_base_offset(root) + retained_start)
+        except BaseException:
+            with suppress(OSError):
+                tmp.unlink()
+            raise
+        return dropped
 
 
 def lifecycle_is_dormant(path: Path, *, now: datetime) -> bool:

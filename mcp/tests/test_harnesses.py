@@ -57,8 +57,8 @@ class HarnessRegistryTests(unittest.TestCase):
 
 class KnobMappingTests(unittest.TestCase):
     """The per-harness knob→flag mapping (260703-L16): claude maps model/effort onto its launch
-    flags with a two-vehicle effort vocabulary (flag values vs session values); a mapping-less
-    harness (codex, pi) stays env-only and enforces no vocabulary."""
+    flags with a two-vehicle effort vocabulary (flag values vs session values); Codex maps its
+    real API enum onto ``--config``; Pi remains env-only."""
 
     def _claude(self):
         claude = find_harness("claude")
@@ -101,15 +101,27 @@ class KnobMappingTests(unittest.TestCase):
         self.assertIsNone(invalid_effort_detail(self._claude(), "max"))
         self.assertIsNone(invalid_effort_detail(self._claude(), "ultracode"))
 
-    def test_mapping_less_harnesses_are_env_only_and_unvalidated(self) -> None:
-        for harness_id in ("codex", "pi"):
-            harness = find_harness(harness_id)
-            assert harness is not None
-            self.assertEqual(knob_argv(harness, model="gpt-5", effort="anything"), [])
-            self.assertEqual(effort_session_commands(harness, "anything"), [])
-            self.assertEqual(effort_vocabulary(harness), ())
-            # No vocabulary means no refusal: the knobs ride the spawn env untouched.
-            self.assertIsNone(invalid_effort_detail(harness, "anything"))
+    def test_codex_knobs_use_explicit_argv_and_pi_remains_env_only(self) -> None:
+        codex = find_harness("codex")
+        pi = find_harness("pi")
+        assert codex is not None and pi is not None
+        self.assertEqual(
+            knob_argv(codex, model="gpt-5.6-sol", effort="xhigh"),
+            ["--model", "gpt-5.6-sol", "--config", "model_reasoning_effort=xhigh"],
+        )
+        self.assertIn("medium", effort_vocabulary(codex))
+        self.assertEqual(
+            effort_vocabulary(codex),
+            ("none", "minimal", "low", "medium", "high", "xhigh"),
+        )
+        for invalid in ("max", "ultracode", "auto", "anything"):
+            detail = invalid_effort_detail(codex, invalid)
+            self.assertIsNotNone(detail)
+            self.assertIn("none, minimal, low, medium, high, xhigh", detail or "")
+        self.assertEqual(knob_argv(pi, model="gpt-5", effort="anything"), [])
+        self.assertEqual(effort_session_commands(pi, "anything"), [])
+        self.assertEqual(effort_vocabulary(pi), ())
+        self.assertIsNone(invalid_effort_detail(pi, "anything"))
 
 
 class DetectionTests(unittest.TestCase):

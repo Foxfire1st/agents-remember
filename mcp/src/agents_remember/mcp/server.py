@@ -55,6 +55,8 @@ from .tools import (
     route_index_refresh_payload,
     runtime_install_payload,
     server_info_payload,
+    session_rename_payload,
+    session_retire_payload,
     skills_install_payload,
     spawn_agent_session_payload,
     switch_lifecycle_payload,
@@ -134,7 +136,11 @@ def create_server(config: McpRuntimeConfig) -> Any:
         return read_ar_files_payload(config, repo_id, files, refresh=refresh)
 
     @server.tool()
-    def attach_terminal_session_to_leaf(session_id: str, leaf_key: str) -> dict[str, Any]:
+    def attach_terminal_session_to_leaf(
+        session_id: str,
+        leaf_key: str,
+        role: str | None = None,
+    ) -> dict[str, Any]:
         """Move an existing hosted terminal/chat session to a durable task leaf.
 
         Reuses the dashboard terminal catalog's server-authoritative `(leaf, role)` uniqueness
@@ -145,12 +151,14 @@ def create_server(config: McpRuntimeConfig) -> Any:
             config,
             session_id=session_id,
             leaf_key=leaf_key,
+            role=role,
         )
 
     @server.tool()
     def spawn_agent_session(
         harness: str | None = None,
         leaf_key: str | None = None,
+        replacement_for_leaf: str | None = None,
         context: str | None = None,
         submit: bool = False,
         label: str | None = None,
@@ -170,37 +178,36 @@ def create_server(config: McpRuntimeConfig) -> Any:
         Composes the EXISTING session primitives so an orchestrator can spawn a manager and a manager
         a worker without dashboard clicks: create a hosted session via the serving opener, attach it
         to `leaf_key` (server-arbitrated uniqueness — a taken leaf returns status 'leaf-taken', never
-        overridden), seed the role knobs (`model`/`effort`/`env` injected as spawn env — the terminal
-        host's `tmux new-session -e KEY=VALUE` seam — AND mapped onto the harness argv per-harness
-        via the registry: claude gets `--model`/`--effort`; a mapping-less harness stays env-only),
-        and deliver `context` as an echo-confirmed bracketed paste. `effort` is validated against the
-        resolved harness's known vocabulary BEFORE spawning: an unknown value returns status
-        'effort-invalid' naming the harness and its valid sets (the CLI would warn-and-silently-
-        degrade); a session-level value (claude 'ultracode') is delivered as a post-launch session
-        command instead of the flag. The free-form escape hatch is never validated, only recorded in
-        spawn provenance: `launch_args` (appended to the harness argv verbatim), `session_commands`
-        (each line pasted + submitted into the fresh session BEFORE the brief), `prompt_keywords`
-        (prepended as the first line of the brief paste — session modes the model interprets).
+        overridden), resolve the role knobs from developer-owned agentic settings, seed resolved
+        `model`/`effort` into spawn env, map them onto the harness argv per-harness via the registry,
+        and deliver `context` as an id-bearing, harness-log-confirmed paste. Ordinary callers declare
+        the seat (`env.AR_SPAWN_ROLE`) and dispatch `level`; they do not choose harness/model/effort or direct
+        launch/session spend controls. Legacy non-null `harness`, `model`, `effort`, `launch_args`,
+        `prompt_keywords`, `session_commands`, `env.AR_SPAWN_MODEL`, `env.AR_SPAWN_EFFORT`, or
+        harness-native spend/endpoint env keys such as `ANTHROPIC_MODEL` and `OPENAI_BASE_URL`
+        return status 'spend-override-unsupported' before spawning, with guidance to configure
+        `orchestration.roles`, `orchestration.rolesPerLevel`, `orchestration.spawn`, or
+        `orchestration.harnesses` instead.
+        An unbound replacement declares its actual work with `replacement_for_leaf`; that provenance
+        is the leaf-chain discriminator while `leaf_key` remains free for the occupied role seat.
         `level` declares the dispatch level (leaf|master|portfolio, default leaf — a manager
         dispatching leaf seats passes leaf, the seam reviewer master, portfolio seats portfolio):
-        unset knobs resolve from the agentic settings as `orchestration.rolesPerLevel[level]`
-        deep-merged over the flat `orchestration.roles` default, keyed by the AR_SPAWN_ROLE riding
-        `env`; the resolved level + source land in spawn provenance.
-        `submit=true` presses Enter so a worker auto-starts; leave it false for a
-        draft. `harness` is optional: explicit values are validated against the detection set; omitted,
-        it resolves per-use from the agentic settings (role knobs, else repo-local
-        `<repo>/system/settings.json` over the global coordination-root file,
-        `orchestration.spawn.harness`; the repo comes from the
-        qualified leaf key), else the first detected registry harness. Each spawned session
-        is its own harness process (the ambient-lifecycle singleton is untouched). Spawned-by
-        provenance (`spawned_by_session` + the active/`spawned_by_lifecycle` lifecycle) is recorded on
-        the catalog row so the dashboard can render the orchestration tree. Status 'spawned' on
-        success; 'harness-unknown'/'harness-not-detected'/'effort-invalid'/'model-invalid'/
-        'level-invalid'/'bad-kind' are pre-spawn refusals."""
+        knobs resolve from the agentic settings as `orchestration.rolesPerLevel[level]` deep-merged
+        over the flat `orchestration.roles` default, keyed by the AR_SPAWN_ROLE riding `env`; the
+        resolved level + source land in spawn provenance. `submit=true` presses Enter so a worker
+        auto-starts; leave it false for a draft. If role settings do not choose a harness, the
+        dispatch falls through to repo-local/global `orchestration.spawn.harness`, then the first
+        detected registry harness. Each spawned session is its own harness process (the
+        ambient-lifecycle singleton is untouched). Spawned-by provenance (`spawned_by_session` + the
+        active/`spawned_by_lifecycle` lifecycle) is recorded on the catalog row so the dashboard can
+        render the orchestration tree. Status 'spawned' on success; 'spend-override-unsupported',
+        'harness-unknown'/'harness-not-detected'/'effort-invalid'/'model-invalid'/'level-invalid'/
+        'bad-kind' are pre-spawn refusals."""
         return spawn_agent_session_payload(
             config,
             harness=harness,
             leaf_key=leaf_key,
+            replacement_for_leaf=replacement_for_leaf,
             context=context,
             submit=submit,
             label=label,
@@ -215,6 +222,41 @@ def create_server(config: McpRuntimeConfig) -> Any:
             spawned_by_lifecycle=spawned_by_lifecycle,
             kind=kind,
         )
+
+    @server.tool()
+    def session_retire(
+        actor_session_id: str,
+        session_id: str,
+        reason: str = "manual retire",
+    ) -> dict[str, Any]:
+        """Retire a tracked chat/terminal session (260707-HFX-L8, issue #12): kill its tmux session,
+        mark the catalog row terminated with retirement provenance (who/why/when/edge), and remove
+        it from the active rail. Transcripts are never deleted.
+
+        `actor_session_id` is the RETIRING seat's own catalog session id (self-declared -- there is
+        no ambient "who am I" resolution, mirroring `spawn_agent_session`'s `spawned_by_session`).
+        Authority is enforced server-side and refusals are loud and policy-naming: a seat never
+        retires itself (`retire-refused`); a manager may retire only worker/reviewer seats of its
+        OWN master; the orchestrator may retire any seat, including a completed manager. Status
+        'retired' on success, 'already-retired' when the target was already terminated (idempotent),
+        'unknown-session'/'unknown-actor' when a session id has no catalog row, 'retire-refused' for
+        every authority-policy refusal."""
+        return session_retire_payload(
+            config,
+            actor_session_id=actor_session_id,
+            session_id=session_id,
+            reason=reason,
+        )
+
+    @server.tool()
+    def session_rename(session_id: str, label: str) -> dict[str, Any]:
+        """Update a chat/terminal session's display label post-spawn (260707-HFX-L8, issue #4).
+
+        Identity text only: the seat's spawned role never changes (L6 role-seat immutability). The
+        FIRST rename freezes the original spawn-time label into spawn provenance for audit (later
+        renames leave it alone). Status 'renamed' on success, 'unknown-session' when the session has
+        no catalog row or is already retired."""
+        return session_rename_payload(config, session_id=session_id, label=label)
 
     @server.tool()
     def runtime_install(

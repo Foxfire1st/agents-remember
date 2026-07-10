@@ -46,6 +46,13 @@ class BenchmarkPrepareRequest:
     skill_exposure_mode: str = "copy"
     force_clone: bool = False
     provider_timeout: int = 1800
+    # Containment R1 (260707-HFX-L1): the live MCP authority's provider ids. The
+    # MCP controllers always pass this; manifest-requested providers outside the
+    # set are skipped (and reported), never armed or launched. None = no
+    # authority context (direct script use) and is FAIL-CLOSED by the consumer
+    # (workspace.filter_benchmark_provider_ids) unless
+    # AR_BENCHMARK_ALLOW_UNFILTERED_PROVIDERS=1 — the explicit developer act.
+    allowed_provider_ids: tuple[str, ...] | None = None
 
 
 @dataclass(frozen=True)
@@ -63,3 +70,5 @@ class BenchmarkRunRequest:
     force_clone: bool = False
     provider_timeout: int = 1800
     codex_sandbox: str = CODEX_BENCHMARK_SANDBOX
+    # See BenchmarkPrepareRequest.allowed_provider_ids (containment R1).
+    allowed_provider_ids: tuple[str, ...] | None = None

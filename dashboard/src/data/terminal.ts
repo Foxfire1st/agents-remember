@@ -270,7 +270,7 @@ export interface HarnessInfo {
   detected: boolean;
 }
 
-export type TerminalSessionStatus = "running" | "exited" | "terminated";
+export type TerminalSessionStatus = "running" | "exited" | "landed" | "terminated";
 
 export interface TerminalSessionInfo {
   id: string;
@@ -281,14 +281,24 @@ export interface TerminalSessionInfo {
   /** The durable leaf-identity key (qualified leaf id `repo/master/leaf-id`) this chat claims. */
   leafKey?: string;
   /** The AR_SPAWN_ROLE recorded at spawn (L14): the l-01 role this session was dispatched AS
-   *  (orchestrator/strategist/manager/worker/reviewer/designer). Absent on hand-opened sessions. */
+   *  (architect/orchestrator/strategist/manager/worker/curator/reviewer/designer). Absent on hand-opened sessions. */
   spawnRole?: string;
+  /** The role occupying the leaf binding. Hand-opened sessions gain this at attach time. */
+  seatRole?: string;
   cwd: string;
   tmuxName: string;
   createdAt: string;
   lastAttachedAt: string;
   status: TerminalSessionStatus;
   terminatedAt?: string;
+  landedAt?: string;
+  landedReason?: string;
+  landedEdge?: string;
+  spawnedBySession?: string;
+  spawnedByLifecycle?: string;
+  spawnedLabel?: string;
+  turnState?: string;
+  turnStateChangedAt?: string;
 }
 
 interface OpenTerminalOptions {
@@ -374,17 +384,48 @@ export async function terminateTerminalSession(sessionId: string, base = ""): Pr
   }
 }
 
-/** The outcome of a leaf-attach POST: bound, refused (the leaf already has a running chat), or failed. */
+export interface LandedCleanupResult {
+  closed: number;
+  skipped: number;
+  closedSessions: string[];
+  skippedSessions: Array<{ session: string; reason: string }>;
+}
+
+export async function cleanupLandedTerminalSessions(
+  sessionIds: string[],
+  base = "",
+): Promise<LandedCleanupResult | null> {
+  try {
+    const response = await fetch(`${base}/api/terminal/landed-cleanup`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ sessionIds }),
+    });
+    if (!response.ok) return null;
+    const body = (await response.json()) as Partial<LandedCleanupResult>;
+    return {
+      closed: typeof body.closed === "number" ? body.closed : 0,
+      skipped: typeof body.skipped === "number" ? body.skipped : 0,
+      closedSessions: Array.isArray(body.closedSessions) ? body.closedSessions : [],
+      skippedSessions: Array.isArray(body.skippedSessions) ? body.skippedSessions : [],
+    };
+  } catch {
+    return null;
+  }
+}
+
+/** The outcome of a leaf-attach POST: bound, refused (the pair already has a live owner), or failed. */
 export type AttachLeafResult = "ok" | "leaf-taken" | "error";
 
 /**
- * Claim a free leaf for an EXISTING session (slice L5): `POST /api/terminal/{id}/attach-leaf {leafKey}`.
- * The server is the uniqueness arbiter — `200` binds the leaf, `409` means another running chat already
- * owns it (`"leaf-taken"`), any other status / network failure is `"error"`. Enclosure-independent.
+ * Claim one leaf-role pair for an existing session. The server is the uniqueness arbiter: `200`
+ * atomically binds the pair, `409` means another live session owns that same pair, and any other
+ * status or network failure is `"error"`. Enclosure-independent.
  */
 export async function attachSessionToLeaf(
   sessionId: string,
   leafKey: string,
+  role: string,
   base = "",
 ): Promise<AttachLeafResult> {
   try {
@@ -393,7 +434,7 @@ export async function attachSessionToLeaf(
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ leafKey }),
+        body: JSON.stringify({ leafKey, role }),
       },
     );
     if (response.ok) return "ok";

@@ -1154,6 +1154,9 @@ class HandoverEnforcementHelperTests(unittest.TestCase):
         config = SimpleNamespace(
             coordination_root=self.coord,
             orchestration=SimpleNamespace(gate_policy=HANDOVER_SEAM_POLICY),
+            # The auto-land hook is orthogonal to this test's gate-policy-plumbing
+            # focus -- disabled so it never fires against this fake, unattached contract.
+            retirement=SimpleNamespace(auto_land_on_integration=False),
         )
         with mock.patch.object(
             worktree_tools.git_worktree_manager,

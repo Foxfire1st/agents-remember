@@ -1,6 +1,6 @@
 ---
 name: c-09-git-worktree-manager
-description: "Create, attach to, report on, integrate, finalize, and clean up Agents Remember worktree-backed tasks while preserving human approval gates and external-memory compatibility."
+description: "Create, attach to, report on, integrate, finalize, and clean up Agents Remember worktree-backed tasks while preserving delegated/human approval gates and external-memory compatibility."
 ---
 
 # c-09-git-worktree-manager Git Worktree Manager
@@ -75,11 +75,14 @@ The intended order is:
    integration branch and integrates back into it. For a nested master, create
    the child integration branch from the parent integration branch.
 6. choose or review the task slug and workflow variables
-7. **hand off** the **Worktree Intent Gate** (notify-and-continue) for explicit developer approval
+7. establish the applicable worktree-start authority: for standalone/new work, hand off the
+   **Worktree Intent Gate** for explicit developer approval; for subordinate leaves/edges inside an
+   accepted orchestrated series, record the accepted-series authority and continue without a new
+   developer hand-off
 8. create the durable task wrapper when one is needed
 9. request the `worktree_start` MCP tool only after the task identity is stable, the
    correct landable `source_branch` is selected, external memory is clean, and
-   the developer approved the intent packet
+   the applicable authority has been recorded
 
 The Worktree Intent Gate must name:
 
@@ -97,7 +100,7 @@ visible: leaf work branches integrate into the pushable integration/source branc
 recorded by their enclosure; protected targets are reached later through the
 repo's PR flow.
 
-Run the applicable dry-run/preflight first, then **hand off**: call
+For developer-gated starts, run the applicable dry-run/preflight first, then **hand off**: call
 `lifecycle_turn_end_notification(summary={…the intent packet + the approve/revise ask…})` as the **last
 tool call**, then deliver the intent packet as your final prose and **STOP / end your turn**. The
 notification sets the `awaiting-developer` lifecycle state, surfaces a
@@ -105,6 +108,10 @@ dashboard attention item, and returns immediately (no wait, no inbox). The devel
 dashboard or in the leaf's attached chat; the **first AR tool call of your next turn** auto-resumes the
 lifecycle (`running`), clears the attention item, and proceeds to `worktree_start` — you send no explicit
 `lifecycle_resume`.
+
+For subordinate orchestrated-series starts, do the same dry-run/preflight, record the accepted
+planner/series authority in the task decision log or worktree intent note, and continue. Do not add
+a developer stop for every leaf worktree.
 
 Parked fallback: the block-and-wait `lifecycle_gate` junction (plus the operator inbox and dashboard
 GateResponder) still works if you deliberately raise it for a durable, developer-attributed,
@@ -190,19 +197,27 @@ quality gate, memory content commit, ledger update, and ledger commit.
 
 For worktree-backed tasks, pass the leaf enclosure `series-contract.md` to
 `worktree_closeout_preview` / `worktree_closeout_apply`. The apply step records
-the developer's explicit commit approval in the contract and updates the
-contract closeout state after the code, memory, and ledger commits are created.
+the applicable closeout authority in the contract and updates the contract closeout state after the
+code, memory, and ledger commits are created.
 
 Worktree closeout stops if the recorded code or external-memory source branch
 moved since task start.
 
 ## Integration
 
-Integration is explicitly human-gated and runs only after closeout completed. It lands the closed task branches back onto the recorded source branches and records the landed commits separately from the closeout commits. Orchestrated-run carve-out (ruled 2026-07-06): dependency-ordered leaf→master and master→super integrations ride the series' standing approval (the developer's portfolio-gate approval recorded in the planner master) — the developer hand-off concentrates at the super PR/carry-over gate per the `l-01-agent-lifecycles` loop/orchestrator doctrine; a raised durable `integration-approval` gate still awaits the developer.
+Integration runs only after closeout completed and is authority-gated by context. It lands the
+closed task branches back onto the recorded source branches and records the landed commits
+separately from the closeout commits. In an accepted orchestrated run, dependency-ordered
+leaf→master and master→super integrations ride the series' standing approval (the developer's
+portfolio-gate approval recorded in the planner master) — the developer hand-off concentrates at
+the super PR/carry-over gate per the `l-01-agent-lifecycles` loop/orchestrator doctrine. A raised
+durable `integration-approval` gate still awaits the developer.
 
 On an orchestrated master's exit (master → super integration) the integrate step additionally enforces the delegated `master-handover-approval` seam: an undecided or policy-invalid handover gate addressed to the master (by `enclosure` = master task name) returns `handover-gate-blocked` instead of landing — decide the gate per the `l-01-agent-lifecycles` seam doctrine, then rerun. When no gate addresses the integrating master but open `master-handover-approval` gates exist elsewhere, integrate still proceeds and its result carries a `handover_gate_warning` naming them — treat it as a spelling check on the raised gate's `enclosure`.
 
-Run `worktree_integrate(..., dry_run=true)` first, then **hand off**: call
+Run `worktree_integrate(..., dry_run=true)` first. For subordinate accepted-series integrations,
+record the standing series authority and then run the real integration without a developer stop.
+For developer-gated integrations, **hand off**: call
 `lifecycle_turn_end_notification(summary={…the integration plan…})` as the **last tool call**, then
 deliver the integration preview as your final prose and **STOP**.
 The developer approves on the dashboard or in chat; the first AR tool call of your next turn auto-resumes
@@ -228,9 +243,17 @@ After successful integration, complete any repo-specific landing tail first: pus
 
 ## Lifecycle Finalization And Cleanup
 
-Lifecycle finalization is explicitly human-gated and runs only after closeout, integration, and any PR/carryover tail are complete. It proves the current parent-child branch edge, then removes the recorded code and memory worktrees, deletes local task branches only when Git can prove they are merged, removes empty worktree group folders when safe, records `cleanup: completed` in the contract, and updates task documents.
+Lifecycle finalization runs only after closeout, integration, and any PR/carryover tail are
+complete, and its approval authority follows the same series boundary. For subordinate
+accepted-series leaf/master edges, the owning manager/orchestrator may finalize and clean up after
+the dry-run proves the landed edge. For final super→main cleanup, standalone work, or a deliberately
+raised `cleanup-approval` gate, stop for developer approval. Finalization proves the current
+parent-child branch edge, then removes the recorded code and memory worktrees, deletes local task
+branches only when Git can prove they are merged, removes empty worktree group folders when safe,
+records `cleanup: completed` in the contract, and updates task documents.
 
-Run `lifecycle_finalize_task(..., dry_run=true)` first, then **hand off**: call
+Run `lifecycle_finalize_task(..., dry_run=true)` first. For subordinate accepted-series cleanup,
+record the standing authority and run the real finalizer. For developer-gated cleanup, **hand off**: call
 `lifecycle_turn_end_notification(summary={…what cleanup removes…})` as the **last tool call**, then relay
 the landed-commit proof, cleanup plan, and task-document updates as your final prose and **STOP**. The developer approves
 on the dashboard or in chat; the first AR tool call of your next turn auto-resumes and runs
@@ -277,11 +300,16 @@ then proceeds as usual, including closeout → integrate → finalize.
 2. The `c-09-git-worktree-manager` skill does not initialize memory roots; use the `c-00-initialize-memory-repo` skill before starting external-memory worktrees.
 3. Closeout belongs to the `c-12-closeout` skill; the `c-09-git-worktree-manager` skill only supplies worktree contract context.
 4. The `c-09-git-worktree-manager` skill must not use divergent memory as semi-trusted reference context.
-5. The `c-09-git-worktree-manager` skill must not bypass the `c-12-closeout` skill's explicit closeout approval gate.
+5. The `c-09-git-worktree-manager` skill must not bypass the `c-12-closeout` skill's applicable
+   closeout authority gate.
 6. The `c-09-git-worktree-manager` skill must not create closeout commits outside the `c-12-closeout` skill's code-memory-ledger sequence.
 7. The `c-09-git-worktree-manager` skill must not call `worktree_start` until
-   the developer has approved the Worktree Intent Gate.
-8. The `c-09-git-worktree-manager` skill must not move source branches during integration until replay/preflight has produced fast-forwardable code and memory commits and explicit integration approval exists.
-9. The `c-09-git-worktree-manager` skill must not finalize or clean up without explicit cleanup/finalization approval.
+   the applicable authority has been recorded: developer-approved Worktree Intent Gate for
+   standalone/new work, or accepted-series authority for subordinate orchestrated work.
+8. The `c-09-git-worktree-manager` skill must not move source branches during integration until
+   replay/preflight has produced fast-forwardable code and memory commits and applicable
+   integration authority exists.
+9. The `c-09-git-worktree-manager` skill must not finalize or clean up without applicable
+   cleanup/finalization authority.
 10. The `c-09-git-worktree-manager` skill must not treat squash-merged content as a normal landed edge.
 11. The `c-08-ar-coordination-context-resolver` skill remains the facts-only resolver; the `c-09-git-worktree-manager` skill owns worktree and lifecycle mutation.

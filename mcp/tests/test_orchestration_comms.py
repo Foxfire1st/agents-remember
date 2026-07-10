@@ -67,6 +67,42 @@ class ArtifactHelperTests(unittest.TestCase):
         )
         self.assertEqual(packet.toRole, "orchestrator")
 
+    def test_curator_escalates_to_manager(self) -> None:
+        packet = escalation_packet(
+            from_role="curator",
+            reason="blocked",
+            subject="leaf memory pass",
+            summary="Changed-path evidence is missing.",
+        )
+        self.assertEqual(packet.toRole, "manager")
+
+    def test_system_specialist_escalates_to_orchestrator(self) -> None:
+        packet = escalation_packet(
+            from_role="system-specialist",
+            reason="blocked",
+            subject="provider degradation report",
+            summary="The provider issue is not fixable in-session.",
+        )
+        self.assertEqual(packet.toRole, "orchestrator")
+
+    def test_orchestrator_escalates_to_architect(self) -> None:
+        packet = escalation_packet(
+            from_role="orchestrator",
+            reason="plan-delta",
+            subject="portfolio decision",
+            summary="A backend decision needs the drawing board.",
+        )
+        self.assertEqual(packet.toRole, "architect")
+
+    def test_architect_escalates_to_developer(self) -> None:
+        packet = escalation_packet(
+            from_role="architect",
+            reason="plan-delta",
+            subject="ruling",
+            summary="The developer must choose between two accepted directions.",
+        )
+        self.assertEqual(packet.toRole, "developer")
+
 
 class NudgePolicyTests(unittest.TestCase):
     def test_missing_artifact_flags_absent_or_empty_report(self) -> None:

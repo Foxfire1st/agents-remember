@@ -49,6 +49,10 @@ from agents_remember.controlplane.gate_policy import (
     make_gate_policy,
     named_gate_policy,
 )
+from agents_remember.controlplane.inbox_backoff import (
+    DEFAULT_RATE_LIMIT_SECONDS,
+    MIN_REDELIVERY_INTERVAL_SECONDS,
+)
 from agents_remember.controlplane.records import GateKind, coerce_gate_kind
 from agents_remember.errors import AgentsRememberError
 from agents_remember.serving.harnesses import HARNESSES, Harness
@@ -69,6 +73,9 @@ KNOWN_ORCHESTRATION_FIELDS = frozenset(
         "concurrency",
         "spawn",
         "harnesses",
+        "expectations",
+        "supervisor",
+        "escalation",
     }
 )
 # One ``orchestration.harnesses.<id>`` entry (260703-L16): define a NEW harness or override a
@@ -95,13 +102,105 @@ KNOWN_LOOP_LEVEL_FIELDS = frozenset({"loop"})
 # The dispatch-time complexity scale (blast radius x novelty x size) the loop
 # thresholds are expressed on (l-01 The Three-Party Loop).
 COMPLEXITY_SCALE = ("low", "medium", "high")
-# The six portable role lifecycles the l-01 registry defines.
-KNOWN_ROLES = frozenset({"orchestrator", "designer", "strategist", "manager", "worker", "reviewer"})
+# The nine portable role lifecycles the l-01 registry defines.
+KNOWN_ROLES = frozenset(
+    {
+        "architect",
+        "orchestrator",
+        "designer",
+        "strategist",
+        "manager",
+        "worker",
+        "curator",
+        "reviewer",
+        "system-specialist",
+    }
+)
 KNOWN_ROLE_KNOB_FIELDS = frozenset(
     {"harness", "model", "effort", "launchArgs", "promptKeywords", "sessionCommands"}
 )
 KNOWN_CONCURRENCY_FIELDS = frozenset({"maxParallelMasters", "maxParallelLeaves", "maxSubAgents"})
 KNOWN_SPAWN_FIELDS = frozenset({"harness"})
+# R1/R5 (260707-HFX2-L2): the deterministic supervisor sweep's own knobs -- interval, enable
+# flag, self-liveness staleness cutoff, inbox redelivery rate limit, and owner-signal cooldown.
+KNOWN_SUPERVISOR_FIELDS = frozenset(
+    {
+        "enabled",
+        "intervalSeconds",
+        "staleCutoffSeconds",
+        "redeliverRateLimitSeconds",
+        "signalCooldownSeconds",
+        "redeliverBudget",
+        "escalationBudget",
+    }
+)
+# R1 (260707-HFX2-L4): the escalation ladder's own knobs -- per-kind ack SLA, per-rung timings,
+# the renudge rate limit (reusing the OrchestrationNudgeStore rate-limit pattern), and the rung a
+# silent seat is marked suspect-for-respawn at (R3).
+KNOWN_ESCALATION_FIELDS = frozenset(
+    {"slaSeconds", "rungSeconds", "nudgeRateLimitSeconds", "respawnAfterRung"}
+)
+DEFAULT_SUPERVISOR_INTERVAL_SECONDS = 10.0
+DEFAULT_SUPERVISOR_STALE_CUTOFF_SECONDS = 60.0
+DEFAULT_SUPERVISOR_REDELIVER_BUDGET = 1
+# CS-6 D1 (260707-HFX2-L12): per-sweep cap on escalation-rung emission, the twin of the redeliver
+# budget. Bounds the synchronous hosted pastes + escalation.rung event appends one sweep can do;
+# deferred rows re-fire next sweep (rung_due is level-triggered) so nothing is lost.
+DEFAULT_SUPERVISOR_ESCALATION_BUDGET = 250
+# R2 (260707-HFX2-L1): the expectation-row kinds every dispatch surface writes a durable
+# what-must-happen-by-when row for, and their default SLAs (schema: docs/reference/settings-json.md,
+# Orchestration Expectations). Kept as a plain string set here (not imported from
+# controlplane.expectation_rows) to avoid a kernel<->controlplane import cycle; the two must be kept
+# in sync -- ``ExpectationKind`` in expectation_rows.py is the sole other definition.
+KNOWN_EXPECTATION_KINDS = frozenset({"briefed-by", "turn-report-by", "verdict-by", "ack-by"})
+KNOWN_EXPECTATIONS_FIELDS = frozenset({"defaults"})
+DEFAULT_EXPECTATION_SLA_SECONDS: dict[str, float] = {
+    "briefed-by": 120.0,
+    "turn-report-by": 3600.0,
+    "verdict-by": 1800.0,
+    # Mirrors AGENT_PICKUP_TTL_SECONDS (interaction_retention.py) -- the existing dashboard
+    # pickup-staleness convention for an unacked signal.
+    "ack-by": 300.0,
+}
+
+# R1 (260707-HFX2-L4): the escalation ladder's own per-``message_kind`` ack SLA -- how long a
+# PENDING operator-inbox row sits unacked, past HFX2-L2's own redelivery attempts, before the
+# ladder walker (``controlplane/escalation_ladder.py``) fires rung 1. Kept as a plain string set
+# (not imported from operator_inbox_records) for the same kernel<->controlplane cycle reason as
+# ``KNOWN_EXPECTATION_KINDS``; the two must be kept in sync with ``InboxMessageKind``.
+KNOWN_ESCALATION_MESSAGE_KINDS = frozenset(
+    {
+        "message",
+        "gate-response",
+        "turn-report",
+        "master-handover",
+        "nudge",
+        "escalation",
+        "degradation-alert",
+        "decision-item",
+        "decision-ruling",
+    }
+)
+DEFAULT_ESCALATION_SLA_SECONDS: dict[str, float] = {
+    "message": 600.0,
+    "gate-response": 600.0,
+    "turn-report": 1800.0,
+    "master-handover": 1800.0,
+    "nudge": 300.0,
+    "escalation": 300.0,
+    "degradation-alert": 300.0,
+    "decision-item": 900.0,
+    "decision-ruling": 900.0,
+}
+# Conservative-by-default rung timings (R1): seconds a row may sit at its CURRENT rung, past its
+# ``escalatedAt`` anchor, before the walker advances it to the next one. Rung 1 = renudge; rung 2 =
+# skip-level; rung 3 = developer attention (terminal -- the walker re-surfaces at this cadence but
+# never advances past it, R5).
+DEFAULT_ESCALATION_RUNG_SECONDS: dict[int, float] = {1: 300.0, 2: 900.0, 3: 1800.0}
+KNOWN_ESCALATION_RUNGS = (1, 2, 3)
+# R3: a seat addressed by a row that reaches this rung with no ack and no catalog turn-state
+# change is marked suspect for respawn -- rung 2 (skip-level failed to raise it) per the leaf spec.
+DEFAULT_RESPAWN_AFTER_RUNG = 2
 
 # The BUILTIN registry ids (claude|codex|pi). Harness references (roles.<role>.harness,
 # spawn.harness) are validated against the EFFECTIVE id set -- these plus any
@@ -182,6 +281,67 @@ class ConcurrencySettings:
 
 
 @dataclass(frozen=True)
+class ExpectationSettings:
+    """``orchestration.expectations`` -- per-kind default SLA seconds (R2, 260707-HFX2-L1).
+
+    Every dispatch surface (spawn, leaf dispatch, gate open, signal post) writes a durable
+    expectation row at write time; the SLA (seconds until ``dueAt``) is configurable per kind
+    here, defaulting to :data:`DEFAULT_EXPECTATION_SLA_SECONDS`.
+    """
+
+    sla_seconds: dict[str, float] = field(
+        default_factory=lambda: dict(DEFAULT_EXPECTATION_SLA_SECONDS)
+    )
+
+    def sla_for(self, kind: str) -> float:
+        return self.sla_seconds.get(kind, DEFAULT_EXPECTATION_SLA_SECONDS[kind])
+
+
+@dataclass(frozen=True)
+class SupervisorSettings:
+    """``orchestration.supervisor`` -- the deterministic sweep's knobs (R1/R5, 260707-HFX2-L2).
+
+    ``redeliver_rate_limit_seconds`` of ``None`` inherits ``OperatorInboxStore.list_redeliverable``'s
+    own default. ``signal_cooldown_seconds`` controls supervisor pane/seat-liveness signal posts.
+    """
+
+    enabled: bool = True
+    interval_seconds: float = DEFAULT_SUPERVISOR_INTERVAL_SECONDS
+    stale_cutoff_seconds: float = DEFAULT_SUPERVISOR_STALE_CUTOFF_SECONDS
+    redeliver_rate_limit_seconds: float | None = None
+    signal_cooldown_seconds: float = DEFAULT_RATE_LIMIT_SECONDS
+    redeliver_budget: int = DEFAULT_SUPERVISOR_REDELIVER_BUDGET
+    escalation_budget: int = DEFAULT_SUPERVISOR_ESCALATION_BUDGET
+
+
+@dataclass(frozen=True)
+class EscalationSettings:
+    """``orchestration.escalation`` -- the P-15 tier-3 ladder's own knobs (R1, 260707-HFX2-L4).
+
+    ``sla_seconds`` gates rung 1 (how long a pending row sits unacked, past ``escalatedAt``,
+    before the first renudge); ``rung_seconds`` gates every rung's OWN dwell time thereafter
+    (keyed 1/2/3, re-anchored at every transition -- see ``OperatorInboxStore.advance_rung``).
+    """
+
+    sla_seconds: dict[str, float] = field(
+        default_factory=lambda: dict(DEFAULT_ESCALATION_SLA_SECONDS)
+    )
+    rung_seconds: dict[int, float] = field(
+        default_factory=lambda: dict(DEFAULT_ESCALATION_RUNG_SECONDS)
+    )
+    nudge_rate_limit_seconds: int = 900
+    respawn_after_rung: int = DEFAULT_RESPAWN_AFTER_RUNG
+
+    def sla_for(self, message_kind: str) -> float:
+        return self.sla_seconds.get(
+            message_kind, DEFAULT_ESCALATION_SLA_SECONDS.get(message_kind, 300.0)
+        )
+
+    def rung_dwell(self, rung: int) -> float:
+        return self.rung_seconds.get(rung, DEFAULT_ESCALATION_RUNG_SECONDS.get(rung, 900.0))
+
+
+@dataclass(frozen=True)
 class AgenticSettings:
     """The merged, typed agentic settings for one read (global <- local)."""
 
@@ -198,6 +358,9 @@ class AgenticSettings:
     # (see :meth:`resolved_role_knobs`). Level vocabulary matches ``loops.perLevel``.
     roles_per_level: dict[str, dict[str, RoleKnobs]] = field(default_factory=dict)
     concurrency: ConcurrencySettings = field(default_factory=ConcurrencySettings)
+    expectations: ExpectationSettings = field(default_factory=ExpectationSettings)
+    supervisor: SupervisorSettings = field(default_factory=SupervisorSettings)
+    escalation: EscalationSettings = field(default_factory=EscalationSettings)
     spawn_harness: str | None = None
     # The EFFECTIVE harness registry (260703-L16): the builtin defaults merged with the
     # ``orchestration.harnesses`` family -- new ids added, builtin ids possibly pre-customized.
@@ -418,6 +581,18 @@ def _require_positive_int(raw: object, owner: str, source: str) -> int:
     return raw
 
 
+def _require_positive_number(raw: object, owner: str, source: str) -> float:
+    if isinstance(raw, bool) or not isinstance(raw, (int, float)) or raw <= 0:
+        raise AgenticSettingsError(f"{owner} must be a positive number: {source}")
+    return float(raw)
+
+
+def _require_bool(raw: object, owner: str, source: str) -> bool:
+    if not isinstance(raw, bool):
+        raise AgenticSettingsError(f"{owner} must be a boolean: {source}")
+    return raw
+
+
 def _require_string_list(raw: object, owner: str, source: str) -> tuple[str, ...]:
     """A free-form list of non-empty strings (shape-checked only; content never validated).
 
@@ -491,6 +666,9 @@ def _parse_orchestration(
             raw.get("rolesPerLevel"), source=source, harness_ids=harness_ids
         ),
         concurrency=_parse_concurrency(raw.get("concurrency"), source=source),
+        expectations=_parse_expectations(raw.get("expectations"), source=source),
+        supervisor=_parse_supervisor(raw.get("supervisor"), source=source),
+        escalation=_parse_escalation(raw.get("escalation"), source=source),
         spawn_harness=_parse_spawn(raw.get("spawn"), source=source, harness_ids=harness_ids),
         harnesses=harnesses,
         sources=sources,
@@ -624,6 +802,15 @@ def _merged_harness(
     for field_name, declared_value in declared.items():
         if declared_value is not None:
             overrides[field_name] = declared_value
+    if (
+        base is not None
+        and parsed.effort_flag is not None
+        and parsed.effort_flag != base.effort_flag
+    ):
+        # The Codex builtin's value template belongs to its ``--config`` vehicle. Replacing that
+        # flag through settings restores the ordinary two-argv-element mapping instead of leaking
+        # ``model_reasoning_effort=...`` into an unrelated custom flag.
+        overrides["effort_flag_value_template"] = None
     merged = replace(fallback, **overrides)
     _refuse_unpaired_vehicles(merged, owner, source)
     _refuse_bad_effort_template(merged, owner, source)
@@ -976,6 +1163,178 @@ def _parse_concurrency(raw: object, *, source: str) -> ConcurrencySettings:
                 concurrency[json_key], f"orchestration.concurrency.{json_key}", source
             )
     return ConcurrencySettings(**parsed)
+
+
+def _parse_expectations(raw: object, *, source: str) -> ExpectationSettings:
+    """``orchestration.expectations.defaults``: per-kind SLA seconds, hyphenated kind keys
+    (matching the expectation-row kind vocabulary), overriding :data:`DEFAULT_EXPECTATION_SLA_SECONDS`
+    entry-by-entry -- an omitted kind keeps its documented default."""
+    if raw is None:
+        return ExpectationSettings()
+    block = _require_object(raw, "orchestration.expectations", source)
+    _refuse_unknown(block, KNOWN_EXPECTATIONS_FIELDS, "orchestration.expectations", source)
+    sla_seconds = dict(DEFAULT_EXPECTATION_SLA_SECONDS)
+    raw_defaults = block.get("defaults")
+    if raw_defaults is not None:
+        defaults = _require_object(
+            raw_defaults, "orchestration.expectations.defaults", source
+        )
+        for kind, value in defaults.items():
+            if kind not in KNOWN_EXPECTATION_KINDS:
+                allowed = ", ".join(sorted(KNOWN_EXPECTATION_KINDS))
+                raise AgenticSettingsError(
+                    f"orchestration.expectations.defaults key {kind!r} is not a known "
+                    f"expectation kind; allowed: {allowed}: {source}"
+                )
+            owner = f"orchestration.expectations.defaults.{kind}"
+            if isinstance(value, bool) or not isinstance(value, (int, float)) or value <= 0:
+                raise AgenticSettingsError(f"{owner} must be a positive number of seconds: {source}")
+            sla_seconds[kind] = float(value)
+    return ExpectationSettings(sla_seconds=sla_seconds)
+
+
+def _parse_supervisor(raw: object, *, source: str) -> SupervisorSettings:
+    """``orchestration.supervisor``: the deterministic sweep's own knobs (R1/R5).
+
+    Absent -> the documented defaults (enabled, 10s interval, 60s staleness cutoff, inbox-store
+    redelivery rate limit inherited).
+    """
+    if raw is None:
+        return SupervisorSettings()
+    block = _require_object(raw, "orchestration.supervisor", source)
+    _refuse_unknown(block, KNOWN_SUPERVISOR_FIELDS, "orchestration.supervisor", source)
+    enabled = (
+        _require_bool(block["enabled"], "orchestration.supervisor.enabled", source)
+        if "enabled" in block
+        else True
+    )
+    interval_seconds = (
+        _require_positive_number(
+            block["intervalSeconds"], "orchestration.supervisor.intervalSeconds", source
+        )
+        if "intervalSeconds" in block
+        else DEFAULT_SUPERVISOR_INTERVAL_SECONDS
+    )
+    stale_cutoff_seconds = (
+        _require_positive_number(
+            block["staleCutoffSeconds"], "orchestration.supervisor.staleCutoffSeconds", source
+        )
+        if "staleCutoffSeconds" in block
+        else DEFAULT_SUPERVISOR_STALE_CUTOFF_SECONDS
+    )
+    redeliver_rate_limit_seconds = (
+        _require_supervisor_floor_seconds(
+            block["redeliverRateLimitSeconds"],
+            "orchestration.supervisor.redeliverRateLimitSeconds",
+            source,
+        )
+        if "redeliverRateLimitSeconds" in block
+        else None
+    )
+    signal_cooldown_seconds = (
+        _require_supervisor_floor_seconds(
+            block["signalCooldownSeconds"],
+            "orchestration.supervisor.signalCooldownSeconds",
+            source,
+        )
+        if "signalCooldownSeconds" in block
+        else DEFAULT_RATE_LIMIT_SECONDS
+    )
+    redeliver_budget = (
+        _require_positive_int(
+            block["redeliverBudget"], "orchestration.supervisor.redeliverBudget", source
+        )
+        if "redeliverBudget" in block
+        else DEFAULT_SUPERVISOR_REDELIVER_BUDGET
+    )
+    escalation_budget = (
+        _require_positive_int(
+            block["escalationBudget"], "orchestration.supervisor.escalationBudget", source
+        )
+        if "escalationBudget" in block
+        else DEFAULT_SUPERVISOR_ESCALATION_BUDGET
+    )
+    return SupervisorSettings(
+        enabled=enabled,
+        interval_seconds=interval_seconds,
+        stale_cutoff_seconds=stale_cutoff_seconds,
+        redeliver_rate_limit_seconds=redeliver_rate_limit_seconds,
+        signal_cooldown_seconds=signal_cooldown_seconds,
+        redeliver_budget=redeliver_budget,
+        escalation_budget=escalation_budget,
+    )
+
+
+def _require_supervisor_floor_seconds(raw: object, owner: str, source: str) -> float:
+    value = _require_positive_number(raw, owner, source)
+    if value < MIN_REDELIVERY_INTERVAL_SECONDS:
+        raise AgenticSettingsError(
+            f"{owner} must be at least {MIN_REDELIVERY_INTERVAL_SECONDS:g} seconds: {source}"
+        )
+    return value
+
+
+def _parse_escalation(raw: object, *, source: str) -> EscalationSettings:
+    """``orchestration.escalation`` (R1, 260707-HFX2-L4): per-``message_kind`` ack SLAs, per-rung
+    dwell timings, the renudge rate limit, and the respawn-after-rung threshold. Absent -> the
+    documented conservative defaults."""
+    if raw is None:
+        return EscalationSettings()
+    block = _require_object(raw, "orchestration.escalation", source)
+    _refuse_unknown(block, KNOWN_ESCALATION_FIELDS, "orchestration.escalation", source)
+    sla_seconds = dict(DEFAULT_ESCALATION_SLA_SECONDS)
+    raw_sla = block.get("slaSeconds")
+    if raw_sla is not None:
+        sla_block = _require_object(raw_sla, "orchestration.escalation.slaSeconds", source)
+        for kind, value in sla_block.items():
+            if kind not in KNOWN_ESCALATION_MESSAGE_KINDS:
+                allowed = ", ".join(sorted(KNOWN_ESCALATION_MESSAGE_KINDS))
+                raise AgenticSettingsError(
+                    f"orchestration.escalation.slaSeconds key {kind!r} is not a known "
+                    f"message kind; allowed: {allowed}: {source}"
+                )
+            owner = f"orchestration.escalation.slaSeconds.{kind}"
+            sla_seconds[kind] = _require_positive_number(value, owner, source)
+    rung_seconds = dict(DEFAULT_ESCALATION_RUNG_SECONDS)
+    raw_rungs = block.get("rungSeconds")
+    if raw_rungs is not None:
+        rung_block = _require_object(raw_rungs, "orchestration.escalation.rungSeconds", source)
+        for raw_rung, value in rung_block.items():
+            try:
+                rung = int(raw_rung)
+            except (TypeError, ValueError):
+                rung = -1
+            if rung not in KNOWN_ESCALATION_RUNGS:
+                allowed = ", ".join(str(r) for r in KNOWN_ESCALATION_RUNGS)
+                raise AgenticSettingsError(
+                    f"orchestration.escalation.rungSeconds key {raw_rung!r} must be one of: "
+                    f"{allowed}: {source}"
+                )
+            owner = f"orchestration.escalation.rungSeconds.{rung}"
+            rung_seconds[rung] = _require_positive_number(value, owner, source)
+    nudge_rate_limit_seconds = 900
+    if "nudgeRateLimitSeconds" in block:
+        nudge_rate_limit_seconds = _require_positive_int(
+            block["nudgeRateLimitSeconds"],
+            "orchestration.escalation.nudgeRateLimitSeconds",
+            source,
+        )
+    respawn_after_rung = DEFAULT_RESPAWN_AFTER_RUNG
+    if "respawnAfterRung" in block:
+        respawn_after_rung = _require_positive_int(
+            block["respawnAfterRung"], "orchestration.escalation.respawnAfterRung", source
+        )
+        if respawn_after_rung not in KNOWN_ESCALATION_RUNGS:
+            allowed = ", ".join(str(r) for r in KNOWN_ESCALATION_RUNGS)
+            raise AgenticSettingsError(
+                f"orchestration.escalation.respawnAfterRung must be one of: {allowed}: {source}"
+            )
+    return EscalationSettings(
+        sla_seconds=sla_seconds,
+        rung_seconds=rung_seconds,
+        nudge_rate_limit_seconds=nudge_rate_limit_seconds,
+        respawn_after_rung=respawn_after_rung,
+    )
 
 
 def _parse_spawn(raw: object, *, source: str, harness_ids: tuple[str, ...] | None) -> str | None:

@@ -6,6 +6,12 @@ import os
 from datetime import datetime
 from pathlib import Path
 
+from agents_remember.controlplane.inbox_backoff import (
+    DEFAULT_RATE_LIMIT_SECONDS,
+    is_ladder_resolved,
+    next_attempt_at,
+    redeliverable,
+)
 from agents_remember.controlplane.interaction_retention import inbox_keep_ids
 from agents_remember.controlplane.operator_inbox_records import (
     AgentRole,
@@ -13,6 +19,7 @@ from agents_remember.controlplane.operator_inbox_records import (
     OperatorInboxEntry,
     OperatorInboxVia,
     consume_operator_inbox_entry,
+    fold_operator_inbox_entries,
     require_inbox_address,
 )
 
@@ -51,11 +58,8 @@ class OperatorInboxStore:
         ]
 
     def current(self) -> dict[str, OperatorInboxEntry]:
-        """Fold the inbox by entry id, last-wins."""
-        latest: dict[str, OperatorInboxEntry] = {}
-        for record in self.read():
-            latest[record.id] = record
-        return latest
+        """Fold the inbox by entry id, with terminal snapshots dominating stale pending ones."""
+        return fold_operator_inbox_entries(self.read())
 
     def list_pending(
         self,
@@ -88,22 +92,205 @@ class OperatorInboxStore:
         delivery_state: InboxDeliveryState,
         delivered_to_session: str | None = None,
         delivery_detail: str | None = None,
+        current: dict[str, OperatorInboxEntry] | None = None,
+        redelivery_floor_seconds: float | None = None,
     ) -> OperatorInboxEntry:
-        """Append a delivery-status snapshot for one pending entry."""
-        current = self.current().get(entry_id)
-        if current is None:
+        """Append a delivery-status snapshot for one pending entry.
+
+        R1/R3: every attempt -- including a confirmed ``delivered`` paste -- bumps
+        ``attemptCount``, stamps ``lastAttemptAt``, and schedules ``nextAttemptAt`` from the
+        backoff ladder. 'delivered' is never terminal (pasted != perceived), so only ``consume``
+        clears the redelivery schedule; a still-pending entry always carries a durable next-attempt
+        row L2 can sweep, restart-proof.
+        """
+        entry = self._entry_from_current(entry_id, current)
+        if entry is None:
             raise KeyError(f"no operator inbox entry {entry_id!r}")
-        delivered = current.model_copy(
+        attempt_count = entry.attemptCount + 1
+        delivered = entry.model_copy(
             update={
                 "ts": now,
                 "deliveryState": delivery_state,
-                "deliveredAt": now if delivery_state == "delivered" else current.deliveredAt,
+                "deliveredAt": now if delivery_state == "delivered" else entry.deliveredAt,
                 "deliveredToSession": delivered_to_session,
                 "deliveryDetail": delivery_detail,
+                "attemptCount": attempt_count,
+                "lastAttemptAt": now,
+                "nextAttemptAt": (
+                    next_attempt_at(
+                        now=datetime.fromisoformat(now),
+                        attempt_count=attempt_count,
+                        redelivery_floor_seconds=redelivery_floor_seconds,
+                    )
+                    if entry.state == "pending"
+                    else entry.nextAttemptAt
+                ),
             }
         )
         self.append(delivered)
         return delivered
+
+    def list_redeliverable(
+        self,
+        *,
+        now: datetime,
+        rate_limit_seconds: float | None = None,
+        current: dict[str, OperatorInboxEntry] | None = None,
+    ) -> list[OperatorInboxEntry]:
+        """Pending rows past their backoff window and clear of the per-target rate limit (R3).
+
+        The pure selection L2's sweep drives redelivery from; this store never redelivers on its
+        own (no in-memory timer -- the sweep is the only caller of ``deliver_inbox_entry`` again).
+        """
+        entries = self.current() if current is None else current
+        pending = [entry for entry in entries.values() if entry.state == "pending"]
+        return redeliverable(
+            pending,
+            now=now,
+            rate_limit_seconds=(
+                rate_limit_seconds if rate_limit_seconds is not None else DEFAULT_RATE_LIMIT_SECONDS
+            ),
+        )
+
+    def mark_escalated(
+        self,
+        entry_id: str,
+        *,
+        now: str,
+        current: dict[str, OperatorInboxEntry] | None = None,
+    ) -> OperatorInboxEntry:
+        """Stamp ``escalatedAt`` once the ladder (HFX2-L4) escalates an unacked row.
+
+        This leaf only reserves the field -- it never calls this itself; redelivery keeps running
+        until either ack or this mark, per R3.
+        """
+        entry = self._entry_from_current(entry_id, current)
+        if entry is None:
+            raise KeyError(f"no operator inbox entry {entry_id!r}")
+        escalated = entry.model_copy(update={"ts": now, "escalatedAt": now})
+        self.append(escalated)
+        return escalated
+
+    def advance_rung(
+        self,
+        entry_id: str,
+        *,
+        rung: int,
+        now: str,
+        owner_role: AgentRole | None = None,
+        owner_agent_id: str | None = None,
+        owner_lifecycle_id: str | None = None,
+        readdress: bool = False,
+        current: dict[str, OperatorInboxEntry] | None = None,
+    ) -> OperatorInboxEntry:
+        """Stamp the ladder's next rung (260707-HFX2-L4, R1/R2): re-anchors ``escalatedAt`` to
+        ``now`` so the NEXT rung's SLA is measured from this transition, not the row's original
+        creation. Distinct from :meth:`mark_escalated` (HFX2-L2's reserved "this row is now
+        escalatable" stamp, rung-agnostic) -- the ladder is the only caller of this method.
+
+        Ruled invariant (developer, 2026-07-09): the ladder climbs by MUTATING this one row --
+        with ``readdress=True`` the row itself moves to the next addressee (skip-level owner,
+        then the developer attention queue). It never mints a sibling row; one root cause is one
+        row for its whole ladder life. (The escalation storm that took the host down was every
+        rung transition posting a new pending row whose own rungs posted more rows.)
+        """
+        entry = self._entry_from_current(entry_id, current)
+        if entry is None:
+            raise KeyError(f"no operator inbox entry {entry_id!r}")
+        update: dict[str, object] = {
+            "ts": now,
+            "rung": rung,
+            "escalatedAt": now,
+            "rungTransitionAt": now,
+        }
+        if readdress:
+            update.update(
+                {
+                    "recipientRole": owner_role,
+                    "agentId": owner_agent_id,
+                    "lifecycleId": owner_lifecycle_id,
+                    "ownerRole": owner_role,
+                    "ownerAgentId": owner_agent_id,
+                    "ownerLifecycleId": owner_lifecycle_id,
+                }
+            )
+        advanced = entry.model_copy(update=update)
+        self.append(advanced)
+        return advanced
+
+    def renew(
+        self,
+        entry_id: str,
+        *,
+        now: str,
+        response: str | None = None,
+        leaf_key: str | None = None,
+        seat_role: str | None = None,
+        subject_agent_id: str | None = None,
+        owner_role: AgentRole | None = None,
+        owner_agent_id: str | None = None,
+        owner_lifecycle_id: str | None = None,
+        readdress: bool = False,
+        current: dict[str, OperatorInboxEntry] | None = None,
+    ) -> OperatorInboxEntry:
+        """Refresh one still-pending row in place: same id, bumped ``ts``, optionally refreshed
+        ``response``. The ruled coalescing primitive (developer, 2026-07-09): a condition that
+        re-fires updates its ONE existing row's date/detail instead of appending a duplicate --
+        there is zero reason to repeat the same message until the system catches fire."""
+        entry = self._entry_from_current(entry_id, current)
+        if entry is None:
+            raise KeyError(f"no operator inbox entry {entry_id!r}")
+        if entry.state != "pending":
+            return entry
+        update: dict[str, object] = {"ts": now}
+        if response is not None:
+            update["response"] = response
+        if leaf_key is not None:
+            update["leafKey"] = leaf_key
+        if seat_role is not None:
+            update["seatRole"] = seat_role
+        if subject_agent_id is not None:
+            update["subjectAgentId"] = subject_agent_id
+        if readdress:
+            update.update(
+                {
+                    "recipientRole": owner_role,
+                    "agentId": owner_agent_id,
+                    "lifecycleId": owner_lifecycle_id,
+                    "ownerRole": owner_role,
+                    "ownerAgentId": owner_agent_id,
+                    "ownerLifecycleId": owner_lifecycle_id,
+                }
+            )
+        renewed = entry.model_copy(update=update)
+        self.append(renewed)
+        return renewed
+
+    def mark_ladder_resolved(
+        self,
+        entry_id: str,
+        *,
+        now: str,
+        reason: str,
+        current: dict[str, OperatorInboxEntry] | None = None,
+    ) -> tuple[OperatorInboxEntry, bool]:
+        """Terminally resolve a ladder-complete row without treating it as an ack."""
+        entry = self._entry_from_current(entry_id, current)
+        if entry is None:
+            raise KeyError(f"no operator inbox entry {entry_id!r}")
+        if is_ladder_resolved(entry):
+            return entry, False
+        resolved = entry.model_copy(
+            update={
+                "ts": now,
+                "state": "ladder-resolved",
+                "ladderResolvedAt": now,
+                "ladderResolvedReason": reason,
+                "nextAttemptAt": None,
+            }
+        )
+        self.append(resolved)
+        return resolved, True
 
     def consume(
         self,
@@ -117,7 +304,7 @@ class OperatorInboxStore:
         current = self.current().get(entry_id)
         if current is None:
             raise KeyError(f"no operator inbox entry {entry_id!r}")
-        if current.state == "consumed":
+        if current.state != "pending":
             return current, False
         consumed = consume_operator_inbox_entry(
             current,
@@ -174,3 +361,11 @@ class OperatorInboxStore:
             encoding="utf-8",
         )
         os.replace(tmp, path)
+
+    def _entry_from_current(
+        self,
+        entry_id: str,
+        current: dict[str, OperatorInboxEntry] | None,
+    ) -> OperatorInboxEntry | None:
+        entries = self.current() if current is None else current
+        return entries.get(entry_id)
