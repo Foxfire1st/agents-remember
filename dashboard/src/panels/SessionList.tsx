@@ -15,11 +15,9 @@ import { RankBadge } from "../grammar/RankBadge";
 // behavior, Panda owns looks), and the row's selected colour cascades to the label so selection state
 // is never re-derived in JSX.
 //
-// L14 adds the G1 COMMAND TREE: when a `grouped` model is supplied (data/sessionGroups), sessions
-// render inside collapsible groups — the command deck (gold insignia) on top, one group per claimed
-// master (purple insignia + 22px indent when commanded), landed work in one collapsed archive —
-// while unattached sessions keep today's flat placement below. Collapse state is UI-local (no
-// persistence); each group is its own GridList so arrow-nav stays within the group.
+// L16 renders each repo-qualified sprint as a local spawn-edge forest. The forest is complete even
+// when a manager is itself spawned by an orchestrator; only manager-owned descendants are
+// collapsible, and visual depth is capped at two levels. Collapse state is UI-local.
 const list = css({
   display: "grid",
   gap: "0.3rem",
@@ -27,6 +25,7 @@ const list = css({
   listStyle: "none",
   outline: "none",
   overflowY: "auto",
+  overflowX: "hidden",
   minHeight: "0",
 });
 const row = css({
@@ -34,6 +33,7 @@ const row = css({
   alignItems: "center",
   gap: "0.3rem",
   width: "100%",
+  minWidth: "0",
   background: "bg",
   color: "muted",
   borderWidth: "1px",
@@ -61,7 +61,7 @@ const badge = css({
   overflow: "hidden",
   textOverflow: "ellipsis",
   whiteSpace: "nowrap",
-  flexShrink: 0,
+  flexShrink: 1,
   fontSize: "0.64rem",
   color: "cyan",
   borderWidth: "1px",
@@ -71,7 +71,12 @@ const badge = css({
   paddingInline: "0.25rem",
 });
 const statusBadge = css({
-  flexShrink: 0,
+  flexShrink: 1,
+  minWidth: "0",
+  maxWidth: "4rem",
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
   fontSize: "0.64rem",
   color: "muted",
   borderWidth: "1px",
@@ -85,7 +90,12 @@ const statusBadge = css({
 // existing progress/attention hues. Unknown roles fall through to the muted base (never throw).
 const roleChip = cva({
   base: {
-    flexShrink: 0,
+    flexShrink: 1,
+    minWidth: "0",
+    maxWidth: "4.5rem",
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
     fontSize: "0.6rem",
     textTransform: "uppercase",
     letterSpacing: "0.08em",
@@ -168,7 +178,7 @@ const groupBox = css({
   borderColor: "grid",
   background: "bgPanel",
 });
-const groupNested = css({ marginLeft: "22px" }); // the shared indent grammar (L14 sketch)
+const groupNested = css({ marginLeft: "22px" }); // shared sprint nesting grammar
 const groupHeaderRow = css({
   display: "flex",
   alignItems: "stretch",
@@ -232,7 +242,65 @@ const groupCount = css({
 });
 const groupRows = css({
   padding: "0.3rem",
+  minWidth: "0",
+  overflowX: "hidden",
 });
+
+const rowIndent = css({ paddingLeft: "1.1rem" });
+const childIndent = css({ paddingLeft: "2.2rem" });
+const managerToggle = css({
+  flex: "none",
+  width: "1rem",
+  minWidth: "1rem",
+  padding: "0",
+  border: "none",
+  background: "transparent",
+  color: "muted",
+  cursor: "pointer",
+  _focusVisible: { outline: "1px solid token(colors.cyan)", outlineOffset: "-1px" },
+});
+
+function orderedVisibleMembers(
+  members: OpenSession[],
+  collapsedManagers: Record<string, boolean>,
+): Array<{ session: OpenSession; depth: 0 | 1; hasChildren: boolean }> {
+  const children = new Map<string, OpenSession[]>();
+  for (const session of members) {
+    if (!session.spawnedBySession) continue;
+    const siblings = children.get(session.spawnedBySession);
+    if (siblings) siblings.push(session);
+    else children.set(session.spawnedBySession, [session]);
+  }
+  const roleRank: Record<string, number> = {
+    architect: 0,
+    orchestrator: 1,
+    strategist: 2,
+    designer: 2,
+    manager: 3,
+  };
+  const compare = (left: OpenSession, right: OpenSession) => {
+    const liveDelta = Number((right.status ?? "running") === "running") - Number((left.status ?? "running") === "running");
+    return liveDelta || (roleRank[left.spawnRole ?? ""] ?? 4) - (roleRank[right.spawnRole ?? ""] ?? 4) || left.id.localeCompare(right.id);
+  };
+  const roots = members.filter((session) => !session.spawnedBySession || !members.some((parent) => parent.id === session.spawnedBySession));
+  roots.sort(compare);
+  const output: Array<{ session: OpenSession; depth: 0 | 1; hasChildren: boolean }> = [];
+  const emit = (parent: OpenSession, depth: 0 | 1) => {
+    const nested = (children.get(parent.id) ?? []).sort(compare);
+    const hasChildren = parent.spawnRole === "manager" && nested.length > 0;
+    output.push({ session: parent, depth, hasChildren });
+    // A non-manager parent (normally the pinned orchestrator) does not own collapse state, but
+    // its descendants must still be emitted. Deeper chains remain visible at the second rail
+    // level, preserving the max-two-indent contract without dropping any member.
+    if (parent.spawnRole !== "manager" || !collapsedManagers[parent.id]) {
+      for (const child of nested) {
+        emit(child, depth === 0 ? 1 : 1);
+      }
+    }
+  };
+  for (const root of roots) emit(root, 0);
+  return output;
+}
 
 function leafKeySegments(leafKey: string): { repo: string; master: string; leafId: string } | null {
   const parts = leafKey.split("/").filter(Boolean);
@@ -242,12 +310,15 @@ function leafKeySegments(leafKey: string): { repo: string; master: string; leafI
 
 function sessionTitle(session: OpenSession, leafName?: string): string {
   const parts = [leafName ? `${session.label} · ${leafName}` : session.label];
+  if (session.spawnRole) parts.push(`role: ${session.spawnRole}`);
+  if (session.lifecycleId) parts.push(`lifecycle: ${session.lifecycleId}`);
   const segments = session.leafKey ? leafKeySegments(session.leafKey) : null;
   if (segments) {
     parts.push(`master: ${segments.master}`);
     parts.push(`leaf: ${segments.leafId}`);
   }
   if (session.turnState) parts.push(`turn: ${session.turnState}`);
+  if (session.status && session.status !== "running") parts.push(`status: ${session.status}`);
   if (session.landedReason) parts.push(`landed: ${session.landedReason}`);
   if (session.landedAt) parts.push(`at: ${session.landedAt}`);
   if (session.landedEdge) parts.push(`edge: ${session.landedEdge}`);
@@ -276,15 +347,16 @@ export function SessionList({
 }) {
   // Collapse state, keyed by group key — UI-local by design (L14: no persistence this leaf).
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
+  const [collapsedManagers, setCollapsedManagers] = useState<Record<string, boolean>>({});
   const stopRowSelection = (event: MouseEvent<HTMLButtonElement> | PointerEvent<HTMLButtonElement>) => {
     event.stopPropagation();
   };
 
-  const renderRow = (session: OpenSession) => {
+  const renderRow = (session: OpenSession, depth: 0 | 1 = 0, hasChildren = false) => {
     const leafName = session.leafKey
       ? (leafNameFor?.(session.leafKey) ?? session.leafKey)
       : undefined;
-    // The full, untruncated archive identity for hover inspection.
+    // The full, untruncated identity for hover inspection.
     const fullName = sessionTitle(session, leafName);
     const knownRole = session.spawnRole && KNOWN_ROLES.has(session.spawnRole)
       ? (session.spawnRole as KnownRole)
@@ -293,12 +365,29 @@ export function SessionList({
       <GridListItem
         id={session.id}
         textValue={session.label}
-        className={row}
+        className={cx(row, depth === 1 ? childIndent : hasChildren ? rowIndent : undefined)}
+        data-depth={depth}
         data-testid={`chats-session-${session.id}`}
       >
+        {hasChildren ? (
+          <button
+            type="button"
+            className={managerToggle}
+            aria-label={`${collapsedManagers[session.id] ? "Expand" : "Collapse"} ${session.label} children`}
+            aria-expanded={!collapsedManagers[session.id]}
+            onPointerDown={stopRowSelection}
+            onClick={(event) => {
+              stopRowSelection(event);
+              setCollapsedManagers((current) => ({ ...current, [session.id]: !current[session.id] }));
+            }}
+          >
+            {collapsedManagers[session.id] ? "▶" : "▼"}
+          </button>
+        ) : depth === 1 ? <span className={managerToggle} aria-hidden="true" /> : null}
         {session.spawnRole ? (
           <span
             className={roleChip({ role: knownRole })}
+            title={session.spawnRole}
             data-known-role={knownRole ? "true" : "false"}
             data-testid={`chats-session-role-${session.id}`}
           >
@@ -314,10 +403,10 @@ export function SessionList({
             </span>
           ) : null}
         </span>
-        {session.lifecycleId ? <span className={badge}>{session.lifecycleId}</span> : null}
-        {session.turnState ? <span className={statusBadge}>{session.turnState}</span> : null}
+        {session.lifecycleId ? <span className={badge} title={session.lifecycleId}>{session.lifecycleId}</span> : null}
+        {session.turnState ? <span className={statusBadge} title={session.turnState}>{session.turnState}</span> : null}
         {session.status && session.status !== "running" ? (
-          <span className={statusBadge}>{session.status}</span>
+          <span className={statusBadge} title={session.status}>{session.status}</span>
         ) : null}
         <span className={actions}>
           <button
@@ -337,23 +426,31 @@ export function SessionList({
     );
   };
 
-  const gridListFor = (members: OpenSession[], ariaLabel: string): ReactNode => (
+  const gridListFor = (members: OpenSession[], ariaLabel: string): ReactNode => {
+    const visible = orderedVisibleMembers(members, collapsedManagers);
+    return (
     <GridList
       aria-label={ariaLabel}
       className={list}
+      data-overflow-x="hidden"
       selectionMode="single"
       selectedKeys={activeId ? [activeId] : []}
       onSelectionChange={(keys) => {
         const id = [...keys][0];
         if (typeof id === "string") onSelect(id);
       }}
-      items={members}
+      items={visible.map(({ session }) => session)}
     >
-      {renderRow}
+      {(session) => {
+        const item = visible.find(({ session: candidate }) => candidate.id === session.id);
+        return renderRow(session, item?.depth ?? 0, item?.hasChildren ?? false);
+      }}
     </GridList>
-  );
+    );
+  };
 
-  // No grouping model (the rail) or nothing grouped ⇒ the pre-L14 flat list, byte-identical.
+  // No grouping model still uses the same complete forest renderer; this keeps flat and grouped
+  // paths consistent when a session catalog temporarily lacks task-document grouping data.
   if (!grouped || grouped.groups.length === 0) {
     return gridListFor(sessions, "Open sessions");
   }

@@ -111,10 +111,9 @@ describe("SessionList (6e-2c)", () => {
   });
 });
 
-// The G1 command tree (L14): grouped rendering — collapsible headers with insignia + counts, the
-// landed archive collapsed by default, unattached sessions flat below, and a group-less model
-// falling back to today's flat list.
-describe("SessionList command tree (L14)", () => {
+// The L16 command tree: grouped rendering — per-sprint headers, complete spawn-edge forests,
+// landed archive behavior, and explicit ungrouped/error surfaces.
+describe("SessionList command tree (L16)", () => {
   const group = (over: Partial<SessionGroup>) => ({
     key: "master:m",
     kind: "master" as const,
@@ -353,5 +352,69 @@ describe("SessionList command tree (L14)", () => {
     expect(curator.textContent).toBe("curator");
     expect(curator.getAttribute("data-known-role")).toBe("true");
     expect(getByTestId("chats-session-role-custom").getAttribute("data-known-role")).toBe("false");
+  });
+
+  it("emits an orchestrator-parented manager subtree exactly once", () => {
+    const members: OpenSession[] = [
+      { id: "worker", label: "Worker", spawnRole: "worker", spawnedBySession: "manager" },
+      { id: "manager", label: "Manager", spawnRole: "manager", spawnedBySession: "orchestrator" },
+      { id: "orchestrator", label: "Orchestrator", spawnRole: "orchestrator" },
+    ];
+    const { getByTestId } = render(
+      <SessionList
+        sessions={members}
+        activeId={null}
+        onSelect={() => {}}
+        onTerminate={() => {}}
+        grouped={{ groups: [group({ key: "sprint:repo/master", sessions: members })], ungrouped: [] }}
+      />,
+    );
+    for (const member of members) expect(getByTestId(`chats-session-${member.id}`)).toBeTruthy();
+    expect(getByTestId("chats-session-manager").getAttribute("data-depth")).toBe("1");
+    expect(getByTestId("chats-session-worker").getAttribute("data-depth")).toBe("1");
+    expect(getByTestId("chats-session-manager").querySelector("button[aria-expanded]")).not.toBeNull();
+  });
+
+  it.each(["16rem", "24rem"])("keeps the rail bounded and hover-complete at %s", (width) => {
+    const longId = "lifecycle-0123456789-0123456789";
+    const longStatus = "waiting-for-a-very-long-turn-state";
+    const longRole = "system-specialist";
+    const { getByTestId, getByTitle, rerender } = render(
+      <div style={{ width }}>
+        <SessionList
+          sessions={[{
+            id: "wide",
+            label: "A deliberately long session label that must recalculate when the rail changes size",
+            spawnRole: longRole,
+            lifecycleId: longId,
+            turnState: longStatus,
+            status: "exited",
+          }]}
+          activeId="wide"
+          onSelect={() => {}}
+          onTerminate={() => {}}
+        />
+      </div>,
+    );
+    const row = getByTestId("chats-session-wide");
+    const list = row.parentElement;
+    expect(list?.getAttribute("data-overflow-x")).toBe("hidden");
+    expect(getByTitle(longRole)).toBeTruthy();
+    expect(getByTitle(longId)).toBeTruthy();
+    expect(getByTitle(longStatus)).toBeTruthy();
+    expect(getByTitle("exited")).toBeTruthy();
+
+    rerender(
+      <div style={{ width: "16rem" }}>
+        <SessionList
+          sessions={[{ id: "wide", label: "short" }]}
+          activeId="wide"
+          onSelect={() => {}}
+          onTerminate={() => {}}
+        />
+      </div>,
+    );
+    expect(getByTitle("short")).toBeTruthy();
+    expect(getByTestId("chats-session-wide")).toBeTruthy();
   });
 });

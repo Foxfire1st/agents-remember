@@ -343,6 +343,7 @@ export function DetailPanel({
   const activeWorktreeGroups = useDashboard((s) => s.activeWorktreeGroups);
   const providers = useDashboard((s) => s.providers);
   const [fullTaskDocs, setFullTaskDocs] = useState<Record<string, TaskDocNode>>({});
+  const [taskDocBodyState, setTaskDocBodyState] = useState<Record<string, "available" | "unavailable">>({});
   // Drill state lives here (not in TaskContent) so the back control can sit in the sticky panel head.
   const [openSlug, setOpenSlug] = useState<string | null>(null);
   useEffect(() => setOpenSlug(null), [selectedId]); // switching lifecycles closes any open sub-task
@@ -391,16 +392,24 @@ export function DetailPanel({
       (doc) => {
         if (!live) return;
         setFullTaskDocs((current) =>
-          current[bodyTargetKey] ? current : { ...current, [bodyTargetKey]: doc },
+          current[bodyTargetKey]
+            ? current
+            : { ...current, [bodyTargetKey]: mergeTaskDocumentBody(bodyTargetDoc, doc) },
         );
+        setTaskDocBodyState((current) => ({ ...current, [bodyTargetKey]: "available" }));
       },
-      () => undefined,
+      () => {
+        if (!live) return;
+        setTaskDocBodyState((current) => ({ ...current, [bodyTargetKey]: "unavailable" }));
+      },
     );
     return () => {
       live = false;
     };
   }, [bodyTargetDoc, bodyTargetKey, bodyTargetCached]);
   const fullTaskDoc = (doc: TaskDocNode): TaskDocNode => fullTaskDocs[taskDocBodyKey(doc)] ?? doc;
+  const bodyUnavailable = (doc: TaskDocNode): boolean =>
+    taskDocBodyState[taskDocBodyKey(doc)] === "unavailable";
 
   // The leaf the panel is actually SHOWING (a drilled sub-task or a directly-opened leaf doc), mirroring
   // the render branches below — a master/series overview shows no single leaf. Reported up so the rail
@@ -454,7 +463,7 @@ export function DetailPanel({
         <div className={where}>task document · {selectedTaskDoc.repository}</div>
         {selectedTaskDoc.kind === "master" ? (
           openDoc ? (
-            <TaskReader doc={fullTaskDoc(openDoc)} onOpenChangeSet={onOpenChangeSet} onOpenNotes={onOpenNotes} />
+            <TaskReader doc={fullTaskDoc(openDoc)} bodyUnavailable={bodyUnavailable(openDoc)} onOpenChangeSet={onOpenChangeSet} onOpenNotes={onOpenNotes} />
           ) : (
             <MasterOverview
               doc={masterDocWithSeriesTokens(fullTaskDoc(selectedTaskDoc), analytics?.series ?? [])}
@@ -465,7 +474,7 @@ export function DetailPanel({
             />
           )
         ) : (
-          <TaskReader doc={fullTaskDoc(selectedTaskDoc)} onOpenChangeSet={onOpenChangeSet} onOpenNotes={onOpenNotes} />
+          <TaskReader doc={fullTaskDoc(selectedTaskDoc)} bodyUnavailable={bodyUnavailable(selectedTaskDoc)} onOpenChangeSet={onOpenChangeSet} onOpenNotes={onOpenNotes} />
         )}
       </Panel>
     );
@@ -510,7 +519,7 @@ export function DetailPanel({
       <Panel testid="detail-panel" head={head} className={sizing}>
         <div className={where}>series master · {selectedSeries.repository}</div>
         {openDoc ? (
-          <TaskReader doc={fullTaskDoc(openDoc)} onOpenChangeSet={onOpenChangeSet} onOpenNotes={onOpenNotes} />
+          <TaskReader doc={fullTaskDoc(openDoc)} bodyUnavailable={bodyUnavailable(openDoc)} onOpenChangeSet={onOpenChangeSet} onOpenNotes={onOpenNotes} />
         ) : (
           <MasterOverview
             doc={seriesDoc}
@@ -623,7 +632,7 @@ export function DetailPanel({
       ) : null}
 
       {openDoc ? (
-        <TaskReader doc={fullTaskDoc(openDoc)} onOpenChangeSet={onOpenChangeSet} onOpenNotes={onOpenNotes} />
+        <TaskReader doc={fullTaskDoc(openDoc)} bodyUnavailable={bodyUnavailable(openDoc)} onOpenChangeSet={onOpenChangeSet} onOpenNotes={onOpenNotes} />
       ) : seriesDoc ? (
         <MasterOverview
           doc={seriesDoc}
@@ -1252,10 +1261,12 @@ function SpineLane({
 
 function TaskReader({
   doc,
+  bodyUnavailable = false,
   onOpenChangeSet,
   onOpenNotes,
 }: {
   doc: TaskDocNode;
+  bodyUnavailable?: boolean;
   onOpenChangeSet?: (target: ChangeSetTarget) => void;
   onOpenNotes?: (target: NotesReaderTarget) => void;
 }) {
@@ -1269,6 +1280,9 @@ function TaskReader({
         <span className={taskdocStatus}>{doc.status}</span>
         <ProgressFill completed={progress.done} total={progress.total} label="steps done" />
       </div>
+      {bodyUnavailable ? (
+        <p className="muted">Full task document details are unavailable; showing the available summary.</p>
+      ) : null}
       <DocChangeSetBar
         kind="leaf"
         repo={doc.repository}
@@ -1276,11 +1290,6 @@ function TaskReader({
         leaf={doc.id}
         onOpen={onOpenChangeSet}
       />
-      {doc.steps.length > 0 ? (
-        <Section title="Progress">
-          <StepList steps={doc.steps} />
-        </Section>
-      ) : null}
       {doc.objective ? (
         <Section title="Objective">
           <Markdown>{doc.objective}</Markdown>
@@ -1333,6 +1342,21 @@ function TaskReader({
       />
     </div>
   );
+}
+
+function mergeTaskDocumentBody(summary: TaskDocNode, body: Partial<TaskDocNode>): TaskDocNode {
+  return {
+    ...summary,
+    ...body,
+    steps: body.steps ?? summary.steps,
+    requirements: body.requirements ?? summary.requirements,
+    codeExamples: body.codeExamples ?? summary.codeExamples,
+    decisions: body.decisions ?? summary.decisions,
+    openQuestions: body.openQuestions ?? summary.openQuestions,
+    references: body.references ?? summary.references,
+    subTasks: body.subTasks ?? summary.subTasks,
+    sections: body.sections ?? summary.sections,
+  };
 }
 
 function Section({ title, children }: { title: string; children: ReactNode }) {
