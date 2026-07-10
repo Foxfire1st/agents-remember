@@ -310,6 +310,18 @@ class SpawnAgentSessionTests(unittest.TestCase):
         self.assertNotIn("contextDelivered", payload)
         self.assertEqual(paster.calls, [])
 
+    def test_plain_terminal_spawn_skips_harness_dispatch(self) -> None:
+        payload = self._spawn(kind="terminal")
+
+        self.assertEqual(payload["status"], "spawned")
+        self.assertEqual(payload["kind"], "terminal")
+        self.assertNotIn("harness", payload)
+        self.assertEqual(self.host.ensured[0]["command"], ("/bin/bash",))
+        row = self.catalog.get("worker-1")
+        assert row is not None
+        self.assertEqual(row.kind, "terminal")
+        self.assertEqual(row.binding_role, "terminal")
+
     def test_verified_delivery_omits_the_failure_capture(self) -> None:
         paster = _FakePaster(delivered=True, submitted=True, capture="worker> [Pasted text #1]")
         payload = self._spawn(context="brief", submit=True, paster=paster)
@@ -431,9 +443,7 @@ class SpawnKnobApplicationTests(unittest.TestCase):
                 }
             }
         )
-        paster = _ObservedPaster(
-            capture="Fable 5 with max effort · Claude Max\n◉ max · /effort\n"
-        )
+        paster = _ObservedPaster(capture="Fable 5 with max effort · Claude Max\n◉ max · /effort\n")
         payload = self._spawn(
             env={"AR_SPAWN_ROLE": "worker"},
             context="brief",
@@ -452,9 +462,7 @@ class SpawnKnobApplicationTests(unittest.TestCase):
         self.assertNotIn("sessionCommandsDelivered", payload)
 
     def test_ultracode_rides_a_session_command_before_the_brief_not_the_flag(self) -> None:
-        self._write_settings(
-            {"roles": {"worker": {"harness": "claude", "effort": "ultracode"}}}
-        )
+        self._write_settings({"roles": {"worker": {"harness": "claude", "effort": "ultracode"}}})
         paster = _ObservedPaster(
             capture="Fable 5 with ultracode effort · Claude Max\n◉ ultracode · /effort\n"
         )
@@ -478,9 +486,7 @@ class SpawnKnobApplicationTests(unittest.TestCase):
         self.assertTrue(payload["sessionCommandsDelivered"])
 
     def test_unknown_effort_refuses_at_dispatch_naming_both_sets(self) -> None:
-        self._write_settings(
-            {"roles": {"worker": {"harness": "claude", "effort": "turbo"}}}
-        )
+        self._write_settings({"roles": {"worker": {"harness": "claude", "effort": "turbo"}}})
         payload = self._spawn(env={"AR_SPAWN_ROLE": "worker"})
         self.assertFalse(payload["ok"])
         self.assertEqual(payload["status"], "effort-invalid")
@@ -493,11 +499,7 @@ class SpawnKnobApplicationTests(unittest.TestCase):
 
     def test_codex_builtin_harness_receives_resolved_knobs_on_argv(self) -> None:
         self._write_settings(
-            {
-                "roles": {
-                    "worker": {"harness": "codex", "model": "gpt-5.6-sol", "effort": "xhigh"}
-                }
-            }
+            {"roles": {"worker": {"harness": "codex", "model": "gpt-5.6-sol", "effort": "xhigh"}}}
         )
         payload = self._spawn(env={"AR_SPAWN_ROLE": "worker"})
         self.assertEqual(payload["status"], "spawned")
@@ -617,9 +619,7 @@ class SpawnKnobApplicationTests(unittest.TestCase):
                 }
             }
         )
-        paster = _ObservedPaster(
-            capture="Fable 5 with max effort · Claude Max\n◉ max · /effort\n"
-        )
+        paster = _ObservedPaster(capture="Fable 5 with max effort · Claude Max\n◉ max · /effort\n")
         payload = self._spawn(
             env={"AR_SPAWN_ROLE": "strategist"},
             context="You are the strategist.",
@@ -627,9 +627,7 @@ class SpawnKnobApplicationTests(unittest.TestCase):
             paster=paster,
         )
         self.assertEqual(payload["status"], "spawned")
-        self.assertEqual(
-            self.host.ensured[0]["command"], ("claude", "--effort", "max")
-        )
+        self.assertEqual(self.host.ensured[0]["command"], ("claude", "--effort", "max"))
         self.assertTrue(
             str(paster.calls[0]["text"]).endswith("\n\nultracode\n\nYou are the strategist.")
         )
@@ -686,9 +684,7 @@ class SpawnKnobApplicationTests(unittest.TestCase):
         self.assertEqual(row.prompt_keywords, ("ultracode",))
 
     def test_undelivered_session_command_is_reported_with_capture(self) -> None:
-        self._write_settings(
-            {"roles": {"worker": {"harness": "claude", "effort": "ultracode"}}}
-        )
+        self._write_settings({"roles": {"worker": {"harness": "claude", "effort": "ultracode"}}})
         paster = _FakePaster(delivered=False, submitted=False, capture="claude> (booting)")
         payload = self._spawn(env={"AR_SPAWN_ROLE": "worker"}, paster=paster)
         self.assertEqual(payload["status"], "spawned")
@@ -726,9 +722,7 @@ class SettingsDefinedHarnessTests(unittest.TestCase):
             coordination_root=self.coordination_root,
             workspace_root=self.tmp / "workspace",
             transcript_root=self.tmp / "logs" / "mcp",
-            repositories={
-                "repo-a": RepositoryScope(repo_id="repo-a", path=self.repo_root)
-            },
+            repositories={"repo-a": RepositoryScope(repo_id="repo-a", path=self.repo_root)},
         )
         self.catalog = TerminalCatalog(
             self.coordination_root / "logs" / "dashboard" / "terminal-sessions.json"
@@ -865,9 +859,7 @@ class SpawnLevelResolutionTests(unittest.TestCase):
 
     # The developer's canonical reviewer economics (docs/reference/harnesses.md walks this).
     ECONOMICS: ClassVar[dict] = {
-        "roles": {
-            "reviewer": {"harness": "claude", "model": "sonnet", "effort": "high"}
-        },
+        "roles": {"reviewer": {"harness": "claude", "model": "sonnet", "effort": "high"}},
         "rolesPerLevel": {
             "master": {"reviewer": {"model": "opus", "effort": "xhigh"}},
             "portfolio": {"reviewer": {"model": "fable", "effort": "ultracode"}},
@@ -885,9 +877,7 @@ class SpawnLevelResolutionTests(unittest.TestCase):
             coordination_root=self.coordination_root,
             workspace_root=self.tmp / "workspace",
             transcript_root=self.tmp / "logs" / "mcp",
-            repositories={
-                "repo-a": RepositoryScope(repo_id="repo-a", path=self.repo_root)
-            },
+            repositories={"repo-a": RepositoryScope(repo_id="repo-a", path=self.repo_root)},
         )
         self.catalog = TerminalCatalog(
             self.coordination_root / "logs" / "dashboard" / "terminal-sessions.json"
@@ -947,13 +937,9 @@ class SpawnLevelResolutionTests(unittest.TestCase):
         # effort must stay OFF the flag and arrive as the /effort session command.
         self._write_settings(self.coordination_root, self.ECONOMICS)
         paster = _FakePaster()
-        payload = self._spawn(
-            env={"AR_SPAWN_ROLE": "reviewer"}, level="portfolio", paster=paster
-        )
+        payload = self._spawn(env={"AR_SPAWN_ROLE": "reviewer"}, level="portfolio", paster=paster)
         self.assertEqual(payload["status"], "spawned")
-        self.assertEqual(
-            self.host.ensured[0]["command"], ("claude", "--model", "fable")
-        )
+        self.assertEqual(self.host.ensured[0]["command"], ("claude", "--model", "fable"))
         self.assertEqual(paster.calls[0]["text"], "/effort ultracode")
         self.assertEqual(payload["sessionCommands"], ["/effort ultracode"])
 
@@ -1134,9 +1120,7 @@ class SpawnLevelResolutionTests(unittest.TestCase):
         self.assertEqual(self.host.ensured[0]["command"], ("claude",))
         self.assertEqual(paster.calls[0]["text"], "/effort ultracode")
         self.assertTrue(
-            str(paster.calls[1]["text"]).endswith(
-                "\n\nultracode\n\nYou are the strategist."
-            )
+            str(paster.calls[1]["text"]).endswith("\n\nultracode\n\nYou are the strategist.")
         )
         row = self.catalog.get("seat-1")
         assert row is not None
@@ -1160,9 +1144,7 @@ class SpawnHarnessResolutionTests(unittest.TestCase):
             coordination_root=self.coordination_root,
             workspace_root=self.tmp / "workspace",
             transcript_root=self.tmp / "logs" / "mcp",
-            repositories={
-                "repo-a": RepositoryScope(repo_id="repo-a", path=self.repo_root)
-            },
+            repositories={"repo-a": RepositoryScope(repo_id="repo-a", path=self.repo_root)},
         )
         self.host = _FakeHost()
         reset_ambient()
@@ -1219,9 +1201,7 @@ class SpawnHarnessResolutionTests(unittest.TestCase):
         self.assertEqual(self.host.ensured, [])
 
     def test_no_settings_falls_back_to_the_first_detected_registry_harness(self) -> None:
-        payload = self._spawn(
-            which=lambda cmd: "/usr/bin/codex" if cmd == "codex" else None
-        )
+        payload = self._spawn(which=lambda cmd: "/usr/bin/codex" if cmd == "codex" else None)
         self.assertEqual(payload["status"], "spawned")
         self.assertEqual(payload["harness"], "codex")
 

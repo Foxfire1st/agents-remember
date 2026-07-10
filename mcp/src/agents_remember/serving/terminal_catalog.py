@@ -137,98 +137,54 @@ class TerminalCatalogEntry:
         raw_command = data.get("command", [])
         command = raw_command if isinstance(raw_command, list) else []
         kind: TerminalSessionKind = "harness" if data.get("kind") == "harness" else "terminal"
-        spawn_role = str(data["spawnRole"]) if data.get("spawnRole") is not None else None
+        spawn_role = _optional_str(data, "spawnRole")
         return cls(
             id=str(data["id"]),
             label=str(data["label"]),
             kind=kind,
-            harness=str(data["harness"]) if data.get("harness") is not None else None,
-            lifecycle_id=(
-                str(data["lifecycleId"]) if data.get("lifecycleId") is not None else None
-            ),
+            harness=_optional_str(data, "harness"),
+            lifecycle_id=_optional_str(data, "lifecycleId"),
             cwd=Path(str(data["cwd"])),
             tmux_name=str(data["tmuxName"]),
             command=tuple(str(part) for part in command),
             created_at=str(data["createdAt"]),
             last_attached_at=str(data["lastAttachedAt"]),
             status=_status(data.get("status")),
-            terminated_at=(
-                str(data["terminatedAt"]) if data.get("terminatedAt") is not None else None
-            ),
-            leaf_key=str(data["leafKey"]) if data.get("leafKey") is not None else None,
+            terminated_at=_optional_str(data, "terminatedAt"),
+            leaf_key=_optional_str(data, "leafKey"),
             seat_role=migrated_seat_role(
-                persisted=str(data["seatRole"]) if data.get("seatRole") is not None else None,
+                persisted=_optional_str(data, "seatRole"),
                 spawn_role=spawn_role,
                 kind=kind,
             ),
-            replacement_for_leaf=(
-                str(data["replacementForLeaf"])
-                if data.get("replacementForLeaf") is not None
-                else None
-            ),
-            spawned_by_session=(
-                str(data["spawnedBySession"]) if data.get("spawnedBySession") is not None else None
-            ),
-            spawned_by_lifecycle=(
-                str(data["spawnedByLifecycle"])
-                if data.get("spawnedByLifecycle") is not None
-                else None
-            ),
+            replacement_for_leaf=_optional_str(data, "replacementForLeaf"),
+            spawned_by_session=_optional_str(data, "spawnedBySession"),
+            spawned_by_lifecycle=_optional_str(data, "spawnedByLifecycle"),
             spawn_role=spawn_role,
             launch_args=_string_tuple(data.get("launchArgs")),
             prompt_keywords=_string_tuple(data.get("promptKeywords")),
             session_commands=_string_tuple(data.get("sessionCommands")),
-            spawn_level=str(data["spawnLevel"]) if data.get("spawnLevel") is not None else None,
-            spawn_level_source=(
-                str(data["spawnLevelSource"]) if data.get("spawnLevelSource") is not None else None
-            ),
-            resolved_model=str(data["resolvedModel"]) if data.get("resolvedModel") is not None else None,
-            resolved_effort=str(data["resolvedEffort"]) if data.get("resolvedEffort") is not None else None,
-            session_log_entry_id=(
-                str(data["sessionLogEntryId"])
-                if data.get("sessionLogEntryId") is not None
-                else None
-            ),
-            session_log_path=(
-                Path(str(data["sessionLogPath"]))
-                if data.get("sessionLogPath") is not None
-                else None
-            ),
+            spawn_level=_optional_str(data, "spawnLevel"),
+            spawn_level_source=_optional_str(data, "spawnLevelSource"),
+            resolved_model=_optional_str(data, "resolvedModel"),
+            resolved_effort=_optional_str(data, "resolvedEffort"),
+            session_log_entry_id=_optional_str(data, "sessionLogEntryId"),
+            session_log_path=_optional_path(data, "sessionLogPath"),
             liveness_failures=_non_negative_int(data.get("livenessFailures")),
-            liveness_first_failed_at=(
-                str(data["livenessFirstFailedAt"])
-                if data.get("livenessFirstFailedAt") is not None
-                else None
-            ),
-            liveness_last_failed_at=(
-                str(data["livenessLastFailedAt"])
-                if data.get("livenessLastFailedAt") is not None
-                else None
-            ),
+            liveness_first_failed_at=_optional_str(data, "livenessFirstFailedAt"),
+            liveness_last_failed_at=_optional_str(data, "livenessLastFailedAt"),
             liveness_evidence=_liveness_evidence(data.get("livenessEvidence")),
             exit_evidence=_liveness_evidence(data.get("exitEvidence")),
-            retired_at=str(data["retiredAt"]) if data.get("retiredAt") is not None else None,
-            retired_by_session=(
-                str(data["retiredBySession"]) if data.get("retiredBySession") is not None else None
-            ),
-            retired_reason=(
-                str(data["retiredReason"]) if data.get("retiredReason") is not None else None
-            ),
-            retired_edge=str(data["retiredEdge"]) if data.get("retiredEdge") is not None else None,
-            landed_at=str(data["landedAt"]) if data.get("landedAt") is not None else None,
-            landed_reason=(
-                str(data["landedReason"]) if data.get("landedReason") is not None else None
-            ),
-            landed_edge=str(data["landedEdge"]) if data.get("landedEdge") is not None else None,
-            spawned_label=(
-                str(data["spawnedLabel"]) if data.get("spawnedLabel") is not None else None
-            ),
+            retired_at=_optional_str(data, "retiredAt"),
+            retired_by_session=_optional_str(data, "retiredBySession"),
+            retired_reason=_optional_str(data, "retiredReason"),
+            retired_edge=_optional_str(data, "retiredEdge"),
+            landed_at=_optional_str(data, "landedAt"),
+            landed_reason=_optional_str(data, "landedReason"),
+            landed_edge=_optional_str(data, "landedEdge"),
+            spawned_label=_optional_str(data, "spawnedLabel"),
             turn_state=_turn_state(data.get("turnState")),
-            turn_state_changed_at=(
-                str(data["turnStateChangedAt"])
-                if data.get("turnStateChangedAt") is not None
-                else None
-            ),
+            turn_state_changed_at=_optional_str(data, "turnStateChangedAt"),
         )
 
     def to_json(self) -> dict[str, object]:
@@ -243,71 +199,53 @@ class TerminalCatalogEntry:
             "lastAttachedAt": self.last_attached_at,
             "status": self.status,
         }
-        if self.harness is not None:
-            data["harness"] = self.harness
-        if self.lifecycle_id is not None:
-            data["lifecycleId"] = self.lifecycle_id
-        if self.terminated_at is not None:
-            data["terminatedAt"] = self.terminated_at
-        if self.leaf_key is not None:
-            data["leafKey"] = self.leaf_key
+        data.update(
+            _present_fields(
+                {
+                    "harness": self.harness,
+                    "lifecycleId": self.lifecycle_id,
+                    "terminatedAt": self.terminated_at,
+                    "leafKey": self.leaf_key,
+                }
+            )
+        )
         data["seatRole"] = self.binding_role
-        if self.replacement_for_leaf is not None:
-            data["replacementForLeaf"] = self.replacement_for_leaf
-        if self.spawned_by_session is not None:
-            data["spawnedBySession"] = self.spawned_by_session
-        if self.spawned_by_lifecycle is not None:
-            data["spawnedByLifecycle"] = self.spawned_by_lifecycle
-        if self.spawn_role is not None:
-            data["spawnRole"] = self.spawn_role
-        if self.launch_args is not None:
-            data["launchArgs"] = list(self.launch_args)
-        if self.prompt_keywords is not None:
-            data["promptKeywords"] = list(self.prompt_keywords)
-        if self.session_commands is not None:
-            data["sessionCommands"] = list(self.session_commands)
-        if self.spawn_level is not None:
-            data["spawnLevel"] = self.spawn_level
-        if self.spawn_level_source is not None:
-            data["spawnLevelSource"] = self.spawn_level_source
-        if self.resolved_model is not None:
-            data["resolvedModel"] = self.resolved_model
-        if self.resolved_effort is not None:
-            data["resolvedEffort"] = self.resolved_effort
-        if self.session_log_entry_id is not None:
-            data["sessionLogEntryId"] = self.session_log_entry_id
-        if self.session_log_path is not None:
-            data["sessionLogPath"] = str(self.session_log_path)
+        data.update(
+            _present_fields(
+                {
+                    "replacementForLeaf": self.replacement_for_leaf,
+                    "spawnedBySession": self.spawned_by_session,
+                    "spawnedByLifecycle": self.spawned_by_lifecycle,
+                    "spawnRole": self.spawn_role,
+                    "launchArgs": _optional_list(self.launch_args),
+                    "promptKeywords": _optional_list(self.prompt_keywords),
+                    "sessionCommands": _optional_list(self.session_commands),
+                    "spawnLevel": self.spawn_level,
+                    "spawnLevelSource": self.spawn_level_source,
+                    "resolvedModel": self.resolved_model,
+                    "resolvedEffort": self.resolved_effort,
+                    "sessionLogEntryId": self.session_log_entry_id,
+                    "sessionLogPath": _optional_path_text(self.session_log_path),
+                    "livenessFirstFailedAt": self.liveness_first_failed_at,
+                    "livenessLastFailedAt": self.liveness_last_failed_at,
+                    "livenessEvidence": self.liveness_evidence,
+                    "retiredAt": self.retired_at,
+                    "retiredBySession": self.retired_by_session,
+                    "retiredReason": self.retired_reason,
+                    "retiredEdge": self.retired_edge,
+                    "landedAt": self.landed_at,
+                    "landedReason": self.landed_reason,
+                    "landedEdge": self.landed_edge,
+                    "spawnedLabel": self.spawned_label,
+                    "turnState": self.turn_state,
+                    "turnStateChangedAt": self.turn_state_changed_at,
+                }
+            )
+        )
         if self.liveness_failures:
             data["livenessFailures"] = self.liveness_failures
-        if self.liveness_first_failed_at is not None:
-            data["livenessFirstFailedAt"] = self.liveness_first_failed_at
-        if self.liveness_last_failed_at is not None:
-            data["livenessLastFailedAt"] = self.liveness_last_failed_at
-        if self.liveness_evidence is not None:
-            data["livenessEvidence"] = self.liveness_evidence
         if self.status == "exited" and self.exit_evidence is not None:
             data["exitEvidence"] = self.exit_evidence
-        if self.retired_at is not None:
-            data["retiredAt"] = self.retired_at
-        if self.retired_by_session is not None:
-            data["retiredBySession"] = self.retired_by_session
-        if self.retired_reason is not None:
-            data["retiredReason"] = self.retired_reason
-        if self.retired_edge is not None:
-            data["retiredEdge"] = self.retired_edge
-        if self.landed_at is not None:
-            data["landedAt"] = self.landed_at
-        if self.landed_reason is not None:
-            data["landedReason"] = self.landed_reason
-        if self.landed_edge is not None:
-            data["landedEdge"] = self.landed_edge
-        if self.spawned_label is not None:
-            data["spawnedLabel"] = self.spawned_label
-        if self.turn_state is not None:
-            data["turnState"] = self.turn_state
-        if self.turn_state_changed_at is not None:
-            data["turnStateChangedAt"] = self.turn_state_changed_at
         return data
 
     def with_attachment(self, attached_at: str) -> TerminalCatalogEntry:
@@ -531,9 +469,7 @@ class TerminalCatalog:
     def get(self, session_id: str) -> TerminalCatalogEntry | None:
         return next((entry for entry in self._read() if entry.id == session_id), None)
 
-    def active_for_leaf(
-        self, leaf_key: str, *, seat_role: str
-    ) -> TerminalCatalogEntry | None:
+    def active_for_leaf(self, leaf_key: str, *, seat_role: str) -> TerminalCatalogEntry | None:
         """The single RUNNING session of ``seat_role`` that owns ``leaf_key``, or ``None``.
 
         Uniqueness is per (leaf, seat role): worker, reviewer, curator, manager, architect, generic
@@ -756,7 +692,9 @@ class TerminalCatalog:
                 if dirty and entries is not None:
                     self._write_disk(entries)
 
-    def compact(self, *, now: datetime, retain_seconds: float = TERMINATED_RETENTION_SECONDS) -> int:
+    def compact(
+        self, *, now: datetime, retain_seconds: float = TERMINATED_RETENTION_SECONDS
+    ) -> int:
         """Reclaim ``terminated`` tombstones older than ``retain_seconds`` so the file stays bounded.
 
         260707-HFX2-L12 F1/CS-6 D3: terminated rows are never resurrected (the hysteresis refuses) and
@@ -840,6 +778,28 @@ def _string_tuple(raw: object) -> tuple[str, ...] | None:
     if not isinstance(raw, list):
         return None
     return tuple(str(item) for item in raw)
+
+
+def _optional_str(data: dict[str, object], key: str) -> str | None:
+    raw = data.get(key)
+    return str(raw) if raw is not None else None
+
+
+def _optional_path(data: dict[str, object], key: str) -> Path | None:
+    raw = _optional_str(data, key)
+    return Path(raw) if raw is not None else None
+
+
+def _optional_list(raw: tuple[str, ...] | None) -> list[str] | None:
+    return list(raw) if raw is not None else None
+
+
+def _optional_path_text(raw: Path | None) -> str | None:
+    return str(raw) if raw is not None else None
+
+
+def _present_fields(fields: dict[str, object | None]) -> dict[str, object]:
+    return {key: value for key, value in fields.items() if value is not None}
 
 
 def _liveness_evidence(raw: object) -> TerminalLivenessEvidence | None:

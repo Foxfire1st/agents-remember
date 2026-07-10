@@ -77,7 +77,9 @@ class TerminalCatalogTests(unittest.TestCase):
         self.catalog.mark_terminated("b", "2026-06-26T00:01:00Z")
 
         self.assertEqual([entry.id for entry in self.catalog.list()], ["a"])
-        self.assertEqual([entry.id for entry in self.catalog.list(include_terminated=True)], ["a", "b"])
+        self.assertEqual(
+            [entry.id for entry in self.catalog.list(include_terminated=True)], ["a", "b"]
+        )
         exited = self.catalog.get("a")
         terminated = self.catalog.get("b")
         assert exited is not None
@@ -228,6 +230,52 @@ class TerminalCatalogTests(unittest.TestCase):
         self.assertEqual(entry.to_json()["replacementForLeaf"], leaf)
         self.assertEqual(entry.to_json()["sessionLogEntryId"], "brief-1")
 
+    def test_complete_optional_projection_round_trips_without_contract_loss(self) -> None:
+        entry = replace(
+            _entry("full", kind="harness"),
+            lifecycle_id="LC-full",
+            status="exited",
+            terminated_at="2026-07-10T10:00:00+00:00",
+            leaf_key="repo/master/leaf-1",
+            seat_role="reviewer",
+            replacement_for_leaf="repo/master/leaf-0",
+            spawned_by_session="manager-1",
+            spawned_by_lifecycle="LC-manager",
+            spawn_role="reviewer",
+            launch_args=("--verbose",),
+            prompt_keywords=("strict", "review"),
+            session_commands=("/effort high",),
+            spawn_level="leaf",
+            spawn_level_source="explicit",
+            resolved_model="review-model",
+            resolved_effort="high",
+            session_log_entry_id="brief-1",
+            session_log_path=Path("/tmp/session.jsonl"),
+            liveness_failures=2,
+            liveness_first_failed_at="2026-07-10T10:01:00+00:00",
+            liveness_last_failed_at="2026-07-10T10:02:00+00:00",
+            liveness_evidence="pane-gone",
+            exit_evidence="pane-gone",
+            retired_at="2026-07-10T10:03:00+00:00",
+            retired_by_session="manager-1",
+            retired_reason="done",
+            retired_edge="leaf-closeout",
+            landed_at="2026-07-10T10:04:00+00:00",
+            landed_reason="integrated",
+            landed_edge="leaf-integration",
+            spawned_label="Original reviewer",
+            turn_state="turn-ended",
+            turn_state_changed_at="2026-07-10T10:05:00+00:00",
+        )
+
+        projected = entry.to_json()
+
+        self.assertEqual(TerminalCatalogEntry.from_json(projected), entry)
+        self.assertEqual(projected["seatRole"], "reviewer")
+        self.assertEqual(projected["launchArgs"], ["--verbose"])
+        self.assertEqual(projected["sessionLogPath"], "/tmp/session.jsonl")
+        self.assertEqual(projected["exitEvidence"], "pane-gone")
+
     def test_bind_session_log_preserves_newer_liveness_state(self) -> None:
         self.catalog.upsert(_entry("a", kind="harness"))
         stale_snapshot = self.catalog.get("a")
@@ -354,7 +402,9 @@ class TerminalCatalogTests(unittest.TestCase):
 
         def _add(session_id: str) -> None:
             barrier.wait()  # maximize overlap on the read-modify-write
-            self.catalog.upsert(_entry(session_id, created_at=f"2026-06-26T00:00:{session_id[-2:]}Z"))
+            self.catalog.upsert(
+                _entry(session_id, created_at=f"2026-06-26T00:00:{session_id[-2:]}Z")
+            )
 
         threads = [threading.Thread(target=_add, args=(session_id,)) for session_id in ids]
         for thread in threads:
@@ -364,7 +414,9 @@ class TerminalCatalogTests(unittest.TestCase):
 
         stored = {entry.id for entry in self.catalog.list()}
         self.assertEqual(stored, set(ids))  # no lost updates
-        json.loads(self.catalog.path.read_text(encoding="utf-8"))  # still valid JSON (no torn write)
+        json.loads(
+            self.catalog.path.read_text(encoding="utf-8")
+        )  # still valid JSON (no torn write)
 
 
 if __name__ == "__main__":

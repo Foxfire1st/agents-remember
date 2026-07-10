@@ -355,7 +355,10 @@ def _knob_refusal(
 ) -> dict[str, Any] | None:
     """The ``model-invalid``/``effort-invalid`` pre-spawn refusal, or ``None`` when the knobs apply."""
     checks = (
-        ("model-invalid", invalid_model_detail(found, effective_model) if effective_model else None),
+        (
+            "model-invalid",
+            invalid_model_detail(found, effective_model) if effective_model else None,
+        ),
         (
             "effort-invalid",
             invalid_effort_detail(found, effective_effort) if effective_effort else None,
@@ -489,7 +492,11 @@ def _deliver_spawn_pastes(
         session_commands_delivered = True
         for command_line in session_commands:
             row = DeliveryRow(
-                kind="session-command", entry_id=entry_id, text=command_line, submit=True, envelope=False
+                kind="session-command",
+                entry_id=entry_id,
+                text=command_line,
+                submit=True,
+                envelope=False,
             )
             command_rows.append(row)
             result = deliver(
@@ -502,7 +509,9 @@ def _deliver_spawn_pastes(
             if result.outcome in ("blocked", "failed"):
                 failure_capture = result.capture or failure_capture
     if packet:
-        row = DeliveryRow(kind="brief", entry_id=entry_id, text=packet, submit=submit, envelope=True)
+        row = DeliveryRow(
+            kind="brief", entry_id=entry_id, text=packet, submit=submit, envelope=True
+        )
         result = deliver(
             row,
             tmux_name=tmux_name,
@@ -546,6 +555,18 @@ def _deliver_spawn_pastes(
         bound_entry_id=bound_entry_id,
         session_log_path=session_log_path,
     )
+
+
+def _resolve_spawn_leaf(
+    config: McpRuntimeConfig, leaf_ref: str | None, *, kind: str
+) -> tuple[str | None, dict[str, Any] | None]:
+    """Resolve one optional spawn leaf reference, preserving the public refusal payload."""
+    if leaf_ref is None:
+        return None, None
+    try:
+        return resolve_catalog_leaf_key(config, leaf_ref), None
+    except LeafRefResolutionError as exc:
+        return None, leaf_ref_refusal_payload("spawn_agent_session", leaf_ref, exc, kind=kind)
 
 
 def spawn_agent_session_payload(
@@ -620,19 +641,19 @@ def spawn_agent_session_payload(
     )
     if spend_refusal is not None:
         return spend_refusal
-    if leaf_key is not None:
-        try:
-            leaf_key = resolve_catalog_leaf_key(config, leaf_key)
-        except LeafRefResolutionError as exc:
-            return leaf_ref_refusal_payload("spawn_agent_session", leaf_key, exc, kind=kind)
-    if replacement_for_leaf is not None:
-        try:
-            replacement_for_leaf = resolve_catalog_leaf_key(config, replacement_for_leaf)
-        except LeafRefResolutionError as exc:
-            return leaf_ref_refusal_payload(
-                "spawn_agent_session", replacement_for_leaf, exc, kind=kind
-            )
-    dispatch: _HarnessDispatch | None = None
+    leaf_key, refusal = _resolve_spawn_leaf(config, leaf_key, kind=kind)
+    if refusal is not None:
+        return refusal
+    replacement_for_leaf, refusal = _resolve_spawn_leaf(config, replacement_for_leaf, kind=kind)
+    if refusal is not None:
+        return refusal
+
+    resolved_session_commands = list(session_commands or [])
+    spawn_level: str | None = None
+    spawn_level_source: str | None = None
+    resolved_model: str | None = None
+    resolved_effort: str | None = None
+    harnesses: tuple[Harness, ...] | None = None
     if kind == "harness":
         dispatch, refusal = _resolve_harness_dispatch(
             config,
@@ -649,10 +670,13 @@ def spawn_agent_session_payload(
         effort = dispatch.effort
         launch_args = dispatch.launch_args
         prompt_keywords = dispatch.prompt_keywords
+        resolved_session_commands = dispatch.session_commands
+        spawn_level = dispatch.spawn_level
+        spawn_level_source = dispatch.spawn_level_source
+        resolved_model = dispatch.model
+        resolved_effort = dispatch.effort
+        harnesses = dispatch.registry
 
-    resolved_session_commands = (
-        dispatch.session_commands if dispatch is not None else list(session_commands or [])
-    )
     sid = session_id or uuid4().hex
     spawn_env = _spawn_env(model, effort, env)
     provenance_lifecycle = spawned_by_lifecycle or _ambient_lifecycle_id()
@@ -667,7 +691,7 @@ def spawn_agent_session_payload(
         kind=kind,
         workspace_root=config.workspace_root,
         shell=shell,
-        harness=harness if kind == "harness" else None,
+        harness=harness,
         label=label,
         leaf_key=leaf_key,
         replacement_for_leaf=replacement_for_leaf,
@@ -675,14 +699,14 @@ def spawn_agent_session_payload(
         launch_args=launch_args,
         prompt_keywords=prompt_keywords,
         session_commands=resolved_session_commands or None,
-        spawn_level=dispatch.spawn_level if dispatch is not None else None,
-        spawn_level_source=dispatch.spawn_level_source if dispatch is not None else None,
-        resolved_model=dispatch.model if dispatch is not None else None,
-        resolved_effort=dispatch.effort if dispatch is not None else None,
+        spawn_level=spawn_level,
+        spawn_level_source=spawn_level_source,
+        resolved_model=resolved_model,
+        resolved_effort=resolved_effort,
         spawned_by_session=spawned_by_session,
         spawned_by_lifecycle=provenance_lifecycle,
         which=which,
-        harnesses=dispatch.registry if dispatch is not None else None,
+        harnesses=harnesses,
     )
 
     if result.status == "bad-kind":
@@ -695,7 +719,7 @@ def spawn_agent_session_payload(
                 "operation": "spawn_agent_session",
                 "status": "leaf-taken",
                 "session": sid,
-                "harness": harness if kind == "harness" else None,
+                "harness": harness,
                 "kind": result.kind,
                 "leafKey": leaf_key,
                 "seatRole": result.seat_role,
@@ -718,7 +742,7 @@ def spawn_agent_session_payload(
             packet,
             submit,
             entry_id=entry.id,
-            harness=harness if kind == "harness" else None,
+            harness=harness,
             cwd=entry.cwd,
             created_at=entry.created_at,
             session_log=session_log,
