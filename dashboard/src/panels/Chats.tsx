@@ -1,4 +1,11 @@
-import { lazy, Suspense, useEffect, useState } from "react";
+import {
+  lazy,
+  Suspense,
+  useEffect,
+  useState,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type PointerEvent as ReactPointerEvent,
+} from "react";
 
 import { css } from "../../styled-system/css";
 import {
@@ -27,6 +34,7 @@ import { useDashboard } from "../data/store";
 import { buildTaskTree, leafIdFromKey, leafTitleForKey } from "../data/taskIdentity";
 import type { TaskDocNode } from "../types/projection";
 import { EmptyStateBackdrop } from "./EmptyStateBackdrop";
+import { usePersistedNumber } from "./file-viewer/usePersistedFlag";
 import { LeafAttachPicker } from "./LeafAttachPicker";
 import { SessionComposer } from "./SessionComposer";
 import { SessionList } from "./SessionList";
@@ -106,23 +114,38 @@ const attachError = css({
   paddingInline: "0.2rem",
 });
 const harnessIcon = css({ flexShrink: 0, display: "block" });
-const body = css({ display: "flex", flex: "1", minHeight: "0", gap: "0.5rem" });
+const body = css({ display: "flex", flex: "1", minHeight: "0", minWidth: "0", gap: "0.5rem" });
 const sidebar = css({
+  position: "relative",
   display: "flex",
   flexDirection: "column",
   flexShrink: 0,
-  width: "16rem",
   minHeight: "0",
+  minWidth: "0",
+  maxWidth: "calc(100% - 20rem)",
   borderRightWidth: "1px",
   borderRightStyle: "solid",
   borderRightColor: "grid",
   paddingRight: "0.4rem",
 });
+const sidebarResizeHandle = css({
+  position: "absolute",
+  top: "0",
+  right: "0",
+  bottom: "0",
+  width: "7px",
+  zIndex: "3",
+  cursor: "col-resize",
+  background: "transparent",
+  transition: "background 0.15s ease",
+  _hover: { background: "amber" },
+  _focusVisible: { outline: "1px solid token(colors.amber)", outlineOffset: "-1px" },
+});
 const terminalArea = css({
   display: "flex",
   flexDirection: "column",
   flex: "1",
-  minWidth: "0",
+  minWidth: "min(20rem, 100%)",
   minHeight: "0",
   gap: "0.4rem",
 });
@@ -159,6 +182,60 @@ const statusPanel = css({
 
 const LAST_ACTIVE_SESSION_KEY = "ar-dashboard:last-active-chat-session";
 const CATALOG_REFRESH_INTERVAL_MS = 2500;
+const SIDEBAR_WIDTH_KEY = "chats.sidebar-width";
+const SIDEBAR_DEFAULT_WIDTH = 256;
+const SIDEBAR_MIN_WIDTH = 220;
+const SIDEBAR_MAX_WIDTH = 560;
+const SIDEBAR_KEYBOARD_STEP = 24;
+
+function clampSidebarWidth(width: number): number {
+  return Math.max(SIDEBAR_MIN_WIDTH, Math.min(SIDEBAR_MAX_WIDTH, Math.round(width)));
+}
+
+function SidebarResizeHandle({
+  width,
+  onResize,
+}: {
+  width: number;
+  onResize: (next: number) => void;
+}) {
+  const onPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    const startX = event.clientX;
+    const startWidth = width;
+    event.currentTarget.setPointerCapture(event.pointerId);
+    const move = (moveEvent: globalThis.PointerEvent) => {
+      onResize(clampSidebarWidth(startWidth + moveEvent.clientX - startX));
+    };
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  };
+  const onKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    const direction = event.key === "ArrowRight" ? 1 : event.key === "ArrowLeft" ? -1 : 0;
+    if (!direction) return;
+    event.preventDefault();
+    onResize(clampSidebarWidth(width + direction * SIDEBAR_KEYBOARD_STEP));
+  };
+  return (
+    <div
+      role="separator"
+      aria-orientation="vertical"
+      aria-label="Resize chats sidebar"
+      aria-valuemin={SIDEBAR_MIN_WIDTH}
+      aria-valuemax={SIDEBAR_MAX_WIDTH}
+      aria-valuenow={width}
+      tabIndex={0}
+      className={sidebarResizeHandle}
+      onPointerDown={onPointerDown}
+      onKeyDown={onKeyDown}
+      data-testid="chats-sidebar-resize"
+    />
+  );
+}
 
 function isInspectableSession(status: string | undefined): boolean {
   return (status ?? "running") === "running" || status === "landed";
@@ -230,6 +307,11 @@ export function Chats({
   const activeId = useSessions((state) => state.activeId);
   const activeSession = sessions.find((session) => session.id === activeId);
   const activeSessionIsRunning = (activeSession?.status ?? "running") === "running";
+  const [persistedSidebarWidth, setPersistedSidebarWidth] = usePersistedNumber(
+    SIDEBAR_WIDTH_KEY,
+    SIDEBAR_DEFAULT_WIDTH,
+  );
+  const sidebarWidth = clampSidebarWidth(persistedSidebarWidth);
   const [mountedSessionIds, setMountedSessionIds] = useState<Set<string>>(() => new Set());
   const [harnesses, setHarnesses] = useState<HarnessInfo[]>([]);
   // The attached-leaf name resolver for the session list ("who works on what"): the bound leaf's task-doc
@@ -437,7 +519,11 @@ export function Chats({
       </header>
       <div className={body}>
         {sessions.length > 0 && (
-          <aside className={sidebar}>
+          <aside
+            className={sidebar}
+            style={{ width: `${sidebarWidth}px` }}
+            data-testid="chats-sidebar"
+          >
             <SessionList
               sessions={sessions}
               activeId={activeId}
@@ -447,6 +533,7 @@ export function Chats({
               leafNameFor={leafNameFor}
               grouped={grouped}
             />
+            <SidebarResizeHandle width={sidebarWidth} onResize={setPersistedSidebarWidth} />
           </aside>
         )}
         <div className={terminalArea}>

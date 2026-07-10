@@ -30,6 +30,15 @@ function secondLeafDoc(): TaskDocNode {
   } as unknown as TaskDocNode;
 }
 
+function pointerEvent(type: string, clientX: number, pointerId = 1): Event {
+  const event = new Event(type, { bubbles: true });
+  Object.defineProperties(event, {
+    clientX: { value: clientX },
+    pointerId: { value: pointerId },
+  });
+  return event;
+}
+
 // Mock the lazy Terminal so opening a session never pulls xterm (a canvas probe) into jsdom; the stub
 // just marks its sessionId so a test can assert which session terminals stay mounted.
 vi.mock("./Terminal", () => ({
@@ -113,6 +122,45 @@ describe("Chats harness launch buttons (6e-2b)", () => {
     const { findByTestId, queryByTestId } = render(<Chats />);
     expect(await findByTestId("chats-new-terminal")).not.toBeNull();
     expect(queryByTestId("chats-new-harness-claude")).toBeNull();
+  });
+});
+
+describe("Chats sidebar resize", () => {
+  it("restores the persisted width and exposes the bounded separator value", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("no backend")));
+    window.localStorage.setItem("chats.sidebar-width", "420");
+    sessionStore.getState().add("Terminal", "s1");
+
+    const { findByTestId } = render(<Chats />);
+
+    expect((await findByTestId("chats-sidebar")).style.width).toBe("420px");
+    expect((await findByTestId("chats-sidebar-resize")).getAttribute("aria-valuenow")).toBe(
+      "420",
+    );
+  });
+
+  it("resizes with pointer drag and keyboard arrows, persisting each width", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("no backend")));
+    sessionStore.getState().add("Terminal", "s1");
+
+    const { findByTestId } = render(<Chats />);
+    const sidebar = await findByTestId("chats-sidebar");
+    const handle = await findByTestId("chats-sidebar-resize");
+    handle.setPointerCapture = vi.fn();
+
+    fireEvent(handle, pointerEvent("pointerdown", 300));
+    fireEvent(window, pointerEvent("pointermove", 360));
+    fireEvent(window, pointerEvent("pointerup", 360));
+    expect(sidebar.style.width).toBe("316px");
+    expect(window.localStorage.getItem("chats.sidebar-width")).toBe("316");
+
+    fireEvent.keyDown(handle, { key: "ArrowRight" });
+    expect(sidebar.style.width).toBe("340px");
+    expect(window.localStorage.getItem("chats.sidebar-width")).toBe("340");
+
+    fireEvent.keyDown(handle, { key: "ArrowLeft" });
+    expect(sidebar.style.width).toBe("316px");
+    expect(window.localStorage.getItem("chats.sidebar-width")).toBe("316");
   });
 });
 
