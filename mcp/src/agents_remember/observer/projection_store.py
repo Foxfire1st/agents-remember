@@ -94,7 +94,7 @@ _repo_surface_cache: dict[tuple[tuple[str, str, str], ...], _RepoSurfaceCacheEnt
 class _LifecycleLogCacheEntry:
     mtime_ns: int
     size: int
-    events: list[Event]
+    log_events: list[Event]
 
 
 # 260707-HFX2-L12 F9/F7: the projection re-read + re-validated EVERY lifecycle's full events.jsonl
@@ -106,7 +106,11 @@ _lifecycle_log_cache: dict[str, _LifecycleLogCacheEntry] = {}
 
 
 def read_lifecycle_logs(root: Path) -> list[list[Event]]:
-    """Every per-lifecycle log under ``lifecycles/<id>/events.jsonl``, validated (F9-cached)."""
+    """Every per-lifecycle log under ``lifecycles/<id>/events.jsonl``, validated (F9/F7-cached).
+
+    Heartbeats are coalesced into ``heartbeat.json`` sidecars, so a heartbeat tick changes one tiny
+    JSON file instead of invalidating the cached parse of the full event log.
+    """
     store = EventStore(root)
     lifecycles_dir = root / "lifecycles"
     if not lifecycles_dir.is_dir():
@@ -125,12 +129,16 @@ def read_lifecycle_logs(root: Path) -> list[list[Event]]:
         seen.add(key)
         cached = _lifecycle_log_cache.get(key)
         if cached is not None and cached.mtime_ns == stat.st_mtime_ns and cached.size == stat.st_size:
-            events = cached.events
+            log_events = cached.log_events
         else:
-            events = store.read(entry.name)
+            log_events = store.read_log(entry.name)
             _lifecycle_log_cache[key] = _LifecycleLogCacheEntry(
-                mtime_ns=stat.st_mtime_ns, size=stat.st_size, events=events
+                mtime_ns=stat.st_mtime_ns, size=stat.st_size, log_events=log_events
             )
+        events = list(log_events)
+        heartbeat = store.read_heartbeat(entry.name)
+        if heartbeat is not None and (not events or heartbeat.ts >= events[-1].ts):
+            events.append(heartbeat)
         if events:
             logs.append(events)
     for stale in [key for key in _lifecycle_log_cache if key not in seen]:

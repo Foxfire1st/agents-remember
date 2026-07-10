@@ -420,8 +420,16 @@ function stubCounters() {
   vi.stubGlobal(
     "fetch",
     vi.fn(
-      async () =>
-        ({
+      async (url: string) => {
+        if (url.startsWith("/api/task-document")) {
+          const params = new URLSearchParams(url.split("?", 2)[1] ?? "");
+          const docPath = params.get("path") ?? "";
+          const doc =
+            dashboardStore.getState().analytics?.taskDocuments.find((item) => item.docPath === docPath) ??
+            taskDoc({ kind: docPath.endsWith("/task.json") ? "master" : "subTask", docPath });
+          return { ok: true, status: 200, json: async () => doc } as unknown as Response;
+        }
+        return {
           ok: true,
           status: 200,
           json: async () => ({
@@ -430,7 +438,8 @@ function stubCounters() {
               memory: { files: 0, insertions: 0, deletions: 0 },
             },
           }),
-        }) as unknown as Response,
+        } as unknown as Response;
+      },
     ),
   );
 }
@@ -864,6 +873,14 @@ function stubNotes(
   body = "note body",
 ) {
   const fn = vi.fn(async (url: string) => {
+    if (url.startsWith("/api/task-document")) {
+      const params = new URLSearchParams(url.split("?", 2)[1] ?? "");
+      const docPath = params.get("path") ?? "";
+      const doc =
+        dashboardStore.getState().analytics?.taskDocuments.find((item) => item.docPath === docPath) ??
+        taskDoc({ kind: docPath.endsWith("/task.json") ? "master" : "subTask", docPath });
+      return { ok: true, status: 200, json: async () => doc } as unknown as Response;
+    }
     if (url.startsWith("/api/notes/list")) {
       const payload = { repo: "agents-remember", master: "m", notes, truncated: false };
       return { ok: true, status: 200, json: async () => payload } as unknown as Response;

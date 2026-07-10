@@ -301,19 +301,20 @@ class HeartbeatTests(unittest.TestCase):
         self.addCleanup(amb.shutdown)
         lc = amb.start()
 
-        def heartbeats() -> int:
-            return sum(1 for event in store.read(lc.id) if event.kind == "lifecycle.heartbeat")
+        def heartbeat_ts() -> str | None:
+            heartbeat = store.read_heartbeat(lc.id)
+            return heartbeat.ts if heartbeat is not None else None
 
         time.sleep(0.15)
-        self.assertGreater(heartbeats(), 0)  # beats while active (age 0 < cutoff)
+        self.assertIsNotNone(heartbeat_ts())  # beats while active (age 0 < cutoff)
         clock[0] = clock[0] + timedelta(seconds=60)  # jump past the 5s inactivity cutoff
         time.sleep(0.1)
-        quiet = heartbeats()
+        quiet = heartbeat_ts()
         time.sleep(0.15)
-        self.assertEqual(heartbeats(), quiet)  # no new beats while idle
+        self.assertEqual(heartbeat_ts(), quiet)  # no new beats while idle
         amb.emit_tool("ping", {"tokens": 1, "ok": True})  # real activity resets the clock
         time.sleep(0.15)
-        self.assertGreater(heartbeats(), quiet)  # the ticker resumes
+        self.assertGreater(heartbeat_ts() or "", quiet or "")  # the ticker resumes
 
 
 class AskTests(unittest.TestCase):

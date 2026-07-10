@@ -212,18 +212,23 @@ the design: run the bulwark check against the portfolio and the past before disp
 
 ## Job O — Orchestrate (execute the plan)
 
-**Entry:** an approved planner master — or a single approved master dispatched for backend execution. Either way,
-**the adopted orchestration task must exist**: the strategist pre-run (Job P) is the
-unconditional precondition for any orchestrated run — even one master. It is doctrine, not a
-knob.
+**Entry:** an approved planner master — or a single approved master dispatched for backend
+execution. Either way, **the adopted orchestration task must exist**. When the developer approved
+the propose-first strategist pass, this seat adopts Job P's accepted draft. When the developer
+sanctioned a strategist skip, this seat authors and adopts the orchestration task from the
+developer-ruled plan, recording that source and adoption in the decision log. A skipped Job P
+therefore never blocks Job O.
 
 **First act — the super-branch intent:** create the super integration branch off `main` so
 masters can base off it. **A branch, not a worktree** — this seat has nothing to build at creation
 time. (Interim: until a branch-without-worktree primitive lands, the manual git + contract edge is
 acceptable and recorded in durable notes.)
 
-**Dispatch loop**, dependency-ordered — for each ready master (dependencies integrated into
-super): `spawn_agent_session(manager)` with a brief compiled from
+**Dispatch loop**, dependency-ordered — the dependency graph, not habit, decides sequencing.
+Dispatch independent ready masters in parallel by default up to
+`orchestration.concurrency.maxParallelMasters`. Sequential execution is the exception and must
+name a gate, a shared-file one-writer dependency, or an explicit ruling. For each ready master
+(dependencies integrated into super), call `spawn_agent_session(manager)` with a brief compiled from
 `../templates/manager-brief.md` (`env={"AR_SPAWN_ROLE": "manager"}`, the **qualified** leaf key
 `<repository>/<master>/<docId>`; the brief carries the load-bearing base fact: master branches
 off the **current super**, never off main);
@@ -395,8 +400,9 @@ task, fill small blanks, escalate real deltas).
 - **Sub-agent durable reports** (`../templates/impact-analysis.md`,
   `../templates/onboarding-coherency.md`); sub-agents never call `task_doc`, gates,
   `spawn_agent_session`, or closeout.
-- **The adopted orchestration task** (the strategist drafts; this seat adopts — with the adoption
-  decision-log entry) before any orchestrated run.
+- **The adopted orchestration task** (the strategist drafts when approved; on a sanctioned skip,
+  this seat authors it from the developer-ruled plan; either way this seat adopts it with the
+  adoption decision-log entry) before any orchestrated run.
 - **The super-exit demo notes** ("what changed visibly", per master) + the reviewable environment
   offer — the architect-mediated developer handover is visible-behavior-first.
 - **The self-improvement report** at close.

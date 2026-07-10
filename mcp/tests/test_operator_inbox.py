@@ -276,10 +276,12 @@ class OperatorInboxStoreTests(unittest.TestCase):
         advanced = self.store.advance_rung("A", rung=1, now=T2)
         self.assertEqual(advanced.rung, 1)
         self.assertEqual(advanced.escalatedAt, T2)
+        self.assertEqual(advanced.rungTransitionAt, T2)
         T3 = "2026-06-23T10:20:00+00:00"
         advanced_again = self.store.advance_rung("A", rung=2, now=T3)
         self.assertEqual(advanced_again.rung, 2)
         self.assertEqual(advanced_again.escalatedAt, T3)
+        self.assertEqual(advanced_again.rungTransitionAt, T3)
 
     def test_advance_rung_unknown_entry_raises(self) -> None:
         with self.assertRaises(KeyError):
@@ -502,6 +504,95 @@ class OperatorInboxToolTests(unittest.TestCase):
             )
             self.assertEqual(posted["recipientRole"], role)
             self.assertEqual(posted["messageKind"], "message")
+
+    def test_reviewer_completion_targets_and_wakes_current_manager(self) -> None:
+        """Live halt regression: a completed reviewer with stale manager provenance must address
+        and paste the existing turn-report signal into the current manager session."""
+        catalog = TerminalCatalog(self.store.root / "terminal-sessions.json")
+        leaf_key = "repo-a/260707_master/leaf-9"
+        catalog.upsert(
+            TerminalCatalogEntry(
+                id="manager-old",
+                label="Old manager",
+                kind="harness",
+                harness="codex",
+                lifecycle_id="L-old",
+                cwd=self.store.root,
+                tmux_name="ar-manager-old",
+                command=("codex",),
+                created_at=T1,
+                last_attached_at=T1,
+                status="terminated",
+                leaf_key="repo-a/260707_master/old-manager-anchor",
+                spawn_role="manager",
+            )
+        )
+        catalog.upsert(
+            TerminalCatalogEntry(
+                id="manager-current",
+                label="Current manager",
+                kind="harness",
+                harness="codex",
+                lifecycle_id="L-current",
+                cwd=self.store.root,
+                tmux_name="ar-manager-current",
+                command=("codex",),
+                created_at=T1,
+                last_attached_at=T2,
+                status="running",
+                leaf_key="repo-a/260707_master/current-manager-anchor",
+                spawn_role="manager",
+            )
+        )
+        catalog.upsert(
+            TerminalCatalogEntry(
+                id="reviewer-1",
+                label="Reviewer",
+                kind="harness",
+                harness="codex",
+                lifecycle_id="L-reviewer",
+                cwd=self.store.root,
+                tmux_name="ar-reviewer-1",
+                command=("codex",),
+                created_at=T1,
+                last_attached_at=T2,
+                status="running",
+                leaf_key=leaf_key,
+                spawned_by_session="manager-old",
+                spawn_role="reviewer",
+            )
+        )
+        pasted_to: list[str] = []
+
+        class _Paster:
+            def paste(self, tmux_name: str, _text: str, *, submit: bool = False) -> PasteResult:
+                pasted_to.append(tmux_name)
+                return PasteResult(delivered=True, submitted=submit)
+
+        posted = inbox_tools.operator_inbox_post_payload(
+            None,  # type: ignore[arg-type]  # temp store/catalog are injected
+            lifecycle_id="L-old",
+            agent_id="manager-old",
+            ask="Reviewer report complete",
+            response="See notes/reports/reviewer-report.md",
+            created_by="reviewer-1",
+            created_via="cli",
+            sender_agent_id="reviewer-1",
+            sender_role="reviewer",
+            recipient_role="manager",
+            message_kind="turn-report",
+            artifact_path="notes/reports/reviewer-report.md",
+            terminal_catalog=catalog,
+            terminal_host=TerminalHost(tmux_probe=lambda _name: True),
+            terminal_paster=_Paster(),  # type: ignore[arg-type]
+        )
+
+        self.assertEqual(posted["recipientRole"], "manager")
+        self.assertEqual(posted["agentId"], "manager-current")
+        self.assertEqual(posted["ownerAgentId"], "manager-current")
+        self.assertEqual(posted["deliveryState"], "delivered")
+        self.assertEqual(posted["deliveredToSession"], "manager-current")
+        self.assertEqual(pasted_to, ["ar-manager-current"])
 
 
 class OperatorInboxDeliveryTests(unittest.TestCase):

@@ -46,6 +46,7 @@ from agents_remember.controlplane.signal_routing import (
 from agents_remember.serving.terminal_catalog import TerminalCatalog
 
 MAX_RUNG = 3
+MIN_RUNG_DWELL_SECONDS = 5 * 60.0
 LadderAction = Literal["renudge", "skip-level", "architect-attention"]
 
 _ACTION_BY_RUNG: dict[int, LadderAction] = {
@@ -70,6 +71,26 @@ def _dwell_anchor(entry: OperatorInboxEntry) -> str:
     return entry.escalatedAt or entry.createdAt
 
 
+def _parse_anchor(value: str) -> datetime | None:
+    try:
+        return datetime.fromisoformat(value)
+    except ValueError:
+        return None
+
+
+def _minimum_dwell_anchor(entry: OperatorInboxEntry, escalated_at: datetime) -> datetime:
+    """Redundant hard-floor anchor for later rung transitions.
+
+    ``advance_rung`` stamps both ``escalatedAt`` and the dedicated ``rungTransitionAt``. The normal
+    per-rung dwell continues to use ``escalatedAt``; the second stamp independently enforces the
+    ruled five-minute safety floor. This redundancy is deliberate: the live 2026-07-09 cascade
+    showed that one stale escalation anchor can collapse several rungs into seconds. General row
+    ``ts`` is intentionally excluded because delivery and renewal also change it.
+    """
+    transition_at = _parse_anchor(entry.rungTransitionAt or "")
+    return max(escalated_at, transition_at) if transition_at is not None else escalated_at
+
+
 def rung_due(
     entry: OperatorInboxEntry,
     *,
@@ -87,12 +108,16 @@ def rung_due(
     """
     if entry.state != "pending" or entry.rung >= MAX_RUNG:
         return False
-    try:
-        anchor = datetime.fromisoformat(_dwell_anchor(entry))
-    except ValueError:
+    anchor = _parse_anchor(_dwell_anchor(entry))
+    if anchor is None:
         return False
     threshold = sla_seconds if entry.rung == 0 else rung_seconds
-    return (now - anchor).total_seconds() >= threshold
+    if (now - anchor).total_seconds() < threshold:
+        return False
+    if entry.rung == 0:
+        return True
+    floor_anchor = _minimum_dwell_anchor(entry, anchor)
+    return (now - floor_anchor).total_seconds() >= MIN_RUNG_DWELL_SECONDS
 
 
 def next_step(

@@ -32,8 +32,10 @@ from agents_remember.observer.projection import (
 )
 from agents_remember.observer.snapshots import (
     TASK_DOCUMENT_SCHEMA,
+    TASK_DOCUMENT_SUMMARY_LIMIT,
     read_gates,
     read_series_documents,
+    read_task_document_body,
     read_task_documents,
 )
 from agents_remember.observer.store import EventStore
@@ -160,17 +162,17 @@ class LifecycleLogCacheTests(unittest.TestCase):
         projection_store._lifecycle_log_cache.clear()
         projection_store.read_lifecycle_logs(root)  # first pass populates the cache
         reads = {"count": 0}
-        original = EventStore.read
+        original = EventStore.read_log
 
-        def counting_read(self, lifecycle_id, _orig=original):  # type: ignore[no-untyped-def]
+        def counting_read_log(self, lifecycle_id, _orig=original):  # type: ignore[no-untyped-def]
             reads["count"] += 1
             return _orig(self, lifecycle_id)
 
-        EventStore.read = counting_read  # type: ignore[assignment]
+        EventStore.read_log = counting_read_log  # type: ignore[assignment]
         try:
             projection_store.read_lifecycle_logs(root)  # second pass, logs unchanged
         finally:
-            EventStore.read = original  # type: ignore[assignment]
+            EventStore.read_log = original  # type: ignore[assignment]
         return reads["count"]
 
     def test_unchanged_logs_reparse_count_is_zero_regardless_of_size(self) -> None:
@@ -182,37 +184,186 @@ class LifecycleLogCacheTests(unittest.TestCase):
                     label=f"lifecycle-log re-reads on unchanged tick (n={size})",
                 )
 
+    def test_heartbeat_sidecar_refreshes_merged_view_without_reparsing_cached_log(self) -> None:
+        """B2/F7: a heartbeat update changes the merged projection view but not the cached
+        events.jsonl parse count."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            store = EventStore(root)
+            store.append(
+                Event(
+                    id="started",
+                    ts=NOW.isoformat(),
+                    kind="lifecycle.started",
+                    trust="declared",
+                    actor="model",
+                    lifecycleId="life-1",
+                    data={"fleeting": True},
+                )
+            )
+            projection_store._lifecycle_log_cache.clear()
+            reads = {"count": 0}
+            original = EventStore.read_log
+
+            def counting_read_log(self, lifecycle_id, _orig=original):  # type: ignore[no-untyped-def]
+                reads["count"] += 1
+                return _orig(self, lifecycle_id)
+
+            EventStore.read_log = counting_read_log  # type: ignore[assignment]
+            try:
+                first = projection_store.read_lifecycle_logs(root)
+                self.assertEqual(reads["count"], 1)
+                store.append(
+                    Event(
+                        id="beat-1",
+                        ts=(NOW + timedelta(seconds=15)).isoformat(),
+                        kind="lifecycle.heartbeat",
+                        trust="observed",
+                        actor="system",
+                        lifecycleId="life-1",
+                        data={"state": "running", "phase": "build"},
+                    )
+                )
+                second = projection_store.read_lifecycle_logs(root)
+            finally:
+                EventStore.read_log = original  # type: ignore[assignment]
+                projection_store._lifecycle_log_cache.clear()
+
+            self.assertEqual([event.id for event in first[0]], ["started"])
+            self.assertEqual([event.id for event in second[0]], ["started", "beat-1"])
+            assert_bounded_count(
+                reads["count"], 1, label="event-log parses across heartbeat sidecar update"
+            )
+
 
 class TaskDocumentsPayloadBudgetTests(unittest.TestCase):
-    """F6/CS-6 D2+D1: the broadcast task-doc body payload is O(docs x body) and unbounded today; the
-    budget + guardrail measure it and flag the hot path (the reduction itself is the escalated follow-up).
+    """F6/CS-6 D2+D1: always-on task-document payloads are bounded summaries; full bodies are
+    served through the on-demand reader path.
     """
 
-    def _doc(self, index: int, body_len: int) -> TaskDocNode:
+    def _doc_node(self, index: int, body_len: int) -> TaskDocNode:
         return TaskDocNode(
             id=f"L{index}", repository="repo", title="t", status="planning", kind="light",
             docPath=f"tasks/repo/leaf-{index}.json", objective="x" * body_len,
         )
+
+    def _write_doc(self, coordination_root: Path, index: int, body_len: int) -> Path:
+        task_dir = coordination_root / "tasks" / "repo" / "master"
+        task_dir.mkdir(parents=True, exist_ok=True)
+        path = task_dir / f"leaf-{index:04d}.json"
+        path.write_text(
+            json.dumps(
+                {
+                    "schema": TASK_DOCUMENT_SCHEMA,
+                    "kind": "subTask",
+                    "id": f"L{index}",
+                    "slug": f"leaf-{index:04d}",
+                    "title": f"Leaf {index}",
+                    "repo": "repo",
+                    "status": "inProgress",
+                    "createdAt": NOW.isoformat(),
+                    "objective": "x" * body_len,
+                    "requirements": ["r" * body_len],
+                    "design": "d" * body_len,
+                    "sections": [{"heading": "Body", "body": "s" * body_len}],
+                    "codeExamples": [
+                        {
+                            "id": "ex",
+                            "title": "Example",
+                            "distinctChange": "c" * body_len,
+                            "why": "w" * body_len,
+                            "snippet": "p" * body_len,
+                        }
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+        return path
+
+    def _write_master(self, coordination_root: Path, body_len: int) -> Path:
+        task_dir = coordination_root / "tasks" / "repo" / "master"
+        task_dir.mkdir(parents=True, exist_ok=True)
+        path = task_dir / "task.json"
+        path.write_text(
+            json.dumps(
+                {
+                    "schema": TASK_DOCUMENT_SCHEMA,
+                    "kind": "master",
+                    "id": "MASTER",
+                    "slug": "master",
+                    "title": "Master",
+                    "repo": "repo",
+                    "status": "inProgress",
+                    "createdAt": NOW.isoformat(),
+                    "objective": "m" * body_len,
+                    "sections": [{"heading": "Long", "body": "s" * body_len}],
+                    "decisions": [{"at": NOW.isoformat(), "decision": "d" * body_len, "rationale": "r"}],
+                }
+            ),
+            encoding="utf-8",
+        )
+        return path
 
     def _projection(self, docs: list[TaskDocNode]) -> WorkspaceProjection:
         return WorkspaceProjection(
             generatedAt=NOW.isoformat(), analytics=Analytics(taskDocuments=docs)
         )
 
-    def test_body_bytes_scales_with_doc_count(self) -> None:
-        # The D2 signature: cost is O(total docs x body size), not bounded -- proven at >=2 sizes. This is
-        # the characterization the escalated F6 windowing follow-up will flip to a bounded assertion.
-        body_len = 512
-        small = task_documents_body_bytes([self._doc(i, body_len) for i in range(10)])
-        large = task_documents_body_bytes([self._doc(i, body_len) for i in range(100)])
-        self.assertEqual(small, 10 * body_len)
-        self.assertEqual(large, 100 * body_len)
+    def test_task_document_broadcast_summaries_are_body_free_and_windowed_at_two_sizes(self) -> None:
+        body_len = 1024
+        for count in (TASK_DOCUMENT_SUMMARY_LIMIT + 20, TASK_DOCUMENT_SUMMARY_LIMIT + 200):
+            with self.subTest(count=count), tempfile.TemporaryDirectory() as tmp:
+                coordination_root = Path(tmp)
+                for index in range(count):
+                    self._write_doc(coordination_root, index, body_len)
+
+                docs = read_task_documents(coordination_root, enclosures=[], now=NOW)
+
+                assert_bounded_count(
+                    len(docs), TASK_DOCUMENT_SUMMARY_LIMIT, label=f"task doc summaries n={count}"
+                )
+                self.assertTrue(docs)
+                self.assertEqual(task_documents_body_bytes(docs), 0)
+                self.assertTrue(all(doc.bodyRevision for doc in docs))
+                self.assertTrue(all(doc.objective == "" for doc in docs))
+                self.assertTrue(all(doc.requirements == [] for doc in docs))
+                self.assertTrue(all(doc.sections == [] for doc in docs))
+
+    def test_series_broadcast_summaries_are_body_free(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            coordination_root = Path(tmp)
+            self._write_master(coordination_root, body_len=4096)
+
+            [series] = read_series_documents(coordination_root, now=NOW)
+
+            self.assertEqual(series.objective, "")
+            self.assertEqual(series.sections, [])
+            self.assertEqual(series.decisions, [])
+
+    def test_on_demand_task_document_body_returns_full_body(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            coordination_root = Path(tmp)
+            path = self._write_doc(coordination_root, 1, body_len=512)
+
+            body = read_task_document_body(
+                coordination_root,
+                doc_path=path.as_posix(),
+                enclosures=[],
+                now=NOW,
+            )
+
+            self.assertIsNotNone(body)
+            assert body is not None
+            self.assertGreater(len(body.objective), 0)
+            self.assertGreater(len(body.requirements[0]), 0)
+            self.assertGreater(len(body.sections[0].body), 0)
 
     def test_guardrail_fires_over_budget_and_is_silent_under_it(self) -> None:
         projection_store._last_task_payload_warn.clear()
-        under = self._projection([self._doc(0, 100)])
+        under = self._projection([self._doc_node(0, 100)])
         # Enough 4 KiB-body docs to blow past the 256 KiB budget.
-        over_docs = [self._doc(i, 4096) for i in range(100)]
+        over_docs = [self._doc_node(i, 4096) for i in range(100)]
         over = self._projection(over_docs)
 
         with self.assertNoLogs(projection_store.logger, level="WARNING"):
@@ -226,7 +377,7 @@ class TaskDocumentsPayloadBudgetTests(unittest.TestCase):
 
     def test_over_budget_warning_is_rate_limited_across_ticks(self) -> None:
         projection_store._last_task_payload_warn.clear()
-        over = self._projection([self._doc(i, 4096) for i in range(100)])
+        over = self._projection([self._doc_node(i, 4096) for i in range(100)])
         with self.assertLogs(projection_store.logger, level="WARNING"):
             projection_store._warn_if_task_documents_payload_over_budget(over, now=NOW)
         # A second tick 1s later must NOT re-log (the 1s projection cadence would otherwise spam).

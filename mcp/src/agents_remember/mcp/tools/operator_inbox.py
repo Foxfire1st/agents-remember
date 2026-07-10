@@ -14,7 +14,11 @@ from agents_remember.controlplane.operator_inbox_records import (
     create_operator_inbox_entry,
 )
 from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
-from agents_remember.controlplane.signal_routing import RoutedOwner, derive_signal_owner
+from agents_remember.controlplane.signal_routing import (
+    RoutedOwner,
+    derive_signal_owner,
+    signal_leaf_key,
+)
 from agents_remember.kernel.agentic_settings import (
     DEFAULT_EXPECTATION_SLA_SECONDS,
     load_agentic_settings,
@@ -59,6 +63,39 @@ def _entry_payload(entry: OperatorInboxEntry) -> dict[str, Any]:
     return entry.model_dump(mode="json", by_alias=True, exclude_none=True)
 
 
+def _signal_route(
+    catalog: TerminalCatalog | None,
+    *,
+    sender_agent_id: str | None,
+    message_kind: InboxMessageKind,
+) -> tuple[RoutedOwner, str | None]:
+    if catalog is None:
+        return RoutedOwner(), None
+    return (
+        derive_signal_owner(
+            catalog,
+            sender_agent_id=sender_agent_id,
+            message_kind=message_kind,
+        ),
+        signal_leaf_key(catalog, sender_agent_id=sender_agent_id),
+    )
+
+
+def _post_address(
+    owner: RoutedOwner,
+    *,
+    message_kind: InboxMessageKind,
+    lifecycle_id: str | None,
+    agent_id: str | None,
+    recipient_role: AgentRole | None,
+) -> tuple[str | None, str | None, AgentRole | None]:
+    """Completion/artifact signals address the current owner; ordinary peer messages stay explicit."""
+    has_owner = owner.agent_id is not None or owner.lifecycle_id is not None or owner.role is not None
+    if message_kind not in ("turn-report", "master-handover") or not has_owner:
+        return lifecycle_id, agent_id, recipient_role
+    return owner.lifecycle_id, owner.agent_id, owner.role
+
+
 def operator_inbox_post_payload(
     config: McpRuntimeConfig,
     *,
@@ -82,14 +119,25 @@ def operator_inbox_post_payload(
     catalog = terminal_catalog or (
         TerminalCatalog(terminal_catalog_path(config.coordination_root)) if config is not None else None
     )
-    owner = derive_signal_owner(catalog, sender_agent_id=sender_agent_id, message_kind=message_kind) if (
-        catalog is not None
-    ) else RoutedOwner()
+    owner, leaf_key = _signal_route(
+        catalog, sender_agent_id=sender_agent_id, message_kind=message_kind
+    )
+    # Completion/artifact messages are hierarchy signals, not arbitrary peer messages. Address
+    # them to the current routed owner in the same post that attempts hosted delivery; merely
+    # recording owner metadata leaves the stale caller-supplied mailbox in control and reproduces
+    # the reviewer-finished/manager-never-woken halt.
+    target_lifecycle_id, target_agent_id, target_role = _post_address(
+        owner,
+        message_kind=message_kind,
+        lifecycle_id=lifecycle_id,
+        agent_id=agent_id,
+        recipient_role=recipient_role,
+    )
     entry = create_operator_inbox_entry(
         entry_id=new_ulid(),
         now=now_iso(),
-        lifecycle_id=lifecycle_id,
-        agent_id=agent_id,
+        lifecycle_id=target_lifecycle_id,
+        agent_id=target_agent_id,
         gate_id=gate_id,
         ask=ask,
         response=response,
@@ -97,9 +145,11 @@ def operator_inbox_post_payload(
         created_via=created_via,
         sender_agent_id=sender_agent_id,
         sender_role=sender_role,
-        recipient_role=recipient_role,
+        recipient_role=target_role,
         message_kind=message_kind,
         artifact_path=artifact_path,
+        leaf_key=leaf_key,
+        subject_agent_id=sender_agent_id,
         owner_role=owner.role,
         owner_agent_id=owner.agent_id,
         owner_lifecycle_id=owner.lifecycle_id,
@@ -117,9 +167,9 @@ def operator_inbox_post_payload(
             kind="ack-by",
             sla_seconds=_expectation_sla_seconds(config, "ack-by"),
             source_id=entry.id,
-            subject_agent_id=agent_id,
-            subject_lifecycle_id=lifecycle_id,
-            note=f"ack-by: {message_kind} to {recipient_role or agent_id or lifecycle_id}",
+            subject_agent_id=target_agent_id,
+            subject_lifecycle_id=target_lifecycle_id,
+            note=f"ack-by: {message_kind} to {target_role or target_agent_id or target_lifecycle_id}",
         )
     if deliver_to_hosted:
         entry = deliver_inbox_entry(

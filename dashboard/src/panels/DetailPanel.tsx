@@ -3,6 +3,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { css, cva, cx } from "../../styled-system/css";
 import { type ChangeCounters, leafChangeset, masterChangeset, taskChangeset } from "../data/changeset";
 import { useDashboard } from "../data/store";
+import { fetchTaskDocument } from "../data/taskDocuments";
 import { parentTaskLinkForDoc, pathDir, stripExt } from "../data/taskHierarchy";
 import {
   findLifecycleEnclosure,
@@ -341,6 +342,7 @@ export function DetailPanel({
   const enclosures = useDashboard((s) => s.enclosures);
   const activeWorktreeGroups = useDashboard((s) => s.activeWorktreeGroups);
   const providers = useDashboard((s) => s.providers);
+  const [fullTaskDocs, setFullTaskDocs] = useState<Record<string, TaskDocNode>>({});
   // Drill state lives here (not in TaskContent) so the back control can sit in the sticky panel head.
   const [openSlug, setOpenSlug] = useState<string | null>(null);
   useEffect(() => setOpenSlug(null), [selectedId]); // switching lifecycles closes any open sub-task
@@ -373,6 +375,32 @@ export function DetailPanel({
           (selectedIsRootTask && item.seriesId === selectedEnclosure?.taskName),
       )
     : undefined;
+  const bodyTargetDoc = displayedReaderDoc({
+    allDocs,
+    selectedTaskDoc,
+    lifecycle,
+    selectedSeries,
+    openSlug,
+  });
+  const bodyTargetKey = taskDocBodyKey(bodyTargetDoc);
+  const bodyTargetCached = bodyTargetKey ? fullTaskDocs[bodyTargetKey] : undefined;
+  useEffect(() => {
+    if (!bodyTargetDoc || !bodyTargetKey || bodyTargetCached) return;
+    let live = true;
+    void fetchTaskDocument(bodyTargetDoc.docPath).then(
+      (doc) => {
+        if (!live) return;
+        setFullTaskDocs((current) =>
+          current[bodyTargetKey] ? current : { ...current, [bodyTargetKey]: doc },
+        );
+      },
+      () => undefined,
+    );
+    return () => {
+      live = false;
+    };
+  }, [bodyTargetDoc, bodyTargetKey, bodyTargetCached]);
+  const fullTaskDoc = (doc: TaskDocNode): TaskDocNode => fullTaskDocs[taskDocBodyKey(doc)] ?? doc;
 
   // The leaf the panel is actually SHOWING (a drilled sub-task or a directly-opened leaf doc), mirroring
   // the render branches below — a master/series overview shows no single leaf. Reported up so the rail
@@ -426,10 +454,10 @@ export function DetailPanel({
         <div className={where}>task document · {selectedTaskDoc.repository}</div>
         {selectedTaskDoc.kind === "master" ? (
           openDoc ? (
-            <TaskReader doc={openDoc} onOpenChangeSet={onOpenChangeSet} onOpenNotes={onOpenNotes} />
+            <TaskReader doc={fullTaskDoc(openDoc)} onOpenChangeSet={onOpenChangeSet} onOpenNotes={onOpenNotes} />
           ) : (
             <MasterOverview
-              doc={masterDocWithSeriesTokens(selectedTaskDoc, analytics?.series ?? [])}
+              doc={masterDocWithSeriesTokens(fullTaskDoc(selectedTaskDoc), analytics?.series ?? [])}
               sliceDocs={sliceDocs}
               onOpen={setOpenSlug}
               onJump={jump}
@@ -437,7 +465,7 @@ export function DetailPanel({
             />
           )
         ) : (
-          <TaskReader doc={selectedTaskDoc} onOpenChangeSet={onOpenChangeSet} onOpenNotes={onOpenNotes} />
+          <TaskReader doc={fullTaskDoc(selectedTaskDoc)} onOpenChangeSet={onOpenChangeSet} onOpenNotes={onOpenNotes} />
         )}
       </Panel>
     );
@@ -456,7 +484,10 @@ export function DetailPanel({
   }
 
   if (!lifecycle && selectedSeries) {
-    const seriesDoc = seriesAsMasterDoc(selectedSeries);
+    const selectedSeriesTaskDoc = allDocs.find((doc) => doc.docPath === selectedSeries.docPath);
+    const seriesDoc = selectedSeriesTaskDoc
+      ? masterDocWithSeriesTokens(fullTaskDoc(selectedSeriesTaskDoc), analytics?.series ?? [])
+      : seriesAsMasterDoc(selectedSeries);
     const seriesSlices = seriesSliceDocs(allDocs, selectedSeries.docPath);
     const openDoc = openSlug ? sliceForSlug(seriesSlices, openSlug) : undefined;
     const head = (
@@ -479,7 +510,7 @@ export function DetailPanel({
       <Panel testid="detail-panel" head={head} className={sizing}>
         <div className={where}>series master · {selectedSeries.repository}</div>
         {openDoc ? (
-          <TaskReader doc={openDoc} onOpenChangeSet={onOpenChangeSet} onOpenNotes={onOpenNotes} />
+          <TaskReader doc={fullTaskDoc(openDoc)} onOpenChangeSet={onOpenChangeSet} onOpenNotes={onOpenNotes} />
         ) : (
           <MasterOverview
             doc={seriesDoc}
@@ -512,7 +543,14 @@ export function DetailPanel({
   // ("← series") or parent ("↑ parent series") up-link, so navigation stays put while the body scrolls.
   const master = docs.find((doc) => doc.kind === "master");
   const slices = master ? seriesSliceDocs(allDocs, master.docPath) : docs.filter((doc) => doc.kind !== "master");
-  const seriesDoc = selectedSeries ? seriesAsMasterDoc(selectedSeries) : undefined;
+  const selectedSeriesTaskDoc = selectedSeries
+    ? allDocs.find((doc) => doc.docPath === selectedSeries.docPath)
+    : undefined;
+  const seriesDoc = selectedSeries
+    ? selectedSeriesTaskDoc
+      ? masterDocWithSeriesTokens(fullTaskDoc(selectedSeriesTaskDoc), analytics?.series ?? [])
+      : seriesAsMasterDoc(selectedSeries)
+    : undefined;
   const seriesSlices = selectedSeries ? seriesSliceDocs(allDocs, selectedSeries.docPath) : [];
   const contentSlices = seriesDoc ? seriesSlices : slices;
   const openDoc = openSlug ? sliceForSlug(contentSlices, openSlug) : undefined;
@@ -585,7 +623,7 @@ export function DetailPanel({
       ) : null}
 
       {openDoc ? (
-        <TaskReader doc={openDoc} onOpenChangeSet={onOpenChangeSet} onOpenNotes={onOpenNotes} />
+        <TaskReader doc={fullTaskDoc(openDoc)} onOpenChangeSet={onOpenChangeSet} onOpenNotes={onOpenNotes} />
       ) : seriesDoc ? (
         <MasterOverview
           doc={seriesDoc}
@@ -596,14 +634,14 @@ export function DetailPanel({
         />
       ) : master ? (
         <MasterOverview
-          doc={masterDocWithSeriesTokens(master, analytics?.series ?? [])}
+          doc={masterDocWithSeriesTokens(fullTaskDoc(master), analytics?.series ?? [])}
           sliceDocs={slices}
           onOpen={setOpenSlug}
           onJump={jump}
           onOpenChangeSet={onOpenChangeSet} onOpenNotes={onOpenNotes}
         />
       ) : (
-        <TaskContent docs={docs} onOpen={setOpenSlug} onJump={jump} onOpenChangeSet={onOpenChangeSet} onOpenNotes={onOpenNotes} />
+        <TaskContent docs={docs.map(fullTaskDoc)} onOpen={setOpenSlug} onJump={jump} onOpenChangeSet={onOpenChangeSet} onOpenNotes={onOpenNotes} />
       )}
 
       {enclosure ? (
@@ -770,6 +808,56 @@ const sliceForRef = (
   ref.file ? sliceForSlug(sliceDocs, stripExt(ref.file)) : undefined;
 const seriesSliceDocs = (sliceDocs: TaskDocNode[], seriesDocPath: string): TaskDocNode[] =>
   sliceDocs.filter((doc) => pathDir(doc.docPath) === pathDir(seriesDocPath));
+
+const taskDocBodyKey = (doc: Pick<TaskDocNode, "docPath" | "bodyRevision"> | undefined): string =>
+  doc ? `${doc.docPath}\n${doc.bodyRevision ?? ""}` : "";
+
+function displayedReaderDoc({
+  allDocs,
+  selectedTaskDoc,
+  lifecycle,
+  selectedSeries,
+  openSlug,
+}: {
+  allDocs: TaskDocNode[];
+  selectedTaskDoc: TaskDocNode | undefined;
+  lifecycle: LifecycleProjection | undefined;
+  selectedSeries: SeriesNode | undefined;
+  openSlug: string | null;
+}): TaskDocNode | undefined {
+  if (selectedTaskDoc && !lifecycle) {
+    if (selectedTaskDoc.kind === "master") {
+      const sliceDocs = seriesSliceDocs(allDocs, selectedTaskDoc.docPath);
+      return openSlug ? sliceForSlug(sliceDocs, openSlug) : selectedTaskDoc;
+    }
+    return selectedTaskDoc;
+  }
+  if (!lifecycle && selectedSeries) {
+    const seriesSlices = seriesSliceDocs(allDocs, selectedSeries.docPath);
+    return openSlug
+      ? sliceForSlug(seriesSlices, openSlug)
+      : allDocs.find((doc) => doc.docPath === selectedSeries.docPath);
+  }
+  if (!lifecycle) return undefined;
+  const docs =
+    selectedTaskDoc?.lifecycleId === lifecycle.id
+      ? [selectedTaskDoc]
+      : taskDocsForLifecycle(lifecycle, allDocs);
+  const master = docs.find((doc) => doc.kind === "master");
+  const slices = master
+    ? seriesSliceDocs(allDocs, master.docPath)
+    : docs.filter((doc) => doc.kind !== "master");
+  const selectedSeriesDoc = selectedSeries
+    ? allDocs.find((doc) => doc.docPath === selectedSeries.docPath)
+    : undefined;
+  const contentSlices = selectedSeries ? seriesSliceDocs(allDocs, selectedSeries.docPath) : slices;
+  const openDoc = openSlug ? sliceForSlug(contentSlices, openSlug) : undefined;
+  if (openDoc) return openDoc;
+  if (selectedSeriesDoc) return selectedSeriesDoc;
+  if (master) return master;
+  const nonMaster = docs.filter((doc) => doc.kind !== "master");
+  return nonMaster.length === 1 ? nonMaster[0] : undefined;
+}
 
 // The leaf doc the panel renders a full reader for — the single source of the viewed-leaf key (L5
 // fix 1). Mirrors the DetailPanel render branches exactly: a drilled sub-task (openSlug), a directly

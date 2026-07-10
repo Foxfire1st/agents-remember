@@ -1,10 +1,12 @@
 # Orchestration-Task Template
 
 The artifact a **strategist** drafts for the **orchestrator** (`roles/strategist.md`) — the sprint
-plan and the sprint scope. A strategist run producing this artifact is a **mandatory precondition
-for any orchestrated run**; the orchestrator adopts the accepted draft into durable task form (the
-strategist is a reader, not a mutator). It is written under the series/coordination `notes/` path
-the brief names and revised across drawing-board rounds.
+plan and the sprint scope. The architect proposes the strategist pass, and the strategist drafts
+this artifact only after developer approval; the orchestrator adopts the accepted draft into
+durable task form (the strategist is a reader, not a mutator). When the developer sanctions a
+strategist skip, `roles/orchestrator.md` owns the alternate author-and-adopt path. It is written
+under the series/coordination `notes/` path the brief names and revised across drawing-board
+rounds.
 
 ## Rules
 

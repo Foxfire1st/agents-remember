@@ -479,25 +479,34 @@ class DeadManagerLiveWorkersTests(_LivenessSimulationCase):
     ``test_dead_manager_with_live_workers_respawns_and_surfaces_orphans``
     (``test_supervisor.py::LadderWalkIntegrationTests``) rather than duplicating its single-sweep
     proof -- this continues the SAME simulation for a second tick to prove the orphaned workers
-    themselves get surfaced to the grandparent as dead-upstream on the very next sweep, closing
+    themselves get surfaced to the current manager as dead-upstream on the very next sweep, closing
     the loop end-to-end instead of stopping at "the manager got respawned"."""
 
-    def test_dead_manager_respawn_then_orphans_signal_the_grandparent_next_tick(self) -> None:
+    def test_dead_manager_respawn_then_orphans_signal_the_current_manager_next_tick(self) -> None:
         self.catalog.upsert(replace(_entry("orchestrator-1"), spawn_role="orchestrator"))
         self.catalog.upsert(
             replace(
                 _entry("manager-1"),
                 spawn_role="manager",
                 spawned_by_session="orchestrator-1",
+                leaf_key="repo-a/260707_master/old-manager-anchor",
                 turn_state="stale",
                 turn_state_changed_at=(NOW - timedelta(minutes=10)).isoformat(),
             )
         )
         self.catalog.upsert(
-            replace(_entry("worker-1"), spawn_role="worker", spawned_by_session="manager-1")
+            replace(
+                _entry("worker-1", leaf_key="repo-a/260707_master/leaf-1"),
+                spawn_role="worker",
+                spawned_by_session="manager-1",
+            )
         )
         self.catalog.upsert(
-            replace(_entry("worker-2"), spawn_role="worker", spawned_by_session="manager-1")
+            replace(
+                _entry("worker-2", leaf_key="repo-a/260707_master/leaf-2"),
+                spawn_role="worker",
+                spawned_by_session="manager-1",
+            )
         )
         entry = create_operator_inbox_entry(
             entry_id="e1",
@@ -525,18 +534,28 @@ class DeadManagerLiveWorkersTests(_LivenessSimulationCase):
         self.assertEqual(len(respawn_events), 1)
         self.assertEqual(sorted(respawn_events[0].data["orphanedWorkers"]), ["worker-1", "worker-2"])
 
+        # The respawn directive is the existing mechanism that creates/wakes a successor. Model
+        # that successor appearing before the next reconciliation tick; leaf signals must now
+        # address it rather than the workers' retired provenance or the orchestrator above it.
+        self.catalog.upsert(
+            replace(
+                _entry("manager-2", leaf_key="repo-a/260707_master/current-manager-anchor"),
+                spawn_role="manager",
+            )
+        )
+
         # Tick 2 (same ctx, later): the SAME catalog now shows both workers' owner as dead, so the
-        # dead-upstream predicate fires for each and signals the grandparent orchestrator -- the
+        # dead-upstream predicate fires for each and signals the current manager -- the
         # orphaned workers are never silently stranded, and they never absorb the manager's role.
         result = run_supervisor_sweep(ctx, now=NOW + timedelta(minutes=2))
         dead_upstream = [f for f in result.findings if f.kind == "dead-upstream"]
         session_ids = sorted(f.session_id for f in dead_upstream if f.session_id is not None)
         self.assertEqual(session_ids, ["worker-1", "worker-2"])
-        grandparent_events = [
+        manager_events = [
             e for e in self.event_store.read(None) if e.kind == "orchestration.supervisor.dead-upstream"
         ]
-        self.assertEqual(len(grandparent_events), 2)
-        self.assertTrue(all(e.data["grandparentAgentId"] == "orchestrator-1" for e in grandparent_events))
+        self.assertEqual(len(manager_events), 2)
+        self.assertTrue(all(e.data["managerAgentId"] == "manager-2" for e in manager_events))
 
         # The orphaned workers are still running, untouched -- doctrine: never auto re-parented,
         # never absorbing the dead manager's role.

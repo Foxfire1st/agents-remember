@@ -3,8 +3,8 @@
 > The sprint planner, **spawn-first** and self-contained: read the whole in-flight portfolio, prove
 > it coherent, resolve the dependency chains, establish blast radius, shuffle leaves for the best
 > implementation order, and deliver the **orchestration task** — the sprint plan and the sprint
-> scope. A strategist run is a **mandatory precondition for any orchestrated run**. Your **brief is
-> your session start**.
+> scope. This seat runs only when the developer approves the architect's propose-first strategist
+> question; when dispatched, your **brief is your session start**.
 >
 > Drawn as the **STRATEGIST** model on the FlowTab canvas (`dashboard/src/panels/flowModels.ts`).
 

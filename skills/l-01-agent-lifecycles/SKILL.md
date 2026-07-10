@@ -1,6 +1,6 @@
 ---
 name: l-01-agent-lifecycles
-description: "The agent lifecycles: one lifecycle per agent type, under one roof. Routes every session by exactly three conditions (spawn-role env -> fresh role brief -> otherwise architect), carries the minimal lifecycle frame (the six lifecycle signals every session shares), and houses the self-contained per-role lifecycles (architect, orchestrator, designer, strategist, manager, worker, curator, system-specialist, adversarial reviewer) plus the report-template library and the reviewer criteria catalogs. A developer-facing session IS the architect; solo work is the degenerate portfolio. Supersedes and replaces both l-01-session-job-lifecycle and l-02-agent-orchestration."
+description: "The agent lifecycles: one lifecycle per agent type, under one roof. Routes every session by exactly three conditions (spawn-role env -> fresh role brief -> otherwise free-chat launcher), carries the minimal lifecycle frame (the six lifecycle signals every session shares), and houses the self-contained per-role lifecycles (architect, orchestrator, designer, strategist, manager, worker, curator, system-specialist, adversarial reviewer) plus the report-template library and the reviewer criteria catalogs. Solo work is the degenerate portfolio. Supersedes and replaces both l-01-session-job-lifecycle and l-02-agent-orchestration."
 ---
 
 # l-01-agent-lifecycles — The Agent Lifecycles
@@ -90,7 +90,7 @@ fit is unclear.
 | **architect** | the developer-facing owner seat; design conversation, decision-item relay, and drawing board | `roles/architect.md` |
 | **orchestrator** | spawned backend portfolio/orchestration seat; never developer-facing | `roles/orchestrator.md` |
 | **designer** | a HAT the architect pulls inline (front of the pipeline or mid-flight; separate chair optional) | `roles/designer.md` |
-| **strategist** | the sprint planner, SPAWN-FIRST; a strategist run is a **mandatory precondition for any orchestrated run** — its deliverable is the orchestration task (sprint plan + scope); spawn value `strategist` | `roles/strategist.md` |
+| **strategist** | the sprint planner, SPAWN-FIRST when the developer approves the architect's propose-first question; its deliverable is the orchestration task draft (sprint plan + scope); spawn value `strategist` | `roles/strategist.md` |
 | **manager** | one coordination leaf per master; drives that master's leaf loop | `roles/manager.md` |
 | **worker** | one leaf worktree, short-lived, fresh session | `roles/worker.md` |
 | **curator** | fresh per leaf after builder/reviewer; writes onboarding only from task docs, notes, and code diff | `roles/curator.md` |
@@ -156,7 +156,7 @@ at spawn (the **qualified** leaf key `<repository>/<master>/<docId>`), not lifec
 `lifecycle_turn_end_notification` — or simply stopping once your artifact is written and nothing is
 pending — is never a liveness gap. Silence is supervised: the HFX2-L2 supervisor sweep evaluates
 every expected artifact/signal on its own mechanical tick and the HFX2-L4 escalation ladder
-(renudge → skip-level → developer attention, then respawn) handles inactivity. **No role watches,
+(renudge → skip-level → architect custody/architect attention, then respawn) handles inactivity. **No role watches,
 polls, or nudges on its own initiative — that is a banned seat-local watcher (uniform-mechanism
 ruling 2026-07-07).** Every role's own liveness duty inverts to *passive*: you will be woken with
 your pending signals; process and ack every item before ending your turn again.
@@ -172,6 +172,9 @@ your pending signals; process and ack every item before ending your turn again.
   can walk into any seat at any level.
 - **Decision-needing questions land in the task doc's `openQuestions`** — the rendered decision
   surface; `notes/` carries the analysis behind them.
+- **Dependency graph, not habit, decides sequencing.** Parallelize independent work by default up
+  to the applicable `orchestration.concurrency` cap. Sequential execution is the exception and
+  must name a gate, a shared-file one-writer dependency, or an explicit ruling.
 
 ## The Three-Party Loop (one home — this section owns the loop doctrine)
 
@@ -229,8 +232,8 @@ promotion ratchet (each catalog carries it). `roles/reviewer.md` binds them.
 orchestrator-level set (the strongest models) and the manager-level set (cheaper, possibly
 workflow-free) are configured per level in the `orchestration.loops` settings block (schema in
 `docs/reference/settings-json.md`; stored in the global agentic settings file with repo-local
-override, parsed by the kernel agentic-settings loader — L13, landed). The strategist's mandatory
-pre-run is doctrine, not a knob — it is unconditional.
+override, parsed by the kernel agentic-settings loader — L13, landed). The architect proposes a
+strategist pre-run, and it occurs only after developer approval; settings cannot auto-run it.
 
 ## Delegated Series Authority
 

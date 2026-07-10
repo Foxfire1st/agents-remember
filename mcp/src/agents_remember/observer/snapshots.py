@@ -16,7 +16,9 @@ These functions do the file I/O at the projection's call edge; the fold itself
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import json
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -57,7 +59,6 @@ from agents_remember.observer.projection import (
     ProviderNode,
     RouteCoverageNode,
     SeriesNode,
-    SeriesSectionNode,
     SeriesSubTaskNode,
     SetupProgressNode,
     SetupSummaryNode,
@@ -121,6 +122,8 @@ _last_gate_compact: dict[str, datetime] = {}
 # cache holds ONE parsed sweep of the task-document payloads, shared by both readers, so a tick pays
 # for one walk+parse (and only every few seconds). Keyed by tasks-root.
 TASK_DOC_CACHE_TTL_SECONDS = 3.0
+TASK_DOCUMENT_SUMMARY_LIMIT = 250
+SERIES_DOCUMENT_SUMMARY_LIMIT = 250
 _task_doc_cache: dict[str, tuple[datetime, list[tuple[Path, dict[str, object]]]]] = {}
 
 # 260707-HFX2-L12 F11: status_payload() shells out to git per leaf; without a cache the projection
@@ -129,6 +132,14 @@ _task_doc_cache: dict[str, tuple[datetime, list[tuple[Path, dict[str, object]]]]
 # tick so it cannot grow unbounded. Keyed by enclosure-contract path.
 STATUS_PAYLOAD_TTL_SECONDS = 8.0
 _status_payload_cache: dict[str, tuple[datetime, dict[str, Any] | None]] = {}
+
+
+@dataclass(frozen=True)
+class _TaskDocumentLifecycleMaps:
+    lifecycle_by_enclosure: dict[str, str]
+    lifecycle_by_dir: dict[Path, str]
+    lifecycle_by_root_doc: dict[Path, str]
+    lifecycle_by_leaf_doc: dict[tuple[Path, str], str]
 
 
 def _iter_task_document_payloads(
@@ -153,6 +164,21 @@ def _iter_task_document_payloads(
     if now is not None:
         _task_doc_cache[str(tasks_root)] = (now, docs)
     return docs
+
+
+def _bounded_task_document_payloads(
+    docs: list[tuple[Path, dict[str, object]]], *, limit: int
+) -> list[tuple[Path, dict[str, object]]]:
+    if len(docs) <= limit:
+        return docs
+    return sorted(docs, key=lambda item: (-_stat_mtime_ns(item[0]), item[0].as_posix()))[:limit]
+
+
+def _stat_mtime_ns(path: Path) -> int:
+    try:
+        return path.stat().st_mtime_ns
+    except OSError:
+        return 0
 
 
 def read_providers(
@@ -1024,10 +1050,12 @@ def read_ledger(memory_root: Path, code_root: Path | None = None) -> LedgerNode 
 def read_task_documents(
     coordination_root: Path, *, enclosures: list[EnclosureNode], now: datetime
 ) -> list[TaskDocNode]:
-    """Surface 7 (slices 3c + 6g): active task-document reader content.
+    """Surface 7 (slices 3c + 6g): active task-document summaries.
 
     Reads each ``ar-task-document/v1`` JSON under ``tasks/<repo>/<task>/`` -- the
-    source of truth, never the rendered markdown. ``lifecycleId`` is optional
+    source of truth, never the rendered markdown. Full reader bodies are intentionally
+    omitted from this always-on projection and served by :func:`read_task_document_body`.
+    ``lifecycleId`` is optional
     runtime context: a ``light``/``subTask`` doc uses its own lifecycle id or the
     lifecycle of its matching leaf enclosure when present, but planning docs are
     still projected before an enclosure exists. Master docs are projected here as
@@ -1036,6 +1064,72 @@ def read_task_documents(
     tasks_root = coordination_root / "tasks"
     if not tasks_root.is_dir():
         return []
+    lifecycle_maps = _task_document_lifecycle_maps(enclosures)
+    nodes: list[TaskDocNode] = []
+    for path, payload in _bounded_task_document_payloads(
+        _iter_task_document_payloads(tasks_root, now=now),
+        limit=TASK_DOCUMENT_SUMMARY_LIMIT,
+    ):
+        try:
+            doc = TaskDocument.model_validate(payload)
+        except ValueError:
+            continue
+        lifecycle_id = _task_doc_lifecycle_id(doc, path, lifecycle_maps)
+        nodes.append(
+            _task_doc_node(
+                doc,
+                lifecycle_id,
+                path,
+                lifecycle_maps.lifecycle_by_dir,
+                now,
+                include_body=False,
+            )
+        )
+    return nodes
+
+
+def read_task_document_body(
+    coordination_root: Path,
+    *,
+    doc_path: str,
+    enclosures: list[EnclosureNode],
+    now: datetime,
+) -> TaskDocNode | None:
+    """Read one full task-document body for the on-demand dashboard endpoint."""
+    tasks_root = (coordination_root / "tasks").resolve()
+    path = Path(doc_path)
+    candidates = [path] if path.is_absolute() else [coordination_root / path, tasks_root / path]
+    resolved: Path | None = None
+    for candidate in candidates:
+        try:
+            candidate_resolved = candidate.resolve()
+        except OSError:
+            continue
+        if candidate_resolved.is_file() and candidate_resolved.is_relative_to(tasks_root):
+            resolved = candidate_resolved
+            break
+    if resolved is None:
+        return None
+    payload = _read_json(resolved)
+    if payload is None or payload.get("schema") != TASK_DOCUMENT_SCHEMA:
+        return None
+    try:
+        doc = TaskDocument.model_validate(payload)
+    except ValueError:
+        return None
+    lifecycle_maps = _task_document_lifecycle_maps(enclosures)
+    lifecycle_id = _task_doc_lifecycle_id(doc, resolved, lifecycle_maps)
+    return _task_doc_node(
+        doc,
+        lifecycle_id,
+        resolved,
+        lifecycle_maps.lifecycle_by_dir,
+        now,
+        include_body=True,
+    )
+
+
+def _task_document_lifecycle_maps(enclosures: list[EnclosureNode]) -> _TaskDocumentLifecycleMaps:
     lifecycle_by_enclosure = {
         enclosure.enclosure: enclosure.lifecycleId
         for enclosure in enclosures
@@ -1063,24 +1157,25 @@ def read_task_documents(
         for enclosure in enclosures
         if enclosure.lifecycleId and enclosure.taskRoot and enclosure.leafId
     }
-    nodes: list[TaskDocNode] = []
-    for path, payload in _iter_task_document_payloads(tasks_root, now=now):
-        try:
-            doc = TaskDocument.model_validate(payload)
-        except ValueError:
-            continue
-        lifecycle_id: str | None = None
-        if doc.kind == "master":
-            lifecycle_id = lifecycle_by_root_doc.get(path.parent.resolve())
-        else:
-            lifecycle_id = (
-                doc.lifecycleId
-                or _doc_enclosure_lifecycle(doc, lifecycle_by_enclosure)
-                or lifecycle_by_leaf_doc.get((path.parent.resolve(), doc.id.lower()))
-                or lifecycle_by_leaf_doc.get((path.parent.resolve(), path.stem.lower()))
-            )
-        nodes.append(_task_doc_node(doc, lifecycle_id, path, lifecycle_by_dir, now))
-    return nodes
+    return _TaskDocumentLifecycleMaps(
+        lifecycle_by_enclosure=lifecycle_by_enclosure,
+        lifecycle_by_dir=lifecycle_by_dir,
+        lifecycle_by_root_doc=lifecycle_by_root_doc,
+        lifecycle_by_leaf_doc=lifecycle_by_leaf_doc,
+    )
+
+
+def _task_doc_lifecycle_id(
+    doc: TaskDocument, path: Path, maps: _TaskDocumentLifecycleMaps
+) -> str | None:
+    if doc.kind == "master":
+        return maps.lifecycle_by_root_doc.get(path.parent.resolve())
+    return (
+        doc.lifecycleId
+        or _doc_enclosure_lifecycle(doc, maps.lifecycle_by_enclosure)
+        or maps.lifecycle_by_leaf_doc.get((path.parent.resolve(), doc.id.lower()))
+        or maps.lifecycle_by_leaf_doc.get((path.parent.resolve(), path.stem.lower()))
+    )
 
 
 def _doc_enclosure_lifecycle(
@@ -1107,7 +1202,10 @@ def read_series_documents(coordination_root: Path, *, now: datetime) -> list[Ser
     if not tasks_root.is_dir():
         return []
     nodes: list[SeriesNode] = []
-    for path, payload in _iter_task_document_payloads(tasks_root, now=now):
+    for path, payload in _bounded_task_document_payloads(
+        _iter_task_document_payloads(tasks_root, now=now),
+        limit=SERIES_DOCUMENT_SUMMARY_LIMIT,
+    ):
         if payload.get("kind") != "master":
             continue
         try:
@@ -1121,18 +1219,12 @@ def read_series_documents(coordination_root: Path, *, now: datetime) -> list[Ser
                 title=doc.title,
                 status=doc.status,
                 createdAt=doc.createdAt,
-                objective=doc.objective,
+                objective="",
                 subTasks=_series_subtask_nodes(path, doc),
                 doneCount=series_done(doc),
                 totalCount=series_total(doc),
-                sections=[
-                    SeriesSectionNode(kind=section.kind, heading=section.heading, body=section.body)
-                    for section in doc.sections
-                ],
-                decisions=[
-                    TaskDecisionNode(at=item.at, decision=item.decision, rationale=item.rationale)
-                    for item in doc.decisions
-                ],
+                sections=[],
+                decisions=[],
                 docPath=path.as_posix(),
                 ageSeconds=_file_age_seconds(path, now),
             )
@@ -1200,6 +1292,8 @@ def _task_doc_node(
     path: Path,
     lifecycle_by_dir: dict[Path, str],
     now: datetime,
+    *,
+    include_body: bool,
 ) -> TaskDocNode:
     """Project one task document, carrying the resolved lifecycle id and (for a master) its index.
 
@@ -1208,6 +1302,7 @@ def _task_doc_node(
     """
     base_dir = path.parent
     parent_lifecycle = _ref_lifecycle(base_dir, doc.master, lifecycle_by_dir)
+    body_revision = _task_doc_body_revision(doc)
     return TaskDocNode(
         id=doc.id,
         lifecycleId=lifecycle_id,
@@ -1219,6 +1314,7 @@ def _task_doc_node(
         stepsTotal=step_total(doc),
         currentStep=current_step(doc),
         docPath=path.as_posix(),
+        bodyRevision=body_revision,
         createdAt=doc.createdAt,
         ageSeconds=_file_age_seconds(path, now),
         steps=[
@@ -1233,9 +1329,9 @@ def _task_doc_node(
             )
             for step in doc.steps
         ],
-        objective=doc.objective,
-        requirements=list(doc.requirements),
-        design=doc.design,
+        objective=doc.objective if include_body else "",
+        requirements=list(doc.requirements) if include_body else [],
+        design=doc.design if include_body else None,
         codeExamples=[
             TaskCodeExampleNode(
                 id=example.id,
@@ -1246,13 +1342,17 @@ def _task_doc_node(
                 snippet=example.snippet,
             )
             for example in doc.codeExamples
-        ],
+        ]
+        if include_body
+        else [],
         decisions=[
             TaskDecisionNode(at=item.at, decision=item.decision, rationale=item.rationale)
             for item in doc.decisions
-        ],
-        openQuestions=list(doc.openQuestions),
-        references=list(doc.references),
+        ]
+        if include_body
+        else [],
+        openQuestions=list(doc.openQuestions) if include_body else [],
+        references=list(doc.references) if include_body else [],
         subTasks=[
             TaskSubTaskRefNode(
                 number=ref.number,
@@ -1267,10 +1367,27 @@ def _task_doc_node(
         sections=[
             TaskSectionNode(kind=section.kind, heading=section.heading, body=section.body)
             for section in doc.sections
-        ],
+        ]
+        if include_body
+        else [],
         masterLifecycleId=parent_lifecycle,
         orchestrates=list(doc.orchestrates),
     )
+
+
+def _task_doc_body_revision(doc: TaskDocument) -> str:
+    payload = {
+        "objective": doc.objective,
+        "requirements": list(doc.requirements),
+        "design": doc.design,
+        "codeExamples": [example.model_dump(mode="json") for example in doc.codeExamples],
+        "decisions": [item.model_dump(mode="json") for item in doc.decisions],
+        "openQuestions": list(doc.openQuestions),
+        "references": list(doc.references),
+        "sections": [section.model_dump(mode="json") for section in doc.sections],
+    }
+    raw = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
 # --- shared helpers ----------------------------------------------------------

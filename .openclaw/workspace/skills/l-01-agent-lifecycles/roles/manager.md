@@ -41,8 +41,10 @@ strategist, reviewer, curator, or worker briefs.
 
 - **Opening move:** on a developer-declared takeover, first run `../SKILL.md`'s
   Developer-Declared Task-Seat Takeover checklist; then read the master `task_doc` + its leaf docs;
-  order the leaves (parallel where safe —
-  the C-11 reconcile absorbs a moved base).
+  order the leaves from their dependency graph. Dispatch independent ready leaves in parallel by
+  default up to `orchestration.concurrency.maxParallelLeaves`; the C-11 reconcile absorbs a moved
+  base. Sequential execution is the exception and must name a gate, a shared-file one-writer
+  dependency, or an explicit ruling.
 - **Retrieval lean:** intent-confirmation on the master's own routes (paired `read_ar_files`); the
   breadth/blast-radius reasoning belongs to the orchestrator, not here.
 - **Decide default:** dispatch the next ready leaf; the master exits through the master-exit seam.
@@ -101,8 +103,8 @@ stops belong to the orchestrator via the system-specialist protocol.
   **every** hand-off; you do not watch for it. The HFX2-L2 supervisor sweep evaluates each expected
   artifact (`evaluate_turn_report_findings`/`missing_artifact()`) on its own mechanical tick and, on
   inactivity or a missing artifact, injects the nudge and — on continued silence — walks the HFX2-L4
-  escalation ladder (renudge → skip-level → developer attention) and respawns per the dead-man
-  policy. Your job is to **be woken with your pending signals and process + ack every item before
+  escalation ladder (renudge → skip-level → architect custody/architect attention) and respawns
+  per the dead-man policy. Your job is to **be woken with your pending signals and process + ack every item before
   ending your turn** — never to poll, timer-loop, or hand-roll your own watch over the worker.
   **Watcher ban (uniform-mechanism ruling 2026-07-07):** no seat-local watcher of any kind — the L2
   supervisor sweep is the one mechanism, no per-seat variance. Escalation intake via the inbox.

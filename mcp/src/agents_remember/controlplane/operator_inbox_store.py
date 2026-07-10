@@ -199,7 +199,12 @@ class OperatorInboxStore:
         entry = self._entry_from_current(entry_id, current)
         if entry is None:
             raise KeyError(f"no operator inbox entry {entry_id!r}")
-        update: dict[str, object] = {"ts": now, "rung": rung, "escalatedAt": now}
+        update: dict[str, object] = {
+            "ts": now,
+            "rung": rung,
+            "escalatedAt": now,
+            "rungTransitionAt": now,
+        }
         if readdress:
             update.update(
                 {
@@ -221,6 +226,12 @@ class OperatorInboxStore:
         *,
         now: str,
         response: str | None = None,
+        leaf_key: str | None = None,
+        subject_agent_id: str | None = None,
+        owner_role: AgentRole | None = None,
+        owner_agent_id: str | None = None,
+        owner_lifecycle_id: str | None = None,
+        readdress: bool = False,
         current: dict[str, OperatorInboxEntry] | None = None,
     ) -> OperatorInboxEntry:
         """Refresh one still-pending row in place: same id, bumped ``ts``, optionally refreshed
@@ -235,6 +246,21 @@ class OperatorInboxStore:
         update: dict[str, object] = {"ts": now}
         if response is not None:
             update["response"] = response
+        if leaf_key is not None:
+            update["leafKey"] = leaf_key
+        if subject_agent_id is not None:
+            update["subjectAgentId"] = subject_agent_id
+        if readdress:
+            update.update(
+                {
+                    "recipientRole": owner_role,
+                    "agentId": owner_agent_id,
+                    "lifecycleId": owner_lifecycle_id,
+                    "ownerRole": owner_role,
+                    "ownerAgentId": owner_agent_id,
+                    "ownerLifecycleId": owner_lifecycle_id,
+                }
+            )
         renewed = entry.model_copy(update=update)
         self.append(renewed)
         return renewed
