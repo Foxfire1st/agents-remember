@@ -247,7 +247,6 @@ def operator_inbox_consume_payload(
         consumed_by=consumed_by,
         consumed_via=consumed_via,
     )
-    store.delete(entry.id)
     if consumed_now and config is not None:
         # R1: consume=ack is the ONLY terminal delivery outcome; it also fulfills the signal's
         # ack-by expectation row (R2), so redelivery/backoff and the deadline sweep both stop.

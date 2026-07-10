@@ -19,6 +19,7 @@ from agents_remember.controlplane.operator_inbox_records import (
     OperatorInboxEntry,
     OperatorInboxVia,
     consume_operator_inbox_entry,
+    fold_operator_inbox_entries,
     require_inbox_address,
 )
 
@@ -57,11 +58,8 @@ class OperatorInboxStore:
         ]
 
     def current(self) -> dict[str, OperatorInboxEntry]:
-        """Fold the inbox by entry id, last-wins."""
-        latest: dict[str, OperatorInboxEntry] = {}
-        for record in self.read():
-            latest[record.id] = record
-        return latest
+        """Fold the inbox by entry id, with terminal snapshots dominating stale pending ones."""
+        return fold_operator_inbox_entries(self.read())
 
     def list_pending(
         self,

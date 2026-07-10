@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -113,6 +114,25 @@ class OperatorInboxEntry(BaseModel):
     ownerRole: AgentRole | None = None
     ownerAgentId: str | None = None
     ownerLifecycleId: str | None = None
+
+
+def fold_operator_inbox_entries(
+    entries: Iterable[OperatorInboxEntry],
+) -> dict[str, OperatorInboxEntry]:
+    """Fold snapshots by id while preserving the first observed terminal transition.
+
+    Delivery can finish from a stale supervisor snapshot after a concurrent consume. Such a
+    pending snapshot is physically later in the append-only log, but it cannot reverse an
+    already-recorded terminal state. Terminal snapshots otherwise remain last-wins so repeated
+    consumes and ladder resolution keep their existing idempotent behavior.
+    """
+    current: dict[str, OperatorInboxEntry] = {}
+    for entry in entries:
+        previous = current.get(entry.id)
+        if previous is not None and previous.state != "pending" and entry.state == "pending":
+            continue
+        current[entry.id] = entry
+    return current
 
 
 def create_operator_inbox_entry(

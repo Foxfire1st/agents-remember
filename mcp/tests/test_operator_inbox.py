@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import sys
 import tempfile
+import threading
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from unittest import mock
@@ -432,7 +434,7 @@ class OperatorInboxToolTests(unittest.TestCase):
         )
         self.assertTrue(consumed["consumedNow"])
         self.assertEqual(consumed["state"], "consumed")
-        self.assertEqual(self.store.read(), [])
+        self.assertEqual([entry.state for entry in self.store.read()], ["pending", "consumed"])
 
     def test_poll_without_address_raises(self) -> None:
         with self.assertRaises(ValueError):
@@ -666,6 +668,78 @@ class OperatorInboxDeliveryTests(unittest.TestCase):
         self.assertEqual(calls[0][0], "ar-agent-a")
         self.assertTrue(calls[0][2])
         self.assertIn("[Agents Remember inbox:message]", calls[0][1])
+
+    def test_consume_during_in_flight_delivery_cannot_resurrect_pending_entry(self) -> None:
+        entry = create_operator_inbox_entry(
+            entry_id="A",
+            now=T1,
+            lifecycle_id="L1",
+            agent_id="agent-a",
+            sender_role="manager",
+            recipient_role="worker",
+            ask="Please continue.",
+            response="Review the report.",
+            created_by="manager-1",
+            created_via="cli",
+        )
+        self.store.append(entry)
+        stale_current = self.store.current()
+        delivery_started = threading.Event()
+        finish_delivery = threading.Event()
+
+        class _InFlightPaster:
+            def paste(
+                self,
+                _tmux_name: str,
+                _text: str,
+                *,
+                submit: bool = False,
+                **_kwargs: object,
+            ) -> PasteResult:
+                delivery_started.set()
+                if not finish_delivery.wait(timeout=2):
+                    raise AssertionError("test did not release the in-flight delivery")
+                return PasteResult(delivered=True, submitted=submit)
+
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            delivery = executor.submit(
+                deliver_inbox_entry,
+                store=self.store,
+                catalog=self.catalog,
+                host=self.host,
+                paster=_InFlightPaster(),  # type: ignore[arg-type]
+                entry=entry,
+                current=stale_current,
+                delivery_at=T2,
+            )
+            self.assertTrue(delivery_started.wait(timeout=2))
+            with mock.patch.object(inbox_tools, "_store", return_value=self.store):
+                consumed = inbox_tools.operator_inbox_consume_payload(
+                    None,  # type: ignore[arg-type]
+                    entry_id=entry.id,
+                    consumed_by="model",
+                    consumed_via="cli",
+                )
+            self.assertTrue(consumed["consumedNow"])
+            finish_delivery.set()
+            delivered = delivery.result(timeout=2)
+
+        self.assertEqual(delivered.deliveryState, "delivered")
+        self.assertEqual(
+            [record.state for record in self.store.read()],
+            ["pending", "consumed", "pending"],
+        )
+        self.assertEqual(self.store.current()[entry.id].state, "consumed")
+        self.assertEqual(
+            self.store.list_pending(lifecycle_id="L1", agent_id="agent-a"),
+            [],
+        )
+        self.assertEqual(
+            self.store.list_redeliverable(
+                now=datetime.fromisoformat("2026-06-24T10:05:00+00:00")
+            ),
+            [],
+        )
 
     def test_deliver_inbox_entry_records_unconfirmed_without_log_acceptance(self) -> None:
         # A reachable harness that accepts tmux bytes but never records the id must remain

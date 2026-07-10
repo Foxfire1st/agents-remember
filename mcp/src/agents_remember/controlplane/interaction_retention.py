@@ -4,7 +4,10 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from agents_remember.controlplane.operator_inbox_records import OperatorInboxEntry
+from agents_remember.controlplane.operator_inbox_records import (
+    OperatorInboxEntry,
+    fold_operator_inbox_entries,
+)
 from agents_remember.controlplane.records import GateKind, GateRecord
 from agents_remember.observer.timeutil import age_seconds
 
@@ -64,9 +67,7 @@ def inbox_keep_ids(
     max_rows: int = INBOX_MAX_CURRENT_ROWS,
 ) -> set[str]:
     """Inbox ids whose current snapshot still belongs in the compacted log."""
-    latest: dict[str, OperatorInboxEntry] = {}
-    for entry in entries:
-        latest[entry.id] = entry
+    latest = fold_operator_inbox_entries(entries)
     kept = [
         entry
         for entry in latest.values()
