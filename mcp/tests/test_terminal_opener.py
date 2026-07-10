@@ -226,16 +226,18 @@ class KnobApplicationTests(unittest.TestCase):
         self.assertEqual(self.host.ensured, [])
         self.assertIsNone(self.catalog.get("worker-1"))
 
-    def test_mapping_less_harness_is_env_only(self) -> None:
+    def test_codex_knobs_are_explicit_argv(self) -> None:
         result = self._open(
-            harness="codex", env={"AR_SPAWN_MODEL": "gpt-5", "AR_SPAWN_EFFORT": "whatever"}
+            harness="codex", env={"AR_SPAWN_MODEL": "gpt-5.6-sol", "AR_SPAWN_EFFORT": "xhigh"}
         )
         self.assertEqual(result.status, "opened")
-        # No mapping: the argv stays untouched and no vocabulary is enforced -- env-only.
-        self.assertEqual(self.host.ensured[0]["command"], ("codex",))
+        self.assertEqual(
+            self.host.ensured[0]["command"],
+            ("codex", "--model", "gpt-5.6-sol", "--config", "model_reasoning_effort=xhigh"),
+        )
         self.assertEqual(
             self.host.ensured[0]["env"],
-            {"AR_SPAWN_MODEL": "gpt-5", "AR_SPAWN_EFFORT": "whatever"},
+            {"AR_SPAWN_MODEL": "gpt-5.6-sol", "AR_SPAWN_EFFORT": "xhigh"},
         )
 
     def test_launch_args_append_verbatim_after_the_knob_flags(self) -> None:

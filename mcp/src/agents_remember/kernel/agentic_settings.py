@@ -142,7 +142,7 @@ KNOWN_ESCALATION_FIELDS = frozenset(
 )
 DEFAULT_SUPERVISOR_INTERVAL_SECONDS = 10.0
 DEFAULT_SUPERVISOR_STALE_CUTOFF_SECONDS = 60.0
-DEFAULT_SUPERVISOR_REDELIVER_BUDGET = 250
+DEFAULT_SUPERVISOR_REDELIVER_BUDGET = 1
 # CS-6 D1 (260707-HFX2-L12): per-sweep cap on escalation-rung emission, the twin of the redeliver
 # budget. Bounds the synchronous hosted pastes + escalation.rung event appends one sweep can do;
 # deferred rows re-fire next sweep (rung_due is level-triggered) so nothing is lost.
@@ -802,6 +802,15 @@ def _merged_harness(
     for field_name, declared_value in declared.items():
         if declared_value is not None:
             overrides[field_name] = declared_value
+    if (
+        base is not None
+        and parsed.effort_flag is not None
+        and parsed.effort_flag != base.effort_flag
+    ):
+        # The Codex builtin's value template belongs to its ``--config`` vehicle. Replacing that
+        # flag through settings restores the ordinary two-argv-element mapping instead of leaking
+        # ``model_reasoning_effort=...`` into an unrelated custom flag.
+        overrides["effort_flag_value_template"] = None
     merged = replace(fallback, **overrides)
     _refuse_unpaired_vehicles(merged, owner, source)
     _refuse_bad_effort_template(merged, owner, source)

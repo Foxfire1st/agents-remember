@@ -169,7 +169,9 @@ class SupervisorContext:
     escalation_sla_seconds: dict[str, float] = dataclass_field(default_factory=dict)
     escalation_rung_seconds: dict[int, float] = dataclass_field(default_factory=dict)
     respawn_after_rung: int = DEFAULT_RESPAWN_AFTER_RUNG
-    redeliver_budget: int = 250
+    # Log acceptance can consume <=171.1 s for one Claude input (<=137.2 s Codex). One row per
+    # sweep keeps that synchronous worst case bounded while backlog drains across later sweeps.
+    redeliver_budget: int = 1
     # R2/CS-6 D1 (260707-HFX2-L12): a per-sweep load-shed cap on escalation-rung emission, the
     # twin of ``redeliver_budget``. Without it one sweep does O(pending-rung-due-rows) synchronous
     # hosted pastes + escalation.rung event appends, the storm that made the workspace river reach

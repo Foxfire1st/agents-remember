@@ -14,6 +14,7 @@ diagnosable in the durable row's ``deliveryDetail`` without a schema change.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 
 from agents_remember.controlplane.operator_inbox_records import (
     InboxDeliveryState,
@@ -21,6 +22,7 @@ from agents_remember.controlplane.operator_inbox_records import (
 )
 from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
 from agents_remember.observer.events import now_iso
+from agents_remember.serving.harness_logs import HarnessSessionLog
 from agents_remember.serving.injector import DeliveryResult, DeliveryRow, deliver
 from agents_remember.serving.terminal import TerminalHost
 from agents_remember.serving.terminal_catalog import TerminalCatalog, TerminalCatalogEntry
@@ -78,7 +80,25 @@ def deliver_inbox_entry(
         submit=submit,
         envelope=False,  # _push_text already renders this payload's own header (below).
     )
-    result = deliver(row, tmux_name=target.tmux_name, paster=paster, harness=target.harness)
+    session_log = HarnessSessionLog(
+        harness=target.harness or "",
+        cwd=target.cwd,
+        started_at=datetime.fromisoformat(target.created_at),
+        bound_path=target.session_log_path,
+    )
+    result = deliver(
+        row,
+        tmux_name=target.tmux_name,
+        paster=paster,
+        harness=target.harness,
+        session_log=session_log,
+    )
+    if result.session_log_path is not None and result.bound_entry_id is not None:
+        catalog.bind_session_log(
+            target.id,
+            entry_id=result.bound_entry_id,
+            path=result.session_log_path,
+        )
     return store.record_delivery(
         entry.id,
         now=now_iso(),
@@ -97,11 +117,11 @@ def _delivery_state(result: DeliveryResult) -> InboxDeliveryState:
 
 def _delivery_detail(result: DeliveryResult) -> str:
     if result.outcome == "acked":
-        return "echo-confirmed"
+        return "harness-log-confirmed"
     if result.outcome == "blocked":
         return f"NEEDS-ATTENTION: blocked ({result.reason}); {_capture_detail(result.capture)}"
     if result.outcome == "landed-unacked":
-        return f"paste landed but was not acked ({result.reason}); {_capture_detail(result.capture)}"
+        return f"draft landed but was not submitted ({result.reason})"
     return _unconfirmed_detail(result.capture)
 
 
@@ -118,8 +138,8 @@ def _unconfirmed_detail(capture: str) -> str:
     reads, so the evidence (what the pane actually showed) rides along, tail-bounded.
     """
     if not capture:
-        return "paste was not capture-verified (empty pane capture)"
-    return "paste was not capture-verified; pane capture (tail):\n" + capture[-_CAPTURE_EVIDENCE_LIMIT:]
+        return "input was not harness-log-confirmed; empty failure capture"
+    return "input was not harness-log-confirmed; pane failure capture (tail):\n" + capture[-_CAPTURE_EVIDENCE_LIMIT:]
 
 
 def _target_session(

@@ -60,6 +60,9 @@ class TerminalCatalogEntry:
     # ``lifecycleId`` / ``terminatedAt``) so legacy rows with no ``leafKey`` read back as ``None``
     # -- no schema bump, migration-safe. A chat claims a leaf at open/attach, enclosure-independent.
     leaf_key: str | None = None
+    # Explicit manager-declared leaf linkage for an unbound replacement seat. Unlike ``cwd`` (the
+    # fleet-wide workspace root), this value varies per leaf and can safely credit chain progress.
+    replacement_for_leaf: str | None = None
     # Spawned-by provenance (L2 agent dispatch): the spawning session id + lifecycle id when this row
     # was created by the ``spawn_agent_session`` tool (an orchestrator spawning a manager, a manager
     # spawning a worker). Same migration-safe pattern as ``leaf_key`` -- written only when set, so a
@@ -84,6 +87,12 @@ class TerminalCatalogEntry:
     # resolution input (260703-L16, ruling 2026-07-07T08:15). Written-only-when-set.
     spawn_level: str | None = None
     spawn_level_source: str | None = None
+    # Settings-resolved knobs are pinned on harness argv/session commands. Acceptance provenance is
+    # the unique id-bearing input and the harness-owned JSONL file that recorded it.
+    resolved_model: str | None = None
+    resolved_effort: str | None = None
+    session_log_entry_id: str | None = None
+    session_log_path: Path | None = None
     # Liveness probe state (260707-HFX-L5): consecutive failed probes are persisted so a daemon
     # restart cannot erase hysteresis, while a later successful probe can clear a false exit mark.
     liveness_failures: int = 0
@@ -138,6 +147,11 @@ class TerminalCatalogEntry:
                 str(data["terminatedAt"]) if data.get("terminatedAt") is not None else None
             ),
             leaf_key=str(data["leafKey"]) if data.get("leafKey") is not None else None,
+            replacement_for_leaf=(
+                str(data["replacementForLeaf"])
+                if data.get("replacementForLeaf") is not None
+                else None
+            ),
             spawned_by_session=(
                 str(data["spawnedBySession"]) if data.get("spawnedBySession") is not None else None
             ),
@@ -153,6 +167,18 @@ class TerminalCatalogEntry:
             spawn_level=str(data["spawnLevel"]) if data.get("spawnLevel") is not None else None,
             spawn_level_source=(
                 str(data["spawnLevelSource"]) if data.get("spawnLevelSource") is not None else None
+            ),
+            resolved_model=str(data["resolvedModel"]) if data.get("resolvedModel") is not None else None,
+            resolved_effort=str(data["resolvedEffort"]) if data.get("resolvedEffort") is not None else None,
+            session_log_entry_id=(
+                str(data["sessionLogEntryId"])
+                if data.get("sessionLogEntryId") is not None
+                else None
+            ),
+            session_log_path=(
+                Path(str(data["sessionLogPath"]))
+                if data.get("sessionLogPath") is not None
+                else None
             ),
             liveness_failures=_non_negative_int(data.get("livenessFailures")),
             liveness_first_failed_at=(
@@ -211,6 +237,8 @@ class TerminalCatalogEntry:
             data["terminatedAt"] = self.terminated_at
         if self.leaf_key is not None:
             data["leafKey"] = self.leaf_key
+        if self.replacement_for_leaf is not None:
+            data["replacementForLeaf"] = self.replacement_for_leaf
         if self.spawned_by_session is not None:
             data["spawnedBySession"] = self.spawned_by_session
         if self.spawned_by_lifecycle is not None:
@@ -227,6 +255,14 @@ class TerminalCatalogEntry:
             data["spawnLevel"] = self.spawn_level
         if self.spawn_level_source is not None:
             data["spawnLevelSource"] = self.spawn_level_source
+        if self.resolved_model is not None:
+            data["resolvedModel"] = self.resolved_model
+        if self.resolved_effort is not None:
+            data["resolvedEffort"] = self.resolved_effort
+        if self.session_log_entry_id is not None:
+            data["sessionLogEntryId"] = self.session_log_entry_id
+        if self.session_log_path is not None:
+            data["sessionLogPath"] = str(self.session_log_path)
         if self.liveness_failures:
             data["livenessFailures"] = self.liveness_failures
         if self.liveness_first_failed_at is not None:
@@ -610,6 +646,28 @@ class TerminalCatalog:
             if index is None:
                 return None
             updated = entries[index].with_label(label)
+            entries[index] = updated
+            self._write(entries)
+            return updated
+
+    def bind_session_log(
+        self,
+        session_id: str,
+        *,
+        entry_id: str,
+        path: Path,
+    ) -> TerminalCatalogEntry | None:
+        """Persist log provenance onto the latest row without replaying an open-time snapshot."""
+        with self._lock:
+            entries = self._read()
+            index = _index_of(entries, session_id)
+            if index is None:
+                return None
+            updated = replace(
+                entries[index],
+                session_log_entry_id=entry_id,
+                session_log_path=path.resolve(),
+            )
             entries[index] = updated
             self._write(entries)
             return updated

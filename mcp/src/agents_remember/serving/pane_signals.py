@@ -2,14 +2,9 @@
 
 Distinct from ``turn_state.py``'s ``classify_turn_state`` (which classifies the L8 catalog's
 ``working``/``turn-ended``/``awaiting-input``/``stale`` UI state): this classifier answers the
-supervisor's own mechanical question -- which of the pilot run's four intervention triggers does
+supervisor's own mechanical question -- which of the retained intervention triggers does
 this pane show, right now -- so the sweep can act without a model ever reading the pane itself.
 
-* ``never-briefed`` -- an empty composer on a freshly-booted harness pane (P-5/P-14): the brief
-  never landed, or landed and was never confirmed.
-* ``delivery-stalled`` -- two or more stacked, un-consumed paste chips: the F-V duplicate-paste
-  class this run forensically diagnosed (terminal_paste.py's ``count_paste_chips``), now read as
-  a supervisor trigger rather than a paste-verification signal.
 * ``mid-turn`` -- an "esc to interrupt"-style marker: the harness is actively generating, so the
   supervisor must not intervene.
 * ``blocked`` -- a modal confirmation/permission dialog (#20): the harness is waiting on a
@@ -27,12 +22,7 @@ import re
 from dataclasses import dataclass
 from typing import Literal
 
-from agents_remember.serving.terminal_paste import count_paste_chips
-
-PaneSignal = Literal["never-briefed", "delivery-stalled", "mid-turn", "blocked", "normal"]
-
-STACKED_CHIP_THRESHOLD = 2
-"""Two or more un-consumed paste chips is the F-V delivery-stalled trigger."""
+PaneSignal = Literal["mid-turn", "blocked", "normal"]
 
 # Checked first: an actively-generating pane must never be misread as blocked or stalled.
 _MID_TURN_PATTERNS: tuple[re.Pattern[str], ...] = (
@@ -49,14 +39,6 @@ _BLOCKED_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"press enter to continue", re.IGNORECASE),
 )
 
-# An idle composer prompt with nothing else rendered: a freshly-booted, never-briefed pane
-# (P-5/P-14). Matched last among the marker families -- a blank composer under a mid-turn or
-# blocked marker is not "never-briefed", it is whatever fired first.
-_EMPTY_COMPOSER_PATTERNS: tuple[re.Pattern[str], ...] = (
-    re.compile(r"(?m)^\s*>\s*$"),
-    re.compile(r"(?m)^\s*│\s*>\s*│?\s*$"),
-)
-
 # Codex-specific modal traps (260707-HFX2-L3, issue #20): the quota/rate-limit dialog ends the
 # seat's turn and needs a developer decision (spend a reset / wait / switch harness) no automatic
 # action can make -- classified as ``blocked`` here, never a silent non-delivery.
@@ -69,7 +51,6 @@ _HARNESS_BLOCKED_PATTERNS: dict[str, tuple[re.Pattern[str], ...]] = {
         re.compile(r"\busage limit\b", re.IGNORECASE),
     ),
 }
-_HARNESS_EMPTY_COMPOSER_PATTERNS: dict[str, tuple[re.Pattern[str], ...]] = {}
 
 # Blocked-reason label lookup (structured NEEDS-ATTENTION classification, R2): each pattern above
 # maps to a short machine-readable reason so a caller never has to re-parse pane text to tell a
@@ -91,29 +72,6 @@ def blocked_reason_label(evidence: str | None) -> str:
     return "permission-prompt"
 
 
-ComposerState = Literal["empty", "has-content", "chip-stacked"]
-
-
-def composer_state(pane_text: str | None, *, harness: str | None = None) -> ComposerState:
-    """The R2 composer-state signature: ``empty`` / ``has-content`` / ``chip-stacked``.
-
-    Reuses this module's own chip-count threshold and empty-composer patterns -- the single source
-    of truth ``harness_adapters.py`` composes into the per-harness adapter, never a duplicated
-    pattern table.
-    """
-    if not pane_text or not pane_text.strip():
-        return "empty"
-    if count_paste_chips(pane_text) >= STACKED_CHIP_THRESHOLD:
-        return "chip-stacked"
-    for pattern in (
-        *_HARNESS_EMPTY_COMPOSER_PATTERNS.get(harness or "", ()),
-        *_EMPTY_COMPOSER_PATTERNS,
-    ):
-        if pattern.search(pane_text):
-            return "empty"
-    return "has-content"
-
-
 @dataclass(frozen=True)
 class PaneSignalClassification:
     """One classification result: the signal plus which marker/count fired (for diagnostics)."""
@@ -129,8 +87,8 @@ def classify_pane_signal(
 
     ``None``/blank ``pane_text`` (a vanished/unreadable pane) classifies as ``normal`` -- there is
     no evidence of a trigger, and an evidence-less pane is a liveness concern (predicate R2e), not
-    a pane-signal one. Precedence: mid-turn (busy) > blocked (needs you) > delivery-stalled (chip
-    count, independent of prompt shape) > never-briefed (empty composer, post-boot) > normal.
+    a pane-signal one. Precedence: mid-turn (busy) > blocked (needs you) > normal. Dispatch
+    acceptance is never inferred from composer contents or paste-chip rendering.
     """
     if not pane_text or not pane_text.strip():
         return PaneSignalClassification("normal", evidence=None)
@@ -140,13 +98,4 @@ def classify_pane_signal(
     for pattern in (*_HARNESS_BLOCKED_PATTERNS.get(harness or "", ()), *_BLOCKED_PATTERNS):
         if pattern.search(pane_text):
             return PaneSignalClassification("blocked", evidence=pattern.pattern)
-    chips = count_paste_chips(pane_text)
-    if chips >= STACKED_CHIP_THRESHOLD:
-        return PaneSignalClassification("delivery-stalled", evidence=f"chips={chips}")
-    for pattern in (
-        *_HARNESS_EMPTY_COMPOSER_PATTERNS.get(harness or "", ()),
-        *_EMPTY_COMPOSER_PATTERNS,
-    ):
-        if pattern.search(pane_text):
-            return PaneSignalClassification("never-briefed", evidence=pattern.pattern)
     return PaneSignalClassification("normal", evidence=None)

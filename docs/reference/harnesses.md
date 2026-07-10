@@ -33,10 +33,10 @@ The curated defaults live in `mcp/src/agents_remember/serving/harnesses.py`:
 | id | argv | modelFlag | effortFlag (values) | session effort (command) |
 | --- | --- | --- | --- | --- |
 | `claude` (Claude Code) | `["claude"]` | `--model` | `--effort` (`low`, `medium`, `high`, `xhigh`, `max`) | `ultracode` → `/effort ultracode` |
-| `codex` (Codex) | `["codex"]` | — (env-only) | — (env-only) | — |
+| `codex` (Codex) | `["codex"]` | `--model` | `--config model_reasoning_effort={value}` (`none`, `minimal`, `low`, `medium`, `high`, `xhigh`) | — |
 | `pi` (Pi.dev) | `["pi"]` | — (env-only) | — (env-only) | — |
 
-**Env-only** means: the model/effort knobs still ride the spawn env as
+**Env-only** (currently Pi.dev) means: the model/effort knobs still ride the spawn env as
 `AR_SPAWN_MODEL`/`AR_SPAWN_EFFORT` (session-start visibility), but nothing is
 put on the command line and no effort vocabulary is enforced. Growing a
 mapping for a builtin is a one-line registry edit — or a settings override,
@@ -87,7 +87,7 @@ settings layers have distinct validation postures:
 | --- | --- | --- |
 | `harness` | Selects the harness entry (argv comes from it). | Must be a known id: builtin or `orchestration.harnesses`-defined. Checked at settings load AND at dispatch. |
 | `model` | The harness's `modelFlag` on the launch argv, e.g. `--model opus`; also rides env as `AR_SPAWN_MODEL`. | Model names are NOT enum-validated (they evolve faster than any registry). A settings-defined harness with no `modelFlag` refuses the knob with guidance (`model-invalid`). |
-| `effort` | Per value: a flag value rides the harness's `effortFlag` on the argv; a session value rides a post-launch session command; either way it rides env as `AR_SPAWN_EFFORT`. | Validated at DISPATCH against the harness's vocabulary (flag values ∪ session values). Unknown values refuse (`effort-invalid`) naming the harness and BOTH sets. Mapping-less builtins (codex, pi) accept anything env-only; a mapping-less settings-defined harness refuses with guidance. |
+| `effort` | Per value: a flag value rides the harness's `effortFlag` on the argv; a session value rides a post-launch session command; either way it rides env as `AR_SPAWN_EFFORT`. | Validated at DISPATCH against the harness's vocabulary (flag values ∪ session values). Unknown values refuse (`effort-invalid`) naming the harness and BOTH sets. Codex accepts exactly `none|minimal|low|medium|high|xhigh`; Pi.dev remains env-only. |
 
 Why dispatch-time effort validation exists: the installed claude CLI accepts
 `--effort low|medium|high|xhigh|max` and **warns-then-silently-degrades** on
@@ -108,17 +108,24 @@ tool payload). Example: `["--dangerously-skip-permissions"]`.
 ### Layer 3 — session free-form: `sessionCommands` and `promptKeywords`
 
 - `sessionCommands`: a list of lines, each pasted into the freshly spawned
-  session as its OWN echo-confirmed paste and submitted, BEFORE the dispatch
+  session as its OWN entry and submitted, BEFORE the dispatch
   brief — the vehicle for any session-level harness feature (a
   session-vocabulary effort like claude's `ultracode` is delivered this way
-  automatically, ahead of configured session commands). Never validated;
-  recorded in spawn provenance.
+  automatically, ahead of configured session commands). After the id-bearing brief binds the
+  spawn-cwd harness JSONL, every command requires its command record plus non-error stdout;
+  a missing/errored command alone is re-issued and re-checked. Never caller-validated; recorded
+  in spawn provenance.
 - `promptKeywords`: a list of keywords prepended as the first line of the
   dispatch-brief paste (session modes the model interprets, e.g. a prompt
   keyword like `ultracode`). Never validated; recorded in spawn provenance.
 
 Delivery order at spawn: **launch argv → settings session commands (effort
 vehicle first, then configured commands) → the brief paste (keywords first)**.
+The brief's unique id binds the harness session log; that id+path are catalog provenance and all
+submitted delivery acceptance comes from the bound log, never terminal-screen vocabulary.
+After a calibrated log-absence window, Enter may be re-pressed once. A re-paste is allowed only
+after a bounded pane check verifies that the prior payload is absent; visible payload/chip evidence
+is cleared and verified absent before replacement, or the delivery fails without appending.
 
 ### The dispatch level: `level` and `orchestration.rolesPerLevel`
 

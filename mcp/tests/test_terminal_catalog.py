@@ -184,6 +184,51 @@ class TerminalCatalogTests(unittest.TestCase):
         assert unset is not None
         self.assertIsNone(unset.spawn_role)
 
+    def test_dispatch_binding_fields_round_trip(self) -> None:
+        leaf = "repo/master/leaf-1"
+        self.catalog.upsert(
+            replace(
+                _entry("a", kind="harness"),
+                replacement_for_leaf=leaf,
+                session_log_entry_id="brief-1",
+                session_log_path=Path("/tmp/session.jsonl"),
+            )
+        )
+
+        entry = self.catalog.get("a")
+        assert entry is not None
+        self.assertEqual(entry.replacement_for_leaf, leaf)
+        self.assertEqual(entry.session_log_entry_id, "brief-1")
+        self.assertEqual(entry.session_log_path, Path("/tmp/session.jsonl"))
+        self.assertEqual(entry.to_json()["replacementForLeaf"], leaf)
+        self.assertEqual(entry.to_json()["sessionLogEntryId"], "brief-1")
+
+    def test_bind_session_log_preserves_newer_liveness_state(self) -> None:
+        self.catalog.upsert(_entry("a", kind="harness"))
+        stale_snapshot = self.catalog.get("a")
+        assert stale_snapshot is not None
+        exited = self.catalog.record_liveness_probe(
+            "a",
+            alive=False,
+            evidence="pane-gone",
+            checked_at=datetime.fromisoformat("2026-07-10T10:00:00+00:00"),
+        )
+        assert exited is not None
+        self.assertEqual(exited.status, "exited")
+
+        bound = self.catalog.bind_session_log(
+            stale_snapshot.id,
+            entry_id="brief-1",
+            path=Path("/tmp/session.jsonl"),
+        )
+
+        assert bound is not None
+        self.assertEqual(bound.status, "exited")
+        self.assertEqual(bound.liveness_failures, 1)
+        self.assertEqual(bound.exit_evidence, "pane-gone")
+        self.assertEqual(bound.session_log_entry_id, "brief-1")
+        self.assertEqual(bound.session_log_path, Path("/tmp/session.jsonl"))
+
     def test_legacy_row_without_leaf_key_reads_as_none(self) -> None:
         # A v1 row written before L5 has no leafKey; it must read back as None (migration-safe).
         self.catalog.path.parent.mkdir(parents=True, exist_ok=True)

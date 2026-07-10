@@ -1,6 +1,6 @@
 """Tests for the agent-facing ``spawn_agent_session`` MCP tool + the serving paste endpoint (slice L2).
 
-The tool composes the EXISTING session primitives (opener + leaf claim + echo-confirmed paste + submit).
+The tool composes the EXISTING session primitives (opener + leaf claim + log-confirmed paste + submit).
 These tests inject a fake host + fake paster + a fake ``which`` so the composition is exercised without a
 real tmux server, and drive the ``POST /api/terminal/{session}/paste`` endpoint through ``TestClient``.
 """
@@ -14,6 +14,7 @@ import unittest
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import ClassVar
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
@@ -32,6 +33,7 @@ from agents_remember.observer import (
 )
 from agents_remember.observer.ambient import ambient
 from agents_remember.serving.app import create_app
+from agents_remember.serving.harness_logs import CommandEvidence
 from agents_remember.serving.terminal import TerminalSessionBinding
 from agents_remember.serving.terminal_catalog import TerminalCatalog, TerminalCatalogEntry
 from agents_remember.serving.terminal_paste import PasteResult
@@ -133,6 +135,19 @@ class _FakeHost:
         )
 
 
+class _FakeLog:
+    def __init__(self) -> None:
+        self.bound_path: Path | None = None
+        self.messages: set[str] = set()
+        self.commands: dict[str, CommandEvidence] = {}
+
+    def message_present(self, entry_id: str) -> bool:
+        return entry_id in self.messages
+
+    def command_evidence(self, command: str) -> CommandEvidence:
+        return self.commands.get(command, CommandEvidence())
+
+
 class _FakePaster:
     def __init__(
         self, *, delivered: bool = True, submitted: bool = True, capture: str = ""
@@ -141,14 +156,38 @@ class _FakePaster:
         self._delivered = delivered
         self._submitted = submitted
         self._capture = capture
+        self.log = _FakeLog()
 
-    def paste(self, tmux_name: str, text: str, *, submit: bool = False, **_kwargs: object) -> PasteResult:
+    def paste(
+        self,
+        tmux_name: str,
+        text: str,
+        *,
+        submit: bool = False,
+        accepted=None,
+        **_kwargs: object,
+    ) -> PasteResult:
         self.calls.append({"tmux": tmux_name, "text": text, "submit": submit})
+        if self._delivered and submit and self._submitted:
+            if text.startswith("/"):
+                self.log.commands[text] = CommandEvidence(
+                    recorded=True,
+                    succeeded=True,
+                    output="command ok",
+                )
+            if "id=" in text:
+                entry_id = text.split("id=", 1)[1].split("]", 1)[0]
+                self.log.messages.add(entry_id)
+                self.log.bound_path = Path("/tmp/fake-session.jsonl")
+        verified = bool(accepted()) if accepted is not None else False
         return PasteResult(
             delivered=self._delivered,
-            submitted=self._submitted if submit else False,
+            submitted=self._submitted and verified if submit else False,
             capture=self._capture,
         )
+
+
+_ObservedPaster = _FakePaster
 
 
 def _running_chat(session_id: str, *, leaf_key: str) -> TerminalCatalogEntry:
@@ -187,6 +226,9 @@ class SpawnAgentSessionTests(unittest.TestCase):
             "which": _detected,
         }
         base.update(kwargs)
+        paster = base.get("paster")
+        if "session_log" not in base and isinstance(paster, _FakePaster):
+            base["session_log"] = paster.log
         return spawn_agent_session_payload(self.config, **base)  # type: ignore[arg-type]
 
     def test_spawns_and_delivers_context_with_submit(self) -> None:
@@ -234,6 +276,17 @@ class SpawnAgentSessionTests(unittest.TestCase):
         assert row is not None
         self.assertEqual(row.leaf_key, "repo/master/leaf-1")
 
+    def test_unbound_replacement_records_real_leaf_discriminator(self) -> None:
+        payload = self._spawn(replacement_for_leaf="leaf-1")
+
+        self.assertEqual(payload["status"], "spawned")
+        self.assertNotIn("leafKey", payload)
+        self.assertEqual(payload["replacementForLeaf"], "repo/master/leaf-1")
+        row = self.catalog.get("worker-1")
+        assert row is not None
+        self.assertIsNone(row.leaf_key)
+        self.assertEqual(row.replacement_for_leaf, "repo/master/leaf-1")
+
     def test_spawn_rejects_unmatchable_leaf_ref_before_spawning(self) -> None:
         payload = self._spawn(leaf_key="missing-leaf", paster=_FakePaster())
         self.assertFalse(payload["ok"])
@@ -246,7 +299,7 @@ class SpawnAgentSessionTests(unittest.TestCase):
         paster = _FakePaster(delivered=True, submitted=True)
         payload = self._spawn(context="draft packet", submit=False, paster=paster)
         self.assertEqual(payload["status"], "spawned")
-        self.assertTrue(payload["contextDelivered"])
+        self.assertFalse(payload["contextDelivered"])
         self.assertNotIn("submitted", payload)  # omitted (None) when not submitting
         self.assertFalse(paster.calls[0]["submit"])
 
@@ -277,11 +330,11 @@ class SpawnAgentSessionTests(unittest.TestCase):
         self.assertEqual(payload["deliveryCapture"], "codex> \n(clean boot)")
 
     def test_unconfirmed_submit_attaches_the_capture_even_when_delivered(self) -> None:
-        # Review N3: a delivered draft whose requested submit did NOT advance the pane is still a
-        # failed outcome -- the capture rides along so the caller can see the stuck draft.
+        # Submitted transport without a matching log record is unconfirmed, even when tmux accepted
+        # the bytes; the failure-only capture rides along for diagnosis.
         paster = _FakePaster(delivered=True, submitted=False, capture="claude> draft sitting")
         payload = self._spawn(context="brief", submit=True, paster=paster)
-        self.assertTrue(payload["contextDelivered"])
+        self.assertFalse(payload["contextDelivered"])
         self.assertFalse(payload["submitted"])
         self.assertEqual(payload["deliveryCapture"], "claude> draft sitting")
 
@@ -360,22 +413,40 @@ class SpawnKnobApplicationTests(unittest.TestCase):
             "which": _detected,
         }
         base.update(kwargs)
+        paster = base.get("paster")
+        if "session_log" not in base and isinstance(paster, _FakePaster):
+            base["session_log"] = paster.log
         return spawn_agent_session_payload(self.config, **base)  # type: ignore[arg-type]
 
     def test_flag_vocabulary_effort_rides_the_argv_with_no_session_command(self) -> None:
         self._write_settings(
-            {"roles": {"worker": {"harness": "claude", "model": "opus", "effort": "max"}}}
+            {
+                "roles": {
+                    "worker": {
+                        "harness": "claude",
+                        "model": "claude-fable-5",
+                        "effort": "max",
+                    }
+                }
+            }
         )
-        paster = _FakePaster()
-        payload = self._spawn(env={"AR_SPAWN_ROLE": "worker"}, context="brief", paster=paster)
+        paster = _ObservedPaster(
+            capture="Fable 5 with max effort · Claude Max\n◉ max · /effort\n"
+        )
+        payload = self._spawn(
+            env={"AR_SPAWN_ROLE": "worker"},
+            context="brief",
+            submit=True,
+            paster=paster,
+        )
         self.assertEqual(payload["status"], "spawned")
         self.assertEqual(
             self.host.ensured[0]["command"],
-            ("claude", "--model", "opus", "--effort", "max"),
+            ("claude", "--model", "claude-fable-5", "--effort", "max"),
         )
         # Flag-vehicle effort: exactly ONE paste (the brief), no session command.
         self.assertEqual(len(paster.calls), 1)
-        self.assertEqual(paster.calls[0]["text"], "brief")
+        self.assertTrue(str(paster.calls[0]["text"]).endswith("\n\nbrief"))
         self.assertNotIn("sessionCommands", payload)
         self.assertNotIn("sessionCommandsDelivered", payload)
 
@@ -383,8 +454,12 @@ class SpawnKnobApplicationTests(unittest.TestCase):
         self._write_settings(
             {"roles": {"worker": {"harness": "claude", "effort": "ultracode"}}}
         )
-        paster = _FakePaster()
-        payload = self._spawn(env={"AR_SPAWN_ROLE": "worker"}, context="brief", paster=paster)
+        paster = _ObservedPaster(
+            capture="Fable 5 with ultracode effort · Claude Max\n◉ ultracode · /effort\n"
+        )
+        payload = self._spawn(
+            env={"AR_SPAWN_ROLE": "worker"}, context="brief", submit=True, paster=paster
+        )
         self.assertEqual(payload["status"], "spawned")
         # NO --effort flag (the CLI would warn-and-degrade); the env still rides the value.
         self.assertEqual(self.host.ensured[0]["command"], ("claude",))
@@ -394,9 +469,10 @@ class SpawnKnobApplicationTests(unittest.TestCase):
         )
         # The session command is the FIRST paste (submitted), the brief follows.
         self.assertEqual(
-            [(call["text"], call["submit"]) for call in paster.calls],
-            [("/effort ultracode", True), ("brief", False)],
+            paster.calls[0]["text"],
+            "/effort ultracode",
         )
+        self.assertTrue(str(paster.calls[1]["text"]).endswith("\n\nbrief"))
         self.assertEqual(payload["sessionCommands"], ["/effort ultracode"])
         self.assertTrue(payload["sessionCommandsDelivered"])
 
@@ -414,25 +490,94 @@ class SpawnKnobApplicationTests(unittest.TestCase):
         self.assertEqual(self.host.ensured, [])
         self.assertIsNone(self.catalog.get("worker-1"))
 
-    def test_mapping_less_builtin_harness_stays_env_only(self) -> None:
+    def test_codex_builtin_harness_receives_resolved_knobs_on_argv(self) -> None:
         self._write_settings(
             {
                 "roles": {
-                    "worker": {"harness": "codex", "model": "gpt-5", "effort": "whatever"}
+                    "worker": {"harness": "codex", "model": "gpt-5.6-sol", "effort": "xhigh"}
                 }
             }
         )
         payload = self._spawn(env={"AR_SPAWN_ROLE": "worker"})
         self.assertEqual(payload["status"], "spawned")
-        self.assertEqual(self.host.ensured[0]["command"], ("codex",))
+        self.assertEqual(
+            self.host.ensured[0]["command"],
+            ("codex", "--model", "gpt-5.6-sol", "--config", "model_reasoning_effort=xhigh"),
+        )
         self.assertEqual(
             self.host.ensured[0]["env"],
             {
                 "AR_SPAWN_ROLE": "worker",
-                "AR_SPAWN_MODEL": "gpt-5",
-                "AR_SPAWN_EFFORT": "whatever",
+                "AR_SPAWN_MODEL": "gpt-5.6-sol",
+                "AR_SPAWN_EFFORT": "xhigh",
             },
         )
+
+    def test_worker_manager_curator_tiers_resolve_map_and_record_log_binding(self) -> None:
+        tiers = {
+            "worker": ("gpt-5.6-sol", "xhigh"),
+            "manager": ("gpt-5.6-terra", "medium"),
+            "curator": ("gpt-5.6-luna", "medium"),
+        }
+        self._write_settings(
+            {
+                "roles": {
+                    role: {"harness": "codex", "model": model, "effort": effort}
+                    for role, (model, effort) in tiers.items()
+                }
+            }
+        )
+        for role, (model, effort) in tiers.items():
+            paster = _FakePaster()
+            payload = self._spawn(
+                session_id=f"{role}-tier",
+                env={"AR_SPAWN_ROLE": role},
+                context="tier probe",
+                submit=True,
+                paster=paster,
+            )
+            self.assertEqual(payload["status"], "spawned")
+            self.assertEqual(payload["resolvedModel"], model)
+            self.assertEqual(payload["resolvedEffort"], effort)
+            self.assertEqual(payload["sessionLogEntryId"], f"{role}-tier")
+            self.assertEqual(payload["sessionLogPath"], "/tmp/fake-session.jsonl")
+            self.assertEqual(
+                self.host.ensured[-1]["command"],
+                ("codex", "--model", model, "--config", f"model_reasoning_effort={effort}"),
+            )
+            row = self.catalog.get(f"{role}-tier")
+            assert row is not None
+            self.assertEqual(row.resolved_model, model)
+            self.assertEqual(row.resolved_effort, effort)
+            self.assertEqual(row.session_log_entry_id, f"{role}-tier")
+            self.assertEqual(row.session_log_path, Path("/tmp/fake-session.jsonl"))
+
+    def test_missing_log_entry_fails_the_brief_without_screen_fallback(self) -> None:
+        self._write_settings(
+            {
+                "roles": {
+                    "worker": {
+                        "harness": "codex",
+                        "model": "gpt-5.6-sol",
+                        "effort": "xhigh",
+                    }
+                }
+            }
+        )
+        paster = _FakePaster(delivered=True, submitted=False, capture="failure pane")
+        payload = self._spawn(
+            env={"AR_SPAWN_ROLE": "worker"},
+            context="dispatch brief",
+            submit=True,
+            paster=paster,
+        )
+
+        self.assertFalse(payload["contextDelivered"])
+        self.assertFalse(payload["submitted"])
+        row = self.catalog.get("worker-1")
+        assert row is not None
+        self.assertIsNone(row.session_log_path)
+        self.assertEqual(payload["deliveryCapture"], "failure pane")
 
     def test_launch_args_ride_the_argv_verbatim_and_are_recorded(self) -> None:
         self._write_settings(
@@ -471,31 +616,38 @@ class SpawnKnobApplicationTests(unittest.TestCase):
                 }
             }
         )
-        paster = _FakePaster()
+        paster = _ObservedPaster(
+            capture="Fable 5 with max effort · Claude Max\n◉ max · /effort\n"
+        )
         payload = self._spawn(
             env={"AR_SPAWN_ROLE": "strategist"},
             context="You are the strategist.",
+            submit=True,
             paster=paster,
         )
         self.assertEqual(payload["status"], "spawned")
         self.assertEqual(
             self.host.ensured[0]["command"], ("claude", "--effort", "max")
         )
-        self.assertEqual(paster.calls[0]["text"], "ultracode\n\nYou are the strategist.")
+        self.assertTrue(
+            str(paster.calls[0]["text"]).endswith("\n\nultracode\n\nYou are the strategist.")
+        )
         self.assertEqual(payload["promptKeywords"], ["ultracode"])
         row = self.catalog.get("worker-1")
         assert row is not None
         self.assertEqual(row.prompt_keywords, ("ultracode",))
 
-    def test_prompt_keywords_without_a_brief_are_still_delivered(self) -> None:
+    def test_prompt_keywords_without_a_brief_are_transported_as_a_draft(self) -> None:
         self._write_settings(
             {"roles": {"strategist": {"harness": "claude", "promptKeywords": ["ultracode"]}}}
         )
-        paster = _FakePaster()
+        paster = _ObservedPaster(
+            capture="Fable 5 with ultracode effort · Claude Max\n◉ ultracode · /effort\n"
+        )
         payload = self._spawn(env={"AR_SPAWN_ROLE": "strategist"}, paster=paster)
         self.assertEqual(payload["status"], "spawned")
-        self.assertEqual(paster.calls[0]["text"], "ultracode")
-        self.assertTrue(payload["contextDelivered"])
+        self.assertTrue(str(paster.calls[0]["text"]).endswith("\n\nultracode"))
+        self.assertFalse(payload["contextDelivered"])
 
     def test_session_command_order_is_effort_vehicle_then_free_form_then_brief(self) -> None:
         self._write_settings(
@@ -510,17 +662,21 @@ class SpawnKnobApplicationTests(unittest.TestCase):
                 }
             }
         )
-        paster = _FakePaster()
+        paster = _ObservedPaster(
+            capture="Fable 5 with ultracode effort · Claude Max\n◉ ultracode · /effort\n"
+        )
         payload = self._spawn(
             env={"AR_SPAWN_ROLE": "worker"},
             context="brief",
+            submit=True,
             paster=paster,
         )
         self.assertEqual(payload["status"], "spawned")
         self.assertEqual(
-            [call["text"] for call in paster.calls],
-            ["/effort ultracode", "/statusline off", "ultracode\n\nbrief"],
+            [call["text"] for call in paster.calls[:2]],
+            ["/effort ultracode", "/statusline off"],
         )
+        self.assertTrue(str(paster.calls[2]["text"]).endswith("\n\nultracode\n\nbrief"))
         # The RESOLVED session-command list (effort vehicle first) is the recorded provenance.
         self.assertEqual(payload["sessionCommands"], ["/effort ultracode", "/statusline off"])
         row = self.catalog.get("worker-1")
@@ -594,6 +750,9 @@ class SettingsDefinedHarnessTests(unittest.TestCase):
             "which": _detected,
         }
         base.update(kwargs)
+        paster = base.get("paster")
+        if "session_log" not in base and isinstance(paster, _FakePaster):
+            base["session_log"] = paster.log
         return spawn_agent_session_payload(self.config, **base)  # type: ignore[arg-type]
 
     def test_settings_defined_harness_spawns_with_its_argv(self) -> None:
@@ -750,6 +909,9 @@ class SpawnLevelResolutionTests(unittest.TestCase):
             "which": _detected,
         }
         base.update(kwargs)
+        paster = base.get("paster")
+        if "session_log" not in base and isinstance(paster, _FakePaster):
+            base["session_log"] = paster.log
         return spawn_agent_session_payload(self.config, **base)  # type: ignore[arg-type]
 
     def test_level_override_deep_merges_harness_inherited(self) -> None:
@@ -959,7 +1121,9 @@ class SpawnLevelResolutionTests(unittest.TestCase):
                 }
             },
         )
-        paster = _FakePaster()
+        paster = _ObservedPaster(
+            capture="Fable 5 with ultracode effort · Claude Max\n◉ ultracode · /effort\n"
+        )
         payload = self._spawn(
             env={"AR_SPAWN_ROLE": "strategist"},
             context="You are the strategist.",
@@ -967,9 +1131,11 @@ class SpawnLevelResolutionTests(unittest.TestCase):
         )
         self.assertEqual(payload["status"], "spawned")
         self.assertEqual(self.host.ensured[0]["command"], ("claude",))
-        self.assertEqual(
-            [call["text"] for call in paster.calls],
-            ["/effort ultracode", "ultracode\n\nYou are the strategist."],
+        self.assertEqual(paster.calls[0]["text"], "/effort ultracode")
+        self.assertTrue(
+            str(paster.calls[1]["text"]).endswith(
+                "\n\nultracode\n\nYou are the strategist."
+            )
         )
         row = self.catalog.get("seat-1")
         assert row is not None
@@ -1018,6 +1184,9 @@ class SpawnHarnessResolutionTests(unittest.TestCase):
             "which": _detected,
         }
         base.update(kwargs)
+        paster = base.get("paster")
+        if "session_log" not in base and isinstance(paster, _FakePaster):
+            base["session_log"] = paster.log
         return spawn_agent_session_payload(self.config, **base)  # type: ignore[arg-type]
 
     def test_omitted_harness_uses_the_global_settings_preference(self) -> None:
@@ -1100,8 +1269,14 @@ class TerminalPasteEndpointTests(unittest.TestCase):
                 status="running",
             )
         )
+        self._current_paster = _FakePaster()
+        log_patch = patch("agents_remember.serving.app.HarnessSessionLog")
+        log_factory = log_patch.start()
+        log_factory.side_effect = lambda **_kwargs: self._current_paster.log
+        self.addCleanup(log_patch.stop)
 
     def _client(self, paster: _FakePaster) -> TestClient:
+        self._current_paster = paster
         app = create_app(
             self.config,
             interval=100,
@@ -1126,8 +1301,7 @@ class TerminalPasteEndpointTests(unittest.TestCase):
         self.assertEqual(paster.calls[0]["tmux"], "ar-live")
 
     def test_paste_endpoint_unconfirmed_submit_ships_the_pane_capture(self) -> None:
-        # Review N3: delivered but the REQUESTED submit did not advance the pane -- still a failed
-        # outcome, so the capture rides the response (parity with the spawn seam).
+        # Requested submit without log acceptance stays unconfirmed and carries failure evidence.
         paster = _FakePaster(delivered=True, submitted=False, capture="claude> draft sitting")
         with self._client(paster) as client:
             response = client.post(
@@ -1135,7 +1309,7 @@ class TerminalPasteEndpointTests(unittest.TestCase):
             )
         self.assertEqual(response.status_code, 200)
         body = response.json()
-        self.assertTrue(body["delivered"])
+        self.assertFalse(body["delivered"])
         self.assertFalse(body["submitted"])
         self.assertEqual(body["capture"], "claude> draft sitting")
 

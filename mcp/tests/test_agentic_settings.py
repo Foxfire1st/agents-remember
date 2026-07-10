@@ -444,7 +444,7 @@ class TypedModelTests(unittest.TestCase):
         self.assertEqual(settings.supervisor.stale_cutoff_seconds, 60.0)
         self.assertIsNone(settings.supervisor.redeliver_rate_limit_seconds)
         self.assertEqual(settings.supervisor.signal_cooldown_seconds, 900.0)
-        self.assertEqual(settings.supervisor.redeliver_budget, 250)
+        self.assertEqual(settings.supervisor.redeliver_budget, 1)
 
     def test_supervisor_knobs_parse(self) -> None:
         settings = self._load(
@@ -843,6 +843,22 @@ class HarnessesFamilyTests(unittest.TestCase):
         self.assertEqual(claude.command, "claude")
         self.assertEqual(claude.effort_flag, "--effort")
         self.assertEqual(claude.defined_in, "registry")
+
+    def test_replacing_codex_effort_flag_drops_its_config_value_template(self) -> None:
+        settings = self._load(
+            {
+                "harnesses": {
+                    "codex": {
+                        "effortFlag": "--reasoning-effort",
+                        "effortFlagValues": ["high", "xhigh"],
+                    }
+                }
+            }
+        )
+        codex = settings.find_harness("codex")
+        assert codex is not None
+        self.assertEqual(codex.effort_flag, "--reasoning-effort")
+        self.assertIsNone(codex.effort_flag_value_template)
 
     def test_new_id_without_command_or_argv_fails_loud(self) -> None:
         with self.assertRaisesRegex(AgenticSettingsError, "command and/or argv"):

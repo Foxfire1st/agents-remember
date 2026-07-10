@@ -55,7 +55,7 @@ from agents_remember.serving.terminal_catalog import (
     TerminalSessionKind,
     TerminalSessionStatus,
 )
-from agents_remember.serving.terminal_paste import TerminalPaster
+from agents_remember.serving.terminal_paste import PasteResult, TerminalPaster
 
 NOW = datetime(2026, 7, 8, 12, 0, 0, tzinfo=UTC)
 
@@ -100,39 +100,20 @@ class _FakeHost:
 
 
 def _fake_paster() -> TerminalPaster:
-    """A capture-verified paste that lands (and submits) on the first check, no real tmux/sleep.
+    """An already-log-confirmed delivery seam for supervisor orchestration tests."""
 
-    ``chips`` grows by one on every ``paste_buffer`` call and never resets, so chip-count growth
-    is detectable even across MULTIPLE independent deliveries sharing one fake paster in the same
-    sweep (one supervisor sweep can redeliver an inbox row AND post an owner signal, each its own
-    ``TerminalPaster.paste`` call against the same fake) -- a fixed one-shot "landed" flag would
-    make the second delivery's origin capture already show the first delivery's chip, hiding growth.
-    """
-    state = {"chips": 0, "calls": 0}
+    class _AcceptedPaster:
+        def paste(
+            self,
+            _tmux_name: str,
+            _text: str,
+            *,
+            submit: bool = False,
+            **_kwargs: object,
+        ) -> PasteResult:
+            return PasteResult(delivered=True, submitted=submit)
 
-    def load_buffer(_name: str, _text: str) -> None:
-        pass
-
-    def paste_buffer(_tmux_name: str, _buffer_name: str) -> None:
-        state["chips"] += 1
-
-    def send_key(_tmux_name: str, _key: str) -> None:
-        pass
-
-    def capture_pane(_tmux_name: str) -> str:
-        # ``calls`` guarantees any two captures differ (so the post-Enter "did output advance"
-        # check resolves on the first poll too); ``chips`` growth is the delivery-landed signal.
-        state["calls"] += 1
-        chips = " ".join(f"[Pasted text #{i}]" for i in range(1, state["chips"] + 1))
-        return f"{chips} call={state['calls']}"
-
-    return TerminalPaster(
-        load_buffer=load_buffer,
-        paste_buffer=paste_buffer,
-        send_key=send_key,
-        capture_pane=capture_pane,
-        sleep=lambda _seconds: None,
-    )
+    return cast(TerminalPaster, _AcceptedPaster())
 
 
 class PanePredicateTests(unittest.TestCase):
@@ -340,7 +321,44 @@ class SeatLivenessPredicateTests(unittest.TestCase):
                     _entry("reviewer-1", status="landed"),
                     spawn_role="reviewer",
                     spawned_by_session="manager-current",
+                    replacement_for_leaf=leaf_key,
                     landed_at=(NOW - timedelta(minutes=1)).isoformat(),
+                )
+            )
+
+            self.assertEqual(
+                evaluate_seat_liveness_findings(catalog, now=NOW, stale_seconds=60.0),
+                [],
+            )
+
+    def test_declared_unbound_replacement_suppresses_false_inactive(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            catalog = TerminalCatalog(Path(tmp) / "catalog.json")
+            leaf_key = "repo-a/260707_master/leaf-9"
+            catalog.upsert(
+                replace(
+                    _entry("manager-current", leaf_key="repo-a/260707_master/manager-anchor"),
+                    spawn_role="manager",
+                )
+            )
+            catalog.upsert(
+                replace(
+                    _entry(
+                        "worker-dead",
+                        leaf_key=leaf_key,
+                        turn_state="stale",
+                        turn_state_changed_at=(NOW - timedelta(minutes=10)).isoformat(),
+                    ),
+                    spawn_role="worker",
+                    spawned_by_session="manager-current",
+                )
+            )
+            catalog.upsert(
+                replace(
+                    _entry("worker-replacement", turn_state="working"),
+                    spawn_role="worker",
+                    spawned_by_session="manager-current",
+                    replacement_for_leaf=leaf_key,
                 )
             )
 
@@ -403,6 +421,8 @@ class SweepIntegrationTests(unittest.TestCase):
             ),
             spawn_role="worker",
             spawned_by_session="manager-1",
+            cwd=Path("/workspace"),
+            replacement_for_leaf="repo-a/260707_master/leaf-10",
         )
         self.catalog.upsert(stale_seat)
 
@@ -567,6 +587,28 @@ class SweepIntegrationTests(unittest.TestCase):
         self.assertEqual(heartbeat.pendingInboxCount, 3)
         self.assertEqual(heartbeat.redeliverableInboxCount, 3)
         self.assertIsNotNone(heartbeat.lastSweepDurationSeconds)
+
+    def test_redelivery_uses_one_row_sweep_budget_not_an_uncalibrated_timeout(self) -> None:
+        self.catalog.upsert(_entry("seat-1"))
+        self.inbox_store.append(
+            create_operator_inbox_entry(
+                entry_id="row-1",
+                now=NOW.isoformat(),
+                lifecycle_id=None,
+                agent_id="seat-1",
+                ask="ask",
+                response="resp",
+                created_by="system",
+                created_via="cli",
+            )
+        )
+
+        with mock.patch.object(supervisor_module, "deliver_inbox_entry") as delivered:
+            delivered.return_value = self.inbox_store.current()["row-1"]
+            run_supervisor_sweep(self._ctx(), now=NOW)
+
+        self.assertNotIn("submit_timeout", delivered.call_args.kwargs)
+        self.assertEqual(self._ctx().redeliver_budget, 1)
 
     def test_repeated_seat_liveness_sweeps_coalesce_into_one_signal_row(self) -> None:
         self.catalog.upsert(replace(_entry("manager-1"), spawn_role="manager"))
@@ -748,6 +790,7 @@ class EscalationPredicateTests(unittest.TestCase):
                     _entry("reviewer-1", status="landed"),
                     spawn_role="reviewer",
                     spawned_by_session="manager-current",
+                    replacement_for_leaf=leaf_key,
                     landed_at=(NOW - timedelta(minutes=1)).isoformat(),
                 )
             )

@@ -130,12 +130,15 @@ def open_terminal_session(
     label: str | None = None,
     lifecycle_id: str | None = None,
     leaf_key: str | None = None,
+    replacement_for_leaf: str | None = None,
     env: Mapping[str, str] | None = None,
     launch_args: Sequence[str] | None = None,
     prompt_keywords: Sequence[str] | None = None,
     session_commands: Sequence[str] | None = None,
     spawn_level: str | None = None,
     spawn_level_source: str | None = None,
+    resolved_model: str | None = None,
+    resolved_effort: str | None = None,
     spawned_by_session: str | None = None,
     spawned_by_lifecycle: str | None = None,
     which: Which | None = None,
@@ -227,6 +230,9 @@ def open_terminal_session(
         status="running",
         # An explicit leaf_key claims a leaf now; otherwise keep any leaf this session already owns.
         leaf_key=preserved(leaf_key, existing.leaf_key if existing else None),
+        replacement_for_leaf=preserved(
+            replacement_for_leaf, existing.replacement_for_leaf if existing else None
+        ),
         # Provenance is set once at first spawn and preserved across a re-open.
         spawned_by_session=preserved(
             spawned_by_session, existing.spawned_by_session if existing else None
@@ -258,6 +264,10 @@ def open_terminal_session(
         spawn_level_source=preserved(
             spawn_level_source, existing.spawn_level_source if existing else None
         ),
+        resolved_model=preserved(resolved_model, existing.resolved_model if existing else None),
+        resolved_effort=preserved(resolved_effort, existing.resolved_effort if existing else None),
+        session_log_entry_id=existing.session_log_entry_id if existing else None,
+        session_log_path=existing.session_log_path if existing else None,
     )
     catalog.upsert(entry)
     return OpenTerminalResult(status="opened", entry=entry, kind=resolved_kind)

@@ -56,7 +56,7 @@ SpawnAgentSessionStatus = Literal[
 class SpawnAgentSessionResponse(ToolResponse):
     """``spawn_agent_session``: spawn a role-configured, leaf-attached, context-primed hosted session.
 
-    Composes the existing session primitives (opener + leaf claim + capture-verified paste + optional
+    Composes the existing session primitives (opener + leaf claim + log-verified input + optional
     submit). ``ok`` is true only for ``spawned``; ``leaf-taken`` surfaces the server-arbitrated
     refusal (the tool never overrides it), and the harness/kind statuses report a validation refusal
     before anything is spawned.
@@ -68,6 +68,7 @@ class SpawnAgentSessionResponse(ToolResponse):
     harness: str | None = None
     kind: Literal["harness", "terminal"] | None = None
     leafKey: str | None = None
+    replacementForLeaf: str | None = None
     label: str | None = None
     cwd: str | None = None
     tmuxName: str | None = None
@@ -81,6 +82,10 @@ class SpawnAgentSessionResponse(ToolResponse):
     # (260703-L16, ruling 2026-07-07T08:15), recorded on the catalog row.
     spawnLevel: str | None = None
     spawnLevelSource: str | None = None
+    resolvedModel: str | None = None
+    resolvedEffort: str | None = None
+    sessionLogEntryId: str | None = None
+    sessionLogPath: str | None = None
     # Free-form spawn provenance (260703-L16), as recorded on the catalog row: launchArgs rode the
     # argv verbatim, sessionCommands were pasted post-launch before the brief (the resolved list --
     # a session-vocabulary effort like claude's ultracode arrives here as "/effort ultracode"),
@@ -88,13 +93,11 @@ class SpawnAgentSessionResponse(ToolResponse):
     launchArgs: list[str] | None = None
     promptKeywords: list[str] | None = None
     sessionCommands: list[str] | None = None
-    # Whether every session command was capture-verified AND submitted (None = none were sent).
+    # Whether every session command has both a bound-log command entry and non-error stdout.
     sessionCommandsDelivered: bool | None = None
     # Set on ``leaf-taken``: the running same-role session that already owns the leaf.
     ownerSession: str | None = None
-    # Context-packet delivery outcome: true ONLY after a pane capture proves the payload landed
-    # (chip count / content probe for codex targets, prompt-echo for claude targets); submit only
-    # when requested. 260707-HFX-L3 -- the SF-1 blind seat was a true here over a clean-booted pane.
+    # Context-packet delivery outcome: true only after the id-bearing user entry is in the bound log.
     contextDelivered: bool | None = None
     submitted: bool | None = None
     # 260707-HFX-L3 loud-failure evidence: the final pane capture, attached whenever any delivery

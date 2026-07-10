@@ -188,22 +188,20 @@ def _entry_carries_leaf_chain(
     *,
     leaf_key: str,
     manager_agent_id: str | None,
-    subject: TerminalCatalogEntry | None,
 ) -> bool:
     if entry.leaf_key == leaf_key or (
         manager_agent_id is not None and entry.id == manager_agent_id
     ):
         return True
-    # Workers are expected to be leaf-bound; accepting an unbound sibling worker here would let
-    # activity on a different parallel leaf suppress this leaf. Reviewers and curators may
-    # legitimately carry the same worktree without a leaf attachment.
+    # A replacement may be unbound while another role occupies the leaf. Same-manager provenance
+    # alone is insufficient because one manager can drive parallel leaves; the explicit replacement
+    # leaf is the production discriminator (catalog cwd is fleet-wide and cannot distinguish work).
     return bool(
         manager_agent_id is not None
         and entry.spawned_by_session == manager_agent_id
-        and entry.spawn_role in ("reviewer", "curator")
+        and entry.spawn_role in ("worker", "reviewer", "curator")
         and entry.leaf_key is None
-        and subject is not None
-        and entry.cwd == subject.cwd
+        and entry.replacement_for_leaf == leaf_key
     )
 
 
@@ -213,7 +211,6 @@ def _is_chain_progress(
     leaf_key: str,
     manager_agent_id: str | None,
     subject_agent_id: str | None,
-    subject: TerminalCatalogEntry | None,
     since: datetime,
 ) -> bool:
     if entry.id == subject_agent_id or entry.status not in ("running", "landed"):
@@ -222,7 +219,6 @@ def _is_chain_progress(
         entry,
         leaf_key=leaf_key,
         manager_agent_id=manager_agent_id,
-        subject=subject,
     ) and _entry_progressed_after(entry, since)
 
 
@@ -236,13 +232,11 @@ def leaf_chain_has_progress(
     """Whether another observable seat carrying ``leaf_key`` progressed after ``since``.
 
     The chain includes exact-leaf seats, the current manager, and an unbound worker/reviewer/curator
-    spawned by that manager in the same worktree as the bound subject. The cwd check is what credits
-    an unbound reviewer without treating unrelated parallel leaves under the same manager as activity.
+    whose catalog row explicitly names this leaf as its replacement target.
     """
     since_at = _parsed_at(since)
     if since_at is None:
         return False
-    subject = catalog.get(subject_agent_id) if subject_agent_id is not None else None
     manager = derive_leaf_manager_owner(
         catalog, sender_agent_id=subject_agent_id, leaf_key=leaf_key
     )
@@ -252,7 +246,6 @@ def leaf_chain_has_progress(
             leaf_key=leaf_key,
             manager_agent_id=manager.agent_id,
             subject_agent_id=subject_agent_id,
-            subject=subject,
             since=since_at,
         )
         for entry in catalog.list()

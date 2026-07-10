@@ -1,62 +1,32 @@
-"""The ONE delivery path (260707-HFX2-L3, R1 + R3): every payload class ends here.
+"""The one delivery path: paste each input, then verify it in the harness session log.
 
-Developer ruling (2026-07-07T22:45, verbatim): "As injector we will then use the paste into chat
-method. It's the one that is harness independent as long as you get its method right. This is the
-one thing we got all the control over we need." The tmux paste seam
-(``serving/terminal_paste.TerminalPaster``) is already the transport this project controls
-end-to-end; this module is where every payload class -- spawn briefs, dispatch orders, nudges,
-redeliveries, expectation-timeout wake-ups -- funnels through it, so there is exactly one place
-that decides what "delivered" means.
-
-R1 CONTRACT: :func:`deliver` returns one of four outcomes, never a bare boolean --
-
-* ``acked``          -- the paste landed, was submitted, and the pane shows the turn started.
-* ``landed-unacked`` -- the paste landed but was not (yet) acted on: a draft-only delivery
-  (``submit=False``), or a submitted paste whose turn-start could not be confirmed.
-* ``blocked(reason)``-- a modal dialog trap (codex quota/rate-limit (#20), a permission/confirmation
-  prompt) sits in the pane; a structured NEEDS-ATTENTION signal, never silent non-delivery.
-* ``failed(reason)`` -- the paste itself was never capture-verified as landed.
-
-The caller (the L2 supervisor, ``serving/supervisor.py``) OWNS retries against this outcome; this
-module never blind-retries -- ``TerminalPaster`` already retries internally, but ONLY after
-re-capturing proof the previous attempt did not land (the F-V lesson, ``terminal_paste.py:284-308``,
-left untouched by this leaf). A second call to :func:`deliver` for the same row is the caller's
-decision, made with the outcome as evidence, exactly like every other supervisor-owned retry.
-
-R4 NON-GOALS (developer-ruled): harness hooks, Agent SDK sessions, and the codex app-server protocol
-are NOT delivery channels here or anywhere downstream of this module -- the paste-into-chat method
-is the one mechanism, full stop. A future harness adds one :class:`~agents_remember.serving.
-harness_adapters.HarnessAdapter` registration, never a second ``deliver``.
+Session commands and messages are always separate entries. Screen text never decides acceptance;
+the pane is read only to prevent a duplicate re-paste and to preserve final failure evidence.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Literal
 
-from agents_remember.serving.harness_adapters import get_adapter
+from agents_remember.serving.harness_adapters import HarnessAdapter, get_adapter
+from agents_remember.serving.harness_logs import HarnessSessionLog
 from agents_remember.serving.terminal_paste import PasteResult, TerminalPaster
 
 DeliveryOutcome = Literal["acked", "landed-unacked", "blocked", "failed"]
 
+# 2026-07-10 real-seat creation-to-user-log calibration (unique inbox ULID -> JSONL user record):
+# Claude n=12, p50=5.044 s, observed max=40.260 s; Codex n=190, p50=3.111 s,
+# p95=18.476 s, immediate-cohort max=28.949 s. Longer Codex rows were queued/redelivery delays,
+# not log flushes. These are the shortest tenth-second windows covering each observed direct cohort.
+_LOG_FLUSH_WINDOWS = {"claude": 40.3, "codex": 29.0}
+_GENERIC_LOG_FLUSH_WINDOW = 40.3
+
 
 @dataclass(frozen=True)
 class DeliveryRow:
-    """The standardized payload envelope (R3): every delivery kind carries the same compact header
-    fields, whether or not :attr:`envelope` renders them into the pasted text.
-
-    ``kind`` is the payload class (``"brief"``, an ``InboxMessageKind`` like ``"nudge"``/
-    ``"escalation"``/``"message"``, ``"session-command"``, ...); ``entry_id`` is the durable row or
-    session id a seat's reply is tracked against; ``ack_instruction`` is the human-readable
-    instruction for how a seat acks (``None`` when the payload carries no ack expectation, e.g. a
-    session command). ``envelope=False`` skips rendering the header into the pasted bytes -- the
-    spawn-brief path uses this: a fresh harness's very first paste is the brief/session-command text
-    itself (unchanged wire format, since other machinery -- ``briefed-by`` expectation rows, the
-    dashboard's spawn payload -- already keys off the session, not a parsed header), while the
-    inbox path renders its own header via ``_push_text`` already, so it also sets ``envelope=False``
-    and lets its pre-built text carry the header. A payload kind with no header of its own (a future
-    dispatch-order/timeout-wake-up path) should leave ``envelope`` at its default ``True``.
-    """
+    """One independently accepted dispatch input."""
 
     kind: str
     entry_id: str
@@ -68,22 +38,19 @@ class DeliveryRow:
 
 @dataclass(frozen=True)
 class DeliveryResult:
-    """One :func:`deliver` outcome (R1): the contract's four-way ``DeliveryOutcome`` plus evidence.
-
-    ``capture`` is the final pane snapshot (the loud-failure evidence
-    ``terminal_paste.PasteResult.capture`` already carries) -- present regardless of outcome, so a
-    ``blocked``/``failed`` result is diagnosable from the result itself.
-    """
+    """One input's log-backed outcome and final failure pane evidence."""
 
     outcome: DeliveryOutcome
     reason: str | None = None
     capture: str = ""
     submitted: bool = False
+    verification: tuple[str, ...] = ()
+    bound_entry_id: str | None = None
+    session_log_path: Path | None = None
 
 
 def envelope_text(row: DeliveryRow) -> str:
-    """Render ``row`` into pasted text: the compact header (R3) prefixed to the body, or the body
-    verbatim when ``row.envelope`` is ``False`` (see :class:`DeliveryRow`'s docstring)."""
+    """Guarantee the existing unique entry id is part of every non-command packet."""
     if not row.envelope:
         return row.text
     header = f"[Agents Remember delivery:{row.kind} id={row.entry_id}]"
@@ -97,45 +64,151 @@ def deliver(
     *,
     tmux_name: str,
     paster: TerminalPaster,
-    harness: str | None = None,
+    harness: str | None,
+    session_log: HarnessSessionLog | None,
 ) -> DeliveryResult:
-    """The ONE delivery path (R1 + R3): paste ``row`` into ``tmux_name`` and classify the outcome.
+    """Paste one input and classify it solely from its harness-log record.
 
-    Every payload class -- spawn briefs and session commands (``mcp/tools/terminal.py``), dispatch/
-    nudge/redelivery/signal rows (``serving/inbox_delivery.py``, called from
-    ``serving/supervisor.py``) -- calls this function; none of them talks to ``TerminalPaster``
-    directly any more (R3: the raw-spawn seam's separate delivery loop is retired into this path).
-
-    Classification order: the paste is attempted first (``TerminalPaster.paste`` already does its
-    own capture-verified, non-blind-retrying dance across the harness boot window); THEN the final
-    pane capture is read for a modal-dialog trap (``blocked`` overrides every other reading -- a
-    paste that nominally "landed" into a quota/permission modal is not a delivery a caller should
-    treat as acked); only then do delivery/submit flags resolve to ``acked`` / ``landed-unacked`` /
-    ``failed``.
+    An unbound spawn command is the one intentional deferred case: it is transported first, then
+    verified retroactively after the id-bearing brief binds the session log. It cannot be reported
+    acked before that check.
     """
     adapter = get_adapter(harness)
-    outcome: PasteResult = paster.paste(tmux_name, envelope_text(row), submit=row.submit)
+    text = envelope_text(row)
+    if not row.submit:
+        return _classify_transport(
+            paster.paste(tmux_name, text, submit=False),
+            adapter=adapter,
+            session_log=session_log,
+        )
+    if session_log is None:
+        return DeliveryResult(
+            "failed",
+            reason="harness session log context is unavailable",
+            verification=("session-log",),
+        )
+    if row.kind == "session-command" and session_log.bound_path is None:
+        outcome = paster.paste(tmux_name, text, submit=True, accepted=None)
+        if not outcome.delivered:
+            return _failed_from_capture(
+                "session command transport failed before log binding",
+                outcome,
+                adapter=adapter,
+            )
+        return DeliveryResult(
+            "landed-unacked",
+            reason="session command awaits retroactive bound-log verification",
+            verification=("command-entry", "command-stdout"),
+        )
+
+    accepted = (
+        (lambda: session_log.command_evidence(row.text).succeeded)
+        if row.kind == "session-command"
+        else (lambda: session_log.message_present(row.entry_id))
+    )
+    flush_window = _LOG_FLUSH_WINDOWS.get(harness or "", _GENERIC_LOG_FLUSH_WINDOW)
+    outcome = paster.paste(
+        tmux_name,
+        text,
+        submit=True,
+        accepted=accepted,
+        flush_window=flush_window,
+    )
+    if outcome.submitted:
+        return DeliveryResult(
+            "acked",
+            submitted=True,
+            verification=(
+                ("command-entry", "command-stdout")
+                if row.kind == "session-command"
+                else ("user-message-entry",)
+            ),
+            bound_entry_id=row.entry_id,
+            session_log_path=session_log.bound_path,
+        )
+    return _failed_from_capture(
+        "input absent from the harness session log after bounded recovery",
+        outcome,
+        adapter=adapter,
+        verification=(
+            ("command-entry", "command-stdout")
+            if row.kind == "session-command"
+            else ("user-message-entry",)
+        ),
+    )
+
+
+def verify_or_reissue_command(
+    row: DeliveryRow,
+    *,
+    tmux_name: str,
+    paster: TerminalPaster,
+    harness: str | None,
+    session_log: HarnessSessionLog,
+) -> DeliveryResult:
+    """Retroactively accept a spawn command, reissuing only that command when missing/errored."""
+    evidence = session_log.command_evidence(row.text)
+    if evidence.succeeded:
+        return DeliveryResult(
+            "acked",
+            submitted=True,
+            verification=("command-entry", "command-stdout"),
+            bound_entry_id=row.entry_id,
+            session_log_path=session_log.bound_path,
+        )
+    result = deliver(
+        row,
+        tmux_name=tmux_name,
+        paster=paster,
+        harness=harness,
+        session_log=session_log,
+    )
+    if result.outcome != "acked" and evidence.errored:
+        return DeliveryResult(
+            result.outcome,
+            reason=f"session command was errored and its isolated re-issue did not verify: {result.reason}",
+            capture=result.capture,
+            submitted=False,
+            verification=result.verification,
+            bound_entry_id=result.bound_entry_id,
+            session_log_path=result.session_log_path,
+        )
+    return result
+
+
+def _classify_transport(
+    outcome: PasteResult,
+    *,
+    adapter: HarnessAdapter,
+    session_log: HarnessSessionLog | None,
+) -> DeliveryResult:
+    if not outcome.delivered:
+        return _failed_from_capture("draft transport failed", outcome, adapter=adapter)
+    return DeliveryResult(
+        "landed-unacked",
+        reason="draft-only delivery (submit=False)",
+        session_log_path=session_log.bound_path if session_log is not None else None,
+    )
+
+
+def _failed_from_capture(
+    reason: str,
+    outcome: PasteResult,
+    *,
+    adapter: HarnessAdapter,
+    verification: tuple[str, ...] = (),
+) -> DeliveryResult:
     blocked = adapter.blocked_reason(outcome.capture)
     if blocked is not None:
         return DeliveryResult(
-            "blocked", reason=blocked, capture=outcome.capture, submitted=outcome.submitted
-        )
-    if not outcome.delivered:
-        return DeliveryResult(
-            "failed", reason="paste was not capture-verified as landed", capture=outcome.capture
-        )
-    if not row.submit:
-        return DeliveryResult(
-            "landed-unacked",
-            reason="draft-only delivery (submit=False)",
+            "blocked",
+            reason=blocked,
             capture=outcome.capture,
+            verification=verification,
         )
-    started = adapter.turn_started(outcome.capture, advanced=outcome.submitted)
-    if not started:
-        return DeliveryResult(
-            "landed-unacked",
-            reason="submitted but the turn did not visibly start",
-            capture=outcome.capture,
-            submitted=False,
-        )
-    return DeliveryResult("acked", capture=outcome.capture, submitted=True)
+    return DeliveryResult(
+        "failed",
+        reason=reason,
+        capture=outcome.capture,
+        verification=verification,
+    )

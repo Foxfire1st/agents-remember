@@ -153,6 +153,7 @@ def create_server(config: McpRuntimeConfig) -> Any:
     def spawn_agent_session(
         harness: str | None = None,
         leaf_key: str | None = None,
+        replacement_for_leaf: str | None = None,
         context: str | None = None,
         submit: bool = False,
         label: str | None = None,
@@ -174,14 +175,16 @@ def create_server(config: McpRuntimeConfig) -> Any:
         to `leaf_key` (server-arbitrated uniqueness — a taken leaf returns status 'leaf-taken', never
         overridden), resolve the role knobs from developer-owned agentic settings, seed resolved
         `model`/`effort` into spawn env, map them onto the harness argv per-harness via the registry,
-        and deliver `context` as an echo-confirmed bracketed paste. Ordinary callers declare the seat
-        (`env.AR_SPAWN_ROLE`) and dispatch `level`; they do not choose harness/model/effort or direct
+        and deliver `context` as an id-bearing, harness-log-confirmed paste. Ordinary callers declare
+        the seat (`env.AR_SPAWN_ROLE`) and dispatch `level`; they do not choose harness/model/effort or direct
         launch/session spend controls. Legacy non-null `harness`, `model`, `effort`, `launch_args`,
         `prompt_keywords`, `session_commands`, `env.AR_SPAWN_MODEL`, `env.AR_SPAWN_EFFORT`, or
         harness-native spend/endpoint env keys such as `ANTHROPIC_MODEL` and `OPENAI_BASE_URL`
         return status 'spend-override-unsupported' before spawning, with guidance to configure
         `orchestration.roles`, `orchestration.rolesPerLevel`, `orchestration.spawn`, or
         `orchestration.harnesses` instead.
+        An unbound replacement declares its actual work with `replacement_for_leaf`; that provenance
+        is the leaf-chain discriminator while `leaf_key` remains free for the occupied role seat.
         `level` declares the dispatch level (leaf|master|portfolio, default leaf — a manager
         dispatching leaf seats passes leaf, the seam reviewer master, portfolio seats portfolio):
         knobs resolve from the agentic settings as `orchestration.rolesPerLevel[level]` deep-merged
@@ -199,6 +202,7 @@ def create_server(config: McpRuntimeConfig) -> Any:
             config,
             harness=harness,
             leaf_key=leaf_key,
+            replacement_for_leaf=replacement_for_leaf,
             context=context,
             submit=submit,
             label=label,

@@ -135,6 +135,7 @@ class SignalRoutingTests(unittest.TestCase):
             spawn_role="reviewer",
             spawned_by_session="manager-current",
             leaf_key=None,
+            replacement_for_leaf=leaf_key,
             status="landed",
             landed_at="2026-06-23T10:05:00+00:00",
         )
@@ -144,6 +145,71 @@ class SignalRoutingTests(unittest.TestCase):
                 self.catalog,
                 leaf_key=leaf_key,
                 subject_agent_id="worker-1",
+                since=T1,
+            )
+        )
+
+    def test_declared_unbound_replacement_counts_as_chain_progress(self) -> None:
+        leaf_key = "repo-a/260707_master/leaf-9"
+        production_cwd = Path("/workspace")
+        self._upsert(
+            id="manager-current",
+            spawn_role="manager",
+            leaf_key="repo-a/260707_master/manager-anchor",
+        )
+        self._upsert(
+            id="worker-dead",
+            spawn_role="worker",
+            spawned_by_session="manager-current",
+            leaf_key=leaf_key,
+            cwd=production_cwd,
+        )
+        self._upsert(
+            id="worker-replacement",
+            spawn_role="worker",
+            spawned_by_session="manager-current",
+            leaf_key=None,
+            cwd=production_cwd,
+            replacement_for_leaf=leaf_key,
+            status="running",
+            turn_state="working",
+        )
+
+        self.assertTrue(
+            leaf_chain_has_progress(
+                self.catalog,
+                leaf_key=leaf_key,
+                subject_agent_id="worker-dead",
+                since=T1,
+            )
+        )
+
+    def test_unbound_worker_on_parallel_leaf_never_suppresses_this_leaf(self) -> None:
+        leaf_key = "repo-a/260707_master/leaf-9"
+        self._upsert(id="manager-current", spawn_role="manager")
+        self._upsert(
+            id="worker-dead",
+            spawn_role="worker",
+            spawned_by_session="manager-current",
+            leaf_key=leaf_key,
+            cwd=Path("/workspace"),
+        )
+        self._upsert(
+            id="parallel-worker",
+            spawn_role="worker",
+            spawned_by_session="manager-current",
+            leaf_key=None,
+            cwd=Path("/workspace"),
+            replacement_for_leaf="repo-a/260707_master/leaf-10",
+            status="running",
+            turn_state="working",
+        )
+
+        self.assertFalse(
+            leaf_chain_has_progress(
+                self.catalog,
+                leaf_key=leaf_key,
+                subject_agent_id="worker-dead",
                 since=T1,
             )
         )

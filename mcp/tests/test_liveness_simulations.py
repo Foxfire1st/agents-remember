@@ -10,20 +10,8 @@ whole chain converges, the way ``LadderWalkIntegrationTests`` in ``test_supervis
 does for its own two fixtures (this file deliberately reuses that exact setup/``_ctx`` shape
 rather than re-inventing one).
 
-Two scenarios are NOT driven through ``run_supervisor_sweep`` end-to-end and say so explicitly in
-their test docstring, rather than forcing a fake automation that would not actually prove
-anything: ``evaluate_predicates`` (called by ``run_supervisor_sweep``) hardcodes
-``evaluate_pane_findings(ctx.catalog)`` with no capturer override, i.e. the sweep always shoots a
-REAL tmux capture-pane -- there is no way to inject a fake pane capturer through
-``SupervisorContext``/``run_supervisor_sweep`` today. Those two cases (chip-stacked delivery
-stall, and the pane-classification half of never-briefed) are proven in two layers instead: (a)
-the pane classifier itself, unit-level, via ``evaluate_pane_findings`` with an injected capturer
-(mirroring ``test_supervisor.py``'s own ``PanePredicateTests``); (b) the ROUTING + DELIVERY +
-LADDER response to that classification, end-to-end, by constructing the exact
-``SupervisorFinding`` the classifier would have produced and feeding it through the real
-``act_on_finding`` inside a real multi-tick sweep loop -- i.e. everything downstream of the pane
-capture itself is genuinely end-to-end; only the capture step is a scripted-manual stand-in,
-called out in the liveness report.
+Composer contents and paste-chip rendering are deliberately absent from these simulations: harness
+session logs, not pane vocabulary, determine delivery acceptance.
 """
 
 from __future__ import annotations
@@ -50,13 +38,9 @@ from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
 from agents_remember.controlplane.orchestration_nudges import OrchestrationNudgeStore
 from agents_remember.controlplane.supervisor_signals import SupervisorSignalCooldownStore
 from agents_remember.observer.store import EventStore
-from agents_remember.serving.pane_signals import classify_pane_signal
 from agents_remember.serving.supervisor import (
     PERSISTENT_FAILURE_ATTEMPTS,
     SupervisorContext,
-    SupervisorFinding,
-    act_on_finding,
-    evaluate_pane_findings,
     evaluate_seat_liveness_findings,
     run_supervisor_sweep,
 )
@@ -120,31 +104,20 @@ class _FakeHost:
 
 
 def _landing_paster() -> TerminalPaster:
-    """A capture-verified paste that lands (and submits) on the first check -- the "healthy
-    delivery" fixture every scenario not itself testing a blocked/stuck pane reuses."""
-    state = {"chips": 0, "calls": 0}
+    """An already-log-confirmed healthy delivery fixture."""
 
-    def load_buffer(_name: str, _text: str) -> None:
-        pass
+    class _AcceptedPaster:
+        def paste(
+            self,
+            _tmux_name: str,
+            _text: str,
+            *,
+            submit: bool = False,
+            **_kwargs: object,
+        ) -> PasteResult:
+            return PasteResult(delivered=True, submitted=submit)
 
-    def paste_buffer(_tmux_name: str, _buffer_name: str) -> None:
-        state["chips"] += 1
-
-    def send_key(_tmux_name: str, _key: str) -> None:
-        pass
-
-    def capture_pane(_tmux_name: str) -> str:
-        state["calls"] += 1
-        chips = " ".join(f"[Pasted text #{i}]" for i in range(1, state["chips"] + 1))
-        return f"{chips} call={state['calls']}"
-
-    return TerminalPaster(
-        load_buffer=load_buffer,
-        paste_buffer=paste_buffer,
-        send_key=send_key,
-        capture_pane=capture_pane,
-        sleep=lambda _seconds: None,
-    )
+    return cast(TerminalPaster, _AcceptedPaster())
 
 
 class _StubPaster:
@@ -155,7 +128,9 @@ class _StubPaster:
         self.result = result
         self.calls: list[tuple[str, str, bool]] = []
 
-    def paste(self, tmux_name: str, text: str, *, submit: bool = False) -> PasteResult:
+    def paste(
+        self, tmux_name: str, text: str, *, submit: bool = False, **_kwargs: object
+    ) -> PasteResult:
         self.calls.append((tmux_name, text, submit))
         return self.result
 
@@ -259,60 +234,6 @@ class NeverBriefedSeatTests(_LivenessSimulationCase):
         )
         self.assertLessEqual((final_rung_at - NOW).total_seconds(), 12 * 60 * 60)
         self.assertEqual(self.inbox_store.current()[nudge_id].rung, 3)
-
-
-class ChipStackedDeliveryStallTests(_LivenessSimulationCase):
-    """Scenario 2 (P-16): stacked, un-consumed paste chips (the F-V duplicate-paste class).
-
-    Pane capture is not injectable through ``run_supervisor_sweep`` (see module docstring), so
-    this proves the classifier at the predicate layer and the ROUTING + LADDER response
-    end-to-end from the finding it would have produced.
-    """
-
-    def test_chip_stacked_pane_classifies_as_delivery_stalled(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            catalog = TerminalCatalog(Path(tmp) / "catalog.json")
-            catalog.upsert(_entry("worker-1"))
-            stacked_pane = " ".join(f"[Pasted text #{i}]" for i in range(1, 4))
-            findings = evaluate_pane_findings(catalog, pane_capturer=lambda _n: stacked_pane)
-            self.assertEqual(len(findings), 1)
-            self.assertEqual(findings[0].detail, "delivery-stalled")
-            classification = classify_pane_signal(stacked_pane)
-            self.assertEqual(classification.signal, "delivery-stalled")
-
-    def test_delivery_stalled_finding_signals_the_owner_and_escalates_if_unacked(self) -> None:
-        self.catalog.upsert(replace(_entry("manager-1"), spawn_role="manager"))
-        self.catalog.upsert(
-            replace(
-                _entry("worker-1", leaf_key="repo-a/260707_master/leaf-3"),
-                spawn_role="worker",
-                spawned_by_session="manager-1",
-            )
-        )
-        ctx = self._ctx()
-        # Stand in for a real pane capture showing 3+ stacked chips (classified above) -- feed the
-        # SAME finding shape the classifier would emit into the real action code.
-        finding = SupervisorFinding(
-            kind="pane-signal",
-            detail="delivery-stalled",
-            session_id="worker-1",
-            leaf_key="repo-a/260707_master/leaf-3",
-        )
-        result = act_on_finding(ctx, finding, now=NOW)
-        self.assertEqual(result.action, "signal-emit")
-        self.assertEqual(result.outcome, "delivered")
-        signal_rows = [e for e in self.inbox_store.current().values() if e.messageKind == "escalation"]
-        self.assertEqual(len(signal_rows), 1)
-        self.assertEqual(signal_rows[0].agentId, "manager-1")
-
-        # If the manager never acks the resulting escalation row, the real ladder still climbs it.
-        entry_id = signal_rows[0].id
-        self._run_until(
-            ctx,
-            lambda: self.inbox_store.current()[entry_id].rung >= 3,
-            start=NOW + timedelta(minutes=2),
-        )
-        self.assertEqual(self.inbox_store.current()[entry_id].rung, 3)
 
 
 class NoHostedSessionTests(_LivenessSimulationCase):
@@ -436,14 +357,9 @@ class DeadSeatStormTests(_LivenessSimulationCase):
 
 
 class ManagerMidTurnSignalLandsTests(_LivenessSimulationCase):
-    """Scenario 4: a signal lands while the target pane shows a mid-turn/busy marker.
+    """Scenario 4: pane busyness never substitutes for a harness-log record."""
 
-    The injector's harness-aware corroboration (260707-HFX2-L3) reads the busy marker as proof
-    the turn started even when the generic "output advanced" flag never fires -- so a signal
-    landing mid-turn is correctly classified ``acked``, not lost or endlessly redelivered.
-    """
-
-    def test_signal_delivered_into_a_busy_pane_is_still_acked(self) -> None:
+    def test_busy_pane_without_log_acceptance_is_unconfirmed(self) -> None:
         self.catalog.upsert(replace(_entry("orchestrator-1"), spawn_role="orchestrator"))
         self.catalog.upsert(
             replace(_entry("manager-1"), spawn_role="manager", spawned_by_session="orchestrator-1")
@@ -460,9 +376,8 @@ class ManagerMidTurnSignalLandsTests(_LivenessSimulationCase):
             message_kind="escalation",
         )
         self.inbox_store.append(entry)
-        # The paste lands but the generic advance flag never fires -- the pane already shows the
-        # busy marker ("esc to interrupt"), which is exactly a manager mid-turn when the signal
-        # arrives.
+        # A busy-pane marker is failure evidence only; without log acceptance the signal remains
+        # unconfirmed instead of receiving transport credit.
         busy_paster = cast(
             TerminalPaster,
             _StubPaster(PasteResult(delivered=True, submitted=False, capture="esc to interrupt")),
@@ -470,8 +385,8 @@ class ManagerMidTurnSignalLandsTests(_LivenessSimulationCase):
         ctx = self._ctx(paster=busy_paster)
         run_supervisor_sweep(ctx, now=NOW)
         current = self.inbox_store.current()["e1"]
-        self.assertEqual(current.deliveryState, "delivered")
-        self.assertEqual(current.deliveryDetail, "echo-confirmed")
+        self.assertEqual(current.deliveryState, "unconfirmed")
+        self.assertIn("harness-log-confirmed", current.deliveryDetail or "")
 
 
 class DeadManagerLiveWorkersTests(_LivenessSimulationCase):
@@ -626,7 +541,7 @@ class CodexQuotaModalTests(_LivenessSimulationCase):
             _StubPaster(
                 PasteResult(
                     delivered=True,
-                    submitted=True,
+                    submitted=False,
                     capture="Approaching rate limits — switch model?",
                 )
             ),

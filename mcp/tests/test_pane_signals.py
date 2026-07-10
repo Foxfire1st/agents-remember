@@ -14,21 +14,6 @@ from agents_remember.serving.pane_signals import classify_pane_signal
 
 
 class PaneSignalClassifierTests(unittest.TestCase):
-    def test_empty_composer_post_boot_is_never_briefed(self) -> None:
-        pane = "some boot banner\n>\n"
-        result = classify_pane_signal(pane, harness="codex")
-        self.assertEqual(result.signal, "never-briefed")
-
-    def test_two_stacked_paste_chips_is_delivery_stalled(self) -> None:
-        pane = "[Pasted Content 40 chars]\n[Pasted Content 41 chars]\n>\n"
-        result = classify_pane_signal(pane, harness="codex")
-        self.assertEqual(result.signal, "delivery-stalled")
-
-    def test_one_paste_chip_alone_is_not_delivery_stalled(self) -> None:
-        pane = "[Pasted Content 40 chars]\n>\n"
-        result = classify_pane_signal(pane, harness="codex")
-        self.assertEqual(result.signal, "never-briefed")  # single chip + empty composer
-
     def test_esc_to_interrupt_is_mid_turn(self) -> None:
         pane = "Thinking...\nesc to interrupt\n"
         result = classify_pane_signal(pane, harness="claude")

@@ -207,7 +207,7 @@ class OperatorInboxStoreTests(unittest.TestCase):
             now=T2,
             delivery_state="delivered",
             delivered_to_session="agent-a",
-            delivery_detail="echo-confirmed",
+            delivery_detail="harness-log-confirmed",
         )
         self.assertEqual(delivered.deliveryState, "delivered")
         self.assertEqual(delivered.deliveredAt, T2)
@@ -565,7 +565,14 @@ class OperatorInboxToolTests(unittest.TestCase):
         pasted_to: list[str] = []
 
         class _Paster:
-            def paste(self, tmux_name: str, _text: str, *, submit: bool = False) -> PasteResult:
+            def paste(
+                self,
+                tmux_name: str,
+                _text: str,
+                *,
+                submit: bool = False,
+                **_kwargs: object,
+            ) -> PasteResult:
                 pasted_to.append(tmux_name)
                 return PasteResult(delivered=True, submitted=submit)
 
@@ -636,7 +643,14 @@ class OperatorInboxDeliveryTests(unittest.TestCase):
         calls: list[tuple[str, str, bool]] = []
 
         class _Paster:
-            def paste(self, tmux_name: str, text: str, *, submit: bool = False) -> PasteResult:
+            def paste(
+                self,
+                tmux_name: str,
+                text: str,
+                *,
+                submit: bool = False,
+                **_kwargs: object,
+            ) -> PasteResult:
                 calls.append((tmux_name, text, submit))
                 return PasteResult(delivered=True, submitted=True)
 
@@ -653,12 +667,9 @@ class OperatorInboxDeliveryTests(unittest.TestCase):
         self.assertTrue(calls[0][2])
         self.assertIn("[Agents Remember inbox:message]", calls[0][1])
 
-    def test_deliver_inbox_entry_records_unconfirmed_when_paste_is_not_echoed(self) -> None:
-        # FINDING 3 (260703-L18, pins friction F-A's echo-confirm seam): a paste the target session
-        # did NOT echo back must record deliveryState 'unconfirmed', never 'delivered'. This is the
-        # exact boot-discard failure echo-confirmation was built to catch (a booting harness silently
-        # drops stdin). If someone collapses inbox_delivery's branch to always-'delivered' this test
-        # FAILS -- the reachable session with an un-echoed paste is the only thing separating the two.
+    def test_deliver_inbox_entry_records_unconfirmed_without_log_acceptance(self) -> None:
+        # A reachable harness that accepts tmux bytes but never records the id must remain
+        # unconfirmed. The pane is retained only as failure evidence.
         entry = create_operator_inbox_entry(
             entry_id="A",
             now=T1,
@@ -674,18 +685,25 @@ class OperatorInboxDeliveryTests(unittest.TestCase):
         self.store.append(entry)
         attempts: list[tuple[str, str]] = []
 
-        class _UnechoedPaster:
-            def paste(self, tmux_name: str, text: str, *, submit: bool = False) -> PasteResult:
-                # A booting harness accepts the keystrokes but never echoes them back. The paster
-                # attaches its final pane capture (260707-HFX-L3 loud-failure contract).
+        class _UnconfirmedPaster:
+            def paste(
+                self,
+                tmux_name: str,
+                text: str,
+                *,
+                _submit: bool = False,
+                **_kwargs: object,
+            ) -> PasteResult:
+                # A booting harness accepts the keystrokes but never records them. The paster
+                # attaches its final failure capture.
                 attempts.append((tmux_name, text))
-                return PasteResult(delivered=False, submitted=submit, capture="claude> (booting)")
+                return PasteResult(delivered=False, submitted=False, capture="claude> (booting)")
 
         recorded = deliver_inbox_entry(
             store=self.store,
             catalog=self.catalog,
             host=self.host,
-            paster=_UnechoedPaster(),  # type: ignore[arg-type]
+            paster=_UnconfirmedPaster(),  # type: ignore[arg-type]
             entry=entry,
         )
         # The paste WAS attempted into the reachable session -- delivery just was not verified.
@@ -694,9 +712,9 @@ class OperatorInboxDeliveryTests(unittest.TestCase):
         self.assertNotEqual(recorded.deliveryState, "delivered")
         self.assertEqual(recorded.deliveredToSession, "agent-a")
         # 260707-HFX-L3: the durable row carries the pane capture as forensic evidence, never a
-        # bare "not echoed" -- the re-briefing operator reads what the pane actually showed.
+        # bare generic failure -- the re-briefing operator reads what the pane actually showed.
         assert recorded.deliveryDetail is not None
-        self.assertIn("paste was not capture-verified", recorded.deliveryDetail)
+        self.assertIn("not harness-log-confirmed", recorded.deliveryDetail)
         self.assertIn("claude> (booting)", recorded.deliveryDetail)
 
     def test_unverified_delivery_with_empty_capture_still_records_a_loud_detail(self) -> None:
@@ -715,9 +733,16 @@ class OperatorInboxDeliveryTests(unittest.TestCase):
         self.store.append(entry)
 
         class _GonePaster:
-            def paste(self, _tmux_name: str, _text: str, *, submit: bool = False) -> PasteResult:
+            def paste(
+                self,
+                _tmux_name: str,
+                _text: str,
+                *,
+                _submit: bool = False,
+                **_kwargs: object,
+            ) -> PasteResult:
                 # capture-pane against a vanished session yields an empty capture.
-                return PasteResult(delivered=False, submitted=submit, capture="")
+                return PasteResult(delivered=False, submitted=False, capture="")
 
         recorded = deliver_inbox_entry(
             store=self.store,
@@ -728,5 +753,6 @@ class OperatorInboxDeliveryTests(unittest.TestCase):
         )
         self.assertEqual(recorded.deliveryState, "unconfirmed")
         self.assertEqual(
-            recorded.deliveryDetail, "paste was not capture-verified (empty pane capture)"
+            recorded.deliveryDetail,
+            "input was not harness-log-confirmed; empty failure capture",
         )

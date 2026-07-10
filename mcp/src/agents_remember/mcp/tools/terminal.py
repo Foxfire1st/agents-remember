@@ -18,6 +18,7 @@ from agents_remember.kernel.agentic_settings import (
 from agents_remember.observer import observer_root
 from agents_remember.observer.ambient import ambient
 from agents_remember.observer.events import now_iso
+from agents_remember.serving.harness_logs import HarnessSessionLog
 from agents_remember.serving.harnesses import (
     Harness,
     Which,
@@ -28,7 +29,11 @@ from agents_remember.serving.harnesses import (
     is_detected,
     unknown_harness_detail,
 )
-from agents_remember.serving.injector import DeliveryRow, deliver
+from agents_remember.serving.injector import (
+    DeliveryRow,
+    deliver,
+    verify_or_reissue_command,
+)
 from agents_remember.serving.leaf_ref_validation import resolve_catalog_leaf_key
 from agents_remember.serving.retire import retire_entry
 from agents_remember.serving.retire_policy import (
@@ -427,6 +432,8 @@ class _SpawnDelivery:
     context_delivered: bool | None = None
     submitted: bool | None = None
     failure_capture: str | None = None
+    bound_entry_id: str | None = None
+    session_log_path: Path | None = None
 
 
 def _deliver_spawn_pastes(
@@ -438,54 +445,97 @@ def _deliver_spawn_pastes(
     *,
     entry_id: str,
     harness: str | None,
+    cwd: Path,
+    created_at: str,
+    session_log: HarnessSessionLog | None = None,
 ) -> _SpawnDelivery:
-    """Deliver the session layer: session commands FIRST (each its own capture-verified paste, always
-    submitted -- an unexecuted ``/effort ultracode`` would be a silent downgrade), THEN the brief.
+    """Deliver commands first, bind on the id-bearing brief, then verify every input in that log.
 
     260707-HFX2-L3 (R3, ONE PATH): this is no longer a separate raw-spawn delivery loop -- every
-    paste here goes through ``serving.injector.deliver``, the SAME path ``inbox_delivery.py`` calls
-    for dispatch/nudge/redelivery rows. ``envelope=False`` on both rows: a fresh harness's very
-    first paste is the session-command/brief text itself, unchanged wire format (other machinery --
-    the ``briefed-by`` expectation row, the spawn payload's ``contextDelivered`` -- already keys off
-    the session, not a parsed envelope header).
+    paste here goes through ``serving.injector.deliver``, the same path ``inbox_delivery.py`` calls.
+    Commands remain verbatim local inputs; the brief gains the standard id envelope that binds the
+    spawn-cwd session log. A failed final outcome alone captures the pane for diagnostics.
 
-    Every ``True`` here is still capture-verified (260707-HFX-L3): a ``False`` means the pane
-    provably shows no trace of the paste, and the failing capture rides the result. A ``blocked``
-    outcome (a modal trap already sitting in a freshly-spawned pane) also counts as undelivered here
-    -- the caller's ``contextDelivered``/``sessionCommandsDelivered`` booleans predate the R1
-    four-way outcome and this function preserves their existing meaning; the richer outcome is
-    available to any future caller via ``serving.injector.deliver`` directly.
+    Numeric bound (L15 FIX-K/f): one Claude input has three calibrated 40.3 s log windows (initial,
+    Enter re-press, re-paste), at most seven 5 s transport operations, two 5 s absence captures, two
+    100 ms settles, and one 5 s failure capture: <=171.1 s. Codex substitutes 29.0 s windows:
+    <=137.2 s. A visible prior payload takes the shorter clear-or-fail branch. Commands sent before the
+    brief do one unverified transport, then incur the same bound only when retroactive evidence is
+    missing/errored. No screen wait or switch flow remains.
     """
     session_commands_delivered: bool | None = None
     context_delivered: bool | None = None
     submitted: bool | None = None
     failure_capture: str | None = None
+    bound_entry_id: str | None = None
+    session_log_path: Path | None = None
     failed = False
+    log = session_log or HarnessSessionLog(
+        harness=harness or "",
+        cwd=cwd,
+        started_at=datetime.fromisoformat(created_at),
+    )
+    command_rows: list[DeliveryRow] = []
     if session_commands:
         session_commands_delivered = True
         for command_line in session_commands:
             row = DeliveryRow(
                 kind="session-command", entry_id=entry_id, text=command_line, submit=True, envelope=False
             )
-            result = deliver(row, tmux_name=tmux_name, paster=paster, harness=harness)
-            if result.outcome != "acked":
-                session_commands_delivered = False
-                failed = True
+            command_rows.append(row)
+            result = deliver(
+                row,
+                tmux_name=tmux_name,
+                paster=paster,
+                harness=harness,
+                session_log=log,
+            )
+            if result.outcome in ("blocked", "failed"):
                 failure_capture = result.capture or failure_capture
     if packet:
-        # Workers auto-start (paste + submit); a human draft-only flow leaves submit=False so the
-        # draft stays editable. Capture-verified server-side (the frontend pasteAndConfirm mirror).
-        row = DeliveryRow(kind="brief", entry_id=entry_id, text=packet, submit=submit, envelope=False)
-        result = deliver(row, tmux_name=tmux_name, paster=paster, harness=harness)
-        context_delivered = result.outcome in ("acked", "landed-unacked")
+        row = DeliveryRow(kind="brief", entry_id=entry_id, text=packet, submit=submit, envelope=True)
+        result = deliver(
+            row,
+            tmux_name=tmux_name,
+            paster=paster,
+            harness=harness,
+            session_log=log,
+        )
+        context_delivered = result.outcome == "acked"
         submitted = result.submitted if submit else None
+        bound_entry_id = result.bound_entry_id
+        session_log_path = result.session_log_path
         if result.outcome in ("blocked", "failed") or (submit and result.outcome != "acked"):
             failed = True
             failure_capture = result.capture or failure_capture
+    if command_rows:
+        if log.bound_path is None:
+            session_commands_delivered = False
+            failed = True
+        else:
+            for row in command_rows:
+                result = verify_or_reissue_command(
+                    row,
+                    tmux_name=tmux_name,
+                    paster=paster,
+                    harness=harness,
+                    session_log=log,
+                )
+                if result.outcome != "acked":
+                    session_commands_delivered = False
+                    failed = True
+                    failure_capture = result.capture or failure_capture
+            session_log_path = log.bound_path
+            bound_entry_id = entry_id
     if failed and failure_capture is None:
         failure_capture = _EMPTY_PANE_CAPTURE
     return _SpawnDelivery(
-        session_commands_delivered, context_delivered, submitted, failure_capture
+        session_commands_delivered=session_commands_delivered,
+        context_delivered=context_delivered,
+        submitted=submitted,
+        failure_capture=failure_capture,
+        bound_entry_id=bound_entry_id,
+        session_log_path=session_log_path,
     )
 
 
@@ -494,6 +544,7 @@ def spawn_agent_session_payload(
     *,
     harness: str | None = None,
     leaf_key: str | None = None,
+    replacement_for_leaf: str | None = None,
     context: str | None = None,
     submit: bool = False,
     label: str | None = None,
@@ -510,14 +561,15 @@ def spawn_agent_session_payload(
     session_id: str | None = None,
     host: TerminalHost | None = None,
     paster: TerminalPaster | None = None,
+    session_log: HarnessSessionLog | None = None,
     which: Which | None = None,
 ) -> dict[str, Any]:
     """Spawn one role-configured, leaf-attached, context-primed hosted session (L2 dispatch).
 
     Composes the EXISTING session primitives -- the shared serving opener (create + leaf claim +
-    detached tmux ensure with env-seeded knobs), then a capture-verified context-packet paste with an
-    optional submit (260707-HFX-L3: ``contextDelivered:true`` only after the pane provably shows the
-    payload; an unverifiable delivery reports false WITH the pane capture) -- so orchestrators spawn
+    detached tmux ensure with argv/session-command-pinned knobs), then a log-verified context input
+    with optional submit (``contextDelivered:true`` only after the id-bearing user record exists) --
+    so orchestrators spawn
     managers and managers spawn workers without dashboard clicks. The harness is resolved per-use
     through the agentic settings (role/level knobs, repo-local over global
     ``orchestration.spawn.harness``), else the detection-gated default. Leaf uniqueness stays
@@ -564,11 +616,18 @@ def spawn_agent_session_payload(
             leaf_key = resolve_catalog_leaf_key(config, leaf_key)
         except LeafRefResolutionError as exc:
             return leaf_ref_refusal_payload("spawn_agent_session", leaf_key, exc, kind=kind)
+    if replacement_for_leaf is not None:
+        try:
+            replacement_for_leaf = resolve_catalog_leaf_key(config, replacement_for_leaf)
+        except LeafRefResolutionError as exc:
+            return leaf_ref_refusal_payload(
+                "spawn_agent_session", replacement_for_leaf, exc, kind=kind
+            )
     dispatch: _HarnessDispatch | None = None
     if kind == "harness":
         dispatch, refusal = _resolve_harness_dispatch(
             config,
-            leaf_key=leaf_key,
+            leaf_key=leaf_key or replacement_for_leaf,
             level=level,
             env=env,
             which=which,
@@ -602,12 +661,15 @@ def spawn_agent_session_payload(
         harness=harness if kind == "harness" else None,
         label=label,
         leaf_key=leaf_key,
+        replacement_for_leaf=replacement_for_leaf,
         env=spawn_env,
         launch_args=launch_args,
         prompt_keywords=prompt_keywords,
         session_commands=resolved_session_commands or None,
         spawn_level=dispatch.spawn_level if dispatch is not None else None,
         spawn_level_source=dispatch.spawn_level_source if dispatch is not None else None,
+        resolved_model=dispatch.model if dispatch is not None else None,
+        resolved_effort=dispatch.effort if dispatch is not None else None,
         spawned_by_session=spawned_by_session,
         spawned_by_lifecycle=provenance_lifecycle,
         which=which,
@@ -633,12 +695,12 @@ def spawn_agent_session_payload(
 
     entry = result.entry
     assert entry is not None  # opened => an upserted row
+    spawn_paster = paster if paster is not None else TerminalPaster()
     _write_spawn_expectation_rows(config, entry)
 
     packet = _brief_packet(context, prompt_keywords)
     delivery = _SpawnDelivery()
     if resolved_session_commands or packet:
-        spawn_paster = paster if paster is not None else TerminalPaster()
         delivery = _deliver_spawn_pastes(
             spawn_paster,
             entry.tmux_name,
@@ -647,19 +709,31 @@ def spawn_agent_session_payload(
             submit,
             entry_id=entry.id,
             harness=harness if kind == "harness" else None,
+            cwd=entry.cwd,
+            created_at=entry.created_at,
+            session_log=session_log,
         )
+        if delivery.session_log_path is not None and delivery.bound_entry_id is not None:
+            bound = catalog.bind_session_log(
+                entry.id,
+                entry_id=delivery.bound_entry_id,
+                path=delivery.session_log_path,
+            )
+            if bound is not None:
+                entry = bound
 
     return _tool_payload("spawn_agent_session", _spawned_payload(entry, delivery))
 
 
 def _write_spawn_expectation_rows(config: McpRuntimeConfig, entry: TerminalCatalogEntry) -> None:
-    """R2: every spawn atomically writes its ``briefed-by`` row (the composer must show the
-    brief within T_boot), plus a ``turn-report-by`` row when the spawn claims a LEAF (a bare
+    """Every spawn atomically writes ``briefed-by`` (the id-bearing log entry must exist), plus a
+    ``turn-report-by`` row when the spawn carries a bound or declared replacement leaf (a bare
     scratch/command chat with no ``leaf_key`` owes no turn report). Written in the SAME call as
     the catalog upsert -- never a forgettable follow-up step."""
     settings = load_agentic_settings(config.coordination_root)
     store = ExpectationRowStore(observer_root(config))
     now = datetime.now(UTC)
+    expectation_leaf = entry.leaf_key or entry.replacement_for_leaf
     write_expectation_row(
         store,
         row_id=uuid4().hex,
@@ -669,10 +743,10 @@ def _write_spawn_expectation_rows(config: McpRuntimeConfig, entry: TerminalCatal
         source_id=entry.id,
         subject_agent_id=entry.id,
         subject_lifecycle_id=entry.lifecycle_id,
-        leaf_key=entry.leaf_key,
+        leaf_key=expectation_leaf,
         note=f"briefed-by: {entry.label} ({entry.spawn_role or entry.kind})",
     )
-    if entry.leaf_key is not None:
+    if expectation_leaf is not None:
         write_expectation_row(
             store,
             row_id=uuid4().hex,
@@ -682,8 +756,8 @@ def _write_spawn_expectation_rows(config: McpRuntimeConfig, entry: TerminalCatal
             source_id=entry.id,
             subject_agent_id=entry.id,
             subject_lifecycle_id=entry.lifecycle_id,
-            leaf_key=entry.leaf_key,
-            note=f"turn-report-by: {entry.leaf_key}",
+            leaf_key=expectation_leaf,
+            note=f"turn-report-by: {expectation_leaf}",
         )
 
 
@@ -697,6 +771,7 @@ def _spawned_payload(entry: TerminalCatalogEntry, delivery: _SpawnDelivery) -> d
         "harness": entry.harness,
         "kind": entry.kind,
         "leafKey": entry.leaf_key,
+        "replacementForLeaf": entry.replacement_for_leaf,
         "label": entry.label,
         "cwd": str(entry.cwd),
         "tmuxName": entry.tmux_name,
@@ -706,6 +781,10 @@ def _spawned_payload(entry: TerminalCatalogEntry, delivery: _SpawnDelivery) -> d
         # The resolved dispatch level + how it was supplied (rolesPerLevel resolution input).
         "spawnLevel": entry.spawn_level,
         "spawnLevelSource": entry.spawn_level_source,
+        "resolvedModel": entry.resolved_model,
+        "resolvedEffort": entry.resolved_effort,
+        "sessionLogEntryId": entry.session_log_entry_id,
+        "sessionLogPath": str(entry.session_log_path) if entry.session_log_path else None,
         # Free-form spawn provenance (260703-L16), echoed as recorded on the catalog row.
         "launchArgs": list(entry.launch_args) if entry.launch_args else None,
         "promptKeywords": list(entry.prompt_keywords) if entry.prompt_keywords else None,

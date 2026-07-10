@@ -151,7 +151,7 @@ def observe_terminal_liveness(
 
     260707-HFX-L8: an ALIVE harness row is also classified into a live turn-state on this SAME
     sweep call -- no second probe, no new hot loop. ``pane_capturer`` is the injectable seam
-    (defaults to the real ``tmux capture-pane``, shared with paste verification).
+    (defaults to the real ``tmux capture-pane``; dispatch may also capture at its retry seam).
     """
     liveness_config = config or TerminalCatalogLivenessConfig()
     session = _host_session(host, entry.id)

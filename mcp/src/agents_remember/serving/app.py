@@ -40,6 +40,7 @@ import logging
 import os
 from collections.abc import AsyncGenerator, AsyncIterator, Callable
 from contextlib import asynccontextmanager
+from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Any
 from uuid import uuid4
@@ -92,7 +93,9 @@ from agents_remember.serving.build_info import ServingBuild, resolve_serving_bui
 from agents_remember.serving.changeset import register_changeset_routes
 from agents_remember.serving.events import stream_raw_events
 from agents_remember.serving.files import register_files_routes
+from agents_remember.serving.harness_logs import HarnessSessionLog
 from agents_remember.serving.harnesses import detect_harnesses
+from agents_remember.serving.injector import DeliveryRow, deliver
 from agents_remember.serving.leaf_ref_validation import resolve_catalog_leaf_key
 from agents_remember.serving.notes import register_notes_routes
 from agents_remember.serving.projector import Projector
@@ -132,8 +135,6 @@ from agents_remember.serving.terminal_paste import TerminalPaster
 from agents_remember.worktrees.leaf_refs import LeafRefResolutionError
 
 if TYPE_CHECKING:
-    from datetime import datetime
-
     from agents_remember.mcp.config import McpRuntimeConfig
 
 logger = logging.getLogger(__name__)
@@ -385,9 +386,8 @@ class TerminalRenameRequest(BaseModel):
 class TerminalPasteRequest(BaseModel):
     """Body of ``POST /api/terminal/{session}/paste``: deliver a context packet to a hosted session.
 
-    The server-side mirror of the frontend ``pasteAndConfirm`` / ``submitAndConfirm`` (L2): paste the
-    text as one echo-confirmed bracketed paste, and only submit it (send ``Enter``) when ``submit`` is
-    true -- a draft stays a draft otherwise.
+    The server-side mirror of the frontend seam: submitted text receives a unique delivery id and is
+    confirmed from the target harness session log; a draft stays an unsubmitted draft.
     """
 
     text: str
@@ -1001,10 +1001,8 @@ def create_app(
     @app.post("/api/terminal/{session}/paste")
     def api_terminal_paste(session: str, request: TerminalPasteRequest) -> Response:
         # L2 paste seam: deliver a context packet to a hosted session server-side (the mirror of the
-        # frontend WebSocket pasteAndConfirm/submitAndConfirm), so a packet can be pushed to a durable
-        # tmux session that has no attached browser client. 404 if the session is unknown/terminated or
-        # its tmux session is gone; otherwise capture-verify the paste (and submit when asked) and
-        # report delivered/submitted. Same localhost posture as the rest of serving/.
+        # frontend delivery seam), so a packet can be pushed to a durable tmux session that has no
+        # attached browser client. Submitted input is accepted only from the bound harness log.
         entry = catalog.get(session)
         if entry is None or entry.status != "running":
             return JSONResponse(content={"status": "unknown-session"}, status_code=404)
@@ -1018,16 +1016,35 @@ def create_app(
         if not observation.alive or observation.entry.status != "running":
             return JSONResponse(content={"status": "unknown-session"}, status_code=404)
         entry = observation.entry
-        outcome = paster.paste(entry.tmux_name, request.text, submit=request.submit)
+        delivery_id = uuid4().hex
+        session_log = HarnessSessionLog(
+            harness=entry.harness or "",
+            cwd=entry.cwd,
+            started_at=datetime.fromisoformat(entry.created_at),
+            bound_path=entry.session_log_path,
+        )
+        outcome = deliver(
+            DeliveryRow(kind="message", entry_id=delivery_id, text=request.text, submit=request.submit),
+            tmux_name=entry.tmux_name,
+            paster=paster,
+            harness=entry.harness,
+            session_log=session_log,
+        )
+        if outcome.session_log_path is not None and outcome.bound_entry_id is not None:
+            catalog.bind_session_log(
+                entry.id,
+                entry_id=outcome.bound_entry_id,
+                path=outcome.session_log_path,
+            )
+        delivered = outcome.outcome in ("acked", "landed-unacked")
         content: dict[str, object] = {
             "session": session,
-            "status": "delivered" if outcome.delivered else "unconfirmed",
-            "delivered": outcome.delivered,
+            "entryId": delivery_id,
+            "status": "delivered" if delivered else "unconfirmed",
+            "delivered": delivered,
             "submitted": outcome.submitted,
         }
-        if not outcome.delivered or (request.submit and not outcome.submitted):
-            # 260707-HFX-L3 loud failure: an unconfirmed paste OR an unconfirmed requested submit
-            # ships its pane capture as evidence (review N3 parity with the spawn seam).
+        if not delivered or (request.submit and not outcome.submitted):
             content["capture"] = outcome.capture
         return JSONResponse(content=content, status_code=200)
 

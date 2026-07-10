@@ -335,13 +335,15 @@ with every parameter, vocabulary, and refusal is
    `claude`/`codex`/`pi` or an `orchestration.harnesses`-defined one),
    `model`, `effort`. The spawn path seeds `model`/`effort` into the spawn env
    (`AR_SPAWN_MODEL`/`AR_SPAWN_EFFORT`) AND applies them onto the harness
-   launch argv per-harness (claude: `--model`/`--effort`; a mapping-less
-   harness stays env-only). `effort` is validated per-harness at DISPATCH:
+   launch argv per-harness (claude: `--model`/`--effort`; codex: `--model` plus
+   `--config model_reasoning_effort=<value>`; only mapping-less harnesses stay env-only).
+   `effort` is validated per-harness at DISPATCH:
    unknown values refuse loudly naming the harness and its valid sets.
 2. **`launchArgs`** (list of strings) — appended VERBATIM to the harness
    launch argv. Never validated; recorded in spawn provenance.
 3. **`sessionCommands`** (list of strings; each line pasted + submitted into
-   the fresh session BEFORE the brief) and **`promptKeywords`** (list of
+   the fresh session BEFORE the brief, then verified by command entry + stdout in the log bound by
+   the brief's unique id) and **`promptKeywords`** (list of
    strings prepended as the first line of the dispatch-brief paste). Never
    validated; recorded in spawn provenance.
 
@@ -399,7 +401,7 @@ fields are optional; an empty block keeps the safe defaults.
 | `staleCutoffSeconds` | `60` | Age after which the supervisor heartbeat is reported stale. |
 | `redeliverRateLimitSeconds` | store default (`900`) | Per-row floor between redelivery attempts. Values below `900` seconds are refused. |
 | `signalCooldownSeconds` | `900` | Minimum interval between repeated pane/seat-liveness owner signals for the same target, leaf, finding kind, and detail. Values below `900` seconds are refused. |
-| `redeliverBudget` | `250` | Maximum inbox redelivery attempts per sweep. Large backlogs are spread across sweeps while the heartbeat keeps ticking. |
+| `redeliverBudget` | `1` | Maximum inbox redelivery attempts per sweep. Harness-log confirmation is synchronous and bounded per input, so backlogs drain across sweeps without multiplying that wait inside one heartbeat tick. |
 | `escalationBudget` | `250` | Maximum escalation-rung emissions per sweep. A large backlog of rung-due rows is spread across sweeps (rung readiness is level-triggered, so deferred rows re-fire on the next sweep) rather than doing O(backlog) synchronous owner pastes + `escalation.rung` event appends in one sweep. Positive integer. |
 
 `enabled: false` is the emergency kill switch for the supervisor loop. During the
