@@ -72,16 +72,23 @@ it. After the attachment is verified, continue with the lifecycle selected above
 ## Developer Clarification Triage
 
 When the developer clarifies a rule, boundary, or desired behavior during an active task, decide
-whether it is **current implementation** or **future queue** before writing only a note.
+whether it is **current implementation** or **future queue** before writing only a note. Read the
+active queue first: the current leaf, parent/master, neighboring leaves, decision log, open
+questions, and in-flight branch state. The question is not whether a note is useful; it is whether
+the developer is effectively steering the work already in hand.
 
-Treat it as current implementation when all of these are true: it is close to the task already
-being edited, small enough to fit the current change set, and clearly improves the same doctrine or
-code path. In that case, extend the current task doc and implement it now.
+Treat it as current implementation when queue context and closeness point at the active change: it
+names the same task/leaf/master, resolves a defect exposed by the current work, or improves the
+same doctrine or code path. A small change that plainly fits the current diff is a strong signal
+for immediate implementation even if the developer phrases it as "maybe" or "we can wrap this in."
+In that case, extend the current task surface/decision log enough to make the added scope visible
+and implement it now.
 
-Treat it as future queue when it names a later release, a separate subsystem, a large scope jump, or
-work whose correctness depends on another unfinished master. Record the item in the right durable
-queue or ask the owning seat to plan it later. If the intent is ambiguous, ask the developer
-directly whether they want immediate implementation or a queued note; do not silently downgrade a
+Treat it as future queue when it names a later release, a separate subsystem, a large scope jump,
+work whose correctness depends on another unfinished master, or a change that would reorder
+already-running leaves. Record the item in the right durable queue or ask the owning seat to plan it
+later. If the intent is genuinely ambiguous after reading the queue, ask the developer directly
+whether they want immediate implementation or a queued note. Do not silently downgrade a
 close/current/small change into future speak, and do not silently expand the active leaf when the
 fit is unclear.
 

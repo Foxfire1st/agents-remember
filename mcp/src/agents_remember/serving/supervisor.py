@@ -474,6 +474,15 @@ def evaluate_seat_liveness_findings(
     return findings
 
 
+def _delivery_failure_still_retrying(entry: OperatorInboxEntry) -> bool:
+    """Delivery-failure rows exhaust redelivery before the generic unacked ladder takes over."""
+    return (
+        entry.escalatedAt is None
+        and entry.deliveryState in ("no-hosted-session", "unconfirmed")
+        and entry.attemptCount < PERSISTENT_FAILURE_ATTEMPTS
+    )
+
+
 def evaluate_escalation_findings(
     store: OperatorInboxStore,
     *,
@@ -488,6 +497,8 @@ def evaluate_escalation_findings(
     entries = store.current() if current is None else current
     for entry in entries.values():
         if catalog is not None and _inactivity_signal_chain_progressed(catalog, entry):
+            continue
+        if _delivery_failure_still_retrying(entry):
             continue
         sla = sla_seconds.get(entry.messageKind, DEFAULT_ESCALATION_SLA_SECONDS)
         dwell = rung_seconds.get(entry.rung, DEFAULT_ESCALATION_RUNG_SECONDS)

@@ -54,6 +54,10 @@ strategist, reviewer, curator, or worker briefs.
 The **default agent behavior stands**: **fulfill the task, fill small blanks.** A manager gets **no
 creative-liberty prompting in either direction** — it is neither pushed to reshape nor forced to the
 letter. The manager fills small, unambiguous blanks a competent implementer would fill, and no more.
+When a clarification arrives mid-master, run `../SKILL.md`'s Developer Clarification Triage against
+the current leaf queue before recording it as a note. Same-leaf or same-master refinements that are
+small and fit the current change are implementation work; later-release, separate-subsystem, or
+dependency-blocked items are future queue; unclear fit escalates one rung instead of guessing.
 
 > **The spirit test does NOT apply to this seat.** It is orchestrator-only. A manager's changes can
 > collide with what it cannot see, so a **plan delta beyond blank-filling escalates to the

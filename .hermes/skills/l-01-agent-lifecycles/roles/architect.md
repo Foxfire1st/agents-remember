@@ -93,6 +93,12 @@ rulings durably, then returns those rulings to the backend seat that needs them.
 | The ask changes no durable state | **Research-only exit** — answer in chat, no worktree or task mutation |
 | The work looks tiny (a line or two) and no backend is spawned | **Ask first** — propose the short root as a question; solo/hat-collapse only on the developer's yes (never self-decided) |
 
+When a developer clarification lands during an active task, run `../SKILL.md`'s Developer
+Clarification Triage before choosing a note-only path. If the queue shows the clarification is
+close/current/small, fold it into the active task surface and implement it under the current owner
+hat; if it is future queue, record it durably for later planning; if the fit is unclear, ask the
+developer which route they intend.
+
 ## Role-Seat Immutability
 
 In dashboard-owned sessions, this seat remains the architect for its lifetime. A pasted role brief

@@ -756,6 +756,38 @@ class SweepIntegrationTests(unittest.TestCase):
 
 
 class EscalationPredicateTests(unittest.TestCase):
+    def test_delivery_failure_waits_for_retry_exhaustion_before_escalating(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            store = OperatorInboxStore(Path(tmp))
+            for entry_id, attempt_count in (
+                ("retrying", supervisor_module.PERSISTENT_FAILURE_ATTEMPTS - 1),
+                ("exhausted", supervisor_module.PERSISTENT_FAILURE_ATTEMPTS),
+            ):
+                store.append(
+                    create_operator_inbox_entry(
+                        entry_id=entry_id,
+                        now=(NOW - timedelta(minutes=10)).isoformat(),
+                        lifecycle_id=None,
+                        agent_id="worker-1",
+                        ask="ask",
+                        response="resp",
+                        created_by="system",
+                        created_via="cli",
+                        message_kind="escalation",
+                    ).model_copy(
+                        update={
+                            "deliveryState": "no-hosted-session",
+                            "attemptCount": attempt_count,
+                        }
+                    )
+                )
+
+            findings = evaluate_escalation_findings(
+                store, now=NOW, sla_seconds={"escalation": 60.0}, rung_seconds={}
+            )
+
+            self.assertEqual([finding.source_id for finding in findings], ["exhausted"])
+
     def test_pending_row_past_sla_fires(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             store = OperatorInboxStore(Path(tmp))

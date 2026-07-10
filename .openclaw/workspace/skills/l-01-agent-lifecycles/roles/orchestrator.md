@@ -40,6 +40,11 @@ exception):
 1. **Trust checkpoint** (below), then `lifecycle_start` (the frame's fleeting lifecycle).
 2. **Portfolio orientation:** read the portfolio state — what exists, what is in flight, what is
    blocked on whom, what awaits the architect/developer relay — and **say it back**.
+   When a developer or architect clarification arrives while a task is active, apply
+   `../SKILL.md`'s Developer Clarification Triage against that same portfolio/queue state before
+   choosing note-only handling. Close/current/small additions belong in the active task surface and
+   implementation; future-queue items go to the durable backlog; unclear fit becomes one
+   clarification request through the architect relay.
 3. **Route the event** by what exists and what is asked:
 
 | Condition | Job |
