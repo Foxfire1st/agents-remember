@@ -30,23 +30,22 @@ export function useTaskDocumentBody(targetDoc: TaskDocNode | undefined): {
   documentFor: (doc: TaskDocNode) => TaskDocNode;
   state: TaskDocumentBodyState | undefined;
 } {
-  const [documents, setDocuments] = useState<Record<string, TaskDocNode>>({});
+  const [bodies, setBodies] = useState<Record<string, Partial<TaskDocNode>>>({});
   const [states, setStates] = useState<Record<string, Exclude<TaskDocumentBodyState, "loading">>>(
     {},
   );
   const targetKey = taskDocumentBodyKey(targetDoc);
-  const cachedTarget = targetKey ? documents[targetKey] : undefined;
+  const targetPath = targetDoc?.docPath;
+  const cachedBody = targetKey ? bodies[targetKey] : undefined;
 
   useEffect(() => {
-    if (!targetDoc || !targetKey || cachedTarget) return;
+    if (!targetPath || !targetKey || cachedBody) return;
     let live = true;
-    void fetchTaskDocument(targetDoc.docPath).then(
+    void fetchTaskDocument(targetPath).then(
       (body) => {
         if (!live) return;
-        setDocuments((current) =>
-          current[targetKey]
-            ? current
-            : { ...current, [targetKey]: mergeTaskDocumentBody(targetDoc, body) },
+        setBodies((current) =>
+          current[targetKey] ? current : { ...current, [targetKey]: body },
         );
         setStates((current) => ({ ...current, [targetKey]: "available" }));
       },
@@ -57,16 +56,19 @@ export function useTaskDocumentBody(targetDoc: TaskDocNode | undefined): {
     return () => {
       live = false;
     };
-  }, [targetDoc, targetKey, cachedTarget]);
+  }, [targetPath, targetKey, cachedBody]);
 
   const state = !targetDoc
     ? undefined
-    : cachedTarget
+    : cachedBody
       ? "available"
       : (states[targetKey] ?? "loading");
 
   return {
-    documentFor: (doc) => documents[taskDocumentBodyKey(doc)] ?? doc,
+    documentFor: (doc) => {
+      const body = bodies[taskDocumentBodyKey(doc)];
+      return body ? mergeTaskDocumentBody(doc, body) : doc;
+    },
     state,
   };
 }
