@@ -113,10 +113,13 @@ class InputEventFilterTests(unittest.TestCase):
             "/c/logs/observer/latest-metrics.json",
             "/c/logs/observer/latest-state.json.01HZX.tmp",
             "/c/tasks/agents-remember/task.json.01HZX.tmp",
-            # workspace/ non-inputs: raw river + cursor/lock, supervisor heartbeat.
+            # workspace/ non-inputs: raw river + cursor/locks, supervisor heartbeat.
             "/c/logs/observer/workspace/events.jsonl",
             "/c/logs/observer/workspace/events.cursor.json",
             "/c/logs/observer/workspace/events.lock",
+            # Created "a+b" by every inbox access (incl. each tick's read_agent_pickups):
+            # its boot-time creation must not cost a spurious change-tick (review F1).
+            "/c/logs/observer/workspace/operator-inbox.lock",
             "/c/logs/observer/workspace/supervisor-heartbeat.json",
             "/c/logs/observer/workspace/.events.cursor.json.123.tmp",
         ):
@@ -314,6 +317,52 @@ class AdaptiveProjectorTests(unittest.IsolatedAsyncioTestCase):
             await self._wait_for(lambda: projector.projection_count >= 3, timeout=3.0)
         self.assertEqual(projector.last_wake_reason, "interval")
         self.assertIn("change watcher task died", "\n".join(logs.output))
+
+    async def test_root_derivation_failure_retries_instead_of_dying(self) -> None:
+        # Review F3: a transient stat/glob failure while deriving the watch roots must
+        # follow the same loud degrade-and-retry path as a watch failure -- not escape
+        # run() and permanently kill the watcher task (losing the periodic self-heal).
+        config = _config(self.tmp)
+        (self.tmp / "tasks").mkdir()
+        watcher = ProjectionInputWatcher(config, refresh_seconds=0.05)
+
+        class RecordingPacer:
+            def __init__(self) -> None:
+                self.health: list[bool] = []
+                self.changes = 0
+
+            def notify_change(self) -> None:
+                self.changes += 1
+
+            def set_watcher_healthy(self, healthy: bool) -> None:
+                self.health.append(healthy)
+
+        real_roots = change_watcher_module.projection_input_roots
+        calls = 0
+
+        def flaky_roots(cfg: McpRuntimeConfig) -> list[Path]:
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                raise RuntimeError("transient derivation failure")
+            return real_roots(cfg)
+
+        pacer = RecordingPacer()
+        with (
+            mock.patch.object(change_watcher_module, "projection_input_roots", flaky_roots),
+            self.assertLogs("agents_remember.serving.change_watcher", level="ERROR") as logs,
+        ):
+            task = asyncio.create_task(watcher.run(pacer))
+            try:
+                # Degrades loudly on the failed derivation, then recovers on the retry
+                # cycle: a healthy=True report proves the watch re-established.
+                await self._wait_for(lambda: True in pacer.health, timeout=3.0)
+            finally:
+                task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await task
+        self.assertIn(False, pacer.health)  # the loud degrade came first
+        self.assertIn("projection input watcher FAILED", "\n".join(logs.output))
 
     async def test_run_owns_the_watcher_task_lifecycle(self) -> None:
         watcher = _FakeWatcher()

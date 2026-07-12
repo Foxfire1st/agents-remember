@@ -116,13 +116,16 @@ WATCH_REFRESH_SECONDS = 30.0
 _EXCLUDED_NAMES = frozenset({LATEST_STATE, LATEST_METRICS})
 
 #: ``<obs>/workspace`` files that are NOT projection inputs: the raw event river (served
-#: by ``/api/events``, never read by ``project_and_write``) with its cursor + lock, and
-#: the supervisor's own heartbeat (written every sweep on its own cadence).
+#: by ``/api/events``, never read by ``project_and_write``) with its cursor + lock, the
+#: operator-inbox flock file (opened ``a+b`` by every inbox access, including each tick's
+#: ``read_agent_pickups`` -- its boot-time creation would emit one spurious change-tick),
+#: and the supervisor's own heartbeat (written every sweep on its own cadence).
 _EXCLUDED_WORKSPACE_NAMES = frozenset(
     {
         "events.jsonl",
         WORKSPACE_CURSOR_FILE,
         WORKSPACE_LOCK_FILE,
+        "operator-inbox.lock",
         supervisor_heartbeat_path(Path(".")).name,
     }
 )
@@ -307,14 +310,17 @@ class ProjectionInputWatcher:
             return
         established_before = False
         while True:
-            roots = await asyncio.to_thread(projection_input_roots, self._config)
-            if not roots:
-                # A fresh/empty coordination tree: nothing to watch yet. Not an error --
-                # fixed-interval pacing until the first input dir appears.
-                pacer.set_watcher_healthy(False)
-                await asyncio.sleep(self._refresh_seconds)
-                continue
             try:
+                # Root derivation sits INSIDE the retry guard: a transient stat/glob failure
+                # must follow the same loud degrade-and-retry path as a watch failure -- not
+                # escape run() and kill the task for good (losing the periodic self-heal).
+                roots = await asyncio.to_thread(projection_input_roots, self._config)
+                if not roots:
+                    # A fresh/empty coordination tree: nothing to watch yet. Not an error --
+                    # fixed-interval pacing until the first input dir appears.
+                    pacer.set_watcher_healthy(False)
+                    await asyncio.sleep(self._refresh_seconds)
+                    continue
                 # Returns when the root set changed (restart with the fresh set).
                 await self._watch_once(roots, pacer, reconcile=established_before)
             except asyncio.CancelledError:
