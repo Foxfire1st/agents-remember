@@ -20,7 +20,9 @@ _CLAUDE_COMMAND = re.compile(
 )
 _LOCAL_STDOUT = re.compile(r"<local-command-stdout>(?P<text>.*?)</local-command-stdout>", re.DOTALL)
 _LOCAL_STDERR = re.compile(r"<local-command-stderr>(?P<text>.*?)</local-command-stderr>", re.DOTALL)
-_COMMAND_ERROR = re.compile(r"(?:^|\b)(?:error:|invalid argument:|valid options are:)", re.IGNORECASE)
+_COMMAND_ERROR = re.compile(
+    r"(?:^|\b)(?:error:|invalid argument:|valid options are:)", re.IGNORECASE
+)
 
 
 @dataclass(frozen=True)
@@ -75,6 +77,12 @@ class HarnessSessionLog:
             return CommandEvidence()
         return _command_evidence(self.bound_path, self.harness, command, cwd=self.cwd)
 
+    @property
+    def command_evidence_supported(self) -> bool:
+        """Whether this harness log has a truthful command-entry/output adapter."""
+
+        return self.harness == "claude"
+
     def _candidate_paths(self) -> list[Path]:
         threshold = self.started_at.timestamp() - 2.0
         if self.harness == "claude":
@@ -97,9 +105,7 @@ class HarnessSessionLog:
                 }
                 candidates = list(self.codex_root.glob("*.jsonl"))
                 for day in dates:
-                    candidates.extend(
-                        (self.codex_root / day.strftime("%Y/%m/%d")).glob("*.jsonl")
-                    )
+                    candidates.extend((self.codex_root / day.strftime("%Y/%m/%d")).glob("*.jsonl"))
         else:
             return []
         recent: list[tuple[float, Path]] = []

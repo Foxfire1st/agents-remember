@@ -36,6 +36,7 @@ InboxMessageKind = Literal[
     "degradation-alert",
     "decision-item",
     "decision-ruling",
+    "dispatch-brief",
 ]
 InboxDeliveryState = Literal["queued", "no-hosted-session", "delivered", "unconfirmed"]
 

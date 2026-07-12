@@ -197,8 +197,8 @@ Everything else — `task_doc`, `worktree_*`, `lifecycle_*`, `gate_*`, `spawn_ag
 | model   | highest-reasoning | whole-portfolio dependency + blast-radius reasoning wants the strongest model |
 | effort  | high              | the sprint plan parameterizes every downstream loop; not the place to economize |
 | launchArgs | — | free-form escape: verbatim harness argv (settings-only; never validated, recorded in spawn provenance) |
-| sessionCommands | — | free-form escape: lines pasted + submitted into the fresh session before the brief (settings-only; never validated) |
-| promptKeywords | — | free-form escape: prepended as the first line of the dispatch brief paste (settings-only; never validated) |
+| sessionCommands | — | settings-owned launch configuration: lines pasted + submitted during fresh-session launch (never validated; not brief delivery) |
+| promptKeywords | — | settings-owned keywords prepended exactly once to the post-readiness dispatch brief (never validated) |
 | tools   | read-only analysis surface | `read_ar_files` · `grepai_*` · `cgc_*` · `context_packet` · `drift_check` · notes-draft write · inbox |
 
 Settings.json `orchestration.roles.strategist` overrides these, and `orchestration.rolesPerLevel.<level>.strategist` overrides per dispatch level (role-file defaults < settings < level override; spawn knobs manual: `docs/reference/harnesses.md`).

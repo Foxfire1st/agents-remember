@@ -1,11 +1,11 @@
 """R2 (260707-HFX2-L1): durable what-must-happen-by-when rows, written atomically at dispatch.
 
-Every dispatch surface -- ``spawn_agent_session`` (briefed-by, and turn-report-by when the spawn
-claims a leaf), a gate opening (verdict-by), and an operator-inbox post (ack-by) -- writes one
-durable :class:`ExpectationRow` in the SAME call that performs the dispatch, never as a
-follow-up step a caller could forget. Deadlines are ROWS an L2 sweep scans, never in-memory
-timers -- the Restate durable-timer lesson (R2): a row survives a daemon/MCP restart; a timer
-does not.
+Every dispatch surface -- a durable ``dispatch-brief`` inbox row (briefed-by, and turn-report-by
+when the target claims a leaf), a gate opening (verdict-by), and every operator-inbox post
+(ack-by) -- writes one durable :class:`ExpectationRow` in the SAME call that performs the
+dispatch, never as a follow-up step a caller could forget. Seat spawn and readiness waiting start
+no assignment clock. Deadlines are ROWS an L2 sweep scans, never in-memory timers -- the Restate
+durable-timer lesson (R2): a row survives a daemon/MCP restart; a timer does not.
 
 ``ExpectationKind`` must be kept in sync with ``KNOWN_EXPECTATION_KINDS`` in
 ``kernel/agentic_settings.py`` (duplicated there to avoid a kernel<->controlplane import cycle).
@@ -43,9 +43,9 @@ class ExpectationRow(BaseModel):
     state: ExpectationState
     createdAt: str
     dueAt: str
-    # The dispatch surface's own id this row rides beside -- a spawned session id (briefed-by /
-    # turn-report-by), a gate id (verdict-by), or an operator-inbox entry id (ack-by). Lets a
-    # sweep or a dashboard resolve straight back to the thing it is a deadline FOR.
+    # The dispatch surface's own id this row rides beside -- the dispatch-brief inbox entry id
+    # (briefed-by / turn-report-by / ack-by) or a gate id (verdict-by). Lets a sweep or dashboard
+    # resolve straight back to the thing it is a deadline FOR.
     sourceId: str
     subjectAgentId: str | None = None
     subjectLifecycleId: str | None = None
@@ -155,12 +155,20 @@ class ExpectationRowStore:
             key=lambda row: row.dueAt,
         )
 
-    def find_by_source(self, source_id: str, *, kind: ExpectationKind | None = None) -> ExpectationRow | None:
+    def find_by_source(
+        self,
+        source_id: str,
+        *,
+        kind: ExpectationKind | None = None,
+        current: dict[str, ExpectationRow] | None = None,
+    ) -> ExpectationRow | None:
         """The most recent pending row for ``source_id`` (optionally kind-filtered) -- the
         write-once-consume-once lookup a dispatch surface's fulfillment path uses."""
+        rows = self.current().values() if current is None else current.values()
         candidates = [
             row
-            for row in self.pending()
+            for row in rows
+            if row.state == "pending"
             if row.sourceId == source_id and (kind is None or row.kind == kind)
         ]
         return max(candidates, key=lambda row: row.createdAt, default=None)
@@ -177,13 +185,22 @@ class ExpectationRowStore:
                 due.append(row)
         return due
 
-    def mark_met(self, row_id: str, *, now: str) -> ExpectationRow:
-        current = self.current().get(row_id)
-        if current is None:
+    def mark_met(
+        self,
+        row_id: str,
+        *,
+        now: str,
+        current: dict[str, ExpectationRow] | None = None,
+    ) -> ExpectationRow:
+        rows = self.current() if current is None else current
+        row = rows.get(row_id)
+        if row is None:
             raise KeyError(f"no expectation row {row_id!r}")
-        met = mark_met(current, now=now)
-        if met is not current:
+        met = mark_met(row, now=now)
+        if met is not row:
             self.append(met)
+            if current is not None:
+                current[row_id] = met
         return met
 
     def mark_missed(

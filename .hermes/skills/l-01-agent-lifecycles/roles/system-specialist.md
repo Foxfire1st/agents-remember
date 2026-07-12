@@ -93,8 +93,8 @@ The orchestrator owns the final decision: fixable-in-session -> order a targeted
 | model   | fable   | system diagnosis and report synthesis |
 | effort  | high    | degradation triage is high-impact |
 | launchArgs | — | free-form escape: verbatim harness argv (settings-only; never validated, recorded in spawn provenance) |
-| sessionCommands | — | free-form escape: lines pasted + submitted into the fresh session before the brief (settings-only; never validated) |
-| promptKeywords | — | free-form escape: prepended as the first line of the dispatch brief paste |
+| sessionCommands | — | settings-owned launch configuration: lines pasted + submitted during fresh-session launch (never validated; not brief delivery) |
+| promptKeywords | — | settings-owned keywords prepended exactly once to the post-readiness dispatch brief (never validated) |
 | tools   | provider diagnostics + native reads + inbox | provider_status · provider_diagnostics · provider_watchers when explicitly ordered · logs/metrics reads · inbox |
 
 Settings.json `orchestration.roles.system-specialist` overrides these, and

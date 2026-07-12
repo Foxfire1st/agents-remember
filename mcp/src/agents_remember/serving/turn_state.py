@@ -50,11 +50,49 @@ _TURN_ENDED_PATTERNS: tuple[re.Pattern[str], ...] = (
 )
 
 # Harness-specific marker overrides/additions (260707-HFX-L8 S1 pin): keyed by ``Harness.id``.
-# Empty for now -- every known harness classifies off the shared markers above; a future harness
-# with a distinctive pane shape adds its table here without touching the classifier itself.
+# Codex's tail-sensitive empty composer is handled below because a regex over full scrollback would
+# confuse submitted U+203A transcript lines with the live editor. Other future static shapes belong
+# in these tables.
 _HARNESS_WORKING_PATTERNS: dict[str, tuple[re.Pattern[str], ...]] = {}
 _HARNESS_AWAITING_INPUT_PATTERNS: dict[str, tuple[re.Pattern[str], ...]] = {}
 _HARNESS_TURN_ENDED_PATTERNS: dict[str, tuple[re.Pattern[str], ...]] = {}
+
+_CODEX_EMPTY_COMPOSER = re.compile(
+    r"^\s*\N{SINGLE RIGHT-POINTING ANGLE QUOTATION MARK}"
+    r"(?:\s+Explain this codebase)?\s*$"
+)
+_CODEX_FOOTER = re.compile(
+    r"(?:\?\s+for shortcuts|\b\d{1,3}%\s+(?:context\s+)?left\b|"
+    r"^\s*[A-Za-z0-9._-]+\s+[A-Za-z0-9._-]+(?:\s+[A-Za-z0-9._-]+)?"
+    r"\s+·\s+(?:~|/).+$)",
+    re.IGNORECASE,
+)
+
+
+def codex_empty_composer_visible(pane_text: str) -> bool:
+    """Whether the pane tail is Codex 0.144.1's empty/placeholder composer.
+
+    Submitted user messages also render with a leading U+203A in scrollback. Only the live tail --
+    optionally followed by Codex's status/footer line -- is a readiness marker, and arbitrary text
+    after U+203A is an existing draft rather than an empty composer.
+    """
+
+    lines = [line for line in pane_text.splitlines() if line.strip()]
+    if not lines:
+        return False
+    if _CODEX_EMPTY_COMPOSER.fullmatch(lines[-1]):
+        return True
+    return bool(
+        len(lines) >= 2
+        and _CODEX_EMPTY_COMPOSER.fullmatch(lines[-2])
+        and codex_footer_line(lines[-1])
+    )
+
+
+def codex_footer_line(line: str) -> bool:
+    """Whether one line is the bounded shipped Codex status/footer family."""
+
+    return _CODEX_FOOTER.search(line) is not None
 
 
 @dataclass(frozen=True)
@@ -65,7 +103,9 @@ class TurnStateClassification:
     evidence: str | None
 
 
-def classify_turn_state(pane_text: str | None, *, harness: str | None = None) -> TurnStateClassification:
+def classify_turn_state(
+    pane_text: str | None, *, harness: str | None = None
+) -> TurnStateClassification:
     """Classify a captured pane's text into a live turn-state.
 
     ``None`` or blank ``pane_text`` (a vanished/unreadable pane, the same evidence-less case the
@@ -74,6 +114,18 @@ def classify_turn_state(pane_text: str | None, *, harness: str | None = None) ->
     turn-ended (idle-ready) > stale (no marker matched at all, i.e. an unrecognized pane shape).
     """
     if not pane_text or not pane_text.strip():
+        return TurnStateClassification("stale", evidence=None)
+    if harness == "codex":
+        if codex_empty_composer_visible(pane_text):
+            return TurnStateClassification("turn-ended", evidence="codex-empty-composer-tail")
+        tail = "\n".join(line for line in pane_text.splitlines() if line.strip())
+        tail = "\n".join(tail.splitlines()[-2:])
+        for pattern in _WORKING_PATTERNS:
+            if pattern.search(tail):
+                return TurnStateClassification("working", evidence=pattern.pattern)
+        for pattern in _AWAITING_INPUT_PATTERNS:
+            if pattern.search(tail):
+                return TurnStateClassification("awaiting-input", evidence=pattern.pattern)
         return TurnStateClassification("stale", evidence=None)
     for pattern in (*_HARNESS_WORKING_PATTERNS.get(harness or "", ()), *_WORKING_PATTERNS):
         if pattern.search(pane_text):
@@ -91,12 +143,6 @@ def classify_turn_state(pane_text: str | None, *, harness: str | None = None) ->
 
 
 def boot_ready(pane_text: str | None, *, harness: str | None = None) -> bool:
-    """The R2 boot-readiness signature (the P-5 window): has the composer rendered ANY recognizable
-    state yet (working / awaiting-input / turn-ended), as opposed to a still-booting pane with no
-    marker at all (``stale``, this classifier's catch-all for "nothing recognized")?
+    """Whether the harness shows its idle, empty composer and can accept a fresh dispatch input."""
 
-    Deliberately reuses :func:`classify_turn_state` rather than a second marker table: a harness
-    that has rendered any of its known shapes has, by construction, mounted a composer a paste can
-    land in.
-    """
-    return classify_turn_state(pane_text, harness=harness).state != "stale"
+    return classify_turn_state(pane_text, harness=harness).state == "turn-ended"

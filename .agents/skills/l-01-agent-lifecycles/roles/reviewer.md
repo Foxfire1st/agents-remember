@@ -180,8 +180,8 @@ integrated on super.
 | model   | high-reasoning   | adversarial review wants a strong, skeptical model           |
 | effort  | high             | the last line of defense before a handover; do not economize |
 | launchArgs | — | free-form escape: verbatim harness argv (settings-only; never validated, recorded in spawn provenance) |
-| sessionCommands | — | free-form escape: lines pasted + submitted into the fresh session before the brief (settings-only; never validated) |
-| promptKeywords | — | free-form escape: prepended as the first line of the dispatch brief paste (settings-only; never validated) |
+| sessionCommands | — | settings-owned launch configuration: lines pasted + submitted during fresh-session launch (never validated; not brief delivery) |
+| promptKeywords | — | settings-owned keywords prepended exactly once to the post-readiness dispatch brief (never validated) |
 | tools   | review surface   | `read_ar_files` · `memory_quality_check` · `drift_check` · `grepai_search` · `cgc_*` · `system/tools.md` checks · report templates · inbox |
 
 Settings.json `orchestration.roles.reviewer` overrides these, and `orchestration.rolesPerLevel.<level>.reviewer` overrides per dispatch level (role-file defaults < settings < level override; spawn knobs manual: `docs/reference/harnesses.md`).

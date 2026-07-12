@@ -179,6 +179,7 @@ KNOWN_ESCALATION_MESSAGE_KINDS = frozenset(
         "degradation-alert",
         "decision-item",
         "decision-ruling",
+        "dispatch-brief",
     }
 )
 DEFAULT_ESCALATION_SLA_SECONDS: dict[str, float] = {
@@ -191,6 +192,7 @@ DEFAULT_ESCALATION_SLA_SECONDS: dict[str, float] = {
     "degradation-alert": 300.0,
     "decision-item": 900.0,
     "decision-ruling": 900.0,
+    "dispatch-brief": 300.0,
 }
 # Conservative-by-default rung timings (R1): seconds a row may sit at its CURRENT rung, past its
 # ``escalatedAt`` anchor, before the walker advances it to the next one. Rung 1 = renudge; rung 2 =
@@ -537,7 +539,9 @@ def _refuse_null_families(raw: dict[str, Any], source: str) -> None:
     keeps its own stronger repo-local presence refusal (checked after this in ``load_agentic_settings``).
     The fix the guidance names: remove the key (absence inherits the global value) or give it a real
     object."""
-    null_families = sorted(key for key in KNOWN_ORCHESTRATION_FIELDS if raw.get(key) is None and key in raw)
+    null_families = sorted(
+        key for key in KNOWN_ORCHESTRATION_FIELDS if raw.get(key) is None and key in raw
+    )
     if null_families:
         offending = ", ".join(f"orchestration.{key}" for key in null_families)
         raise AgenticSettingsError(
@@ -1176,9 +1180,7 @@ def _parse_expectations(raw: object, *, source: str) -> ExpectationSettings:
     sla_seconds = dict(DEFAULT_EXPECTATION_SLA_SECONDS)
     raw_defaults = block.get("defaults")
     if raw_defaults is not None:
-        defaults = _require_object(
-            raw_defaults, "orchestration.expectations.defaults", source
-        )
+        defaults = _require_object(raw_defaults, "orchestration.expectations.defaults", source)
         for kind, value in defaults.items():
             if kind not in KNOWN_EXPECTATION_KINDS:
                 allowed = ", ".join(sorted(KNOWN_EXPECTATION_KINDS))
@@ -1188,7 +1190,9 @@ def _parse_expectations(raw: object, *, source: str) -> ExpectationSettings:
                 )
             owner = f"orchestration.expectations.defaults.{kind}"
             if isinstance(value, bool) or not isinstance(value, (int, float)) or value <= 0:
-                raise AgenticSettingsError(f"{owner} must be a positive number of seconds: {source}")
+                raise AgenticSettingsError(
+                    f"{owner} must be a positive number of seconds: {source}"
+                )
             sla_seconds[kind] = float(value)
     return ExpectationSettings(sla_seconds=sla_seconds)
 

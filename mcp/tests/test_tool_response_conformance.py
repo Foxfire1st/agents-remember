@@ -154,6 +154,10 @@ def _simple_payloads(config) -> dict[str, dict]:
             config,
             harness="definitely-not-a-real-harness",
         ),
+        "hosted_session_readiness": tools.hosted_session_readiness_payload(
+            config,
+            session_id="missing-session",
+        ),
         # Representative refusal payloads: neither session id has a catalog row, so both
         # short-circuit before touching a real tmux host.
         "session_retire": tools.session_retire_payload(
@@ -221,9 +225,7 @@ def _worktree_payloads(root: Path) -> dict[str, dict]:
     payloads["worktree_attach"] = tools.worktree_attach_payload(
         config, REPO, contract_path=contract_path
     )
-    payloads["worktree_sync"] = tools.worktree_sync_payload(
-        config, contract_path, dry_run=True
-    )
+    payloads["worktree_sync"] = tools.worktree_sync_payload(config, contract_path, dry_run=True)
     payloads["worktree_closeout_preview"] = tools.worktree_closeout_preview_payload(
         config, contract_path, "code commit message"
     )
@@ -255,9 +257,7 @@ def _worktree_payloads(root: Path) -> dict[str, dict]:
     )
     # Reopen the fully landed demo-task leaf (closeout+integrate+cleanup completed above) —
     # after the finalize preview so its landed-commit proof still saw the completed contract.
-    payloads["task_reopen"] = tools.task_reopen_payload(
-        config, contract_path, dry_run=False
-    )
+    payloads["task_reopen"] = tools.task_reopen_payload(config, contract_path, dry_run=False)
     return payloads
 
 
@@ -369,9 +369,9 @@ def _gate_payloads(config) -> dict[str, dict]:
         def approve_lifecycle_gate(_seconds: float) -> None:
             open_gates = [
                 gate
-                for gate in tools.gate_list_payload(
-                    config, lifecycle_id=started["lifecycleId"]
-                )["gates"]
+                for gate in tools.gate_list_payload(config, lifecycle_id=started["lifecycleId"])[
+                    "gates"
+                ]
                 if gate["state"] == "open"
             ]
             tools.gate_decide_payload(
@@ -393,9 +393,7 @@ def _gate_payloads(config) -> dict[str, dict]:
     finally:
         reset_ambient()
 
-    created = tools.gate_create_payload(
-        config, kind="closeout-approval", lifecycle_id="gate-demo"
-    )
+    created = tools.gate_create_payload(config, kind="closeout-approval", lifecycle_id="gate-demo")
     gate_id = created["gateId"]
     return {
         "lifecycle_gate": lifecycle_gate,

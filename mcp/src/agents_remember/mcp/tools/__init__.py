@@ -26,6 +26,7 @@ from .gates import (
     gate_wait_payload,
     lifecycle_gate_payload,
 )
+from .hosted_readiness import hosted_session_readiness_payload
 from .lifecycle import (
     lifecycle_block_payload,
     lifecycle_end_payload,
@@ -111,6 +112,7 @@ __all__ = [
     "gate_wait_payload",
     "grepai_search_payload",
     "grepai_trace_payload",
+    "hosted_session_readiness_payload",
     "lifecycle_block_payload",
     "lifecycle_end_payload",
     "lifecycle_finalize_task_payload",

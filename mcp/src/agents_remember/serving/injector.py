@@ -12,7 +12,11 @@ from typing import Literal
 
 from agents_remember.serving.harness_adapters import HarnessAdapter, get_adapter
 from agents_remember.serving.harness_logs import HarnessSessionLog
-from agents_remember.serving.terminal_paste import PasteResult, TerminalPaster
+from agents_remember.serving.terminal_paste import (
+    DispatchPastePolicy,
+    PasteResult,
+    TerminalPaster,
+)
 
 DeliveryOutcome = Literal["acked", "landed-unacked", "blocked", "failed"]
 
@@ -34,6 +38,7 @@ class DeliveryRow:
     ack_instruction: str | None = None
     submit: bool = True
     envelope: bool = True
+    dispatch_policy: DispatchPastePolicy | None = None
 
 
 @dataclass(frozen=True)
@@ -113,6 +118,7 @@ def deliver(
         submit=True,
         accepted=accepted,
         flush_window=flush_window,
+        dispatch_policy=row.dispatch_policy,
     )
     if outcome.submitted:
         return DeliveryResult(

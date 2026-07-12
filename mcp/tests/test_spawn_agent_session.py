@@ -231,38 +231,34 @@ class SpawnAgentSessionTests(unittest.TestCase):
             base["session_log"] = paster.log
         return spawn_agent_session_payload(self.config, **base)  # type: ignore[arg-type]
 
-    def test_spawns_and_delivers_context_with_submit(self) -> None:
+    def test_spawns_bound_seat_without_brief_or_readiness_claim(self) -> None:
         paster = _FakePaster(delivered=True, submitted=True)
         payload = self._spawn(
             leaf_key="repo/master/leaf-1",
-            context="You are the worker for leaf-1.",
-            submit=True,
             spawned_by_session="manager-9",
             spawned_by_lifecycle="LC-manager",
             paster=paster,
         )
         self.assertTrue(payload["ok"])
-        self.assertEqual(payload["status"], "spawned")
+        self.assertEqual(payload["status"], "spawned-unbriefed")
         self.assertEqual(payload["session"], "worker-1")
         self.assertEqual(payload["leafKey"], "repo/master/leaf-1")
         self.assertEqual(payload["spawnedBySession"], "manager-9")
         self.assertEqual(payload["spawnedByLifecycle"], "LC-manager")
-        self.assertTrue(payload["contextDelivered"])
-        self.assertTrue(payload["submitted"])
+        self.assertNotIn("contextDelivered", payload)
+        self.assertNotIn("submitted", payload)
         # Provenance persisted on the catalog row.
         row = self.catalog.get("worker-1")
         assert row is not None
         self.assertEqual(row.spawned_by_session, "manager-9")
         self.assertEqual(row.spawned_by_lifecycle, "LC-manager")
-        # The packet was pasted-and-submitted into this session's tmux pane.
-        self.assertEqual(paster.calls[0]["tmux"], "ar-worker-1")
-        self.assertTrue(paster.calls[0]["submit"])
+        self.assertEqual(paster.calls, [])
 
     def test_spawn_records_role_from_env_and_reports_it(self) -> None:
         # L14: the AR_SPAWN_ROLE riding the caller's env is persisted on the catalog row and
         # reported in the payload — the Chats command tree groups command chats by it.
         payload = self._spawn(env={"AR_SPAWN_ROLE": "manager"})
-        self.assertEqual(payload["status"], "spawned")
+        self.assertEqual(payload["status"], "spawned-unbriefed")
         self.assertEqual(payload["spawnRole"], "manager")
         row = self.catalog.get("worker-1")
         assert row is not None
@@ -270,7 +266,7 @@ class SpawnAgentSessionTests(unittest.TestCase):
 
     def test_spawn_normalizes_legacy_leaf_slug_before_persisting(self) -> None:
         payload = self._spawn(leaf_key="leaf-1")
-        self.assertEqual(payload["status"], "spawned")
+        self.assertEqual(payload["status"], "spawned-unbriefed")
         self.assertEqual(payload["leafKey"], "repo/master/leaf-1")
         row = self.catalog.get("worker-1")
         assert row is not None
@@ -279,7 +275,7 @@ class SpawnAgentSessionTests(unittest.TestCase):
     def test_unbound_replacement_records_real_leaf_discriminator(self) -> None:
         payload = self._spawn(replacement_for_leaf="leaf-1")
 
-        self.assertEqual(payload["status"], "spawned")
+        self.assertEqual(payload["status"], "spawned-unbriefed")
         self.assertNotIn("leafKey", payload)
         self.assertEqual(payload["replacementForLeaf"], "repo/master/leaf-1")
         row = self.catalog.get("worker-1")
@@ -295,25 +291,41 @@ class SpawnAgentSessionTests(unittest.TestCase):
         self.assertEqual(self.host.ensured, [])
         self.assertIsNone(self.catalog.get("worker-1"))
 
-    def test_draft_paste_does_not_submit(self) -> None:
-        paster = _FakePaster(delivered=True, submitted=True)
-        payload = self._spawn(context="draft packet", submit=False, paster=paster)
-        self.assertEqual(payload["status"], "spawned")
-        self.assertFalse(payload["contextDelivered"])
-        self.assertNotIn("submitted", payload)  # omitted (None) when not submitting
-        self.assertFalse(paster.calls[0]["submit"])
+    def test_context_including_empty_string_refuses_before_every_spawn_side_effect(self) -> None:
+        for context in ("", "draft packet"):
+            with self.subTest(context=context):
+                paster = _FakePaster()
+                payload = self._spawn(
+                    context=context,
+                    leaf_key="missing-leaf",
+                    harness="legacy-override",
+                    paster=paster,
+                )
+                self.assertFalse(payload["ok"])
+                self.assertEqual(payload["status"], "brief-delivery-separate")
+                self.assertIn("hosted_session_readiness", payload["detail"])
+                self.assertIn("message_kind='dispatch-brief'", payload["detail"])
+                self.assertIn("harness-log-confirmed", payload["detail"])
+                self.assertEqual(self.host.ensured, [])
+                self.assertEqual(paster.calls, [])
+
+    def test_submit_true_refuses_before_spawn_even_without_context(self) -> None:
+        payload = self._spawn(submit=True)
+        self.assertFalse(payload["ok"])
+        self.assertEqual(payload["status"], "brief-delivery-separate")
+        self.assertEqual(self.host.ensured, [])
 
     def test_spawn_without_context_skips_paste(self) -> None:
         paster = _FakePaster()
         payload = self._spawn(paster=paster)
-        self.assertEqual(payload["status"], "spawned")
+        self.assertEqual(payload["status"], "spawned-unbriefed")
         self.assertNotIn("contextDelivered", payload)
         self.assertEqual(paster.calls, [])
 
     def test_plain_terminal_spawn_skips_harness_dispatch(self) -> None:
         payload = self._spawn(kind="terminal")
 
-        self.assertEqual(payload["status"], "spawned")
+        self.assertEqual(payload["status"], "spawned-unbriefed")
         self.assertEqual(payload["kind"], "terminal")
         self.assertNotIn("harness", payload)
         self.assertEqual(self.host.ensured[0]["command"], ("/bin/bash",))
@@ -321,43 +333,6 @@ class SpawnAgentSessionTests(unittest.TestCase):
         assert row is not None
         self.assertEqual(row.kind, "terminal")
         self.assertEqual(row.binding_role, "terminal")
-
-    def test_verified_delivery_omits_the_failure_capture(self) -> None:
-        paster = _FakePaster(delivered=True, submitted=True, capture="worker> [Pasted text #1]")
-        payload = self._spawn(context="brief", submit=True, paster=paster)
-        self.assertTrue(payload["contextDelivered"])
-        # 260707-HFX-L3: the capture is failure evidence -- a verified delivery ships none.
-        self.assertNotIn("deliveryCapture", payload)
-
-    def test_unverified_delivery_reports_false_with_the_pane_capture_attached(self) -> None:
-        # 260707-HFX-L3 / SF-1: reviewer 46b2e267 got contextDelivered:true over a codex pane that
-        # booted clean with no payload. The loud-failure contract: delivered false + the capture.
-        paster = _FakePaster(delivered=False, submitted=False, capture="codex> \n(clean boot)")
-        payload = self._spawn(
-            leaf_key="repo/master/leaf-1", context="the brief", submit=True, paster=paster
-        )
-        self.assertEqual(payload["status"], "spawned")
-        self.assertFalse(payload["contextDelivered"])
-        self.assertFalse(payload["submitted"])
-        self.assertEqual(payload["deliveryCapture"], "codex> \n(clean boot)")
-
-    def test_unconfirmed_submit_attaches_the_capture_even_when_delivered(self) -> None:
-        # Submitted transport without a matching log record is unconfirmed, even when tmux accepted
-        # the bytes; the failure-only capture rides along for diagnosis.
-        paster = _FakePaster(delivered=True, submitted=False, capture="claude> draft sitting")
-        payload = self._spawn(context="brief", submit=True, paster=paster)
-        self.assertFalse(payload["contextDelivered"])
-        self.assertFalse(payload["submitted"])
-        self.assertEqual(payload["deliveryCapture"], "claude> draft sitting")
-
-    def test_failed_delivery_with_empty_capture_ships_an_explicit_marker(self) -> None:
-        # Review N3 alignment with inbox_delivery: a False outcome never goes evidence-less. A
-        # vanished pane yields an empty capture -- the payload carries the explicit marker instead
-        # of silently omitting deliveryCapture.
-        paster = _FakePaster(delivered=False, submitted=False, capture="")
-        payload = self._spawn(context="brief", submit=True, paster=paster)
-        self.assertFalse(payload["contextDelivered"])
-        self.assertEqual(payload["deliveryCapture"], "(empty pane capture)")
 
     def test_leaf_taken_is_surfaced_never_overridden(self) -> None:
         self.catalog.upsert(_running_chat("owner-1", leaf_key="repo/master/leaf-1"))
@@ -446,44 +421,39 @@ class SpawnKnobApplicationTests(unittest.TestCase):
         paster = _ObservedPaster(capture="Fable 5 with max effort · Claude Max\n◉ max · /effort\n")
         payload = self._spawn(
             env={"AR_SPAWN_ROLE": "worker"},
-            context="brief",
-            submit=True,
             paster=paster,
         )
-        self.assertEqual(payload["status"], "spawned")
+        self.assertEqual(payload["status"], "spawned-unbriefed")
         self.assertEqual(
             self.host.ensured[0]["command"],
             ("claude", "--model", "claude-fable-5", "--effort", "max"),
         )
-        # Flag-vehicle effort: exactly ONE paste (the brief), no session command.
-        self.assertEqual(len(paster.calls), 1)
-        self.assertTrue(str(paster.calls[0]["text"]).endswith("\n\nbrief"))
+        # Flag-vehicle effort needs no session command, and spawn never pastes a brief.
+        self.assertEqual(paster.calls, [])
         self.assertNotIn("sessionCommands", payload)
         self.assertNotIn("sessionCommandsDelivered", payload)
 
-    def test_ultracode_rides_a_session_command_before_the_brief_not_the_flag(self) -> None:
+    def test_ultracode_rides_a_launch_session_command_not_the_flag(self) -> None:
         self._write_settings({"roles": {"worker": {"harness": "claude", "effort": "ultracode"}}})
         paster = _ObservedPaster(
             capture="Fable 5 with ultracode effort · Claude Max\n◉ ultracode · /effort\n"
         )
-        payload = self._spawn(
-            env={"AR_SPAWN_ROLE": "worker"}, context="brief", submit=True, paster=paster
-        )
-        self.assertEqual(payload["status"], "spawned")
+        payload = self._spawn(env={"AR_SPAWN_ROLE": "worker"}, paster=paster)
+        self.assertEqual(payload["status"], "spawned-unbriefed")
         # NO --effort flag (the CLI would warn-and-degrade); the env still rides the value.
         self.assertEqual(self.host.ensured[0]["command"], ("claude",))
         self.assertEqual(
             self.host.ensured[0]["env"],
             {"AR_SPAWN_ROLE": "worker", "AR_SPAWN_EFFORT": "ultracode"},
         )
-        # The session command is the FIRST paste (submitted), the brief follows.
+        # The settings-owned session command remains launch behavior; no task brief follows.
         self.assertEqual(
             paster.calls[0]["text"],
             "/effort ultracode",
         )
-        self.assertTrue(str(paster.calls[1]["text"]).endswith("\n\nbrief"))
+        self.assertEqual(len(paster.calls), 1)
         self.assertEqual(payload["sessionCommands"], ["/effort ultracode"])
-        self.assertTrue(payload["sessionCommandsDelivered"])
+        self.assertFalse(payload["sessionCommandsDelivered"])
 
     def test_unknown_effort_refuses_at_dispatch_naming_both_sets(self) -> None:
         self._write_settings({"roles": {"worker": {"harness": "claude", "effort": "turbo"}}})
@@ -502,7 +472,7 @@ class SpawnKnobApplicationTests(unittest.TestCase):
             {"roles": {"worker": {"harness": "codex", "model": "gpt-5.6-sol", "effort": "xhigh"}}}
         )
         payload = self._spawn(env={"AR_SPAWN_ROLE": "worker"})
-        self.assertEqual(payload["status"], "spawned")
+        self.assertEqual(payload["status"], "spawned-unbriefed")
         self.assertEqual(
             self.host.ensured[0]["command"],
             ("codex", "--model", "gpt-5.6-sol", "--config", "model_reasoning_effort=xhigh"),
@@ -516,7 +486,7 @@ class SpawnKnobApplicationTests(unittest.TestCase):
             },
         )
 
-    def test_worker_manager_curator_tiers_resolve_map_and_record_log_binding(self) -> None:
+    def test_worker_manager_curator_tiers_resolve_and_record_without_brief_log(self) -> None:
         tiers = {
             "worker": ("gpt-5.6-sol", "xhigh"),
             "manager": ("gpt-5.6-terra", "medium"),
@@ -535,15 +505,13 @@ class SpawnKnobApplicationTests(unittest.TestCase):
             payload = self._spawn(
                 session_id=f"{role}-tier",
                 env={"AR_SPAWN_ROLE": role},
-                context="tier probe",
-                submit=True,
                 paster=paster,
             )
-            self.assertEqual(payload["status"], "spawned")
+            self.assertEqual(payload["status"], "spawned-unbriefed")
             self.assertEqual(payload["resolvedModel"], model)
             self.assertEqual(payload["resolvedEffort"], effort)
-            self.assertEqual(payload["sessionLogEntryId"], f"{role}-tier")
-            self.assertEqual(payload["sessionLogPath"], "/tmp/fake-session.jsonl")
+            self.assertNotIn("sessionLogEntryId", payload)
+            self.assertNotIn("sessionLogPath", payload)
             self.assertEqual(
                 self.host.ensured[-1]["command"],
                 ("codex", "--model", model, "--config", f"model_reasoning_effort={effort}"),
@@ -552,10 +520,10 @@ class SpawnKnobApplicationTests(unittest.TestCase):
             assert row is not None
             self.assertEqual(row.resolved_model, model)
             self.assertEqual(row.resolved_effort, effort)
-            self.assertEqual(row.session_log_entry_id, f"{role}-tier")
-            self.assertEqual(row.session_log_path, Path("/tmp/fake-session.jsonl"))
+            self.assertIsNone(row.session_log_entry_id)
+            self.assertIsNone(row.session_log_path)
 
-    def test_missing_log_entry_fails_the_brief_without_screen_fallback(self) -> None:
+    def test_spawn_never_attempts_a_brief_or_binds_a_session_log(self) -> None:
         self._write_settings(
             {
                 "roles": {
@@ -568,19 +536,14 @@ class SpawnKnobApplicationTests(unittest.TestCase):
             }
         )
         paster = _FakePaster(delivered=True, submitted=False, capture="failure pane")
-        payload = self._spawn(
-            env={"AR_SPAWN_ROLE": "worker"},
-            context="dispatch brief",
-            submit=True,
-            paster=paster,
-        )
+        payload = self._spawn(env={"AR_SPAWN_ROLE": "worker"}, paster=paster)
 
-        self.assertFalse(payload["contextDelivered"])
-        self.assertFalse(payload["submitted"])
+        self.assertEqual(payload["status"], "spawned-unbriefed")
+        self.assertEqual(paster.calls, [])
         row = self.catalog.get("worker-1")
         assert row is not None
         self.assertIsNone(row.session_log_path)
-        self.assertEqual(payload["deliveryCapture"], "failure pane")
+        self.assertNotIn("deliveryCapture", payload)
 
     def test_launch_args_ride_the_argv_verbatim_and_are_recorded(self) -> None:
         self._write_settings(
@@ -595,7 +558,7 @@ class SpawnKnobApplicationTests(unittest.TestCase):
             }
         )
         payload = self._spawn(env={"AR_SPAWN_ROLE": "worker"})
-        self.assertEqual(payload["status"], "spawned")
+        self.assertEqual(payload["status"], "spawned-unbriefed")
         self.assertEqual(
             self.host.ensured[0]["command"],
             ("claude", "--effort", "max", "--dangerously-skip-permissions"),
@@ -605,7 +568,7 @@ class SpawnKnobApplicationTests(unittest.TestCase):
         assert row is not None
         self.assertEqual(row.launch_args, ("--dangerously-skip-permissions",))
 
-    def test_prompt_keywords_ride_the_brief_paste_and_are_recorded(self) -> None:
+    def test_prompt_keywords_are_recorded_but_withheld_from_spawn(self) -> None:
         # The original L16 acceptance case: strategist as effort:max + promptKeywords:["ultracode"]
         # dispatches claude with --effort max and the keyword riding the paste.
         self._write_settings(
@@ -622,21 +585,17 @@ class SpawnKnobApplicationTests(unittest.TestCase):
         paster = _ObservedPaster(capture="Fable 5 with max effort · Claude Max\n◉ max · /effort\n")
         payload = self._spawn(
             env={"AR_SPAWN_ROLE": "strategist"},
-            context="You are the strategist.",
-            submit=True,
             paster=paster,
         )
-        self.assertEqual(payload["status"], "spawned")
+        self.assertEqual(payload["status"], "spawned-unbriefed")
         self.assertEqual(self.host.ensured[0]["command"], ("claude", "--effort", "max"))
-        self.assertTrue(
-            str(paster.calls[0]["text"]).endswith("\n\nultracode\n\nYou are the strategist.")
-        )
+        self.assertEqual(paster.calls, [])
         self.assertEqual(payload["promptKeywords"], ["ultracode"])
         row = self.catalog.get("worker-1")
         assert row is not None
         self.assertEqual(row.prompt_keywords, ("ultracode",))
 
-    def test_prompt_keywords_without_a_brief_are_transported_as_a_draft(self) -> None:
+    def test_prompt_keywords_without_a_brief_stay_deferred(self) -> None:
         self._write_settings(
             {"roles": {"strategist": {"harness": "claude", "promptKeywords": ["ultracode"]}}}
         )
@@ -644,11 +603,11 @@ class SpawnKnobApplicationTests(unittest.TestCase):
             capture="Fable 5 with ultracode effort · Claude Max\n◉ ultracode · /effort\n"
         )
         payload = self._spawn(env={"AR_SPAWN_ROLE": "strategist"}, paster=paster)
-        self.assertEqual(payload["status"], "spawned")
-        self.assertTrue(str(paster.calls[0]["text"]).endswith("\n\nultracode"))
-        self.assertFalse(payload["contextDelivered"])
+        self.assertEqual(payload["status"], "spawned-unbriefed")
+        self.assertEqual(paster.calls, [])
+        self.assertEqual(payload["promptKeywords"], ["ultracode"])
 
-    def test_session_command_order_is_effort_vehicle_then_free_form_then_brief(self) -> None:
+    def test_session_command_order_is_effort_vehicle_then_free_form_without_brief(self) -> None:
         self._write_settings(
             {
                 "roles": {
@@ -666,16 +625,14 @@ class SpawnKnobApplicationTests(unittest.TestCase):
         )
         payload = self._spawn(
             env={"AR_SPAWN_ROLE": "worker"},
-            context="brief",
-            submit=True,
             paster=paster,
         )
-        self.assertEqual(payload["status"], "spawned")
+        self.assertEqual(payload["status"], "spawned-unbriefed")
         self.assertEqual(
             [call["text"] for call in paster.calls[:2]],
             ["/effort ultracode", "/statusline off"],
         )
-        self.assertTrue(str(paster.calls[2]["text"]).endswith("\n\nultracode\n\nbrief"))
+        self.assertEqual(len(paster.calls), 2)
         # The RESOLVED session-command list (effort vehicle first) is the recorded provenance.
         self.assertEqual(payload["sessionCommands"], ["/effort ultracode", "/statusline off"])
         row = self.catalog.get("worker-1")
@@ -687,7 +644,7 @@ class SpawnKnobApplicationTests(unittest.TestCase):
         self._write_settings({"roles": {"worker": {"harness": "claude", "effort": "ultracode"}}})
         paster = _FakePaster(delivered=False, submitted=False, capture="claude> (booting)")
         payload = self._spawn(env={"AR_SPAWN_ROLE": "worker"}, paster=paster)
-        self.assertEqual(payload["status"], "spawned")
+        self.assertEqual(payload["status"], "spawned-unbriefed")
         self.assertFalse(payload["sessionCommandsDelivered"])
         # 260707-HFX-L3: the failing paste's pane capture rides the payload as evidence.
         self.assertEqual(payload["deliveryCapture"], "claude> (booting)")
@@ -759,7 +716,7 @@ class SettingsDefinedHarnessTests(unittest.TestCase):
             },
         )
         payload = self._spawn(env={"AR_SPAWN_ROLE": "worker"})
-        self.assertEqual(payload["status"], "spawned")
+        self.assertEqual(payload["status"], "spawned-unbriefed")
         self.assertEqual(payload["harness"], "hermes")
         self.assertEqual(self.host.ensured[0]["command"], ("hermes", "--tui"))
 
@@ -772,7 +729,7 @@ class SettingsDefinedHarnessTests(unittest.TestCase):
             },
         )
         payload = self._spawn(env={"AR_SPAWN_ROLE": "worker"})
-        self.assertEqual(payload["status"], "spawned")
+        self.assertEqual(payload["status"], "spawned-unbriefed")
         # The user's command array replaces ours; the builtin knob mapping survives the override.
         self.assertEqual(
             self.host.ensured[0]["command"], ("claude", "--continue", "--effort", "max")
@@ -824,7 +781,7 @@ class SettingsDefinedHarnessTests(unittest.TestCase):
             },
         )
         payload = self._spawn(env={"AR_SPAWN_ROLE": "worker"})
-        self.assertEqual(payload["status"], "spawned")
+        self.assertEqual(payload["status"], "spawned-unbriefed")
         self.assertEqual(
             self.host.ensured[0]["command"],
             ("hermes", "--model", "h-1", "--reasoning", "high"),
@@ -843,11 +800,11 @@ class SettingsDefinedHarnessTests(unittest.TestCase):
             {"harnesses": {"hermes": {"argv": ["hermes", "--local"]}}},
         )
         payload = self._spawn(leaf_key="repo-a/master/leaf-1")
-        self.assertEqual(payload["status"], "spawned")
+        self.assertEqual(payload["status"], "spawned-unbriefed")
         self.assertEqual(self.host.ensured[0]["command"], ("hermes", "--local"))
         # A leafless spawn resolves the GLOBAL layer only (no repo-local override).
         payload = self._spawn(session_id="worker-2")
-        self.assertEqual(payload["status"], "spawned")
+        self.assertEqual(payload["status"], "spawned-unbriefed")
         self.assertEqual(self.host.ensured[-1]["command"], ("hermes", "--global"))
 
 
@@ -908,7 +865,7 @@ class SpawnLevelResolutionTests(unittest.TestCase):
     def test_level_override_deep_merges_harness_inherited(self) -> None:
         self._write_settings(self.coordination_root, self.ECONOMICS)
         payload = self._spawn(env={"AR_SPAWN_ROLE": "reviewer"}, level="master")
-        self.assertEqual(payload["status"], "spawned")
+        self.assertEqual(payload["status"], "spawned-unbriefed")
         # harness inherited from the flat default; model/effort from the master override.
         self.assertEqual(payload["harness"], "claude")
         self.assertEqual(
@@ -924,7 +881,7 @@ class SpawnLevelResolutionTests(unittest.TestCase):
     def test_leaf_default_uses_the_flat_role_knobs(self) -> None:
         self._write_settings(self.coordination_root, self.ECONOMICS)
         payload = self._spawn(env={"AR_SPAWN_ROLE": "reviewer"})
-        self.assertEqual(payload["status"], "spawned")
+        self.assertEqual(payload["status"], "spawned-unbriefed")
         self.assertEqual(
             self.host.ensured[0]["command"],
             ("claude", "--model", "sonnet", "--effort", "high"),
@@ -938,7 +895,7 @@ class SpawnLevelResolutionTests(unittest.TestCase):
         self._write_settings(self.coordination_root, self.ECONOMICS)
         paster = _FakePaster()
         payload = self._spawn(env={"AR_SPAWN_ROLE": "reviewer"}, level="portfolio", paster=paster)
-        self.assertEqual(payload["status"], "spawned")
+        self.assertEqual(payload["status"], "spawned-unbriefed")
         self.assertEqual(self.host.ensured[0]["command"], ("claude", "--model", "fable"))
         self.assertEqual(paster.calls[0]["text"], "/effort ultracode")
         self.assertEqual(payload["sessionCommands"], ["/effort ultracode"])
@@ -1059,7 +1016,7 @@ class SpawnLevelResolutionTests(unittest.TestCase):
             level="master",
             leaf_key="repo-a/master/leaf-1",
         )
-        self.assertEqual(payload["status"], "spawned")
+        self.assertEqual(payload["status"], "spawned-unbriefed")
         # model: repo-local master override; effort: global master override; harness: flat default.
         self.assertEqual(
             self.host.ensured[0]["command"],
@@ -1080,7 +1037,7 @@ class SpawnLevelResolutionTests(unittest.TestCase):
         # No settings file, no level, no role env: exactly the pre-L16 dispatch (plain argv),
         # with the defaulted level recorded as provenance.
         payload = self._spawn()
-        self.assertEqual(payload["status"], "spawned")
+        self.assertEqual(payload["status"], "spawned-unbriefed")
         self.assertEqual(self.host.ensured[0]["command"], ("claude",))
         self.assertEqual(payload["spawnLevel"], "leaf")
         self.assertEqual(payload["spawnLevelSource"], "default")
@@ -1113,15 +1070,12 @@ class SpawnLevelResolutionTests(unittest.TestCase):
         )
         payload = self._spawn(
             env={"AR_SPAWN_ROLE": "strategist"},
-            context="You are the strategist.",
             paster=paster,
         )
-        self.assertEqual(payload["status"], "spawned")
+        self.assertEqual(payload["status"], "spawned-unbriefed")
         self.assertEqual(self.host.ensured[0]["command"], ("claude",))
         self.assertEqual(paster.calls[0]["text"], "/effort ultracode")
-        self.assertTrue(
-            str(paster.calls[1]["text"]).endswith("\n\nultracode\n\nYou are the strategist.")
-        )
+        self.assertEqual(len(paster.calls), 1)
         row = self.catalog.get("seat-1")
         assert row is not None
         self.assertEqual(row.prompt_keywords, ("ultracode",))
@@ -1175,14 +1129,14 @@ class SpawnHarnessResolutionTests(unittest.TestCase):
     def test_omitted_harness_uses_the_global_settings_preference(self) -> None:
         self._write_settings(self.coordination_root, "codex")
         payload = self._spawn()
-        self.assertEqual(payload["status"], "spawned")
+        self.assertEqual(payload["status"], "spawned-unbriefed")
         self.assertEqual(payload["harness"], "codex")
 
     def test_repo_local_settings_override_global_via_the_qualified_leaf_key(self) -> None:
         self._write_settings(self.coordination_root, "codex")
         self._write_settings(self.repo_root, "pi")
         payload = self._spawn(leaf_key="repo-a/master/leaf-1")
-        self.assertEqual(payload["status"], "spawned")
+        self.assertEqual(payload["status"], "spawned-unbriefed")
         self.assertEqual(payload["harness"], "pi")
 
     def test_leafless_spawn_reads_the_global_layer_only(self) -> None:
@@ -1202,7 +1156,7 @@ class SpawnHarnessResolutionTests(unittest.TestCase):
 
     def test_no_settings_falls_back_to_the_first_detected_registry_harness(self) -> None:
         payload = self._spawn(which=lambda cmd: "/usr/bin/codex" if cmd == "codex" else None)
-        self.assertEqual(payload["status"], "spawned")
+        self.assertEqual(payload["status"], "spawned-unbriefed")
         self.assertEqual(payload["harness"], "codex")
 
     def test_nothing_detected_is_a_refusal_not_a_silent_default(self) -> None:
@@ -1224,7 +1178,7 @@ class SpawnHarnessResolutionTests(unittest.TestCase):
     def test_unconfigured_leaf_repo_segment_resolves_globally(self) -> None:
         self._write_settings(self.coordination_root, "codex")
         payload = self._spawn(leaf_key="not-a-repo/master/leaf-9")
-        self.assertEqual(payload["status"], "spawned")
+        self.assertEqual(payload["status"], "spawned-unbriefed")
         self.assertEqual(payload["harness"], "codex")
 
 
