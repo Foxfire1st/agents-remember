@@ -130,6 +130,28 @@ describe("EnclosureCanvas — remote/PR strip (5h H3)", () => {
     expect(merged.getByTestId("pr-badge").getAttribute("data-state")).toBe("merged");
   });
 
+  it("renders stale landing facts as stale and stops live landing-flow packets", () => {
+    const base = nodeFrom("engine-landing-ffonly");
+    const node: EngineProcessNode = {
+      ...base,
+      landing: (base.landing ?? []).map((ref) => ({
+        ...ref,
+        factState: "stale",
+        observedAt: "2026-07-12T14:00:00+00:00",
+        lastAttemptAt: "2026-07-12T14:01:00+00:00",
+        staleSeconds: 60,
+      })),
+    };
+    const { container, getByTestId, queryByTestId } = render(<EnclosureProcessMap node={node} />);
+    const feat = container.querySelector('[data-testid="remote-chip"][data-kind="origin-feat"]');
+    expect(feat?.getAttribute("data-tone")).toBe("stale");
+    expect(feat?.textContent).toContain("stale");
+    expect(feat?.querySelector("title")?.textContent).toContain("60s old");
+    expect(getByTestId("pr-badge").getAttribute("data-state")).toBe("stale");
+    expect(getByTestId("pr-badge").textContent).toContain("stale");
+    expect(queryByTestId("landing-packet")).toBeNull();
+  });
+
   it("omits the remote strip for a plain enclosure and never throws when landing is absent", () => {
     const { queryByTestId } = render(<EnclosureProcessMap node={nodeFrom("engine-bootstrap")} />);
     expect(queryByTestId("remote-strip")).toBeNull();

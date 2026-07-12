@@ -18,10 +18,11 @@ from __future__ import annotations
 import contextlib
 import hashlib
 import json
+import logging
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from agents_remember.controlplane.attention_dismissals import (
     AttentionDismissalRecord,
@@ -98,8 +99,9 @@ from agents_remember.worktrees.modules.git import run_git
 from agents_remember.worktrees.modules.guidance import (
     contract_payload,
     lifecycle_guidance,
-    status_payload,
+    projected_status_payload,
 )
+from agents_remember.worktrees.modules.landing import unobserved_landing_refs
 from agents_remember.worktrees.start_progress import read_start_progress
 from agents_remember.worktrees.task_resolver import (
     ARCHIVE_DIR,
@@ -107,6 +109,11 @@ from agents_remember.worktrees.task_resolver import (
     iter_leaf_enclosure_contracts,
 )
 from agents_remember.worktrees.worktree_contract import ContractError, load_contract
+
+if TYPE_CHECKING:
+    from agents_remember.observer.landing_state import LandingStateReader
+
+logger = logging.getLogger(__name__)
 
 WORKTREE_PROVIDER_STATE_SCHEMA = "ar-worktree-provider-state/v1"
 WORKTREE_PROVIDER_INSPECT_SECONDS = 5
@@ -631,6 +638,7 @@ def read_engine_process_facts(
     *,
     active_worktree_groups: set[str] | None = None,
     now: datetime | None = None,
+    landing_state: LandingStateReader | None = None,
 ) -> list[EngineProcessFacts]:
     """Slice 5e: gather one fact bundle per leaf enclosure for the Engine Room map.
 
@@ -667,7 +675,12 @@ def read_engine_process_facts(
             EngineProcessFacts(
                 contract=cp,
                 guidance=lifecycle_guidance(contract),
-                status=_safe_status_payload(contract, cache_key=status_key, now=now),
+                status=_safe_status_payload(
+                    contract,
+                    cache_key=status_key,
+                    now=now,
+                    landing_state=landing_state,
+                ),
                 ledger_rows=ledger_rows,
                 ledger_row_count=ledger_total,
             )
@@ -680,20 +693,54 @@ def read_engine_process_facts(
 
 
 def _safe_status_payload(
-    contract: Any, *, cache_key: str | None = None, now: datetime | None = None
+    contract: Any,
+    *,
+    cache_key: str | None = None,
+    now: datetime | None = None,
+    landing_state: LandingStateReader | None = None,
 ) -> dict[str, Any] | None:
-    """``status_payload`` is the only git-touching part; never let it crash the tick.
+    """Read cached local status, then attach immutable landing facts without remote work.
 
-    260707-HFX2-L12 F11: when ``cache_key``/``now`` are given, the git probe result is TTL-cached so
-    the projection does not fire one git subprocess per leaf every tick — git state changes slowly.
+    The local git result remains TTL-cached. Landing facts are merged after that cache lookup so a
+    newly published background observation is visible on the next projection tick.
     """
+    value = _cached_local_status(contract, cache_key=cache_key, now=now)
+    if value is None:
+        return None
+    moment = now or datetime.now(UTC)
+    try:
+        landing = (
+            landing_state.current(contract, now=moment)
+            if landing_state is not None
+            else unobserved_landing_refs(contract)
+        )
+    except Exception:
+        # The local status is already truthful. A malformed injected/immutable landing snapshot
+        # must sacrifice only this contract's landing detail, not freeze the whole projection tick.
+        logger.warning(
+            "landing snapshot merge failed for %s; using local status",
+            getattr(contract, "contract_path", "unknown-contract"),
+            exc_info=True,
+        )
+        return value
+    if landing is None:
+        return value
+    return {**value, "landing": landing}
+
+
+def _cached_local_status(
+    contract: Any, *, cache_key: str | None, now: datetime | None
+) -> dict[str, Any] | None:
     if cache_key is not None and now is not None:
         cached = _status_payload_cache.get(cache_key)
-        if cached is not None and 0 <= (now - cached[0]).total_seconds() < STATUS_PAYLOAD_TTL_SECONDS:
+        if (
+            cached is not None
+            and 0 <= (now - cached[0]).total_seconds() < STATUS_PAYLOAD_TTL_SECONDS
+        ):
             return cached[1]
     try:
-        value = status_payload(contract)
-    except Exception:  # a single worktree's git state must never fail the projection tick
+        value = projected_status_payload(contract, landing=None)
+    except Exception:  # local status for one broken worktree must not fail the whole projection
         value = None
     if cache_key is not None and now is not None:
         _status_payload_cache[cache_key] = (now, value)

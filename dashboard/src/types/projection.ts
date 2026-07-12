@@ -310,6 +310,7 @@ export type ProcessFactState =
   | "derived"
   | "planned"
   | "missing"
+  | "stale"
   | "not-applicable";
 
 export type ProcessHealth =
@@ -363,6 +364,9 @@ export interface LandingRefNode {
   state: string; // behind | tip | open | merged | pushed | planned | unknown
   factState: ProcessFactState;
   detail?: string;
+  observedAt?: string;
+  lastAttemptAt?: string;
+  staleSeconds?: number;
 }
 
 export interface EngineProcessNode {

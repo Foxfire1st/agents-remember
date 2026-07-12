@@ -79,6 +79,7 @@ from agents_remember.observer.event_retention import (
     compact_workspace_river,
 )
 from agents_remember.observer.events import now_iso
+from agents_remember.observer.landing_state import LandingStateRefresher
 from agents_remember.observer.projection_store import ProviderStateRefresher
 from agents_remember.observer.snapshots import read_task_document_body
 from agents_remember.observer.store import EventStore
@@ -468,24 +469,29 @@ def create_app(
     now: Callable[[], datetime] | None = None,
     before_tick: Callable[[datetime], object] | None = None,
     refresh_provider_state: bool | None = None,
+    refresh_landing_state: bool | None = None,
     terminal_host: TerminalHost | None = None,
     terminal_catalog: TerminalCatalog | None = None,
     terminal_paster: TerminalPaster | None = None,
 ) -> FastAPI:
     """Build the dashboard app bound to one shared projector for ``config``.
 
-    ``now`` / ``before_tick`` default to live behaviour; sim wires a replay clock + feeder.
+    ``now`` / ``before_tick`` default to live behaviour; sim wires a replay clock + feeder. Live
+    serving enables the landing-state refresher by default; sim disables it unless explicitly set.
     ``terminal_host`` defaults to a fresh :class:`TerminalHost` (the Mode B2 terminal backend);
     tests inject a fake to drive the WebSocket bridge without a real PTY.
     """
     if refresh_provider_state is None:
         refresh_provider_state = before_tick is None
+    if refresh_landing_state is None:
+        refresh_landing_state = before_tick is None
     projector = Projector(
         config,
         interval=interval,
         now=now,
         before_tick=before_tick,
         provider_refresher=ProviderStateRefresher() if refresh_provider_state else None,
+        landing_refresher=LandingStateRefresher(config) if refresh_landing_state else None,
     )
     host = terminal_host if terminal_host is not None else TerminalHost()
     catalog = terminal_catalog or TerminalCatalog(terminal_catalog_path(config.coordination_root))

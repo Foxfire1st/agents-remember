@@ -221,7 +221,9 @@ def base_freshness(contract: WorktreeContract) -> dict[str, object] | None:
     return payload
 
 
-def status_payload(contract: WorktreeContract) -> dict[str, object]:
+def _status_payload_with_landing(
+    contract: WorktreeContract, landing: list[dict[str, object]] | None
+) -> dict[str, object]:
     guidance = lifecycle_guidance(contract)
     payload = {
         "task_id": contract.task_id,
@@ -259,8 +261,19 @@ def status_payload(contract: WorktreeContract) -> dict[str, object]:
     freshness = base_freshness(contract)
     if freshness is not None:
         payload["freshness"] = freshness
-    landing = landing_refs(contract)
     if landing is not None:
         payload["landing"] = landing
     payload.update(guidance)
     return payload
+
+
+def projected_status_payload(
+    contract: WorktreeContract, *, landing: list[dict[str, object]] | None
+) -> dict[str, object]:
+    """Build status from local facts plus an already-observed landing snapshot."""
+    return _status_payload_with_landing(contract, landing)
+
+
+def status_payload(contract: WorktreeContract) -> dict[str, object]:
+    """Build an interactive status response, including a fresh remote landing observation."""
+    return _status_payload_with_landing(contract, landing_refs(contract))

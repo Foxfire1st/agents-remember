@@ -241,6 +241,8 @@ function branchEnter(factState: CommitRefNode["factState"]): { opacity: number; 
       return { opacity: 0, dx: -90 };
     case "missing":
       return { opacity: 0.22, dx: 0 };
+    case "stale":
+      return { opacity: 0.55, dx: 0 };
     default:
       return { opacity: 0.45, dx: 0 };
   }
@@ -989,9 +991,10 @@ const PR_CX = (COL_MAIN_CX + COL_FEAT_CX) / 2; // centre of the gap between orig
 // The dock is the SUCCESSFUL-LANDING arc — it shows only while an enclosure is actually retiring to the
 // official line (closeout → integration → cleanup), not for every live worktree the probe touched.
 const LANDING_PHASES = new Set(["closeout-pending", "integration-pending", "cleanup-pending"]);
-type RemoteTone = "planned" | "live" | "done";
+type RemoteTone = "planned" | "live" | "done" | "stale";
 
 function remoteTone(ref: LandingRefNode): RemoteTone {
+  if (ref.factState === "stale") return "stale";
   if (ref.factState === "planned" || ref.state === "planned") return "planned";
   if (ref.state === "tip" || ref.state === "merged" || ref.state === "pushed") return "done";
   return "live";
@@ -1000,8 +1003,15 @@ function remoteTone(ref: LandingRefNode): RemoteTone {
 // One short status word per chip — the colour already carries the tone, so the line stays terse and
 // always fits; the full ref + detail lives in the hover <title>.
 function remoteStateWord(ref: LandingRefNode): string {
+  if (ref.factState === "stale") return "stale";
   if (ref.factState === "planned" || ref.state === "planned") return "planned";
   return ref.state || "—";
+}
+
+function remoteTitle(ref: LandingRefNode): string {
+  const age = ref.staleSeconds == null ? "" : ` · ${Math.round(ref.staleSeconds)}s old`;
+  const freshness = ref.factState === "stale" ? `stale${age}` : ref.factState;
+  return `${ref.label} · ${freshness} · ${ref.detail ?? ref.state}`;
 }
 
 function RemoteChip({ refNode }: { refNode: LandingRefNode }) {
@@ -1019,7 +1029,7 @@ function RemoteChip({ refNode }: { refNode: LandingRefNode }) {
       exit={animate ? { opacity: 0, y: -7 } : { opacity: 0 }}
       transition={{ duration: animate ? 0.5 : 0, ease: [0.2, 0.7, 0.2, 1] }}
     >
-      <title>{`${refNode.label} · ${refNode.detail ?? refNode.state}`}</title>
+      <title>{remoteTitle(refNode)}</title>
       <rect className={remoteChip({ tone })} x={pos.x} y={pos.y} width={RBOX_W} height={RBOX_H} rx={7} />
       <text className={remoteChipLabel({ tone })} x={pos.x + RBOX_W / 2} y={pos.y + 18} textAnchor="middle">
         {truncate(refNode.label, 18)}
@@ -1036,8 +1046,8 @@ function RemoteChip({ refNode }: { refNode: LandingRefNode }) {
 // line beneath the dock. (prBadge's stroke carries the open=amber / merged=mint colour onto the arrow.)
 function PrBadge({ refNode }: { refNode: LandingRefNode }) {
   const animate = useShouldAnimate();
-  const state = refNode.state === "merged" ? "merged" : "open";
-  const sub = state === "merged" ? "merged" : refNode.state;
+  const state = refNode.factState === "stale" ? "stale" : refNode.state === "merged" ? "merged" : "open";
+  const sub = state === "stale" ? "stale" : state === "merged" ? "merged" : refNode.state;
   const top = REMOTE_POS["origin-main"].y;
   const cy = top + RBOX_H / 2;
   return (
@@ -1049,7 +1059,7 @@ function PrBadge({ refNode }: { refNode: LandingRefNode }) {
       exit={animate ? { opacity: 0, y: -7 } : { opacity: 0 }}
       transition={{ duration: animate ? 0.5 : 0, ease: [0.2, 0.7, 0.2, 1] }}
     >
-      <title>{refNode.detail ? `${refNode.label} · ${sub} · ${refNode.detail}` : `${refNode.label} · ${sub}`}</title>
+      <title>{remoteTitle(refNode)}</title>
       <line className={prBadge({ state })} x1={PR_CX + 11} y1={cy} x2={PR_CX - 9} y2={cy} strokeWidth={2.6} markerEnd="url(#er-chev)" />
       <text className={prBadgeLabel({ state })} x={PR_CX} y={top + RBOX_H + 15} textAnchor="middle">
         {truncate(refNode.label, 14)} · {sub}
@@ -1123,10 +1133,12 @@ function landingFlowState(refs: LandingRefNode[], kind: string): FlowState {
   const ref = (k: string) => refs.find((r) => r.kind === k);
   const resolved = (k: string) => {
     const r = ref(k);
-    return r ? r.factState !== "planned" && r.state !== "planned" : false;
+    return r ? r.factState === "observed" && r.state !== "planned" : false;
   };
-  const prMerged = ref("pr")?.state === "merged";
-  const memPushed = ref("origin-mem-main")?.state === "pushed";
+  const pr = ref("pr");
+  const memory = ref("origin-mem-main");
+  const prMerged = pr?.factState === "observed" && pr.state === "merged";
+  const memPushed = memory?.factState === "observed" && memory.state === "pushed";
   if (kind === "push") return !resolved("origin-feat") ? "hidden" : prMerged ? "settled" : "active";
   if (kind === "pull") return !prMerged ? "hidden" : memPushed ? "settled" : "active";
   return memPushed ? "active" : "hidden"; // carry + push-mem: the carryover frontier

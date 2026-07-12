@@ -40,6 +40,7 @@ from agents_remember.serving.delta import (
 
 if TYPE_CHECKING:
     from agents_remember.mcp.config import McpRuntimeConfig
+    from agents_remember.observer.landing_state import LandingStateRefresh
     from agents_remember.observer.projection import WorkspaceProjection
     from agents_remember.observer.projection_store import ProviderStateRefresh
 
@@ -64,12 +65,14 @@ class Projector:
         now: Callable[[], datetime] | None = None,
         before_tick: Callable[[datetime], object] | None = None,
         provider_refresher: ProviderStateRefresh | None = None,
+        landing_refresher: LandingStateRefresh | None = None,
     ) -> None:
         self._config = config
         self._interval = interval
         self._now: Callable[[], datetime] = now or _utcnow
         self._before_tick = before_tick
         self._provider_refresher = provider_refresher
+        self._landing_refresher = landing_refresher
         # (seq, projection) publish as ONE tuple: /api/state runs in a threadpool, so pairing
         # them via two attributes could tear (a bumped seq read against the previous snapshot
         # would hand a poller a stale body under a fresh ETag).
@@ -96,25 +99,43 @@ class Projector:
 
     async def run(self) -> None:
         """Tick forever: re-project, diff, broadcast. One bad tick never kills the loop."""
-        while True:
-            await asyncio.sleep(self._interval)
-            try:
-                current = await asyncio.to_thread(self._tick_sync, self._now())
-            except Exception:
-                logger.exception("projection tick failed; retrying next interval")
-                continue
-            current_stable = stable_projection_state(current)
-            seq, previous = self._published
-            for delta in diff_projection(
-                previous,
-                current,
-                previous_state=self._latest_stable,
-                current_state=current_stable,
-            ):
-                seq += 1
-                self._broadcast((seq, delta))
-            self._latest_stable = current_stable
-            self._published = (seq, current)
+        landing_task = (
+            asyncio.create_task(self._landing_refresher.run())
+            if self._landing_refresher is not None
+            else None
+        )
+        try:
+            while True:
+                await asyncio.sleep(self._interval)
+                try:
+                    current = await asyncio.to_thread(self._tick_sync, self._now())
+                except Exception:
+                    logger.exception("projection tick failed; retrying next interval")
+                    continue
+                current_stable = stable_projection_state(current)
+                seq, previous = self._published
+                for delta in diff_projection(
+                    previous,
+                    current,
+                    previous_state=self._latest_stable,
+                    current_state=current_stable,
+                ):
+                    seq += 1
+                    self._broadcast((seq, delta))
+                self._latest_stable = current_stable
+                self._published = (seq, current)
+        finally:
+            if landing_task is not None:
+                landing_task.cancel()
+                try:
+                    await landing_task
+                except asyncio.CancelledError:
+                    pass
+                except Exception:
+                    # The refresher logs cycle failures itself. This shutdown guard is still
+                    # required for an already-dead task: its stored exception must not replace the
+                    # Projector cancellation and skip the serving lifespan's terminal-host cleanup.
+                    logger.exception("landing refresher task failed before projector shutdown")
 
     def _tick_sync(self, moment: datetime) -> WorkspaceProjection:
         """Run the optional pre-tick hook, then project at ``moment`` (off the loop thread)."""
@@ -124,6 +145,7 @@ class Projector:
             self._config,
             now=moment,
             provider_refresher=self._provider_refresher,
+            landing_state=self._landing_refresher,
         )
 
     def current(self) -> tuple[int, WorkspaceProjection | None]:

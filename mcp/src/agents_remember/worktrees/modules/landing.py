@@ -15,8 +15,8 @@ which degrades to ``missing`` when ``gh`` is absent or unauthed.
 Slice 5l P2 hardens the probe to *follow* a real remote landing: ``origin/main`` (the protected
 target) is now probed directly via ``ls-remote`` -- visible across the whole landing window, not
 only inferred from a PR's base once gh resolves one -- and the PR ref carries gh's own open/merge
-timestamps. The dashboard re-probes every projector tick (~1s), so these reads drive the live arc;
-no milestone hook is needed for cadence.
+timestamps. The dashboard's bounded landing-state refresher now invokes this probe outside the
+recurring projection tick and publishes the latest exact-contract observation.
 """
 
 from __future__ import annotations
@@ -30,7 +30,7 @@ from agents_remember.worktrees.worktree_contract import WorktreeContract
 _PROBE_TIMEOUT_SECONDS = 8
 
 
-def _landing_active(contract: WorktreeContract) -> bool:
+def landing_active(contract: WorktreeContract) -> bool:
     """The landing arc is only meaningful from closeout-completed onward.
 
     Before closeout there is nothing pushed, merged, or carried over to observe, and gating here
@@ -251,11 +251,11 @@ def landing_refs(contract: WorktreeContract) -> list[dict[str, object]] | None:
     """Observe the successful-landing arc (slice 5h; hardened 5l P2), best-effort.
 
     ``None`` -> no landing key in the status payload (the node defaults to an empty ``landing``).
-    Otherwise one dict per remote/PR participant, each carrying an honest ``factState``. Probed
-    fresh every projector tick while the landing window is active, so the dashboard follows the live
-    push -> PR open -> PR merge arc without a milestone hook.
+    Otherwise one dict per remote/PR participant, each carrying an honest ``factState``. Called by
+    the bounded background refresher while the landing window is active; the recurring projection
+    only consumes its latest immutable result.
     """
-    if not _landing_active(contract):
+    if not landing_active(contract):
         return None
 
     refs: list[dict[str, object]] = [
@@ -276,4 +276,53 @@ def landing_refs(contract: WorktreeContract) -> list[dict[str, object]] | None:
     pr = _pr_for(contract.code_repo_path, contract.code_source_branch)
     refs.append(_main_ref(contract.code_repo_path, pr))
     refs.extend(_pr_ref(pr))
+    return refs
+
+
+def unobserved_landing_refs(contract: WorktreeContract) -> list[dict[str, object]] | None:
+    """Expected landing participants before a remote observation is available.
+
+    This is the network-free startup/fallback shape consumed by the recurring projection. Every
+    participant is explicit ``missing``/``unknown`` truth; the background landing refresher replaces
+    it with observed facts once its first exact-contract probe completes.
+    """
+    if not landing_active(contract):
+        return None
+    refs: list[dict[str, object]] = [
+        {
+            "kind": "origin-feat",
+            "label": f"origin/{contract.code_source_branch}",
+            "state": "unknown",
+            "factState": "missing",
+            "detail": "observation pending",
+        }
+    ]
+    if contract.memory_mode == "external" and contract.memory_repo_path is not None:
+        refs.append(
+            {
+                "kind": "origin-mem-main",
+                "label": f"origin/{contract.memory_source_branch}",
+                "state": "unknown",
+                "factState": "missing",
+                "detail": "observation pending",
+            }
+        )
+    refs.extend(
+        [
+            {
+                "kind": "origin-main",
+                "label": "origin/main",
+                "state": "unknown",
+                "factState": "missing",
+                "detail": "observation pending",
+            },
+            {
+                "kind": "pr",
+                "label": "PR",
+                "state": "unknown",
+                "factState": "missing",
+                "detail": "observation pending",
+            },
+        ]
+    )
     return refs

@@ -10,9 +10,12 @@ from __future__ import annotations
 import json
 import sys
 import tempfile
+import time
 import unittest
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from unittest.mock import patch
 
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
@@ -39,6 +42,7 @@ from agents_remember.observer.snapshots import (
     read_task_documents,
 )
 from agents_remember.observer.store import EventStore
+from agents_remember.worktrees.worktree_contract import default_contract, write_contract
 
 NOW = datetime(2026, 7, 9, 12, 0, 0, tzinfo=UTC)
 
@@ -125,22 +129,106 @@ class GitStatusCacheTests(unittest.TestCase):
 
     def test_status_payload_cached_within_ttl(self) -> None:
         calls = {"count": 0}
-        original = snapshots.status_payload
+        original = snapshots.projected_status_payload
 
-        def fake_status(_contract):  # type: ignore[no-untyped-def]
+        class NoLanding:
+            def current(self, contract, *, now):  # type: ignore[no-untyped-def]
+                _ = contract, now
+
+        def fake_status(_contract, *, landing):  # type: ignore[no-untyped-def]
+            _ = landing
             calls["count"] += 1
             return {"ok": True}
 
-        snapshots.status_payload = fake_status  # type: ignore[assignment]
+        snapshots.projected_status_payload = fake_status  # type: ignore[assignment]
         snapshots._status_payload_cache.clear()
+        landing_state = NoLanding()
         try:
-            snapshots._safe_status_payload("c", cache_key="leaf-1", now=NOW)
-            snapshots._safe_status_payload("c", cache_key="leaf-1", now=NOW + timedelta(seconds=1))
-            snapshots._safe_status_payload("c", cache_key="leaf-1", now=NOW + timedelta(seconds=30))
+            snapshots._safe_status_payload(
+                "c", cache_key="leaf-1", now=NOW, landing_state=landing_state
+            )
+            snapshots._safe_status_payload(
+                "c",
+                cache_key="leaf-1",
+                now=NOW + timedelta(seconds=1),
+                landing_state=landing_state,
+            )
+            snapshots._safe_status_payload(
+                "c",
+                cache_key="leaf-1",
+                now=NOW + timedelta(seconds=30),
+                landing_state=landing_state,
+            )
         finally:
-            snapshots.status_payload = original  # type: ignore[assignment]
+            snapshots.projected_status_payload = original  # type: ignore[assignment]
         # 1 cold probe + 1 refresh past the 8s TTL; the within-TTL call reused the cache.
         assert_bounded_count(calls["count"], 2, label="git status probes across 3 ticks")
+
+
+class LandingProjectionHotPathTests(unittest.TestCase):
+    """Remote landing observation must not serialize the recurring projection reader."""
+
+    def test_slow_remote_landing_probes_do_not_block_engine_facts(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            coordination_root = Path(tmp)
+            for index in range(4):
+                contract = default_contract(
+                    task_name=f"landing-{index}",
+                    repo_name=f"repo-{index}",
+                    workflow_kind="light",
+                    memory_mode="disabled",
+                    coordination_root=coordination_root,
+                    code_repo_path=coordination_root / f"repo-{index}",
+                    code_source_branch=f"feat/{index}",
+                    code_work_branch=f"ar/{index}",
+                    code_base_commit=f"base-{index}",
+                    worktree_name=f"landing-{index}",
+                )
+                contract = replace(contract, closeout_status="completed")
+                contract.contract_path.parent.mkdir(parents=True, exist_ok=True)
+                write_contract(contract.contract_path, contract)
+
+            def slow_remote_probe(_contract):  # type: ignore[no-untyped-def]
+                time.sleep(0.075)
+                return []
+
+            started = time.perf_counter()
+            with patch(
+                "agents_remember.worktrees.modules.guidance.landing_refs",
+                side_effect=slow_remote_probe,
+            ):
+                facts = snapshots.read_engine_process_facts(coordination_root, now=NOW)
+            elapsed = time.perf_counter() - started
+
+            self.assertEqual(len(facts), 4)
+            self.assertLess(
+                elapsed,
+                0.15,
+                f"projection reader waited {elapsed:.3f}s for four remote landing probes",
+            )
+
+    def test_invalid_landing_snapshot_keeps_truthful_local_status(self) -> None:
+        class InvalidLanding:
+            def current(self, contract, *, now):  # type: ignore[no-untyped-def]
+                _ = contract, now
+                raise ValueError("invalid immutable snapshot")
+
+        with (
+            patch.object(
+                snapshots,
+                "projected_status_payload",
+                return_value={"code_worktree_exists": True},
+            ),
+            self.assertLogs(snapshots.logger, level="WARNING") as captured,
+        ):
+            status = snapshots._safe_status_payload(
+                "contract",
+                now=NOW,
+                landing_state=InvalidLanding(),
+            )
+
+        self.assertEqual(status, {"code_worktree_exists": True})
+        self.assertIn("landing snapshot merge failed", captured.output[0])
 
 
 class LifecycleLogCacheTests(unittest.TestCase):
