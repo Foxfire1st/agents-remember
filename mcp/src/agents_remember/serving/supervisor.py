@@ -65,6 +65,10 @@ from agents_remember.serving.dispatch_brief import (
     fulfill_briefed_expectation,
 )
 from agents_remember.serving.inbox_delivery import deliver_inbox_entry
+from agents_remember.serving.inbox_reclamation import (
+    InboxReclamationPlan,
+    plan_confirmed_gone_reclamation,
+)
 from agents_remember.serving.pane_signals import classify_pane_signal
 from agents_remember.serving.retire import retire_entry
 from agents_remember.serving.supervisor_models import (
@@ -1120,17 +1124,40 @@ def run_supervisor_sweep(ctx: SupervisorContext, *, now: datetime) -> Supervisor
     liveness (R5).
     """
     started = perf_counter()
-    # Ruled invariant (developer, 2026-07-09): the inbox is reclaimed EVERY sweep -- expired
-    # pending rows (past the pending TTL), stale consumed rows, ladder-resolved rows, and
-    # anything beyond the hard health cap are physically dropped before the sweep reads its
-    # snapshot, so the on-disk log stays folded-size-bounded no matter what produced into it.
-    inbox_removed = ctx.inbox_store.compact(now=now)
-    current = ctx.inbox_store.current()
-    if inbox_removed:
+    # R1-R8 (260712-TRH-L5): fold once under the inbox writer lock, join one catalog snapshot,
+    # terminally resolve only positively-gone supervisor alerts, then compact before selecting
+    # anything for redelivery. The existing TTL/cap compaction remains the fallback in this same
+    # transaction. Holding the lock through resolve+compact makes a concurrent consume authoritative.
+    reclamation: InboxReclamationPlan | None = None
+
+    def reconcile(current: dict[str, OperatorInboxEntry]) -> dict[str, str]:
+        nonlocal reclamation
+        reclamation = plan_confirmed_gone_reclamation(
+            current,
+            catalog_entries=ctx.catalog.list(include_terminated=True),
+            snapshotter=ctx.tmux_name_snapshotter,
+        )
+        return dict(reclamation.resolve_reasons)
+
+    inbox_removed, current, resolved_entries = ctx.inbox_store.reconcile_and_compact(
+        now=now,
+        reconcile=reconcile,
+    )
+    if inbox_removed or resolved_entries:
+        data: dict[str, object] = {"removed": inbox_removed, "kept": len(current)}
+        if reclamation is not None and reclamation.candidate_row_count:
+            data.update(
+                {
+                    "resolvedRowCount": len(resolved_entries),
+                    "uniqueSubjectCount": reclamation.unique_subject_count,
+                    "keptCandidateCount": reclamation.kept_row_count,
+                    "evidenceClass": reclamation.evidence_class,
+                }
+            )
         _log_event(
             ctx,
             "orchestration.supervisor.inbox-compacted",
-            {"removed": inbox_removed, "kept": len(current)},
+            data,
         )
     # CS-6 D2/D3: read + reclaim the append-only signal cooldown log ONCE per sweep. compact()
     # drops rows older than the cooldown window (they can no longer suppress a signal) and returns

@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import fcntl
 import os
+from collections.abc import Callable, Iterator, Mapping
+from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 
@@ -40,22 +43,13 @@ class OperatorInboxStore:
 
     def append(self, record: OperatorInboxEntry) -> None:
         """Append one inbox snapshot, creating parent dirs on first write."""
-        path = self.log_path()
-        path.parent.mkdir(parents=True, exist_ok=True)
-        line = record.model_dump_json(by_alias=True, exclude_none=True)
-        with path.open("a", encoding="utf-8") as handle:
-            handle.write(line + "\n")
+        with self._exclusive_access():
+            self._append_unlocked(record)
 
     def read(self) -> list[OperatorInboxEntry]:
         """Read the inbox log back as validated snapshots (empty when absent)."""
-        path = self.log_path()
-        if not path.exists():
-            return []
-        return [
-            OperatorInboxEntry.model_validate_json(line)
-            for line in path.read_text(encoding="utf-8").splitlines()
-            if line.strip()
-        ]
+        with self._exclusive_access():
+            return self._read_unlocked()
 
     def current(self) -> dict[str, OperatorInboxEntry]:
         """Fold the inbox by entry id, with terminal snapshots dominating stale pending ones."""
@@ -301,51 +295,115 @@ class OperatorInboxStore:
         consumed_via: OperatorInboxVia,
     ) -> tuple[OperatorInboxEntry, bool]:
         """Mark an entry consumed. Returns ``(entry, consumed_now)``."""
-        current = self.current().get(entry_id)
-        if current is None:
-            raise KeyError(f"no operator inbox entry {entry_id!r}")
-        if current.state != "pending":
-            return current, False
-        consumed = consume_operator_inbox_entry(
-            current,
-            now=now,
-            consumed_by=consumed_by,
-            consumed_via=consumed_via,
-        )
-        self.append(consumed)
-        return consumed, True
+        with self._exclusive_access():
+            current = fold_operator_inbox_entries(self._read_unlocked()).get(entry_id)
+            if current is None:
+                raise KeyError(f"no operator inbox entry {entry_id!r}")
+            if current.state != "pending":
+                return current, False
+            consumed = consume_operator_inbox_entry(
+                current,
+                now=now,
+                consumed_by=consumed_by,
+                consumed_via=consumed_via,
+            )
+            self._append_unlocked(consumed)
+            return consumed, True
 
     def delete(self, entry_id: str) -> bool:
         """Physically remove one inbox entry id from the shared inbox log."""
-        records = self.read()
-        kept = [record for record in records if record.id != entry_id]
-        if len(kept) == len(records):
-            return False
-        self._replace(kept)
-        return True
+        with self._exclusive_access():
+            records = self._read_unlocked()
+            kept = [record for record in records if record.id != entry_id]
+            if len(kept) == len(records):
+                return False
+            self._replace_unlocked(kept)
+            return True
 
     def delete_by_gate(self, gate_id: str) -> int:
         """Physically remove pending or historical entries tied to one gate."""
-        records = self.read()
-        kept = [record for record in records if record.gateId != gate_id]
-        if len(kept) == len(records):
-            return 0
-        self._replace(kept)
-        return len(records) - len(kept)
+        with self._exclusive_access():
+            records = self._read_unlocked()
+            kept = [record for record in records if record.gateId != gate_id]
+            if len(kept) == len(records):
+                return 0
+            self._replace_unlocked(kept)
+            return len(records) - len(kept)
 
     def compact(self, *, now: datetime) -> int:
         """Prune consumed or expired interaction entries from the inbox log."""
-        records = self.read()
-        if not records:
-            return 0
-        keep_ids = inbox_keep_ids(records, now=now)
-        kept = [record for record in records if record.id in keep_ids]
-        if len(kept) == len(records):
-            return 0
-        self._replace(kept)
-        return len(records) - len(kept)
+        with self._exclusive_access():
+            records = self._read_unlocked()
+            if not records:
+                return 0
+            keep_ids = inbox_keep_ids(records, now=now)
+            kept = [record for record in records if record.id in keep_ids]
+            if len(kept) == len(records):
+                return 0
+            self._replace_unlocked(kept)
+            return len(records) - len(kept)
 
-    def _replace(self, records: list[OperatorInboxEntry]) -> None:
+    def reconcile_and_compact(
+        self,
+        *,
+        now: datetime,
+        reconcile: Callable[[dict[str, OperatorInboxEntry]], Mapping[str, str]],
+    ) -> tuple[int, dict[str, OperatorInboxEntry], tuple[OperatorInboxEntry, ...]]:
+        """Fold once, terminally resolve a reviewed subset, then compact under one file lock.
+
+        The resolver receives the authoritative folded snapshot while inbox writers are blocked.
+        A consume that won the lock first is therefore terminal and cannot be overwritten; stale
+        pending snapshots already in the log remain subordinate to the terminal fold.
+        """
+        with self._exclusive_access():
+            records = self._read_unlocked()
+            current = fold_operator_inbox_entries(records)
+            persisted_ids_before = set(current)
+            resolved: list[OperatorInboxEntry] = []
+            for entry_id, reason in reconcile(dict(current)).items():
+                entry = current.get(entry_id)
+                if entry is None or entry.state != "pending":
+                    continue
+                terminal = entry.model_copy(
+                    update={
+                        "ts": now.isoformat(),
+                        "state": "ladder-resolved",
+                        "ladderResolvedAt": now.isoformat(),
+                        "ladderResolvedReason": reason,
+                        "nextAttemptAt": None,
+                    }
+                )
+                records.append(terminal)
+                current[entry_id] = terminal
+                resolved.append(terminal)
+            keep_ids = inbox_keep_ids(records, now=now, current=current)
+            kept_records = [record for record in records if record.id in keep_ids]
+            kept_current = {
+                entry_id: entry for entry_id, entry in current.items() if entry_id in keep_ids
+            }
+            removed = len(persisted_ids_before - set(kept_current))
+            if removed:
+                self._replace_unlocked(kept_records)
+            return removed, kept_current, tuple(resolved)
+
+    def _append_unlocked(self, record: OperatorInboxEntry) -> None:
+        path = self.log_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        line = record.model_dump_json(by_alias=True, exclude_none=True)
+        with path.open("a", encoding="utf-8") as handle:
+            handle.write(line + "\n")
+
+    def _read_unlocked(self) -> list[OperatorInboxEntry]:
+        path = self.log_path()
+        if not path.exists():
+            return []
+        return [
+            OperatorInboxEntry.model_validate_json(line)
+            for line in path.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+
+    def _replace_unlocked(self, records: list[OperatorInboxEntry]) -> None:
         path = self.log_path()
         if not records:
             path.unlink(missing_ok=True)
@@ -361,6 +419,18 @@ class OperatorInboxStore:
             encoding="utf-8",
         )
         os.replace(tmp, path)
+
+    @contextmanager
+    def _exclusive_access(self) -> Iterator[None]:
+        """Serialize append and physical compaction across dashboard and MCP processes."""
+        lock_path = self.log_path().with_name("operator-inbox.lock")
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        with lock_path.open("a+b") as handle:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
     def _entry_from_current(
         self,

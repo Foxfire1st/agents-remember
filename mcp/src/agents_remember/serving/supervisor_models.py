@@ -15,6 +15,10 @@ from agents_remember.controlplane.supervisor_signals import (
     SupervisorSignalRecord,
 )
 from agents_remember.observer.store import EventStore
+from agents_remember.serving.inbox_reclamation import (
+    TmuxSessionNameSnapshotter,
+    snapshot_tmux_session_names,
+)
 from agents_remember.serving.supervisor_heartbeat import SupervisorHeartbeatStore
 from agents_remember.serving.terminal import TerminalHost
 from agents_remember.serving.terminal_catalog import TerminalCatalog
@@ -98,6 +102,7 @@ class SupervisorContext:
     respawn_after_rung: int = DEFAULT_RESPAWN_AFTER_RUNG
     redeliver_budget: int = 1
     escalation_budget: int = 250
+    tmux_name_snapshotter: TmuxSessionNameSnapshotter = snapshot_tmux_session_names
 
 
 @dataclass
