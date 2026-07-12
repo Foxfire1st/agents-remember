@@ -69,7 +69,8 @@ def test_claude_errored_command_is_not_success(tmp_path: Path) -> None:
 def test_codex_message_binds_only_matching_cwd(tmp_path: Path) -> None:
     cwd = (tmp_path / "workspace").resolve()
     cwd.mkdir()
-    path = tmp_path / "codex" / "2026" / "07" / "10" / "rollout.jsonl"
+    started_at = datetime.now(UTC) - timedelta(seconds=5)
+    path = tmp_path / "codex" / started_at.strftime("%Y/%m/%d") / "rollout.jsonl"
     _write(
         path,
         [
@@ -80,7 +81,7 @@ def test_codex_message_binds_only_matching_cwd(tmp_path: Path) -> None:
     log = HarnessSessionLog(
         harness="codex",
         cwd=cwd,
-        started_at=datetime.now(UTC) - timedelta(seconds=5),
+        started_at=started_at,
         claude_root=tmp_path / "claude",
         codex_root=tmp_path / "codex",
     )
@@ -90,7 +91,7 @@ def test_codex_message_binds_only_matching_cwd(tmp_path: Path) -> None:
     wrong = HarnessSessionLog(
         harness="codex",
         cwd=tmp_path / "other",
-        started_at=datetime.now(UTC) - timedelta(seconds=5),
+        started_at=started_at,
         claude_root=tmp_path / "claude",
         codex_root=tmp_path / "codex",
     )
