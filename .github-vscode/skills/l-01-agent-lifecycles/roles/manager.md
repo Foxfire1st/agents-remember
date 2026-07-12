@@ -37,6 +37,16 @@ Roles expand horizontally into new chats; sub-agents drill vertically inside thi
 bounded analysis or report checks. A spawned manager never absorbs architect, orchestrator,
 strategist, reviewer, curator, or worker briefs.
 
+## Hosted Role Dispatch
+
+Every worker, reviewer, or curator dispatch below uses the shared three-state protocol in
+`../SKILL.md`: call `spawn_agent_session` with `context` omitted and `submit=false`, retain the exact
+`spawned-unbriefed` session id, and require `hosted_session_readiness(...)=status=ready` for that
+same id before posting one exact-agent durable `dispatch-brief`. Spawned-only and not-ready seats
+are not active work. Briefed means both `deliveryState=delivered` and
+`deliveryDetail=harness-log-confirmed`. If delivery fails, keep the original row and session pending
+for standard retry; never duplicate the brief or respawn merely because delivery is pending.
+
 ## Lens
 
 - **Opening move:** on a developer-declared takeover, first run `../SKILL.md`'s
@@ -99,8 +109,9 @@ stops belong to the orchestrator via the system-specialist protocol.
   fix rounds resume the SAME builder); **every round must shrink the finding set** — a
   non-shrinking round escalates to the orchestrator immediately, with the full round history
   attached, regardless of the count.
-- `spawn_agent_session(worker)` — a **fresh session** on the leaf: the brief (compiled from
-  `../templates/worker-brief.md`) is pasted + submitted, with `env={"AR_SPAWN_ROLE": "worker"}` and
+- `spawn_agent_session(worker)` — a **fresh session** on the leaf: after exact-session readiness,
+  one durable `dispatch-brief` compiled from `../templates/worker-brief.md` is delivered and proven,
+  with `env={"AR_SPAWN_ROLE": "worker"}` and
   the **qualified** leaf key `<repository>/<master>/<docId>`; together they claim the worker's
   `(leaf, role)` seat, and the worker edits inside the leaf worktrees the brief names.
 - **Process and ack the worker's signals — passive contract.** A turn-report artifact is expected at
@@ -224,8 +235,8 @@ own lifecycle if you need its state).
 | model   | mid-reasoning  | leaf review + coordination; strong but below the orchestrator    |
 | effort  | medium         | one master's scope, not the portfolio                            |
 | launchArgs | — | free-form escape: verbatim harness argv (settings-only; never validated, recorded in spawn provenance) |
-| sessionCommands | — | free-form escape: lines pasted + submitted into the fresh session before the brief (settings-only; never validated) |
-| promptKeywords | — | free-form escape: prepended as the first line of the dispatch brief paste (settings-only; never validated) |
+| sessionCommands | — | settings-owned launch configuration: lines pasted + submitted during fresh-session launch (never validated; not brief delivery) |
+| promptKeywords | — | settings-owned keywords prepended exactly once to the post-readiness dispatch brief (never validated) |
 | tools   | coordination + review + leaf lifecycle | `task_doc` · `read_ar_files` · gates · `spawn_agent_session` · `session_retire` (your own master's worker/reviewer/curator seats only) · worktree lifecycle (start · closeout · integrate · finalize) · C-11/`c-09` · inbox |
 
 Settings.json `orchestration.roles.manager` overrides these, and `orchestration.rolesPerLevel.<level>.manager` overrides per dispatch level (role-file defaults < settings < level override; spawn knobs manual: `docs/reference/harnesses.md`).

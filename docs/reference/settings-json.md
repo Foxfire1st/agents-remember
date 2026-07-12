@@ -341,18 +341,28 @@ with every parameter, vocabulary, and refusal is
    unknown values refuse loudly naming the harness and its valid sets.
 2. **`launchArgs`** (list of strings) — appended VERBATIM to the harness
    launch argv. Never validated; recorded in spawn provenance.
-3. **`sessionCommands`** (list of strings; each line pasted + submitted into
-   the fresh session BEFORE the brief, then verified by command entry + stdout in the log bound by
-   the brief's unique id) and **`promptKeywords`** (list of
-   strings prepended as the first line of the dispatch-brief paste). Never
-   validated; recorded in spawn provenance.
+3. **`sessionCommands`** (list of strings; each line pasted + submitted as
+   fresh-session launch configuration before task assignment) and **`promptKeywords`** (list of
+   strings prepended exactly once to the later post-readiness `dispatch-brief`). Never validated;
+   recorded in spawn provenance. For evidence-capable harness logs (currently Claude), the brief
+   retro-proves every launch command and re-issues only a missing/errored command; the durable brief
+   remains pending until all required proofs succeed. Other harnesses preserve launch-time transport
+   with an explicitly unproven outcome rather than entering an impossible proof retry loop.
+   Session-command application by itself does not prove brief delivery.
+
+Hosted role dispatch uses the exact id through three states: `spawn_agent_session` returns
+`spawned-unbriefed`; `hosted_session_readiness` alone advances the exact seat to harness-ready;
+one durable exact-agent `dispatch-brief` starts the brief/turn-report clocks. Spawned-only and
+not-ready seats are not active work. Briefed requires both `deliveryState=delivered` and
+`deliveryDetail=harness-log-confirmed`; failure leaves the original row pending without duplicate
+brief or respawn.
 
 The claude effort vocabulary (empirical, 2026-07-07) is TWO-VEHICLE:
 
 | Value | Delivery vehicle |
 | --- | --- |
 | `low`, `medium`, `high`, `xhigh`, `max` | the `--effort` launch flag |
-| `ultracode` | the `/effort ultracode` session command, pasted post-launch before the brief |
+| `ultracode` | the `/effort ultracode` session command, applied during fresh-session launch |
 
 Rationale: the installed claude CLI **warns-then-silently-degrades** on
 unknown `--effort` values (probed with `ultracode`, which its interactive

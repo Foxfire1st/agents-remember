@@ -110,6 +110,16 @@ host harness rules.
 Hat-collapse is allowed here because this is the owner/developer-facing seat. The same collapse is
 not allowed in spawned role seats.
 
+## Hosted Role Dispatch
+
+Every horizontal expansion from this seat follows the shared three-state protocol in `../SKILL.md`:
+`spawn_agent_session(context omitted, submit=false)` must return `spawned-unbriefed`; then
+`hosted_session_readiness` must return `status=ready` for the exact returned session id; only then
+post one exact-agent durable `dispatch-brief`. A spawned-only or not-ready orchestrator is not
+active work. Count it briefed only from `deliveryState=delivered` plus
+`deliveryDetail=harness-log-confirmed`; a failed delivery stays pending on the same row and session,
+never a duplicate brief or automatic respawn.
+
 ## Design And Drawing Board
 
 When the developer is still shaping the work, the architect wears `roles/designer.md` inline:
@@ -247,8 +257,8 @@ developer or the configured distinct decider; the architect does not approve its
 | model   | highest-reasoning | developer-facing architecture and ruling quality need the strongest model |
 | effort  | high              | decision framing is not the place to economize |
 | launchArgs | — | free-form escape: verbatim harness argv (settings-only; never validated, recorded in spawn provenance) |
-| sessionCommands | — | free-form escape: lines pasted + submitted into the fresh session before the brief (settings-only; never validated) |
-| promptKeywords | — | free-form escape: prepended as the first line of the dispatch brief paste (settings-only; never validated) |
+| sessionCommands | — | settings-owned launch configuration: lines pasted + submitted during fresh-session launch (never validated; not brief delivery) |
+| promptKeywords | — | settings-owned keywords prepended exactly once to the post-readiness dispatch brief (never validated) |
 | tools   | developer-facing owner surface | `read_ar_files` · onboarding · route indexes · `task_doc` · inbox · gates for developer hand-offs · `spawn_agent_session` |
 
 Settings.json `orchestration.roles.architect` overrides these, and `orchestration.rolesPerLevel.<level>.architect` overrides per dispatch level (role-file defaults < settings < level override; spawn knobs manual: `docs/reference/harnesses.md`).

@@ -253,8 +253,12 @@ function seedSeriesOrdering() {
   dashboardStore.getState().applySnapshot(projection);
 }
 
-function seedTaskDocuments(docs: TaskDocNode[]) {
+function seedTaskDocuments(
+  docs: TaskDocNode[],
+  over: Partial<Pick<WorkspaceProjection, "lifecycles" | "enclosures" | "activeWorktreeGroups">> = {},
+) {
   seedProjection({
+    ...over,
     analytics: {
       driftSnapshots: [],
       stalestSidecars: [],
@@ -792,6 +796,108 @@ describe("DetailPanel master series navigation (6g)", () => {
     expect(queryByText("Current State")).toBeNull();
   });
 
+  it("loads the complete task body before mounting reader ancillary requests", async () => {
+    const lifecycleId = "LC-READER-PRIORITY";
+    const summary = taskDoc({
+      lifecycleId,
+      kind: "subTask",
+      docPath: "/tasks/agents-remember/260712_reader-priority/01_reader.json",
+      title: "Reader priority",
+      objective: "Summary objective.",
+      steps: [{ id: "S1", title: "Keep the summary visible", status: "inProgress", substeps: [] }],
+    });
+    seedTaskDocuments([summary], {
+      lifecycles: [
+        {
+          id: lifecycleId,
+          state: "running",
+          phase: "build",
+          fleeting: false,
+          enclosure: "/contracts/reader-priority",
+          repoId: "agents-remember",
+          tokens: 0,
+          startedAt: "2026-07-12T08:00:00+00:00",
+          lastEventTs: "2026-07-12T08:00:01+00:00",
+          inferred: false,
+          actions: [],
+          tokenSeries: [],
+        },
+      ],
+      enclosures: [
+        enclosure({
+          enclosure: "/contracts/reader-priority",
+          lifecycleId,
+          leafId: summary.id,
+          taskId: "READER-PRIORITY-MASTER",
+          taskName: "260712_reader-priority",
+          worktreeGroup: "/worktrees/reader-priority-ar",
+        }),
+      ],
+      activeWorktreeGroups: ["reader-priority-ar"],
+    });
+    let resolveBody!: (response: Response) => void;
+    const pendingBody = new Promise<Response>((resolve) => {
+      resolveBody = resolve;
+    });
+    const requested: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((url: string): Promise<Response> => {
+        requested.push(url);
+        if (url.startsWith("/api/task-document")) return pendingBody;
+        if (url.startsWith("/api/notes/list")) {
+          return Promise.resolve({
+            ok: true,
+            status: 200,
+            json: async () => ({
+              repo: "repo-a",
+              master: "260712_reader-priority",
+              notes: [],
+              truncated: false,
+            }),
+          } as unknown as Response);
+        }
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: async () => ({
+            counters: {
+              code: { files: 0, insertions: 0, deletions: 0 },
+              memory: { files: 0, insertions: 0, deletions: 0 },
+            },
+          }),
+        } as unknown as Response);
+      }),
+    );
+
+    const { getByText, queryByText } = render(
+      <DetailPanel
+        selectedId={lifecycleId}
+        onOpenChangeSet={vi.fn()}
+      />,
+    );
+
+    expect(getByText("Summary objective.")).toBeTruthy();
+    expect(getByText("Loading complete task document…")).toBeTruthy();
+    await waitFor(() => expect(requested).toHaveLength(1));
+    expect(requested[0]).toContain("/api/task-document");
+    expect(requested.some((url) => url.startsWith("/api/changeset/"))).toBe(false);
+    expect(requested.some((url) => url.startsWith("/api/notes/list"))).toBe(false);
+
+    resolveBody({
+      ok: true,
+      status: 200,
+      json: async () => ({ ...summary, objective: "Complete objective." }),
+    } as unknown as Response);
+
+    await waitFor(() => expect(getByText("Complete objective.")).toBeTruthy());
+    expect(queryByText("Loading complete task document…")).toBeNull();
+    await waitFor(() => {
+      expect(requested.some((url) => url.startsWith("/api/changeset/"))).toBe(true);
+      expect(requested.some((url) => url.startsWith("/api/notes/list"))).toBe(true);
+    });
+  });
+
   it("renders the complete on-demand task-document body while retaining its summary", async () => {
     const summary = taskDoc({
       kind: "subTask",
@@ -805,8 +911,27 @@ describe("DetailPanel master series navigation (6g)", () => {
       ...summary,
       objective: "Complete objective.",
       requirements: ["Show the complete body."],
-      decisions: [{ at: "2026-07-10", decision: "Use the on-demand body.", rationale: "It is authoritative." }],
+      design: "Hydrate the visible reader first.",
+      codeExamples: [
+        {
+          id: "E1",
+          title: "Body priority",
+          distinctChange: "Delay ancillary requests.",
+          why: "The complete task is the reader's primary content.",
+          language: "tsx",
+          snippet: "bodyState !== 'loading'",
+        },
+      ],
+      decisions: [
+        {
+          at: "2026-07-10",
+          decision: "Use the on-demand body.",
+          rationale: "It is authoritative.",
+        },
+      ],
+      openQuestions: ["Does every reader entry path share this state?"],
       references: ["notes/reader.md"],
+      sections: [{ kind: "freeform", heading: "Evidence", body: "The live request was starved." }],
     };
     vi.stubGlobal(
       "fetch",
@@ -814,7 +939,16 @@ describe("DetailPanel master series navigation (6g)", () => {
         if (url.startsWith("/api/task-document")) {
           return { ok: true, status: 200, json: async () => body } as unknown as Response;
         }
-        return { ok: true, status: 200, json: async () => ({ counters: { code: { files: 0, insertions: 0, deletions: 0 }, memory: { files: 0, insertions: 0, deletions: 0 } } }) } as unknown as Response;
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            counters: {
+              code: { files: 0, insertions: 0, deletions: 0 },
+              memory: { files: 0, insertions: 0, deletions: 0 },
+            },
+          }),
+        } as unknown as Response;
       }),
     );
 
@@ -824,7 +958,11 @@ describe("DetailPanel master series navigation (6g)", () => {
     expect(getByText("Summary objective.")).toBeTruthy();
     await waitFor(() => expect(getByText("Complete objective.")).toBeTruthy());
     expect(getByText("Show the complete body.")).toBeTruthy();
+    expect(getByText("Hydrate the visible reader first.")).toBeTruthy();
+    expect(getByText("E1 — Body priority")).toBeTruthy();
     expect(getByText("Use the on-demand body.")).toBeTruthy();
+    expect(getByText("Does every reader entry path share this state?")).toBeTruthy();
+    expect(getByText("The live request was starved.")).toBeTruthy();
     expect(getByText("notes/reader.md")).toBeTruthy();
     expect(getAllByText("S1 — Render once")).toHaveLength(1);
   });
@@ -851,6 +989,52 @@ describe("DetailPanel master series navigation (6g)", () => {
       expect(getByText("Full task document details are unavailable; showing the available summary.")).toBeTruthy(),
     );
     expect(getByText("Available summary objective.")).toBeTruthy();
+  });
+
+  it("reuses an unchanged task body and refetches when its revision changes", async () => {
+    const summary = taskDoc({
+      kind: "subTask",
+      docPath: "/tasks/agents-remember/260712_reader-priority/02_cache.json",
+      bodyRevision: "revision-1",
+      objective: "Summary objective.",
+    });
+    seedTaskDocuments([summary]);
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.startsWith("/api/task-document")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ objective: "Complete objective." }),
+        } as unknown as Response;
+      }
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          repo: "repo-a",
+          master: "260712_reader-priority",
+          notes: [],
+          truncated: false,
+        }),
+      } as unknown as Response;
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const selection = `taskdoc:${summary.docPath}`;
+    const { getByText, rerender } = render(<DetailPanel selectedId={selection} />);
+    await waitFor(() => expect(getByText("Complete objective.")).toBeTruthy());
+    rerender(<DetailPanel selectedId={selection} />);
+    expect(
+      fetchMock.mock.calls.filter(([url]) => String(url).startsWith("/api/task-document")),
+    ).toHaveLength(1);
+
+    seedTaskDocuments([{ ...summary, bodyRevision: "revision-2" }]);
+    rerender(<DetailPanel selectedId={selection} />);
+    await waitFor(() =>
+      expect(
+        fetchMock.mock.calls.filter(([url]) => String(url).startsWith("/api/task-document")),
+      ).toHaveLength(2),
+    );
   });
 });
 
@@ -1035,7 +1219,7 @@ describe("DetailPanel series notes (L9)", () => {
 describe("DetailPanel doc-reader change-set bar (L4a)", () => {
   const leafPath = "/tasks/agents-remember/260628_operations-integration/04a_changeset-everywhere.json";
 
-  it("shows a committed button on a leaf doc reader (no live enclosure) and opens the leaf target", () => {
+  it("shows a committed button on a leaf doc reader (no live enclosure) and opens the leaf target", async () => {
     stubCounters();
     const doc = taskDoc({
       id: "260628-L4a",
@@ -1048,12 +1232,12 @@ describe("DetailPanel doc-reader change-set bar (L4a)", () => {
     });
     seedTaskDocuments([doc]);
     const onOpenChangeSet = vi.fn();
-    const { getAllByTestId } = render(
+    const { findAllByTestId } = render(
       <DetailPanel selectedId={`taskdoc:${leafPath}`} onOpenChangeSet={onOpenChangeSet} />,
     );
     // identity comes from the doc node, so the bar shows with NO active enclosure (the L4 gap);
     // committed is always present, working only when live -> exactly one button here.
-    const buttons = getAllByTestId("open-changeset");
+    const buttons = await findAllByTestId("open-changeset");
     expect(buttons).toHaveLength(1);
     expect(buttons[0].textContent).toContain("committed");
     fireEvent.click(buttons[0]);
@@ -1065,7 +1249,7 @@ describe("DetailPanel doc-reader change-set bar (L4a)", () => {
     });
   });
 
-  it("shows a series button on a master doc reader", () => {
+  it("shows a series button on a master doc reader", async () => {
     stubCounters();
     const master = taskDoc({
       lifecycleId: undefined,
@@ -1077,13 +1261,13 @@ describe("DetailPanel doc-reader change-set bar (L4a)", () => {
     });
     seedTaskDocuments([master]);
     const onOpenChangeSet = vi.fn();
-    const { getAllByTestId } = render(
+    const { findAllByTestId } = render(
       <DetailPanel
         selectedId="taskdoc:/tasks/agents-remember/260628_operations-integration/task.json"
         onOpenChangeSet={onOpenChangeSet}
       />,
     );
-    const buttons = getAllByTestId("open-changeset");
+    const buttons = await findAllByTestId("open-changeset");
     expect(buttons).toHaveLength(1);
     expect(buttons[0].textContent).toContain("series");
     fireEvent.click(buttons[0]);
@@ -1093,7 +1277,7 @@ describe("DetailPanel doc-reader change-set bar (L4a)", () => {
     });
   });
 
-  it("adds a working button when the leaf's enclosure is live", () => {
+  it("adds a working button when the leaf's enclosure is live", async () => {
     stubCounters();
     const doc = taskDoc({
       id: "260628-l4a",
@@ -1130,10 +1314,10 @@ describe("DetailPanel doc-reader change-set bar (L4a)", () => {
       },
     });
     const onOpenChangeSet = vi.fn();
-    const { getAllByTestId } = render(
+    const { findAllByTestId } = render(
       <DetailPanel selectedId={`taskdoc:${leafPath}`} onOpenChangeSet={onOpenChangeSet} />,
     );
-    const labels = getAllByTestId("open-changeset").map((b) => b.textContent ?? "");
+    const labels = (await findAllByTestId("open-changeset")).map((b) => b.textContent ?? "");
     expect(labels).toHaveLength(2);
     expect(labels.some((t) => t.includes("committed"))).toBe(true);
     expect(labels.some((t) => t.includes("working"))).toBe(true);

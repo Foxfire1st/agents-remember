@@ -48,7 +48,9 @@ def _config(root: Path, **retirement_overrides: bool) -> McpRuntimeConfig:
         coordination_root=root,
         workspace_root=root,
         transcript_root=root / "logs" / "mcp",
-        retirement=RetirementSettings(**retirement_overrides) if retirement_overrides else RetirementSettings(),
+        retirement=RetirementSettings(**retirement_overrides)
+        if retirement_overrides
+        else RetirementSettings(),
     )
 
 
@@ -119,7 +121,9 @@ class RetirePolicyMatrixTests(unittest.TestCase):
 
     def test_manager_refused_against_a_manager_seat(self) -> None:
         actor = SeatRef(session_id="mgr-a", leaf_key="repo/master-a/manager-a", seat_role="manager")
-        target = SeatRef(session_id="mgr-b", leaf_key="repo/master-a/manager-b", seat_role="manager")
+        target = SeatRef(
+            session_id="mgr-b", leaf_key="repo/master-a/manager-b", seat_role="manager"
+        )
         with self.assertRaisesRegex(RetirePolicyError, "own master"):
             check_retire_authority(actor, target)
 
@@ -170,18 +174,17 @@ class SessionRetireToolTests(unittest.TestCase):
         self._dir = tempfile.TemporaryDirectory()
         self.root = Path(self._dir.name)
         self.config = _config(self.root)
-        self.catalog = TerminalCatalog(
-            self.root / "logs" / "dashboard" / "terminal-sessions.json"
-        )
+        self.catalog = TerminalCatalog(self.root / "logs" / "dashboard" / "terminal-sessions.json")
 
     def tearDown(self) -> None:
         self._dir.cleanup()
 
     def _with_catalog_patched(self, fn):
-        with mock.patch(
-            "agents_remember.mcp.tools.terminal.TerminalCatalog", return_value=self.catalog
-        ), mock.patch(
-            "agents_remember.mcp.tools.terminal.TerminalHost", return_value=_FakeHost()
+        with (
+            mock.patch(
+                "agents_remember.mcp.tools.terminal.TerminalCatalog", return_value=self.catalog
+            ),
+            mock.patch("agents_remember.mcp.tools.terminal.TerminalHost", return_value=_FakeHost()),
         ):
             return fn()
 
@@ -195,7 +198,9 @@ class SessionRetireToolTests(unittest.TestCase):
         self.assertEqual(result["status"], "unknown-session")
 
     def test_unknown_actor_session_is_refused(self) -> None:
-        self.catalog.upsert(_entry("worker-1", leaf_key="repo/master-a/leaf-1", spawn_role="worker"))
+        self.catalog.upsert(
+            _entry("worker-1", leaf_key="repo/master-a/leaf-1", spawn_role="worker")
+        )
         result = self._with_catalog_patched(
             lambda: session_retire_payload(
                 self.config, actor_session_id="missing-actor", session_id="worker-1"
@@ -206,7 +211,9 @@ class SessionRetireToolTests(unittest.TestCase):
 
     def test_manager_retires_own_worker_end_to_end(self) -> None:
         self.catalog.upsert(_entry("mgr", leaf_key="repo/master-a/master-a", spawn_role="manager"))
-        self.catalog.upsert(_entry("worker-1", leaf_key="repo/master-a/leaf-1", spawn_role="worker"))
+        self.catalog.upsert(
+            _entry("worker-1", leaf_key="repo/master-a/leaf-1", spawn_role="worker")
+        )
         result = self._with_catalog_patched(
             lambda: session_retire_payload(
                 self.config, actor_session_id="mgr", session_id="worker-1", reason="leaf done"
@@ -270,7 +277,9 @@ class SessionRetireToolTests(unittest.TestCase):
 
     def test_retiring_an_already_retired_seat_is_idempotent(self) -> None:
         self.catalog.upsert(_entry("mgr", leaf_key="repo/master-a/master-a", spawn_role="manager"))
-        self.catalog.upsert(_entry("worker-1", leaf_key="repo/master-a/leaf-1", spawn_role="worker"))
+        self.catalog.upsert(
+            _entry("worker-1", leaf_key="repo/master-a/leaf-1", spawn_role="worker")
+        )
         first = self._with_catalog_patched(
             lambda: session_retire_payload(
                 self.config, actor_session_id="mgr", session_id="worker-1"
@@ -279,7 +288,10 @@ class SessionRetireToolTests(unittest.TestCase):
         self.assertEqual(first["status"], "retired")
         second = self._with_catalog_patched(
             lambda: session_retire_payload(
-                self.config, actor_session_id="mgr", session_id="worker-1", reason="different reason"
+                self.config,
+                actor_session_id="mgr",
+                session_id="worker-1",
+                reason="different reason",
             )
         )
         self.assertTrue(second["ok"])
@@ -307,9 +319,7 @@ class SessionRenameToolTests(unittest.TestCase):
         self._dir = tempfile.TemporaryDirectory()
         self.root = Path(self._dir.name)
         self.config = _config(self.root)
-        self.catalog = TerminalCatalog(
-            self.root / "logs" / "dashboard" / "terminal-sessions.json"
-        )
+        self.catalog = TerminalCatalog(self.root / "logs" / "dashboard" / "terminal-sessions.json")
 
     def tearDown(self) -> None:
         self._dir.cleanup()
@@ -378,6 +388,53 @@ class TurnStateClassificationTests(unittest.TestCase):
         result = classify_turn_state("assistant: done.\n>\n", harness="claude")
         self.assertEqual(result.state, "turn-ended")
 
+    def test_modern_codex_composer_classifies_turn_ended(self) -> None:
+        result = classify_turn_state(
+            "header\n\N{SINGLE RIGHT-POINTING ANGLE QUOTATION MARK} Explain this codebase",
+            harness="codex",
+        )
+        self.assertEqual(result.state, "turn-ended")
+
+    def test_midline_codex_glyph_in_transcript_does_not_mark_ready(self) -> None:
+        result = classify_turn_state(
+            "assistant described the glyph "
+            "\N{SINGLE RIGHT-POINTING ANGLE QUOTATION MARK} inside prose",
+            harness="codex",
+        )
+        self.assertEqual(result.state, "stale")
+
+    def test_historical_codex_prompt_line_does_not_mark_ready(self) -> None:
+        result = classify_turn_state(
+            "\N{SINGLE RIGHT-POINTING ANGLE QUOTATION MARK} previous submitted user prompt\n"
+            "■ You've hit your usage limit.",
+            harness="codex",
+        )
+        self.assertEqual(result.state, "stale")
+
+    def test_nonempty_codex_composer_draft_does_not_mark_ready(self) -> None:
+        result = classify_turn_state(
+            "\N{SINGLE RIGHT-POINTING ANGLE QUOTATION MARK} unrelated existing draft",
+            harness="codex",
+        )
+        self.assertEqual(result.state, "stale")
+
+    def test_codex_empty_composer_with_footer_marks_ready(self) -> None:
+        result = classify_turn_state(
+            "\N{SINGLE RIGHT-POINTING ANGLE QUOTATION MARK} Explain this codebase\n"
+            "\n  gpt-5.6-sol xhigh fast · ~/Projects",
+            harness="codex",
+        )
+        self.assertEqual(result.state, "turn-ended")
+
+    def test_historical_thinking_prose_does_not_override_live_codex_composer(self) -> None:
+        result = classify_turn_state(
+            "I was thinking about this earlier.\n"
+            "\N{SINGLE RIGHT-POINTING ANGLE QUOTATION MARK} Explain this codebase\n\n"
+            "  gpt-5.6-sol xhigh fast · ~/Projects",
+            harness="codex",
+        )
+        self.assertEqual(result.state, "turn-ended")
+
     def test_empty_capture_classifies_stale(self) -> None:
         result = classify_turn_state("", harness="claude")
         self.assertEqual(result.state, "stale")
@@ -394,6 +451,14 @@ class TurnStateClassificationTests(unittest.TestCase):
         # A busy marker anywhere in the capture wins even if the pane ALSO contains
         # something that looks like an idle prompt further up the scrollback.
         result = classify_turn_state(">\nesc to interrupt", harness="claude")
+        self.assertEqual(result.state, "working")
+
+    def test_busy_marker_takes_precedence_over_codex_composer(self) -> None:
+        result = classify_turn_state(
+            "\N{SINGLE RIGHT-POINTING ANGLE QUOTATION MARK} "
+            "Explain this codebase\nesc to interrupt",
+            harness="codex",
+        )
         self.assertEqual(result.state, "working")
 
 
@@ -452,7 +517,6 @@ class TurnStateSweepWiringTests(unittest.TestCase):
             calls.append(tmux_name)
             return "(esc to interrupt)"
 
-
         observation = observe_terminal_liveness(
             self.catalog,
             _AliveHost(),
@@ -482,7 +546,11 @@ class TerminalMarkVsLivenessInterplayTests(unittest.TestCase):
     def test_retired_row_stays_terminated_after_an_alive_liveness_probe(self) -> None:
         self.catalog.upsert(_entry("worker-1"))
         self.catalog.mark_retired(
-            "worker-1", at="2026-07-08T00:00:00+00:00", by_session="mgr", reason="done", edge="manual"
+            "worker-1",
+            at="2026-07-08T00:00:00+00:00",
+            by_session="mgr",
+            reason="done",
+            edge="manual",
         )
         updated = self.catalog.record_liveness_probe(
             "worker-1", alive=True, checked_at=datetime(2026, 7, 8, 0, 1, tzinfo=UTC)
@@ -520,7 +588,9 @@ class LandSeatsForLeafTests(unittest.TestCase):
         self._dir.cleanup()
 
     def test_lands_only_matching_role_and_leaf_without_terminating(self) -> None:
-        self.catalog.upsert(_entry("worker-1", leaf_key="repo/master-a/leaf-1", spawn_role="worker"))
+        self.catalog.upsert(
+            _entry("worker-1", leaf_key="repo/master-a/leaf-1", spawn_role="worker")
+        )
         self.catalog.upsert(
             _entry("reviewer-1", leaf_key="repo/master-a/leaf-1", spawn_role="reviewer")
         )
@@ -547,7 +617,10 @@ class LandSeatsForLeafTests(unittest.TestCase):
     def test_terminated_seats_are_skipped_by_landing(self) -> None:
         self.catalog.upsert(
             _entry(
-                "worker-1", leaf_key="repo/master-a/leaf-1", spawn_role="worker", status="terminated"
+                "worker-1",
+                leaf_key="repo/master-a/leaf-1",
+                spawn_role="worker",
+                status="terminated",
             )
         )
         landed = land_seats_for_leaf(
@@ -696,9 +769,7 @@ class AutoLandHookIntegrationTests(unittest.TestCase):
                 "integrate_result",
                 return_value=mock.Mock(payload={"state": "integrated"}, returncode=0),
             ),
-            mock.patch.object(
-                worktree_tools, "load_contract", side_effect=OSError("gone")
-            ),
+            mock.patch.object(worktree_tools, "load_contract", side_effect=OSError("gone")),
         ):
             result = worktree_tools.worktree_integrate_tool(
                 config, contract_path=str(self.contract_path)

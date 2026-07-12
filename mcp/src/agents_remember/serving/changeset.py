@@ -25,9 +25,9 @@ the ``task_changeset`` shape. Selection precedence is ``leaf > master > scope``.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Query
 from fastapi.responses import JSONResponse, Response
 
 from agents_remember.errors import AuthorityError
@@ -40,7 +40,7 @@ from agents_remember.worktrees.modules.git import (
     commit_text_or_none,
     head_commit,
 )
-from agents_remember.worktrees.task_resolver import iter_leaf_enclosure_contracts, slugify
+from agents_remember.worktrees.task_resolver import slugify
 from agents_remember.worktrees.worktree_contract import (
     ContractError,
     WorktreeContract,
@@ -134,19 +134,32 @@ def _leaf_counts(contract: WorktreeContract, *, memory: bool) -> list[dict[str, 
     return []
 
 
+def _master_task_root(config: McpRuntimeConfig, repo_id: str, master: str) -> Path | None:
+    """Return the exact requested master task root when ``master`` is one safe path segment."""
+    if not master or "/" in master or "\\" in master or master.startswith("."):
+        return None
+    return config.coordination_root / "tasks" / repo_id / master
+
+
+def _master_enclosure_contracts(
+    config: McpRuntimeConfig, repo_id: str, master: str
+) -> list[Path]:
+    """Leaf contracts directly under ``tasks/<repo>/<master>/enclosures`` only."""
+    task_root = _master_task_root(config, repo_id, master)
+    if task_root is None:
+        return []
+    return sorted((task_root / "enclosures").glob("*/series-contract.md"))
+
+
 def _load_master_contract(
     config: McpRuntimeConfig, repo_id: str, master: str
 ) -> WorktreeContract | None:
-    """The series (root) contract at ``tasks/<repo>/<master>/series-contract.md``, or None.
-
-    ``master`` is confined to a single path segment (no separators / ``..``) so a wire value
-    cannot escape the tasks tree.
-    """
-    if not master or "/" in master or "\\" in master or master.startswith("."):
+    """The series (root) contract at ``tasks/<repo>/<master>/series-contract.md``, or None."""
+    task_root = _master_task_root(config, repo_id, master)
+    if task_root is None:
         return None
-    path = config.coordination_root / "tasks" / repo_id / master / "series-contract.md"
     try:
-        return load_contract(path)
+        return load_contract(task_root / "series-contract.md")
     except (ContractError, OSError):
         return None
 
@@ -183,7 +196,7 @@ def _master_leaf_summaries(
 ) -> list[dict[str, Any]]:
     """Per-leaf counter breakdown (each leaf vs its own base) shown alongside the net diff."""
     leaves: list[dict[str, Any]] = []
-    for path in iter_leaf_enclosure_contracts(config.coordination_root / "tasks"):
+    for path in _master_enclosure_contracts(config, repo_id, master):
         try:
             contract = load_contract(path)
         except (ContractError, OSError):
@@ -203,14 +216,17 @@ def _master_leaf_summaries(
     return leaves
 
 
-def master_changeset(config: McpRuntimeConfig, repo_id: str, master: str) -> dict[str, Any]:
+def master_changeset(
+    config: McpRuntimeConfig, repo_id: str, master: str, *, include_leaves: bool = True
+) -> dict[str, Any]:
     """The series NET change-set: ``git diff <master-base> <series-tip>`` for code + memory.
 
     Unlike a sum of the leaf change-sets (which double-counts a file two leaves touched and has
     no single base to diff against), the net range from the master's recorded base to the live
     source-branch tip is one coherent diff -- so every changed file is inspectable via
-    :func:`master_file_diff`. ``leaves`` keeps the per-leaf counter breakdown alongside it.
-    Reflects the COMMITTED/landed series state; an in-flight leaf not yet integrated is excluded.
+    :func:`master_file_diff`. ``leaves`` keeps the optional per-leaf counter breakdown alongside it.
+    Callers that render only the net range can skip those extra per-leaf git diffs. Reflects the
+    COMMITTED/landed series state; an in-flight leaf not yet integrated is excluded.
     """
     contract = _load_master_contract(config, repo_id, master)
     code: list[dict[str, Any]] = []
@@ -240,7 +256,7 @@ def master_changeset(config: McpRuntimeConfig, repo_id: str, master: str) -> dic
         )
     return {
         "master": master,
-        "leaves": _master_leaf_summaries(config, repo_id, master),
+        "leaves": _master_leaf_summaries(config, repo_id, master) if include_leaves else [],
         "code": code,
         "memory": memory,
         "counters": {"code": _sum(code), "memory": _sum(memory)},
@@ -287,15 +303,15 @@ def _load_leaf_contract(
 ) -> WorktreeContract | None:
     """The leaf enclosure contract for ``leaf`` under ``master``, resolved by leaf-id, or None.
 
-    Matched by ``slugify(leaf) == contract.leaf_id`` over the persisted enclosure contracts, so it
-    keeps resolving after the leaf's worktree is cleaned up (the contract outlives the worktree).
-    ``master`` scopes the search to one series (matched against the contract's parent/task name) so a
-    leaf-id that recurs across series cannot collide. ``leaf`` is confined to a single path segment.
+    Both requested and persisted leaf ids use ``slugify`` so authored mixed-case ids match the
+    dashboard's normalized selector. Discovery is confined to the requested repository/master's
+    direct enclosure directory, so a leaf-id that recurs across series cannot collide. ``leaf`` is
+    confined to a single path segment.
     """
     if not leaf or "/" in leaf or "\\" in leaf or leaf.startswith("."):
         return None
     want = slugify(leaf)
-    for path in iter_leaf_enclosure_contracts(config.coordination_root / "tasks"):
+    for path in _master_enclosure_contracts(config, repo_id, master):
         try:
             contract = load_contract(path)
         except (ContractError, OSError):
@@ -304,7 +320,7 @@ def _load_leaf_contract(
             continue
         if master not in (contract.parent_task_name, contract.task_name):
             continue
-        if contract.leaf_id == want:
+        if slugify(contract.leaf_id) == want:
             return contract
     return None
 
@@ -505,5 +521,11 @@ def register_changeset_routes(app: FastAPI, config: McpRuntimeConfig) -> None:
         return run_scoped(lambda fs: file_diff(fs, kind, path), config, repo, scope)
 
     @app.get("/api/changeset/master")
-    def api_changeset_master(repo: str, master: str) -> Response:
-        return JSONResponse(master_changeset(config, repo, master), status_code=200)
+    def api_changeset_master(
+        repo: str,
+        master: str,
+        include_leaves: Annotated[bool, Query(alias="includeLeaves")] = True,
+    ) -> Response:
+        return JSONResponse(
+            master_changeset(config, repo, master, include_leaves=include_leaves), status_code=200
+        )

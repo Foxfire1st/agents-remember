@@ -27,6 +27,16 @@ architect or owning seat via the inbox. Roles expand horizontally into new chats
 vertically inside this seat for bounded analysis. A spawned orchestrator never absorbs another
 role brief and never performs architect/developer-facing hat-collapse.
 
+## Hosted Role Dispatch
+
+Every manager, strategist, reviewer, or system-specialist dispatch below means the complete shared
+three-state protocol in `../SKILL.md`: spawn with `context` omitted and `submit=false` and retain the
+exact `spawned-unbriefed` session id; require `hosted_session_readiness(...)=status=ready` for that
+same id; then create one exact-agent durable `dispatch-brief`. Spawned-only and not-ready seats are
+not active work. Briefed means both `deliveryState=delivered` and
+`deliveryDetail=harness-log-confirmed`. A delivery failure remains pending on its original row and
+session for standard retry; never duplicate its brief or respawn it merely for pending delivery.
+
 ## The Event Loop
 
 **Opening move, every session — new or resumed** (resumption is the common case, not the
@@ -56,8 +66,9 @@ exception):
 
 **Profile check (takeover).** Before heavy work in any job: if this session's harness/model/
 effort is wrong for the run (resolved: role file < settings), spawn the right chair —
-`spawn_agent_session` with `AR_SPAWN_ROLE=orchestrator` + a conversation-handover packet
-(`../templates/conversation-handover-packet.md`) — and hand over; the architect still talks to the
+`spawn_agent_session` with `AR_SPAWN_ROLE=orchestrator`, then deliver a conversation-handover packet
+(`../templates/conversation-handover-packet.md`) as the post-readiness `dispatch-brief` — and hand
+over; the architect still talks to the
 developer, and backend orchestrator seats stay behind the relay.
 
 Several jobs can be active across a day; the loop routes per event. The frame's phase axis stays
@@ -234,7 +245,8 @@ acceptable and recorded in durable notes.)
 Dispatch independent ready masters in parallel by default up to
 `orchestration.concurrency.maxParallelMasters`. Sequential execution is the exception and must
 name a gate, a shared-file one-writer dependency, or an explicit ruling. For each ready master
-(dependencies integrated into super), call `spawn_agent_session(manager)` with a brief compiled from
+(dependencies integrated into super), run the three-state hosted-role dispatch for
+`spawn_agent_session(manager)`, compiling its post-readiness `dispatch-brief` from
 `../templates/manager-brief.md` (`env={"AR_SPAWN_ROLE": "manager"}`, the **qualified** leaf key
 `<repository>/<master>/<docId>`; together the environment role and qualified leaf claim the
 manager's `(leaf, role)` seat; the brief carries the load-bearing base fact: master branches off
@@ -444,8 +456,8 @@ task, fill small blanks, escalate real deltas).
 | model   | highest-reasoning | portfolio blast-radius judgment wants the strongest model |
 | effort  | high              | the bird's-eye seat; not the place to economize |
 | launchArgs | — | free-form escape: verbatim harness argv (settings-only; never validated, recorded in spawn provenance) |
-| sessionCommands | — | free-form escape: lines pasted + submitted into the fresh session before the brief (settings-only; never validated) |
-| promptKeywords | — | free-form escape: prepended as the first line of the dispatch brief paste (settings-only; never validated) |
+| sessionCommands | — | settings-owned launch configuration: lines pasted + submitted during fresh-session launch (never validated; not brief delivery) |
+| promptKeywords | — | settings-owned keywords prepended exactly once to the post-readiness dispatch brief (never validated) |
 | tools   | full bird's-eye + orchestration | route indexes · onboarding · `grepai_search` · `cgc_*` · `read_ar_files` · `task_doc` · gates · `spawn_agent_session` · `session_retire` (any seat, portfolio-wide) · worktree/C-11 |
 
 Settings.json `orchestration.roles.orchestrator` overrides these, and `orchestration.rolesPerLevel.<level>.orchestrator` overrides per dispatch level (role-file defaults < settings < level override; spawn knobs manual: `docs/reference/harnesses.md`).

@@ -22,6 +22,13 @@ from agents_remember.controlplane.operator_inbox_records import (
 )
 from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
 from agents_remember.observer.events import now_iso
+from agents_remember.serving.dispatch_brief import (
+    DISPATCH_BRIEF_KIND,
+    DispatchBriefGate,
+    dispatch_paste_policy,
+    verify_launch_commands,
+    with_prompt_keywords,
+)
 from agents_remember.serving.harness_logs import HarnessSessionLog
 from agents_remember.serving.injector import DeliveryResult, DeliveryRow, deliver
 from agents_remember.serving.terminal import TerminalHost
@@ -52,6 +59,7 @@ def deliver_inbox_entry(
     current: dict[str, OperatorInboxEntry] | None = None,
     redelivery_floor_seconds: float | None = None,
     delivery_at: str | None = None,
+    dispatch_gate: DispatchBriefGate | None = None,
 ) -> OperatorInboxEntry:
     """Push an inbox message into the target hosted session and record the delivery state."""
     timestamp = delivery_at or now_iso()
@@ -75,12 +83,35 @@ def deliver_inbox_entry(
             current=current,
             redelivery_floor_seconds=redelivery_floor_seconds,
         )
+    if entry.messageKind == DISPATCH_BRIEF_KIND:
+        gate_detail = (dispatch_gate or DispatchBriefGate()).check(
+            catalog,
+            host,
+            target,
+            recovery=entry.attemptCount > 0,
+        )
+        if gate_detail is not None:
+            return store.record_delivery(
+                entry.id,
+                now=timestamp,
+                delivery_state="unconfirmed",
+                delivered_to_session=target.id,
+                delivery_detail=gate_detail,
+                current=current,
+                redelivery_floor_seconds=redelivery_floor_seconds,
+            )
+    text = _push_text(entry)
+    policy = None
+    if entry.messageKind == DISPATCH_BRIEF_KIND:
+        text = with_prompt_keywords(target, text)
+        policy = dispatch_paste_policy(entry, target)
     row = DeliveryRow(
         kind=entry.messageKind,
         entry_id=entry.id,
-        text=_push_text(entry),
+        text=text,
         submit=submit,
         envelope=False,  # _push_text already renders this payload's own header (below).
+        dispatch_policy=policy,
     )
     session_log = HarnessSessionLog(
         harness=target.harness or "",
@@ -101,6 +132,25 @@ def deliver_inbox_entry(
             entry_id=result.bound_entry_id,
             path=result.session_log_path,
         )
+    if entry.messageKind == DISPATCH_BRIEF_KIND and result.outcome == "acked":
+        command_proof = verify_launch_commands(
+            target,
+            paster=paster,
+            session_log=session_log,
+        )
+        if not command_proof.allows_brief:
+            detail = f"launch session commands unconfirmed: {command_proof.detail}"
+            if command_proof.capture:
+                detail += f"; {_capture_detail(command_proof.capture)}"
+            return store.record_delivery(
+                entry.id,
+                now=timestamp,
+                delivery_state="unconfirmed",
+                delivered_to_session=target.id,
+                delivery_detail=detail,
+                current=current,
+                redelivery_floor_seconds=redelivery_floor_seconds,
+            )
     return store.record_delivery(
         entry.id,
         now=timestamp,
@@ -141,13 +191,21 @@ def _unconfirmed_detail(capture: str) -> str:
     """
     if not capture:
         return "input was not harness-log-confirmed; empty failure capture"
-    return "input was not harness-log-confirmed; pane failure capture (tail):\n" + capture[-_CAPTURE_EVIDENCE_LIMIT:]
+    return (
+        "input was not harness-log-confirmed; pane failure capture (tail):\n"
+        + capture[-_CAPTURE_EVIDENCE_LIMIT:]
+    )
 
 
 def _target_session(
     catalog: TerminalCatalog,
     entry: OperatorInboxEntry,
 ) -> TerminalCatalogEntry | None:
+    if entry.messageKind == DISPATCH_BRIEF_KIND:
+        if entry.agentId is None:
+            return None
+        target = catalog.get(entry.agentId)
+        return target if target is not None and target.status == "running" else None
     if entry.agentId:
         target = catalog.get(entry.agentId)
         if target is not None and target.status == "running":

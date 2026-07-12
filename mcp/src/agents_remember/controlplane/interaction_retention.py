@@ -65,9 +65,10 @@ def inbox_keep_ids(
     now: datetime,
     ttl_seconds: float = INTERACTION_RECORD_TTL_SECONDS,
     max_rows: int = INBOX_MAX_CURRENT_ROWS,
+    current: dict[str, OperatorInboxEntry] | None = None,
 ) -> set[str]:
     """Inbox ids whose current snapshot still belongs in the compacted log."""
-    latest = fold_operator_inbox_entries(entries)
+    latest = fold_operator_inbox_entries(entries) if current is None else current
     kept = [
         entry
         for entry in latest.values()

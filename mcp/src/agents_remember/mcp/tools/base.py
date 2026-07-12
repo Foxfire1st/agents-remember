@@ -21,6 +21,7 @@ PUBLIC_TOOLS = (
     "read_ar_files",
     "attach_terminal_session_to_leaf",
     "spawn_agent_session",
+    "hosted_session_readiness",
     "session_retire",
     "session_rename",
     "runtime_install",
@@ -107,7 +108,9 @@ def _tool_payload(tool_name: str, payload: dict[str, Any]) -> dict[str, Any]:
         # degrades to "never ticked", never blocks the tool response).
         try:
             banner = supervisor_staleness_banner(
-                amb.root, now=datetime.now(UTC), stale_cutoff_seconds=DEFAULT_SUPERVISOR_STALE_CUTOFF_SECONDS
+                amb.root,
+                now=datetime.now(UTC),
+                stale_cutoff_seconds=DEFAULT_SUPERVISOR_STALE_CUTOFF_SECONDS,
             )
         except Exception:
             banner = None

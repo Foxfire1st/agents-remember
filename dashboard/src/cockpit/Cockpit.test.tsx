@@ -1,10 +1,15 @@
-import { cleanup, fireEvent, render } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { sessionStore } from "../data/sessions";
 import { dashboardStore } from "../data/store";
 import { GALLERY } from "../dev/fixtures";
-import type { LifecycleProjection, TaskDocNode, WorkspaceProjection } from "../types/projection";
+import type {
+  EnclosureNode,
+  LifecycleProjection,
+  TaskDocNode,
+  WorkspaceProjection,
+} from "../types/projection";
 import { CockpitShell } from "./Cockpit";
 
 function seed(stateName: string) {
@@ -113,9 +118,320 @@ function seedDrillableMaster() {
 
 afterEach(() => {
   cleanup();
+  vi.unstubAllGlobals();
   sessionStore.setState({ sessions: [], activeId: null, count: 0 });
   dashboardStore.getState().reset();
   window.localStorage.clear(); // the rail toggle now persists its choice; isolate it between tests
+});
+
+function deferred() {
+  let resolve!: () => void;
+  const promise = new Promise<void>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
+
+function liveEnclosure(
+  leafId: string,
+  lifecycleId: string,
+  enclosureId = leafId,
+): EnclosureNode {
+  return {
+    enclosure: `/contracts/${enclosureId}`,
+    enclosureId,
+    leafId,
+    taskRoot: "/tasks/repo-a/ops",
+    taskId: "ops-master",
+    taskName: "ops",
+    repoName: "repo-a",
+    lifecycleId,
+    worktreeGroup: `/worktrees/${enclosureId}`,
+    humanReviewStatus: "pending-review",
+    closeoutStatus: "not-started",
+    integrationStatus: "not-started",
+    cleanup: "pending",
+    codeWorktreeExists: true,
+    memoryWorktreeExists: true,
+    actions: [],
+  };
+}
+
+function taskReaderProjection(): WorkspaceProjection {
+  const lifecycle = (id: string, enclosure: string): LifecycleProjection => ({
+    id,
+    state: "running",
+    phase: "build",
+    fleeting: false,
+    repoId: "repo-a",
+    enclosure: `/contracts/${enclosure}`,
+    tokens: 0,
+    startedAt: "2026-07-12T10:00:00+00:00",
+    lastEventTs: "2026-07-12T10:00:30+00:00",
+    inferred: false,
+    actions: [],
+    tokenSeries: [],
+  });
+  const master = taskDoc({
+    id: "ops-master",
+    kind: "master",
+    title: "Body Priority Master",
+    docPath: "/tasks/repo-a/ops/task.json",
+    bodyRevision: "master-r1",
+    objective: "Master summary.",
+    subTasks: [
+      {
+        number: "2",
+        name: "Drilled Reader",
+        file: "02_drilled.json",
+        status: "inProgress",
+        scope: "",
+      },
+    ],
+  });
+  const directLeaf = taskDoc({
+    id: "direct-leaf",
+    kind: "subTask",
+    lifecycleId: "LC-DIRECT",
+    title: "Direct Leaf Reader",
+    docPath: "/tasks/repo-a/ops/01_direct-leaf.json",
+    bodyRevision: "direct-r1",
+    objective: "Direct leaf summary.",
+  });
+  const drilledLeaf = taskDoc({
+    id: "drilled-leaf",
+    kind: "subTask",
+    title: "Drilled Reader",
+    docPath: "/tasks/repo-a/ops/02_drilled.json",
+    bodyRevision: "drilled-r1",
+    objective: "Drilled summary.",
+  });
+  const lifecycleBound = taskDoc({
+    id: "bound-doc",
+    kind: "subTask",
+    lifecycleId: "LC-BOUND",
+    title: "Lifecycle Bound Reader",
+    docPath: "/tasks/repo-a/ops/03_lifecycle-bound.json",
+    bodyRevision: "bound-r1",
+    objective: "Lifecycle-bound summary.",
+  });
+  return {
+    version: 2,
+    generatedAt: "2026-07-12T10:01:00+00:00",
+    lifecycles: [lifecycle("LC-DIRECT", "direct-leaf"), lifecycle("LC-BOUND", "runtime-only")],
+    enclosures: [
+      liveEnclosure("direct-leaf", "LC-DIRECT"),
+      liveEnclosure("runtime-only", "LC-BOUND"),
+    ],
+    providers: [],
+    activeWorktreeGroups: ["direct-leaf", "runtime-only"],
+    metrics: {
+      lifecycleCount: 2,
+      runningCount: 2,
+      blockedCount: 0,
+      pausedCount: 0,
+      totalTokens: 0,
+      stalenessHistogram: {},
+    },
+    analytics: {
+      driftSnapshots: [],
+      stalestSidecars: [],
+      setupSummaries: [],
+      setupProgress: [],
+      routeCoverage: [],
+      toolReports: [],
+      ledgers: [],
+      taskDocuments: [master, directLeaf, drilledLeaf, lifecycleBound],
+      series: [
+        {
+          seriesId: "ops",
+          repository: "repo-a",
+          title: "Body Priority Master",
+          status: "inProgress",
+          objective: "Master summary.",
+          subTasks: master.subTasks,
+          doneCount: 0,
+          totalCount: 1,
+          seriesTokenTotal: 0,
+          sections: [],
+          decisions: [],
+          docPath: master.docPath,
+        },
+      ],
+      attentionQueue: [],
+      engineProcesses: [],
+    },
+  };
+}
+
+function refreshTaskSummaries(): void {
+  const analytics = dashboardStore.getState().analytics;
+  if (!analytics) throw new Error("analytics missing");
+  dashboardStore.getState().applyDelta("analytics", {
+    ...analytics,
+    taskDocuments: analytics.taskDocuments.map((doc) => ({
+      ...doc,
+      stepsDone: doc.stepsDone + 1,
+    })),
+  });
+}
+
+function stubTaskReaderFetch(
+  projection: WorkspaceProjection,
+  gates: Map<string, ReturnType<typeof deferred>>,
+  completeObjective: Map<string, string>,
+) {
+  const fetchMock = vi.fn(async (url: string) => {
+    if (url.startsWith("/api/task-document")) {
+      const path = new URL(url, "http://dashboard.test").searchParams.get("path") ?? "";
+      await gates.get(path)?.promise;
+      const summary = projection.analytics.taskDocuments.find((doc) => doc.docPath === path);
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ ...summary, objective: completeObjective.get(path) }),
+      } as Response;
+    }
+    if (url === "/api/files/repos") {
+      return { ok: true, status: 200, json: async () => ({ repos: [] }) } as Response;
+    }
+    if (url === "/api/harnesses") {
+      return { ok: true, status: 200, json: async () => ({ harnesses: [] }) } as Response;
+    }
+    if (url === "/api/terminal/sessions") {
+      return { ok: true, status: 200, json: async () => ({ sessions: [] }) } as Response;
+    }
+    if (url.startsWith("/api/changeset/")) {
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          counters: {
+            code: { files: 0, insertions: 0, deletions: 0 },
+            memory: { files: 0, insertions: 0, deletions: 0 },
+          },
+        }),
+      } as Response;
+    }
+    if (url.startsWith("/api/notes/list")) {
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ repo: "repo-a", master: "ops", notes: [], truncated: false }),
+      } as Response;
+    }
+    return { ok: true, status: 200, json: async () => ({}) } as Response;
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  return fetchMock;
+}
+
+describe("Operations click-to-detail body hydration", () => {
+  it("renders complete bodies for direct, master, drilled, and lifecycle-bound paths during analytics refreshes", async () => {
+    const projection = taskReaderProjection();
+    dashboardStore.getState().applySnapshot(projection);
+    const gates = new Map(
+      projection.analytics.taskDocuments.map((doc) => [doc.docPath, deferred()]),
+    );
+    const completeObjective = new Map(
+      projection.analytics.taskDocuments.map((doc) => [
+        doc.docPath,
+        `Complete ${doc.title} objective.`,
+      ]),
+    );
+    const fetchMock = stubTaskReaderFetch(projection, gates, completeObjective);
+
+    const view = render(<CockpitShell />);
+    const assertClickHydratesOnce = async (label: string, path: string) => {
+      fireEvent.click(view.getByText(label));
+      await waitFor(() =>
+        expect(
+          fetchMock.mock.calls.filter(([url]) =>
+            String(url).includes(encodeURIComponent(path)),
+          ),
+        ).toHaveLength(1),
+      );
+      act(refreshTaskSummaries);
+      await Promise.resolve();
+      expect(
+        fetchMock.mock.calls.filter(([url]) => String(url).includes(encodeURIComponent(path))),
+      ).toHaveLength(1);
+      gates.get(path)?.resolve();
+      await waitFor(() => expect(view.getByText(completeObjective.get(path) ?? "")).toBeTruthy());
+    };
+
+    await assertClickHydratesOnce(
+      "Direct Leaf Reader",
+      "/tasks/repo-a/ops/01_direct-leaf.json",
+    );
+    await assertClickHydratesOnce("Body Priority Master", "/tasks/repo-a/ops/task.json");
+
+    fireEvent.click(view.getByTestId("subtask-open-1"));
+    const drilledPath = "/tasks/repo-a/ops/02_drilled.json";
+    await waitFor(() =>
+      expect(
+        fetchMock.mock.calls.filter(([url]) => String(url).includes(encodeURIComponent(drilledPath))),
+      ).toHaveLength(1),
+    );
+    act(refreshTaskSummaries);
+    await Promise.resolve();
+    expect(
+      fetchMock.mock.calls.filter(([url]) => String(url).includes(encodeURIComponent(drilledPath))),
+    ).toHaveLength(1);
+    gates.get(drilledPath)?.resolve();
+    await waitFor(() =>
+      expect(view.getByText(completeObjective.get(drilledPath) ?? "")).toBeTruthy(),
+    );
+
+    await assertClickHydratesOnce(
+      "runtime-only",
+      "/tasks/repo-a/ops/03_lifecycle-bound.json",
+    );
+  });
+
+  it("discards task A's late body after selecting task B and hydrates B exactly once", async () => {
+    const projection = taskReaderProjection();
+    dashboardStore.getState().applySnapshot(projection);
+    const gates = new Map(
+      projection.analytics.taskDocuments.map((doc) => [doc.docPath, deferred()]),
+    );
+    const completeObjective = new Map(
+      projection.analytics.taskDocuments.map((doc) => [
+        doc.docPath,
+        `Complete ${doc.title} objective.`,
+      ]),
+    );
+    const fetchMock = stubTaskReaderFetch(projection, gates, completeObjective);
+    const view = render(<CockpitShell />);
+    const taskAPath = "/tasks/repo-a/ops/01_direct-leaf.json";
+    const taskBPath = "/tasks/repo-a/ops/03_lifecycle-bound.json";
+    const requestsFor = (path: string) =>
+      fetchMock.mock.calls.filter(([url]) => String(url).includes(encodeURIComponent(path)));
+
+    fireEvent.click(view.getByText("Direct Leaf Reader"));
+    await waitFor(() => expect(requestsFor(taskAPath)).toHaveLength(1));
+
+    fireEvent.click(view.getByText("runtime-only"));
+    await waitFor(() => expect(requestsFor(taskBPath)).toHaveLength(1));
+    expect(view.getByText("Lifecycle-bound summary.")).toBeTruthy();
+
+    await act(async () => {
+      gates.get(taskAPath)?.resolve();
+      await Promise.resolve();
+    });
+
+    expect(view.queryByText(completeObjective.get(taskAPath) ?? "")).toBeNull();
+    expect(view.queryByText(completeObjective.get(taskBPath) ?? "")).toBeNull();
+    expect(view.getByText("Lifecycle-bound summary.")).toBeTruthy();
+    expect(requestsFor(taskBPath)).toHaveLength(1);
+
+    gates.get(taskBPath)?.resolve();
+    await waitFor(() =>
+      expect(view.getByText(completeObjective.get(taskBPath) ?? "")).toBeTruthy(),
+    );
+    expect(view.queryByText(completeObjective.get(taskAPath) ?? "")).toBeNull();
+    expect(requestsFor(taskBPath)).toHaveLength(1);
+  });
 });
 
 describe("serving-build stamp (260703-L15 — the July-4 ghost-process lesson)", () => {

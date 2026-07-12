@@ -279,9 +279,7 @@ class SeatLivenessPredicateTests(unittest.TestCase):
     def test_recently_stale_does_not_fire_yet(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             catalog = TerminalCatalog(Path(tmp) / "catalog.json")
-            catalog.upsert(
-                _entry("s1", turn_state="stale", turn_state_changed_at=NOW.isoformat())
-            )
+            catalog.upsert(_entry("s1", turn_state="stale", turn_state_changed_at=NOW.isoformat()))
             self.assertEqual(
                 evaluate_seat_liveness_findings(catalog, now=NOW, stale_seconds=60.0), []
             )
@@ -630,7 +628,9 @@ class SweepIntegrationTests(unittest.TestCase):
         run_supervisor_sweep(ctx, now=NOW + timedelta(seconds=10))
 
         signal_rows = [
-            entry for entry in self.inbox_store.current().values() if entry.messageKind == "escalation"
+            entry
+            for entry in self.inbox_store.current().values()
+            if entry.messageKind == "escalation"
         ]
         self.assertEqual(len(signal_rows), 1)
         self.assertEqual(signal_rows[0].agentId, "manager-1")
@@ -638,7 +638,9 @@ class SweepIntegrationTests(unittest.TestCase):
 
         run_supervisor_sweep(ctx, now=NOW + timedelta(seconds=901))
         signal_rows = [
-            entry for entry in self.inbox_store.current().values() if entry.messageKind == "escalation"
+            entry
+            for entry in self.inbox_store.current().values()
+            if entry.messageKind == "escalation"
         ]
         # Ruled invariant (developer, 2026-07-09): past the cooldown the re-fired condition
         # RENEWS its one existing row (same id, bumped ts) instead of appending a duplicate.
@@ -673,7 +675,9 @@ class SweepIntegrationTests(unittest.TestCase):
             )
 
         signal_rows = [
-            entry for entry in self.inbox_store.current().values() if entry.messageKind == "escalation"
+            entry
+            for entry in self.inbox_store.current().values()
+            if entry.messageKind == "escalation"
         ]
         self.assertEqual(len(signal_rows), 2)
         self.assertEqual({entry.seatRole for entry in signal_rows}, {"worker", "reviewer"})
@@ -747,7 +751,9 @@ class SweepIntegrationTests(unittest.TestCase):
             run_supervisor_sweep(ctx, now=NOW + timedelta(seconds=tick))
 
         signal_rows = [
-            entry for entry in self.inbox_store.current().values() if entry.messageKind == "escalation"
+            entry
+            for entry in self.inbox_store.current().values()
+            if entry.messageKind == "escalation"
         ]
         self.assertEqual(len(signal_rows), 1)
         heartbeat = self.heartbeat_store.read()
@@ -787,6 +793,34 @@ class EscalationPredicateTests(unittest.TestCase):
             )
 
             self.assertEqual([finding.source_id for finding in findings], ["exhausted"])
+
+    def test_dispatch_failure_never_enters_generic_escalation_ladder(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            store = OperatorInboxStore(Path(tmp))
+            store.append(
+                create_operator_inbox_entry(
+                    entry_id="dispatch-1",
+                    now=(NOW - timedelta(minutes=10)).isoformat(),
+                    lifecycle_id=None,
+                    agent_id="worker-1",
+                    ask="brief",
+                    response="work",
+                    created_by="manager-1",
+                    created_via="cli",
+                    message_kind="dispatch-brief",
+                ).model_copy(
+                    update={
+                        "deliveryState": "unconfirmed",
+                        "attemptCount": supervisor_module.PERSISTENT_FAILURE_ATTEMPTS + 10,
+                    }
+                )
+            )
+
+            findings = evaluate_escalation_findings(
+                store, now=NOW, sla_seconds={"dispatch-brief": 60.0}, rung_seconds={}
+            )
+
+            self.assertEqual(findings, [])
 
     def test_pending_row_past_sla_fires(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -961,6 +995,57 @@ class LadderWalkIntegrationTests(unittest.TestCase):
     def _events(self) -> set[str]:
         return {event.kind for event in self.event_store.read(None)}
 
+    def test_delivered_dispatch_never_readdresses_at_rung_two(self) -> None:
+        self.catalog.upsert(replace(_entry("manager-1"), spawn_role="manager"))
+        self.catalog.upsert(
+            replace(_entry("worker-1"), spawn_role="worker", spawned_by_session="manager-1")
+        )
+        entry = create_operator_inbox_entry(
+            entry_id="dispatch-1",
+            now=(NOW - timedelta(minutes=10)).isoformat(),
+            lifecycle_id=None,
+            agent_id="worker-1",
+            ask="brief",
+            response="work",
+            created_by="manager-1",
+            created_via="cli",
+            message_kind="dispatch-brief",
+            recipient_role="worker",
+        ).model_copy(
+            update={
+                "deliveryState": "delivered",
+                "deliveryDetail": "harness-log-confirmed",
+                "rung": 1,
+                "escalatedAt": (NOW - timedelta(minutes=5)).isoformat(),
+            }
+        )
+        self.inbox_store.append(entry)
+
+        self.assertEqual(
+            evaluate_escalation_findings(
+                self.inbox_store,
+                now=NOW,
+                sla_seconds={"dispatch-brief": 60.0},
+                rung_seconds={1: 60.0},
+                catalog=self.catalog,
+            ),
+            [],
+        )
+        finding = SupervisorFinding(
+            kind="escalation-due",
+            detail="dispatch-brief",
+            session_id="worker-1",
+            source_id=entry.id,
+        )
+        with mock.patch.object(supervisor_module, "deliver_inbox_entry") as deliver:
+            result = act_on_finding(self._ctx(), finding, now=NOW)
+
+        deliver.assert_not_called()
+        current = self.inbox_store.current()[entry.id]
+        self.assertEqual(result.detail, "dispatch brief stays on its exact session")
+        self.assertEqual(current.rung, 1)
+        self.assertEqual(current.agentId, "worker-1")
+
     def test_silent_seat_climbs_rung_one_then_two_then_three(self) -> None:
         self.catalog.upsert(replace(_entry("orchestrator-1"), spawn_role="orchestrator"))
         self.catalog.upsert(
@@ -1134,10 +1219,14 @@ class LadderWalkIntegrationTests(unittest.TestCase):
         # ...and its live workers are surfaced as orphans in the respawn event, never re-parented
         # automatically and never absorbing the dead manager's role themselves.
         respawn_events = [
-            event for event in self.event_store.read(None) if event.kind == "orchestration.supervisor.respawn"
+            event
+            for event in self.event_store.read(None)
+            if event.kind == "orchestration.supervisor.respawn"
         ]
         self.assertEqual(len(respawn_events), 1)
-        self.assertEqual(sorted(respawn_events[0].data["orphanedWorkers"]), ["worker-1", "worker-2"])
+        self.assertEqual(
+            sorted(respawn_events[0].data["orphanedWorkers"]), ["worker-1", "worker-2"]
+        )
         self.assertEqual(respawn_events[0].data["ownerRole"], "orchestrator")
         self.assertEqual(respawn_events[0].data["ownerAgentId"], "orchestrator-1")
 
@@ -1210,9 +1299,7 @@ class LadderWalkIntegrationTests(unittest.TestCase):
 
         final = self.inbox_store.current()
         self.assertEqual(len(final), seeded)
-        self.assertEqual(
-            sorted(final), [f"root-{index}" for index in range(seeded)]
-        )
+        self.assertEqual(sorted(final), [f"root-{index}" for index in range(seeded)])
         # Per-sweep compaction keeps the on-disk log within one sweep's appends of folded size.
         lines = [
             line

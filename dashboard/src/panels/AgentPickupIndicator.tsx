@@ -1,4 +1,3 @@
-import { motion } from "motion/react";
 import { useState, type MouseEvent } from "react";
 
 import { css } from "../../styled-system/css";
@@ -15,14 +14,14 @@ const shell = css({
   color: "amber",
   fontSize: "0.66rem",
 });
-const spinner = css({
+const deliveryMarker = css({
   width: "0.65rem",
   height: "0.65rem",
+  flex: "0 0 auto",
   borderWidth: "1px",
   borderStyle: "solid",
-  borderColor: "grid",
-  borderTopColor: "amber",
-  borderRadius: "999px",
+  borderColor: "amber",
+  borderRadius: "2px",
 });
 const notice = css({
   minWidth: "0",
@@ -44,6 +43,8 @@ export function AgentPickupIndicator({ pickup }: { pickup: AgentPickupNode | und
   const [dismissing, setDismissing] = useState(false);
   if (!pickup) return null;
   const expired = pickup.state === "check-chat";
+  const subject = pickup.messageKind === "dispatch-brief" ? "brief" : "message";
+  const pendingLabel = `${subject} unacknowledged`;
   const dismissPickup = (event: MouseEvent<HTMLButtonElement>) => {
     event.stopPropagation();
     if (dismissing) return;
@@ -55,21 +56,15 @@ export function AgentPickupIndicator({ pickup }: { pickup: AgentPickupNode | und
       className={shell}
       title={
         expired
-          ? "The agent did not receive your approval, check your chat"
-          : "Waiting for agent"
+          ? "Inbox acknowledgment overdue; check chat"
+          : `Inbox delivery: ${pickup.deliveryState}; ${subject} awaiting acknowledgment`
       }
+      aria-label={expired ? "Inbox acknowledgment overdue; check chat" : pendingLabel}
       data-testid="agent-pickup"
     >
-      {expired ? null : (
-        <motion.span
-          className={spinner}
-          animate={{ rotate: 360 }}
-          transition={{ duration: 0.9, ease: "linear", repeat: Infinity }}
-          aria-hidden="true"
-        />
-      )}
+      {expired ? null : <span className={deliveryMarker} aria-hidden="true" />}
       <span className={notice}>
-        {expired ? "check chat" : "waiting for agent"}
+        {expired ? "check chat" : pendingLabel}
       </span>
       {expired ? (
         <button

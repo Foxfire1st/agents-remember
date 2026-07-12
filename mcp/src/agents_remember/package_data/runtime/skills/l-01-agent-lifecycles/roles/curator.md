@@ -100,8 +100,8 @@ verdict.
 | model   | mid-reasoning  | precise onboarding edits and reference checking |
 | effort  | medium         | scales with onboarding blast radius via settings |
 | launchArgs | — | free-form escape: verbatim harness argv (settings-only; never validated, recorded in spawn provenance) |
-| sessionCommands | — | free-form escape: lines pasted + submitted into the fresh session before the brief (settings-only; never validated) |
-| promptKeywords | — | free-form escape: prepended as the first line of the dispatch brief paste (settings-only; never validated) |
+| sessionCommands | — | settings-owned launch configuration: lines pasted + submitted during fresh-session launch (never validated; not brief delivery) |
+| promptKeywords | — | settings-owned keywords prepended exactly once to the post-readiness dispatch brief (never validated) |
 | tools   | onboarding surface | native reads/edits in memory worktree · native reads in code worktree · c-05 workflow · local route indexes · shell checks · inbox |
 
 Settings.json `orchestration.roles.curator` overrides these, and `orchestration.rolesPerLevel.<level>.curator` overrides per dispatch level (role-file defaults < settings < level override; spawn knobs manual: `docs/reference/harnesses.md`).

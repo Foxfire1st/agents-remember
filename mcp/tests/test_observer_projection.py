@@ -3398,7 +3398,10 @@ class EngineProcessTests(unittest.TestCase):
                                 "kind": "origin-feat",
                                 "label": "origin/feat-x",
                                 "state": "pushed",
-                                "factState": "observed",
+                                "factState": "stale",
+                                "observedAt": "2026-07-12T16:00:00+00:00",
+                                "lastAttemptAt": "2026-07-12T16:01:00+00:00",
+                                "staleSeconds": 60.0,
                             },
                             {
                                 "kind": "pr",
@@ -3416,6 +3419,8 @@ class EngineProcessTests(unittest.TestCase):
         )[0]
         self.assertEqual(node.integrationStrategy, "ff-only")
         self.assertEqual([ref.kind for ref in node.landing], ["origin-feat", "pr"])
+        self.assertEqual(node.landing[0].factState, "stale")
+        self.assertEqual(node.landing[0].staleSeconds, 60.0)
         self.assertEqual(node.landing[1].state, "open")
 
     def test_project_workspace_wires_engine_processes(self) -> None:

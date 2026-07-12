@@ -3,7 +3,6 @@ import { useEffect, useState, type ReactNode } from "react";
 import { css, cva, cx } from "../../styled-system/css";
 import { type ChangeCounters, leafChangeset, masterChangeset, taskChangeset } from "../data/changeset";
 import { useDashboard } from "../data/store";
-import { fetchTaskDocument } from "../data/taskDocuments";
 import { parentTaskLinkForDoc, pathDir, stripExt } from "../data/taskHierarchy";
 import {
   findLifecycleEnclosure,
@@ -14,6 +13,10 @@ import {
   taskLabel,
   type TaskSelection,
 } from "../data/taskIdentity";
+import {
+  type TaskDocumentBodyState,
+  useTaskDocumentBody,
+} from "../data/useTaskDocumentBody";
 import { Markdown } from "../grammar/Markdown";
 import { Panel } from "../grammar/Panel";
 import { ProgressFill } from "../grammar/ProgressFill";
@@ -342,8 +345,6 @@ export function DetailPanel({
   const enclosures = useDashboard((s) => s.enclosures);
   const activeWorktreeGroups = useDashboard((s) => s.activeWorktreeGroups);
   const providers = useDashboard((s) => s.providers);
-  const [fullTaskDocs, setFullTaskDocs] = useState<Record<string, TaskDocNode>>({});
-  const [taskDocBodyState, setTaskDocBodyState] = useState<Record<string, "available" | "unavailable">>({});
   // Drill state lives here (not in TaskContent) so the back control can sit in the sticky panel head.
   const [openSlug, setOpenSlug] = useState<string | null>(null);
   useEffect(() => setOpenSlug(null), [selectedId]); // switching lifecycles closes any open sub-task
@@ -383,33 +384,8 @@ export function DetailPanel({
     selectedSeries,
     openSlug,
   });
-  const bodyTargetKey = taskDocBodyKey(bodyTargetDoc);
-  const bodyTargetCached = bodyTargetKey ? fullTaskDocs[bodyTargetKey] : undefined;
-  useEffect(() => {
-    if (!bodyTargetDoc || !bodyTargetKey || bodyTargetCached) return;
-    let live = true;
-    void fetchTaskDocument(bodyTargetDoc.docPath).then(
-      (doc) => {
-        if (!live) return;
-        setFullTaskDocs((current) =>
-          current[bodyTargetKey]
-            ? current
-            : { ...current, [bodyTargetKey]: mergeTaskDocumentBody(bodyTargetDoc, doc) },
-        );
-        setTaskDocBodyState((current) => ({ ...current, [bodyTargetKey]: "available" }));
-      },
-      () => {
-        if (!live) return;
-        setTaskDocBodyState((current) => ({ ...current, [bodyTargetKey]: "unavailable" }));
-      },
-    );
-    return () => {
-      live = false;
-    };
-  }, [bodyTargetDoc, bodyTargetKey, bodyTargetCached]);
-  const fullTaskDoc = (doc: TaskDocNode): TaskDocNode => fullTaskDocs[taskDocBodyKey(doc)] ?? doc;
-  const bodyUnavailable = (doc: TaskDocNode): boolean =>
-    taskDocBodyState[taskDocBodyKey(doc)] === "unavailable";
+  const { documentFor: fullTaskDoc, state: taskDocumentBodyState } =
+    useTaskDocumentBody(bodyTargetDoc);
 
   // The leaf the panel is actually SHOWING (a drilled sub-task or a directly-opened leaf doc), mirroring
   // the render branches below — a master/series overview shows no single leaf. Reported up so the rail
@@ -463,18 +439,30 @@ export function DetailPanel({
         <div className={where}>task document · {selectedTaskDoc.repository}</div>
         {selectedTaskDoc.kind === "master" ? (
           openDoc ? (
-            <TaskReader doc={fullTaskDoc(openDoc)} bodyUnavailable={bodyUnavailable(openDoc)} onOpenChangeSet={onOpenChangeSet} onOpenNotes={onOpenNotes} />
+            <TaskReader
+              doc={fullTaskDoc(openDoc)}
+              bodyState={taskDocumentBodyState}
+              onOpenChangeSet={onOpenChangeSet}
+              onOpenNotes={onOpenNotes}
+            />
           ) : (
             <MasterOverview
               doc={masterDocWithSeriesTokens(fullTaskDoc(selectedTaskDoc), analytics?.series ?? [])}
+              bodyState={taskDocumentBodyState}
               sliceDocs={sliceDocs}
               onOpen={setOpenSlug}
               onJump={jump}
-              onOpenChangeSet={onOpenChangeSet} onOpenNotes={onOpenNotes}
+              onOpenChangeSet={onOpenChangeSet}
+              onOpenNotes={onOpenNotes}
             />
           )
         ) : (
-          <TaskReader doc={fullTaskDoc(selectedTaskDoc)} bodyUnavailable={bodyUnavailable(selectedTaskDoc)} onOpenChangeSet={onOpenChangeSet} onOpenNotes={onOpenNotes} />
+          <TaskReader
+            doc={fullTaskDoc(selectedTaskDoc)}
+            bodyState={taskDocumentBodyState}
+            onOpenChangeSet={onOpenChangeSet}
+            onOpenNotes={onOpenNotes}
+          />
         )}
       </Panel>
     );
@@ -519,14 +507,21 @@ export function DetailPanel({
       <Panel testid="detail-panel" head={head} className={sizing}>
         <div className={where}>series master · {selectedSeries.repository}</div>
         {openDoc ? (
-          <TaskReader doc={fullTaskDoc(openDoc)} bodyUnavailable={bodyUnavailable(openDoc)} onOpenChangeSet={onOpenChangeSet} onOpenNotes={onOpenNotes} />
+          <TaskReader
+            doc={fullTaskDoc(openDoc)}
+            bodyState={taskDocumentBodyState}
+            onOpenChangeSet={onOpenChangeSet}
+            onOpenNotes={onOpenNotes}
+          />
         ) : (
           <MasterOverview
             doc={seriesDoc}
+            bodyState={taskDocumentBodyState}
             sliceDocs={seriesSlices}
             onOpen={setOpenSlug}
             onJump={jump}
-            onOpenChangeSet={onOpenChangeSet} onOpenNotes={onOpenNotes}
+            onOpenChangeSet={onOpenChangeSet}
+            onOpenNotes={onOpenNotes}
           />
         )}
       </Panel>
@@ -632,31 +627,47 @@ export function DetailPanel({
       ) : null}
 
       {openDoc ? (
-        <TaskReader doc={fullTaskDoc(openDoc)} bodyUnavailable={bodyUnavailable(openDoc)} onOpenChangeSet={onOpenChangeSet} onOpenNotes={onOpenNotes} />
+        <TaskReader
+          doc={fullTaskDoc(openDoc)}
+          bodyState={taskDocumentBodyState}
+          onOpenChangeSet={onOpenChangeSet}
+          onOpenNotes={onOpenNotes}
+        />
       ) : seriesDoc ? (
         <MasterOverview
           doc={seriesDoc}
+          bodyState={taskDocumentBodyState}
           sliceDocs={seriesSlices}
           onOpen={setOpenSlug}
           onJump={jump}
-          onOpenChangeSet={onOpenChangeSet} onOpenNotes={onOpenNotes}
+          onOpenChangeSet={onOpenChangeSet}
+          onOpenNotes={onOpenNotes}
         />
       ) : master ? (
         <MasterOverview
           doc={masterDocWithSeriesTokens(fullTaskDoc(master), analytics?.series ?? [])}
+          bodyState={taskDocumentBodyState}
           sliceDocs={slices}
           onOpen={setOpenSlug}
           onJump={jump}
-          onOpenChangeSet={onOpenChangeSet} onOpenNotes={onOpenNotes}
+          onOpenChangeSet={onOpenChangeSet}
+          onOpenNotes={onOpenNotes}
         />
       ) : (
-        <TaskContent docs={docs.map(fullTaskDoc)} onOpen={setOpenSlug} onJump={jump} onOpenChangeSet={onOpenChangeSet} onOpenNotes={onOpenNotes} />
+        <TaskContent
+          docs={docs.map(fullTaskDoc)}
+          bodyState={taskDocumentBodyState}
+          onOpen={setOpenSlug}
+          onJump={jump}
+          onOpenChangeSet={onOpenChangeSet}
+          onOpenNotes={onOpenNotes}
+        />
       )}
 
       {enclosure ? (
         <div className={spine}>
           <div className={spineHead}>worktree · {groupName || enclosure.repoName}</div>
-          {onOpenChangeSet ? (
+          {onOpenChangeSet && taskDocumentBodyState !== "loading" ? (
             <div className={changeSetBar}>
               {activeWorktreeGroups.includes(groupName) ? (
                 <ChangeSetButton
@@ -722,7 +733,7 @@ function ChangeSetButton({
     const req = target.leaf
       ? leafChangeset(target.repo, target.master ?? "", target.leaf, target.mode ?? "committed")
       : target.master
-        ? masterChangeset(target.repo, target.master)
+        ? masterChangeset(target.repo, target.master, { includeLeaves: false })
         : taskChangeset(target.repo, target.scope ?? "");
     void req.then(
       (d) => live && setCounters(d.counters),
@@ -817,9 +828,6 @@ const sliceForRef = (
   ref.file ? sliceForSlug(sliceDocs, stripExt(ref.file)) : undefined;
 const seriesSliceDocs = (sliceDocs: TaskDocNode[], seriesDocPath: string): TaskDocNode[] =>
   sliceDocs.filter((doc) => pathDir(doc.docPath) === pathDir(seriesDocPath));
-
-const taskDocBodyKey = (doc: Pick<TaskDocNode, "docPath" | "bodyRevision"> | undefined): string =>
-  doc ? `${doc.docPath}\n${doc.bodyRevision ?? ""}` : "";
 
 function displayedReaderDoc({
   allDocs,
@@ -962,12 +970,14 @@ const masterDocWithSeriesTokens = (doc: TaskDocNode, seriesList: SeriesNode[]): 
 // directly. Sub-tasks never enter the sidebar — they are reached here, from the series.
 function TaskContent({
   docs,
+  bodyState,
   onOpen,
   onJump,
   onOpenChangeSet,
   onOpenNotes,
 }: {
   docs: TaskDocNode[];
+  bodyState: TaskDocumentBodyState | undefined;
   onOpen: (slug: string) => void;
   onJump: (id: string) => void;
   onOpenChangeSet?: (target: ChangeSetTarget) => void;
@@ -982,15 +992,24 @@ function TaskContent({
     return (
       <MasterOverview
         doc={master}
+        bodyState={bodyState}
         sliceDocs={sliceDocs}
         onOpen={onOpen}
         onJump={onJump}
-        onOpenChangeSet={onOpenChangeSet} onOpenNotes={onOpenNotes}
+        onOpenChangeSet={onOpenChangeSet}
+        onOpenNotes={onOpenNotes}
       />
     );
   }
   if (sliceDocs.length === 1) {
-    return <TaskReader doc={sliceDocs[0]} onOpenChangeSet={onOpenChangeSet} onOpenNotes={onOpenNotes} />;
+    return (
+      <TaskReader
+        doc={sliceDocs[0]}
+        bodyState={bodyState}
+        onOpenChangeSet={onOpenChangeSet}
+        onOpenNotes={onOpenNotes}
+      />
+    );
   }
   return <SliceList sliceDocs={sliceDocs} onOpen={onOpen} />;
 }
@@ -1000,6 +1019,7 @@ function TaskContent({
 // table. If no section drives the index but the master carries one, it is appended.
 function MasterOverview({
   doc,
+  bodyState,
   sliceDocs,
   onOpen,
   onJump,
@@ -1007,6 +1027,7 @@ function MasterOverview({
   onOpenNotes,
 }: {
   doc: MasterDocView;
+  bodyState: TaskDocumentBodyState | undefined;
   sliceDocs: TaskDocNode[];
   onOpen: (slug: string) => void;
   onJump: (id: string) => void;
@@ -1020,12 +1041,15 @@ function MasterOverview({
         <span className={taskdocTitle}>{doc.title}</span>
         <span className={taskdocStatus}>{doc.status}</span>
       </div>
-      <DocChangeSetBar
-        kind="master"
-        repo={doc.repository}
-        master={dirName(doc.docPath)}
-        onOpen={onOpenChangeSet}
-      />
+      <TaskBodyNotice state={bodyState} />
+      {bodyState !== "loading" ? (
+        <DocChangeSetBar
+          kind="master"
+          repo={doc.repository}
+          master={dirName(doc.docPath)}
+          onOpen={onOpenChangeSet}
+        />
+      ) : null}
       <MasterTokenSummary total={doc.seriesTokenTotal} />
       {/* Pinned navigation: the sub-task index sits above the description, always reachable. The
           authored `subTasks` section still renders its own copy in place (MasterSection). */}
@@ -1051,12 +1075,14 @@ function MasterOverview({
       ))}
       {/* L9: the series' coordination notes (design records, friction ledger, reports/) —
           browsable from the master overview too, not only from a drilled leaf reader. */}
-      <TaskNotes
-        repo={doc.repository}
-        master={dirName(doc.docPath)}
-        references={[]}
-        onOpenNotes={onOpenNotes}
-      />
+      {bodyState !== "loading" ? (
+        <TaskNotes
+          repo={doc.repository}
+          master={dirName(doc.docPath)}
+          references={[]}
+          onOpenNotes={onOpenNotes}
+        />
+      ) : null}
     </div>
   );
 }
@@ -1261,12 +1287,12 @@ function SpineLane({
 
 function TaskReader({
   doc,
-  bodyUnavailable = false,
+  bodyState,
   onOpenChangeSet,
   onOpenNotes,
 }: {
   doc: TaskDocNode;
-  bodyUnavailable?: boolean;
+  bodyState: TaskDocumentBodyState | undefined;
   onOpenChangeSet?: (target: ChangeSetTarget) => void;
   onOpenNotes?: (target: NotesReaderTarget) => void;
 }) {
@@ -1280,16 +1306,16 @@ function TaskReader({
         <span className={taskdocStatus}>{doc.status}</span>
         <ProgressFill completed={progress.done} total={progress.total} label="steps done" />
       </div>
-      {bodyUnavailable ? (
-        <p className="muted">Full task document details are unavailable; showing the available summary.</p>
+      <TaskBodyNotice state={bodyState} />
+      {bodyState !== "loading" ? (
+        <DocChangeSetBar
+          kind="leaf"
+          repo={doc.repository}
+          master={dirName(doc.docPath)}
+          leaf={doc.id}
+          onOpen={onOpenChangeSet}
+        />
       ) : null}
-      <DocChangeSetBar
-        kind="leaf"
-        repo={doc.repository}
-        master={dirName(doc.docPath)}
-        leaf={doc.id}
-        onOpen={onOpenChangeSet}
-      />
       {doc.objective ? (
         <Section title="Objective">
           <Markdown>{doc.objective}</Markdown>
@@ -1334,29 +1360,32 @@ function TaskReader({
       ))}
       {/* L9: References moved into TaskNotes so a reference naming an existing notes/ file
           renders as an openable link into the series-notes view (plain text otherwise). */}
-      <TaskNotes
-        repo={doc.repository}
-        master={dirName(doc.docPath)}
-        references={doc.references}
-        onOpenNotes={onOpenNotes}
-      />
+      {bodyState !== "loading" ? (
+        <TaskNotes
+          repo={doc.repository}
+          master={dirName(doc.docPath)}
+          references={doc.references}
+          onOpenNotes={onOpenNotes}
+        />
+      ) : null}
     </div>
   );
 }
 
-function mergeTaskDocumentBody(summary: TaskDocNode, body: Partial<TaskDocNode>): TaskDocNode {
-  return {
-    ...summary,
-    ...body,
-    steps: body.steps ?? summary.steps,
-    requirements: body.requirements ?? summary.requirements,
-    codeExamples: body.codeExamples ?? summary.codeExamples,
-    decisions: body.decisions ?? summary.decisions,
-    openQuestions: body.openQuestions ?? summary.openQuestions,
-    references: body.references ?? summary.references,
-    subTasks: body.subTasks ?? summary.subTasks,
-    sections: body.sections ?? summary.sections,
-  };
+function TaskBodyNotice({ state }: { state: TaskDocumentBodyState | undefined }) {
+  if (state === "loading") {
+    return (
+      <p className="muted" role="status">
+        Loading complete task document…
+      </p>
+    );
+  }
+  if (state === "unavailable") {
+    return (
+      <p className="muted">Full task document details are unavailable; showing the available summary.</p>
+    );
+  }
+  return null;
 }
 
 function Section({ title, children }: { title: string; children: ReactNode }) {

@@ -1,7 +1,8 @@
-import { cleanup, fireEvent, render } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { dashboardStore } from "../data/store";
+import { sessionStore } from "../data/sessions";
 import type {
   Analytics,
   EnclosureNode,
@@ -126,9 +127,105 @@ function projection(over: Partial<WorkspaceProjection>): WorkspaceProjection {
   };
 }
 
+function collapsibleHierarchyProjection(): WorkspaceProjection {
+  return projection({
+    enclosures: [
+      enclosure({
+        enclosure: "/contracts/a1",
+        lifecycleId: "",
+        leafId: "01_leaf-a1",
+        taskRoot: "/tasks/master-a",
+      }),
+      enclosure({
+        enclosure: "/contracts/b1",
+        lifecycleId: "",
+        leafId: "01_leaf-b1",
+        taskRoot: "/tasks/master-b",
+      }),
+    ],
+    analytics: {
+      ...EMPTY_ANALYTICS,
+      taskDocuments: [
+        taskDoc({
+          id: "SPRINT-02",
+          kind: "master",
+          title: "Sprint 02",
+          docPath: "/tasks/sprint-02/task.json",
+          orchestrates: ["master-a", "master-b"],
+          createdAt: "2026-06-19T09:00:00+00:00",
+        }),
+        taskDoc({
+          kind: "master",
+          title: "Master A",
+          docPath: "/tasks/master-a/task.json",
+          createdAt: "2026-06-20T08:00:00+00:00",
+        }),
+        taskDoc({
+          kind: "master",
+          title: "Master B",
+          docPath: "/tasks/master-b/task.json",
+          createdAt: "2026-06-20T09:00:00+00:00",
+        }),
+        taskDoc({
+          kind: "master",
+          title: "Empty Master",
+          docPath: "/tasks/empty-master/task.json",
+          createdAt: "2026-06-20T10:00:00+00:00",
+        }),
+        taskDoc({
+          id: "01",
+          title: "Leaf A1",
+          docPath: "/tasks/master-a/01_leaf-a1.json",
+          createdAt: "2026-06-21T08:00:00+00:00",
+        }),
+        taskDoc({
+          id: "01",
+          title: "Leaf B1",
+          docPath: "/tasks/master-b/01_leaf-b1.json",
+          createdAt: "2026-06-21T09:00:00+00:00",
+        }),
+      ],
+      series: [
+        seriesNode({
+          seriesId: "master-a",
+          title: "Master A",
+          docPath: "/tasks/master-a/task.json",
+          subTasks: [
+            {
+              number: "01",
+              name: "Leaf A1",
+              file: "01_leaf-a1.md",
+              status: "inProgress",
+              scope: "",
+              createdAt: "2026-06-21T08:00:00+00:00",
+            },
+          ],
+        }),
+        seriesNode({
+          seriesId: "master-b",
+          title: "Master B",
+          docPath: "/tasks/master-b/task.json",
+          subTasks: [
+            {
+              number: "01",
+              name: "Leaf B1",
+              file: "01_leaf-b1.md",
+              status: "inProgress",
+              scope: "",
+              createdAt: "2026-06-21T09:00:00+00:00",
+            },
+          ],
+        }),
+      ],
+    },
+  });
+}
+
 afterEach(() => {
   cleanup();
   dashboardStore.getState().reset();
+  sessionStore.getState().hydrate([]);
+  window.localStorage.clear();
 });
 
 describe("LifecycleList task labels", () => {
@@ -781,6 +878,90 @@ describe("LifecycleList task labels", () => {
     expect(freeRow?.querySelector("[data-rank-tier]")).toBeNull();
   });
 
+  it("defaults hierarchy disclosures to expanded and renders controls only for parents", () => {
+    seed(collapsibleHierarchyProjection());
+
+    const { getByRole, getByText } = render(
+      <LifecycleList selectedId={null} onSelect={vi.fn()} />,
+    );
+
+    expect(getByText("Tasks · 6")).toBeTruthy();
+    expect(getByRole("button", { name: "Collapse Sprint 02 tasks" }).getAttribute("aria-expanded"))
+      .toBe("true");
+    expect(getByRole("button", { name: "Collapse Master A tasks" }).getAttribute("aria-expanded"))
+      .toBe("true");
+    expect(getByRole("button", { name: "Collapse Master B tasks" }).getAttribute("aria-expanded"))
+      .toBe("true");
+    expect(getByText("01. Leaf A1").closest("[role='option']")?.querySelector("button")).toBeNull();
+    expect(getByText("01. Leaf B1").closest("[role='option']")?.querySelector("button")).toBeNull();
+    expect(getByText("Empty Master").closest("[role='option']")?.querySelector("button")).toBeNull();
+  });
+
+  it("keeps sprint and master collapse independent without changing selection or BY PHASE", () => {
+    const onSelect = vi.fn();
+    seed(collapsibleHierarchyProjection());
+    const selectedLeaf = "taskdoc:/tasks/master-a/01_leaf-a1.json";
+    const view = render(<LifecycleList selectedId={selectedLeaf} onSelect={onSelect} />);
+
+    expect(view.getByText("01. Leaf A1").closest("[role='option']")?.getAttribute("aria-selected"))
+      .toBe("true");
+    const masterToggle = view.getByRole("button", { name: "Collapse Master A tasks" });
+    expect(masterToggle.tagName).toBe("BUTTON");
+    expect(masterToggle.tabIndex).toBe(0);
+    fireEvent.keyDown(masterToggle, { key: "Enter" });
+    expect(onSelect).not.toHaveBeenCalled();
+    fireEvent.click(masterToggle);
+    expect(view.queryByText("01. Leaf A1")).toBeNull();
+    expect(view.getByText("01. Leaf B1")).toBeTruthy();
+    expect(onSelect).not.toHaveBeenCalled();
+
+    fireEvent.click(view.getByRole("button", { name: "Collapse Sprint 02 tasks" }));
+    expect(view.queryByText("Master A")).toBeNull();
+    expect(view.queryByText("Master B")).toBeNull();
+    expect(view.getByText("Tasks · 6")).toBeTruthy();
+    expect(onSelect).not.toHaveBeenCalled();
+
+    fireEvent.click(view.getByRole("button", { name: "Expand Sprint 02 tasks" }));
+    expect(view.getByText("Master A")).toBeTruthy();
+    expect(view.getByText("Master B")).toBeTruthy();
+    expect(view.queryByText("01. Leaf A1")).toBeNull();
+    expect(view.getByText("01. Leaf B1")).toBeTruthy();
+    expect(view.getByRole("button", { name: "Expand Master A tasks" }).getAttribute("aria-expanded"))
+      .toBe("false");
+
+    fireEvent.click(view.getByText("BY PHASE"));
+    expect(view.getByText("01. Leaf A1")).toBeTruthy();
+    expect(view.getByText("01. Leaf B1")).toBeTruthy();
+    expect(view.getByText("01. Leaf A1").closest("[role='option']")?.getAttribute("aria-selected"))
+      .toBe("true");
+    expect(view.queryByRole("button", { name: /^(Collapse|Expand) .* tasks$/ })).toBeNull();
+    expect(view.getByText("Tasks · 6")).toBeTruthy();
+    expect(onSelect).not.toHaveBeenCalled();
+  });
+
+  it("persists stable sprint and master keys across remounts", () => {
+    seed(collapsibleHierarchyProjection());
+    const first = render(<LifecycleList selectedId={null} onSelect={vi.fn()} />);
+
+    fireEvent.click(first.getByRole("button", { name: "Collapse Master A tasks" }));
+    fireEvent.click(first.getByRole("button", { name: "Collapse Sprint 02 tasks" }));
+    expect(JSON.parse(window.localStorage.getItem("operations.tasks.collapsed.v1") ?? "[]"))
+      .toEqual([
+        "taskdoc:/tasks/master-a/task.json",
+        "taskdoc:/tasks/sprint-02/task.json",
+      ]);
+    first.unmount();
+
+    const second = render(<LifecycleList selectedId={null} onSelect={vi.fn()} />);
+    expect(second.getByRole("button", { name: "Expand Sprint 02 tasks" }).getAttribute("aria-expanded"))
+      .toBe("false");
+    fireEvent.click(second.getByRole("button", { name: "Expand Sprint 02 tasks" }));
+    expect(second.getByRole("button", { name: "Expand Master A tasks" }).getAttribute("aria-expanded"))
+      .toBe("false");
+    expect(second.queryByText("01. Leaf A1")).toBeNull();
+    expect(second.getByText("01. Leaf B1")).toBeTruthy();
+  });
+
   it("renders NO orchestration row or insignia in a flat run (D3 regression)", () => {
     // No doc carries `orchestrates` ⇒ the list is byte-identical to the pre-L14 rendering:
     // masters top-level, leaves one nested step, zero tier attributes, zero badges.
@@ -940,5 +1121,105 @@ describe("LifecycleList gate hint (L17 — no bare-ask affordance)", () => {
     expect(row.getAttribute("title")).toContain("State: running");
     expect(row.getAttribute("title")).not.toContain("Gate:");
     expect(row.getAttribute("title")).not.toContain("Approve the plan?");
+  });
+});
+
+describe("LifecycleList independent Operations signals", () => {
+  const leafKey = "agents-remember/260610_browser-dashboard/01";
+
+  function seedActivityProjection(agentPickups: Analytics["agentPickups"] = []) {
+    seed(
+      projection({
+        lifecycles: [
+          lifecycle({
+            id: "LC-ACTIVITY",
+            repoId: "agents-remember",
+            state: "running",
+            phase: "build",
+          }),
+        ],
+        enclosures: [
+          enclosure({
+            enclosure: "/contracts/activity",
+            lifecycleId: "LC-ACTIVITY",
+            leafId: "01",
+          }),
+        ],
+        analytics: {
+          ...EMPTY_ANALYTICS,
+          agentPickups,
+          taskDocuments: [
+            taskDoc({
+              id: "01",
+              lifecycleId: "LC-ACTIVITY",
+              title: "Activity Leaf",
+              docPath: "/tasks/260610_browser-dashboard/01_activity.json",
+            }),
+          ],
+        },
+      }),
+    );
+  }
+
+  function hydrateTurn(turnState: string) {
+    sessionStore.getState().hydrate([
+      {
+        id: "worker",
+        label: "Worker",
+        kind: "harness",
+        status: "running",
+        leafKey,
+        lifecycleId: "LC-ACTIVITY",
+        seatRole: "worker",
+        turnState,
+      },
+    ]);
+  }
+
+  it("keeps a running task distinct from an idle chat", () => {
+    seedActivityProjection();
+    hydrateTurn("turn-ended");
+
+    const { getByTestId } = render(<LifecycleList selectedId={null} onSelect={vi.fn()} />);
+
+    expect(getByTestId("task-state").getAttribute("aria-label")).toBe(
+      "Task progress: running; phase: build",
+    );
+    expect(getByTestId("chat-activity").textContent).toBe("idle");
+    expect(getByTestId("chat-activity").getAttribute("aria-label")).toContain("worker: idle");
+  });
+
+  it("shows pending inbox acknowledgment beside an idle chat without conflating them", () => {
+    seedActivityProjection([
+      {
+        id: "pickup:BRIEF",
+        entryId: "BRIEF",
+        lifecycleId: "LC-ACTIVITY",
+        messageKind: "dispatch-brief",
+        deliveryState: "delivered",
+        state: "waiting-for-agent",
+        ttlSeconds: 300,
+      },
+    ]);
+    hydrateTurn("turn-ended");
+
+    const { getByTestId, getByText } = render(
+      <LifecycleList selectedId={null} onSelect={vi.fn()} />,
+    );
+
+    expect(getByTestId("chat-activity").textContent).toBe("idle");
+    expect(getByText("brief unacknowledged")).toBeTruthy();
+    expect(getByTestId("agent-pickup").getAttribute("title")).toContain("Inbox delivery");
+  });
+
+  it("reacts to live shared-session-store transitions while Operations stays mounted", async () => {
+    seedActivityProjection();
+    hydrateTurn("turn-ended");
+    const { getByTestId } = render(<LifecycleList selectedId={null} onSelect={vi.fn()} />);
+    expect(getByTestId("chat-activity").textContent).toBe("idle");
+
+    act(() => hydrateTurn("working"));
+
+    await waitFor(() => expect(getByTestId("chat-activity").textContent).toBe("working"));
   });
 });

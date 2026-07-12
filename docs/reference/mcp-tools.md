@@ -1,6 +1,6 @@
 # MCP Tool Reference
 
-The Agents Remember MCP server exposes 36 tools. Tools **apply by default** — pass
+The Agents Remember MCP server exposes 58 tools. Tools **apply by default** — pass
 `dry_run=true` to preview first (for the read-only `cgc_*`/`grepai_*` query tools,
 `dry_run=true` returns the planned provider command without running it). The two
 `codex_benchmark_*` tools are the exception: they default to `dry_run=true`
@@ -26,6 +26,17 @@ surrounding procedure. See the [Skills reference](skills.md).
 | `server_info` | Report resolved roots, allowed repos/providers, and the tool list. | — |
 | `resolve_context` | Resolve a repository's coordination/memory context (topology, roots, settings, storage, pathRules). | `repo_id`, optional `task_name` / `contract_path` / `worktree_name` / `topology` |
 | `context_packet` | Bundle repo state, paths, memory, worktree, and provider status into one packet. | `repo_id`, `include_providers=true`, `include_drift=false` |
+
+## Hosted role dispatch
+
+| Tool | Purpose | Key args |
+| --- | --- | --- |
+| `attach_terminal_session_to_leaf` | Bind an existing hosted session to one exact qualified leaf and seat role. | `session_id`, `leaf_key`, `role` |
+| `spawn_agent_session` | Resolve settings-owned role/level launch knobs, create and bind one seat, and return `spawned-unbriefed`; it does not deliver caller task context. | `env.AR_SPAWN_ROLE`, `level`, `leaf_key`, `submit=false`, no `context` |
+| `hosted_session_readiness` | Read-only bounded readiness check for the exact returned catalog id, addressable pane, harness prompt marker, and non-copy-mode state. | `session_id`, finite `wait_seconds` (maximum 60) |
+| `operator_inbox_post` | Create the one durable exact-agent `dispatch-brief`; only `delivered` plus `harness-log-confirmed` proves the seat briefed. | `agent_id`, `message_kind="dispatch-brief"`, `deliver_to_hosted=true` |
+| `session_retire` | Terminate and mark one catalog session under role-scoped authority. | `actor_session_id`, `session_id`, `reason` |
+| `session_rename` | Rename one hosted catalog session. | `session_id`, `label` |
 
 ## Install & scaffolding
 

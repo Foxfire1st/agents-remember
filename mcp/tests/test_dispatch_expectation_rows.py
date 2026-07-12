@@ -48,7 +48,12 @@ def _write_leaf_task(coordination_root: Path) -> None:
                 "repo": "repo",
                 "createdAt": "2026-07-07T10:00",
                 "subTasks": [
-                    {"number": "leaf-1", "name": "Leaf", "file": "leaf-1.md", "status": "inProgress"}
+                    {
+                        "number": "leaf-1",
+                        "name": "Leaf",
+                        "file": "leaf-1.md",
+                        "status": "inProgress",
+                    }
                 ],
             }
         ),
@@ -80,37 +85,28 @@ class SpawnExpectationRowTests(unittest.TestCase):
     def tearDown(self) -> None:
         reset_ambient()
 
-    def test_spawn_writes_briefed_by_and_turn_report_by_atomically(self) -> None:
+    def test_spawn_starts_no_assignment_clocks(self) -> None:
         payload = spawn_agent_session_payload(
             self.config,
             session_id="worker-1",
             leaf_key="repo/master/leaf-1",
-            context="You are the worker.",
-            submit=True,
             env={"AR_SPAWN_ROLE": "worker"},
             host=self.host,  # type: ignore[arg-type]
             which=_detected,
             paster=_FakePaster(),  # type: ignore[arg-type]
         )
-        self.assertEqual(payload["status"], "spawned")
-        rows = ExpectationRowStore(observer_root(self.config)).pending()
-        kinds = sorted(row.kind for row in rows)
-        self.assertEqual(kinds, ["briefed-by", "turn-report-by"])
-        for row in rows:
-            self.assertEqual(row.sourceId, "worker-1")
-            self.assertEqual(row.seatRole, "worker")
+        self.assertEqual(payload["status"], "spawned-unbriefed")
+        self.assertEqual(ExpectationRowStore(observer_root(self.config)).pending(), [])
 
-    def test_a_bare_command_chat_with_no_leaf_key_gets_no_turn_report_by(self) -> None:
+    def test_a_bare_command_chat_gets_no_assignment_clock(self) -> None:
         payload = spawn_agent_session_payload(
             self.config,
             session_id="chat-1",
             host=self.host,  # type: ignore[arg-type]
             which=_detected,
         )
-        self.assertEqual(payload["status"], "spawned")
-        rows = ExpectationRowStore(observer_root(self.config)).pending()
-        kinds = [row.kind for row in rows]
-        self.assertEqual(kinds, ["briefed-by"])
+        self.assertEqual(payload["status"], "spawned-unbriefed")
+        self.assertEqual(ExpectationRowStore(observer_root(self.config)).pending(), [])
 
 
 class GateExpectationRowTests(unittest.TestCase):

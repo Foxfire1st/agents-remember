@@ -281,6 +281,25 @@ For ordinary spawned seats, settings are the sole developer-controlled spend sur
 `spawn_agent_session` callers declare role and level, never harness/model/effort or direct
 launch/session spend controls.
 
+### Hosted role dispatch is three explicit states
+
+Every role that dispatches another hosted role uses one exact session id through all three states:
+
+1. Call `spawn_agent_session` with `context` omitted and `submit=false`. Success is
+   `spawned-unbriefed`; it creates and binds the seat but assigns no work.
+2. Call `hosted_session_readiness(session_id=<returned-id>, wait_seconds=<finite-bound>)`.
+   Only `status=ready` advances that exact seat to harness-ready. Spawned-only and not-ready seats
+   are **not active work** and receive no task instructions.
+3. Post exactly one durable `operator_inbox_post` row addressed by that same `agent_id`, with
+   `message_kind="dispatch-brief"` and `deliver_to_hosted=true`. Treat the seat as briefed only when
+   that row reports both `deliveryState=delivered` and
+   `deliveryDetail=harness-log-confirmed`.
+
+If step 3 fails, the original durable row stays pending on the original spawned session for the
+standard injector/supervisor retry path. Never duplicate the row, append another visible draft,
+or respawn merely because delivery is pending. Settings-owned `sessionCommands` remain launch
+configuration; settings-owned `promptKeywords` ride the post-readiness dispatch brief exactly once.
+
 ## settings.json Orchestration Block
 
 Machine/user overrides layer over the role-file defaults, in the **global agentic settings file**
@@ -337,7 +356,8 @@ per-harness via the effective registry (claude `--model`/`--effort`; a mapping-l
 env-only; a session-vocabulary effort like claude's `ultracode` is delivered as a post-launch
 `/effort` paste). Unknown effort values REFUSE at dispatch naming the harness's vocabulary — the
 CLI would warn-and-silently-degrade. The free-form escape hatch (`launchArgs` verbatim argv,
-`promptKeywords` riding the brief paste, `sessionCommands` pasted before the brief) is never
+`promptKeywords` riding the post-readiness brief exactly once, `sessionCommands` applied during
+fresh-session launch) is never
 validated, only recorded in spawn provenance; `orchestration.harnesses` teaches the framework new
 TUIs or pre-customizes builtin launches (manual: `docs/reference/harnesses.md`).
 `orchestration.loops` (the three-party-loop knobs: per-level loop sets, round cap, reviewer

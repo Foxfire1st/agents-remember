@@ -65,6 +65,7 @@ from agents_remember.providers.status import refresh_current_provider_state
 
 if TYPE_CHECKING:
     from agents_remember.mcp.config import McpRuntimeConfig
+    from agents_remember.observer.landing_state import LandingStateReader
 
 LATEST_STATE = "latest-state.json"
 LATEST_METRICS = "latest-metrics.json"
@@ -194,6 +195,7 @@ def project_and_write(
     *,
     now: datetime | None = None,
     provider_refresher: ProviderStateRefresh | None = None,
+    landing_state: LandingStateReader | None = None,
 ) -> WorkspaceProjection:
     """Read logs + structural + analytical snapshots, reduce the tree, write it atomically."""
     moment = now or datetime.now(UTC)
@@ -235,7 +237,10 @@ def project_and_write(
         task_documents=read_task_documents(coordination_root, enclosures=enclosures, now=moment),
         series=read_series_documents(coordination_root, now=moment),
         engine_process_facts=read_engine_process_facts(
-            coordination_root, active_worktree_groups=engine_groups, now=moment
+            coordination_root,
+            active_worktree_groups=engine_groups,
+            now=moment,
+            landing_state=landing_state,
         ),
         engine_start_progress=read_start_progress_entries(coordination_root, now=moment),
         gates=read_gates(coordination_root, now=moment),

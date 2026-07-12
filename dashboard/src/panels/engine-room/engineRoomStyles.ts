@@ -284,6 +284,7 @@ export const factChip = cva({
       derived: { borderStyle: "dashed", borderColor: "amber", color: "amber" },
       planned: { borderStyle: "dotted", borderColor: "muted", color: "muted" },
       missing: { borderStyle: "dotted", borderColor: "dormant", color: "dormant", opacity: "0.7" },
+      stale: { borderStyle: "dashed", borderColor: "alarm", color: "alarm", opacity: "0.8" },
       "not-applicable": { borderStyle: "solid", borderColor: "grid", color: "dormant" },
     },
   },
@@ -328,6 +329,7 @@ export const nodeBox = cva({
       derived: { borderStyle: "dashed", borderColor: "amber", opacity: "0.85" },
       planned: { borderStyle: "dotted", borderColor: "muted", opacity: "0.7" },
       missing: { borderStyle: "dotted", borderColor: "dormant", opacity: "0.6" },
+      stale: { borderStyle: "dashed", borderColor: "alarm", opacity: "0.8" },
       "not-applicable": { borderColor: "grid", opacity: "0.5" },
     },
   },
@@ -632,6 +634,7 @@ export const svgNodeBox = cva({
       derived: { stroke: "token(colors.cyan)", strokeDasharray: "5 4" },
       planned: { stroke: "token(colors.muted)", strokeDasharray: "2 4", opacity: "0.7" },
       missing: { stroke: "token(colors.dormant)", strokeDasharray: "2 4", opacity: "0.6" },
+      stale: { stroke: "token(colors.alarm)", strokeDasharray: "4 4", opacity: "0.8" },
       "not-applicable": { stroke: "token(colors.grid)", opacity: "0.5" },
     },
   },
@@ -1145,7 +1148,9 @@ export const closeoutBeatLabel = css({ fill: "token(colors.mint)", fontSize: "9.
 // AFTER (mem-main). Each ref is a state chip honest to its factState: `planned` = dashed/muted
 // ("expected, not yet"; the PR is never shown live until observed — honest-motion §4), `live` = solid
 // amber (observed, in-flight), `done` = mint (a landed tip/merge/push — colour parity with the
-// green-active engine + closeout-done palette). The fill/stroke transition is the only motion (a
+// green-active engine + closeout-done palette), `stale` = dashed alarm (last truthful observation,
+// no longer current). Stale is static and never drives an active landing-flow packet. The fill/stroke
+// transition is the only motion (a
 // projection state flip), frozen to the settled end-state under html[data-effects=off] (index.css).
 // The strip header + the wiring between chips. Chips are sized + typed as peers of the branch nodes so
 // they read at the same scale; the connectors give the landing chain a visible path (solid amber for the
@@ -1178,6 +1183,7 @@ export const remoteChip = cva({
       planned: { fill: "token(colors.bgPanel)", stroke: "token(colors.muted)", strokeDasharray: "4 5", opacity: "0.8" },
       live: { fill: "token(colors.bgPanel)", stroke: "token(colors.amber)" },
       done: { fill: "oklch(0.24 0.04 160)", stroke: "token(colors.mint)" },
+      stale: { fill: "token(colors.bgPanel)", stroke: "token(colors.alarm)", strokeDasharray: "4 4", opacity: "0.8" },
     },
   },
 });
@@ -1188,6 +1194,7 @@ export const remoteChipLabel = cva({
       planned: { fill: "token(colors.muted)" },
       live: { fill: "token(colors.amber)" },
       done: { fill: "token(colors.mint)" },
+      stale: { fill: "token(colors.alarm)" },
     },
   },
 });
@@ -1198,6 +1205,7 @@ export const remoteChipState = cva({
       planned: { fill: "token(colors.muted)", fontStyle: "italic" },
       live: { fill: "token(colors.muted)" },
       done: { fill: "token(colors.mint)", opacity: "0.85" },
+      stale: { fill: "token(colors.alarm)", fontStyle: "italic" },
     },
   },
 });
@@ -1210,6 +1218,7 @@ export const prBadge = cva({
     state: {
       open: { fill: "token(colors.bgPanel)", stroke: "token(colors.amber)" },
       merged: { fill: "oklch(0.24 0.04 160)", stroke: "token(colors.mint)" },
+      stale: { fill: "token(colors.bgPanel)", stroke: "token(colors.alarm)", strokeDasharray: "4 4", opacity: "0.8" },
     },
   },
 });
@@ -1219,6 +1228,7 @@ export const prBadgeLabel = cva({
     state: {
       open: { fill: "token(colors.amber)" },
       merged: { fill: "token(colors.mint)" },
+      stale: { fill: "token(colors.alarm)" },
     },
   },
 });
@@ -1228,6 +1238,7 @@ export const prBadgeSub = cva({
     state: {
       open: { fill: "token(colors.muted)" },
       merged: { fill: "token(colors.mint)", opacity: "0.85" },
+      stale: { fill: "token(colors.alarm)", fontStyle: "italic" },
     },
   },
 });

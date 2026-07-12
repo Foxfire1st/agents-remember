@@ -116,6 +116,9 @@ TmuxConfigurer = Callable[[str], None]
 TmuxModeCanceller = Callable[[str], None]
 """Cancel copy-mode on a tmux session name (no-op when the pane is not in a mode)."""
 
+TmuxPaneModeProbe = Callable[[str], bool | None]
+"""Return whether the target pane is in a tmux mode, or ``None`` when it cannot be queried."""
+
 
 def _tmux_has_session(name: str) -> bool:
     """Whether tmux currently knows ``name``.
@@ -246,6 +249,46 @@ def _tmux_cancel_copy_mode(name: str) -> None:
             stderr=subprocess.DEVNULL,
             timeout=_TERMINATE_TIMEOUT,
         )
+
+
+def pane_in_mode(name: str) -> bool | None:
+    """Read tmux's exact ``pane_in_mode`` flag without sending input."""
+    try:
+        result = subprocess.run(
+            ["tmux", "display-message", "-p", "-t", name, "#{pane_in_mode}"],
+            check=False,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            timeout=_TERMINATE_TIMEOUT,
+            text=True,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if result.returncode != 0:
+        return None
+    value = result.stdout.strip()
+    if value == "1":
+        return True
+    if value == "0":
+        return False
+    return None
+
+
+def ensure_terminal_input_ready(
+    name: str,
+    *,
+    mode_probe: TmuxPaneModeProbe = pane_in_mode,
+    mode_canceller: TmuxModeCanceller = _tmux_cancel_copy_mode,
+) -> bool:
+    """Cancel copy mode when present and prove the exact pane left it before input."""
+    mode = mode_probe(name)
+    if mode is None:
+        return False
+    if mode:
+        mode_canceller(name)
+        return mode_probe(name) is False
+    return True
 
 
 @dataclass

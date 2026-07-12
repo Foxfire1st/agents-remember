@@ -28,6 +28,7 @@ import time
 import unittest
 from collections.abc import Mapping, Sequence
 from pathlib import Path
+from unittest import mock
 
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
@@ -38,6 +39,8 @@ from agents_remember.serving.terminal import (
     _build_tmux_command,
     _spawn_pty,
     _tmux_session_name,
+    ensure_terminal_input_ready,
+    pane_in_mode,
 )
 
 _HAS_TMUX = shutil.which("tmux") is not None
@@ -139,8 +142,16 @@ class BuildCommandTests(unittest.TestCase):
         self.assertEqual(
             argv,
             [
-                "tmux", "new-session", "-A", "-s", "ar-lc1",
-                "-c", "/work/tree", "--", "claude", "--resume",
+                "tmux",
+                "new-session",
+                "-A",
+                "-s",
+                "ar-lc1",
+                "-c",
+                "/work/tree",
+                "--",
+                "claude",
+                "--resume",
             ],
         )
 
@@ -180,9 +191,7 @@ class TerminalHostRegistryTests(unittest.TestCase):
         self.existing_tmux.add(name)
 
     def test_open_builds_tmux_command_and_registers(self) -> None:
-        session = self.host.open(
-            "lc1", cwd=self.tmp, command=["claude"], lifecycle_id="LC-1"
-        )
+        session = self.host.open("lc1", cwd=self.tmp, command=["claude"], lifecycle_id="LC-1")
         self.assertEqual(self.spawner.calls[0][:4], ["tmux", "new-session", "-A", "-s"])
         self.assertEqual(self.spawner.calls[0][-2:], ["--", "claude"])
         self.assertEqual(session.tmux_name, "ar-lc1")
@@ -360,7 +369,10 @@ class _PipeWriteSpawner:
         read_fd, write_fd = os.pipe()
         self.read_fds.append(read_fd)
         return PtyProcess(
-            master_fd=write_fd, pid=7000 + len(self.read_fds), terminate=lambda: None, poll=lambda: None
+            master_fd=write_fd,
+            pid=7000 + len(self.read_fds),
+            terminate=lambda: None,
+            poll=lambda: None,
         )
 
 
@@ -454,6 +466,41 @@ class TerminalHostCopyModeCancelTests(unittest.TestCase):
         self.host.write("m", b"\x1b[<64;10;5M")
         self.host.write("m", b"\x1b[<64;10;5Mx")
         self.assertEqual(self.cancelled, ["ar-m"])
+
+
+class TerminalInputReadinessTests(unittest.TestCase):
+    def test_copy_mode_is_cancelled_and_rechecked_before_input(self) -> None:
+        modes = iter([True, False])
+        cancelled: list[str] = []
+        ready = ensure_terminal_input_ready(
+            "ar-worker",
+            mode_probe=lambda _name: next(modes),
+            mode_canceller=cancelled.append,
+        )
+        self.assertTrue(ready)
+        self.assertEqual(cancelled, ["ar-worker"])
+
+    def test_uncleared_or_unobservable_copy_mode_blocks_input(self) -> None:
+        for observations in ([True, True], [None]):
+            with self.subTest(observations=observations):
+                modes = iter(observations)
+                self.assertFalse(
+                    ensure_terminal_input_ready(
+                        "ar-worker",
+                        mode_probe=lambda _name, modes=modes: next(modes),
+                        mode_canceller=lambda _name: None,
+                    )
+                )
+
+    def test_pane_mode_probe_parses_only_exact_tmux_flags(self) -> None:
+        for stdout, expected in (("1\n", True), ("0\n", False), ("unknown\n", None)):
+            with self.subTest(stdout=stdout):
+                completed = subprocess.CompletedProcess([], 0, stdout=stdout)
+                with mock.patch(
+                    "agents_remember.serving.terminal.subprocess.run",
+                    return_value=completed,
+                ):
+                    self.assertIs(pane_in_mode("ar-worker"), expected)
 
 
 @unittest.skipUnless(

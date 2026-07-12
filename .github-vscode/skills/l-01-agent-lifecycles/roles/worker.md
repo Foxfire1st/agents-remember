@@ -147,8 +147,8 @@ leaf well, ask when the leaf itself is in question" default.
 | model   | mid-reasoning  | competent implementer on a scoped leaf |
 | effort  | medium         | scales with leaf difficulty via settings |
 | launchArgs | — | free-form escape: verbatim harness argv (settings-only; never validated, recorded in spawn provenance) |
-| sessionCommands | — | free-form escape: lines pasted + submitted into the fresh session before the brief (settings-only; never validated) |
-| promptKeywords | — | free-form escape: prepended as the first line of the dispatch brief paste (settings-only; never validated) |
+| sessionCommands | — | settings-owned launch configuration: lines pasted + submitted during fresh-session launch (never validated; not brief delivery) |
+| promptKeywords | — | settings-owned keywords prepended exactly once to the post-readiness dispatch brief (never validated) |
 | tools   | build surface  | native edit · read-only AR retrieval · prescribed checks · inbox |
 
 Settings.json `orchestration.roles.worker` overrides these, and `orchestration.rolesPerLevel.<level>.worker` overrides per dispatch level (role-file defaults < settings < level override; spawn knobs manual: `docs/reference/harnesses.md`).

@@ -20,6 +20,7 @@ import json
 import os
 import sys
 import tempfile
+import threading
 import time
 import unittest
 from datetime import UTC, datetime
@@ -91,6 +92,7 @@ from agents_remember.serving.sim import (
     parse_sim_speed,
 )
 from agents_remember.serving.static import dashboard_static_dir
+from agents_remember.serving.terminal import TerminalHost
 from pydantic import BaseModel
 
 _TS = "2026-06-14T10:00:00Z"
@@ -340,6 +342,33 @@ class ProjectorTests(unittest.IsolatedAsyncioTestCase):
         await projector.prime()
         self.assertEqual(calls, [moment])
 
+    async def test_run_owns_landing_refresher_lifecycle(self) -> None:
+        started = asyncio.Event()
+        stopped = asyncio.Event()
+
+        class Refresher:
+            def current(self, contract, *, now):  # type: ignore[no-untyped-def]
+                _ = contract, now
+
+            async def run(self) -> None:
+                started.set()
+                try:
+                    await asyncio.Event().wait()
+                finally:
+                    stopped.set()
+
+        projector = Projector(
+            _config(self.tmp),
+            interval=100,
+            landing_refresher=Refresher(),
+        )
+        task = asyncio.create_task(projector.run())
+        await asyncio.wait_for(started.wait(), timeout=1)
+        task.cancel()
+        with self.assertRaises(asyncio.CancelledError):
+            await task
+        self.assertTrue(stopped.is_set())
+
 
 class StreamEventsTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self) -> None:
@@ -405,6 +434,27 @@ class AppTests(unittest.TestCase):
         self.assertIn('<div id="root">', response.text)
         self.assertIn("Agents Remember", response.text)
 
+    def test_terminal_host_shutdown_survives_dead_landing_refresher(self) -> None:
+        failed = threading.Event()
+
+        async def failed_run(_refresher) -> None:  # type: ignore[no-untyped-def]
+            failed.set()
+            raise RuntimeError("refresher died")
+
+        host = TerminalHost()
+        with (
+            mock.patch(
+                "agents_remember.serving.app.LandingStateRefresher.run",
+                new=failed_run,
+            ),
+            mock.patch.object(host, "shutdown", wraps=host.shutdown) as shutdown,
+            self.assertLogs("agents_remember.serving.projector", level="ERROR"),
+        ):
+            app = create_app(_config(self.tmp), interval=100, terminal_host=host)
+            with TestClient(app):
+                self.assertTrue(failed.wait(timeout=1))
+        shutdown.assert_called_once_with()
+
 
 class StateEtagTests(unittest.TestCase):
     """The /api/state change gate (260703-L15): 200 -> ETag -> 304, real change -> new ETag."""
@@ -421,7 +471,7 @@ class StateEtagTests(unittest.TestCase):
     ) -> TestClient:
         patcher = mock.patch(
             "agents_remember.serving.projector.project_and_write",
-            side_effect=lambda config, *, now, provider_refresher=None: held[0],
+            side_effect=lambda config, *, now, provider_refresher=None, landing_state=None: held[0],
         )
         patcher.start()
         self.addCleanup(patcher.stop)

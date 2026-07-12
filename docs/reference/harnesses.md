@@ -108,24 +108,28 @@ tool payload). Example: `["--dangerously-skip-permissions"]`.
 ### Layer 3 — session free-form: `sessionCommands` and `promptKeywords`
 
 - `sessionCommands`: a list of lines, each pasted into the freshly spawned
-  session as its OWN entry and submitted, BEFORE the dispatch
-  brief — the vehicle for any session-level harness feature (a
+  session as its OWN entry and submitted during launch, before any task
+  assignment — the vehicle for any session-level harness feature (a
   session-vocabulary effort like claude's `ultracode` is delivered this way
-  automatically, ahead of configured session commands). After the id-bearing brief binds the
-  spawn-cwd harness JSONL, every command requires its command record plus non-error stdout;
-  a missing/errored command alone is re-issued and re-checked. Never caller-validated; recorded
-  in spawn provenance.
+  automatically, ahead of configured session commands). This launch-command outcome is distinct
+  from brief delivery and cannot make a seat active work. Once the later dispatch brief binds the
+  harness log, an evidence-capable adapter (currently Claude) retroactively proves every pre-brief
+  command from command entry + successful stdout; a missing or errored command alone is re-issued,
+  and the dispatch row remains pending unless every required proof succeeds. Harnesses without a
+  truthful command-entry/output adapter retain their existing launch-time transport semantics and
+  keep that outcome explicitly unproven; they are not placed into an impossible retry loop. The
+  initial command delivery never moves out of launch. Never caller-validated; recorded in spawn
+  provenance.
 - `promptKeywords`: a list of keywords prepended as the first line of the
-  dispatch-brief paste (session modes the model interprets, e.g. a prompt
+  post-readiness dispatch-brief exactly once (session modes the model interprets, e.g. a prompt
   keyword like `ultracode`). Never validated; recorded in spawn provenance.
 
-Delivery order at spawn: **launch argv → settings session commands (effort
-vehicle first, then configured commands) → the brief paste (keywords first)**.
-The brief's unique id binds the harness session log; that id+path are catalog provenance and all
-submitted delivery acceptance comes from the bound log, never terminal-screen vocabulary.
-After a calibrated log-absence window, Enter may be re-pressed once. A re-paste is allowed only
-after a bounded pane check verifies that the prior payload is absent; visible payload/chip evidence
-is cleared and verified absent before replacement, or the delivery fails without appending.
+Dispatch order is explicit: **spawn (launch argv → settings session commands) →
+`hosted_session_readiness` on the exact returned id → one durable exact-agent `dispatch-brief`
+(keywords first)**. Spawn success is `spawned-unbriefed`; a spawned-only or not-ready seat is not
+active work. Brief delivery is accepted only when the durable row reports
+`deliveryState=delivered` and `deliveryDetail=harness-log-confirmed`. A failed attempt leaves that
+same row pending for recovery; it does not create a duplicate brief or replacement session.
 
 ### The dispatch level: `level` and `orchestration.rolesPerLevel`
 

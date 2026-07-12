@@ -14,6 +14,7 @@ from typing import Literal
 from uuid import uuid4
 
 from agents_remember.serving.seat_binding import migrated_seat_role
+from agents_remember.serving.terminal_catalog_lock import exclusive_terminal_catalog_lock
 
 # 260707-HFX2-L12 F1/CS-6 D3: a ``terminated`` row is a tombstone (the tmux session is gone and the
 # hysteresis refuses to resurrect it), so without reclamation every retire/terminate leaves one to
@@ -83,9 +84,9 @@ class TerminalCatalogEntry:
     # Same migration-safe written-only-when-set pattern as the provenance fields above.
     spawn_role: str | None = None
     # Free-form spawn provenance (260703-L16): the escape-hatch role knobs, recorded VERBATIM and
-    # never validated -- launch_args rode the harness argv, session_commands were pasted post-launch
-    # before the brief, prompt_keywords were prepended to the brief paste. Same migration-safe
-    # written-only-when-set pattern as the fields above.
+    # never validated -- launch_args rode the harness argv, session_commands were applied during
+    # fresh-session launch, and prompt_keywords await the later post-readiness brief. Same
+    # migration-safe written-only-when-set pattern as the fields above.
     launch_args: tuple[str, ...] | None = None
     prompt_keywords: tuple[str, ...] | None = None
     session_commands: tuple[str, ...] | None = None
@@ -446,12 +447,8 @@ class TerminalCatalog:
 
     def __init__(self, path: Path) -> None:
         self.path = path
-        # Serialize the read-modify-write within the process. FastAPI runs sync handlers in a threadpool,
-        # so concurrent open/attach/terminate/refresh requests would otherwise each read a stale snapshot
-        # and clobber one another (lost updates) — and, with the old shared temp file, interleave their
-        # bytes into a torn file that then 500s every reader. The unique-temp + atomic replace in `_write`
-        # keeps any single write valid even across processes; this lock makes concurrent mutations in THIS
-        # process compose instead of racing. (RLock so a mutator may call another lock-taking helper.)
+        # The RLock composes threads sharing this instance. ``_catalog_access`` adds the stable-file
+        # flock that composes dashboard and MCP processes; atomic replace alone only prevents torn JSON.
         self._lock = threading.RLock()
         # 260707-HFX2-L12 F1/CS-6 D2: an in-memory unit-of-work buffer for a full-catalog sweep. When a
         # ``batch()`` is active, ``_read``/``_write`` hit this buffer instead of disk, so the liveness
@@ -461,13 +458,13 @@ class TerminalCatalog:
         self._batch_dirty = False
 
     def list(self, *, include_terminated: bool = False) -> list[TerminalCatalogEntry]:
-        entries = self._read()
+        entries = self._read_snapshot()
         if include_terminated:
             return entries
         return [entry for entry in entries if entry.status != "terminated"]
 
     def get(self, session_id: str) -> TerminalCatalogEntry | None:
-        return next((entry for entry in self._read() if entry.id == session_id), None)
+        return next((entry for entry in self._read_snapshot() if entry.id == session_id), None)
 
     def active_for_leaf(self, leaf_key: str, *, seat_role: str) -> TerminalCatalogEntry | None:
         """The single RUNNING session of ``seat_role`` that owns ``leaf_key``, or ``None``.
@@ -488,13 +485,13 @@ class TerminalCatalog:
         )
 
     def upsert(self, entry: TerminalCatalogEntry) -> None:
-        with self._lock:
+        with self._catalog_access():
             entries = [current for current in self._read() if current.id != entry.id]
             entries.append(entry)
             self._write(entries)
 
     def mark_attached(self, session_id: str, attached_at: str) -> TerminalCatalogEntry | None:
-        with self._lock:
+        with self._catalog_access():
             entries = self._read()
             index = _index_of(entries, session_id)
             if index is None:
@@ -505,7 +502,7 @@ class TerminalCatalog:
             return updated
 
     def mark_exited(self, session_id: str) -> TerminalCatalogEntry | None:
-        with self._lock:
+        with self._catalog_access():
             entries = self._read()
             index = _index_of(entries, session_id)
             if index is None:
@@ -530,7 +527,7 @@ class TerminalCatalog:
         pane_gone_failure_threshold: int = 1,
     ) -> TerminalCatalogEntry | None:
         """Persist one liveness observation with hysteresis and success-side self-healing."""
-        with self._lock:
+        with self._catalog_access():
             entries = self._read()
             index = _index_of(entries, session_id)
             if index is None:
@@ -554,7 +551,7 @@ class TerminalCatalog:
             return updated
 
     def mark_terminated(self, session_id: str, terminated_at: str) -> TerminalCatalogEntry | None:
-        with self._lock:
+        with self._catalog_access():
             entries = self._read()
             index = _index_of(entries, session_id)
             if index is None:
@@ -574,7 +571,7 @@ class TerminalCatalog:
         edge: str,
     ) -> TerminalCatalogEntry | None:
         """The explicit retire terminal mark (260707-HFX-L8): never a zombie row, never resurrected."""
-        with self._lock:
+        with self._catalog_access():
             entries = self._read()
             index = _index_of(entries, session_id)
             if index is None:
@@ -596,7 +593,7 @@ class TerminalCatalog:
         edge: str,
     ) -> TerminalCatalogEntry | None:
         """Mark a successful completion as landed/archive without closing the tmux session."""
-        with self._lock:
+        with self._catalog_access():
             entries = self._read()
             index = _index_of(entries, session_id)
             if index is None:
@@ -610,7 +607,7 @@ class TerminalCatalog:
 
     def set_label(self, session_id: str, label: str) -> TerminalCatalogEntry | None:
         """Rename a session's display label (identity text only -- ``spawn_role`` never changes)."""
-        with self._lock:
+        with self._catalog_access():
             entries = self._read()
             index = _index_of(entries, session_id)
             if index is None:
@@ -628,7 +625,7 @@ class TerminalCatalog:
         path: Path,
     ) -> TerminalCatalogEntry | None:
         """Persist log provenance onto the latest row without replaying an open-time snapshot."""
-        with self._lock:
+        with self._catalog_access():
             entries = self._read()
             index = _index_of(entries, session_id)
             if index is None:
@@ -646,7 +643,7 @@ class TerminalCatalog:
         self, session_id: str, state: SeatTurnState, *, changed_at: str
     ) -> TerminalCatalogEntry | None:
         """Persist a live turn-state classification; a no-op write when the state did not change."""
-        with self._lock:
+        with self._catalog_access():
             entries = self._read()
             index = _index_of(entries, session_id)
             if index is None:
@@ -667,30 +664,29 @@ class TerminalCatalog:
         O(n) disk rewrites per sweep, each O(n) to parse/serialise, i.e. O(n^2) disk work that grows with
         the session count. Inside this context the catalog is read from disk exactly once (here, at begin)
         and every mutator's ``_read``/``_write`` hits the in-memory buffer; the single atomic disk write
-        happens on exit. The lock is NOT held across the ``yield`` -- only for the begin read and the
-        commit write -- so the slow tmux probes between mutators do not block concurrent API catalog
-        access, and each mutator still takes the lock per-call for its (now in-memory) read-modify-write.
-        Re-entrant: a nested ``batch()`` reuses the outer buffer and defers commit to the outermost frame.
+        happens on exit. The cross-process lock intentionally spans the bounded probe lifecycle:
+        another process's spawn/terminate waits, then reads and composes from this committed state.
+        That serialization is the narrow defense against the reproduced stale-sweep overwrite while
+        preserving exactly one catalog read and one write. Nested batches reuse the outer buffer.
         """
         with self._lock:
             if self._batch is not None:
                 yield
                 return
-            self._batch = self._read_disk()
-            self._batch_dirty = False
-        try:
-            yield
-        finally:
-            # Clear the buffer and flush it under ONE lock acquisition: a mutator that races the commit
-            # either already wrote into ``entries`` (flushed here) or sees ``_batch is None`` and writes
-            # disk directly after this block releases -- never a torn interleave or a clobbered update.
+        with exclusive_terminal_catalog_lock(self.path):
             with self._lock:
-                entries = self._batch
-                dirty = self._batch_dirty
-                self._batch = None
+                self._batch = self._read_disk()
                 self._batch_dirty = False
-                if dirty and entries is not None:
-                    self._write_disk(entries)
+            try:
+                yield
+            finally:
+                with self._lock:
+                    entries = self._batch
+                    dirty = self._batch_dirty
+                    self._batch = None
+                    self._batch_dirty = False
+                    if dirty and entries is not None:
+                        self._write_disk(entries)
 
     def compact(
         self, *, now: datetime, retain_seconds: float = TERMINATED_RETENTION_SECONDS
@@ -705,7 +701,7 @@ class TerminalCatalog:
         Returns the number of rows reclaimed. Composes inside ``batch()`` (drops from the buffer, folded
         into the one commit write).
         """
-        with self._lock:
+        with self._catalog_access():
             entries = self._read()
             kept = [
                 entry
@@ -719,6 +715,32 @@ class TerminalCatalog:
                 return 0
             self._write(kept)
             return len(entries) - len(kept)
+
+    @contextlib.contextmanager
+    def _catalog_access(self) -> Iterator[None]:
+        """Serialize one mutation, reusing an outer batch's held file lock."""
+
+        with self._lock:
+            if self._batch is not None:
+                yield
+                return
+        # Acquire the process lock before re-taking the instance lock, matching ``batch``. Holding
+        # the instance lock while waiting for a batch's flock would deadlock that batch at commit.
+        with exclusive_terminal_catalog_lock(self.path), self._lock:
+            yield
+
+    def _read_snapshot(self) -> list[TerminalCatalogEntry]:
+        """Read one coherent atomic-file snapshot without waiting for the writer flock.
+
+        A same-instance batch exposes its current buffer under the thread lock. Other instances
+        read the last committed file while a slow liveness batch is probing panes; atomic replace
+        makes that snapshot coherent, and read-only access never performs schema migration.
+        """
+
+        with self._lock:
+            if self._batch is not None:
+                return list(self._batch)
+        return self._read_disk()
 
     def _read(self) -> list[TerminalCatalogEntry]:
         # Inside a batch the buffer IS the current state -- a shallow copy so a caller's in-place
@@ -748,10 +770,7 @@ class TerminalCatalog:
         if not isinstance(sessions, list):
             return []
         rows = [item for item in sessions if isinstance(item, dict)]
-        entries = [TerminalCatalogEntry.from_json(item) for item in rows]
-        if any("seatRole" not in item for item in rows):
-            self._write_disk(entries)
-        return entries
+        return [TerminalCatalogEntry.from_json(item) for item in rows]
 
     def _write_disk(self, entries: list[TerminalCatalogEntry]) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)

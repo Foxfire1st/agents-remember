@@ -58,9 +58,52 @@ function stubChangeset() {
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+  vi.useRealTimers();
 });
 
 describe("ChangeSetViewer screen", () => {
+  it("shows loading until the request resolves instead of rendering a zero-file result", async () => {
+    let resolveFetch!: (response: Response) => void;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        () =>
+          new Promise<Response>((resolve) => {
+            resolveFetch = resolve;
+          }),
+      ),
+    );
+    const { getByTestId, findByTestId } = render(
+      <ChangeSetViewer repo="agents-remember" scope="wt-a" onBack={vi.fn()} />,
+    );
+    expect(getByTestId("pane-placeholder").textContent).toContain("Loading change-set");
+    resolveFetch({
+      ok: true,
+      status: 200,
+      json: async () => TASK_CHANGESET,
+    } as unknown as Response);
+    await findByTestId("changeset-counters");
+  });
+
+  it("retains the explicit request error state", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          ({
+            ok: false,
+            status: 404,
+            statusText: "Not Found",
+            json: async () => ({ status: "not-found" }),
+          }) as unknown as Response,
+      ),
+    );
+    const { findByText } = render(
+      <ChangeSetViewer repo="agents-remember" scope="gone" onBack={vi.fn()} />,
+    );
+    expect(await findByText("not-found (404)")).not.toBeNull();
+  });
+
   it("renders the changed-file rows + counters for a task scope", async () => {
     stubChangeset();
     const { container, findByTestId, getByText } = render(
@@ -163,7 +206,57 @@ describe("ChangeSetViewer screen", () => {
     });
     expect(countOf("/api/changeset/task")).toBe(1); // load only
     expect(countOf("/api/changeset/file-diff")).toBe(1); // click only, no poll
-    vi.useRealTimers();
+  });
+
+  it("does not start another working refresh until the list and open-file requests settle", async () => {
+    vi.useFakeTimers();
+    let defer = false;
+    const pending: { url: string; resolve: (response: Response) => void }[] = [];
+    const responseFor = (url: string) =>
+      ({
+        ok: true,
+        status: 200,
+        json: async () =>
+          url.includes("/api/changeset/file-diff") ? FILE_DIFF : TASK_CHANGESET,
+      }) as unknown as Response;
+    const fetchFn = vi.fn((url: string) => {
+      if (!defer) return Promise.resolve(responseFor(url));
+      return new Promise<Response>((resolve) => pending.push({ url, resolve }));
+    });
+    vi.stubGlobal("fetch", fetchFn);
+
+    const working = render(
+      <ChangeSetViewer repo="r" master="m" leaf="l" mode="working" onBack={vi.fn()} />,
+    );
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    fireEvent.click(working.getByText("dashboard/src/x.ts"));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(fetchFn).toHaveBeenCalledTimes(2);
+
+    defer = true;
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2500);
+    });
+    expect(fetchFn).toHaveBeenCalledTimes(4);
+    expect(pending).toHaveLength(2);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10_000);
+    });
+    expect(fetchFn).toHaveBeenCalledTimes(4);
+
+    defer = false;
+    await act(async () => {
+      for (const request of pending.splice(0)) request.resolve(responseFor(request.url));
+      await Promise.resolve();
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2500);
+    });
+    expect(fetchFn).toHaveBeenCalledTimes(6);
   });
 
   it("opens a per-file NET diff from a clickable row in master mode", async () => {
@@ -172,6 +265,11 @@ describe("ChangeSetViewer screen", () => {
       <ChangeSetViewer repo="agents-remember" master="browser-dashboard" onBack={vi.fn()} />,
     );
     await findByTestId("changeset-counters");
+    expect(
+      (vi.mocked(fetch).mock.calls as unknown as string[][]).some((call) =>
+        String(call[0]).includes("includeLeaves=false"),
+      ),
+    ).toBe(true);
     // master mode now lists the net changed files with the normal empty-state backdrop prompt
     // (not the old accumulated-summary message), and the rows are clickable.
     expect(container.textContent).toContain("Select a changed file");

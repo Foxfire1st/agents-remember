@@ -29,6 +29,7 @@ from .tools import (
     gate_list_payload,
     grepai_search_payload,
     grepai_trace_payload,
+    hosted_session_readiness_payload,
     lifecycle_end_payload,
     lifecycle_finalize_task_payload,
     lifecycle_gate_payload,
@@ -173,16 +174,20 @@ def create_server(config: McpRuntimeConfig) -> Any:
         spawned_by_lifecycle: str | None = None,
         kind: str = "harness",
     ) -> dict[str, Any]:
-        """Spawn a role-configured, leaf-attached, context-primed hosted agent session.
+        """Spawn a role-configured, leaf-attached hosted agent session without its brief.
 
         Composes the EXISTING session primitives so an orchestrator can spawn a manager and a manager
         a worker without dashboard clicks: create a hosted session via the serving opener, attach it
         to `leaf_key` (server-arbitrated uniqueness — a taken leaf returns status 'leaf-taken', never
         overridden), resolve the role knobs from developer-owned agentic settings, seed resolved
         `model`/`effort` into spawn env, map them onto the harness argv per-harness via the registry,
-        and deliver `context` as an id-bearing, harness-log-confirmed paste. Ordinary callers declare
-        the seat (`env.AR_SPAWN_ROLE`) and dispatch `level`; they do not choose harness/model/effort or direct
-        launch/session spend controls. Legacy non-null `harness`, `model`, `effort`, `launch_args`,
+        and return the exact catalog session id as `spawned-unbriefed`. Ordinary callers declare the
+        seat (`env.AR_SPAWN_ROLE`) and dispatch `level`; they do not choose harness/model/effort or
+        direct launch/session spend controls. Legacy non-null `context` or `submit=true` returns
+        `brief-delivery-separate` before settings, catalog, or terminal side effects. The caller must
+        then obtain `hosted_session_readiness(...)=ready` for the returned id and post one exact-agent
+        durable `dispatch-brief`; only `delivered` plus `harness-log-confirmed` proves brief delivery.
+        Legacy non-null `harness`, `model`, `effort`, `launch_args`,
         `prompt_keywords`, `session_commands`, `env.AR_SPAWN_MODEL`, `env.AR_SPAWN_EFFORT`, or
         harness-native spend/endpoint env keys such as `ANTHROPIC_MODEL` and `OPENAI_BASE_URL`
         return status 'spend-override-unsupported' before spawning, with guidance to configure
@@ -194,15 +199,17 @@ def create_server(config: McpRuntimeConfig) -> Any:
         dispatching leaf seats passes leaf, the seam reviewer master, portfolio seats portfolio):
         knobs resolve from the agentic settings as `orchestration.rolesPerLevel[level]` deep-merged
         over the flat `orchestration.roles` default, keyed by the AR_SPAWN_ROLE riding `env`; the
-        resolved level + source land in spawn provenance. `submit=true` presses Enter so a worker
-        auto-starts; leave it false for a draft. If role settings do not choose a harness, the
+        resolved level + source land in spawn provenance. Settings-owned session commands remain
+        launch-phase configuration; prompt keywords stay on the catalog row until that later brief.
+        If role settings do not choose a harness, the
         dispatch falls through to repo-local/global `orchestration.spawn.harness`, then the first
         detected registry harness. Each spawned session is its own harness process (the
         ambient-lifecycle singleton is untouched). Spawned-by provenance (`spawned_by_session` + the
         active/`spawned_by_lifecycle` lifecycle) is recorded on the catalog row so the dashboard can
-        render the orchestration tree. Status 'spawned' on success; 'spend-override-unsupported',
-        'harness-unknown'/'harness-not-detected'/'effort-invalid'/'model-invalid'/'level-invalid'/
-        'bad-kind' are pre-spawn refusals."""
+        render the orchestration tree. Status `spawned-unbriefed` on success;
+        `brief-delivery-separate`, `spend-override-unsupported`, `harness-unknown`/
+        `harness-not-detected`/`effort-invalid`/`model-invalid`/`level-invalid`/`bad-kind` are
+        pre-spawn refusals."""
         return spawn_agent_session_payload(
             config,
             harness=harness,
@@ -221,6 +228,23 @@ def create_server(config: McpRuntimeConfig) -> Any:
             spawned_by_session=spawned_by_session,
             spawned_by_lifecycle=spawned_by_lifecycle,
             kind=kind,
+        )
+
+    @server.tool()
+    def hosted_session_readiness(
+        session_id: str,
+        wait_seconds: float = 0.0,
+    ) -> dict[str, Any]:
+        """Check whether one exact spawned session is ready for durable brief delivery.
+
+        This is read-only: it verifies the same running catalog identity, addressable tmux pane,
+        harness-aware composer marker, and absence of tmux copy mode. It returns as soon as ready
+        or when the caller's finite wait (maximum 60 seconds) expires; it never sends input.
+        """
+        return hosted_session_readiness_payload(
+            config,
+            session_id=session_id,
+            wait_seconds=wait_seconds,
         )
 
     @server.tool()

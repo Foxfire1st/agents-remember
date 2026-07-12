@@ -186,7 +186,7 @@ class TerminalCatalogTests(unittest.TestCase):
         assert unset is not None
         self.assertIsNone(unset.spawn_role)
 
-    def test_legacy_catalog_migrates_seat_roles_in_place_without_row_loss(self) -> None:
+    def test_read_only_snapshot_does_not_write_legacy_seat_role_migration(self) -> None:
         rows = [
             replace(_entry("worker", kind="harness"), spawn_role="worker").to_json(),
             _entry("legacy-chat", kind="harness").to_json(),
@@ -206,6 +206,10 @@ class TerminalCatalogTests(unittest.TestCase):
             {entry.id: entry.binding_role for entry in migrated},
             {"worker": "worker", "legacy-chat": "chat", "terminal": "terminal"},
         )
+        persisted = json.loads(self.catalog.path.read_text(encoding="utf-8"))["sessions"]
+        self.assertTrue(all("seatRole" not in row for row in persisted))
+
+        self.catalog.set_label("worker", "Worker renamed")
         persisted = json.loads(self.catalog.path.read_text(encoding="utf-8"))["sessions"]
         self.assertEqual(len(persisted), len(rows))
         self.assertEqual(len({row["id"] for row in persisted}), len(rows))
@@ -417,6 +421,79 @@ class TerminalCatalogTests(unittest.TestCase):
         json.loads(
             self.catalog.path.read_text(encoding="utf-8")
         )  # still valid JSON (no torn write)
+
+    def test_cross_instance_spawn_waits_for_batch_and_survives(self) -> None:
+        other = TerminalCatalog(self.catalog.path)
+        self.catalog.upsert(_entry("existing"))
+        started = threading.Event()
+        finished = threading.Event()
+
+        def spawn() -> None:
+            started.set()
+            other.upsert(_entry("spawned"))
+            finished.set()
+
+        with self.catalog.batch():
+            self.catalog.record_turn_state("existing", "working", changed_at="2026-07-12T10:00Z")
+            writer = threading.Thread(target=spawn)
+            writer.start()
+            self.assertTrue(started.wait(timeout=1))
+            self.assertFalse(finished.wait(timeout=0.05))
+        writer.join(timeout=1)
+
+        self.assertTrue(finished.is_set())
+        self.assertEqual({row.id for row in other.list()}, {"existing", "spawned"})
+
+    def test_cross_instance_termination_is_sticky_and_never_resurrected(self) -> None:
+        other = TerminalCatalog(self.catalog.path)
+        self.catalog.upsert(_entry("worker"))
+        finished = threading.Event()
+
+        def terminate() -> None:
+            other.mark_terminated("worker", "2026-07-12T10:01:00+00:00")
+            finished.set()
+
+        with self.catalog.batch():
+            self.catalog.record_turn_state("worker", "working", changed_at="2026-07-12T10:00Z")
+            writer = threading.Thread(target=terminate)
+            writer.start()
+            self.assertFalse(finished.wait(timeout=0.05))
+        writer.join(timeout=1)
+        self.assertEqual(other.get("worker").status, "terminated")  # type: ignore[union-attr]
+
+        with self.catalog.batch():
+            self.catalog.record_liveness_probe(
+                "worker",
+                alive=True,
+                checked_at=datetime.fromisoformat("2026-07-12T10:02:00+00:00"),
+            )
+        self.assertEqual(other.get("worker").status, "terminated")  # type: ignore[union-attr]
+
+    def test_cross_instance_field_update_composes_after_batch(self) -> None:
+        other = TerminalCatalog(self.catalog.path)
+        self.catalog.upsert(_entry("worker"))
+        finished = threading.Event()
+
+        def bind_log() -> None:
+            other.bind_session_log(
+                "worker",
+                entry_id="dispatch-1",
+                path=Path("/tmp/session.jsonl"),
+            )
+            finished.set()
+
+        with self.catalog.batch():
+            self.catalog.record_turn_state("worker", "working", changed_at="2026-07-12T10:00Z")
+            writer = threading.Thread(target=bind_log)
+            writer.start()
+            self.assertFalse(finished.wait(timeout=0.05))
+        writer.join(timeout=1)
+
+        row = other.get("worker")
+        assert row is not None
+        self.assertEqual(row.turn_state, "working")
+        self.assertEqual(row.session_log_entry_id, "dispatch-1")
+        self.assertEqual(row.session_log_path, Path("/tmp/session.jsonl"))
 
 
 if __name__ == "__main__":

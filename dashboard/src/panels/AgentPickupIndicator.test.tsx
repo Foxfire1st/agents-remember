@@ -12,22 +12,26 @@ afterEach(() => {
 });
 
 describe("AgentPickupIndicator", () => {
-  it("renders waiting-for-agent while the response is fresh", () => {
-    const { getByText, queryByTestId } = render(
+  it("renders inbox acknowledgment state without a model-busy spinner", () => {
+    const { container, getByText, queryByTestId } = render(
       <AgentPickupIndicator
         pickup={{
           id: "pickup:I1",
           entryId: "I1",
           lifecycleId: "LC1",
-          messageKind: "message",
-          deliveryState: "queued",
+          messageKind: "dispatch-brief",
+          deliveryState: "delivered",
           state: "waiting-for-agent",
           ttlSeconds: 300,
         }}
       />,
     );
 
-    expect(getByText("waiting for agent")).toBeTruthy();
+    expect(getByText("brief unacknowledged")).toBeTruthy();
+    expect(queryByTestId("agent-pickup")?.getAttribute("title")).toBe(
+      "Inbox delivery: delivered; brief awaiting acknowledgment",
+    );
+    expect(container.querySelector("[style]")).toBeNull();
     expect(queryByTestId("agent-pickup-dismiss")).toBeNull();
   });
 

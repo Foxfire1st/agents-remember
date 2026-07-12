@@ -32,7 +32,8 @@ class AttachTerminalSessionToLeafResponse(ToolResponse):
 
 
 SpawnAgentSessionStatus = Literal[
-    "spawned",
+    "spawned-unbriefed",
+    "brief-delivery-separate",
     "leaf-taken",
     "harness-unknown",
     "harness-not-detected",
@@ -57,13 +58,7 @@ SpawnAgentSessionStatus = Literal[
 
 
 class SpawnAgentSessionResponse(ToolResponse):
-    """``spawn_agent_session``: spawn a role-configured, leaf-attached, context-primed hosted session.
-
-    Composes the existing session primitives (opener + leaf claim + log-verified input + optional
-    submit). ``ok`` is true only for ``spawned``; ``leaf-taken`` surfaces the server-arbitrated
-    refusal (the tool never overrides it), and the harness/kind statuses report a validation refusal
-    before anything is spawned.
-    """
+    """``spawn_agent_session``: create and bind a hosted seat without delivering its brief."""
 
     operation: Literal["spawn_agent_session"] = "spawn_agent_session"
     status: SpawnAgentSessionStatus
@@ -88,26 +83,39 @@ class SpawnAgentSessionResponse(ToolResponse):
     spawnLevelSource: str | None = None
     resolvedModel: str | None = None
     resolvedEffort: str | None = None
-    sessionLogEntryId: str | None = None
-    sessionLogPath: str | None = None
-    # Free-form spawn provenance (260703-L16), as recorded on the catalog row: launchArgs rode the
-    # argv verbatim, sessionCommands were pasted post-launch before the brief (the resolved list --
-    # a session-vocabulary effort like claude's ultracode arrives here as "/effort ultracode"),
-    # promptKeywords were prepended to the brief paste. Never validated.
+    # Free-form spawn provenance (260703-L16): launchArgs rode the resolved launch argv verbatim;
+    # sessionCommands were applied as launch-phase configuration (a session-vocabulary effort like
+    # claude's ultracode arrives here as "/effort ultracode"); promptKeywords remain provenance for
+    # the later post-readiness dispatch brief. Never validated.
     launchArgs: list[str] | None = None
     promptKeywords: list[str] | None = None
     sessionCommands: list[str] | None = None
-    # Whether every session command has both a bound-log command entry and non-error stdout.
+    # Settings-owned launch/session commands remain spawn-phase configuration. Without a bound
+    # brief log, ``False`` means their application was not proven; it is never a brief-delivery claim.
     sessionCommandsDelivered: bool | None = None
     # Set on ``leaf-taken``: the running same-role session that already owns the leaf.
     ownerSession: str | None = None
-    # Context-packet delivery outcome: true only after the id-bearing user entry is in the bound log.
-    contextDelivered: bool | None = None
-    submitted: bool | None = None
-    # 260707-HFX-L3 loud-failure evidence: the final pane capture, attached whenever any delivery
-    # outcome above reports False -- a blind seat is diagnosed from the payload itself, never
-    # trusted from a bare boolean. Absent on full success.
+    # Failure-only launch-command evidence. Task instructions are delivered by dispatch-brief.
     deliveryCapture: str | None = None
+    detail: str | None = None
+
+
+HostedSessionReadinessStatus = Literal[
+    "ready",
+    "not-ready",
+    "unknown-session",
+    "terminated",
+]
+
+
+class HostedSessionReadinessResponse(ToolResponse):
+    """``hosted_session_readiness``: bounded, read-only exact-session readiness."""
+
+    operation: Literal["hosted_session_readiness"] = "hosted_session_readiness"
+    status: HostedSessionReadinessStatus
+    session: str
+    harness: str | None = None
+    tmuxName: str | None = None
     detail: str | None = None
 
 

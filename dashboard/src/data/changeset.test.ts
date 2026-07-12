@@ -18,14 +18,16 @@ describe("data/changeset client", () => {
     const fn = stubFetch({});
     await taskChangeset("agents-remember", "files-api-ar");
     await fileDiff("agents-remember", "files-api-ar", "memory", "onboarding/x.ts.md");
-    await masterChangeset("agents-remember", "260628_operations-integration");
+    await masterChangeset("agents-remember", "260628_operations-integration", {
+      includeLeaves: false,
+    });
     const urls = (fn.mock.calls as unknown as string[][]).map((c) => c[0]);
     expect(urls[0]).toBe("/api/changeset/task?repo=agents-remember&scope=files-api-ar");
     expect(urls[1]).toBe(
       "/api/changeset/file-diff?repo=agents-remember&scope=files-api-ar&kind=memory&path=onboarding%2Fx.ts.md",
     );
     expect(urls[2]).toBe(
-      "/api/changeset/master?repo=agents-remember&master=260628_operations-integration",
+      "/api/changeset/master?repo=agents-remember&master=260628_operations-integration&includeLeaves=false",
     );
   });
 

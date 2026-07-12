@@ -20,12 +20,9 @@ reconciliation sweep").
 from __future__ import annotations
 
 import contextlib
-from dataclasses import dataclass
-from dataclasses import field as dataclass_field
 from datetime import datetime
 from pathlib import Path
 from time import perf_counter
-from typing import Literal
 
 from agents_remember.controlplane.escalation_ladder import (
     MAX_RUNG,
@@ -46,7 +43,6 @@ from agents_remember.controlplane.orchestration_artifacts import turn_report_art
 from agents_remember.controlplane.orchestration_nudges import (
     NudgeReason,
     OrchestrationNudgeRecord,
-    OrchestrationNudgeStore,
     missing_artifact,
     nudge_message,
 )
@@ -59,40 +55,33 @@ from agents_remember.controlplane.signal_routing import (
     leaf_chain_has_progress,
 )
 from agents_remember.controlplane.supervisor_signals import (
-    SupervisorSignalCooldownStore,
     SupervisorSignalRecord,
 )
 from agents_remember.observer.events import Event, now_iso
-from agents_remember.observer.store import EventStore
 from agents_remember.observer.ulid import new_ulid
+from agents_remember.serving.dispatch_brief import (
+    DISPATCH_BRIEF_KIND,
+    dispatch_stays_on_exact_session,
+    fulfill_briefed_expectation,
+)
 from agents_remember.serving.inbox_delivery import deliver_inbox_entry
+from agents_remember.serving.inbox_reclamation import (
+    InboxReclamationPlan,
+    plan_confirmed_gone_reclamation,
+)
 from agents_remember.serving.pane_signals import classify_pane_signal
 from agents_remember.serving.retire import retire_entry
-from agents_remember.serving.supervisor_heartbeat import SupervisorHeartbeatStore
-from agents_remember.serving.terminal import TerminalHost
+from agents_remember.serving.supervisor_models import (
+    SupervisorActionResult,
+    SupervisorContext,
+    SupervisorFinding,
+    SupervisorSweepResult,
+)
+from agents_remember.serving.supervisor_models import (
+    SweepState as _SweepState,
+)
 from agents_remember.serving.terminal_catalog import TerminalCatalog, TerminalCatalogEntry
-from agents_remember.serving.terminal_paste import TerminalPaster
 from agents_remember.serving.terminal_paste import capture_pane as default_capture_pane
-
-FindingKind = Literal[
-    "pane-signal",
-    "expectation-overdue",
-    "turn-report-stale",
-    "inbox-redeliverable",
-    "inbox-ladder-terminal",
-    "seat-liveness",
-    "escalation-due",
-    "dead-upstream",
-]
-ActionKind = Literal[
-    "redeliver",
-    "ladder-resolve",
-    "auto-nudge",
-    "signal-emit",
-    "escalate-rung",
-    "signal-manager",
-    "none",
-]
 
 # R1 (260707-HFX2-L4): conservative built-in fallbacks when a caller (a test, or a context built
 # before settings are read) supplies no per-kind/per-rung knobs. ``serving/app.py`` always wires
@@ -102,8 +91,6 @@ ActionKind = Literal[
 # extended to knobs: no settings TYPE crosses into this file, only resolved numbers.
 DEFAULT_ESCALATION_SLA_SECONDS = 300.0
 DEFAULT_ESCALATION_RUNG_SECONDS = 900.0
-DEFAULT_RESPAWN_AFTER_RUNG = 2
-
 PERSISTENT_FAILURE_ATTEMPTS = 5
 """Attempt count past which an unacked inbox row is handed to the escalation ladder (R4d): this
 leaf only reserves the transition (``OperatorInboxStore.mark_escalated``) -- HFX2-L4 owns the
@@ -111,109 +98,6 @@ actual ladder that reads it."""
 
 _INACTIVE_EXPECTATION_KINDS = frozenset({"briefed-by", "verdict-by", "ack-by"})
 _NON_ESCALATING_PANE_DETAILS = frozenset({"mid-turn"})
-
-
-@dataclass(frozen=True)
-class SupervisorFinding:
-    """One predicate hit: what the sweep saw, read straight off a store (never the projection)."""
-
-    kind: FindingKind
-    detail: str
-    session_id: str | None = None
-    leaf_key: str | None = None
-    seat_role: str | None = None
-    source_id: str | None = None
-
-
-@dataclass(frozen=True)
-class SupervisorActionResult:
-    """One action the sweep took (or explicitly skipped) for a finding."""
-
-    action: ActionKind
-    finding: SupervisorFinding
-    outcome: str
-    detail: str | None = None
-
-
-@dataclass(frozen=True)
-class SupervisorSweepResult:
-    findings: tuple[SupervisorFinding, ...]
-    actions: tuple[SupervisorActionResult, ...]
-    swept_at: str
-    pending_inbox_count: int = 0
-    redeliverable_inbox_count: int = 0
-    duration_seconds: float | None = None
-
-
-@dataclass(frozen=True)
-class SupervisorContext:
-    """Everything one sweep needs -- stores and the delivery seam, read/called directly (R3)."""
-
-    catalog: TerminalCatalog
-    host: TerminalHost
-    paster: TerminalPaster
-    inbox_store: OperatorInboxStore
-    expectation_store: ExpectationRowStore
-    nudge_store: OrchestrationNudgeStore
-    signal_cooldown_store: SupervisorSignalCooldownStore
-    event_store: EventStore
-    heartbeat_store: SupervisorHeartbeatStore
-    coordination_root: Path
-    stale_seat_seconds: float = 120.0
-    redeliver_rate_limit_seconds: float | None = None
-    signal_cooldown_seconds: float = 900.0
-    nudge_rate_limit_seconds: int = 900
-    # R1 (260707-HFX2-L4): the escalation ladder's own knobs -- per-``message_kind`` ack SLA
-    # (rung 0 -> 1), per-rung dwell time thereafter (keyed 1/2), and the rung a silent seat is
-    # marked suspect-for-respawn at (R3). ``None`` entries in the dicts fall back to the module
-    # defaults above.
-    escalation_sla_seconds: dict[str, float] = dataclass_field(default_factory=dict)
-    escalation_rung_seconds: dict[int, float] = dataclass_field(default_factory=dict)
-    respawn_after_rung: int = DEFAULT_RESPAWN_AFTER_RUNG
-    # Log acceptance can consume <=171.1 s for one Claude input (<=137.2 s Codex). One row per
-    # sweep keeps that synchronous worst case bounded while backlog drains across later sweeps.
-    redeliver_budget: int = 1
-    # R2/CS-6 D1 (260707-HFX2-L12): a per-sweep load-shed cap on escalation-rung emission, the
-    # twin of ``redeliver_budget``. Without it one sweep does O(pending-rung-due-rows) synchronous
-    # hosted pastes + escalation.rung event appends, the storm that made the workspace river reach
-    # ~26k rung rows. Deferred rows re-fire next sweep for free (rung_due is level-triggered).
-    escalation_budget: int = 250
-
-
-@dataclass
-class _SweepState:
-    inbox_current: dict[str, OperatorInboxEntry]
-    redeliver_budget: int
-    pending_inbox_count: int = 0
-    redeliverable_entries: list[OperatorInboxEntry] = dataclass_field(default_factory=list)
-    # CS-6 D2 (260707-HFX2-L12): the sweep's ONE-read snapshots of the append-only cooldown /
-    # expectation logs, threaded into every per-finding cooldown check + mark so the store is read
-    # once per sweep, not once per finding (the L7 accidental-quadratic fix generalized). ``None``
-    # in the standalone ``act_on_finding`` path falls back to a fresh per-call read.
-    signal_current: list[SupervisorSignalRecord] | None = None
-    expectation_current: dict[str, ExpectationRow] | None = None
-    # A stale/duplicated finding list must not advance the same row twice in one sweep. The live
-    # rung-cascade incident proved that a second transition against the pre-sweep anchor can collapse
-    # the ladder even when the durable transition itself re-anchors correctly.
-    escalated_entry_ids: set[str] = dataclass_field(default_factory=set)
-
-    @property
-    def redeliverable_inbox_count(self) -> int:
-        return len(self.redeliverable_entries)
-
-    def remember(self, entry: OperatorInboxEntry) -> None:
-        self.inbox_current[entry.id] = entry
-
-    def remember_signal(self, record: SupervisorSignalRecord) -> None:
-        """Keep the sweep's signal snapshot consistent with a just-appended record."""
-        if self.signal_current is not None:
-            self.signal_current.append(record)
-
-    def remember_expectation(self, row: ExpectationRow) -> None:
-        """Keep the sweep's expectation snapshot consistent with a just-marked row."""
-        if self.expectation_current is not None:
-            self.expectation_current[row.id] = row
-
 
 # --- R2: predicates ----------------------------------------------------------------------------
 
@@ -378,9 +262,7 @@ def _age_seconds(iso_text: str, now: datetime) -> float | None:
         return None
 
 
-def _expectation_chain_progressed(
-    catalog: TerminalCatalog | None, row: ExpectationRow
-) -> bool:
+def _expectation_chain_progressed(catalog: TerminalCatalog | None, row: ExpectationRow) -> bool:
     return bool(
         catalog is not None
         and row.leafKey is not None
@@ -448,9 +330,7 @@ def evaluate_seat_liveness_findings(
         if entry.kind != "harness" or entry.status != "running":
             continue
         if entry.turn_state is not None and entry.turn_state_changed_at is not None:
-            if not _stale_turn_state_due(
-                catalog, entry, now=now, stale_seconds=stale_seconds
-            ):
+            if not _stale_turn_state_due(catalog, entry, now=now, stale_seconds=stale_seconds):
                 continue
             findings.append(
                 SupervisorFinding(
@@ -476,6 +356,8 @@ def evaluate_seat_liveness_findings(
 
 def _delivery_failure_still_retrying(entry: OperatorInboxEntry) -> bool:
     """Delivery-failure rows exhaust redelivery before the generic unacked ladder takes over."""
+    if dispatch_stays_on_exact_session(entry):
+        return True
     return (
         entry.escalatedAt is None
         and entry.deliveryState in ("no-hosted-session", "unconfirmed")
@@ -637,6 +519,11 @@ def _redeliver(
         delivery_at=now.isoformat(),
     )
     sweep.remember(updated)
+    fulfill_briefed_expectation(
+        ctx.expectation_store,
+        updated,
+        current=sweep.expectation_current,
+    )
     _log_event(
         ctx,
         "orchestration.supervisor.redeliver",
@@ -647,9 +534,15 @@ def _redeliver(
             "sessionId": finding.session_id,
         },
     )
-    if updated.deliveryState != "delivered" and updated.attemptCount >= PERSISTENT_FAILURE_ATTEMPTS:
+    if (
+        entry.messageKind != DISPATCH_BRIEF_KIND
+        and updated.deliveryState != "delivered"
+        and updated.attemptCount >= PERSISTENT_FAILURE_ATTEMPTS
+    ):
         _escalate_inbox_entry(ctx, updated.id, now=now, sweep=sweep)
-    return SupervisorActionResult("redeliver", finding, updated.deliveryState, updated.deliveryDetail)
+    return SupervisorActionResult(
+        "redeliver", finding, updated.deliveryState, updated.deliveryDetail
+    )
 
 
 def _resolve_ladder_terminal(
@@ -683,7 +576,9 @@ def _resolve_ladder_terminal(
                 "ladderResolvedAt": resolved.ladderResolvedAt,
             },
         )
-    return SupervisorActionResult("ladder-resolve", finding, resolved.state, resolved.ladderResolvedReason)
+    return SupervisorActionResult(
+        "ladder-resolve", finding, resolved.state, resolved.ladderResolvedReason
+    )
 
 
 def _escalate_inbox_entry(
@@ -727,7 +622,9 @@ def _auto_nudge(
     reason = _nudge_reason(finding)
     subject = finding.leaf_key or finding.session_id or finding.detail
     message = nudge_message(
-        reason, subject=subject, artifact_path=finding.detail if finding.kind == "turn-report-stale" else None
+        reason,
+        subject=subject,
+        artifact_path=finding.detail if finding.kind == "turn-report-stale" else None,
     )
     record = ctx.nudge_store.record(
         OrchestrationNudgeRecord(
@@ -978,6 +875,22 @@ def _signal_emit(
     return SupervisorActionResult("signal-emit", finding, delivery_state)
 
 
+def _rung_entry(
+    finding: SupervisorFinding,
+    sweep: _SweepState,
+) -> tuple[OperatorInboxEntry | None, str | None]:
+    if finding.source_id is None:
+        return None, "no source entry id"
+    if finding.source_id in sweep.escalated_entry_ids:
+        return None, "entry already transitioned this sweep"
+    entry = sweep.inbox_current.get(finding.source_id)
+    if entry is None or entry.state != "pending":
+        return None, "entry not pending"
+    if dispatch_stays_on_exact_session(entry):
+        return None, "dispatch brief stays on its exact session"
+    return entry, None
+
+
 def _escalate_rung(
     ctx: SupervisorContext,
     finding: SupervisorFinding,
@@ -993,15 +906,9 @@ def _escalate_rung(
     and redelivers it (which increments its attempt count). The prior shape (a new pending row
     per transition, itself ladder-eligible) was a branching process: with an absent developer it
     grew the inbox to 20k+ pending rows and took the host down."""
-    if finding.source_id is None:
-        return SupervisorActionResult("escalate-rung", finding, "skipped", "no source entry id")
-    if finding.source_id in sweep.escalated_entry_ids:
-        return SupervisorActionResult(
-            "escalate-rung", finding, "skipped", "entry already transitioned this sweep"
-        )
-    entry = sweep.inbox_current.get(finding.source_id)
-    if entry is None or entry.state != "pending":
-        return SupervisorActionResult("escalate-rung", finding, "skipped", "entry not pending")
+    entry, refusal = _rung_entry(finding, sweep)
+    if entry is None:
+        return SupervisorActionResult("escalate-rung", finding, "skipped", refusal)
     sweep.escalated_entry_ids.add(entry.id)
     step = next_step(ctx.catalog, entry)
     if step.owner.agent_id is None and step.owner.role is None:
@@ -1096,11 +1003,15 @@ def _respawn_suspect(
     )
     orphaned: list[str] = []
     if entry.binding_role == "manager":
-        orphaned = [worker.id for worker in find_orphaned_workers(ctx.catalog, manager_agent_id=agent_id)]
+        orphaned = [
+            worker.id for worker in find_orphaned_workers(ctx.catalog, manager_agent_id=agent_id)
+        ]
     delivery_state = "skipped"
     if owner.agent_id is not None or owner.role is not None:
         ask = f"Respawn directive: seat {agent_id} ({entry.binding_role}) retired as suspect (R3)"
-        response = f"Pending queue for the successor: {pending_queue}. Orphaned workers: {orphaned}."
+        response = (
+            f"Pending queue for the successor: {pending_queue}. Orphaned workers: {orphaned}."
+        )
         delivery_state = _post_owner_signal(
             ctx,
             owner,
@@ -1213,17 +1124,40 @@ def run_supervisor_sweep(ctx: SupervisorContext, *, now: datetime) -> Supervisor
     liveness (R5).
     """
     started = perf_counter()
-    # Ruled invariant (developer, 2026-07-09): the inbox is reclaimed EVERY sweep -- expired
-    # pending rows (past the pending TTL), stale consumed rows, ladder-resolved rows, and
-    # anything beyond the hard health cap are physically dropped before the sweep reads its
-    # snapshot, so the on-disk log stays folded-size-bounded no matter what produced into it.
-    inbox_removed = ctx.inbox_store.compact(now=now)
-    current = ctx.inbox_store.current()
-    if inbox_removed:
+    # R1-R8 (260712-TRH-L5): fold once under the inbox writer lock, join one catalog snapshot,
+    # terminally resolve only positively-gone supervisor alerts, then compact before selecting
+    # anything for redelivery. The existing TTL/cap compaction remains the fallback in this same
+    # transaction. Holding the lock through resolve+compact makes a concurrent consume authoritative.
+    reclamation: InboxReclamationPlan | None = None
+
+    def reconcile(current: dict[str, OperatorInboxEntry]) -> dict[str, str]:
+        nonlocal reclamation
+        reclamation = plan_confirmed_gone_reclamation(
+            current,
+            catalog_entries=ctx.catalog.list(include_terminated=True),
+            snapshotter=ctx.tmux_name_snapshotter,
+        )
+        return dict(reclamation.resolve_reasons)
+
+    inbox_removed, current, resolved_entries = ctx.inbox_store.reconcile_and_compact(
+        now=now,
+        reconcile=reconcile,
+    )
+    if inbox_removed or resolved_entries:
+        data: dict[str, object] = {"removed": inbox_removed, "kept": len(current)}
+        if reclamation is not None and reclamation.candidate_row_count:
+            data.update(
+                {
+                    "resolvedRowCount": len(resolved_entries),
+                    "uniqueSubjectCount": reclamation.unique_subject_count,
+                    "keptCandidateCount": reclamation.kept_row_count,
+                    "evidenceClass": reclamation.evidence_class,
+                }
+            )
         _log_event(
             ctx,
             "orchestration.supervisor.inbox-compacted",
-            {"removed": inbox_removed, "kept": len(current)},
+            data,
         )
     # CS-6 D2/D3: read + reclaim the append-only signal cooldown log ONCE per sweep. compact()
     # drops rows older than the cooldown window (they can no longer suppress a signal) and returns
