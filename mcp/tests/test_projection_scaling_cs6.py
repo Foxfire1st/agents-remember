@@ -7,11 +7,14 @@ tick. These prove the caches/single-folds landed for F8/F9/F10/F11 bound that pe
 
 from __future__ import annotations
 
+import contextlib
 import json
+import os
 import sys
 import tempfile
 import time
 import unittest
+from collections.abc import Iterator
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -23,7 +26,9 @@ sys.path.insert(0, str(MCP_SRC))
 from _scaling import assert_bounded_count
 from agents_remember.controlplane.records import GateRecord
 from agents_remember.controlplane.store import GateStore
-from agents_remember.observer import projection_store, snapshots
+from agents_remember.mcp.config import McpRuntimeConfig
+from agents_remember.observer import contract_snapshot, drift_snapshots, projection_store, snapshots
+from agents_remember.observer.contract_snapshot import ContractSnapshotCache
 from agents_remember.observer.events import Event
 from agents_remember.observer.paths import observer_logs_root
 from agents_remember.observer.projection import (
@@ -36,13 +41,20 @@ from agents_remember.observer.projection import (
 from agents_remember.observer.snapshots import (
     TASK_DOCUMENT_SCHEMA,
     TASK_DOCUMENT_SUMMARY_LIMIT,
+    read_enclosures,
+    read_engine_process_facts,
     read_gates,
     read_series_documents,
     read_task_document_body,
     read_task_documents,
 )
 from agents_remember.observer.store import EventStore
-from agents_remember.worktrees.worktree_contract import default_contract, write_contract
+from agents_remember.worktrees.task_resolver import ENCLOSURES_DIR, SERIES_CONTRACT_FILENAME
+from agents_remember.worktrees.worktree_contract import (
+    WorktreeContract,
+    default_contract,
+    write_contract,
+)
 
 NOW = datetime(2026, 7, 9, 12, 0, 0, tzinfo=UTC)
 
@@ -478,6 +490,204 @@ class TaskDocumentsPayloadBudgetTests(unittest.TestCase):
             projection_store._warn_if_task_documents_payload_over_budget(
                 over, now=NOW + timedelta(seconds=400)
             )
+
+
+class ContractSnapshotSharedPassTests(unittest.TestCase):
+    """260712-PTS-L2: one shared contract pass per tick with a stat-identity parse cache.
+
+    The projection previously enumerated + re-parsed EVERY leaf enclosure contract three
+    times per tick (read_enclosures, read_engine_process_facts, drift-snapshot pruning).
+    These prove the shared ``ContractSnapshot`` performs one pass per tick (R1), that the
+    cross-tick cache parses only changed files (R2/R7), that retention is bounded to the
+    live contract set (R3), and that reader outputs are behavior-identical (R4).
+    """
+
+    def _seed_contracts(self, coordination_root: Path, count: int) -> list[WorktreeContract]:
+        contracts: list[WorktreeContract] = []
+        for index in range(count):
+            contract = default_contract(
+                task_name=f"scaling task {index}",
+                repo_name="repo",
+                workflow_kind="light-task",
+                memory_mode="disabled",
+                coordination_root=coordination_root,
+                code_repo_path=coordination_root / "repo",
+                code_source_branch="main",
+                code_work_branch=f"ar/leaf-{index}",
+                code_base_commit="0" * 40,
+                worktree_name=f"leaf-{index}",
+                lifecycle_id=f"LC-{index}",
+            )
+            contract.contract_path.parent.mkdir(parents=True, exist_ok=True)
+            write_contract(contract.contract_path, contract)
+            contracts.append(contract)
+        return contracts
+
+    def _seed_malformed_contract(self, coordination_root: Path) -> Path:
+        path = (
+            coordination_root
+            / "tasks"
+            / "repo"
+            / "broken-task"
+            / ENCLOSURES_DIR
+            / "broken-leaf"
+            / SERIES_CONTRACT_FILENAME
+        )
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("this is not a worktree contract\n", encoding="utf-8")
+        return path
+
+    @contextlib.contextmanager
+    def _counting_parses(self) -> Iterator[list[Path]]:
+        """Count load_contract calls made by the snapshot builder (its only parse site)."""
+        calls: list[Path] = []
+        original = contract_snapshot.load_contract
+
+        def counting(path: Path) -> WorktreeContract:
+            calls.append(path)
+            return original(path)
+
+        with patch.object(contract_snapshot, "load_contract", counting):
+            yield calls
+
+    @staticmethod
+    def _bump_mtime(path: Path) -> None:
+        """Force a stat-identity change even on coarse-timestamp filesystems."""
+        stat = path.stat()
+        os.utime(path, ns=(stat.st_atime_ns, stat.st_mtime_ns + 1_000_000))
+
+    def test_parse_counts_n_then_zero_then_exactly_the_changed_file(self) -> None:
+        """R7/R2: N parses on tick 1, zero on an unchanged tick 2, only the change on tick 3."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            contracts = self._seed_contracts(root, 5)
+            tasks_root = root / "tasks"
+            cache = ContractSnapshotCache()
+
+            with self._counting_parses() as calls:
+                first = cache.build(tasks_root)
+            self.assertEqual(len(first.contracts), 5)
+            self.assertEqual(len(calls), 5)  # tick 1: every contract parsed once, not 3x
+
+            with self._counting_parses() as calls:
+                second = cache.build(tasks_root)
+            assert_bounded_count(len(calls), 0, label="unchanged-tick contract parses")
+            self.assertEqual(dict(first.contracts), dict(second.contracts))
+
+            changed = contracts[2]
+            write_contract(changed.contract_path, replace(changed, lifecycle_id="LC-CHANGED"))
+            self._bump_mtime(changed.contract_path)
+            with self._counting_parses() as calls:
+                third = cache.build(tasks_root)
+            self.assertEqual(calls, [changed.contract_path])  # tick 3: exactly the changed file
+            self.assertEqual(third.contracts[changed.contract_path].lifecycle_id, "LC-CHANGED")
+
+    def test_full_projection_tick_enumerates_once_and_reparses_nothing_unchanged(self) -> None:
+        """R1: project_and_write drives ONE enumeration per tick for all three consumers."""
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp).resolve()
+            coord = tmp_path / "coord"
+            coord.mkdir(parents=True)
+            self._seed_contracts(coord, 4)
+            config = McpRuntimeConfig(
+                config_path=coord / "mcp.settings.json",
+                coordination_root=coord,
+                workspace_root=tmp_path / "ws",
+                transcript_root=coord / "logs",
+            )
+            snapshots._task_doc_cache.clear()
+            projection_store._repo_surface_cache.clear()
+            self.addCleanup(snapshots._task_doc_cache.clear)
+            self.addCleanup(projection_store._repo_surface_cache.clear)
+            walks = {"count": 0}
+            original_iter = contract_snapshot.iter_leaf_enclosure_contracts
+
+            def counting_iter(tasks_root: Path) -> Iterator[Path]:
+                walks["count"] += 1
+                return original_iter(tasks_root)
+
+            with (
+                patch.object(projection_store, "_contract_snapshot_cache", ContractSnapshotCache()),
+                patch.object(contract_snapshot, "iter_leaf_enclosure_contracts", counting_iter),
+                self._counting_parses() as calls,
+            ):
+                projection_store.project_and_write(config, now=NOW)
+                first_walks, first_parses = walks["count"], len(calls)
+                projection_store.project_and_write(config, now=NOW + timedelta(seconds=1))
+                second_walks = walks["count"] - first_walks
+                second_parses = len(calls) - first_parses
+
+            assert_bounded_count(first_walks, 1, label="tick-1 contract enumerations")
+            self.assertEqual(first_parses, 4)  # one parse per contract on the cold tick
+            assert_bounded_count(second_walks, 1, label="tick-2 contract enumerations")
+            assert_bounded_count(second_parses, 0, label="tick-2 contract re-parses")
+
+    def test_reader_outputs_equal_with_and_without_shared_snapshot(self) -> None:
+        """R4: enclosure rows, engine facts, and prune keys are identical in both modes."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            contracts = self._seed_contracts(root, 3)
+            contracts[0].code_worktree.mkdir(parents=True)  # one live worktree for prune keys
+            broken = self._seed_malformed_contract(root)
+            tasks_root = root / "tasks"
+            cache = ContractSnapshotCache()
+            cold = cache.build(tasks_root)
+            warm = cache.build(tasks_root)  # cache-hit build must be output-identical too
+
+            self.assertEqual(len(cold.contracts), 3)
+            self.assertIn(broken, cold.skipped)  # malformed: skipped, never fatal (as before)
+
+            standalone_enclosures = read_enclosures(root)
+            self.assertEqual(standalone_enclosures, read_enclosures(root, contracts=cold))
+            self.assertEqual(standalone_enclosures, read_enclosures(root, contracts=warm))
+
+            standalone_facts = read_engine_process_facts(root)
+            self.assertEqual(standalone_facts, read_engine_process_facts(root, contracts=cold))
+            self.assertEqual(standalone_facts, read_engine_process_facts(root, contracts=warm))
+
+            standalone_keys = drift_snapshots._active_worktree_snapshot_keys(root)
+            self.assertEqual(
+                standalone_keys,
+                drift_snapshots._active_worktree_snapshot_keys(root, contracts=cold),
+            )
+            self.assertEqual(
+                standalone_keys,
+                {(contracts[0].code_worktree.name, contracts[0].code_work_branch)},
+            )
+
+    def test_cache_drops_entries_for_contracts_that_left_the_enumeration(self) -> None:
+        """R3: retention is bounded to the live path set across task churn."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            contracts = self._seed_contracts(root, 3)
+            tasks_root = root / "tasks"
+            cache = ContractSnapshotCache()
+            cache.build(tasks_root)
+            self.assertEqual(len(cache._entries), 3)
+
+            contracts[1].contract_path.unlink()
+            snapshot = cache.build(tasks_root)
+            self.assertEqual(len(snapshot.contracts), 2)
+            self.assertNotIn(contracts[1].contract_path, cache._entries)
+            self.assertEqual(len(cache._entries), 2)
+
+    def test_malformed_contract_is_retried_every_build_not_cached(self) -> None:
+        """R2 containment: a parse failure degrades exactly as before -- skip + retry next tick."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            self._seed_contracts(root, 1)
+            broken = self._seed_malformed_contract(root)
+            tasks_root = root / "tasks"
+            cache = ContractSnapshotCache()
+            with self._counting_parses() as calls:
+                first = cache.build(tasks_root)
+                second = cache.build(tasks_root)
+            self.assertIn(broken, first.skipped)
+            self.assertIn(broken, second.skipped)
+            # The broken file is re-attempted each build (a transient error self-heals);
+            # the healthy contract is parsed exactly once across both builds.
+            self.assertEqual(calls.count(broken), 2)
+            self.assertEqual(len(calls), 3)
 
 
 if __name__ == "__main__":

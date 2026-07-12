@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol
 
 from agents_remember.controlplane.attention_dismissals import AttentionDismissalStore
+from agents_remember.observer.contract_snapshot import ContractSnapshotCache
 from agents_remember.observer.drift_snapshots import prune_orphaned_drift_snapshots
 from agents_remember.observer.event_retention import prune_expired_lifecycle_event_logs
 from agents_remember.observer.events import Event
@@ -97,6 +98,14 @@ class _LifecycleLogCacheEntry:
     size: int
     log_events: list[Event]
 
+
+# 260712-PTS-L2 R1/R2: ONE leaf-enclosure-contract enumeration + parse pass per tick, shared by
+# read_enclosures, read_engine_process_facts, and drift-snapshot pruning (each previously ran its
+# own walk + load_contract pass = 3x per tick). The cache reuses a parsed contract while its
+# (mtime_ns, size) is unchanged and prunes to the live enumeration each build. Mutated only on the
+# projection worker thread (ticks are serialized by the projector's awaited asyncio.to_thread),
+# matching the module-level cache discipline of _lifecycle_log_cache below.
+_contract_snapshot_cache = ContractSnapshotCache()
 
 # 260707-HFX2-L12 F9/F7: the projection re-read + re-validated EVERY lifecycle's full events.jsonl
 # each 1s tick. Heartbeats append only every 15s (and stop entirely once a leaf is parked past its
@@ -201,10 +210,14 @@ def project_and_write(
     moment = now or datetime.now(UTC)
     root = observer_root(config)
     coordination_root = config.coordination_root
+    # 260712-PTS-L2: ONE contract pass per tick -- the snapshot is built here on the projection
+    # worker thread and handed (immutable) to read_enclosures, drift-snapshot pruning, and
+    # read_engine_process_facts below, replacing their three independent walk+parse passes.
+    contract_snapshot = _contract_snapshot_cache.build(coordination_root / "tasks")
     # Read the durable enclosures FIRST so retention is enclosure-aware: a not-yet-retired master
     # series protects every one of its leaves' event logs from the inactivity TTL (a running durable
     # task must never lose its history just because it has been a while since its last lifecycle event).
-    enclosures = read_enclosures(coordination_root)
+    enclosures = read_enclosures(coordination_root, contracts=contract_snapshot)
     prune_expired_lifecycle_event_logs(
         root,
         now=moment,
@@ -214,7 +227,7 @@ def project_and_write(
     sidecar_staleness, route_coverage, ledgers = _gather_repo_surfaces_cached(config, moment)
     provider_groups = admitted_worktree_groups(enclosures, lifecycle_logs, now=moment)
     engine_groups = active_enclosure_worktree_groups(enclosures, lifecycle_logs, now=moment)
-    prune_orphaned_drift_snapshots(config)
+    prune_orphaned_drift_snapshots(config, contracts=contract_snapshot)
     if provider_refresher is not None:
         provider_refresher.maybe_refresh(config, now=moment)
     attention_store = AttentionDismissalStore(root)
@@ -241,6 +254,7 @@ def project_and_write(
             active_worktree_groups=engine_groups,
             now=moment,
             landing_state=landing_state,
+            contracts=contract_snapshot,
         ),
         engine_start_progress=read_start_progress_entries(coordination_root, now=moment),
         gates=read_gates(coordination_root, now=moment),
