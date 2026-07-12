@@ -1,7 +1,8 @@
-import { cleanup, fireEvent, render } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { dashboardStore } from "../data/store";
+import { sessionStore } from "../data/sessions";
 import type {
   Analytics,
   EnclosureNode,
@@ -223,6 +224,7 @@ function collapsibleHierarchyProjection(): WorkspaceProjection {
 afterEach(() => {
   cleanup();
   dashboardStore.getState().reset();
+  sessionStore.getState().hydrate([]);
   window.localStorage.clear();
 });
 
@@ -1119,5 +1121,105 @@ describe("LifecycleList gate hint (L17 — no bare-ask affordance)", () => {
     expect(row.getAttribute("title")).toContain("State: running");
     expect(row.getAttribute("title")).not.toContain("Gate:");
     expect(row.getAttribute("title")).not.toContain("Approve the plan?");
+  });
+});
+
+describe("LifecycleList independent Operations signals", () => {
+  const leafKey = "agents-remember/260610_browser-dashboard/01";
+
+  function seedActivityProjection(agentPickups: Analytics["agentPickups"] = []) {
+    seed(
+      projection({
+        lifecycles: [
+          lifecycle({
+            id: "LC-ACTIVITY",
+            repoId: "agents-remember",
+            state: "running",
+            phase: "build",
+          }),
+        ],
+        enclosures: [
+          enclosure({
+            enclosure: "/contracts/activity",
+            lifecycleId: "LC-ACTIVITY",
+            leafId: "01",
+          }),
+        ],
+        analytics: {
+          ...EMPTY_ANALYTICS,
+          agentPickups,
+          taskDocuments: [
+            taskDoc({
+              id: "01",
+              lifecycleId: "LC-ACTIVITY",
+              title: "Activity Leaf",
+              docPath: "/tasks/260610_browser-dashboard/01_activity.json",
+            }),
+          ],
+        },
+      }),
+    );
+  }
+
+  function hydrateTurn(turnState: string) {
+    sessionStore.getState().hydrate([
+      {
+        id: "worker",
+        label: "Worker",
+        kind: "harness",
+        status: "running",
+        leafKey,
+        lifecycleId: "LC-ACTIVITY",
+        seatRole: "worker",
+        turnState,
+      },
+    ]);
+  }
+
+  it("keeps a running task distinct from an idle chat", () => {
+    seedActivityProjection();
+    hydrateTurn("turn-ended");
+
+    const { getByTestId } = render(<LifecycleList selectedId={null} onSelect={vi.fn()} />);
+
+    expect(getByTestId("task-state").getAttribute("aria-label")).toBe(
+      "Task progress: running; phase: build",
+    );
+    expect(getByTestId("chat-activity").textContent).toBe("idle");
+    expect(getByTestId("chat-activity").getAttribute("aria-label")).toContain("worker: idle");
+  });
+
+  it("shows pending inbox acknowledgment beside an idle chat without conflating them", () => {
+    seedActivityProjection([
+      {
+        id: "pickup:BRIEF",
+        entryId: "BRIEF",
+        lifecycleId: "LC-ACTIVITY",
+        messageKind: "dispatch-brief",
+        deliveryState: "delivered",
+        state: "waiting-for-agent",
+        ttlSeconds: 300,
+      },
+    ]);
+    hydrateTurn("turn-ended");
+
+    const { getByTestId, getByText } = render(
+      <LifecycleList selectedId={null} onSelect={vi.fn()} />,
+    );
+
+    expect(getByTestId("chat-activity").textContent).toBe("idle");
+    expect(getByText("brief unacknowledged")).toBeTruthy();
+    expect(getByTestId("agent-pickup").getAttribute("title")).toContain("Inbox delivery");
+  });
+
+  it("reacts to live shared-session-store transitions while Operations stays mounted", async () => {
+    seedActivityProjection();
+    hydrateTurn("turn-ended");
+    const { getByTestId } = render(<LifecycleList selectedId={null} onSelect={vi.fn()} />);
+    expect(getByTestId("chat-activity").textContent).toBe("idle");
+
+    act(() => hydrateTurn("working"));
+
+    await waitFor(() => expect(getByTestId("chat-activity").textContent).toBe("working"));
   });
 });

@@ -12,6 +12,7 @@ import {
 import { css, cva } from "../../styled-system/css";
 import { fmtWait, hasLiveWorktree, type Pivot } from "../data/selectors";
 import { servedAgeSeconds, useNowMs } from "../data/servedAges";
+import { type OpenSession, useSessions } from "../data/sessions";
 import { useDashboard } from "../data/store";
 import {
   isOrchestrationDoc,
@@ -27,6 +28,7 @@ import {
   groupEnclosuresByLifecycle,
   lifecycleSelectionKey,
   parseTaskSelection,
+  qualifiedLeafKey,
   seriesSelectionKey,
   taskDocSelectionKey,
   taskLabel,
@@ -36,6 +38,12 @@ import { Panel } from "../grammar/Panel";
 import { RankBadge, type RankTier } from "../grammar/RankBadge";
 import type { AgentPickupNode, EnclosureNode, LifecycleProjection, SeriesNode, TaskDocNode } from "../types/projection";
 import { AgentPickupIndicator } from "./AgentPickupIndicator";
+import {
+  ChatActivityIndicator,
+  summarizeChatActivity,
+  type ChatActivityIdentity,
+  type ChatActivitySummary,
+} from "./ChatActivityIndicator";
 import { TaskGroupDisclosure } from "./TaskGroupDisclosure";
 import { useCollapsedTaskGroups } from "./useCollapsedTaskGroups";
 
@@ -218,6 +226,7 @@ export function LifecycleList({
   const lifecycles = useDashboard((s) => s.lifecycles);
   const enclosures = useDashboard((s) => s.enclosures);
   const analytics = useDashboard((s) => s.analytics);
+  const sessions = useSessions((state) => state.sessions);
   // Row staleness advances locally between emissions — the change gate (260703-L15) no longer
   // re-serves a lifecycle every tick just because its age moved.
   const nowMs = useNowMs();
@@ -233,6 +242,7 @@ export function LifecycleList({
     docs,
     series,
     agentPickups,
+    sessions,
     nowMs,
   });
   const groups = groupRows(rows, pivot);
@@ -316,12 +326,19 @@ export function LifecycleList({
                           onToggle={() => toggleCollapsed(item.key)}
                         />
                       ) : null}
-                      <Dot variant={item.variant} />
+                      <span
+                        aria-label={`Task progress: ${item.variant}; phase: ${item.phase}`}
+                        title={`Task progress: ${item.variant}; phase: ${item.phase}`}
+                        data-testid="task-state"
+                      >
+                        <Dot variant={item.variant} />
+                      </span>
                       {item.tier ? <RankBadge tier={item.tier} size="row" /> : null}
                       <span className={rowId} title={item.title}>
                         {item.label}
                       </span>
                       <span className={rowSec}>{secondary}</span>
+                      <ChatActivityIndicator summary={item.chatActivity} />
                       <AgentPickupIndicator pickup={item.pickup} />
                       {item.gate ? <span className={rowGate}>{item.gate}</span> : null}
                       <span className={rowMeta}>
@@ -348,6 +365,7 @@ interface OperationRowsInput {
   docs: TaskDocNode[];
   series: SeriesNode[];
   agentPickups: AgentPickupNode[];
+  sessions: OpenSession[];
   nowMs: number; // the age-display clock — served staleness advances locally (260703-L15)
 }
 
@@ -362,6 +380,8 @@ interface OperationRow {
   meta: string;
   gate: string;
   pickup?: AgentPickupNode;
+  chatIdentity: ChatActivityIdentity;
+  chatActivity?: ChatActivitySummary;
   createdAt: string;
   fallbackOrder: string;
   parentKey?: string;
@@ -471,7 +491,12 @@ function operationRows(input: OperationRowsInput): OperationRow[] {
     );
   }
 
-  return rows.sort(compareRows);
+  return rows
+    .map((item) => ({
+      ...item,
+      chatActivity: summarizeChatActivity(input.sessions, item.chatIdentity),
+    }))
+    .sort(compareRows);
 }
 
 // The command facts for a master-shaped row (L14): an orchestration doc IS the gold tier; a master
@@ -526,6 +551,10 @@ function docRow(
     ),
     gate,
     pickup,
+    chatIdentity: {
+      leafKey: qualifiedLeafKey(doc),
+      ...(lifecycle ? { lifecycleId: lifecycle.id } : {}),
+    },
     createdAt: doc.createdAt ?? "",
     fallbackOrder: doc.docPath,
     parentKey: command.parentKey ?? taskDocParentKey(doc, seriesList, masterDocPaths),
@@ -579,6 +608,7 @@ function seriesRow(
     ),
     gate,
     pickup,
+    chatIdentity: lifecycle ? { lifecycleId: lifecycle.id } : {},
     createdAt: series.createdAt ?? "",
     fallbackOrder: series.docPath,
     parentKey: commander,
@@ -621,6 +651,10 @@ function lifecycleRow(
     meta: rowMetaText(taskHint(docs), "", servedAgeSeconds(lifecycle, lifecycle.staleSeconds, nowMs)),
     gate,
     pickup,
+    chatIdentity: {
+      leafKey: docs.length === 1 ? qualifiedLeafKey(docs[0]) : undefined,
+      lifecycleId: lifecycle.id,
+    },
     createdAt: lifecycle.startedAt,
     fallbackOrder: lifecycle.id,
     // A lifecycle with an enclosure but no matching doc (e.g. a reopened/orphaned leaf) still
