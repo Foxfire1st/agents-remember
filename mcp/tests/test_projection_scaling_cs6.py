@@ -556,6 +556,13 @@ class ContractSnapshotSharedPassTests(unittest.TestCase):
         stat = path.stat()
         os.utime(path, ns=(stat.st_atime_ns, stat.st_mtime_ns + 1_000_000))
 
+    @staticmethod
+    def _step_past_ctime_granule() -> None:
+        """Sleep past the kernel's coarse-clock tick so the next metadata change gets a
+        distinct ctime_ns (ctime cannot be set explicitly the way _bump_mtime sets mtime;
+        at HZ=100 the inode-timestamp granule is 10ms, so 50ms clears it comfortably)."""
+        time.sleep(0.05)
+
     def test_parse_counts_n_then_zero_then_exactly_the_changed_file(self) -> None:
         """R7/R2: N parses on tick 1, zero on an unchanged tick 2, only the change on tick 3."""
         with tempfile.TemporaryDirectory() as tmp:
@@ -670,6 +677,69 @@ class ContractSnapshotSharedPassTests(unittest.TestCase):
             self.assertEqual(len(snapshot.contracts), 2)
             self.assertNotIn(contracts[1].contract_path, cache._entries)
             self.assertEqual(len(cache._entries), 2)
+
+    def test_permission_flip_invalidates_cache_instead_of_serving_stale_parse(self) -> None:
+        """Review hardening: chmod changes ctime only -- the cache must skip, not serve forever.
+
+        Pre-L2, an unreadable contract was skipped every tick (PermissionError). A cache
+        keyed only on (mtime_ns, size) would keep serving the old good parse FOREVER after
+        a chmod 000, because chmod changes neither; ctime_ns in the identity restores the
+        pre-L2 degradation (and, unlike the same-stat rewrite window, this case never
+        self-heals without it).
+        """
+        if os.geteuid() == 0:
+            self.skipTest("root ignores file modes; the permission flip cannot be observed")
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            [contract] = self._seed_contracts(root, 1)
+            tasks_root = root / "tasks"
+            cache = ContractSnapshotCache()
+            first = cache.build(tasks_root)
+            self.assertIn(contract.contract_path, first.contracts)
+
+            # ctime is kernel-assigned from the coarse clock; step past the granule so the
+            # chmod lands on a distinct ctime_ns (production chmods are never in the same
+            # tick as the original contract write). Tempdir cleanup can unlink a 000-mode
+            # file (unlink needs directory perms only), so no chmod-back cleanup is needed.
+            self._step_past_ctime_granule()
+            os.chmod(contract.contract_path, 0o000)
+            second = cache.build(tasks_root)
+            self.assertNotIn(contract.contract_path, second.contracts)
+            self.assertIn(contract.contract_path, second.skipped)
+
+            # Restoring readability self-heals on the next build (chmod bumps ctime again,
+            # and the failed build already dropped the stale entry).
+            os.chmod(contract.contract_path, 0o644)
+            third = cache.build(tasks_root)
+            self.assertIn(contract.contract_path, third.contracts)
+
+    def test_rewrite_with_pinned_mtime_and_size_is_still_detected(self) -> None:
+        """Review hardening: an os.utime-pinned same-size rewrite still bumps ctime -> re-parse."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            [contract] = self._seed_contracts(root, 1)
+            path = contract.contract_path
+            tasks_root = root / "tasks"
+            cache = ContractSnapshotCache()
+            first = cache.build(tasks_root)
+            self.assertEqual(first.contracts[path].lifecycle_id, "LC-0")
+            before = path.stat()
+
+            # Same-length content rewrite, then pin (mtime_ns, size) back to the cached
+            # identity. Step past the coarse-clock granule first so the rewrite's
+            # kernel-assigned ctime_ns is distinct from the cached one.
+            self._step_past_ctime_granule()
+            path.write_text(
+                path.read_text(encoding="utf-8").replace("LC-0", "LC-9"), encoding="utf-8"
+            )
+            os.utime(path, ns=(before.st_atime_ns, before.st_mtime_ns))
+            after = path.stat()
+            self.assertEqual(
+                (before.st_mtime_ns, before.st_size), (after.st_mtime_ns, after.st_size)
+            )
+
+            second = cache.build(tasks_root)
+            self.assertEqual(second.contracts[path].lifecycle_id, "LC-9")
 
     def test_malformed_contract_is_retried_every_build_not_cached(self) -> None:
         """R2 containment: a parse failure degrades exactly as before -- skip + retry next tick."""

@@ -6,8 +6,8 @@ re-parsed EVERY leaf enclosure contract three times: ``read_enclosures``,
 walk + ``load_contract`` pass. :class:`ContractSnapshotCache.build` performs that
 pass ONCE at tick start and hands the result to all three readers as an immutable
 :class:`ContractSnapshot`, backed by a stat-identity parse cache (path +
-``mtime_ns`` + size) so an unchanged contract file is not re-read or re-parsed on
-later ticks at all.
+``mtime_ns`` + size + ``ctime_ns``) so an unchanged contract file is not re-read
+or re-parsed on later ticks at all.
 
 Concurrency discipline (mirrors ``projection_store._lifecycle_log_cache``): the
 cache is mutated only inside ``build``, which runs on the projection worker
@@ -53,19 +53,27 @@ class ContractSnapshot:
 class _ParseCacheEntry:
     mtime_ns: int
     size: int
+    ctime_ns: int
     contract: WorktreeContract
 
 
 class ContractSnapshotCache:
     """Cross-tick contract parse cache keyed by stat identity (R2) with live-set pruning (R3).
 
-    A cache entry is reused only while the contract file's ``(mtime_ns, size)``
-    is unchanged; any stat change re-parses. Parse FAILURES are never cached: an
-    unreadable or malformed contract is skipped this build and re-attempted on
-    the next one, exactly the retry-every-tick containment the readers had when
-    they parsed inline (a transient ``OSError`` therefore self-heals without
-    waiting for an mtime change). Entries whose paths left the enumeration are
-    dropped on the next build, so retention is bounded by the live contract set.
+    A cache entry is reused only while the contract file's ``(mtime_ns, size,
+    ctime_ns)`` is unchanged; any stat change re-parses. ``ctime_ns`` is part of
+    the identity (adversarial-review hardening): a ``chmod 000`` changes neither
+    mtime nor size, so without it the cache would serve the old good parse
+    forever where the pre-cache readers degraded to skip-every-tick, and a
+    rewrite whose ``(mtime_ns, size)`` was pinned via ``os.utime`` would never be
+    seen; ctime changes on both, while staying untouched for genuinely unchanged
+    files -- so the hardening costs zero extra parses. Parse FAILURES are never
+    cached: an unreadable or malformed contract is skipped this build and
+    re-attempted on the next one, exactly the retry-every-tick containment the
+    readers had when they parsed inline (a transient ``OSError`` therefore
+    self-heals without waiting for a stat change). Entries whose paths left the
+    enumeration are dropped on the next build, so retention is bounded by the
+    live contract set.
     """
 
     def __init__(self) -> None:
@@ -91,7 +99,10 @@ class ContractSnapshotCache:
                 continue
             if stat is not None:
                 self._entries[path] = _ParseCacheEntry(
-                    mtime_ns=stat.st_mtime_ns, size=stat.st_size, contract=contract
+                    mtime_ns=stat.st_mtime_ns,
+                    size=stat.st_size,
+                    ctime_ns=stat.st_ctime_ns,
+                    contract=contract,
                 )
             else:
                 self._entries.pop(path, None)
@@ -101,11 +112,16 @@ class ContractSnapshotCache:
         return ContractSnapshot(contracts=MappingProxyType(contracts), skipped=frozenset(skipped))
 
     def _cached_contract(self, path: Path, stat: os.stat_result | None) -> WorktreeContract | None:
-        """The cached parse, only while the stat identity (mtime_ns + size) is unchanged."""
+        """The cached parse, only while the stat identity (mtime_ns + size + ctime_ns) holds."""
         if stat is None:
             return None
         entry = self._entries.get(path)
-        if entry is None or entry.mtime_ns != stat.st_mtime_ns or entry.size != stat.st_size:
+        if (
+            entry is None
+            or entry.mtime_ns != stat.st_mtime_ns
+            or entry.size != stat.st_size
+            or entry.ctime_ns != stat.st_ctime_ns
+        ):
             return None
         return entry.contract
 

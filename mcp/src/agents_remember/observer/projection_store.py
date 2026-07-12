@@ -102,7 +102,7 @@ class _LifecycleLogCacheEntry:
 # 260712-PTS-L2 R1/R2: ONE leaf-enclosure-contract enumeration + parse pass per tick, shared by
 # read_enclosures, read_engine_process_facts, and drift-snapshot pruning (each previously ran its
 # own walk + load_contract pass = 3x per tick). The cache reuses a parsed contract while its
-# (mtime_ns, size) is unchanged and prunes to the live enumeration each build. Mutated only on the
+# (mtime_ns, size, ctime_ns) is unchanged and prunes to the live enumeration each build. Mutated only on the
 # projection worker thread (ticks are serialized by the projector's awaited asyncio.to_thread),
 # matching the module-level cache discipline of _lifecycle_log_cache below.
 _contract_snapshot_cache = ContractSnapshotCache()
