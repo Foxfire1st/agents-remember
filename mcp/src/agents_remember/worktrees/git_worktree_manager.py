@@ -21,6 +21,7 @@ from agents_remember.worktrees.modules.cli import (
     command_attach,
     command_cleanup,
     command_closeout,
+    command_heal_leaf_ids,
     command_integrate,
     command_start,
     command_status,
@@ -103,6 +104,7 @@ from agents_remember.worktrees.modules.start import (
     status_result,
 )
 from agents_remember.worktrees.modules.sync import sync_result
+from agents_remember.worktrees.worktree_contract import heal_contract_leaf_ids
 
 __all__ = [
     "ENTITY_FINGERPRINT_ALGORITHM",
@@ -124,6 +126,7 @@ __all__ = [
     "command_attach",
     "command_cleanup",
     "command_closeout",
+    "command_heal_leaf_ids",
     "command_integrate",
     "command_start",
     "command_status",
@@ -147,6 +150,7 @@ __all__ = [
     "finalize_result",
     "has_changes",
     "head_commit",
+    "heal_contract_leaf_ids",
     "integrate_result",
     "integration_branch",
     "is_ancestor",

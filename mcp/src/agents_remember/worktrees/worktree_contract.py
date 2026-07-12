@@ -8,20 +8,28 @@ top-level fields and one-level nested sections.
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 from agents_remember.errors import AgentsRememberError
-from agents_remember.worktrees.leaf_refs import LeafRefResolutionError, resolve_leaf_ref
+from agents_remember.worktrees.leaf_refs import (
+    LeafRefResolutionError,
+    canonical_leaf_doc_ids,
+    resolve_leaf_ref,
+)
 from agents_remember.worktrees.task_resolver import (
     SERIES_CONTRACT_FILENAME,
     TaskResolutionError,
+    iter_leaf_enclosure_contracts,
     leaf_enclosure_path,
     resolve_active_task_root,
     series_contract_path,
     slugify,
     task_root_for,
 )
+
+logger = logging.getLogger(__name__)
 
 CONTRACT_SCHEMA = "ar-series-contract/v1"
 VALID_MEMORY_MODES = {"internal", "external", "disabled"}
@@ -212,11 +220,18 @@ def default_series_contract(
 
 
 def load_contract(path: Path) -> WorktreeContract:
+    """Read + parse + validate one contract file — deliberately walk-free (260712-PTS-L1).
+
+    The read path performs zero tasks-tree traversal: no leaf-ref resolution, no
+    series-contract iteration, no glob. A legacy stem-shaped ``leaf_id`` is returned
+    verbatim; normalization is a write-time concern (``write_contract``) plus the
+    explicit :func:`heal_contract_leaf_ids` migration for contracts already on disk.
+    """
     if not path.exists():
         raise ContractError(f"worktree contract does not exist: {path}")
     front_matter = _extract_front_matter(path.read_text(encoding="utf-8"))
     data = _parse_limited_yaml(front_matter)
-    contract = normalize_contract_leaf_id(_contract_from_data(data, path), keep_unresolved=True)
+    contract = _contract_from_data(data, path)
     validate_contract(contract)
     return contract
 
@@ -226,6 +241,84 @@ def write_contract(path: Path, contract: WorktreeContract) -> None:
     validate_contract(contract)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(contract_to_text(contract), encoding="utf-8")
+
+
+def heal_contract_leaf_ids(coordination_root: Path, *, dry_run: bool = False) -> dict[str, object]:
+    """Heal legacy stem-shaped leaf ids across the active leaf-enclosure population.
+
+    The deliberate, one-shot successor to the per-read normalization ``load_contract``
+    used to run (260712-PTS-L1): walk ``tasks/`` once via
+    ``iter_leaf_enclosure_contracts`` — the exact population the projection readers
+    consume — map each legacy ``leaf_id`` to its canonical doc id through the same
+    resolution the read path used to apply (``normalize_contract_leaf_id``), and
+    rewrite only the contracts whose id actually changes. Idempotent and cheap on
+    re-run: a contract whose ``leaf_id`` already is a doc id of the task root its
+    enclosure lives in is skipped via a per-root index (one bounded ``*.json`` scan,
+    cached per root) without any resolution walk. Loud by design: every rewrite logs
+    one line here and lands in the returned report; an unresolvable or malformed
+    entry is reported, never fatal to the sweep. Never invoked implicitly by any
+    read path — reach it through the ``heal-leaf-ids`` CLI command or call it
+    directly (e.g. once at daemon startup).
+    """
+    healed: list[dict[str, str]] = []
+    errors: list[dict[str, str]] = []
+    canonical = 0
+    unchanged = 0
+    doc_id_index: dict[Path, frozenset[str]] = {}
+    for path in iter_leaf_enclosure_contracts(coordination_root / "tasks"):
+        try:
+            contract = load_contract(path)
+        except (ContractError, OSError) as error:
+            errors.append({"contract": path.as_posix(), "error": str(error)})
+            continue
+        if contract.kind != "leaf" or not contract.leaf_id:
+            unchanged += 1
+            continue
+        # The task root the enclosure PHYSICALLY lives in (enclosures/<leaf>/series-contract.md),
+        # not the recorded one: a stale recorded root must degrade to the slow path, not a skip.
+        task_root = path.parent.parent.parent
+        try:
+            known = doc_id_index.get(task_root)
+            if known is None:
+                known = canonical_leaf_doc_ids(contract.repo_name, task_root)
+                doc_id_index[task_root] = known
+            if contract.leaf_id in known:
+                canonical += 1
+                continue
+            healed_contract = normalize_contract_leaf_id(contract, keep_unresolved=True)
+        except Exception as error:  # one malformed task doc never aborts the sweep
+            errors.append({"contract": path.as_posix(), "error": str(error)})
+            continue
+        if healed_contract.leaf_id == contract.leaf_id:
+            unchanged += 1
+            continue
+        logger.info(
+            "heal_contract_leaf_ids: %s leaf_id %r -> %r%s",
+            path.as_posix(),
+            contract.leaf_id,
+            healed_contract.leaf_id,
+            " (dry run)" if dry_run else "",
+        )
+        if not dry_run:
+            try:
+                write_contract(path, healed_contract)
+            except Exception as error:  # a failed rewrite is reported, never fatal to the sweep
+                errors.append({"contract": path.as_posix(), "error": str(error)})
+                continue
+        healed.append(
+            {
+                "contract": path.as_posix(),
+                "from": contract.leaf_id,
+                "to": healed_contract.leaf_id,
+            }
+        )
+    return {
+        "healed": healed,
+        "canonical": canonical,
+        "unchanged": unchanged,
+        "errors": errors,
+        "dryRun": dry_run,
+    }
 
 
 def normalize_contract_leaf_id(
