@@ -173,6 +173,7 @@ def spawn(
     port: int,
     version: str,
     interval: float = 1.0,
+    heartbeat: float | None = None,
 ) -> DaemonState:
     """Launch the detached foreground CLI and record it immediately.
 
@@ -198,8 +199,10 @@ def spawn(
         str(port),
         "--interval",
         str(interval),
-        "--no-access-log",
     ]
+    if heartbeat is not None:
+        command += ["--heartbeat", str(heartbeat)]
+    command.append("--no-access-log")
     with log_path.open("ab") as log:
         process = subprocess.Popen(
             command,
@@ -255,11 +258,12 @@ def ensure(
     port: int,
     version: str = SERVER_VERSION,
     interval: float = 1.0,
+    heartbeat: float | None = None,
 ) -> EnsureResult:
     """Adopt a healthy daemon, spawn a missing one, restart a mismatched one.
 
-    ``interval`` reaches the child only when this call spawns (or restarts) it;
-    an adopted daemon keeps the cadence it was started with.
+    ``interval`` / ``heartbeat`` reach the child only when this call spawns (or
+    restarts) it; an adopted daemon keeps the cadences it was started with.
     """
     directory = daemon_dir(config)
     directory.mkdir(parents=True, exist_ok=True)
@@ -275,7 +279,13 @@ def ensure(
             )
         try:
             return _ensure_locked(
-                config, directory, host=host, port=port, version=version, interval=interval
+                config,
+                directory,
+                host=host,
+                port=port,
+                version=version,
+                interval=interval,
+                heartbeat=heartbeat,
             )
         finally:
             fcntl.flock(lock, fcntl.LOCK_UN)
@@ -289,6 +299,7 @@ def _ensure_locked(
     port: int,
     version: str,
     interval: float,
+    heartbeat: float | None = None,
 ) -> EnsureResult:
     current, alive = probe(directory)
     mismatch = ""
@@ -301,7 +312,9 @@ def _ensure_locked(
             )
         mismatch = _describe_mismatch(current, host=host, port=port, version=version)
         stop(directory)
-    state = spawn(config, host=host, port=port, version=version, interval=interval)
+    state = spawn(
+        config, host=host, port=port, version=version, interval=interval, heartbeat=heartbeat
+    )
     if not _wait_ready(state):
         if _pid_alive(state.pid):
             detail = (

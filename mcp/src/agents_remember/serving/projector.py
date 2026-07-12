@@ -1,10 +1,20 @@
 """The shared projection projector: one tick loop fanned out to every client.
 
-A single background task ticks :func:`project_and_write` on an interval (writing the
-atomic ``latest-state.json`` as a side benefit), diffs each new projection against the
-last, and broadcasts the per-entity deltas to all subscribed SSE connections. N clients
-therefore cost one re-projection per tick -- what makes the single multiplexed
-EventSource (note 09) scale. Reads go only through ``McpRuntimeConfig`` (North-Star #5).
+A single background task ticks :func:`project_and_write` (writing the atomic
+``latest-state.json`` as a side benefit), diffs each new projection against the last, and
+broadcasts the per-entity deltas to all subscribed SSE connections. N clients therefore
+cost one re-projection per tick -- what makes the single multiplexed EventSource (note 09)
+scale. Reads go only through ``McpRuntimeConfig`` (North-Star #5).
+
+Adaptive waking (260712-PTS-L3): with a ``change_watcher`` the pacemaker is no longer an
+unconditional ``sleep(interval)`` -- the loop wakes on debounced input changes (floored to
+one projection per ``interval``; ``--interval`` keeps meaning the fast-path cadence floor)
+or on a slow ``heartbeat`` when nothing changed, so a quiet daemon idles near zero CPU.
+Freshness bounds: change -> SSE delta within debounce + projection time (plus the interval
+floor when busy); ``/api/state`` staleness and time-derived field resolution are bounded
+by the heartbeat. Without a watcher (sim replay, existing tests) the loop keeps the exact
+fixed-interval behaviour, and a failed watcher degrades back to it loudly (fail-open).
+The tick body itself is byte-identical either way -- see ``serving/change_watcher.py``.
 
 Two seams keep this generic across live and sim (slice 4b): ``now`` is the clock the
 tick projects at (a replay clock under sim, wall-clock UTC live), and ``before_tick`` is
@@ -31,6 +41,7 @@ from typing import TYPE_CHECKING
 from uuid import uuid4
 
 from agents_remember.observer.projection_store import project_and_write
+from agents_remember.serving.change_watcher import DEFAULT_HEARTBEAT_SECONDS, ChangePacer
 from agents_remember.serving.delta import (
     DeltaEvent,
     StableProjectionState,
@@ -43,6 +54,7 @@ if TYPE_CHECKING:
     from agents_remember.observer.landing_state import LandingStateRefresh
     from agents_remember.observer.projection import WorkspaceProjection
     from agents_remember.observer.projection_store import ProviderStateRefresh
+    from agents_remember.serving.change_watcher import ChangeWatch
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +66,24 @@ def _utcnow() -> datetime:
     return datetime.now(UTC)
 
 
+async def _shutdown_task(task: asyncio.Task[None] | None, label: str) -> None:
+    """Cancel-and-await one background task at projector shutdown.
+
+    Both background tasks log their own cycle failures. This guard is still required for
+    an already-dead task: its stored exception must not replace the Projector cancellation
+    and skip the serving lifespan's terminal-host cleanup.
+    """
+    if task is None:
+        return
+    task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
+    except Exception:
+        logger.exception("%s task failed before projector shutdown", label)
+
+
 class Projector:
     """Owns the latest projection, a monotonic sequence, and the subscriber fan-out."""
 
@@ -62,10 +92,12 @@ class Projector:
         config: McpRuntimeConfig,
         *,
         interval: float = 1.0,
+        heartbeat: float | None = None,
         now: Callable[[], datetime] | None = None,
         before_tick: Callable[[datetime], object] | None = None,
         provider_refresher: ProviderStateRefresh | None = None,
         landing_refresher: LandingStateRefresh | None = None,
+        change_watcher: ChangeWatch | None = None,
     ) -> None:
         self._config = config
         self._interval = interval
@@ -73,6 +105,23 @@ class Projector:
         self._before_tick = before_tick
         self._provider_refresher = provider_refresher
         self._landing_refresher = landing_refresher
+        # Adaptive waking (260712-PTS-L3): with a watcher, the run loop paces via the
+        # ChangePacer (change-driven + heartbeat, floored to one tick per ``interval``).
+        # Without one -- sim replay and the injected-now() tests -- it keeps the exact
+        # legacy ``sleep(interval)`` pacemaker.
+        self._change_watcher = change_watcher
+        self._pacer: ChangePacer | None = (
+            ChangePacer(
+                interval=interval,
+                heartbeat=heartbeat if heartbeat is not None else DEFAULT_HEARTBEAT_SECONDS,
+            )
+            if change_watcher is not None
+            else None
+        )
+        # Instrumentation (R7 tests + ops): successful projections since run() started,
+        # and why the last tick woke ("change" | "heartbeat" | "interval").
+        self.projection_count = 0
+        self.last_wake_reason: str | None = None
         # (seq, projection) publish as ONE tuple: /api/state runs in a threadpool, so pairing
         # them via two attributes could tear (a bumped seq read against the previous snapshot
         # would hand a poller a stale body under a fresh ETag).
@@ -98,20 +147,34 @@ class Projector:
         self._published = (0, first)
 
     async def run(self) -> None:
-        """Tick forever: re-project, diff, broadcast. One bad tick never kills the loop."""
+        """Tick on wake: re-project, diff, broadcast. One bad tick never kills the loop."""
         landing_task = (
             asyncio.create_task(self._landing_refresher.run())
             if self._landing_refresher is not None
             else None
         )
+        watch_task = (
+            asyncio.create_task(self._change_watcher.run(self._pacer))
+            if self._change_watcher is not None and self._pacer is not None
+            else None
+        )
+        if watch_task is not None:
+            # A watcher that dies (or returns) must not leave the pacer believing changes
+            # are still detected -- that would silently stretch every wake to the heartbeat.
+            # Fail-open (R7): drop to fixed-interval ticking and say so loudly.
+            watch_task.add_done_callback(self._on_watch_task_done)
         try:
             while True:
-                await asyncio.sleep(self._interval)
+                if self._pacer is None:
+                    await asyncio.sleep(self._interval)
+                else:
+                    self.last_wake_reason = await self._pacer.wait()
                 try:
                     current = await asyncio.to_thread(self._tick_sync, self._now())
                 except Exception:
                     logger.exception("projection tick failed; retrying next interval")
                     continue
+                self.projection_count += 1
                 current_stable = stable_projection_state(current)
                 seq, previous = self._published
                 for delta in diff_projection(
@@ -125,17 +188,21 @@ class Projector:
                 self._latest_stable = current_stable
                 self._published = (seq, current)
         finally:
-            if landing_task is not None:
-                landing_task.cancel()
-                try:
-                    await landing_task
-                except asyncio.CancelledError:
-                    pass
-                except Exception:
-                    # The refresher logs cycle failures itself. This shutdown guard is still
-                    # required for an already-dead task: its stored exception must not replace the
-                    # Projector cancellation and skip the serving lifespan's terminal-host cleanup.
-                    logger.exception("landing refresher task failed before projector shutdown")
+            await _shutdown_task(watch_task, "change watcher")
+            await _shutdown_task(landing_task, "landing refresher")
+
+    def _on_watch_task_done(self, task: asyncio.Task[None]) -> None:
+        """R7 fail-open: a finished watcher task degrades pacing to the fixed interval."""
+        if self._pacer is None or task.cancelled():
+            return
+        exception = task.exception()
+        if exception is not None:
+            logger.error(
+                "change watcher task died; falling back to fixed-interval ticking every %.1fs",
+                self._interval,
+                exc_info=exception,
+            )
+        self._pacer.set_watcher_healthy(False)
 
     def _tick_sync(self, moment: datetime) -> WorkspaceProjection:
         """Run the optional pre-tick hook, then project at ``moment`` (off the loop thread)."""
