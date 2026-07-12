@@ -10,7 +10,7 @@ from agents_remember.worktrees.modules.cleanup import cleanup_result
 from agents_remember.worktrees.modules.closeout import closeout_result
 from agents_remember.worktrees.modules.integrate import integrate_result
 from agents_remember.worktrees.modules.start import attach_result, start_result, status_result
-from agents_remember.worktrees.worktree_contract import ContractError
+from agents_remember.worktrees.worktree_contract import ContractError, heal_contract_leaf_ids
 
 
 def parse_json_stdout(stdout: str) -> object:
@@ -57,6 +57,17 @@ def command_cleanup(args: argparse.Namespace) -> int:
     result = cleanup_result(WorktreeArgs.from_namespace(args))
     print(json.dumps(result.payload, indent=2))
     return result.returncode
+
+
+def command_heal_leaf_ids(args: argparse.Namespace) -> int:
+    """The deliberate on-demand seam for :func:`heal_contract_leaf_ids` (260712-PTS-L1).
+
+    Healing legacy stem-shaped leaf ids is a one-shot migration walk, never a per-read
+    side effect — run this once against a coordination root (or at daemon startup)
+    instead of relying on ``load_contract`` to normalize."""
+    report = heal_contract_leaf_ids(args.coordination_root, dry_run=args.dry_run)
+    print(json.dumps(report, indent=2))
+    return 0
 
 
 def add_common(parser: argparse.ArgumentParser) -> None:
@@ -131,6 +142,17 @@ def build_parser() -> argparse.ArgumentParser:
     cleanup.add_argument("--approved", action="store_true")
     cleanup.add_argument("--dry-run", action="store_true")
     cleanup.set_defaults(func=command_cleanup)
+
+    heal = subparsers.add_parser(
+        "heal-leaf-ids",
+        help=(
+            "Rewrite legacy stem-shaped leaf ids to canonical doc ids across the "
+            "active leaf enclosures (one-shot, idempotent, loud)."
+        ),
+    )
+    heal.add_argument("--coordination-root", type=Path, required=True)
+    heal.add_argument("--dry-run", action="store_true")
+    heal.set_defaults(func=command_heal_leaf_ids)
     return parser
 
 

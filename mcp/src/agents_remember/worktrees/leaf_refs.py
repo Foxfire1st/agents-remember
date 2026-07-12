@@ -135,6 +135,19 @@ def resolve_leaf_ref(
     )
 
 
+def canonical_leaf_doc_ids(repo_name: str, task_root: Path) -> frozenset[str]:
+    """The doc ids provable for one task root — the heal fast-path index (260712-PTS-L1).
+
+    One bounded ``*.json`` scan of ``task_root`` (never the whole tasks tree): a leaf
+    contract whose ``leaf_id`` already is one of these ids is canonical and needs no
+    resolution walk. ``repo_name`` only shapes the internal qualified ids, never the
+    returned doc ids.
+    """
+    return frozenset(
+        candidate.doc_id for candidate in _leaf_candidates_for_root(repo_name, task_root)
+    )
+
+
 def leaf_ref_enclosure_aliases(
     coordination_root: Path,
     repo_name: str,
