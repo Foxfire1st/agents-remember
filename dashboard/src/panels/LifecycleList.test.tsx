@@ -126,9 +126,104 @@ function projection(over: Partial<WorkspaceProjection>): WorkspaceProjection {
   };
 }
 
+function collapsibleHierarchyProjection(): WorkspaceProjection {
+  return projection({
+    enclosures: [
+      enclosure({
+        enclosure: "/contracts/a1",
+        lifecycleId: "",
+        leafId: "01_leaf-a1",
+        taskRoot: "/tasks/master-a",
+      }),
+      enclosure({
+        enclosure: "/contracts/b1",
+        lifecycleId: "",
+        leafId: "01_leaf-b1",
+        taskRoot: "/tasks/master-b",
+      }),
+    ],
+    analytics: {
+      ...EMPTY_ANALYTICS,
+      taskDocuments: [
+        taskDoc({
+          id: "SPRINT-02",
+          kind: "master",
+          title: "Sprint 02",
+          docPath: "/tasks/sprint-02/task.json",
+          orchestrates: ["master-a", "master-b"],
+          createdAt: "2026-06-19T09:00:00+00:00",
+        }),
+        taskDoc({
+          kind: "master",
+          title: "Master A",
+          docPath: "/tasks/master-a/task.json",
+          createdAt: "2026-06-20T08:00:00+00:00",
+        }),
+        taskDoc({
+          kind: "master",
+          title: "Master B",
+          docPath: "/tasks/master-b/task.json",
+          createdAt: "2026-06-20T09:00:00+00:00",
+        }),
+        taskDoc({
+          kind: "master",
+          title: "Empty Master",
+          docPath: "/tasks/empty-master/task.json",
+          createdAt: "2026-06-20T10:00:00+00:00",
+        }),
+        taskDoc({
+          id: "01",
+          title: "Leaf A1",
+          docPath: "/tasks/master-a/01_leaf-a1.json",
+          createdAt: "2026-06-21T08:00:00+00:00",
+        }),
+        taskDoc({
+          id: "01",
+          title: "Leaf B1",
+          docPath: "/tasks/master-b/01_leaf-b1.json",
+          createdAt: "2026-06-21T09:00:00+00:00",
+        }),
+      ],
+      series: [
+        seriesNode({
+          seriesId: "master-a",
+          title: "Master A",
+          docPath: "/tasks/master-a/task.json",
+          subTasks: [
+            {
+              number: "01",
+              name: "Leaf A1",
+              file: "01_leaf-a1.md",
+              status: "inProgress",
+              scope: "",
+              createdAt: "2026-06-21T08:00:00+00:00",
+            },
+          ],
+        }),
+        seriesNode({
+          seriesId: "master-b",
+          title: "Master B",
+          docPath: "/tasks/master-b/task.json",
+          subTasks: [
+            {
+              number: "01",
+              name: "Leaf B1",
+              file: "01_leaf-b1.md",
+              status: "inProgress",
+              scope: "",
+              createdAt: "2026-06-21T09:00:00+00:00",
+            },
+          ],
+        }),
+      ],
+    },
+  });
+}
+
 afterEach(() => {
   cleanup();
   dashboardStore.getState().reset();
+  window.localStorage.clear();
 });
 
 describe("LifecycleList task labels", () => {
@@ -779,6 +874,90 @@ describe("LifecycleList task labels", () => {
     expect(freeRow?.getAttribute("data-depth")).toBe("0");
     expect((freeRow as HTMLElement).style.marginLeft).toBe("");
     expect(freeRow?.querySelector("[data-rank-tier]")).toBeNull();
+  });
+
+  it("defaults hierarchy disclosures to expanded and renders controls only for parents", () => {
+    seed(collapsibleHierarchyProjection());
+
+    const { getByRole, getByText } = render(
+      <LifecycleList selectedId={null} onSelect={vi.fn()} />,
+    );
+
+    expect(getByText("Tasks · 6")).toBeTruthy();
+    expect(getByRole("button", { name: "Collapse Sprint 02 tasks" }).getAttribute("aria-expanded"))
+      .toBe("true");
+    expect(getByRole("button", { name: "Collapse Master A tasks" }).getAttribute("aria-expanded"))
+      .toBe("true");
+    expect(getByRole("button", { name: "Collapse Master B tasks" }).getAttribute("aria-expanded"))
+      .toBe("true");
+    expect(getByText("01. Leaf A1").closest("[role='option']")?.querySelector("button")).toBeNull();
+    expect(getByText("01. Leaf B1").closest("[role='option']")?.querySelector("button")).toBeNull();
+    expect(getByText("Empty Master").closest("[role='option']")?.querySelector("button")).toBeNull();
+  });
+
+  it("keeps sprint and master collapse independent without changing selection or BY PHASE", () => {
+    const onSelect = vi.fn();
+    seed(collapsibleHierarchyProjection());
+    const selectedLeaf = "taskdoc:/tasks/master-a/01_leaf-a1.json";
+    const view = render(<LifecycleList selectedId={selectedLeaf} onSelect={onSelect} />);
+
+    expect(view.getByText("01. Leaf A1").closest("[role='option']")?.getAttribute("aria-selected"))
+      .toBe("true");
+    const masterToggle = view.getByRole("button", { name: "Collapse Master A tasks" });
+    expect(masterToggle.tagName).toBe("BUTTON");
+    expect(masterToggle.tabIndex).toBe(0);
+    fireEvent.keyDown(masterToggle, { key: "Enter" });
+    expect(onSelect).not.toHaveBeenCalled();
+    fireEvent.click(masterToggle);
+    expect(view.queryByText("01. Leaf A1")).toBeNull();
+    expect(view.getByText("01. Leaf B1")).toBeTruthy();
+    expect(onSelect).not.toHaveBeenCalled();
+
+    fireEvent.click(view.getByRole("button", { name: "Collapse Sprint 02 tasks" }));
+    expect(view.queryByText("Master A")).toBeNull();
+    expect(view.queryByText("Master B")).toBeNull();
+    expect(view.getByText("Tasks · 6")).toBeTruthy();
+    expect(onSelect).not.toHaveBeenCalled();
+
+    fireEvent.click(view.getByRole("button", { name: "Expand Sprint 02 tasks" }));
+    expect(view.getByText("Master A")).toBeTruthy();
+    expect(view.getByText("Master B")).toBeTruthy();
+    expect(view.queryByText("01. Leaf A1")).toBeNull();
+    expect(view.getByText("01. Leaf B1")).toBeTruthy();
+    expect(view.getByRole("button", { name: "Expand Master A tasks" }).getAttribute("aria-expanded"))
+      .toBe("false");
+
+    fireEvent.click(view.getByText("BY PHASE"));
+    expect(view.getByText("01. Leaf A1")).toBeTruthy();
+    expect(view.getByText("01. Leaf B1")).toBeTruthy();
+    expect(view.getByText("01. Leaf A1").closest("[role='option']")?.getAttribute("aria-selected"))
+      .toBe("true");
+    expect(view.queryByRole("button", { name: /^(Collapse|Expand) .* tasks$/ })).toBeNull();
+    expect(view.getByText("Tasks · 6")).toBeTruthy();
+    expect(onSelect).not.toHaveBeenCalled();
+  });
+
+  it("persists stable sprint and master keys across remounts", () => {
+    seed(collapsibleHierarchyProjection());
+    const first = render(<LifecycleList selectedId={null} onSelect={vi.fn()} />);
+
+    fireEvent.click(first.getByRole("button", { name: "Collapse Master A tasks" }));
+    fireEvent.click(first.getByRole("button", { name: "Collapse Sprint 02 tasks" }));
+    expect(JSON.parse(window.localStorage.getItem("operations.tasks.collapsed.v1") ?? "[]"))
+      .toEqual([
+        "taskdoc:/tasks/master-a/task.json",
+        "taskdoc:/tasks/sprint-02/task.json",
+      ]);
+    first.unmount();
+
+    const second = render(<LifecycleList selectedId={null} onSelect={vi.fn()} />);
+    expect(second.getByRole("button", { name: "Expand Sprint 02 tasks" }).getAttribute("aria-expanded"))
+      .toBe("false");
+    fireEvent.click(second.getByRole("button", { name: "Expand Sprint 02 tasks" }));
+    expect(second.getByRole("button", { name: "Expand Master A tasks" }).getAttribute("aria-expanded"))
+      .toBe("false");
+    expect(second.queryByText("01. Leaf A1")).toBeNull();
+    expect(second.getByText("01. Leaf B1")).toBeTruthy();
   });
 
   it("renders NO orchestration row or insignia in a flat run (D3 regression)", () => {

@@ -36,6 +36,8 @@ import { Panel } from "../grammar/Panel";
 import { RankBadge, type RankTier } from "../grammar/RankBadge";
 import type { AgentPickupNode, EnclosureNode, LifecycleProjection, SeriesNode, TaskDocNode } from "../types/projection";
 import { AgentPickupIndicator } from "./AgentPickupIndicator";
+import { TaskGroupDisclosure } from "./TaskGroupDisclosure";
+import { useCollapsedTaskGroups } from "./useCollapsedTaskGroups";
 
 // The single unit list (note 01: the lifecycle is THE unit; note 06 IA). A BY REPO | BY PHASE pivot
 // (React Aria ToggleButtonGroup) over every lifecycle (fleeting + persistent), presented as a React
@@ -204,7 +206,6 @@ const rowMeta = css({
   textOverflow: "ellipsis",
   whiteSpace: "nowrap",
 });
-
 export function LifecycleList({
   selectedId,
   onSelect,
@@ -213,6 +214,7 @@ export function LifecycleList({
   onSelect: (id: string) => void;
 }) {
   const [pivot, setPivot] = useState<Pivot>("repo");
+  const { collapsedKeys, toggleCollapsed } = useCollapsedTaskGroups();
   const lifecycles = useDashboard((s) => s.lifecycles);
   const enclosures = useDashboard((s) => s.enclosures);
   const analytics = useDashboard((s) => s.analytics);
@@ -276,45 +278,62 @@ export function LifecycleList({
             if (typeof id === "string") onSelect(id);
           }}
         >
-          {groups.map((group) => (
-            <ListBoxSection key={group.key} className={section}>
-              <Header className={groupHeader}>{group.label}</Header>
-              {group.rows.map((item) => {
-                const secondary = pivot === "repo" ? item.secondary : item.repo;
-                return (
-                  <ListBoxItem
-                    key={item.key}
-                    id={item.key}
-                    textValue={item.label}
-                    className={row({
-                      fleeting: item.fleeting,
-                      // Tier rows carry the V4 treatment and indent by margin (below); non-tier
-                      // nesting keeps today's leaf look untouched (the flat-run regression rule).
-                      nested: item.depth > 0 && !item.tier,
-                      tier: item.tier,
-                    })}
-                    style={indentStyle(item)}
-                    data-depth={item.depth}
-                    data-parent-key={item.parentKey}
-                    data-tier={item.tier}
-                  >
-                    <Dot variant={item.variant} />
-                    {item.tier ? <RankBadge tier={item.tier} size="row" /> : null}
-                    <span className={rowId} title={item.title}>
-                      {item.label}
-                    </span>
-                    <span className={rowSec}>{secondary}</span>
-                    <AgentPickupIndicator pickup={item.pickup} />
-                    {item.gate ? <span className={rowGate}>{item.gate}</span> : null}
-                    <span className={rowMeta}>
-                      {item.meta}
-                      {item.inferred ? " · inf" : ""}
-                    </span>
-                  </ListBoxItem>
-                );
-              })}
-            </ListBoxSection>
-          ))}
+          {groups.map((group) => {
+            const descendantKeys = descendantBearingKeys(group.rows);
+            const visibleRows =
+              pivot === "repo" ? visibleHierarchyRows(group.rows, collapsedKeys) : group.rows;
+            return (
+              <ListBoxSection key={group.key} className={section}>
+                <Header className={groupHeader}>{group.label}</Header>
+                {visibleRows.map((item) => {
+                  const secondary = pivot === "repo" ? item.secondary : item.repo;
+                  const hasDescendants =
+                    pivot === "repo" &&
+                    item.secondary === "master" &&
+                    descendantKeys.has(item.key);
+                  const collapsed = collapsedKeys.has(item.key);
+                  return (
+                    <ListBoxItem
+                      key={item.key}
+                      id={item.key}
+                      textValue={item.label}
+                      className={row({
+                        fleeting: item.fleeting,
+                        // Tier rows carry the V4 treatment and indent by margin (below); non-tier
+                        // nesting keeps today's leaf look untouched (the flat-run regression rule).
+                        nested: item.depth > 0 && !item.tier,
+                        tier: item.tier,
+                      })}
+                      style={indentStyle(item)}
+                      data-depth={item.depth}
+                      data-parent-key={item.parentKey}
+                      data-tier={item.tier}
+                    >
+                      {hasDescendants ? (
+                        <TaskGroupDisclosure
+                          label={item.label}
+                          collapsed={collapsed}
+                          onToggle={() => toggleCollapsed(item.key)}
+                        />
+                      ) : null}
+                      <Dot variant={item.variant} />
+                      {item.tier ? <RankBadge tier={item.tier} size="row" /> : null}
+                      <span className={rowId} title={item.title}>
+                        {item.label}
+                      </span>
+                      <span className={rowSec}>{secondary}</span>
+                      <AgentPickupIndicator pickup={item.pickup} />
+                      {item.gate ? <span className={rowGate}>{item.gate}</span> : null}
+                      <span className={rowMeta}>
+                        {item.meta}
+                        {item.inferred ? " · inf" : ""}
+                      </span>
+                    </ListBoxItem>
+                  );
+                })}
+              </ListBoxSection>
+            );
+          })}
         </ListBox>
       )}
     </Panel>
@@ -677,6 +696,30 @@ function hierarchyRows(rows: OperationRow[]): OperationRow[] {
     if (!seen.has(item.key)) visit(item, 0);
   }
   return out;
+}
+
+function descendantBearingKeys(rows: OperationRow[]): Set<string> {
+  const rowKeys = new Set(rows.map((item) => item.key));
+  return new Set(
+    rows
+      .map((item) => item.parentKey)
+      .filter((key): key is string => key !== undefined && rowKeys.has(key)),
+  );
+}
+
+// hierarchyRows is depth-first, so collapsed depths form the complete ancestor stack for each row.
+// Hidden parents are still visited here, preserving their independent collapse state for later.
+function visibleHierarchyRows(
+  rows: OperationRow[],
+  collapsedKeys: ReadonlySet<string>,
+): OperationRow[] {
+  const collapsedByDepth: boolean[] = [];
+  return rows.filter((item) => {
+    collapsedByDepth.length = item.depth;
+    const hidden = collapsedByDepth.includes(true);
+    collapsedByDepth[item.depth] = collapsedKeys.has(item.key);
+    return !hidden;
+  });
 }
 
 function selectionKey(selection: ReturnType<typeof parseTaskSelection>): string | null {
