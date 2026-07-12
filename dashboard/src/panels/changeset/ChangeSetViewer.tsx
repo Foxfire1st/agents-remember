@@ -163,6 +163,7 @@ export function ChangeSetViewer({ repo, scope, master, leaf, mode, onBack }: Cha
   // (qualified by `master`); `master` alone is the series net; otherwise an enclosure `scope`.
   const isLeaf = Boolean(leaf);
   const isSeries = Boolean(master) && !leaf;
+  const hasData = data !== null;
 
   useEffect(() => {
     let live = true;
@@ -174,7 +175,7 @@ export function ChangeSetViewer({ repo, scope, master, leaf, mode, onBack }: Cha
     const req = leaf
       ? leafChangeset(repo, master ?? "", leaf, mode ?? "committed")
       : master
-        ? masterChangeset(repo, master)
+        ? masterChangeset(repo, master, { includeLeaves: false })
         : taskChangeset(repo, scope ?? "");
     void req.then(
       (d) => live && setData(d),
@@ -186,31 +187,36 @@ export function ChangeSetViewer({ repo, scope, master, leaf, mode, onBack }: Cha
   }, [repo, scope, master, leaf, mode]);
 
   // L4a: the WORKING view is the LIVE uncommitted delta, so it must not be a frozen snapshot taken
-  // when the button was clicked. Poll the change-set on an interval so a file edited *after* opening
+  // when the button was clicked. Refresh the change-set after each prior refresh settles so a file edited *after* opening
   // appears in the list (and the counters track), AND re-fetch the file currently open in the diff
   // column so an edit to the file you are LOOKING AT updates in place. The open-diff re-fetch is cheap
   // and non-disruptive: CodeMirror only rebuilds when the before/after content actually changed, so an
   // unchanged poll is a no-op (no flicker / scroll-reset) — it only re-renders when that file is the
   // one edited, which is exactly when you want it to. Only `working` polls — committed/series/scope
   // are immutable snapshots of committed state. (A server push would need a worktree watcher + SSE; a
-  // client interval is self-contained and enough on localhost.)
+  // settle-then-schedule loop is self-contained and enough on localhost.)
   useEffect(() => {
-    if (mode !== "working" || !leaf) return;
+    if (mode !== "working" || !leaf || !hasData) return;
+    let live = true;
     const m = master ?? "";
-    const id = setInterval(() => {
-      void leafChangeset(repo, m, leaf, "working").then(
-        (d) => setData(d),
-        () => {}, // a transient fetch error (e.g. mid-git-op) keeps the last good list
-      );
-      if (active) {
-        void leafFileDiff(repo, m, leaf, active.kind, active.path, "working").then(
-          (d) => setDiff(d),
-          () => {},
-        );
-      }
-    }, 2500);
-    return () => clearInterval(id);
-  }, [mode, leaf, repo, master, active]);
+    let timer: number | undefined;
+    const refresh = async () => {
+      const listRequest = leafChangeset(repo, m, leaf, "working");
+      const diffRequest = active
+        ? leafFileDiff(repo, m, leaf, active.kind, active.path, "working")
+        : Promise.resolve(null);
+      const [listResult, diffResult] = await Promise.allSettled([listRequest, diffRequest]);
+      if (!live) return;
+      if (listResult.status === "fulfilled") setData(listResult.value);
+      if (diffResult.status === "fulfilled" && diffResult.value) setDiff(diffResult.value);
+      timer = window.setTimeout(refresh, 2500);
+    };
+    timer = window.setTimeout(refresh, 2500);
+    return () => {
+      live = false;
+      if (timer !== undefined) window.clearTimeout(timer);
+    };
+  }, [mode, leaf, repo, master, active, hasData]);
 
   const partnerOf = (kind: "code" | "memory", path: string, hasSidecar?: boolean) =>
     kind === "code"
@@ -274,6 +280,10 @@ export function ChangeSetViewer({ repo, scope, master, leaf, mode, onBack }: Cha
       {error ? (
         <div className={placeholder} data-testid="pane-placeholder">
           {error}
+        </div>
+      ) : !data ? (
+        <div className={placeholder} data-testid="pane-placeholder">
+          Loading change-set…
         </div>
       ) : (
         <PanelGroup direction="horizontal" autoSaveId="changeset.outer" className={css({ flex: "1", minHeight: "0" })}>

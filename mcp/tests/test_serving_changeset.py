@@ -13,6 +13,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
@@ -385,6 +386,18 @@ class MasterChangesetTests(unittest.TestCase):
         body = master_changeset(self.config, "R", "t")
         self.assertEqual({lf["leafId"] for lf in body["leaves"]}, {"l1"})
 
+    def test_master_route_can_skip_per_leaf_breakdown(self) -> None:
+        app = FastAPI()
+        register_changeset_routes(app, self.config)
+        with patch("agents_remember.serving.changeset._master_leaf_summaries") as summaries:
+            response = TestClient(app).get(
+                "/api/changeset/master",
+                params={"repo": "R", "master": "t", "includeLeaves": "false"},
+            )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["leaves"], [])
+        summaries.assert_not_called()
+
     def test_unknown_master_degrades_to_empty(self) -> None:
         body = master_changeset(self.config, "R", "nope")
         self.assertEqual(body["code"], [])
@@ -472,11 +485,12 @@ class LeafChangesetTests(unittest.TestCase):
 
     def test_committed_landed_delta_without_live_worktree(self) -> None:
         # A completed/cleaned leaf: the worktree is gone, but the contract's commits live on the repo,
-        # so committed still diffs base -> code_commit. `leaf` is given mixed-case to prove slugify.
+        # so committed still diffs base -> code_commit. The persisted authored id is mixed-case while
+        # the dashboard selector is normalized lowercase; both sides must use the same canonicalizer.
         code, base, commit = self._committed_repo()
-        _write_leaf(self.config, "260628-l4a", code=code, code_base=base, code_commit=commit,
+        _write_leaf(self.config, "260707-HFX2-L15", code=code, code_base=base, code_commit=commit,
                     code_worktree=self.tmp / "gone")
-        body = leaf_changeset(self.config, "R", "t", "260628-L4a", "committed")
+        body = leaf_changeset(self.config, "R", "t", "260707-hfx2-l15", "committed")
         files = _by_path(body["code"])
         self.assertEqual(body["mode"], "committed")
         self.assertEqual(files["f.py"]["insertions"], 1)
@@ -529,6 +543,27 @@ class LeafChangesetTests(unittest.TestCase):
         _write_leaf(self.config, "l4", code=code, code_base=base, code_commit=commit, code_worktree=code)
         with self.assertRaises(FileNotFoundError):  # right leaf-id, wrong master
             leaf_changeset(self.config, "R", "other-master", "l4", "committed")
+
+    def test_leaf_lookup_does_not_scan_contracts_outside_requested_master(self) -> None:
+        code, base, _ = self._committed_repo()
+        stray_path = (
+            self.config.coordination_root
+            / "tasks"
+            / "R"
+            / "other-master"
+            / "enclosures"
+            / "stray"
+            / "series-contract.md"
+        )
+        _write_leaf_contract(
+            stray_path,
+            coord=self.config.coordination_root,
+            code=code,
+            code_base=base,
+            leaf_id="stray",
+        )
+        with self.assertRaises(FileNotFoundError):
+            leaf_changeset(self.config, "R", "t", "stray", "committed")
 
     def test_leaf_file_diff_committed_base_to_commit(self) -> None:
         code, base, commit = self._committed_repo()

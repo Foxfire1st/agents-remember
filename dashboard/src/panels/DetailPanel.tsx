@@ -733,7 +733,7 @@ function ChangeSetButton({
     const req = target.leaf
       ? leafChangeset(target.repo, target.master ?? "", target.leaf, target.mode ?? "committed")
       : target.master
-        ? masterChangeset(target.repo, target.master)
+        ? masterChangeset(target.repo, target.master, { includeLeaves: false })
         : taskChangeset(target.repo, target.scope ?? "");
     void req.then(
       (d) => live && setCounters(d.counters),

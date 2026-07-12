@@ -49,6 +49,9 @@ export interface MasterChangeset {
   memory: ChangedFile[];
   counters: { code: ChangeCounters; memory: ChangeCounters };
 }
+export interface MasterChangesetOptions {
+  includeLeaves?: boolean;
+}
 
 export const taskChangeset = (repo: string, scope: string, base = ""): Promise<TaskChangeset> =>
   getJson<TaskChangeset>(`${base}/api/changeset/task?${qs({ repo, scope })}`);
@@ -65,9 +68,15 @@ export const fileDiff = (
 export const masterChangeset = (
   repo: string,
   master: string,
+  options: MasterChangesetOptions = {},
   base = "",
-): Promise<MasterChangeset> =>
-  getJson<MasterChangeset>(`${base}/api/changeset/master?${qs({ repo, master })}`);
+): Promise<MasterChangeset> => {
+  const params: Record<string, string> = { repo, master };
+  if (options.includeLeaves !== undefined) {
+    params.includeLeaves = String(options.includeLeaves);
+  }
+  return getJson<MasterChangeset>(`${base}/api/changeset/master?${qs(params)}`);
+};
 
 // `masterFileDiff` — BEFORE (master base) + AFTER (series tip) content for one file in the net
 // series diff. Same /api/changeset/file-diff route, with `master` instead of an enclosure `scope`.
