@@ -27,8 +27,6 @@ watched root                              readers it feeds
 ``<coord>/logs/providers/setup``          read_setup_summaries
 ``<coord>/temp/worktree-start``           read_start_progress_entries
 ``<coord>/temp/tool-reports``             read_tool_reports
-``<coord>/worktrees/*/*/provider-runtime``  worktree ``provider-state.json`` (read_providers)
-                                          + ``setup-progress.json`` (read_setup_progress_nodes)
 ========================================  =====================================================
 
 (``<obs>`` = ``<coord>/logs/observer``.) Deliberately NOT watched -- heartbeat-covered
@@ -38,10 +36,13 @@ blind spots:
   behind ``REPO_SURFACE_REFRESH_TTL_SECONDS`` (15s) already, and their onboarding trees
   are large, so their freshness bound is TTL + heartbeat;
 * landing state: an in-memory 30s git-derived refresher with no file signal;
-* the full ``worktrees/`` checkouts (~50k dirs live): watching them recursively would
-  re-create the very scan cost this change removes -- only the tiny ``provider-runtime``
-  metadata dirs are watched, and *new* groups are picked up by the periodic watch-set
-  refresh (bounded by the heartbeat in between).
+* the entire ``worktrees/`` tree: the checkouts are ~50k dirs (recursive watching would
+  re-create the scan cost this change removes) and each task's ``provider-runtime`` holds
+  live container data (Postgres/grepai) that is unreadable to the daemon user and churns on
+  every container write -- watching it crashed the watcher on permission-denied and would
+  have re-projected on WAL writes. Worktree ``provider-state.json`` / ``setup-progress.json``
+  changes are infrequent and heartbeat-covered; central provider status is watched via
+  ``logs/providers``.
 
 Self-trigger safety: the projection's own per-tick outputs (``latest-state.json`` /
 ``latest-metrics.json`` and their ``*.tmp`` siblings) live at the observer root, *outside*
@@ -150,10 +151,12 @@ def projection_input_roots(config: McpRuntimeConfig) -> list[Path]:
         coordination_root / "temp" / "worktree-start",
         coordination_root / "temp" / "tool-reports",
     ]
-    worktrees_root = coordination_root / "worktrees"
-    if worktrees_root.is_dir():
-        # Two-level glob only -- never a recursive walk of the worktree checkouts.
-        candidates.extend(sorted(worktrees_root.glob("*/*/provider-runtime")))
+    # Deliberately NOT under coordination_root/worktrees: those trees carry each task's
+    # live provider-runtime (Postgres data, grepai indexes) which the daemon user cannot
+    # read and which churn on container writes -- watching them recursively both crashed
+    # the watcher (permission-denied on the container data dir) and would have re-projected
+    # on every WAL write. Worktree provider-state.json changes are infrequent and are
+    # heartbeat-covered; central provider status is already watched via logs/providers.
     return [path for path in candidates if path.is_dir()]
 
 
@@ -353,6 +356,9 @@ class ProjectionInputWatcher:
                 step=_AWATCH_STEP_MS,
                 stop_event=stop,
                 recursive=True,
+                # Defence-in-depth: the watched roots are deliberately container-free, but an
+                # unreadable subdir must degrade to skipping it, never crash the whole watch.
+                ignore_permission_denied=True,
             ):
                 if changes:
                     pacer.notify_change()

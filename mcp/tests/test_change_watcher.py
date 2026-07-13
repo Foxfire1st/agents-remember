@@ -68,8 +68,10 @@ class ProjectionInputRootsTests(unittest.TestCase):
         ]
         for path in expected:
             path.mkdir(parents=True)
-        # A worktree group: only its provider-runtime metadata dir is an input surface;
-        # the checkout itself (potentially tens of thousands of dirs) must NOT be watched.
+        # A worktree group: NOTHING under worktrees/ is a watch root. Its provider-runtime
+        # holds live container data (Postgres/grepai) that is unreadable to the daemon user
+        # and churns on every container write -- watching it crashed the watcher and would
+        # have re-projected on WAL writes. provider-state.json changes are heartbeat-covered.
         runtime = self.tmp / "worktrees" / "repo" / "group-ar" / "provider-runtime"
         runtime.mkdir(parents=True)
         checkout = self.tmp / "worktrees" / "repo" / "group-ar" / "src"
@@ -79,9 +81,11 @@ class ProjectionInputRootsTests(unittest.TestCase):
         (observer / "quarantine-1").mkdir(parents=True)
 
         roots = projection_input_roots(_config(self.tmp))
-        self.assertEqual(roots, [*expected, runtime])
+        self.assertEqual(roots, expected)
+        # Regression guard: no watch root may ever fall under worktrees/ (container data).
+        self.assertFalse(any((self.tmp / "worktrees") in root.parents for root in roots))
+        self.assertNotIn(runtime, roots)
         self.assertNotIn(checkout, roots)
-        self.assertNotIn(self.tmp / "worktrees", roots)
         self.assertNotIn(observer / "providers", roots)
 
     def test_missing_surfaces_are_skipped_until_they_exist(self) -> None:
@@ -101,7 +105,6 @@ class InputEventFilterTests(unittest.TestCase):
             "/c/logs/observer/workspace/expectation-rows.jsonl",
             "/c/logs/observer/drift/repo.json",
             "/c/tasks/agents-remember/260712_x/task.json",
-            "/c/worktrees/repo/group/provider-runtime/provider-state.json",
         ):
             self.assertTrue(is_projection_input_event(path), path)
 
