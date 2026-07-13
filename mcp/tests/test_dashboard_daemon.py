@@ -192,10 +192,23 @@ class SpawnTests(unittest.TestCase):
             self.assertEqual(command[command.index("--config") + 1], str(config.config_path))
             self.assertEqual(command[command.index("--port") + 1], "9100")
             self.assertEqual(command[command.index("--interval") + 1], "1.0")
+            self.assertNotIn("--heartbeat", command)
             self.assertIn("--no-access-log", command)
             self.assertTrue(popen.call_args.kwargs["start_new_session"])
             self.assertEqual(state.pid, 777)
             self.assertEqual(daemon.read_state(daemon.daemon_dir(config)), state)
+            daemon._spawned.remove(fake)
+
+    def test_spawn_forwards_an_explicit_heartbeat_to_the_child(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            config = make_config(Path(tmp))
+            fake = mock.Mock()
+            fake.pid = 779
+            with mock.patch.object(daemon.subprocess, "Popen", return_value=fake) as popen:
+                daemon.spawn(config, host="127.0.0.1", port=9100, version="9.9.9", heartbeat=20.0)
+            command = popen.call_args.args[0]
+            self.assertEqual(command[command.index("--heartbeat") + 1], "20.0")
+            self.assertIn("--no-access-log", command)
             daemon._spawned.remove(fake)
 
     def test_spawn_rotates_the_previous_log(self) -> None:
@@ -232,7 +245,7 @@ class EnsureTests(unittest.TestCase):
         self.assertEqual(result.action, "started")
         self.assertEqual(result.state, spawned)
         spawn.assert_called_once_with(
-            self.config, host="127.0.0.1", port=9000, version="1.0", interval=1.0
+            self.config, host="127.0.0.1", port=9000, version="1.0", interval=1.0, heartbeat=None
         )
         stop.assert_not_called()
 

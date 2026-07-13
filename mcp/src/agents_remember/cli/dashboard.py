@@ -19,6 +19,7 @@ from agents_remember.cli.discovery import ConfigDiscoveryError, discover_config
 from agents_remember.mcp.config import ConfigError, load_config
 from agents_remember.serving import daemon as serving_daemon
 from agents_remember.serving.app import create_app
+from agents_remember.serving.change_watcher import DEFAULT_HEARTBEAT_SECONDS
 from agents_remember.serving.sim import SimError, build_sim, parse_sim_speed
 
 # Dev hot-reload (``--reload``): uvicorn's reloader re-imports the app per worker restart, so it
@@ -26,12 +27,18 @@ from agents_remember.serving.sim import SimError, build_sim, parse_sim_speed
 # The factory reads the resolved config from the environment the parent ``run`` sets.
 _DEV_CONFIG_ENV = "AR_DASHBOARD_DEV_CONFIG"
 _DEV_INTERVAL_ENV = "AR_DASHBOARD_DEV_INTERVAL"
+_DEV_HEARTBEAT_ENV = "AR_DASHBOARD_DEV_HEARTBEAT"
 
 
 def _dev_app():
     """Zero-arg app factory for ``uvicorn --reload`` (live state only; never sim)."""
     config = load_config(os.environ[_DEV_CONFIG_ENV])
-    return create_app(config, interval=float(os.environ.get(_DEV_INTERVAL_ENV, "1.0")))
+    heartbeat_env = os.environ.get(_DEV_HEARTBEAT_ENV)
+    return create_app(
+        config,
+        interval=float(os.environ.get(_DEV_INTERVAL_ENV, "1.0")),
+        heartbeat=float(heartbeat_env) if heartbeat_env else None,
+    )
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
@@ -52,7 +59,22 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         help="Bind port (default: the dashboard.port settings key, else 8765).",
     )
     parser.add_argument(
-        "--interval", type=float, default=1.0, help="Projection refresh interval, seconds."
+        "--interval",
+        type=float,
+        default=1.0,
+        help="Fast-path projection cadence floor, seconds: change-driven re-projections are "
+        "never spaced closer than this, a continuously-busy world still projects once per "
+        "interval, and it stays the fixed tick cadence under --sim or when the change "
+        "watcher is unavailable. Also the /api/events raw-tail poll cadence.",
+    )
+    parser.add_argument(
+        "--heartbeat",
+        type=float,
+        default=None,
+        help="Idle re-projection heartbeat, seconds (default "
+        f"{DEFAULT_HEARTBEAT_SECONDS:g}). With no detected input change the projection "
+        "still refreshes at this cadence -- the staleness bound for /api/state and for "
+        "time-derived fields (ageSeconds/staleSeconds and stale/overdue flips).",
     )
     parser.add_argument(
         "--reload",
@@ -118,6 +140,8 @@ def run(args: argparse.Namespace) -> int:
         # re-import on change; watch only the package source so node_modules/.git don't churn it.
         os.environ[_DEV_CONFIG_ENV] = str(Path(config_path).resolve())
         os.environ[_DEV_INTERVAL_ENV] = str(args.interval)
+        if args.heartbeat is not None:
+            os.environ[_DEV_HEARTBEAT_ENV] = str(args.heartbeat)
         uvicorn.run(
             "agents_remember.cli.dashboard:_dev_app",
             factory=True,
@@ -140,7 +164,7 @@ def run(args: argparse.Namespace) -> int:
             sim.config, interval=args.interval, now=sim.clock.now, before_tick=sim.feeder.feed
         )
     else:
-        app = create_app(config, interval=args.interval)
+        app = create_app(config, interval=args.interval, heartbeat=args.heartbeat)
     uvicorn.run(app, host=args.host, port=port, access_log=not args.no_access_log)
     return 0
 
@@ -166,6 +190,8 @@ def _run_daemon_command(
     if args.stop:
         print(f"dashboard daemon: {serving_daemon.stop(directory)}")
         return 0
-    result = serving_daemon.ensure(config, host=args.host, port=port, interval=args.interval)
+    result = serving_daemon.ensure(
+        config, host=args.host, port=port, interval=args.interval, heartbeat=args.heartbeat
+    )
     print(f"dashboard daemon {result.action}: {result.detail}")
     return 0 if result.action in ("adopted", "started", "restarted") else 1

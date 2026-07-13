@@ -43,6 +43,10 @@ from agents_remember.memory_quality.integrity.onboarding_drift_check.discovery i
     discover_onboarding_files,
     parse_table_metadata,
 )
+from agents_remember.observer.contract_snapshot import (
+    ContractSnapshot,
+    build_contract_snapshot,
+)
 from agents_remember.observer.paths import (
     DRIFT_SNAPSHOT_SCHEMA,
     drift_snapshot_dir,
@@ -106,9 +110,8 @@ from agents_remember.worktrees.start_progress import read_start_progress
 from agents_remember.worktrees.task_resolver import (
     ARCHIVE_DIR,
     ENCLOSURES_DIR,
-    iter_leaf_enclosure_contracts,
 )
-from agents_remember.worktrees.worktree_contract import ContractError, load_contract
+from agents_remember.worktrees.worktree_contract import WorktreeContract
 
 if TYPE_CHECKING:
     from agents_remember.observer.landing_state import LandingStateReader
@@ -470,27 +473,27 @@ def _worktree_runtime_summary(
     }
 
 
-def read_enclosures(coordination_root: Path) -> list[EnclosureNode]:
+def read_enclosures(
+    coordination_root: Path, *, contracts: ContractSnapshot | None = None
+) -> list[EnclosureNode]:
     """Surfaces 5/6: every active leaf enclosure contract.
 
     Leaf contracts live below ``enclosures/<leaf-id>/series-contract.md``. Root
     series contracts describe integration branches and are not live worktree
     processes. A malformed contract is skipped, never fatal to the projection.
+
+    260712-PTS-L2: the projection tick passes its shared per-tick
+    :class:`ContractSnapshot` so this reader adds ZERO contract parses; a
+    standalone call (``contracts=None``) builds a local snapshot, preserving the
+    public signature and the walk-and-skip behavior it had before.
     """
-    tasks_root = coordination_root / "tasks"
-    nodes: list[EnclosureNode] = []
-    for path in iter_leaf_enclosure_contracts(tasks_root):
-        node = _enclosure_from_contract(path)
-        if node is not None:
-            nodes.append(node)
-    return nodes
+    snapshot = (
+        contracts if contracts is not None else build_contract_snapshot(coordination_root / "tasks")
+    )
+    return [_enclosure_from_contract(contract) for contract in snapshot.contracts.values()]
 
 
-def _enclosure_from_contract(path: Path) -> EnclosureNode | None:
-    try:
-        contract = load_contract(path)
-    except (ContractError, OSError):
-        return None
+def _enclosure_from_contract(contract: WorktreeContract) -> EnclosureNode:
     return EnclosureNode(
         enclosure=contract.contract_path.as_posix(),
         enclosureId=contract.leaf_id or contract.contract_path.parent.name,
@@ -639,25 +642,26 @@ def read_engine_process_facts(
     active_worktree_groups: set[str] | None = None,
     now: datetime | None = None,
     landing_state: LandingStateReader | None = None,
+    contracts: ContractSnapshot | None = None,
 ) -> list[EngineProcessFacts]:
     """Slice 5e: gather one fact bundle per leaf enclosure for the Engine Room map.
 
-    Globs the same leaf enclosure files as :func:`read_enclosures`, but
-    enriches each with the status-guidance facts the structural ``EnclosureNode`` omits (the
-    code/memory branches, base commits, worktree paths, existence/dirty flags, base freshness,
-    and provider-boot status). ``contract_payload`` and ``lifecycle_guidance`` are pure; only
-    ``status_payload`` touches git, and it is best-effort so a contract pointing at absent or
-    fake worktrees degrades to ``status=None`` (rendered as missing/derived) instead of
-    crashing the projection tick. A malformed contract is skipped, never fatal.
+    Reads the same leaf enclosure contracts as :func:`read_enclosures` (via the shared
+    per-tick :class:`ContractSnapshot` when the projection passes one; a standalone call
+    builds a local snapshot), but enriches each with the status-guidance facts the
+    structural ``EnclosureNode`` omits (the code/memory branches, base commits, worktree
+    paths, existence/dirty flags, base freshness, and provider-boot status).
+    ``contract_payload`` and ``lifecycle_guidance`` are pure; only ``status_payload``
+    touches git, and it is best-effort so a contract pointing at absent or fake worktrees
+    degrades to ``status=None`` (rendered as missing/derived) instead of crashing the
+    projection tick. A malformed contract is skipped, never fatal.
     """
-    tasks_root = coordination_root / "tasks"
+    snapshot = (
+        contracts if contracts is not None else build_contract_snapshot(coordination_root / "tasks")
+    )
     facts: list[EngineProcessFacts] = []
     seen_status_keys: set[str] = set()
-    for path in iter_leaf_enclosure_contracts(tasks_root):
-        try:
-            contract = load_contract(path)
-        except (ContractError, OSError):
-            continue
+    for path, contract in snapshot.contracts.items():
         if (
             active_worktree_groups is not None
             and contract.worktree_group.name not in active_worktree_groups

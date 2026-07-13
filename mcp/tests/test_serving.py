@@ -475,7 +475,10 @@ class StateEtagTests(unittest.TestCase):
         )
         patcher.start()
         self.addCleanup(patcher.stop)
-        return TestClient(create_app(_config(self.tmp), interval=interval))
+        # watch_changes=False: this world changes only through the mocked project_and_write,
+        # which no filesystem watcher can observe -- the tick loop must stay interval-paced
+        # (the live contract for watcher-invisible changes is the heartbeat bound instead).
+        return TestClient(create_app(_config(self.tmp), interval=interval, watch_changes=False))
 
     def _get_until(self, client: TestClient, *, etag: str, want_status: int) -> httpx.Response:
         """Poll /api/state with If-None-Match until the tick loop publishes ``want_status``."""
@@ -989,6 +992,7 @@ class CliTests(unittest.TestCase):
         self.assertEqual(namespace.port, 9999)
         self.assertEqual(namespace.host, "127.0.0.1")
         self.assertEqual(namespace.interval, 1.0)
+        self.assertIsNone(namespace.heartbeat)
         self.assertIs(namespace.func, cli_dashboard.run)
 
 
@@ -999,6 +1003,7 @@ class CliRunTests(unittest.TestCase):
             "host": "127.0.0.1",
             "port": 8765,
             "interval": 1.0,
+            "heartbeat": None,
             "reload": False,
             "sim": None,
             "sim_speed": "1",
@@ -1607,6 +1612,7 @@ class CliSimTests(unittest.TestCase):
             "host": "127.0.0.1",
             "port": 8765,
             "interval": 1.0,
+            "heartbeat": None,
             "reload": False,
             "sim": None,
             "sim_speed": "1",

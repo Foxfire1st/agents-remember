@@ -91,6 +91,7 @@ from agents_remember.providers.metrics import (
 )
 from agents_remember.serving.actions import ActionRequest, evaluate_action
 from agents_remember.serving.build_info import ServingBuild, resolve_serving_build
+from agents_remember.serving.change_watcher import ProjectionInputWatcher
 from agents_remember.serving.changeset import register_changeset_routes
 from agents_remember.serving.events import stream_raw_events
 from agents_remember.serving.files import register_files_routes
@@ -466,10 +467,12 @@ def create_app(
     config: McpRuntimeConfig,
     *,
     interval: float = 1.0,
+    heartbeat: float | None = None,
     now: Callable[[], datetime] | None = None,
     before_tick: Callable[[datetime], object] | None = None,
     refresh_provider_state: bool | None = None,
     refresh_landing_state: bool | None = None,
+    watch_changes: bool | None = None,
     terminal_host: TerminalHost | None = None,
     terminal_catalog: TerminalCatalog | None = None,
     terminal_paster: TerminalPaster | None = None,
@@ -477,21 +480,29 @@ def create_app(
     """Build the dashboard app bound to one shared projector for ``config``.
 
     ``now`` / ``before_tick`` default to live behaviour; sim wires a replay clock + feeder. Live
-    serving enables the landing-state refresher by default; sim disables it unless explicitly set.
-    ``terminal_host`` defaults to a fresh :class:`TerminalHost` (the Mode B2 terminal backend);
-    tests inject a fake to drive the WebSocket bridge without a real PTY.
+    serving enables the landing-state refresher and the change-driven projection watcher by
+    default; sim disables both unless explicitly set (replay must stay time-driven -- the sim
+    feeder only writes *inside* a tick, so a change-gated loop would never wake). ``interval``
+    is the fast-path projection cadence floor; ``heartbeat`` bounds quiet-world ``/api/state``
+    staleness (260712-PTS-L3, default ``DEFAULT_HEARTBEAT_SECONDS``). ``terminal_host``
+    defaults to a fresh :class:`TerminalHost` (the Mode B2 terminal backend); tests inject a
+    fake to drive the WebSocket bridge without a real PTY.
     """
     if refresh_provider_state is None:
         refresh_provider_state = before_tick is None
     if refresh_landing_state is None:
         refresh_landing_state = before_tick is None
+    if watch_changes is None:
+        watch_changes = before_tick is None
     projector = Projector(
         config,
         interval=interval,
+        heartbeat=heartbeat,
         now=now,
         before_tick=before_tick,
         provider_refresher=ProviderStateRefresher() if refresh_provider_state else None,
         landing_refresher=LandingStateRefresher(config) if refresh_landing_state else None,
+        change_watcher=ProjectionInputWatcher(config) if watch_changes else None,
     )
     host = terminal_host if terminal_host is not None else TerminalHost()
     catalog = terminal_catalog or TerminalCatalog(terminal_catalog_path(config.coordination_root))

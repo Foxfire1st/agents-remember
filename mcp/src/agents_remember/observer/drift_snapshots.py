@@ -9,9 +9,11 @@ from typing import Any
 from agents_remember.memory_quality.integrity.onboarding_drift_check.report import (
     sanitize_report_token,
 )
+from agents_remember.observer.contract_snapshot import (
+    ContractSnapshot,
+    build_contract_snapshot,
+)
 from agents_remember.observer.paths import DRIFT_SNAPSHOT_SCHEMA, drift_snapshot_dir
-from agents_remember.worktrees.task_resolver import iter_leaf_enclosure_contracts
-from agents_remember.worktrees.worktree_contract import ContractError, load_contract
 
 
 def drift_snapshot_path(coordination_root: Path, *, repository: str, branch: str) -> Path:
@@ -31,8 +33,15 @@ def remove_drift_snapshot(
     )
 
 
-def prune_orphaned_drift_snapshots(config: Any) -> dict[str, object]:
-    """Remove valid drift snapshots that no longer map to a configured repo or live worktree."""
+def prune_orphaned_drift_snapshots(
+    config: Any, *, contracts: ContractSnapshot | None = None
+) -> dict[str, object]:
+    """Remove valid drift snapshots that no longer map to a configured repo or live worktree.
+
+    260712-PTS-L2: the projection tick passes its shared per-tick
+    :class:`ContractSnapshot` so pruning adds ZERO contract parses; a standalone
+    call (``contracts=None``) builds a local snapshot with identical behavior.
+    """
     directory = drift_snapshot_dir(config.coordination_root)
     if not directory.is_dir():
         return {"removed": [], "kept": 0, "skipped": 0}
@@ -40,7 +49,9 @@ def prune_orphaned_drift_snapshots(config: Any) -> dict[str, object]:
     configured_repositories = {
         scope.path.name for scope in config.repositories.values() if scope.path.name
     }
-    active_worktrees = _active_worktree_snapshot_keys(config.coordination_root)
+    active_worktrees = _active_worktree_snapshot_keys(
+        config.coordination_root, contracts=contracts
+    )
     removed: list[dict[str, object]] = []
     kept = 0
     skipped = 0
@@ -60,13 +71,14 @@ def prune_orphaned_drift_snapshots(config: Any) -> dict[str, object]:
     return {"removed": removed, "kept": kept, "skipped": skipped}
 
 
-def _active_worktree_snapshot_keys(coordination_root: Path) -> set[tuple[str, str]]:
+def _active_worktree_snapshot_keys(
+    coordination_root: Path, *, contracts: ContractSnapshot | None = None
+) -> set[tuple[str, str]]:
+    snapshot = (
+        contracts if contracts is not None else build_contract_snapshot(coordination_root / "tasks")
+    )
     keys: set[tuple[str, str]] = set()
-    for path in iter_leaf_enclosure_contracts(coordination_root / "tasks"):
-        try:
-            contract = load_contract(path)
-        except (ContractError, OSError):
-            continue
+    for contract in snapshot.contracts.values():
         if contract.code_worktree.exists():
             keys.add((contract.code_worktree.name, contract.code_work_branch))
     return keys
