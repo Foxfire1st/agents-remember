@@ -1,0 +1,45 @@
+{
+  "schema": "ar-pi-rpc-capabilities/v1",
+  "package": "@earendil-works/pi-coding-agent",
+  "version": "0.80.6",
+  "launch": ["--mode", "rpc"],
+  "framing": {
+    "delimiter": "LF",
+    "acceptsTrailingCR": true,
+    "unicodeLineSeparatorsAreContent": true
+  },
+  "commands": [
+    "prompt",
+    "get_state",
+    "get_entries",
+    "extension_ui_response"
+  ],
+  "stateFields": [
+    "sessionId",
+    "sessionFile",
+    "thinkingLevel",
+    "isStreaming",
+    "isCompacting",
+    "pendingMessageCount"
+  ],
+  "events": [
+    "agent_start",
+    "agent_end",
+    "agent_settled",
+    "queue_update",
+    "compaction_start",
+    "compaction_end",
+    "auto_retry_start",
+    "auto_retry_end",
+    "message_end",
+    "extension_ui_request"
+  ],
+  "dialogMethods": ["select", "confirm", "input", "editor"],
+  "fireAndForgetMethods": [
+    "notify",
+    "setStatus",
+    "setWidget",
+    "setTitle",
+    "set_editor_text"
+  ]
+}
