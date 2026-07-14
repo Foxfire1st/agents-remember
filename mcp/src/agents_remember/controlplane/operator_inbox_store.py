@@ -17,6 +17,7 @@ from agents_remember.controlplane.inbox_backoff import (
 )
 from agents_remember.controlplane.interaction_retention import inbox_keep_ids
 from agents_remember.controlplane.operator_inbox_records import (
+    AdapterDeliveryState,
     AgentRole,
     InboxDeliveryState,
     OperatorInboxEntry,
@@ -86,6 +87,11 @@ class OperatorInboxStore:
         delivery_state: InboxDeliveryState,
         delivered_to_session: str | None = None,
         delivery_detail: str | None = None,
+        adapter_delivery_state: AdapterDeliveryState | None = None,
+        adapter_request_id: str | None = None,
+        adapter_vendor_correlation_id: str | None = None,
+        adapter_accepted_at: str | None = None,
+        adapter_delivery_detail: str | None = None,
         current: dict[str, OperatorInboxEntry] | None = None,
         redelivery_floor_seconds: float | None = None,
     ) -> OperatorInboxEntry:
@@ -108,6 +114,17 @@ class OperatorInboxStore:
                 "deliveredAt": now if delivery_state == "delivered" else entry.deliveredAt,
                 "deliveredToSession": delivered_to_session,
                 "deliveryDetail": delivery_detail,
+                "adapterDeliveryState": adapter_delivery_state or entry.adapterDeliveryState,
+                "adapterRequestId": adapter_request_id or entry.adapterRequestId,
+                "adapterVendorCorrelationId": (
+                    adapter_vendor_correlation_id or entry.adapterVendorCorrelationId
+                ),
+                "adapterAcceptedAt": adapter_accepted_at or entry.adapterAcceptedAt,
+                "adapterDeliveryDetail": (
+                    adapter_delivery_detail
+                    if adapter_delivery_detail is not None
+                    else entry.adapterDeliveryDetail
+                ),
                 "attemptCount": attempt_count,
                 "lastAttemptAt": now,
                 "nextAttemptAt": (
@@ -123,6 +140,34 @@ class OperatorInboxStore:
         )
         self.append(delivered)
         return delivered
+
+    def record_adapter_completion(
+        self,
+        entry_id: str,
+        *,
+        now: str,
+        vendor_correlation_id: str | None = None,
+        detail: str | None = None,
+        current: dict[str, OperatorInboxEntry] | None = None,
+    ) -> OperatorInboxEntry:
+        """Persist terminal adapter evidence without consuming the durable inbox row."""
+
+        entry = self._entry_from_current(entry_id, current)
+        if entry is None:
+            raise KeyError(f"no operator inbox entry {entry_id!r}")
+        completed = entry.model_copy(
+            update={
+                "ts": now,
+                "adapterDeliveryState": "completed",
+                "adapterVendorCorrelationId": (
+                    vendor_correlation_id or entry.adapterVendorCorrelationId
+                ),
+                "adapterCompletedAt": now,
+                "adapterDeliveryDetail": detail,
+            }
+        )
+        self.append(completed)
+        return completed
 
     def list_redeliverable(
         self,

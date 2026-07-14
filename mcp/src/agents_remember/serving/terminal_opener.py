@@ -21,7 +21,13 @@ from typing import Any, Literal
 
 from agents_remember.observer.events import now_iso
 from agents_remember.serving.harness_control_adapter import protocol_adapter_status
-from agents_remember.serving.harness_control_models import CONTROL_PROTOCOL_VERSION, ControlState
+from agents_remember.serving.harness_control_ipc import LocalControlEndpoint
+from agents_remember.serving.harness_control_models import (
+    CONTROL_PROTOCOL_VERSION,
+    ControlIdentity,
+    ControlState,
+)
+from agents_remember.serving.harness_control_runner import RunnerConfig, control_runner_command
 from agents_remember.serving.harnesses import (
     Harness,
     Which,
@@ -33,7 +39,11 @@ from agents_remember.serving.harnesses import (
     unknown_harness_detail,
 )
 from agents_remember.serving.seat_binding import migrated_seat_role
-from agents_remember.serving.terminal import TerminalHost
+from agents_remember.serving.terminal import (
+    TerminalHost,
+    TerminalSessionBinding,
+    terminal_session_name,
+)
 from agents_remember.serving.terminal_catalog import (
     TerminalCatalog,
     TerminalCatalogEntry,
@@ -130,13 +140,170 @@ def _control_metadata(
 ) -> tuple[ControlState | None, Path | None, str | None]:
     if kind != "harness" or harness is None:
         return None, None, None
-    state = existing.control_state if existing is not None else None
+    state = (
+        existing.control_state
+        if existing is not None and existing.control_endpoint == endpoint
+        else None
+    )
     resolved_endpoint = endpoint or (existing.control_endpoint if existing is not None else None)
     protocol = existing.control_protocol if existing is not None else None
     return (
         state or protocol_adapter_status(harness),
         resolved_endpoint,
         protocol or CONTROL_PROTOCOL_VERSION,
+    )
+
+
+def _previous(existing: TerminalCatalogEntry | None, name: str) -> Any:
+    return getattr(existing, name) if existing is not None else None
+
+
+def _preserved(
+    existing: TerminalCatalogEntry | None,
+    new_value: object,
+    name: str,
+) -> Any:
+    """Keep write-once spawn provenance when a session is reopened."""
+
+    return new_value or _previous(existing, name)
+
+
+def _session_command(
+    *,
+    session_id: str,
+    resolved_kind: TerminalSessionKind,
+    harness: str | None,
+    cwd: Path,
+    vendor_command: list[str],
+    existing: TerminalCatalogEntry | None,
+    host: TerminalHost,
+    workspace_root: Path,
+    control_endpoint: Path | None,
+    control_root: Path | None,
+    session_commands: Sequence[str] | None,
+    created_at: str,
+    tmux_name: str,
+) -> tuple[list[str], Path | None, bool]:
+    legacy_running = bool(
+        resolved_kind == "harness"
+        and existing is not None
+        and existing.control_endpoint is None
+        and host.has_session(existing.tmux_name)
+    )
+    if legacy_running:
+        assert existing is not None
+        return list(existing.command), None, True
+    if resolved_kind != "harness" or harness is None:
+        return vendor_command, control_endpoint, False
+    endpoint_root = control_root or workspace_root / ".agents-remember-control"
+    identity = ControlIdentity(
+        ar_session_id=session_id,
+        tmux_name=tmux_name,
+        created_at=created_at,
+    )
+    endpoint = control_endpoint or LocalControlEndpoint.for_session(endpoint_root, identity).path
+    command = control_runner_command(
+        RunnerConfig(
+            identity=identity,
+            harness_id=harness,
+            cwd=cwd,
+            argv=tuple(vendor_command),
+            endpoint_root=endpoint_root,
+            session_commands=tuple(session_commands or ()),
+        )
+    )
+    return list(command), endpoint, False
+
+
+def _opened_catalog_entry(
+    *,
+    opened: TerminalSessionBinding,
+    existing: TerminalCatalogEntry | None,
+    resolved_label: str,
+    resolved_kind: TerminalSessionKind,
+    harness: str | None,
+    lifecycle_id: str | None,
+    command: list[str],
+    created_at: str,
+    attached_at: str,
+    leaf_key: str | None,
+    seat_role: str | None,
+    replacement_for_leaf: str | None,
+    spawned_by_session: str | None,
+    spawned_by_lifecycle: str | None,
+    spawn_env: Mapping[str, str],
+    launch_args: Sequence[str] | None,
+    prompt_keywords: Sequence[str] | None,
+    session_commands: Sequence[str] | None,
+    spawn_level: str | None,
+    spawn_level_source: str | None,
+    resolved_model: str | None,
+    resolved_effort: str | None,
+    legacy_running: bool,
+    control_endpoint: Path | None,
+) -> TerminalCatalogEntry:
+    control_state, resolved_endpoint, control_protocol = _control_metadata(
+        existing,
+        kind=resolved_kind,
+        harness=harness,
+        endpoint=control_endpoint,
+    )
+    if legacy_running:
+        control_state = "unsupported"
+        resolved_endpoint = None
+        control_protocol = None
+    return TerminalCatalogEntry(
+        id=opened.sid,
+        label=resolved_label,
+        kind=resolved_kind,
+        harness=harness,
+        lifecycle_id=lifecycle_id,
+        cwd=opened.cwd,
+        tmux_name=opened.tmux_name,
+        command=tuple(command),
+        created_at=created_at,
+        last_attached_at=attached_at,
+        status="running",
+        leaf_key=_preserved(existing, leaf_key, "leaf_key"),
+        seat_role=seat_role,
+        replacement_for_leaf=_preserved(existing, replacement_for_leaf, "replacement_for_leaf"),
+        spawned_by_session=_preserved(existing, spawned_by_session, "spawned_by_session"),
+        spawned_by_lifecycle=_preserved(existing, spawned_by_lifecycle, "spawned_by_lifecycle"),
+        spawn_role=_preserved(existing, spawn_env.get("AR_SPAWN_ROLE"), "spawn_role"),
+        launch_args=_preserved(
+            existing, tuple(launch_args) if launch_args else None, "launch_args"
+        ),
+        prompt_keywords=_preserved(
+            existing,
+            tuple(prompt_keywords) if prompt_keywords else None,
+            "prompt_keywords",
+        ),
+        session_commands=_preserved(
+            existing,
+            tuple(session_commands) if session_commands else None,
+            "session_commands",
+        ),
+        spawn_level=_preserved(existing, spawn_level, "spawn_level"),
+        spawn_level_source=_preserved(existing, spawn_level_source, "spawn_level_source"),
+        resolved_model=_preserved(existing, resolved_model, "resolved_model"),
+        resolved_effort=_preserved(existing, resolved_effort, "resolved_effort"),
+        session_log_entry_id=_previous(existing, "session_log_entry_id"),
+        session_log_path=_previous(existing, "session_log_path"),
+        control_state=control_state,
+        control_endpoint=resolved_endpoint,
+        control_protocol=control_protocol,
+        control_activity=("unknown" if legacy_running else _previous(existing, "control_activity")),
+        control_acceptance=(
+            "unsupported" if legacy_running else _previous(existing, "control_acceptance")
+        ),
+        control_vendor_session_id=_previous(existing, "control_vendor_session_id"),
+        control_pending_interaction=_previous(existing, "control_pending_interaction"),
+        control_last_event_sequence=_previous(existing, "control_last_event_sequence"),
+        control_raw=(
+            {"detail": "legacy raw-TUI session has no protocol bridge"}
+            if legacy_running
+            else _previous(existing, "control_raw")
+        ),
     )
 
 
@@ -164,6 +331,7 @@ def open_terminal_session(
     spawned_by_session: str | None = None,
     spawned_by_lifecycle: str | None = None,
     control_endpoint: Path | None = None,
+    control_root: Path | None = None,
     which: Which | None = None,
     harnesses: Sequence[Harness] | None = None,
 ) -> OpenTerminalResult:
@@ -187,7 +355,7 @@ def open_terminal_session(
     """
     spawn_env = dict(env or {})
     try:
-        cwd, command = resolve_terminal_launch(
+        cwd, vendor_command = resolve_terminal_launch(
             kind,
             workspace_root=workspace_root,
             shell=shell,
@@ -203,6 +371,24 @@ def open_terminal_session(
 
     resolved_kind: TerminalSessionKind = "harness" if kind == "harness" else "terminal"
     existing = catalog.get(session_id)
+    attached_at = now_iso()
+    created_at = existing.created_at if existing is not None else attached_at
+    tmux_name = existing.tmux_name if existing is not None else terminal_session_name(session_id)
+    command, resolved_control_endpoint, legacy_running = _session_command(
+        session_id=session_id,
+        resolved_kind=resolved_kind,
+        harness=harness,
+        cwd=cwd,
+        vendor_command=vendor_command,
+        existing=existing,
+        host=host,
+        workspace_root=workspace_root,
+        control_endpoint=control_endpoint,
+        control_root=control_root,
+        session_commands=session_commands,
+        created_at=created_at,
+        tmux_name=tmux_name,
+    )
     seat_role = migrated_seat_role(
         persisted=existing.seat_role if existing is not None else None,
         spawn_role=spawn_env.get("AR_SPAWN_ROLE") or (existing.spawn_role if existing else None),
@@ -235,79 +421,35 @@ def open_terminal_session(
         suspend_unsafe=resolved_kind == "harness",
         env=spawn_env,
     )
-    attached_at = now_iso()
     resolved_label = label or (
         existing.label if existing else _terminal_label(resolved_kind, harness, session_id)
     )
 
-    def preserved(new_value: object, existing_value: object) -> Any:
-        # Write-once-preserve provenance: an explicit value wins now; otherwise keep whatever the
-        # row already recorded (a re-open / reconnect must never silently drop provenance).
-        return new_value or (existing_value if existing is not None else None)
-
-    control_state, resolved_control_endpoint, control_protocol = _control_metadata(
-        existing,
-        kind=resolved_kind,
-        harness=harness,
-        endpoint=control_endpoint,
-    )
-
-    entry = TerminalCatalogEntry(
-        id=opened.sid,
-        label=resolved_label,
-        kind=resolved_kind,
+    entry = _opened_catalog_entry(
+        opened=opened,
+        existing=existing,
+        resolved_label=resolved_label,
+        resolved_kind=resolved_kind,
         harness=harness,
         lifecycle_id=lifecycle_id,
-        cwd=opened.cwd,
-        tmux_name=opened.tmux_name,
-        command=tuple(command),
-        created_at=existing.created_at if existing is not None else attached_at,
-        last_attached_at=attached_at,
-        status="running",
-        # An explicit leaf_key claims a leaf now; otherwise keep any leaf this session already owns.
-        leaf_key=preserved(leaf_key, existing.leaf_key if existing else None),
+        command=command,
+        created_at=created_at,
+        attached_at=attached_at,
+        leaf_key=leaf_key,
         seat_role=seat_role,
-        replacement_for_leaf=preserved(
-            replacement_for_leaf, existing.replacement_for_leaf if existing else None
-        ),
-        # Provenance is set once at first spawn and preserved across a re-open.
-        spawned_by_session=preserved(
-            spawned_by_session, existing.spawned_by_session if existing else None
-        ),
-        spawned_by_lifecycle=preserved(
-            spawned_by_lifecycle, existing.spawned_by_lifecycle if existing else None
-        ),
-        # The dispatch seam already rides the role as AR_SPAWN_ROLE in the spawn env (l-01); record
-        # it on the durable row so the Chats command tree (L14) can group by role provenance.
-        spawn_role=preserved(
-            spawn_env.get("AR_SPAWN_ROLE"), existing.spawn_role if existing else None
-        ),
-        # Free-form spawn provenance (260703-L16): recorded verbatim, never validated; the same
-        # write-once-preserve rule as the spawned-by pair.
-        launch_args=preserved(
-            tuple(launch_args) if launch_args else None,
-            existing.launch_args if existing else None,
-        ),
-        prompt_keywords=preserved(
-            tuple(prompt_keywords) if prompt_keywords else None,
-            existing.prompt_keywords if existing else None,
-        ),
-        session_commands=preserved(
-            tuple(session_commands) if session_commands else None,
-            existing.session_commands if existing else None,
-        ),
-        # The resolved dispatch level + how it was supplied (rolesPerLevel resolution input).
-        spawn_level=preserved(spawn_level, existing.spawn_level if existing else None),
-        spawn_level_source=preserved(
-            spawn_level_source, existing.spawn_level_source if existing else None
-        ),
-        resolved_model=preserved(resolved_model, existing.resolved_model if existing else None),
-        resolved_effort=preserved(resolved_effort, existing.resolved_effort if existing else None),
-        session_log_entry_id=existing.session_log_entry_id if existing else None,
-        session_log_path=existing.session_log_path if existing else None,
-        control_state=control_state,
+        replacement_for_leaf=replacement_for_leaf,
+        spawned_by_session=spawned_by_session,
+        spawned_by_lifecycle=spawned_by_lifecycle,
+        spawn_env=spawn_env,
+        launch_args=launch_args,
+        prompt_keywords=prompt_keywords,
+        session_commands=session_commands,
+        spawn_level=spawn_level,
+        spawn_level_source=spawn_level_source,
+        resolved_model=resolved_model,
+        resolved_effort=resolved_effort,
+        legacy_running=legacy_running,
         control_endpoint=resolved_control_endpoint,
-        control_protocol=control_protocol,
     )
     catalog.upsert(entry)
     return OpenTerminalResult(

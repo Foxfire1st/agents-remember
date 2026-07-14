@@ -17,6 +17,7 @@ from pathlib import Path
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
+from agents_remember.serving.harness_control_runner import parse_runner_config
 from agents_remember.serving.harnesses import Harness
 from agents_remember.serving.terminal import TerminalSessionBinding
 from agents_remember.serving.terminal_catalog import TerminalCatalog, TerminalCatalogEntry
@@ -68,6 +69,13 @@ class _FakeHost:
 
 def _detected(_command: str) -> str | None:
     return "/usr/bin/harness"
+
+
+def _runner_config(host: _FakeHost):
+    command = host.ensured[0]["command"]
+    assert isinstance(command, tuple)
+    assert command[1:3] == ("-m", "agents_remember.serving.harness_control_runner")
+    return parse_runner_config(command[3])
 
 
 def _running_chat(
@@ -140,7 +148,8 @@ class OpenTerminalSessionTests(unittest.TestCase):
         self.assertEqual(entry.to_json()["spawnedByLifecycle"], "LC-manager")
         self.assertEqual(entry.to_json()["spawnRole"], "worker")
         self.assertEqual(entry.to_json()["seatRole"], "worker")
-        self.assertEqual(entry.control_state, "unsupported")
+        self.assertEqual(entry.control_state, "starting")
+        self.assertIsNotNone(entry.control_endpoint)
         self.assertEqual(entry.control_protocol, "ar-harness-control/v1")
 
     def test_future_bridge_endpoint_is_additive_control_metadata(self) -> None:
@@ -281,7 +290,7 @@ class KnobApplicationTests(unittest.TestCase):
         result = self._open(env={"AR_SPAWN_MODEL": "opus", "AR_SPAWN_EFFORT": "max"})
         self.assertEqual(result.status, "opened")
         self.assertEqual(
-            self.host.ensured[0]["command"],
+            _runner_config(self.host).argv,
             ("claude", "--model", "opus", "--effort", "max"),
         )
         # The env vars KEEP riding for session-start visibility.
@@ -295,7 +304,7 @@ class KnobApplicationTests(unittest.TestCase):
         self.assertEqual(result.status, "opened")
         # No --effort flag: the claude CLI would warn-and-degrade on it; the session vehicle
         # ("/effort ultracode") is delivered by the dispatch layer, not the launch argv.
-        self.assertEqual(self.host.ensured[0]["command"], ("claude",))
+        self.assertEqual(_runner_config(self.host).argv, ("claude",))
         self.assertEqual(self.host.ensured[0]["env"], {"AR_SPAWN_EFFORT": "ultracode"})
 
     def test_unknown_effort_refuses_naming_harness_and_both_sets(self) -> None:
@@ -316,7 +325,7 @@ class KnobApplicationTests(unittest.TestCase):
         )
         self.assertEqual(result.status, "opened")
         self.assertEqual(
-            self.host.ensured[0]["command"],
+            _runner_config(self.host).argv,
             ("codex", "--model", "gpt-5.6-sol", "--config", "model_reasoning_effort=xhigh"),
         )
         self.assertEqual(
@@ -328,7 +337,7 @@ class KnobApplicationTests(unittest.TestCase):
         result = self._open(harness="codex", env={"AR_SPAWN_EFFORT": "max"})
         self.assertEqual(result.status, "opened")
         self.assertEqual(
-            self.host.ensured[0]["command"],
+            _runner_config(self.host).argv,
             ("codex", "--config", "model_reasoning_effort=max"),
         )
 
@@ -339,7 +348,7 @@ class KnobApplicationTests(unittest.TestCase):
         )
         self.assertEqual(result.status, "opened")
         self.assertEqual(
-            self.host.ensured[0]["command"],
+            _runner_config(self.host).argv,
             ("claude", "--effort", "max", "--dangerously-skip-permissions", "--foo", "bar"),
         )
 
@@ -380,7 +389,8 @@ class KnobApplicationTests(unittest.TestCase):
         )
         result = self._open(harness="hermes", harnesses=(hermes,))
         self.assertEqual(result.status, "opened")
-        self.assertEqual(self.host.ensured[0]["command"], ("hermes", "--tui"))
+        self.assertEqual(_runner_config(self.host).argv, ("hermes", "--tui"))
+        self.assertEqual(result.entry.control_state if result.entry else None, "unsupported")
 
     def test_unknown_everywhere_harness_refuses_pointing_at_the_manual(self) -> None:
         result = self._open(harness="hermes")

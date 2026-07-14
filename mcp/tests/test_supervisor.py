@@ -462,13 +462,14 @@ class SweepIntegrationTests(unittest.TestCase):
         self.assertIn("auto-nudge", action_kinds)
         self.assertIn("signal-emit", action_kinds)
 
-        # The signal-emit action routed to the stale seat's manager and delivered.
+        # The signal-emit action routed to the stale seat's manager. This legacy fixture has no
+        # protocol endpoint, so delivery is loudly unsupported instead of raw-pasted.
         signal_actions = [a for a in result.actions if a.action == "signal-emit"]
-        self.assertEqual(signal_actions[0].outcome, "delivered")
+        self.assertEqual(signal_actions[0].outcome, "unconfirmed")
 
-        # The redeliver action actually landed (the fake paster always confirms).
+        # The pre-existing row follows the same no-fallback contract.
         redeliver_actions = [a for a in result.actions if a.action == "redeliver"]
-        self.assertEqual(redeliver_actions[0].outcome, "delivered")
+        self.assertEqual(redeliver_actions[0].outcome, "unconfirmed")
 
         # The overdue expectation row is marked missed -- the sweep is its reserved caller.
         current = self.expectation_store.current()["exp-1"]
@@ -682,7 +683,7 @@ class SweepIntegrationTests(unittest.TestCase):
         self.assertEqual(len(signal_rows), 2)
         self.assertEqual({entry.seatRole for entry in signal_rows}, {"worker", "reviewer"})
 
-    def test_mid_turn_pane_signal_is_observed_without_owner_inbox_noise(self) -> None:
+    def test_diagnostic_pane_signal_is_not_actionable(self) -> None:
         self.catalog.upsert(replace(_entry("manager-1"), spawn_role="manager"))
         self.catalog.upsert(
             replace(
@@ -700,7 +701,7 @@ class SweepIntegrationTests(unittest.TestCase):
 
         result = act_on_finding(self._ctx(), finding, now=NOW)
 
-        self.assertEqual(result.action, "signal-emit")
+        self.assertEqual(result.action, "none")
         self.assertEqual(result.outcome, "skipped")
         self.assertEqual(self.inbox_store.current(), {})
 

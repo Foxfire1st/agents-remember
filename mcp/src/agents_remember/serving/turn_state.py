@@ -1,16 +1,16 @@
-"""Live turn-state classification from pane observation (260707-HFX-L8, issue #4).
+"""Diagnostic turn-state classification from pane observation.
 
 Classifies a captured pane's text into one of the catalog's ``SeatTurnState`` values --
 ``working`` / ``turn-ended`` / ``awaiting-input`` / ``stale`` -- the same "model ended its turn" /
 "waiting on you" signal a developer would read off a raw tmux/cmux pane, surfaced onto the catalog
-row instead. Deliberately marker-based (regex over captured text), not a terminal-control-sequence
-parser: cheap enough to run on the EXISTING L5 liveness sweep cadence (``terminal_liveness.py``),
-never a new hot loop or a new tmux round-trip.
+row before the protocol cutover. It is now retained only as ``paneDiagnostic`` detail on the
+adapter-owned liveness sweep; it cannot set catalog turn state or authorize any action. It remains
+marker-based (regex over captured text), not a terminal-control-sequence parser.
 
 Per-harness marker tables are declared here (not in ``harnesses.py``): they are pane-TEXT patterns,
 an orthogonal concern to that registry's launch-argv/knob-mapping tables. A harness id with no
 declared markers, or no captured text at all, classifies generically off the shared markers so an
-unknown/uncustomized harness still gets a best-effort signal rather than none.
+    unknown/uncustomized harness still gets a best-effort diagnostic rather than none.
 """
 
 from __future__ import annotations

@@ -11,7 +11,7 @@ does for its own two fixtures (this file deliberately reuses that exact setup/``
 rather than re-inventing one).
 
 Composer contents and paste-chip rendering are deliberately absent from these simulations: harness
-session logs, not pane vocabulary, determine delivery acceptance.
+protocol receipts, not pane vocabulary, determine delivery acceptance.
 """
 
 from __future__ import annotations
@@ -231,6 +231,7 @@ class NeverBriefedSeatTests(_LivenessSimulationCase):
             ctx,
             lambda: self.inbox_store.current()[nudge_id].rung >= 3,
             start=NOW + timedelta(minutes=2),
+            max_ticks=90,
         )
         self.assertLessEqual((final_rung_at - NOW).total_seconds(), 12 * 60 * 60)
         self.assertEqual(self.inbox_store.current()[nudge_id].rung, 3)
@@ -357,9 +358,9 @@ class DeadSeatStormTests(_LivenessSimulationCase):
 
 
 class ManagerMidTurnSignalLandsTests(_LivenessSimulationCase):
-    """Scenario 4: pane busyness never substitutes for a harness-log record."""
+    """Scenario 4: pane busyness never substitutes for a protocol receipt."""
 
-    def test_busy_pane_without_log_acceptance_is_unconfirmed(self) -> None:
+    def test_busy_pane_on_legacy_session_is_diagnostic_only(self) -> None:
         self.catalog.upsert(replace(_entry("orchestrator-1"), spawn_role="orchestrator"))
         self.catalog.upsert(
             replace(_entry("manager-1"), spawn_role="manager", spawned_by_session="orchestrator-1")
@@ -376,8 +377,8 @@ class ManagerMidTurnSignalLandsTests(_LivenessSimulationCase):
             message_kind="escalation",
         )
         self.inbox_store.append(entry)
-        # A busy-pane marker is failure evidence only; without log acceptance the signal remains
-        # unconfirmed instead of receiving transport credit.
+        # A busy-pane marker is diagnostic only. A legacy raw-TUI session has no adapter receipt,
+        # remains loudly unsupported, and never receives raw input from the delivery path.
         busy_paster = cast(
             TerminalPaster,
             _StubPaster(PasteResult(delivered=True, submitted=False, capture="esc to interrupt")),
@@ -386,7 +387,10 @@ class ManagerMidTurnSignalLandsTests(_LivenessSimulationCase):
         run_supervisor_sweep(ctx, now=NOW)
         current = self.inbox_store.current()["e1"]
         self.assertEqual(current.deliveryState, "unconfirmed")
-        self.assertIn("harness-log-confirmed", current.deliveryDetail or "")
+        self.assertEqual(current.adapterDeliveryState, "unsupported")
+        self.assertIn("no protocol delivery adapter", current.deliveryDetail or "")
+        assert isinstance(busy_paster, _StubPaster)
+        self.assertEqual(busy_paster.calls, [])
 
 
 class DeadManagerLiveWorkersTests(_LivenessSimulationCase):
@@ -512,10 +516,9 @@ class KilledSupervisorDaemonTests(_LivenessSimulationCase):
 
 
 class CodexQuotaModalTests(_LivenessSimulationCase):
-    """Scenario 7 (#20): the codex quota/rate-limit modal is BLOCKED, never silently dropped, and
-    the sweep itself (not just the injector unit test) drives it to NEEDS-ATTENTION escalation."""
+    """Scenario 7 (#20): a legacy quota modal is diagnostic and cannot authorize raw delivery."""
 
-    def test_quota_modal_blocks_every_redelivery_then_escalates_needs_attention(self) -> None:
+    def test_quota_modal_never_becomes_delivery_authority(self) -> None:
         self.catalog.upsert(replace(_entry("manager-1"), spawn_role="manager"))
         self.catalog.upsert(
             replace(_entry("worker-1", kind="harness"), spawn_role="worker", spawned_by_session="manager-1")
@@ -532,10 +535,9 @@ class CodexQuotaModalTests(_LivenessSimulationCase):
             message_kind="message",
         )
         self.inbox_store.append(entry)
-        # The pane permanently shows the codex quota modal -- every redelivery attempt lands into
-        # it and is classified ``blocked``/``codex-quota-limit``, never ``failed`` or silently
-        # dropped (the injector's own outcome-mapping unit tests prove the CLASSIFICATION in
-        # isolation; this proves the SWEEP consumes it correctly across ticks).
+        # The pane permanently shows the codex quota modal. The classifier may diagnose it in
+        # isolation, but inbox delivery must not paste, classify, retry via timing, or treat the
+        # modal as transport evidence.
         quota_paster = cast(
             TerminalPaster,
             _StubPaster(
@@ -551,22 +553,13 @@ class CodexQuotaModalTests(_LivenessSimulationCase):
             escalation_sla_seconds={"message": 1_000_000_000.0, "nudge": 60.0, "escalation": 60.0},
         )
 
-        now = NOW
-        for _ in range(PERSISTENT_FAILURE_ATTEMPTS):
-            run_supervisor_sweep(ctx, now=now)
-            current = self.inbox_store.current()["e1"]
-            self.assertEqual(current.deliveryState, "unconfirmed")
-            assert current.deliveryDetail is not None
-            self.assertIn("NEEDS-ATTENTION", current.deliveryDetail)
-            self.assertIn("codex-quota-limit", current.deliveryDetail)
-            if current.escalatedAt is not None:
-                break
-            assert current.nextAttemptAt is not None
-            now = datetime.fromisoformat(current.nextAttemptAt)
-
-        final = self.inbox_store.current()["e1"]
-        self.assertEqual(final.attemptCount, PERSISTENT_FAILURE_ATTEMPTS)
-        self.assertIsNotNone(final.escalatedAt)
+        run_supervisor_sweep(ctx, now=NOW)
+        current = self.inbox_store.current()["e1"]
+        self.assertEqual(current.deliveryState, "unconfirmed")
+        self.assertEqual(current.adapterDeliveryState, "unsupported")
+        self.assertIn("no protocol delivery adapter", current.deliveryDetail or "")
+        assert isinstance(quota_paster, _StubPaster)
+        self.assertEqual(quota_paster.calls, [])
 
 
 class FalseDeadSeatHysteresisTests(_LivenessSimulationCase):

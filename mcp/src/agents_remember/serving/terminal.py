@@ -342,6 +342,12 @@ def _tmux_session_name(sid: str) -> str:
     return f"{_TMUX_NAME_PREFIX}-{safe or 'session'}"
 
 
+def terminal_session_name(sid: str) -> str:
+    """Public deterministic tmux identity used before a controlled session is launched."""
+
+    return _tmux_session_name(sid)
+
+
 def _build_tmux_command(
     name: str, cwd: Path, harness: Sequence[str], env: Mapping[str, str] | None = None
 ) -> list[str]:

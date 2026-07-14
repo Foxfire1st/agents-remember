@@ -1,15 +1,12 @@
-"""Supervisor pane-state classifier (260707-HFX2-L2, R2a): the P-15 fixture-zoo predicates.
+"""Diagnostic pane-state classifier retained for migration visibility.
 
-Distinct from ``turn_state.py``'s ``classify_turn_state`` (which classifies the L8 catalog's
-``working``/``turn-ended``/``awaiting-input``/``stale`` UI state): this classifier answers the
-supervisor's own mechanical question -- which of the retained intervention triggers does
-this pane show, right now -- so the sweep can act without a model ever reading the pane itself.
+Distinct from ``turn_state.py``'s four-state diagnostic, this classifier labels older modal and
+busy-pane shapes. Neither the supervisor sweep nor hosted readiness, delivery, liveness, or gate
+flow may act on these labels; exact-session protocol snapshots and receipts own those decisions.
 
-* ``mid-turn`` -- an "esc to interrupt"-style marker: the harness is actively generating, so the
-  supervisor must not intervene.
-* ``blocked`` -- a modal confirmation/permission dialog (#20): the harness is waiting on a
-  developer decision no automatic action can resolve.
-* ``normal`` -- none of the above; no supervisor trigger fires on this pane.
+* ``mid-turn`` -- an "esc to interrupt"-style marker was visible.
+* ``blocked`` -- an older modal confirmation/permission shape was visible.
+* ``normal`` -- none of the diagnostic marker families matched.
 
 Per-harness marker tables are declared here (mirroring ``turn_state.py``'s pattern), empty for now:
 a harness id with no declared markers classifies off the shared markers, so an unknown/uncustomized
@@ -83,12 +80,11 @@ class PaneSignalClassification:
 def classify_pane_signal(
     pane_text: str | None, *, harness: str | None = None
 ) -> PaneSignalClassification:
-    """Classify a captured pane's text into a supervisor trigger signal.
+    """Classify captured pane text for diagnostics only.
 
     ``None``/blank ``pane_text`` (a vanished/unreadable pane) classifies as ``normal`` -- there is
-    no evidence of a trigger, and an evidence-less pane is a liveness concern (predicate R2e), not
-    a pane-signal one. Precedence: mid-turn (busy) > blocked (needs you) > normal. Dispatch
-    acceptance is never inferred from composer contents or paste-chip rendering.
+    no pane-shape evidence. Precedence: mid-turn (busy) > blocked (modal) > normal. No control,
+    activity, acceptance, delivery, or approval state is inferred from the result.
     """
     if not pane_text or not pane_text.strip():
         return PaneSignalClassification("normal", evidence=None)

@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from agents_remember.controlplane.operator_inbox_records import (
+    AdapterDeliveryState,
     AgentRole,
     InboxDeliveryState,
     InboxMessageKind,
@@ -33,6 +34,12 @@ class OperatorInboxPostResponse(ToolResponse):
     deliveredAt: str | None = None
     deliveredToSession: str | None = None
     deliveryDetail: str | None = None
+    adapterDeliveryState: AdapterDeliveryState | None = None
+    adapterRequestId: str | None = None
+    adapterVendorCorrelationId: str | None = None
+    adapterAcceptedAt: str | None = None
+    adapterCompletedAt: str | None = None
+    adapterDeliveryDetail: str | None = None
 
 
 class OperatorInboxPollResponse(ToolResponse):

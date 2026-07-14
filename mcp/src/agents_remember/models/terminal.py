@@ -97,6 +97,9 @@ class SpawnAgentSessionResponse(ToolResponse):
     ownerSession: str | None = None
     # Failure-only launch-command evidence. Task instructions are delivered by dispatch-brief.
     deliveryCapture: str | None = None
+    controlState: str | None = None
+    controlEndpoint: str | None = None
+    controlProtocol: str | None = None
     detail: str | None = None
 
 
@@ -116,6 +119,11 @@ class HostedSessionReadinessResponse(ToolResponse):
     session: str
     harness: str | None = None
     tmuxName: str | None = None
+    controlState: str | None = None
+    activity: str | None = None
+    acceptance: str | None = None
+    vendorSessionId: str | None = None
+    pendingInteraction: dict[str, object] | None = None
     detail: str | None = None
 
 

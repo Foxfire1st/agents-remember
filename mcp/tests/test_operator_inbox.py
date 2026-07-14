@@ -7,6 +7,7 @@ import tempfile
 import threading
 import unittest
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from unittest import mock
@@ -22,6 +23,7 @@ from agents_remember.controlplane.operator_inbox_records import (
 )
 from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
 from agents_remember.mcp.tools import operator_inbox as inbox_tools
+from agents_remember.serving.harness_control_models import SubmissionReceipt
 from agents_remember.serving.inbox_delivery import deliver_inbox_entry
 from agents_remember.serving.terminal import TerminalHost
 from agents_remember.serving.terminal_catalog import TerminalCatalog, TerminalCatalogEntry
@@ -527,6 +529,9 @@ class OperatorInboxToolTests(unittest.TestCase):
                 status="terminated",
                 leaf_key="repo-a/260707_master/old-manager-anchor",
                 spawn_role="manager",
+                control_state="ready",
+                control_endpoint=self.store.root / "manager.sock",
+                control_protocol="ar-harness-control/v1",
             )
         )
         catalog.upsert(
@@ -544,6 +549,9 @@ class OperatorInboxToolTests(unittest.TestCase):
                 status="running",
                 leaf_key="repo-a/260707_master/current-manager-anchor",
                 spawn_role="manager",
+                control_state="ready",
+                control_endpoint=self.store.root / "manager-current.sock",
+                control_protocol="ar-harness-control/v1",
             )
         )
         catalog.upsert(
@@ -578,30 +586,41 @@ class OperatorInboxToolTests(unittest.TestCase):
                 pasted_to.append(tmux_name)
                 return PasteResult(delivered=True, submitted=submit)
 
-        posted = inbox_tools.operator_inbox_post_payload(
-            None,  # type: ignore[arg-type]  # temp store/catalog are injected
-            lifecycle_id="L-old",
-            agent_id="manager-old",
-            ask="Reviewer report complete",
-            response="See notes/reports/reviewer-report.md",
-            created_by="reviewer-1",
-            created_via="cli",
-            sender_agent_id="reviewer-1",
-            sender_role="reviewer",
-            recipient_role="manager",
-            message_kind="turn-report",
-            artifact_path="notes/reports/reviewer-report.md",
-            terminal_catalog=catalog,
-            terminal_host=TerminalHost(tmux_probe=lambda _name: True),
-            terminal_paster=_Paster(),  # type: ignore[arg-type]
-        )
+        with mock.patch(
+            "agents_remember.serving.inbox_delivery.submit_control_prompt",
+            autospec=True,
+        ) as submit_prompt:
+            submit_prompt.side_effect = lambda _target, _text, **kwargs: SubmissionReceipt(
+                request_id=kwargs["request_id"],
+                acceptance="immediate",
+                submitted_at=T1,
+                accepted_at=T1,
+            )
+            posted = inbox_tools.operator_inbox_post_payload(
+                None,  # type: ignore[arg-type]  # temp store/catalog are injected
+                lifecycle_id="L-old",
+                agent_id="manager-old",
+                ask="Reviewer report complete",
+                response="See notes/reports/reviewer-report.md",
+                created_by="reviewer-1",
+                created_via="cli",
+                sender_agent_id="reviewer-1",
+                sender_role="reviewer",
+                recipient_role="manager",
+                message_kind="turn-report",
+                artifact_path="notes/reports/reviewer-report.md",
+                terminal_catalog=catalog,
+                terminal_host=TerminalHost(tmux_probe=lambda _name: True),
+                terminal_paster=_Paster(),  # type: ignore[arg-type]
+            )
 
         self.assertEqual(posted["recipientRole"], "manager")
         self.assertEqual(posted["agentId"], "manager-current")
         self.assertEqual(posted["ownerAgentId"], "manager-current")
         self.assertEqual(posted["deliveryState"], "delivered")
         self.assertEqual(posted["deliveredToSession"], "manager-current")
-        self.assertEqual(pasted_to, ["ar-manager-current"])
+        self.assertEqual(pasted_to, [])
+        submit_prompt.assert_called_once()
 
 
 class OperatorInboxDeliveryTests(unittest.TestCase):
@@ -624,6 +643,9 @@ class OperatorInboxDeliveryTests(unittest.TestCase):
                 created_at=T1,
                 last_attached_at=T1,
                 status="running",
+                control_state="ready",
+                control_endpoint=root / "agent-a.sock",
+                control_protocol="ar-harness-control/v1",
             )
         )
         self.host = TerminalHost(tmux_probe=lambda _name: True)
@@ -656,18 +678,28 @@ class OperatorInboxDeliveryTests(unittest.TestCase):
                 calls.append((tmux_name, text, submit))
                 return PasteResult(delivered=True, submitted=True)
 
-        delivered = deliver_inbox_entry(
-            store=self.store,
-            catalog=self.catalog,
-            host=self.host,
-            paster=_Paster(),  # type: ignore[arg-type]
-            entry=entry,
-        )
+        with mock.patch(
+            "agents_remember.serving.inbox_delivery.submit_control_prompt",
+            side_effect=lambda _target, _text, **kwargs: SubmissionReceipt(
+                request_id=kwargs["request_id"],
+                acceptance="queued",
+                submitted_at=T1,
+                accepted_at=T1,
+            ),
+        ) as submit_prompt:
+            delivered = deliver_inbox_entry(
+                store=self.store,
+                catalog=self.catalog,
+                host=self.host,
+                paster=_Paster(),  # type: ignore[arg-type]
+                entry=entry,
+            )
         self.assertEqual(delivered.deliveryState, "delivered")
         self.assertEqual(delivered.deliveredToSession, "agent-a")
-        self.assertEqual(calls[0][0], "ar-agent-a")
-        self.assertTrue(calls[0][2])
-        self.assertIn("[Agents Remember inbox:message]", calls[0][1])
+        self.assertEqual(calls, [])
+        self.assertEqual(delivered.adapterDeliveryState, "queued")
+        self.assertEqual(delivered.state, "pending")
+        self.assertIn("[Agents Remember inbox:message]", submit_prompt.call_args.args[1])
 
     def test_consume_during_in_flight_delivery_cannot_resurrect_pending_entry(self) -> None:
         entry = create_operator_inbox_entry(
@@ -687,27 +719,26 @@ class OperatorInboxDeliveryTests(unittest.TestCase):
         delivery_started = threading.Event()
         finish_delivery = threading.Event()
 
-        class _InFlightPaster:
-            def paste(
-                self,
-                _tmux_name: str,
-                _text: str,
-                *,
-                submit: bool = False,
-                **_kwargs: object,
-            ) -> PasteResult:
-                delivery_started.set()
-                if not finish_delivery.wait(timeout=2):
-                    raise AssertionError("test did not release the in-flight delivery")
-                return PasteResult(delivered=True, submitted=submit)
+        def in_flight(_target: object, _text: str, **kwargs: object) -> SubmissionReceipt:
+            delivery_started.set()
+            if not finish_delivery.wait(timeout=2):
+                raise AssertionError("test did not release the in-flight delivery")
+            return SubmissionReceipt(
+                request_id=str(kwargs["request_id"]),
+                acceptance="immediate",
+                submitted_at=T1,
+                accepted_at=T1,
+            )
 
-        with ThreadPoolExecutor(max_workers=1) as executor:
+        with mock.patch(
+            "agents_remember.serving.inbox_delivery.submit_control_prompt", side_effect=in_flight
+        ), ThreadPoolExecutor(max_workers=1) as executor:
             delivery = executor.submit(
                 deliver_inbox_entry,
                 store=self.store,
                 catalog=self.catalog,
                 host=self.host,
-                paster=_InFlightPaster(),  # type: ignore[arg-type]
+                paster=mock.Mock(),  # type: ignore[arg-type]
                 entry=entry,
                 current=stale_current,
                 delivery_at=T2,
@@ -741,9 +772,7 @@ class OperatorInboxDeliveryTests(unittest.TestCase):
             [],
         )
 
-    def test_deliver_inbox_entry_records_unconfirmed_without_log_acceptance(self) -> None:
-        # A reachable harness that accepts tmux bytes but never records the id must remain
-        # unconfirmed. The pane is retained only as failure evidence.
+    def test_deliver_inbox_entry_records_unknown_adapter_acceptance(self) -> None:
         entry = create_operator_inbox_entry(
             entry_id="A",
             now=T1,
@@ -773,23 +802,28 @@ class OperatorInboxDeliveryTests(unittest.TestCase):
                 attempts.append((tmux_name, text))
                 return PasteResult(delivered=False, submitted=False, capture="claude> (booting)")
 
-        recorded = deliver_inbox_entry(
-            store=self.store,
-            catalog=self.catalog,
-            host=self.host,
-            paster=_UnconfirmedPaster(),  # type: ignore[arg-type]
-            entry=entry,
-        )
-        # The paste WAS attempted into the reachable session -- delivery just was not verified.
-        self.assertEqual(attempts[0][0], "ar-agent-a")
+        with mock.patch(
+            "agents_remember.serving.inbox_delivery.submit_control_prompt",
+            side_effect=lambda _target, _text, **kwargs: SubmissionReceipt(
+                request_id=kwargs["request_id"],
+                acceptance="unknown",
+                submitted_at=T1,
+                detail="transport closed after write",
+            ),
+        ):
+            recorded = deliver_inbox_entry(
+                store=self.store,
+                catalog=self.catalog,
+                host=self.host,
+                paster=_UnconfirmedPaster(),  # type: ignore[arg-type]
+                entry=entry,
+            )
+        self.assertEqual(attempts, [])
         self.assertEqual(recorded.deliveryState, "unconfirmed")
         self.assertNotEqual(recorded.deliveryState, "delivered")
         self.assertEqual(recorded.deliveredToSession, "agent-a")
-        # 260707-HFX-L3: the durable row carries the pane capture as forensic evidence, never a
-        # bare generic failure -- the re-briefing operator reads what the pane actually showed.
-        assert recorded.deliveryDetail is not None
-        self.assertIn("not harness-log-confirmed", recorded.deliveryDetail)
-        self.assertIn("claude> (booting)", recorded.deliveryDetail)
+        self.assertEqual(recorded.adapterDeliveryState, "unknown")
+        self.assertIn("transport closed after write", recorded.deliveryDetail or "")
 
     def test_unverified_delivery_with_empty_capture_still_records_a_loud_detail(self) -> None:
         entry = create_operator_inbox_entry(
@@ -818,6 +852,9 @@ class OperatorInboxDeliveryTests(unittest.TestCase):
                 # capture-pane against a vanished session yields an empty capture.
                 return PasteResult(delivered=False, submitted=False, capture="")
 
+        legacy = self.catalog.get("agent-a")
+        assert legacy is not None
+        self.catalog.upsert(replace(legacy, control_endpoint=None, control_state="unsupported"))
         recorded = deliver_inbox_entry(
             store=self.store,
             catalog=self.catalog,
@@ -826,7 +863,5 @@ class OperatorInboxDeliveryTests(unittest.TestCase):
             entry=entry,
         )
         self.assertEqual(recorded.deliveryState, "unconfirmed")
-        self.assertEqual(
-            recorded.deliveryDetail,
-            "input was not harness-log-confirmed; empty failure capture",
-        )
+        self.assertEqual(recorded.adapterDeliveryState, "unsupported")
+        self.assertIn("no protocol delivery adapter", recorded.deliveryDetail or "")

@@ -473,7 +473,7 @@ class TurnStateSweepWiringTests(unittest.TestCase):
     def tearDown(self) -> None:
         self._dir.cleanup()
 
-    def test_alive_harness_row_gets_classified_and_changed_flag_set(self) -> None:
+    def test_alive_legacy_harness_pane_is_diagnostic_only(self) -> None:
         entry = _entry("chat-1", kind="harness")
         self.catalog.upsert(entry)
 
@@ -498,7 +498,10 @@ class TurnStateSweepWiringTests(unittest.TestCase):
         )
         self.assertTrue(observation.alive)
         self.assertTrue(observation.turn_state_changed)
-        self.assertEqual(observation.entry.turn_state, "working")
+        self.assertEqual(observation.entry.turn_state, "stale")
+        self.assertEqual(observation.entry.control_state, "unsupported")
+        assert observation.entry.control_raw is not None
+        self.assertEqual(observation.entry.control_raw["paneDiagnostic"], "working")
 
     def test_plain_terminal_rows_are_never_classified(self) -> None:
         entry = _entry("term-1", kind="terminal")

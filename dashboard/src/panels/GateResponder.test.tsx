@@ -77,7 +77,7 @@ afterEach(() => {
 });
 
 describe("GateResponder", () => {
-  it("records Yes on the current gate and notifies the hosted chat", async () => {
+  it("records Yes and routes the notice through the durable inbox even with a hosted chat", async () => {
     sessionStore.getState().add("Claude Code", "s1", "LC1");
     const { getByTestId, queryByTestId } = render(<GateResponder lifecycleId="LC1" gateNode={GATE} />);
 
@@ -92,11 +92,14 @@ describe("GateResponder", () => {
       expect(postGateDecision).toHaveBeenCalledWith("LC1", "approve", { gateId: "G1", note: undefined }),
     );
     await waitFor(() =>
-      expect(deliverToSession).toHaveBeenCalledWith(
-        "s1",
-        expect.stringContaining("Approved by developer in dashboard."),
-      ),
+      expect(postOperatorInbox).toHaveBeenCalledWith({
+        lifecycleId: "LC1",
+        gateId: "G1",
+        ask: expect.stringContaining("Ship it?"),
+        response: "Approved by developer in dashboard.",
+      }),
     );
+    expect(deliverToSession).not.toHaveBeenCalled();
     await waitFor(() => expect(queryByTestId("gate-respond-dialog")).toBeNull());
   });
 
@@ -204,6 +207,24 @@ describe("GateResponder", () => {
     expect(findSessionForLifecycle("LC1")?.id).toBe("s1");
 
     fireEvent.click(getByTestId("gate-respond-yes"));
-    await waitFor(() => expect(deliverToSession).toHaveBeenCalledWith("s1", expect.any(String)));
+    await waitFor(() => expect(postOperatorInbox).toHaveBeenCalled());
+    expect(deliverToSession).not.toHaveBeenCalled();
+  });
+
+  it("uses the durable adapter-interaction gate as the sole response source", async () => {
+    const adapterGate: GateNode = {
+      ...GATE,
+      id: "ADAPTER-1",
+      kind: "agent-question",
+      packet: { adapterInteraction: { sessionId: "s1", interactionId: "approval-1" } },
+    };
+    const { getByTestId } = render(
+      <GateResponder lifecycleId="LC1" gateNode={adapterGate} />,
+    );
+    fireEvent.click(getByTestId("gate-respond-open"));
+    fireEvent.click(getByTestId("gate-respond-yes"));
+    await waitFor(() => expect(postGateDecision).toHaveBeenCalled());
+    expect(postOperatorInbox).not.toHaveBeenCalled();
+    expect(deliverToSession).not.toHaveBeenCalled();
   });
 });

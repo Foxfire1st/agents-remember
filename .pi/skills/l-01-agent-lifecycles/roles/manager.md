@@ -44,7 +44,7 @@ Every worker, reviewer, or curator dispatch below uses the shared three-state pr
 `spawned-unbriefed` session id, and require `hosted_session_readiness(...)=status=ready` for that
 same id before posting one exact-agent durable `dispatch-brief`. Spawned-only and not-ready seats
 are not active work. Briefed means both `deliveryState=delivered` and
-`deliveryDetail=harness-log-confirmed`. If delivery fails, keep the original row and session pending
+`adapterDeliveryState=accepted|queued`. If delivery fails, keep the original row and session pending
 for standard retry; never duplicate the brief or respawn merely because delivery is pending.
 
 ## Lens

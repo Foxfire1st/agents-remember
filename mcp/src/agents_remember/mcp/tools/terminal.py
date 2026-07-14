@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
-from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
@@ -16,7 +15,6 @@ from agents_remember.kernel.agentic_settings import (
 )
 from agents_remember.observer.ambient import ambient
 from agents_remember.observer.events import now_iso
-from agents_remember.serving.harness_logs import HarnessSessionLog
 from agents_remember.serving.harnesses import (
     Harness,
     Which,
@@ -26,10 +24,6 @@ from agents_remember.serving.harnesses import (
     invalid_model_detail,
     is_detected,
     unknown_harness_detail,
-)
-from agents_remember.serving.injector import (
-    DeliveryRow,
-    deliver,
 )
 from agents_remember.serving.leaf_ref_validation import resolve_catalog_leaf_key
 from agents_remember.serving.retire import retire_entry
@@ -426,15 +420,9 @@ def _brief_delivery_separate_refusal(
         "then call hosted_session_readiness(session_id=<returned session>, wait_seconds=<bound>); "
         "only after status='ready', post one operator_inbox entry with the exact agent_id, "
         "message_kind='dispatch-brief', and deliver_to_hosted=true; treat the seat as briefed only "
-        "when deliveryState='delivered' and deliveryDetail='harness-log-confirmed'."
+        "when deliveryState='delivered' and adapterDeliveryState is accepted or queued."
     )
     return _spawn_refusal("brief-delivery-separate", None, kind, detail=detail)
-
-
-_EMPTY_PANE_CAPTURE = "(empty pane capture)"
-"""Explicit stand-in when a failed delivery's pane capture is empty (a vanished/unreadable pane):
-review N3 alignment with ``inbox_delivery`` -- a False outcome NEVER ships evidence-less, so the
-``deliveryCapture`` field is present (with this marker) rather than silently omitted."""
 
 
 @dataclass(frozen=True)
@@ -443,59 +431,6 @@ class _SpawnDelivery:
 
     session_commands_delivered: bool | None = None
     failure_capture: str | None = None
-
-
-def _deliver_spawn_commands(
-    paster: TerminalPaster,
-    tmux_name: str,
-    session_commands: list[str],
-    *,
-    entry_id: str,
-    harness: str | None,
-    cwd: Path,
-    created_at: str,
-    session_log: HarnessSessionLog | None = None,
-) -> _SpawnDelivery:
-    """Preserve settings-owned post-launch commands without sending a leaf brief.
-
-    An unbound harness log cannot prove a command was applied, so the response remains explicitly
-    unconfirmed. This is launch configuration, not assignment delivery; prompt keywords stay on the
-    catalog row for the later durable dispatch brief.
-    """
-    if not session_commands:
-        return _SpawnDelivery()
-    session_commands_delivered = True
-    failure_capture: str | None = None
-    log = session_log or HarnessSessionLog(
-        harness=harness or "",
-        cwd=cwd,
-        started_at=datetime.fromisoformat(created_at),
-    )
-    for command_line in session_commands:
-        row = DeliveryRow(
-            kind="session-command",
-            entry_id=entry_id,
-            text=command_line,
-            submit=True,
-            envelope=False,
-        )
-        result = deliver(
-            row,
-            tmux_name=tmux_name,
-            paster=paster,
-            harness=harness,
-            session_log=log,
-        )
-        if result.outcome != "acked":
-            session_commands_delivered = False
-        if result.outcome in ("blocked", "failed"):
-            failure_capture = result.capture or failure_capture
-    if not session_commands_delivered and failure_capture is None:
-        failure_capture = _EMPTY_PANE_CAPTURE
-    return _SpawnDelivery(
-        session_commands_delivered=session_commands_delivered,
-        failure_capture=failure_capture,
-    )
 
 
 def _resolve_spawn_leaf(
@@ -532,7 +467,7 @@ def spawn_agent_session_payload(
     session_id: str | None = None,
     host: TerminalHost | None = None,
     paster: TerminalPaster | None = None,
-    session_log: HarnessSessionLog | None = None,
+    session_log: object | None = None,
     which: Which | None = None,
 ) -> dict[str, Any]:
     """Spawn one role-configured, leaf-attached hosted session without a leaf brief.
@@ -554,6 +489,7 @@ def spawn_agent_session_payload(
     effort remains the first settings-owned session command. The free-form settings values remain
     recorded verbatim and caller-controlled spend inputs still refuse before spawning.
     """
+    del paster, session_log  # retained injection parameters; bridge runner owns launch commands
     brief_refusal = _brief_delivery_separate_refusal(context, submit, kind=kind)
     if brief_refusal is not None:
         return brief_refusal
@@ -633,6 +569,7 @@ def spawn_agent_session_payload(
         resolved_effort=resolved_effort,
         spawned_by_session=spawned_by_session,
         spawned_by_lifecycle=provenance_lifecycle,
+        control_root=config.coordination_root / "runtime" / "harness-control",
         which=which,
         harnesses=harnesses,
     )
@@ -657,19 +594,7 @@ def spawn_agent_session_payload(
 
     entry = result.entry
     assert entry is not None  # opened => an upserted row
-    spawn_paster = paster if paster is not None else TerminalPaster()
     delivery = _SpawnDelivery()
-    if resolved_session_commands:
-        delivery = _deliver_spawn_commands(
-            spawn_paster,
-            entry.tmux_name,
-            resolved_session_commands,
-            entry_id=entry.id,
-            harness=harness,
-            cwd=entry.cwd,
-            created_at=entry.created_at,
-            session_log=session_log,
-        )
 
     return _tool_payload("spawn_agent_session", _spawned_payload(entry, delivery))
 
@@ -703,6 +628,9 @@ def _spawned_payload(entry: TerminalCatalogEntry, delivery: _SpawnDelivery) -> d
         "sessionCommands": list(entry.session_commands) if entry.session_commands else None,
         "sessionCommandsDelivered": delivery.session_commands_delivered,
         "deliveryCapture": delivery.failure_capture,
+        "controlState": entry.control_state,
+        "controlEndpoint": str(entry.control_endpoint) if entry.control_endpoint else None,
+        "controlProtocol": entry.control_protocol,
     }
 
 

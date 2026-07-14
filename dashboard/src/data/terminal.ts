@@ -271,6 +271,9 @@ export interface HarnessInfo {
 }
 
 export type TerminalSessionStatus = "running" | "exited" | "landed" | "terminated";
+export type HarnessControlState = "starting" | "ready" | "disconnected" | "failed" | "unsupported";
+export type HarnessActivityState = "idle" | "running" | "blocked" | "settling" | "unknown";
+export type HarnessAcceptanceState = "immediate" | "queued" | "rejected" | "unknown" | "unsupported";
 
 export interface TerminalSessionInfo {
   id: string;
@@ -299,6 +302,14 @@ export interface TerminalSessionInfo {
   spawnedLabel?: string;
   turnState?: string;
   turnStateChangedAt?: string;
+  controlState?: HarnessControlState;
+  controlProtocol?: string;
+  controlActivity?: HarnessActivityState;
+  controlAcceptance?: HarnessAcceptanceState;
+  controlVendorSessionId?: string;
+  controlPendingInteraction?: Record<string, unknown>;
+  controlLastEventSequence?: number;
+  controlRaw?: Record<string, unknown>;
 }
 
 interface OpenTerminalOptions {

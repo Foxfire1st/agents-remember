@@ -70,6 +70,7 @@ from agents_remember.controlplane.operator_inbox_records import AgentRole, Inbox
 from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
 from agents_remember.controlplane.orchestration_nudges import OrchestrationNudgeStore
 from agents_remember.controlplane.supervisor_signals import SupervisorSignalCooldownStore
+from agents_remember.errors import HarnessControlError
 from agents_remember.kernel.agentic_settings import load_agentic_settings
 from agents_remember.mcp.tools.gates import gate_decide_for_lifecycle, gate_decide_payload
 from agents_remember.mcp.tools.operator_inbox import operator_inbox_post_payload
@@ -96,9 +97,12 @@ from agents_remember.serving.changeset import register_changeset_routes
 from agents_remember.serving.events import stream_raw_events
 from agents_remember.serving.files import register_files_routes
 from agents_remember.serving.harness_control_adapter import protocol_adapter_status
-from agents_remember.serving.harness_logs import HarnessSessionLog
+from agents_remember.serving.harness_control_client import (
+    stop_control_session,
+    submit_control_prompt,
+)
 from agents_remember.serving.harnesses import detect_harnesses
-from agents_remember.serving.injector import DeliveryRow, deliver
+from agents_remember.serving.hosted_interactions import HostedInteractionSynchronizer
 from agents_remember.serving.leaf_ref_validation import resolve_catalog_leaf_key
 from agents_remember.serving.notes import register_notes_routes
 from agents_remember.serving.projector import Projector
@@ -510,12 +514,14 @@ def create_app(
     paster = terminal_paster if terminal_paster is not None else TerminalPaster()
     liveness_clock = now or utc_now
     liveness_config = TerminalCatalogLivenessConfig()
+    interaction_synchronizer = HostedInteractionSynchronizer(observer_root(config))
     liveness_sweeper = TerminalCatalogLivenessSweeper(
         catalog,
         host,
         now=now,
         config=liveness_config,
         on_turn_state_change=lambda observation: log_turn_state_change_event(config, observation.entry),
+        on_control_snapshot=interaction_synchronizer.observe,
     )
     # Resolved ONCE at boot (260703-L15): the stamp that makes a stale serving process visible.
     build = resolve_serving_build()
@@ -957,6 +963,7 @@ def create_app(
                 if request.kind == "harness" or request.harness
                 else None
             ),
+            control_root=config.coordination_root / "runtime" / "harness-control",
         )
         if result.status == "bad-kind":
             return JSONResponse(
@@ -986,6 +993,8 @@ def create_app(
                 "cwd": str(entry.cwd),
                 "tmuxName": entry.tmux_name,
                 "status": "running",
+                "controlState": entry.control_state,
+                "controlProtocol": entry.control_protocol,
             },
             status_code=200,
         )
@@ -1040,9 +1049,8 @@ def create_app(
 
     @app.post("/api/terminal/{session}/paste")
     def api_terminal_paste(session: str, request: TerminalPasteRequest) -> Response:
-        # L2 paste seam: deliver a context packet to a hosted session server-side (the mirror of the
-        # frontend delivery seam), so a packet can be pushed to a durable tmux session that has no
-        # attached browser client. Submitted input is accepted only from the bound harness log.
+        # Explicit operator terminal input. Inter-agent messaging uses the durable inbox route;
+        # a protocol harness receives one correlated whole message, never raw pane input.
         entry = catalog.get(session)
         if entry is None or entry.status != "running":
             return JSONResponse(content={"status": "unknown-session"}, status_code=404)
@@ -1057,34 +1065,74 @@ def create_app(
             return JSONResponse(content={"status": "unknown-session"}, status_code=404)
         entry = observation.entry
         delivery_id = uuid4().hex
-        session_log = HarnessSessionLog(
-            harness=entry.harness or "",
-            cwd=entry.cwd,
-            started_at=datetime.fromisoformat(entry.created_at),
-            bound_path=entry.session_log_path,
-        )
-        outcome = deliver(
-            DeliveryRow(kind="message", entry_id=delivery_id, text=request.text, submit=request.submit),
-            tmux_name=entry.tmux_name,
-            paster=paster,
-            harness=entry.harness,
-            session_log=session_log,
-        )
-        if outcome.session_log_path is not None and outcome.bound_entry_id is not None:
-            catalog.bind_session_log(
-                entry.id,
-                entry_id=outcome.bound_entry_id,
-                path=outcome.session_log_path,
+        if entry.kind == "harness":
+            if entry.control_endpoint is None:
+                return JSONResponse(
+                    content={
+                        "session": session,
+                        "status": "unsupported",
+                        "detail": "legacy harness session has no protocol adapter",
+                    },
+                    status_code=409,
+                )
+            if not request.submit:
+                return JSONResponse(
+                    content={
+                        "session": session,
+                        "status": "draft-not-submitted",
+                        "detail": "harness drafts remain on the attached terminal surface",
+                    },
+                    status_code=409,
+                )
+            try:
+                receipt = submit_control_prompt(
+                    entry,
+                    request.text,
+                    source="terminal",
+                    request_id=delivery_id,
+                )
+            except HarnessControlError as exc:
+                return JSONResponse(
+                    content={
+                        "session": session,
+                        "entryId": delivery_id,
+                        "status": "unconfirmed",
+                        "delivered": False,
+                        "submitted": True,
+                        "detail": str(exc),
+                    },
+                    status_code=200,
+                )
+            delivered = receipt.acceptance in {"immediate", "queued"}
+            return JSONResponse(
+                content={
+                    "session": session,
+                    "entryId": delivery_id,
+                    "status": "delivered" if delivered else "unconfirmed",
+                    "delivered": delivered,
+                    "submitted": True,
+                    "acceptance": receipt.acceptance,
+                    "vendorCorrelationId": receipt.vendor_correlation_id,
+                    "acceptedAt": receipt.accepted_at,
+                    "detail": receipt.detail,
+                },
+                status_code=200,
             )
-        delivered = outcome.outcome in ("acked", "landed-unacked")
+        outcome = paster.paste(
+            entry.tmux_name,
+            request.text,
+            submit=request.submit,
+            accepted=None,
+        )
+        delivered = outcome.delivered
         content: dict[str, object] = {
             "session": session,
             "entryId": delivery_id,
             "status": "delivered" if delivered else "unconfirmed",
             "delivered": delivered,
-            "submitted": outcome.submitted,
+            "submitted": request.submit and delivered,
         }
-        if not delivered or (request.submit and not outcome.submitted):
+        if not delivered:
             content["capture"] = outcome.capture
         return JSONResponse(content=content, status_code=200)
 
@@ -1094,6 +1142,12 @@ def create_app(
         live = host.get(session)
         if entry is None and live is None:
             return JSONResponse(content={"status": "unknown-session"}, status_code=404)
+        control_stop_detail = None
+        if entry is not None and entry.control_endpoint is not None:
+            try:
+                stop_control_session(entry)
+            except HarnessControlError as exc:
+                control_stop_detail = str(exc)
         host.terminate(session, tmux_name=entry.tmux_name if entry is not None else None)
         terminated_at = now_iso()
         updated = catalog.mark_terminated(session, terminated_at)
@@ -1103,6 +1157,7 @@ def create_app(
                 "status": "terminated",
                 "terminatedAt": terminated_at,
                 **({"tmuxName": updated.tmux_name} if updated is not None else {}),
+                **({"controlStopDetail": control_stop_detail} if control_stop_detail else {}),
             },
             status_code=200,
         )

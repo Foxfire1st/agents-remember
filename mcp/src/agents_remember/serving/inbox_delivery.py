@@ -1,42 +1,30 @@
-"""Hosted-session delivery for durable operator inbox messages.
-
-260707-HFX2-L3 (R1 + R3): pushing an inbox row into a hosted session now goes through the ONE
-delivery path (``serving/injector.deliver``) every other payload class uses -- this module's job
-narrows to translating that path's four-way ``DeliveryOutcome`` back onto the ``OperatorInboxEntry``
-schema's existing ``InboxDeliveryState`` (``"queued" | "no-hosted-session" | "delivered" |
-"unconfirmed"``), which this leaf leaves UNCHANGED (it rides through the dashboard, the backoff
-predicate, and the L2 supervisor -- widening it is a bigger-blast-radius leaf than this one). A
-``blocked`` outcome (a modal dialog trap -- codex quota/rate-limit (#20), a permission prompt) maps
-to ``"unconfirmed"`` with a ``NEEDS-ATTENTION:`` prefixed detail, so it stays structured and
-diagnosable in the durable row's ``deliveryDetail`` without a schema change.
-"""
+"""Inbox-rooted delivery through exact-session harness protocol adapters."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
 
 from agents_remember.controlplane.operator_inbox_records import (
+    AdapterDeliveryState,
     InboxDeliveryState,
     OperatorInboxEntry,
 )
 from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
+from agents_remember.errors import HarnessControlError
 from agents_remember.observer.events import now_iso
 from agents_remember.serving.dispatch_brief import (
     DISPATCH_BRIEF_KIND,
     DispatchBriefGate,
-    dispatch_paste_policy,
-    verify_launch_commands,
     with_prompt_keywords,
 )
-from agents_remember.serving.harness_logs import HarnessSessionLog
-from agents_remember.serving.injector import DeliveryResult, DeliveryRow, deliver
+from agents_remember.serving.harness_control_client import (
+    reconcile_control_prompt,
+    submit_control_prompt,
+)
+from agents_remember.serving.harness_control_models import ReconciliationResult, SubmissionReceipt
 from agents_remember.serving.terminal import TerminalHost
 from agents_remember.serving.terminal_catalog import TerminalCatalog, TerminalCatalogEntry
 from agents_remember.serving.terminal_paste import TerminalPaster
-
-_CAPTURE_EVIDENCE_LIMIT = 2000
-"""Durable-row bound for an attached pane capture: keep the TAIL (the freshest pane output)."""
 
 
 @dataclass(frozen=True)
@@ -61,25 +49,60 @@ def deliver_inbox_entry(
     delivery_at: str | None = None,
     dispatch_gate: DispatchBriefGate | None = None,
 ) -> OperatorInboxEntry:
-    """Push an inbox message into the target hosted session and record the delivery state."""
+    """Deliver a pre-existing durable row and record adapter evidence without consuming it.
+
+    ``paster`` remains in the public composition signature for callers shared with ordinary
+    terminal plumbing, but harness delivery never invokes it and has no raw-input fallback.
+    """
+
+    del paster  # compatibility composition parameter; protocol delivery never uses terminal input
     timestamp = delivery_at or now_iso()
     target = _target_session(catalog, entry)
     if target is None:
-        return store.record_delivery(
-            entry.id,
-            now=timestamp,
+        return _record(
+            store,
+            entry,
+            timestamp,
+            target=None,
             delivery_state="no-hosted-session",
-            delivery_detail="no running hosted session matched the inbox address",
+            adapter_state=None,
+            detail="no running hosted session matched the inbox address",
             current=current,
             redelivery_floor_seconds=redelivery_floor_seconds,
         )
     if not host.has_session(target.tmux_name):
-        return store.record_delivery(
-            entry.id,
-            now=timestamp,
+        return _record(
+            store,
+            entry,
+            timestamp,
+            target=target,
             delivery_state="no-hosted-session",
-            delivered_to_session=target.id,
-            delivery_detail="catalog row exists but tmux session is not running",
+            adapter_state=None,
+            detail="catalog row exists but tmux session is not running",
+            current=current,
+            redelivery_floor_seconds=redelivery_floor_seconds,
+        )
+    if target.kind != "harness" or target.control_endpoint is None:
+        return _record(
+            store,
+            entry,
+            timestamp,
+            target=target,
+            delivery_state="unconfirmed",
+            adapter_state="unsupported",
+            detail="legacy or ordinary terminal session has no protocol delivery adapter",
+            current=current,
+            redelivery_floor_seconds=redelivery_floor_seconds,
+        )
+    if not submit:
+        return _record(
+            store,
+            entry,
+            timestamp,
+            target=target,
+            delivery_state="unconfirmed",
+            adapter_state="rejected",
+            detail="durable inbox delivery requires a committed adapter submission",
             current=current,
             redelivery_floor_seconds=redelivery_floor_seconds,
         )
@@ -91,109 +114,209 @@ def deliver_inbox_entry(
             recovery=entry.attemptCount > 0,
         )
         if gate_detail is not None:
-            return store.record_delivery(
-                entry.id,
-                now=timestamp,
+            return _record(
+                store,
+                entry,
+                timestamp,
+                target=target,
                 delivery_state="unconfirmed",
-                delivered_to_session=target.id,
-                delivery_detail=gate_detail,
+                adapter_state="rejected",
+                detail=gate_detail,
                 current=current,
                 redelivery_floor_seconds=redelivery_floor_seconds,
             )
+
+    if entry.adapterRequestId is not None:
+        return _redelivery(
+            store,
+            entry,
+            target,
+            timestamp,
+            current=current,
+            redelivery_floor_seconds=redelivery_floor_seconds,
+        )
+
     text = _push_text(entry)
-    policy = None
     if entry.messageKind == DISPATCH_BRIEF_KIND:
         text = with_prompt_keywords(target, text)
-        policy = dispatch_paste_policy(entry, target)
-    row = DeliveryRow(
-        kind=entry.messageKind,
-        entry_id=entry.id,
-        text=text,
-        submit=submit,
-        envelope=False,  # _push_text already renders this payload's own header (below).
-        dispatch_policy=policy,
-    )
-    session_log = HarnessSessionLog(
-        harness=target.harness or "",
-        cwd=target.cwd,
-        started_at=datetime.fromisoformat(target.created_at),
-        bound_path=target.session_log_path,
-    )
-    result = deliver(
-        row,
-        tmux_name=target.tmux_name,
-        paster=paster,
-        harness=target.harness,
-        session_log=session_log,
-    )
-    if result.session_log_path is not None and result.bound_entry_id is not None:
-        catalog.bind_session_log(
-            target.id,
-            entry_id=result.bound_entry_id,
-            path=result.session_log_path,
-        )
-    if entry.messageKind == DISPATCH_BRIEF_KIND and result.outcome == "acked":
-        command_proof = verify_launch_commands(
+    try:
+        receipt = submit_control_prompt(
             target,
-            paster=paster,
-            session_log=session_log,
+            text,
+            source="durable",
+            request_id=entry.id,
+            submitted_at=timestamp,
         )
-        if not command_proof.allows_brief:
-            detail = f"launch session commands unconfirmed: {command_proof.detail}"
-            if command_proof.capture:
-                detail += f"; {_capture_detail(command_proof.capture)}"
-            return store.record_delivery(
-                entry.id,
-                now=timestamp,
-                delivery_state="unconfirmed",
-                delivered_to_session=target.id,
-                delivery_detail=detail,
-                current=current,
-                redelivery_floor_seconds=redelivery_floor_seconds,
-            )
-    return store.record_delivery(
-        entry.id,
-        now=timestamp,
-        delivery_state=_delivery_state(result),
-        delivered_to_session=target.id,
-        delivery_detail=_delivery_detail(result),
+    except HarnessControlError as exc:
+        reconciliation = _try_reconcile(target, entry.id)
+        return _record_reconciliation(
+            store,
+            entry,
+            target,
+            timestamp,
+            reconciliation,
+            fallback_detail=f"ambiguous adapter transport: {exc}",
+            current=current,
+            redelivery_floor_seconds=redelivery_floor_seconds,
+        )
+    return _record_receipt(
+        store,
+        entry,
+        target,
+        timestamp,
+        receipt,
         current=current,
         redelivery_floor_seconds=redelivery_floor_seconds,
     )
 
 
-def _delivery_state(result: DeliveryResult) -> InboxDeliveryState:
-    """Map the R1 ``DeliveryOutcome`` onto the unchanged ``InboxDeliveryState`` vocabulary."""
-    return "delivered" if result.outcome == "acked" else "unconfirmed"
+def _redelivery(
+    store: OperatorInboxStore,
+    entry: OperatorInboxEntry,
+    target: TerminalCatalogEntry,
+    timestamp: str,
+    *,
+    current: dict[str, OperatorInboxEntry] | None,
+    redelivery_floor_seconds: float | None,
+) -> OperatorInboxEntry:
+    if entry.adapterDeliveryState in {"accepted", "queued", "completed"}:
+        return _record(
+            store,
+            entry,
+            timestamp,
+            target=target,
+            delivery_state="delivered",
+            adapter_state=entry.adapterDeliveryState,
+            detail=f"adapter-{entry.adapterDeliveryState}: already correlated",
+            current=current,
+            redelivery_floor_seconds=redelivery_floor_seconds,
+        )
+    request_id = entry.adapterRequestId
+    assert request_id is not None  # this helper is entered only for an already-correlated row
+    reconciliation = _try_reconcile(target, request_id)
+    return _record_reconciliation(
+        store,
+        entry,
+        target,
+        timestamp,
+        reconciliation,
+        fallback_detail="adapter request remains ambiguous; not resubmitted",
+        current=current,
+        redelivery_floor_seconds=redelivery_floor_seconds,
+    )
 
 
-def _delivery_detail(result: DeliveryResult) -> str:
-    if result.outcome == "acked":
-        return "harness-log-confirmed"
-    if result.outcome == "blocked":
-        return f"NEEDS-ATTENTION: blocked ({result.reason}); {_capture_detail(result.capture)}"
-    if result.outcome == "landed-unacked":
-        return f"draft landed but was not submitted ({result.reason})"
-    return _unconfirmed_detail(result.capture)
+def _try_reconcile(target: TerminalCatalogEntry, request_id: str) -> ReconciliationResult | None:
+    try:
+        return reconcile_control_prompt(target, request_id)
+    except HarnessControlError:
+        return None
 
 
-def _capture_detail(capture: str) -> str:
-    if not capture:
-        return "empty pane capture"
-    return "pane capture (tail):\n" + capture[-_CAPTURE_EVIDENCE_LIMIT:]
+def _record_receipt(
+    store: OperatorInboxStore,
+    entry: OperatorInboxEntry,
+    target: TerminalCatalogEntry,
+    timestamp: str,
+    receipt: SubmissionReceipt,
+    *,
+    current: dict[str, OperatorInboxEntry] | None,
+    redelivery_floor_seconds: float | None,
+) -> OperatorInboxEntry:
+    adapter_state: AdapterDeliveryState = (
+        "accepted" if receipt.acceptance == "immediate" else receipt.acceptance
+    )
+    delivery_state: InboxDeliveryState = (
+        "delivered" if adapter_state in {"accepted", "queued"} else "unconfirmed"
+    )
+    detail = f"adapter-{adapter_state}"
+    if receipt.detail:
+        detail += f": {receipt.detail}"
+    return _record(
+        store,
+        entry,
+        timestamp,
+        target=target,
+        delivery_state=delivery_state,
+        adapter_state=adapter_state,
+        detail=detail,
+        request_id=receipt.request_id,
+        vendor_correlation_id=receipt.vendor_correlation_id,
+        accepted_at=receipt.accepted_at,
+        current=current,
+        redelivery_floor_seconds=redelivery_floor_seconds,
+    )
 
 
-def _unconfirmed_detail(capture: str) -> str:
-    """The 260707-HFX-L3 loud-failure detail: an unverified push carries its pane capture.
+def _record_reconciliation(
+    store: OperatorInboxStore,
+    entry: OperatorInboxEntry,
+    target: TerminalCatalogEntry,
+    timestamp: str,
+    reconciliation: ReconciliationResult | None,
+    *,
+    fallback_detail: str,
+    current: dict[str, OperatorInboxEntry] | None,
+    redelivery_floor_seconds: float | None,
+) -> OperatorInboxEntry:
+    if reconciliation is None or reconciliation.state == "unresolved":
+        state: AdapterDeliveryState = "unknown"
+        detail = fallback_detail
+    elif reconciliation.state == "accepted":
+        state = "accepted"
+        detail = reconciliation.detail or "adapter reconciliation accepted the request"
+    else:
+        state = reconciliation.state
+        detail = reconciliation.detail or f"adapter reconciliation {reconciliation.state}"
+    return _record(
+        store,
+        entry,
+        timestamp,
+        target=target,
+        delivery_state="delivered" if state == "accepted" else "unconfirmed",
+        adapter_state=state,
+        detail=detail,
+        request_id=(
+            reconciliation.request_id
+            if reconciliation is not None
+            else entry.adapterRequestId or entry.id
+        ),
+        vendor_correlation_id=(
+            reconciliation.vendor_correlation_id if reconciliation is not None else None
+        ),
+        current=current,
+        redelivery_floor_seconds=redelivery_floor_seconds,
+    )
 
-    Never a bare "not echoed" -- the durable row is the forensic record a re-briefing operator
-    reads, so the evidence (what the pane actually showed) rides along, tail-bounded.
-    """
-    if not capture:
-        return "input was not harness-log-confirmed; empty failure capture"
-    return (
-        "input was not harness-log-confirmed; pane failure capture (tail):\n"
-        + capture[-_CAPTURE_EVIDENCE_LIMIT:]
+
+def _record(
+    store: OperatorInboxStore,
+    entry: OperatorInboxEntry,
+    timestamp: str,
+    *,
+    target: TerminalCatalogEntry | None,
+    delivery_state: InboxDeliveryState,
+    adapter_state: AdapterDeliveryState | None,
+    detail: str,
+    current: dict[str, OperatorInboxEntry] | None,
+    redelivery_floor_seconds: float | None,
+    request_id: str | None = None,
+    vendor_correlation_id: str | None = None,
+    accepted_at: str | None = None,
+) -> OperatorInboxEntry:
+    return store.record_delivery(
+        entry.id,
+        now=timestamp,
+        delivery_state=delivery_state,
+        delivered_to_session=target.id if target is not None else None,
+        delivery_detail=detail,
+        adapter_delivery_state=adapter_state,
+        adapter_request_id=entry.adapterRequestId or request_id,
+        adapter_vendor_correlation_id=vendor_correlation_id,
+        adapter_accepted_at=accepted_at,
+        adapter_delivery_detail=detail,
+        current=current,
+        redelivery_floor_seconds=redelivery_floor_seconds,
     )
 
 

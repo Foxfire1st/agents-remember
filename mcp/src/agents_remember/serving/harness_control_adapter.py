@@ -59,7 +59,9 @@ class HarnessProtocolRegistry:
 
 
 DEFAULT_HARNESS_PROTOCOL_REGISTRY = HarnessProtocolRegistry()
-"""No vendor drivers are registered by L1; later adapter leaves register explicit factories."""
+"""Factory-free status registry; the hosted runner constructs built-ins from spawn settings."""
+
+BUILTIN_PROTOCOL_HARNESSES = frozenset({"claude", "codex", "pi"})
 
 
 def protocol_adapter_status(
@@ -69,6 +71,8 @@ def protocol_adapter_status(
 ) -> ControlState:
     """Report settings/builtin harnesses without a registered protocol adapter as unsupported."""
 
+    if harness_id in BUILTIN_PROTOCOL_HARNESSES:
+        return "starting"
     return registry.status(harness_id)
 
 

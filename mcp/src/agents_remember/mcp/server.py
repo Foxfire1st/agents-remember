@@ -186,7 +186,7 @@ def create_server(config: McpRuntimeConfig) -> Any:
         direct launch/session spend controls. Legacy non-null `context` or `submit=true` returns
         `brief-delivery-separate` before settings, catalog, or terminal side effects. The caller must
         then obtain `hosted_session_readiness(...)=ready` for the returned id and post one exact-agent
-        durable `dispatch-brief`; only `delivered` plus `harness-log-confirmed` proves brief delivery.
+        durable `dispatch-brief`; only `delivered` plus adapter acceptance proves brief delivery.
         Legacy non-null `harness`, `model`, `effort`, `launch_args`,
         `prompt_keywords`, `session_commands`, `env.AR_SPAWN_MODEL`, `env.AR_SPAWN_EFFORT`, or
         harness-native spend/endpoint env keys such as `ANTHROPIC_MODEL` and `OPENAI_BASE_URL`
@@ -237,9 +237,10 @@ def create_server(config: McpRuntimeConfig) -> Any:
     ) -> dict[str, Any]:
         """Check whether one exact spawned session is ready for durable brief delivery.
 
-        This is read-only: it verifies the same running catalog identity, addressable tmux pane,
-        harness-aware composer marker, and absence of tmux copy mode. It returns as soon as ready
-        or when the caller's finite wait (maximum 60 seconds) expires; it never sends input.
+        This is read-only: it verifies the same running catalog identity and exact protocol adapter
+        snapshot, including negotiated readiness and acceptance capability. Pane text, copy mode,
+        and log timing are not authority. It returns as soon as ready or when the caller's finite
+        wait (maximum 60 seconds) expires; it never sends input.
         """
         return hosted_session_readiness_payload(
             config,

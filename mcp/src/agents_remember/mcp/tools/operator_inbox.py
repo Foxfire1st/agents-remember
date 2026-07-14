@@ -308,6 +308,12 @@ def operator_inbox_post_payload(
             "deliveredAt": entry.deliveredAt,
             "deliveredToSession": entry.deliveredToSession,
             "deliveryDetail": entry.deliveryDetail,
+            "adapterDeliveryState": entry.adapterDeliveryState,
+            "adapterRequestId": entry.adapterRequestId,
+            "adapterVendorCorrelationId": entry.adapterVendorCorrelationId,
+            "adapterAcceptedAt": entry.adapterAcceptedAt,
+            "adapterCompletedAt": entry.adapterCompletedAt,
+            "adapterDeliveryDetail": entry.adapterDeliveryDetail,
         },
     )
 

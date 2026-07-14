@@ -34,7 +34,7 @@ three-state protocol in `../SKILL.md`: spawn with `context` omitted and `submit=
 exact `spawned-unbriefed` session id; require `hosted_session_readiness(...)=status=ready` for that
 same id; then create one exact-agent durable `dispatch-brief`. Spawned-only and not-ready seats are
 not active work. Briefed means both `deliveryState=delivered` and
-`deliveryDetail=harness-log-confirmed`. A delivery failure remains pending on its original row and
+`adapterDeliveryState=accepted|queued`. A delivery failure remains pending on its original row and
 session for standard retry; never duplicate its brief or respawn it merely for pending delivery.
 
 ## The Event Loop

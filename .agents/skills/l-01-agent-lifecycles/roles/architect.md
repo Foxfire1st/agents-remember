@@ -117,7 +117,7 @@ Every horizontal expansion from this seat follows the shared three-state protoco
 `hosted_session_readiness` must return `status=ready` for the exact returned session id; only then
 post one exact-agent durable `dispatch-brief`. A spawned-only or not-ready orchestrator is not
 active work. Count it briefed only from `deliveryState=delivered` plus
-`deliveryDetail=harness-log-confirmed`; a failed delivery stays pending on the same row and session,
+`adapterDeliveryState=accepted|queued`; a failed delivery stays pending on the same row and session,
 never a duplicate brief or automatic respawn.
 
 ## Design And Drawing Board

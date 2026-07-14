@@ -54,6 +54,15 @@ def hosted_session_readiness_payload(
             "session": result.session_id,
             "harness": entry.harness if entry is not None else None,
             "tmuxName": entry.tmux_name if entry is not None else None,
+            "controlState": entry.control_state if entry is not None else None,
+            "activity": entry.control_activity if entry is not None else None,
+            "acceptance": entry.control_acceptance if entry is not None else None,
+            "vendorSessionId": (
+                entry.control_vendor_session_id if entry is not None else None
+            ),
+            "pendingInteraction": (
+                entry.control_pending_interaction if entry is not None else None
+            ),
             "detail": result.detail,
         },
     )

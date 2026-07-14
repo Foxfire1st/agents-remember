@@ -13,17 +13,13 @@ import { css, cx } from "../../styled-system/css";
 import { postGateDecision } from "../data/actions";
 import { postOperatorInbox } from "../data/operatorInbox";
 import {
-  deliverToSession,
-  findSessionForLifecycle,
   sessionStore,
   useSessions,
-  type DeliveryStatus,
 } from "../data/sessions";
 import type { GateNode } from "../types/projection";
 import {
   askQuestion,
   diagnosticText,
-  packageResponse,
   requestText,
   statusText,
   type GateResponseStatus,
@@ -224,13 +220,12 @@ export function GateResponder({
   const notifyAgent = async (response: string): Promise<boolean> => {
     const text = response.trim();
     if (!text) return false;
-    const target = findSessionForLifecycle(lifecycleId);
     setStatus("sending");
-    const packaged = packageResponse(lifecycleId, gateNode, ask, text);
-    if (target) {
-      const result: DeliveryStatus = await deliverToSession(target.id, packaged);
-      setStatus(result === "delivered" ? "delivered" : "unconfirmed");
-      return result === "delivered";
+    if (gateNode?.packet?.adapterInteraction) {
+      // The durable gate decision is the adapter response source. The backend synchronizer returns
+      // it to the exact pending interaction; a second terminal/inbox message would duplicate it.
+      setStatus("delivered");
+      return true;
     }
     const result = await postOperatorInbox({
       lifecycleId,

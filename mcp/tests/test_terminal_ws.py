@@ -37,6 +37,7 @@ from agents_remember.serving.app import (
     _apply_terminal_input,
     create_app,
 )
+from agents_remember.serving.harness_control_runner import parse_runner_config
 from agents_remember.serving.terminal import TerminalHost, TerminalSessionBinding
 from agents_remember.serving.terminal_catalog import (
     TerminalCatalog,
@@ -916,7 +917,7 @@ class TerminalWebSocketTests(unittest.TestCase):
             {h["id"]: h["detected"] for h in harnesses},
             {"claude": True, "codex": False, "pi": False},
         )
-        self.assertEqual({h["control"] for h in harnesses}, {"unsupported"})
+        self.assertEqual({h["control"] for h in harnesses}, {"starting"})
 
     def test_post_open_harness_spawns_registry_argv_at_workspace_root(self) -> None:
         with patch("shutil.which", _which("claude")), TestClient(self.app) as client:
@@ -930,7 +931,13 @@ class TerminalWebSocketTests(unittest.TestCase):
         self.assertEqual(body["label"], "Claude Code 1")
         self.assertEqual(len(self.host.ensured), 1)
         ensured = self.host.ensured[0]
-        self.assertEqual(ensured["command"], ["claude"])  # server-resolved argv, never wire-supplied
+        command = ensured["command"]
+        assert isinstance(command, list)
+        self.assertEqual(command[1:3], ["-m", "agents_remember.serving.harness_control_runner"])
+        runner = parse_runner_config(command[3])
+        self.assertEqual(runner.argv, ("claude",))  # server-resolved argv, never wire-supplied
+        self.assertEqual(runner.harness_id, "claude")
+        self.assertEqual(runner.identity.ar_session_id, "h-1")
         self.assertEqual(ensured["cwd"], self.tmp)  # workspace_root
         self.assertTrue(ensured["suspend_unsafe"])  # a bare-pane harness gets the Ctrl-Z strip
         entry = self.catalog.get("h-1")

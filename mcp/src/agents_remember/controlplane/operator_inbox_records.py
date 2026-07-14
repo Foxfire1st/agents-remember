@@ -39,6 +39,9 @@ InboxMessageKind = Literal[
     "dispatch-brief",
 ]
 InboxDeliveryState = Literal["queued", "no-hosted-session", "delivered", "unconfirmed"]
+AdapterDeliveryState = Literal[
+    "accepted", "queued", "rejected", "unknown", "completed", "unsupported"
+]
 
 
 def require_inbox_address(
@@ -83,6 +86,14 @@ class OperatorInboxEntry(BaseModel):
     deliveredAt: str | None = None
     deliveredToSession: str | None = None
     deliveryDetail: str | None = None
+    # Protocol delivery evidence is additive to the stable inbox delivery vocabulary. Acceptance
+    # never mutates ``state``; explicit recipient consume remains the only acknowledgement (R14).
+    adapterDeliveryState: AdapterDeliveryState | None = None
+    adapterRequestId: str | None = None
+    adapterVendorCorrelationId: str | None = None
+    adapterAcceptedAt: str | None = None
+    adapterCompletedAt: str | None = None
+    adapterDeliveryDetail: str | None = None
     consumedAt: str | None = None
     consumedBy: str | None = None
     consumedVia: OperatorInboxVia | None = None

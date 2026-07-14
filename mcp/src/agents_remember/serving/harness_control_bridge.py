@@ -106,6 +106,22 @@ class HarnessControlBridge:
     def snapshot(self) -> AdapterSnapshot:
         return self._snapshot
 
+    def mark_failed(self, detail: str) -> AdapterSnapshot:
+        """Expose a startup failure through IPC after the adapter cleaned up its partial launch."""
+
+        if self._started:
+            raise HarnessControlError("cannot replace a started control bridge with a failure")
+        self._started = True
+        self._snapshot = replace(
+            self._snapshot,
+            control="failed",
+            activity="unknown",
+            acceptance="rejected",
+            raw={**self._snapshot.raw, "bridgeError": detail},
+        )
+        self._publish()
+        return self._snapshot
+
     async def subscribe(self) -> AsyncGenerator[AdapterSnapshot]:
         queue: asyncio.Queue[AdapterSnapshot] = asyncio.Queue(maxsize=self._subscriber_queue_limit)
         self._subscribers.add(queue)

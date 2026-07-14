@@ -447,6 +447,29 @@ describe("session catalog cross-tab sync", () => {
 });
 
 describe("connection registry + deliverToSession (6f hardening)", () => {
+  it("submits harness messages through the protocol endpoint without terminal timing", async () => {
+    sessionStore.getState().upsert({
+      id: "controlled",
+      label: "Codex",
+      kind: "harness",
+      harness: "codex",
+      status: "running",
+      controlState: "ready",
+      controlAcceptance: "immediate",
+    });
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ delivered: true, acceptance: "queued" }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    expect(await deliverToSession("controlled", "whole message")).toBe("delivered");
+    expect(fetchMock).toHaveBeenCalledWith("/api/terminal/controlled/paste", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ text: "whole message", submit: true }),
+    });
+  });
+
   it("queues sendToSession into pending and flushes in order once the terminal registers", () => {
     const conn = fakeConn();
     sendToSession("q1", "one");

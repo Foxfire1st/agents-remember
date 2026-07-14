@@ -11,6 +11,9 @@ import {
   type TerminalOpenKind,
   type TerminalSessionInfo,
   type TerminalSessionStatus,
+  type HarnessAcceptanceState,
+  type HarnessActivityState,
+  type HarnessControlState,
 } from "./terminal";
 
 // The open terminal/chat sessions (slice 6e hardening): the session registry as a module-level store
@@ -40,6 +43,14 @@ export interface OpenSession {
   spawnedLabel?: string;
   turnState?: string;
   turnStateChangedAt?: string;
+  controlState?: HarnessControlState;
+  controlProtocol?: string;
+  controlActivity?: HarnessActivityState;
+  controlAcceptance?: HarnessAcceptanceState;
+  controlVendorSessionId?: string;
+  controlPendingInteraction?: Record<string, unknown>;
+  controlLastEventSequence?: number;
+  controlRaw?: Record<string, unknown>;
 }
 
 type SessionCatalogChangeReason = "create" | "terminate" | "leaf";
@@ -385,6 +396,18 @@ export function fromTerminalSessionInfo(info: TerminalSessionInfo): OpenSession 
     ...(info.spawnedLabel ? { spawnedLabel: info.spawnedLabel } : {}),
     ...(info.turnState ? { turnState: info.turnState } : {}),
     ...(info.turnStateChangedAt ? { turnStateChangedAt: info.turnStateChangedAt } : {}),
+    ...(info.controlState ? { controlState: info.controlState } : {}),
+    ...(info.controlProtocol ? { controlProtocol: info.controlProtocol } : {}),
+    ...(info.controlActivity ? { controlActivity: info.controlActivity } : {}),
+    ...(info.controlAcceptance ? { controlAcceptance: info.controlAcceptance } : {}),
+    ...(info.controlVendorSessionId ? { controlVendorSessionId: info.controlVendorSessionId } : {}),
+    ...(info.controlPendingInteraction
+      ? { controlPendingInteraction: info.controlPendingInteraction }
+      : {}),
+    ...(info.controlLastEventSequence !== undefined
+      ? { controlLastEventSequence: info.controlLastEventSequence }
+      : {}),
+    ...(info.controlRaw ? { controlRaw: info.controlRaw } : {}),
     status: info.status,
   };
 }
@@ -487,6 +510,23 @@ export async function pasteDraftToSession(id: string, packageText: string): Prom
  * dropping the message silently — including when the terminal never registered.
  */
 export async function deliverToSession(id: string, packageText: string): Promise<DeliveryStatus> {
+  const session = sessionStore.getState().sessions.find((candidate) => candidate.id === id);
+  if (session?.kind === "harness") {
+    try {
+      const response = await fetch(`/api/terminal/${encodeURIComponent(id)}/paste`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ text: packageText, submit: true }),
+      });
+      if (!response.ok) return "unconfirmed";
+      const body = (await response.json()) as { delivered?: boolean; acceptance?: string };
+      return body.delivered === true && (body.acceptance === "immediate" || body.acceptance === "queued")
+        ? "delivered"
+        : "unconfirmed";
+    } catch {
+      return "unconfirmed";
+    }
+  }
   const conn = await waitForConnection(id);
   if (!conn) return "unconfirmed"; // terminal never registered — surface a retry, never hang on "Sending…"
   await conn.whenReady();

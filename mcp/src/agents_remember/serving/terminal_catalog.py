@@ -13,7 +13,11 @@ from pathlib import Path
 from typing import Literal
 from uuid import uuid4
 
-from agents_remember.serving.harness_control_models import ControlState
+from agents_remember.serving.harness_control_models import (
+    AcceptanceState,
+    ActivityState,
+    ControlState,
+)
 from agents_remember.serving.seat_binding import migrated_seat_role
 from agents_remember.serving.terminal_catalog_lock import exclusive_terminal_catalog_lock
 
@@ -108,6 +112,12 @@ class TerminalCatalogEntry:
     control_state: ControlState | None = None
     control_endpoint: Path | None = None
     control_protocol: str | None = None
+    control_activity: ActivityState | None = None
+    control_acceptance: AcceptanceState | None = None
+    control_vendor_session_id: str | None = None
+    control_pending_interaction: dict[str, object] | None = None
+    control_last_event_sequence: int | None = None
+    control_raw: dict[str, object] | None = None
     # Liveness probe state (260707-HFX-L5): consecutive failed probes are persisted so a daemon
     # restart cannot erase hysteresis, while a later successful probe can clear a false exit mark.
     liveness_failures: int = 0
@@ -181,6 +191,16 @@ class TerminalCatalogEntry:
             control_state=_control_state(data.get("controlState")),
             control_endpoint=_optional_path(data, "controlEndpoint"),
             control_protocol=_optional_str(data, "controlProtocol"),
+            control_activity=_control_activity(data.get("controlActivity")),
+            control_acceptance=_control_acceptance(data.get("controlAcceptance")),
+            control_vendor_session_id=_optional_str(data, "controlVendorSessionId"),
+            control_pending_interaction=_optional_object(
+                data.get("controlPendingInteraction")
+            ),
+            control_last_event_sequence=_optional_non_negative_int(
+                data.get("controlLastEventSequence")
+            ),
+            control_raw=_optional_object(data.get("controlRaw")),
             liveness_failures=_non_negative_int(data.get("livenessFailures")),
             liveness_first_failed_at=_optional_str(data, "livenessFirstFailedAt"),
             liveness_last_failed_at=_optional_str(data, "livenessLastFailedAt"),
@@ -240,6 +260,12 @@ class TerminalCatalogEntry:
                     "controlState": self.control_state,
                     "controlEndpoint": _optional_path_text(self.control_endpoint),
                     "controlProtocol": self.control_protocol,
+                    "controlActivity": self.control_activity,
+                    "controlAcceptance": self.control_acceptance,
+                    "controlVendorSessionId": self.control_vendor_session_id,
+                    "controlPendingInteraction": self.control_pending_interaction,
+                    "controlLastEventSequence": self.control_last_event_sequence,
+                    "controlRaw": self.control_raw,
                     "livenessFirstFailedAt": self.liveness_first_failed_at,
                     "livenessLastFailedAt": self.liveness_last_failed_at,
                     "livenessEvidence": self.liveness_evidence,
@@ -830,6 +856,18 @@ def _optional_path_text(raw: Path | None) -> str | None:
     return str(raw) if raw is not None else None
 
 
+def _optional_object(raw: object) -> dict[str, object] | None:
+    if not isinstance(raw, dict) or not all(isinstance(key, str) for key in raw):
+        return None
+    return dict(raw)
+
+
+def _optional_non_negative_int(raw: object) -> int | None:
+    if isinstance(raw, int) and not isinstance(raw, bool) and raw >= 0:
+        return raw
+    return None
+
+
 def _present_fields(fields: dict[str, object | None]) -> dict[str, object]:
     return {key: value for key, value in fields.items() if value is not None}
 
@@ -913,5 +951,17 @@ def _status(raw: object) -> TerminalSessionStatus:
 
 def _control_state(raw: object) -> ControlState | None:
     if raw in {"starting", "ready", "disconnected", "failed", "unsupported"}:
+        return raw  # type: ignore[return-value] -- membership narrows the runtime contract.
+    return None
+
+
+def _control_activity(raw: object) -> ActivityState | None:
+    if raw in {"idle", "running", "blocked", "settling", "unknown"}:
+        return raw  # type: ignore[return-value] -- membership narrows the runtime contract.
+    return None
+
+
+def _control_acceptance(raw: object) -> AcceptanceState | None:
+    if raw in {"immediate", "queued", "rejected", "unknown", "unsupported"}:
         return raw  # type: ignore[return-value] -- membership narrows the runtime contract.
     return None

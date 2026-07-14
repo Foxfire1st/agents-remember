@@ -1,21 +1,23 @@
-"""Exact-session hosted harness readiness without terminal input side effects."""
+"""Exact-session hosted readiness derived only from the protocol bridge handshake."""
 
 from __future__ import annotations
 
 import contextlib
 import time
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Literal, Protocol
 
-from agents_remember.serving.terminal import pane_in_mode
+from agents_remember.errors import HarnessControlError
+from agents_remember.serving.harness_control_client import read_control_snapshot
+from agents_remember.serving.harness_control_models import AdapterSnapshot
+from agents_remember.serving.hosted_control_projection import (
+    control_snapshot_entry,
+)
 from agents_remember.serving.terminal_catalog import TerminalCatalog, TerminalCatalogEntry
-from agents_remember.serving.terminal_paste import capture_pane
-from agents_remember.serving.turn_state import boot_ready
 
 HostedReadinessStatus = Literal["ready", "not-ready", "unknown-session", "terminated"]
-PaneCapturer = Callable[[str], str]
-PaneModeProbe = Callable[[str], bool | None]
+SnapshotReader = Callable[[TerminalCatalogEntry], AdapterSnapshot]
 MAX_HOSTED_READINESS_WAIT_SECONDS = 60.0
 """Public bounded-wait ceiling; readiness never installs a watcher or sleeps without a bound."""
 
@@ -26,12 +28,13 @@ class HostedReadinessHost(Protocol):
 
 @dataclass(frozen=True)
 class HostedReadinessResult:
-    """One truthful readiness observation for exactly one catalog session id."""
+    """One truthful protocol observation for exactly one catalog session id."""
 
     status: HostedReadinessStatus
     session_id: str
     entry: TerminalCatalogEntry | None = None
     detail: str | None = None
+    snapshot: AdapterSnapshot | None = None
 
 
 def hosted_session_readiness(
@@ -40,17 +43,17 @@ def hosted_session_readiness(
     *,
     session_id: str,
     wait_seconds: float = 0.0,
-    pane_capturer: PaneCapturer = capture_pane,
-    pane_mode_probe: PaneModeProbe = pane_in_mode,
+    snapshot_reader: SnapshotReader = read_control_snapshot,
     monotonic: Callable[[], float] = time.monotonic,
     sleep: Callable[[float], None] = time.sleep,
     poll_interval: float = 0.1,
+    **_diagnostic_only: object,
 ) -> HostedReadinessResult:
-    """Observe the exact row/pane until ready or the caller's wait bound expires.
+    """Observe one bridge until it is ready or the caller's wait bound expires.
 
-    This function never sends input. Readiness requires the same catalog id to remain running,
-    its tmux session to remain addressable, its own captured pane to satisfy the harness marker
-    table, and that exact pane to be outside tmux copy mode.
+    Pane text, copy mode, log markers, and timing heuristics are intentionally absent from the
+    readiness decision. Extra legacy pane-probe keyword arguments remain accepted only so older
+    callers fail by result instead of crashing while they migrate; they are never invoked.
     """
 
     started = monotonic()
@@ -60,8 +63,7 @@ def hosted_session_readiness(
             catalog,
             host,
             session_id=session_id,
-            pane_capturer=pane_capturer,
-            pane_mode_probe=pane_mode_probe,
+            snapshot_reader=snapshot_reader,
         )
         if observed.status != "not-ready":
             return observed
@@ -77,8 +79,7 @@ def _observe_exact_session(
     host: HostedReadinessHost,
     *,
     session_id: str,
-    pane_capturer: PaneCapturer,
-    pane_mode_probe: PaneModeProbe,
+    snapshot_reader: SnapshotReader,
 ) -> HostedReadinessResult:
     entry = catalog.get(session_id)
     if entry is None:
@@ -95,15 +96,32 @@ def _observe_exact_session(
         return HostedReadinessResult(
             "not-ready", session_id, entry=entry, detail="tmux session is not addressable"
         )
-
-    pane_text = pane_capturer(entry.tmux_name)
-    input_mode = pane_mode_probe(entry.tmux_name)
-    current = catalog.get(session_id)
-    if current is None:
+    if entry.kind != "harness":
         return HostedReadinessResult(
-            "unknown-session", session_id, detail="catalog row disappeared during readiness check"
+            "not-ready", session_id, entry=entry, detail="ordinary terminals have no harness bridge"
         )
-    if hosted_session_identity(current) != hosted_session_identity(entry):
+    if entry.control_endpoint is None:
+        legacy = replace(
+            entry,
+            control_state="unsupported",
+            control_activity="unknown",
+            control_acceptance="unsupported",
+        )
+        return HostedReadinessResult(
+            "not-ready",
+            session_id,
+            entry=legacy,
+            detail="legacy raw-TUI session is unsupported until restarted through the bridge",
+        )
+    try:
+        snapshot = snapshot_reader(entry)
+    except HarnessControlError as exc:
+        return HostedReadinessResult(
+            "not-ready", session_id, entry=entry, detail=str(exc)
+        )
+
+    current = catalog.get(session_id)
+    if current is None or hosted_session_identity(current) != hosted_session_identity(entry):
         return HostedReadinessResult(
             "unknown-session", session_id, detail="catalog identity changed during readiness check"
         )
@@ -111,28 +129,26 @@ def _observe_exact_session(
         return HostedReadinessResult(
             "terminated", session_id, entry=current, detail="catalog status is terminated"
         )
-    if current.status != "running":
-        return HostedReadinessResult(
-            "not-ready", session_id, entry=current, detail=f"catalog status is {current.status}"
-        )
-    if not host.has_session(current.tmux_name):
-        return HostedReadinessResult(
-            "not-ready",
-            session_id,
-            entry=current,
-            detail="tmux session disappeared during readiness check",
-        )
-    if input_mode is not False:
-        detail = "pane is in copy mode" if input_mode else "pane input mode could not be verified"
-        return HostedReadinessResult("not-ready", session_id, entry=current, detail=detail)
-    if not boot_ready(pane_text, harness=current.harness):
-        return HostedReadinessResult(
-            "not-ready", session_id, entry=current, detail="harness composer is not ready"
-        )
-    return HostedReadinessResult("ready", session_id, entry=current)
+    current = control_snapshot_entry(current, snapshot)
+    ready = snapshot.control == "ready" and snapshot.acceptance in {"immediate", "queued"}
+    if ready:
+        return HostedReadinessResult("ready", session_id, entry=current, snapshot=snapshot)
+    detail = _snapshot_detail(snapshot)
+    return HostedReadinessResult(
+        "not-ready", session_id, entry=current, detail=detail, snapshot=snapshot
+    )
 
 
 def hosted_session_identity(entry: TerminalCatalogEntry) -> tuple[str, str, str]:
     """Fields that prove a re-read still describes the exact spawned hosted session."""
 
     return entry.id, entry.tmux_name, entry.created_at
+
+
+def _snapshot_detail(snapshot: AdapterSnapshot) -> str:
+    raw_detail = snapshot.raw.get("detail") or snapshot.raw.get("bridgeError")
+    suffix = f": {raw_detail}" if isinstance(raw_detail, str) and raw_detail else ""
+    return (
+        f"adapter control={snapshot.control} acceptance={snapshot.acceptance}"
+        f" activity={snapshot.activity}{suffix}"
+    )

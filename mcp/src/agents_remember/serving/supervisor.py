@@ -97,15 +97,13 @@ leaf only reserves the transition (``OperatorInboxStore.mark_escalated``) -- HFX
 actual ladder that reads it."""
 
 _INACTIVE_EXPECTATION_KINDS = frozenset({"briefed-by", "verdict-by", "ack-by"})
-_NON_ESCALATING_PANE_DETAILS = frozenset({"mid-turn"})
-
 # --- R2: predicates ----------------------------------------------------------------------------
 
 
 def evaluate_pane_findings(
     catalog: TerminalCatalog, *, pane_capturer=default_capture_pane
 ) -> list[SupervisorFinding]:
-    """R2a: the per-harness pane-state classifier over every RUNNING chat row."""
+    """Diagnostic-only pane classifications; the production sweep does not act on them."""
     findings: list[SupervisorFinding] = []
     for entry in catalog.list():
         if entry.kind != "harness" or entry.status != "running":
@@ -430,7 +428,6 @@ def evaluate_predicates(
     """R2: run every predicate over its store, directly (R3) -- the sweep's full finding set."""
     findings: list[SupervisorFinding] = []
     inbox_current = sweep.inbox_current if sweep is not None else None
-    findings += evaluate_pane_findings(ctx.catalog)
     findings += evaluate_expectation_findings(ctx.expectation_store, now=now, catalog=ctx.catalog)
     findings += evaluate_turn_report_findings(
         ctx.expectation_store,
@@ -816,8 +813,6 @@ def _signal_emit(
     )
     if owner.agent_id is None and owner.lifecycle_id is None and owner.role is None:
         return SupervisorActionResult("signal-emit", finding, "skipped", "no routable owner")
-    if finding.kind == "pane-signal" and finding.detail in _NON_ESCALATING_PANE_DETAILS:
-        return SupervisorActionResult("signal-emit", finding, "skipped", "busy pane state")
     if ctx.signal_cooldown_store.in_cooldown(
         target_agent_id=owner.agent_id,
         target_lifecycle_id=owner.lifecycle_id,
@@ -1107,7 +1102,7 @@ def act_on_finding(
         return _escalate_rung(ctx, finding, now=now, sweep=sweep)
     if finding.kind == "dead-upstream":
         return _signal_dead_upstream(ctx, finding, now=now, sweep=sweep)
-    if finding.kind in ("pane-signal", "seat-liveness"):
+    if finding.kind == "seat-liveness":
         return _signal_emit(ctx, finding, now=now, sweep=sweep)
     return SupervisorActionResult("none", finding, "skipped", "unhandled finding kind")
 

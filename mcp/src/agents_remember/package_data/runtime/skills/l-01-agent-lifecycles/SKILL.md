@@ -293,7 +293,7 @@ Every role that dispatches another hosted role uses one exact session id through
 3. Post exactly one durable `operator_inbox_post` row addressed by that same `agent_id`, with
    `message_kind="dispatch-brief"` and `deliver_to_hosted=true`. Treat the seat as briefed only when
    that row reports both `deliveryState=delivered` and
-   `deliveryDetail=harness-log-confirmed`.
+   `adapterDeliveryState=accepted|queued`.
 
 If step 3 fails, the original durable row stays pending on the original spawned session for the
 standard injector/supervisor retry path. Never duplicate the row, append another visible draft,
