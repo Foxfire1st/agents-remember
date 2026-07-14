@@ -40,3 +40,16 @@ class HarnessAdapterDisconnectedError(HarnessControlError):
         super().__init__(detail)
         self.may_have_sent = may_have_sent
         self.vendor_correlation_id = vendor_correlation_id
+
+
+class CodexAppServerError(HarnessControlError):
+    """The pinned Codex app-server protocol or its configured contract was violated."""
+
+
+class CodexAppServerRpcError(CodexAppServerError):
+    """A correlated Codex JSON-RPC request returned an error response."""
+
+    def __init__(self, method: str, code: int, message: str) -> None:
+        super().__init__(f"Codex app-server {method} failed ({code}): {message}")
+        self.method = method
+        self.code = code
