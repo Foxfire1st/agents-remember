@@ -44,13 +44,15 @@ from typing import Literal
 
 Which = Callable[[str], str | None]
 """A :func:`shutil.which`-shaped lookup: a command name -> its resolved path, or ``None`` if absent."""
+EffortValidation = Literal["enumerated", "non-empty"]
 
-CODEX_EFFORT_VALUES = ("none", "minimal", "low", "medium", "high", "xhigh")
-"""Codex reasoning-effort enum proven by a first-turn API probe on 2026-07-10.
+CODEX_EFFORT_VALUES = ("none", "minimal", "low", "medium", "high", "xhigh", "max")
+"""Known Codex reasoning-effort examples, not a dispatch validation enum.
 
-``max`` was accepted by the local launcher but absent from the API's reported enum; the L15 owner
-ruled that it stays excluded together with ``ultracode`` and ``auto`` so dispatch validation matches
-the values a real turn accepts, not merely values the boot banner will echo.
+The 2026-07-13 runtime compatibility correction removes the stale static exclusion of ``max``:
+Codex 0.144.3 exposes reasoning effort as a non-empty model-advertised string, and the installed
+launcher accepts it through ``model_reasoning_effort``. ``Harness.effort_validation`` carries that
+schema contract so future model-advertised values do not require a package release.
 """
 
 
@@ -75,6 +77,10 @@ class Harness:
     # ``effort_flag_values`` are never put on the flag (the claude CLI warns-then-silently-degrades).
     effort_flag: str | None = None
     effort_flag_values: tuple[str, ...] = ()
+    # Most CLIs expose an explicit enum; Codex's app-server schema accepts a non-empty,
+    # model-advertised string. This policy controls validation and flag emission without pretending
+    # a package-owned tuple is vendor authority.
+    effort_validation: EffortValidation = "enumerated"
     # Effort values the LAUNCH FLAG rejects but the RUNNING SESSION accepts as a command (claude:
     # the interactive ``/effort`` offers ``ultracode``). Delivered post-launch as a pasted session
     # command rendered from ``effort_session_command`` (``{value}`` placeholder), before the brief.
@@ -110,6 +116,7 @@ HARNESSES: tuple[Harness, ...] = (
         model_flag="--model",
         effort_flag="--config",
         effort_flag_values=CODEX_EFFORT_VALUES,
+        effort_validation="non-empty",
         effort_flag_value_template="model_reasoning_effort={value}",
     ),
     Harness(id="pi", name="Pi.dev", command="pi", argv=("pi",)),
@@ -183,7 +190,7 @@ def detect_harnesses(
 
 
 def effort_vocabulary(harness: Harness) -> tuple[str, ...]:
-    """``harness``'s full known effort vocabulary: launch-flag values + session-level values.
+    """``harness``'s known effort values: authoritative enum or non-empty-policy examples.
 
     Empty means the harness has NO known vocabulary (no mapping): effort is env-only and never
     validated for it.
@@ -194,14 +201,22 @@ def effort_vocabulary(harness: Harness) -> tuple[str, ...]:
 def invalid_effort_detail(harness: Harness, effort: str) -> str | None:
     """The dispatch-time refusal text for ``effort``, or ``None`` when the value is fine.
 
-    A value inside the harness's vocabulary (flag OR session set) passes; a MAPPING-LESS BUILTIN
-    (currently pi) passes everything -- its knobs are documented env-only. A mapping-less
+    A non-empty-policy harness (Codex) accepts the installed schema's model-advertised string. For
+    enumerated harnesses, a value inside the vocabulary (flag OR session set) passes. A
+    MAPPING-LESS BUILTIN (currently pi) passes everything -- its knobs are documented env-only. A mapping-less
     SETTINGS-DEFINED harness refuses the effort knob outright with guidance: declare the mapping or
     use the free-form escape -- explicit over guessing a flag that might mean something else
     (developer ruling 2026-07-07). Everything else is refused LOUDLY, naming the harness and BOTH
     value sets -- the alternative is the claude CLI's warn-then-silently-degrade, which quietly
     downgrades the most reasoning-hungry seats (probed 2026-07-07).
     """
+    if harness.effort_validation == "non-empty":
+        if effort.strip():
+            return None
+        return (
+            f"unknown effort {effort!r} for harness {harness.id!r}: this harness requires a "
+            "non-empty model-advertised effort after trimming whitespace."
+        )
     vocabulary = effort_vocabulary(harness)
     if not vocabulary:
         if harness.defined_in == "settings":
@@ -251,14 +266,25 @@ def knob_argv(
     extra: list[str] = []
     if model and harness.model_flag:
         extra += [harness.model_flag, model]
-    if effort and harness.effort_flag and effort in harness.effort_flag_values:
+    mapped_effort = _mapped_effort(harness, effort)
+    if mapped_effort is not None and harness.effort_flag:
         value = (
-            harness.effort_flag_value_template.format(value=effort)
+            harness.effort_flag_value_template.format(value=mapped_effort)
             if harness.effort_flag_value_template
-            else effort
+            else mapped_effort
         )
         extra += [harness.effort_flag, value]
     return extra
+
+
+def _mapped_effort(harness: Harness, effort: str | None) -> str | None:
+    """The validated value for the launch vehicle, or ``None`` when it must stay off argv."""
+
+    if not effort or harness.effort_flag is None:
+        return None
+    if harness.effort_validation == "non-empty":
+        return effort.strip() or None
+    return effort if effort in harness.effort_flag_values else None
 
 
 def effort_session_commands(harness: Harness, effort: str | None = None) -> list[str]:

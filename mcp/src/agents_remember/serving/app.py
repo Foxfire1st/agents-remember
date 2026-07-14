@@ -95,6 +95,7 @@ from agents_remember.serving.change_watcher import ProjectionInputWatcher
 from agents_remember.serving.changeset import register_changeset_routes
 from agents_remember.serving.events import stream_raw_events
 from agents_remember.serving.files import register_files_routes
+from agents_remember.serving.harness_control_adapter import protocol_adapter_status
 from agents_remember.serving.harness_logs import HarnessSessionLog
 from agents_remember.serving.harnesses import detect_harnesses
 from agents_remember.serving.injector import DeliveryRow, deliver
@@ -875,7 +876,12 @@ def create_app(
         registry = load_agentic_settings(config.coordination_root).harnesses
         return {
             "harnesses": [
-                {"id": h.id, "name": h.name, "detected": h.detected}
+                {
+                    "id": h.id,
+                    "name": h.name,
+                    "detected": h.detected,
+                    "control": protocol_adapter_status(h.id),
+                }
                 for h in detect_harnesses(registry=registry)
             ]
         }

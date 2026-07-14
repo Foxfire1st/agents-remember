@@ -23,7 +23,7 @@ Each harness is described by an entry with:
 | `command` | The executable probed on `PATH` for detection. |
 | `argv` | The exact launch command array, e.g. `["claude"]`. Fixed server-side. |
 | `modelFlag` | The launch flag the model knob maps onto (`--model <value>`), if any. |
-| `effortFlag` + `effortFlagValues` | The launch flag the effort knob maps onto, and the values that flag ACCEPTS. Declared together. |
+| `effortFlag` + `effortFlagValues` | The launch flag the effort knob maps onto, and the values that flag ACCEPTS. Declared together. A settings-declared vocabulary is authoritative even when overriding a dynamic builtin. |
 | `effortSessionValues` + `effortSessionCommand` | Effort values the launch flag rejects but the RUNNING session accepts as a command; the command template (`{value}` placeholder) that delivers them post-launch. Declared together. |
 
 ### Built-in registry (good defaults, not a wall)
@@ -33,7 +33,7 @@ The curated defaults live in `mcp/src/agents_remember/serving/harnesses.py`:
 | id | argv | modelFlag | effortFlag (values) | session effort (command) |
 | --- | --- | --- | --- | --- |
 | `claude` (Claude Code) | `["claude"]` | `--model` | `--effort` (`low`, `medium`, `high`, `xhigh`, `max`) | `ultracode` → `/effort ultracode` |
-| `codex` (Codex) | `["codex"]` | `--model` | `--config model_reasoning_effort={value}` (`none`, `minimal`, `low`, `medium`, `high`, `xhigh`) | — |
+| `codex` (Codex) | `["codex"]` | `--model` | `--config model_reasoning_effort={value}` (any stripped-non-empty model-advertised value; known examples: `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`) | — |
 | `pi` (Pi.dev) | `["pi"]` | — (env-only) | — (env-only) | — |
 
 **Env-only** (currently Pi.dev) means: the model/effort knobs still ride the spawn env as
@@ -62,6 +62,10 @@ merges over the registry **by id**:
   `effortFlag` with `effortFlagValues`, `effortSessionValues` with
   `effortSessionCommand`. A flag without a vocabulary would reintroduce the
   silent-degrade risk, so the loader refuses it.
+- A settings override that declares `effortFlagValues` makes that enum
+  authoritative for the effective harness. This includes Codex: its builtin accepts
+  model-advertised stripped-non-empty values, but a settings-supplied custom flag and
+  vocabulary accept exactly the values the settings entry declares.
 - The `effortSessionCommand` **template** must render with `{value}` and
   reference no other placeholder: a stray field (`/set {mode}={value}`), a
   positional `{}`, or an unmatched brace is refused by the loader naming the
@@ -87,7 +91,7 @@ settings layers have distinct validation postures:
 | --- | --- | --- |
 | `harness` | Selects the harness entry (argv comes from it). | Must be a known id: builtin or `orchestration.harnesses`-defined. Checked at settings load AND at dispatch. |
 | `model` | The harness's `modelFlag` on the launch argv, e.g. `--model opus`; also rides env as `AR_SPAWN_MODEL`. | Model names are NOT enum-validated (they evolve faster than any registry). A settings-defined harness with no `modelFlag` refuses the knob with guidance (`model-invalid`). |
-| `effort` | Per value: a flag value rides the harness's `effortFlag` on the argv; a session value rides a post-launch session command; either way it rides env as `AR_SPAWN_EFFORT`. | Validated at DISPATCH against the harness's vocabulary (flag values ∪ session values). Unknown values refuse (`effort-invalid`) naming the harness and BOTH sets. Codex accepts exactly `none|minimal|low|medium|high|xhigh`; Pi.dev remains env-only. |
+| `effort` | Per value: a flag value rides the harness's `effortFlag` on the argv; a session value rides a post-launch session command; either way it rides env as `AR_SPAWN_EFFORT`. | Enumerated harnesses validate at DISPATCH against their vocabulary (flag values ∪ session values), with unknown values refused (`effort-invalid`) naming both sets. Builtin Codex accepts any stripped-non-empty model-advertised value; a Codex settings override that declares `effortFlagValues` instead enforces that declared enum. Pi.dev remains env-only. |
 
 Why dispatch-time effort validation exists: the installed claude CLI accepts
 `--effort low|medium|high|xhigh|max` and **warns-then-silently-degrades** on

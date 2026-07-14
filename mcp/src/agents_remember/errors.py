@@ -21,3 +21,22 @@ class AuthorityError(AgentsRememberError):
     path that escapes the coordinator root. Centralizing this means every
     controller reports the same boundary violation the same way.
     """
+
+
+class HarnessControlError(AgentsRememberError):
+    """The hosted harness control contract or exact-session identity was violated."""
+
+
+class HarnessAdapterDisconnectedError(HarnessControlError):
+    """A protocol adapter disconnected before or after a prompt might have been sent."""
+
+    def __init__(
+        self,
+        detail: str,
+        *,
+        may_have_sent: bool,
+        vendor_correlation_id: str | None = None,
+    ) -> None:
+        super().__init__(detail)
+        self.may_have_sent = may_have_sent
+        self.vendor_correlation_id = vendor_correlation_id

@@ -234,6 +234,26 @@ class TerminalCatalogTests(unittest.TestCase):
         self.assertEqual(entry.to_json()["replacementForLeaf"], leaf)
         self.assertEqual(entry.to_json()["sessionLogEntryId"], "brief-1")
 
+    def test_control_metadata_round_trips_additively_and_legacy_rows_remain_unset(self) -> None:
+        self.catalog.upsert(
+            replace(
+                _entry("controlled", kind="harness"),
+                control_state="ready",
+                control_endpoint=Path("/tmp/ar-control/session.sock"),
+                control_protocol="ar-harness-control/v1",
+            )
+        )
+        self.catalog.upsert(_entry("legacy", kind="harness"))
+
+        controlled = self.catalog.get("controlled")
+        legacy = self.catalog.get("legacy")
+        assert controlled is not None and legacy is not None
+        self.assertEqual(controlled.control_state, "ready")
+        self.assertEqual(controlled.control_endpoint, Path("/tmp/ar-control/session.sock"))
+        self.assertEqual(controlled.to_json()["controlProtocol"], "ar-harness-control/v1")
+        self.assertNotIn("controlState", legacy.to_json())
+        self.assertNotIn("controlEndpoint", legacy.to_json())
+
     def test_complete_optional_projection_round_trips_without_contract_loss(self) -> None:
         entry = replace(
             _entry("full", kind="harness"),

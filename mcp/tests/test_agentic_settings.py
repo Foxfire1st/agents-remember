@@ -28,6 +28,7 @@ from agents_remember.kernel.agentic_settings import (
     load_agentic_settings,
     merge_settings,
 )
+from agents_remember.serving.harnesses import invalid_effort_detail, knob_argv
 
 
 def write_settings(root: Path, data: dict) -> Path:
@@ -859,6 +860,20 @@ class HarnessesFamilyTests(unittest.TestCase):
         assert codex is not None
         self.assertEqual(codex.effort_flag, "--reasoning-effort")
         self.assertIsNone(codex.effort_flag_value_template)
+        self.assertEqual(codex.effort_validation, "enumerated")
+        self.assertIsNone(invalid_effort_detail(codex, "high"))
+        self.assertEqual(knob_argv(codex, effort="high"), ["--reasoning-effort", "high"])
+        detail = invalid_effort_detail(codex, "bogus-effort")
+        assert detail is not None
+        self.assertIn("high, xhigh", detail)
+        self.assertEqual(knob_argv(codex, effort="bogus-effort"), [])
+
+    def test_partial_codex_override_keeps_builtin_dynamic_effort_policy(self) -> None:
+        settings = self._load({"harnesses": {"codex": {"argv": ["codex", "--search"]}}})
+        codex = settings.find_harness("codex")
+        assert codex is not None
+        self.assertEqual(codex.effort_validation, "non-empty")
+        self.assertIsNone(invalid_effort_detail(codex, "future-model-effort"))
 
     def test_new_id_without_command_or_argv_fails_loud(self) -> None:
         with self.assertRaisesRegex(AgenticSettingsError, "command and/or argv"):

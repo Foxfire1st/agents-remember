@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Literal
 from uuid import uuid4
 
+from agents_remember.serving.harness_control_models import ControlState
 from agents_remember.serving.seat_binding import migrated_seat_role
 from agents_remember.serving.terminal_catalog_lock import exclusive_terminal_catalog_lock
 
@@ -101,6 +102,12 @@ class TerminalCatalogEntry:
     resolved_effort: str | None = None
     session_log_entry_id: str | None = None
     session_log_path: Path | None = None
+    # Protocol-backed control metadata (260713-PHA-L1): additive and absent on legacy/plain-terminal
+    # rows. ``control_endpoint`` is a user-private local socket; the exact identity tuple remains
+    # id + tmux_name + created_at, and every IPC request repeats it.
+    control_state: ControlState | None = None
+    control_endpoint: Path | None = None
+    control_protocol: str | None = None
     # Liveness probe state (260707-HFX-L5): consecutive failed probes are persisted so a daemon
     # restart cannot erase hysteresis, while a later successful probe can clear a false exit mark.
     liveness_failures: int = 0
@@ -171,6 +178,9 @@ class TerminalCatalogEntry:
             resolved_effort=_optional_str(data, "resolvedEffort"),
             session_log_entry_id=_optional_str(data, "sessionLogEntryId"),
             session_log_path=_optional_path(data, "sessionLogPath"),
+            control_state=_control_state(data.get("controlState")),
+            control_endpoint=_optional_path(data, "controlEndpoint"),
+            control_protocol=_optional_str(data, "controlProtocol"),
             liveness_failures=_non_negative_int(data.get("livenessFailures")),
             liveness_first_failed_at=_optional_str(data, "livenessFirstFailedAt"),
             liveness_last_failed_at=_optional_str(data, "livenessLastFailedAt"),
@@ -227,6 +237,9 @@ class TerminalCatalogEntry:
                     "resolvedEffort": self.resolved_effort,
                     "sessionLogEntryId": self.session_log_entry_id,
                     "sessionLogPath": _optional_path_text(self.session_log_path),
+                    "controlState": self.control_state,
+                    "controlEndpoint": _optional_path_text(self.control_endpoint),
+                    "controlProtocol": self.control_protocol,
                     "livenessFirstFailedAt": self.liveness_first_failed_at,
                     "livenessLastFailedAt": self.liveness_last_failed_at,
                     "livenessEvidence": self.liveness_evidence,
@@ -896,3 +909,9 @@ def _status(raw: object) -> TerminalSessionStatus:
     if raw == "terminated":
         return "terminated"
     return "running"
+
+
+def _control_state(raw: object) -> ControlState | None:
+    if raw in {"starting", "ready", "disconnected", "failed", "unsupported"}:
+        return raw  # type: ignore[return-value] -- membership narrows the runtime contract.
+    return None

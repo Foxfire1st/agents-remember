@@ -58,7 +58,7 @@ class HarnessRegistryTests(unittest.TestCase):
 class KnobMappingTests(unittest.TestCase):
     """The per-harness knob→flag mapping (260703-L16): claude maps model/effort onto its launch
     flags with a two-vehicle effort vocabulary (flag values vs session values); Codex maps its
-    real API enum onto ``--config``; Pi remains env-only."""
+    model-advertised non-empty effort onto ``--config``; Pi remains env-only."""
 
     def _claude(self):
         claude = find_harness("claude")
@@ -84,9 +84,7 @@ class KnobMappingTests(unittest.TestCase):
     def test_session_level_effort_rides_a_session_command_not_the_flag(self) -> None:
         claude = self._claude()
         self.assertEqual(knob_argv(claude, effort="ultracode"), [])
-        self.assertEqual(
-            effort_session_commands(claude, "ultracode"), ["/effort ultracode"]
-        )
+        self.assertEqual(effort_session_commands(claude, "ultracode"), ["/effort ultracode"])
         # A flag-vocabulary value never leaks into the session vehicle.
         self.assertEqual(effort_session_commands(claude, "max"), [])
 
@@ -112,12 +110,21 @@ class KnobMappingTests(unittest.TestCase):
         self.assertIn("medium", effort_vocabulary(codex))
         self.assertEqual(
             effort_vocabulary(codex),
-            ("none", "minimal", "low", "medium", "high", "xhigh"),
+            ("none", "minimal", "low", "medium", "high", "xhigh", "max"),
         )
-        for invalid in ("max", "ultracode", "auto", "anything"):
-            detail = invalid_effort_detail(codex, invalid)
-            self.assertIsNotNone(detail)
-            self.assertIn("none, minimal, low, medium, high, xhigh", detail or "")
+        self.assertIsNone(invalid_effort_detail(codex, "max"))
+        self.assertEqual(knob_argv(codex, effort="max"), ["--config", "model_reasoning_effort=max"])
+        self.assertIsNone(invalid_effort_detail(codex, "future-model-effort"))
+        self.assertEqual(
+            knob_argv(codex, effort="future-model-effort"),
+            ["--config", "model_reasoning_effort=future-model-effort"],
+        )
+        self.assertIsNotNone(invalid_effort_detail(codex, " \t "))
+        self.assertEqual(knob_argv(codex, effort=" \t "), [])
+        self.assertEqual(
+            knob_argv(codex, effort=" future-model-effort "),
+            ["--config", "model_reasoning_effort=future-model-effort"],
+        )
         self.assertEqual(knob_argv(pi, model="gpt-5", effort="anything"), [])
         self.assertEqual(effort_session_commands(pi, "anything"), [])
         self.assertEqual(effort_vocabulary(pi), ())

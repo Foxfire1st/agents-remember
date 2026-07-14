@@ -20,6 +20,8 @@ from pathlib import Path
 from typing import Any, Literal
 
 from agents_remember.observer.events import now_iso
+from agents_remember.serving.harness_control_adapter import protocol_adapter_status
+from agents_remember.serving.harness_control_models import CONTROL_PROTOCOL_VERSION, ControlState
 from agents_remember.serving.harnesses import (
     Harness,
     Which,
@@ -119,6 +121,25 @@ def _terminal_label(kind: TerminalSessionKind, harness: str | None, fallback: st
     return harness or fallback
 
 
+def _control_metadata(
+    existing: TerminalCatalogEntry | None,
+    *,
+    kind: TerminalSessionKind,
+    harness: str | None,
+    endpoint: Path | None,
+) -> tuple[ControlState | None, Path | None, str | None]:
+    if kind != "harness" or harness is None:
+        return None, None, None
+    state = existing.control_state if existing is not None else None
+    resolved_endpoint = endpoint or (existing.control_endpoint if existing is not None else None)
+    protocol = existing.control_protocol if existing is not None else None
+    return (
+        state or protocol_adapter_status(harness),
+        resolved_endpoint,
+        protocol or CONTROL_PROTOCOL_VERSION,
+    )
+
+
 def open_terminal_session(
     *,
     catalog: TerminalCatalog,
@@ -142,6 +163,7 @@ def open_terminal_session(
     resolved_effort: str | None = None,
     spawned_by_session: str | None = None,
     spawned_by_lifecycle: str | None = None,
+    control_endpoint: Path | None = None,
     which: Which | None = None,
     harnesses: Sequence[Harness] | None = None,
 ) -> OpenTerminalResult:
@@ -223,6 +245,13 @@ def open_terminal_session(
         # row already recorded (a re-open / reconnect must never silently drop provenance).
         return new_value or (existing_value if existing is not None else None)
 
+    control_state, resolved_control_endpoint, control_protocol = _control_metadata(
+        existing,
+        kind=resolved_kind,
+        harness=harness,
+        endpoint=control_endpoint,
+    )
+
     entry = TerminalCatalogEntry(
         id=opened.sid,
         label=resolved_label,
@@ -276,6 +305,9 @@ def open_terminal_session(
         resolved_effort=preserved(resolved_effort, existing.resolved_effort if existing else None),
         session_log_entry_id=existing.session_log_entry_id if existing else None,
         session_log_path=existing.session_log_path if existing else None,
+        control_state=control_state,
+        control_endpoint=resolved_control_endpoint,
+        control_protocol=control_protocol,
     )
     catalog.upsert(entry)
     return OpenTerminalResult(

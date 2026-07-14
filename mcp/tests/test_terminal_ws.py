@@ -916,6 +916,7 @@ class TerminalWebSocketTests(unittest.TestCase):
             {h["id"]: h["detected"] for h in harnesses},
             {"claude": True, "codex": False, "pi": False},
         )
+        self.assertEqual({h["control"] for h in harnesses}, {"unsupported"})
 
     def test_post_open_harness_spawns_registry_argv_at_workspace_root(self) -> None:
         with patch("shutil.which", _which("claude")), TestClient(self.app) as client:

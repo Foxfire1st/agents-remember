@@ -806,6 +806,11 @@ def _merged_harness(
     for field_name, declared_value in declared.items():
         if declared_value is not None:
             overrides[field_name] = declared_value
+    if parsed.effort_flag_values is not None:
+        # A settings-declared vocabulary is authoritative even when it overrides the dynamic
+        # Codex builtin. Silently inheriting ``non-empty`` would accept values the user's custom
+        # delivery vehicle explicitly did not declare.
+        overrides["effort_validation"] = "enumerated"
     if (
         base is not None
         and parsed.effort_flag is not None

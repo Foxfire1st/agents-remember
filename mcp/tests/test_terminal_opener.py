@@ -140,6 +140,16 @@ class OpenTerminalSessionTests(unittest.TestCase):
         self.assertEqual(entry.to_json()["spawnedByLifecycle"], "LC-manager")
         self.assertEqual(entry.to_json()["spawnRole"], "worker")
         self.assertEqual(entry.to_json()["seatRole"], "worker")
+        self.assertEqual(entry.control_state, "unsupported")
+        self.assertEqual(entry.control_protocol, "ar-harness-control/v1")
+
+    def test_future_bridge_endpoint_is_additive_control_metadata(self) -> None:
+        endpoint = self.tmp / "control" / "worker.sock"
+        self._open(control_endpoint=endpoint)
+        entry = self.catalog.get("worker-1")
+        assert entry is not None
+        self.assertEqual(entry.control_endpoint, endpoint)
+        self.assertEqual(entry.to_json()["controlEndpoint"], str(endpoint))
 
     def test_reopen_preserves_spawn_role_and_hand_open_records_none(self) -> None:
         # Role provenance is set once at first spawn and survives a role-less re-open (the same
@@ -312,6 +322,14 @@ class KnobApplicationTests(unittest.TestCase):
         self.assertEqual(
             self.host.ensured[0]["env"],
             {"AR_SPAWN_MODEL": "gpt-5.6-sol", "AR_SPAWN_EFFORT": "xhigh"},
+        )
+
+    def test_codex_max_effort_uses_the_model_advertised_config_value(self) -> None:
+        result = self._open(harness="codex", env={"AR_SPAWN_EFFORT": "max"})
+        self.assertEqual(result.status, "opened")
+        self.assertEqual(
+            self.host.ensured[0]["command"],
+            ("codex", "--config", "model_reasoning_effort=max"),
         )
 
     def test_launch_args_append_verbatim_after_the_knob_flags(self) -> None:
