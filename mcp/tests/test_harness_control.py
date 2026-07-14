@@ -169,6 +169,24 @@ class _BlockingSubmitAdapter(_FakeAdapter):
         return await super().submit(request)
 
 
+class _ObservedHarnessControlServer(HarnessControlServer):
+    """Expose completion of the fire-and-forget asyncio client callback to tests."""
+
+    def __init__(self, endpoint: LocalControlEndpoint, bridge: HarnessControlBridge) -> None:
+        super().__init__(endpoint, bridge)
+        self.connection_finished = asyncio.Event()
+
+    async def _handle_connection(
+        self,
+        reader: asyncio.StreamReader,
+        writer: asyncio.StreamWriter,
+    ) -> None:
+        try:
+            await super()._handle_connection(reader, writer)
+        finally:
+            self.connection_finished.set()
+
+
 def _identity(session: str = "ar-session-1") -> ControlIdentity:
     return ControlIdentity(
         ar_session_id=session,
@@ -702,6 +720,61 @@ class HarnessControlConformanceTests(unittest.IsolatedAsyncioTestCase):
 
 
 class HarnessControlIpcTests(unittest.IsolatedAsyncioTestCase):
+    async def test_peer_timeout_after_submit_preserves_reconciliation_result(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_str:
+            identity = _identity()
+            adapter = _BlockingSubmitAdapter()
+            adapter.disconnects.append(True)
+            adapter.reconciliations["ipc-timeout"] = ReconciliationResult(
+                request_id="ipc-timeout",
+                state="accepted",
+                reconciled_at="2026-07-14T17:36:00+02:00",
+                vendor_correlation_id="vendor-ipc-timeout",
+            )
+            bridge = HarnessControlBridge(identity, adapter)
+            await bridge.start(_launch(identity))
+            endpoint = LocalControlEndpoint.for_session(Path(tmp_str), identity)
+            server = _ObservedHarnessControlServer(endpoint, bridge)
+            await server.start()
+            loop = asyncio.get_running_loop()
+            prior_exception_handler = loop.get_exception_handler()
+            callback_exceptions: list[dict[str, object]] = []
+            loop.set_exception_handler(lambda _loop, context: callback_exceptions.append(context))
+            try:
+                _, writer = await asyncio.open_unix_connection(endpoint.path)
+                request = {
+                    "protocol": CONTROL_PROTOCOL_VERSION,
+                    "identity": identity.to_json(),
+                    "action": "submit",
+                    "payload": {
+                        "requestId": "ipc-timeout",
+                        "source": "durable",
+                        "text": "hello",
+                        "submittedAt": "2026-07-14T17:36:00+02:00",
+                    },
+                }
+                writer.write(json.dumps(request, separators=(",", ":")).encode("utf-8") + b"\n")
+                await writer.drain()
+                await asyncio.wait_for(adapter.submit_started.wait(), timeout=1.0)
+                writer.transport.abort()
+                adapter.release_submit.set()
+
+                await asyncio.wait_for(server.connection_finished.wait(), timeout=1.0)
+                await asyncio.sleep(0)
+                self.assertEqual(callback_exceptions, [])
+                reconciled = await asyncio.wait_for(bridge.reconcile("ipc-timeout"), timeout=1.0)
+                self.assertEqual(reconciled.state, "accepted")
+                self.assertEqual(reconciled.vendor_correlation_id, "vendor-ipc-timeout")
+                self.assertEqual(
+                    [submission.request_id for submission in adapter.submissions],
+                    ["ipc-timeout"],
+                )
+            finally:
+                loop.set_exception_handler(prior_exception_handler)
+                adapter.release_submit.set()
+                await server.close()
+                await bridge.stop("forced")
+
     async def test_private_endpoint_exact_identity_and_submission(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_str:
             identity = _identity()

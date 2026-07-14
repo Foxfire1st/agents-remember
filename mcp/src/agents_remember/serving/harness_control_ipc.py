@@ -107,10 +107,18 @@ class HarnessControlServer:
             response = {"ok": True, "result": result}
         except (HarnessControlError, KeyError, TypeError, ValueError) as exc:
             response = {"ok": False, "error": str(exc)}
-        writer.write(json.dumps(response, separators=(",", ":")).encode("utf-8") + b"\n")
-        await writer.drain()
-        writer.close()
-        await writer.wait_closed()
+        try:
+            writer.write(json.dumps(response, separators=(",", ":")).encode("utf-8") + b"\n")
+            await writer.drain()
+        except (BrokenPipeError, ConnectionResetError):
+            # A synchronous caller may time out after dispatch accepted the action.
+            pass
+        finally:
+            try:
+                writer.close()
+                await writer.wait_closed()
+            except (BrokenPipeError, ConnectionResetError):
+                pass
 
     async def _dispatch(self, request: Mapping[str, object]) -> object:
         if request.get("protocol") != CONTROL_PROTOCOL_VERSION:
