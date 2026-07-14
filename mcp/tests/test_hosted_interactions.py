@@ -4,10 +4,12 @@ from dataclasses import replace
 from pathlib import Path
 from unittest import mock
 
+import pytest
 from agents_remember.controlplane.operator_inbox_records import create_operator_inbox_entry
 from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
 from agents_remember.controlplane.records import decide_gate
 from agents_remember.controlplane.store import GateStore
+from agents_remember.errors import HarnessControlError
 from agents_remember.serving.harness_control_models import (
     AdapterSnapshot,
     ControlIdentity,
@@ -141,6 +143,7 @@ def test_transcript_completion_updates_but_never_consumes_inbox(tmp_path: Path) 
     ).model_copy(
         update={
             "deliveryState": "delivered",
+            "deliveredToSession": "worker-1",
             "adapterDeliveryState": "accepted",
             "adapterRequestId": "inbox-1",
         }
@@ -174,3 +177,150 @@ def test_transcript_completion_updates_but_never_consumes_inbox(tmp_path: Path) 
     assert completed.adapterDeliveryState == "completed"
     assert completed.adapterCompletedAt == NOW
     assert completed.state == "pending"
+
+
+def test_null_request_id_completion_uses_unique_accepted_vendor_correlation(
+    tmp_path: Path,
+) -> None:
+    entry = _entry(tmp_path)
+    inbox = OperatorInboxStore(tmp_path)
+    row = create_operator_inbox_entry(
+        entry_id="inbox-1",
+        now=NOW,
+        lifecycle_id="L1",
+        agent_id="worker-1",
+        ask="Continue",
+        response="Please continue",
+        created_by="manager-1",
+        created_via="cli",
+    ).model_copy(
+        update={
+            "deliveryState": "delivered",
+            "deliveredToSession": "worker-1",
+            "adapterDeliveryState": "accepted",
+            "adapterRequestId": "inbox-1",
+            "adapterVendorCorrelationId": "vendor-1",
+        }
+    )
+    inbox.append(row)
+    transcript = (
+        {
+            "sequence": 1,
+            "role": "result",
+            "text": "done",
+            "createdAt": NOW,
+            "requestId": None,
+            "vendorCorrelationId": "vendor-1",
+            "terminalResult": {"outcome": "completed", "completedAt": NOW},
+        },
+    )
+    with mock.patch(
+        "agents_remember.serving.hosted_interactions.read_control_transcript",
+        return_value=transcript,
+    ):
+        HostedInteractionSynchronizer(tmp_path).observe(
+            entry,
+            AdapterSnapshot(
+                identity=ControlIdentity(entry.id, entry.tmux_name, entry.created_at),
+                control="ready",
+                activity="idle",
+                acceptance="immediate",
+            ),
+        )
+
+    current = inbox.current()
+    assert set(current) == {"inbox-1"}
+    completed = current["inbox-1"]
+    assert completed.adapterDeliveryState == "completed"
+    assert completed.adapterVendorCorrelationId == "vendor-1"
+    assert completed.adapterCompletedAt == NOW
+    assert completed.state == "pending"
+
+
+def test_null_request_id_completion_requires_vendor_correlation(tmp_path: Path) -> None:
+    entry = _entry(tmp_path)
+    transcript = (
+        {
+            "sequence": 1,
+            "role": "result",
+            "text": "done",
+            "createdAt": NOW,
+            "requestId": None,
+            "vendorCorrelationId": None,
+            "terminalResult": {"outcome": "completed", "completedAt": NOW},
+        },
+    )
+    with (
+        mock.patch(
+            "agents_remember.serving.hosted_interactions.read_control_transcript",
+            return_value=transcript,
+        ),
+        pytest.raises(HarnessControlError, match="requires vendorCorrelationId"),
+    ):
+        HostedInteractionSynchronizer(tmp_path).observe(
+            entry,
+            AdapterSnapshot(
+                identity=ControlIdentity(entry.id, entry.tmux_name, entry.created_at),
+                control="ready",
+                activity="settling",
+                acceptance="queued",
+            ),
+        )
+
+
+def test_null_request_id_completion_rejects_ambiguous_vendor_correlation(
+    tmp_path: Path,
+) -> None:
+    entry = _entry(tmp_path)
+    inbox = OperatorInboxStore(tmp_path)
+    for entry_id in ("inbox-1", "inbox-2"):
+        inbox.append(
+            create_operator_inbox_entry(
+                entry_id=entry_id,
+                now=NOW,
+                lifecycle_id="L1",
+                agent_id="worker-1",
+                ask="Continue",
+                response="Please continue",
+                created_by="manager-1",
+                created_via="cli",
+            ).model_copy(
+                update={
+                    "deliveryState": "delivered",
+                    "deliveredToSession": "worker-1",
+                    "adapterDeliveryState": "accepted",
+                    "adapterRequestId": entry_id,
+                    "adapterVendorCorrelationId": "vendor-1",
+                }
+            )
+        )
+    transcript = (
+        {
+            "sequence": 1,
+            "role": "result",
+            "text": "done",
+            "createdAt": NOW,
+            "requestId": None,
+            "vendorCorrelationId": "vendor-1",
+            "terminalResult": {"outcome": "completed", "completedAt": NOW},
+        },
+    )
+    with (
+        mock.patch(
+            "agents_remember.serving.hosted_interactions.read_control_transcript",
+            return_value=transcript,
+        ),
+        pytest.raises(HarnessControlError, match="matches multiple inbox rows"),
+    ):
+        HostedInteractionSynchronizer(tmp_path).observe(
+            entry,
+            AdapterSnapshot(
+                identity=ControlIdentity(entry.id, entry.tmux_name, entry.created_at),
+                control="ready",
+                activity="settling",
+                acceptance="queued",
+            ),
+        )
+    assert {
+        row.adapterDeliveryState for row in inbox.current().values()
+    } == {"accepted"}

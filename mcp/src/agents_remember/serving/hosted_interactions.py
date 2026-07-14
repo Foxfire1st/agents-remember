@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from pathlib import Path
 
+from agents_remember.controlplane.operator_inbox_records import OperatorInboxEntry
 from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
 from agents_remember.controlplane.records import (
     GateRecord,
@@ -115,14 +116,11 @@ class HostedInteractionSynchronizer:
             return
         current = self._inbox.current()
         for item in transcript:
-            request_id = item.get("requestId")
             terminal_result = item.get("terminalResult")
-            if (
-                not isinstance(request_id, str)
-                or request_id not in current
-                or not isinstance(terminal_result, Mapping)
-                or current[request_id].adapterDeliveryState == "completed"
-            ):
+            if not isinstance(terminal_result, Mapping):
+                continue
+            request_id = _completion_request_id(item, current, session_id=entry.id)
+            if request_id is None or current[request_id].adapterDeliveryState == "completed":
                 continue
             outcome = terminal_result.get("outcome")
             completed_at = terminal_result.get("completedAt")
@@ -134,6 +132,56 @@ class HostedInteractionSynchronizer:
                 detail=f"adapter terminal result: {outcome}",
                 current=current,
             )
+
+
+def _completion_request_id(
+    item: Mapping[str, object],
+    current: Mapping[str, OperatorInboxEntry],
+    *,
+    session_id: str,
+) -> str | None:
+    request_id = item.get("requestId")
+    if isinstance(request_id, str):
+        return request_id if request_id in current else None
+    if request_id is not None:
+        raise HarnessControlError("adapter terminal result carried a non-text requestId")
+    return _request_id_from_vendor_correlation(item, current, session_id=session_id)
+
+
+def _request_id_from_vendor_correlation(
+    item: Mapping[str, object],
+    current: Mapping[str, OperatorInboxEntry],
+    *,
+    session_id: str,
+) -> str:
+    correlation = item.get("vendorCorrelationId")
+    if not isinstance(correlation, str) or not correlation.strip():
+        raise HarnessControlError(
+            "adapter terminal result without requestId requires vendorCorrelationId"
+        )
+    matches = [
+        row
+        for row in current.values()
+        if row.adapterVendorCorrelationId == correlation and row.deliveredToSession == session_id
+    ]
+    if not matches:
+        raise HarnessControlError(
+            "adapter terminal result vendor correlation does not match an accepted inbox row "
+            "for the hosted session"
+        )
+    if len(matches) > 1:
+        matched_ids = ", ".join(sorted(row.id for row in matches))
+        raise HarnessControlError(
+            "adapter terminal result vendor correlation matches multiple inbox rows: "
+            f"{matched_ids}"
+        )
+    matched = matches[0]
+    if matched.adapterDeliveryState not in {"accepted", "completed"}:
+        raise HarnessControlError(
+            "adapter terminal result vendor correlation matches an inbox row without "
+            "accepted delivery evidence"
+        )
+    return matched.id
 
 
 def _interaction_identity(gate: GateRecord) -> tuple[str, str | None] | None:

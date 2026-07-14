@@ -339,6 +339,10 @@ async def test_turn_acceptance_blocking_and_terminal_mapping(status: str, outcom
                 break
         assert event.transcript[0].terminal_result is not None
         assert event.transcript[0].terminal_result.outcome == outcome
+        assert event.snapshot is not None
+        assert event.snapshot.activity == "idle"
+        assert event.snapshot.acceptance == "immediate"
+        assert (await adapter.snapshot()).activity == "idle"
     finally:
         await adapter.stop("forced")
 

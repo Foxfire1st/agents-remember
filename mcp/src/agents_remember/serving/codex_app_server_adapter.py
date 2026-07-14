@@ -385,7 +385,11 @@ class CodexAppServerAdapter:
             if evidence.turn_id == turn_id:
                 evidence.state = "completed"
         self._active_turn_id = None
-        self._snapshot = replace(await self.snapshot(), activity="settling", acceptance="queued")
+        self._snapshot = replace(
+            await self.snapshot(),
+            activity="settling" if self._busy_queue else "idle",
+            acceptance="queued" if self._busy_queue else "immediate",
+        )
         await self._emit(
             "completed",
             transcript=(transcript,),
