@@ -13,7 +13,6 @@ from agents_remember.serving.harness_control_models import ShutdownMode
 
 MAX_CLAUDE_FRAME_BYTES = 1024 * 1024
 PROCESS_SHUTDOWN_TIMEOUT_SECONDS = 5.0
-VERSION_PROBE_TIMEOUT_SECONDS = 10.0
 
 
 class ClaudeStreamTransport(Protocol):
@@ -152,40 +151,3 @@ class ClaudeSubprocessTransport:
         if self._stderr_task is None:
             return
         await asyncio.gather(self._stderr_task, return_exceptions=True)
-
-
-async def probe_claude_version(
-    executable: str,
-    cwd: Path,
-    env: Mapping[str, str],
-) -> str:
-    """Return bounded ``claude --version`` output without exposing stderr or environment data."""
-
-    try:
-        process = await asyncio.create_subprocess_exec(
-            executable,
-            "--version",
-            cwd=cwd,
-            env=dict(env) if env else None,
-            stdin=asyncio.subprocess.DEVNULL,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.DEVNULL,
-            limit=4096,
-        )
-    except OSError as exc:
-        raise HarnessControlError(f"could not probe Claude Code version: {exc}") from exc
-    try:
-        stdout, _ = await asyncio.wait_for(
-            process.communicate(), timeout=VERSION_PROBE_TIMEOUT_SECONDS
-        )
-    except TimeoutError as exc:
-        process.kill()
-        await process.wait()
-        raise HarnessControlError("Claude Code version probe timed out") from exc
-    if process.returncode != 0:
-        raise HarnessControlError(
-            f"Claude Code version probe exited with status {process.returncode}"
-        )
-    if len(stdout) > 4096:
-        raise HarnessControlError("Claude Code version output exceeded 4096 bytes")
-    return stdout.decode("utf-8", errors="strict").strip()

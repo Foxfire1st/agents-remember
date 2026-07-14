@@ -12,7 +12,6 @@ from agents_remember.serving.harness_control_models import LaunchSpec
 
 PI_RPC_PACKAGE = "@earendil-works/pi-coding-agent"
 PI_RPC_PROTOCOL = "pi-rpc/jsonl"
-SUPPORTED_PI_RPC_VERSIONS = frozenset({"0.80.6"})
 PI_RPC_DIALOG_METHODS = frozenset({"select", "confirm", "input", "editor"})
 PI_RPC_FIRE_AND_FORGET_METHODS = frozenset(
     {"notify", "setStatus", "setWidget", "setTitle", "set_editor_text"}
@@ -106,16 +105,6 @@ def encode_pi_rpc_frame(value: Mapping[str, object]) -> bytes:
     except (TypeError, ValueError) as exc:
         raise HarnessControlError(f"Pi RPC command is not JSON-serializable: {exc}") from exc
     return payload + b"\n"
-
-
-def require_pi_rpc_version(version: str) -> None:
-    """Refuse versions outside the one pinned protocol fixture this adapter proves."""
-
-    if version not in SUPPORTED_PI_RPC_VERSIONS:
-        supported = ", ".join(sorted(SUPPORTED_PI_RPC_VERSIONS))
-        raise HarnessControlError(
-            f"unsupported Pi RPC version {version!r}; pinned capability versions: [{supported}]"
-        )
 
 
 def pi_rpc_launch(launch: LaunchSpec) -> LaunchSpec:

@@ -12,7 +12,6 @@ from agents_remember.serving.harness_control_adapter import (
 )
 from agents_remember.serving.harness_control_claude import ClaudeStreamJsonAdapter
 from agents_remember.serving.pi_rpc_adapter import PiRpcAdapter
-from agents_remember.serving.pi_rpc_protocol import SUPPORTED_PI_RPC_VERSIONS
 
 BUILTIN_PROTOCOL_HARNESSES = frozenset({"claude", "codex", "pi"})
 
@@ -20,7 +19,7 @@ BUILTIN_PROTOCOL_HARNESSES = frozenset({"claude", "codex", "pi"})
 def create_harness_protocol_adapter(
     harness_id: str, *, env: Mapping[str, str]
 ) -> HarnessProtocolAdapter:
-    """Create the pinned adapter for a built-in id; custom ids stay explicitly unsupported."""
+    """Create a protocol-negotiating built-in adapter; custom ids stay explicitly unsupported."""
 
     if harness_id == "claude":
         return ClaudeStreamJsonAdapter()
@@ -32,5 +31,5 @@ def create_harness_protocol_adapter(
             )
         )
     if harness_id == "pi":
-        return PiRpcAdapter(version=sorted(SUPPORTED_PI_RPC_VERSIONS)[0])
+        return PiRpcAdapter()
     return UnsupportedHarnessProtocolAdapter(harness_id)

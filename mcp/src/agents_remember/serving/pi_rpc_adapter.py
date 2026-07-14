@@ -38,7 +38,6 @@ from agents_remember.serving.pi_rpc_protocol import (
     pi_response_error,
     pi_rpc_launch,
     pi_rpc_resume_launch,
-    require_pi_rpc_version,
     require_pi_success,
 )
 
@@ -55,12 +54,11 @@ class _SubmissionEvidence:
 
 
 class PiRpcAdapter:
-    """Own a Pi RPC subprocess and translate only documented 0.80.6 protocol semantics."""
+    """Own a Pi RPC subprocess and translate only structurally validated protocol semantics."""
 
     def __init__(
         self,
         *,
-        version: str,
         transport_factory: TransportFactory = PiRpcSubprocess,
         submission_limit: int = 256,
         interaction_limit: int = 64,
@@ -68,7 +66,6 @@ class PiRpcAdapter:
     ) -> None:
         if submission_limit < 1 or interaction_limit < 1:
             raise HarnessControlError("Pi RPC adapter limits must be positive")
-        self._version = version
         self._transport_factory = transport_factory
         self._submission_limit = submission_limit
         self._interaction_limit = interaction_limit
@@ -87,7 +84,6 @@ class PiRpcAdapter:
     async def start(self, launch: LaunchSpec) -> AdapterHandshake:
         if self._transport is not None:
             raise HarnessControlError("Pi RPC adapter is already started")
-        require_pi_rpc_version(self._version)
         rpc_launch = pi_rpc_launch(launch)
         transport = self._transport_factory()
         await transport.start(rpc_launch)
@@ -95,7 +91,6 @@ class PiRpcAdapter:
         self._launch = rpc_launch
         self._events = PiRpcEventMapper(
             launch.identity,
-            version=self._version,
             interaction_limit=self._interaction_limit,
             clock=self._clock,
         )
@@ -105,13 +100,12 @@ class PiRpcAdapter:
         snapshot = self._events.apply_state(state, cursor=self._cursor)
         return AdapterHandshake(
             protocol_version=CONTROL_PROTOCOL_VERSION,
-            adapter_id=f"pi-rpc:{self._version}",
+            adapter_id="pi-rpc",
             identity=launch.identity,
             capabilities=REQUIRED_ADAPTER_CAPABILITIES,
             snapshot=snapshot,
             raw={
                 "vendorProtocol": PI_RPC_PROTOCOL,
-                "piVersion": self._version,
                 "entryCursor": self._cursor,
             },
         )

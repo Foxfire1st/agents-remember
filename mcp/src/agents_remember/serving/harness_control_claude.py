@@ -1,19 +1,16 @@
-"""Claude Code 2.1.207 long-lived stream-json harness protocol adapter."""
+"""Capability-negotiated Claude Code long-lived stream-json adapter."""
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
+from collections.abc import AsyncIterator, Callable
 from datetime import UTC, datetime
-from pathlib import Path
 from uuid import uuid4
 
 from agents_remember.errors import HarnessControlError
 from agents_remember.serving.claude_stream_limits import ClaudeAdapterLimits
 from agents_remember.serving.claude_stream_protocol import (
-    CLAUDE_ADAPTER_ID,
-    CLAUDE_CODE_PROTOCOL_VERSION,
+    CLAUDE_STREAM_PROTOCOL,
     build_claude_stream_argv,
-    parse_claude_version,
     restore_pending_interaction,
 )
 from agents_remember.serving.claude_stream_startup import negotiate_claude_startup
@@ -21,7 +18,6 @@ from agents_remember.serving.claude_stream_state import ClaudeStreamState
 from agents_remember.serving.claude_stream_transport import (
     ClaudeStreamTransport,
     ClaudeSubprocessTransport,
-    probe_claude_version,
 )
 from agents_remember.serving.harness_control_models import (
     CONTROL_PROTOCOL_VERSION,
@@ -41,7 +37,6 @@ from agents_remember.serving.harness_control_models import (
 Clock = Callable[[], str]
 CorrelationFactory = Callable[[], str]
 TransportFactory = Callable[[], ClaudeStreamTransport]
-VersionProbe = Callable[[str, Path, Mapping[str, str]], Awaitable[str]]
 
 
 class ClaudeStreamJsonAdapter:
@@ -51,13 +46,11 @@ class ClaudeStreamJsonAdapter:
         self,
         *,
         transport_factory: TransportFactory = ClaudeSubprocessTransport,
-        version_probe: VersionProbe = probe_claude_version,
         clock: Clock = lambda: datetime.now(UTC).isoformat(),
         correlation_factory: CorrelationFactory = lambda: str(uuid4()),
         limits: ClaudeAdapterLimits | None = None,
     ) -> None:
         self._transport = transport_factory()
-        self._version_probe = version_probe
         self._clock = clock
         self._correlation_factory = correlation_factory
         self._limits = limits or ClaudeAdapterLimits()
@@ -76,17 +69,8 @@ class ClaudeStreamJsonAdapter:
     async def start(self, launch: LaunchSpec) -> AdapterHandshake:
         self._validate_launch(launch)
         self._identity = launch.identity
+        version: str | None = None
         try:
-            version = parse_claude_version(
-                await self._version_probe(launch.argv[0], launch.cwd, launch.env)
-            )
-            if version != CLAUDE_CODE_PROTOCOL_VERSION:
-                return await self._unsupported_handshake(
-                    launch,
-                    f"Claude Code {version} is unsupported; validated stream-json version is "
-                    f"{CLAUDE_CODE_PROTOCOL_VERSION}",
-                    version=version,
-                )
             argv = build_claude_stream_argv(launch.argv)
             await self._transport.start(argv, cwd=launch.cwd, env=launch.env)
             self._transport_started = True
@@ -95,16 +79,13 @@ class ClaudeStreamJsonAdapter:
                 cwd=launch.cwd,
                 timeout_seconds=self._limits.startup_timeout_seconds,
             )
-            if system_init.version != CLAUDE_CODE_PROTOCOL_VERSION:
-                raise HarnessControlError(
-                    "Claude system/init version differs from the validated protocol version"
-                )
+            version = system_init.version
             supported_commands = control_init.commands | system_init.commands
             pending, pending_frame = restore_pending_interaction(
                 control_init.pending_requests, created_at=self._clock()
             )
         except HarnessControlError as exc:
-            return await self._unsupported_handshake(launch, str(exc))
+            return await self._unsupported_handshake(launch, str(exc), version=version)
         snapshot = AdapterSnapshot(
             identity=launch.identity,
             control="ready",
@@ -134,7 +115,7 @@ class ClaudeStreamJsonAdapter:
         self._started = True
         return AdapterHandshake(
             protocol_version=CONTROL_PROTOCOL_VERSION,
-            adapter_id=CLAUDE_ADAPTER_ID,
+            adapter_id=f"{CLAUDE_STREAM_PROTOCOL}:{version}",
             identity=launch.identity,
             capabilities=REQUIRED_ADAPTER_CAPABILITIES,
             snapshot=snapshot,
@@ -218,14 +199,13 @@ class ClaudeStreamJsonAdapter:
             acceptance="unsupported",
             raw={
                 "claudeCodeVersion": version,
-                "validatedVersion": CLAUDE_CODE_PROTOCOL_VERSION,
                 "detail": detail,
             },
         )
         self._started = True
         return AdapterHandshake(
             protocol_version=CONTROL_PROTOCOL_VERSION,
-            adapter_id=CLAUDE_ADAPTER_ID,
+            adapter_id=CLAUDE_STREAM_PROTOCOL,
             identity=launch.identity,
             capabilities=frozenset(),
             snapshot=self._unsupported_snapshot,

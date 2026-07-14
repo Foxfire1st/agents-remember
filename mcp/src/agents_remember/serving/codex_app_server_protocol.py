@@ -1,4 +1,4 @@
-"""Bounded JSONL transport for the pinned Codex app-server protocol."""
+"""Bounded JSONL transport for the Codex app-server protocol."""
 
 from __future__ import annotations
 
@@ -15,8 +15,7 @@ from agents_remember.errors import (
 )
 from agents_remember.serving.harness_control_models import LaunchSpec, ShutdownMode
 
-PINNED_CODEX_CLI_VERSION = "0.144.3"
-CODEX_APP_SERVER_PROTOCOL = f"codex-app-server/{PINNED_CODEX_CLI_VERSION}"
+CODEX_APP_SERVER_PROTOCOL = "codex-app-server"
 DEFAULT_MAX_MESSAGE_BYTES = 4 * 1024 * 1024
 
 JsonObject = dict[str, object]

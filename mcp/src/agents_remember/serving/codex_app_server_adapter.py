@@ -1,4 +1,4 @@
-"""Stable Codex 0.144.3 app-server adapter for the L1 harness contract."""
+"""Capability-negotiated Codex app-server adapter for the L1 harness contract."""
 
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ from agents_remember.errors import (
     HarnessControlError,
 )
 from agents_remember.serving.codex_app_server_protocol import (
-    PINNED_CODEX_CLI_VERSION,
+    CODEX_APP_SERVER_PROTOCOL,
     CodexAppServerTransport,
     CodexStdioTransport,
     JsonObject,
@@ -99,9 +99,11 @@ class CodexAppServerAdapter:
         )
         transport = self._require_transport()
         self._processor = asyncio.create_task(self._run_messages(transport))
+        cli_version = self._session.cli_version
+        assert cli_version is not None
         return AdapterHandshake(
             protocol_version=CONTROL_PROTOCOL_VERSION,
-            adapter_id=f"codex-app-server:{PINNED_CODEX_CLI_VERSION}",
+            adapter_id=f"{CODEX_APP_SERVER_PROTOCOL}:{cli_version}",
             identity=launch.identity,
             capabilities=REQUIRED_ADAPTER_CAPABILITIES,
             snapshot=self._snapshot,

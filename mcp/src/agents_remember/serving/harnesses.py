@@ -50,8 +50,8 @@ CODEX_EFFORT_VALUES = ("none", "minimal", "low", "medium", "high", "xhigh", "max
 """Known Codex reasoning-effort examples, not a dispatch validation enum.
 
 The 2026-07-13 runtime compatibility correction removes the stale static exclusion of ``max``:
-Codex 0.144.3 exposes reasoning effort as a non-empty model-advertised string, and the installed
-launcher accepts it through ``model_reasoning_effort``. ``Harness.effort_validation`` carries that
+Codex exposes reasoning effort as a non-empty model-advertised string, and the installed launcher
+accepts it through ``model_reasoning_effort``. ``Harness.effort_validation`` carries that
 schema contract so future model-advertised values do not require a package release.
 """
 

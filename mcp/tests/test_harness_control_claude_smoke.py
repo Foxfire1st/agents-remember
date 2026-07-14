@@ -1,4 +1,4 @@
-"""Opt-in credential-safe smoke for the pinned Claude Code stream-json adapter."""
+"""Opt-in credential-safe smoke for a configured Claude Code stream-json release."""
 
 from __future__ import annotations
 
@@ -25,7 +25,7 @@ from agents_remember.serving.harness_control_models import (
     "set AR_CLAUDE_STREAM_SMOKE=1 and optionally AR_CLAUDE_STREAM_BINARY to run",
 )
 class ClaudeStreamJsonLiveSmoke(unittest.IsolatedAsyncioTestCase):
-    async def test_pinned_cli_completes_one_correlated_local_command_without_secret_output(
+    async def test_configured_cli_completes_one_correlated_local_command_without_secret_output(
         self,
     ) -> None:
         binary = os.environ.get("AR_CLAUDE_STREAM_BINARY") or shutil.which("claude")
@@ -49,7 +49,7 @@ class ClaudeStreamJsonLiveSmoke(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             handshake.snapshot.control,
             "ready",
-            "live smoke requires the pinned Claude Code 2.1.207 binary",
+            "live smoke requires a structurally compatible Claude stream-json protocol",
         )
         try:
             receipt = await asyncio.wait_for(

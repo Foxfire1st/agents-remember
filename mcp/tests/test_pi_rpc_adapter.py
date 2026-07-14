@@ -27,11 +27,9 @@ from agents_remember.serving.pi_rpc_protocol import (
     PI_RPC_DIALOG_METHODS,
     PI_RPC_FIRE_AND_FORGET_METHODS,
     PI_RPC_PACKAGE,
-    SUPPORTED_PI_RPC_VERSIONS,
     PiRpcJsonlDecoder,
     encode_pi_rpc_frame,
     pi_rpc_launch,
-    require_pi_rpc_version,
 )
 
 FIXTURES = Path(__file__).parent / "fixtures" / "pi_rpc"
@@ -240,22 +238,18 @@ class PiRpcProtocolTests(unittest.TestCase):
                 )
             )
 
-    def test_capability_fixture_is_the_narrow_code_policy(self) -> None:
+    def test_capability_fixture_documents_the_smoke_baseline(self) -> None:
         fixture = json.loads((FIXTURES / "0.80.6-capabilities.json").read_text())
         self.assertEqual(fixture["package"], PI_RPC_PACKAGE)
-        self.assertEqual({fixture["version"]}, SUPPORTED_PI_RPC_VERSIONS)
+        self.assertEqual(fixture["version"], "0.80.6")
         self.assertEqual(set(fixture["dialogMethods"]), PI_RPC_DIALOG_METHODS)
         self.assertEqual(set(fixture["fireAndForgetMethods"]), PI_RPC_FIRE_AND_FORGET_METHODS)
-        require_pi_rpc_version("0.80.6")
-        with self.assertRaisesRegex(HarnessControlError, "unsupported Pi RPC version"):
-            require_pi_rpc_version("0.80.5")
 
 
 class PiRpcAdapterTests(unittest.IsolatedAsyncioTestCase):
     async def test_handshake_and_prompt_ack_preserve_launch_and_correlation(self) -> None:
         transport = _FakePiTransport()
         adapter = PiRpcAdapter(
-            version="0.80.6",
             transport_factory=_TransportSequence(transport),
             clock=lambda: "2026-07-14T09:02:00+00:00",
         )
@@ -264,6 +258,9 @@ class PiRpcAdapterTests(unittest.IsolatedAsyncioTestCase):
             receipt = await adapter.submit(_prompt("request-1"))
             self.assertEqual(handshake.snapshot.control, "ready")
             self.assertEqual(handshake.snapshot.vendor_session_id, "pi-session-1")
+            self.assertEqual(handshake.adapter_id, "pi-rpc")
+            self.assertEqual(handshake.raw["vendorProtocol"], "pi-rpc/jsonl")
+            self.assertNotIn("piVersion", handshake.raw)
             self.assertEqual(receipt.acceptance, "immediate")
             self.assertEqual(receipt.vendor_correlation_id, "request-1")
             self.assertEqual(
@@ -277,7 +274,7 @@ class PiRpcAdapterTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_streaming_prompts_use_source_specific_queue_behavior(self) -> None:
         transport = _FakePiTransport()
-        adapter = PiRpcAdapter(version="0.80.6", transport_factory=_TransportSequence(transport))
+        adapter = PiRpcAdapter(transport_factory=_TransportSequence(transport))
         await adapter.start(_launch())
         stream = cast(AsyncGenerator[AdapterEvent], adapter.subscribe())
         try:
@@ -305,9 +302,7 @@ class PiRpcAdapterTests(unittest.IsolatedAsyncioTestCase):
             with self.subTest(updates=updates):
                 transport = _FakePiTransport()
                 transport.session.update(updates)
-                adapter = PiRpcAdapter(
-                    version="0.80.6", transport_factory=_TransportSequence(transport)
-                )
+                adapter = PiRpcAdapter(transport_factory=_TransportSequence(transport))
                 handshake = await adapter.start(_launch())
                 try:
                     self.assertEqual(handshake.snapshot.activity, expected)
@@ -317,7 +312,7 @@ class PiRpcAdapterTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_retry_compaction_and_agent_settled_are_not_early_idle(self) -> None:
         transport = _FakePiTransport()
-        adapter = PiRpcAdapter(version="0.80.6", transport_factory=_TransportSequence(transport))
+        adapter = PiRpcAdapter(transport_factory=_TransportSequence(transport))
         await adapter.start(_launch())
         stream = cast(AsyncGenerator[AdapterEvent], adapter.subscribe())
         decoder = PiRpcJsonlDecoder()
@@ -350,7 +345,6 @@ class PiRpcAdapterTests(unittest.IsolatedAsyncioTestCase):
             with self.subTest(size=size):
                 transport = _FakePiTransport()
                 adapter = PiRpcAdapter(
-                    version="0.80.6",
                     transport_factory=_TransportSequence(transport),
                     interaction_limit=4,
                 )
@@ -399,7 +393,7 @@ class PiRpcAdapterTests(unittest.IsolatedAsyncioTestCase):
         transport.prompt_failures.append(
             HarnessAdapterDisconnectedError("closed before write", may_have_sent=False)
         )
-        adapter = PiRpcAdapter(version="0.80.6", transport_factory=_TransportSequence(transport))
+        adapter = PiRpcAdapter(transport_factory=_TransportSequence(transport))
         bridge = HarnessControlBridge(_identity(), adapter)
         await bridge.start(_launch())
         try:
@@ -433,9 +427,7 @@ class PiRpcAdapterTests(unittest.IsolatedAsyncioTestCase):
             HarnessAdapterDisconnectedError("closed after write", may_have_sent=True)
         )
         second = _FakePiTransport(entries=[base_entry, accepted_entry], leaf_id="entry-1")
-        adapter = PiRpcAdapter(
-            version="0.80.6", transport_factory=_TransportSequence(first, second)
-        )
+        adapter = PiRpcAdapter(transport_factory=_TransportSequence(first, second))
         bridge = HarnessControlBridge(_identity(), adapter)
         await bridge.start(_launch())
         try:
@@ -480,7 +472,7 @@ class PiRpcAdapterTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_disconnect_after_ack_keeps_correlated_acceptance_without_resend(self) -> None:
         transport = _FakePiTransport()
-        adapter = PiRpcAdapter(version="0.80.6", transport_factory=_TransportSequence(transport))
+        adapter = PiRpcAdapter(transport_factory=_TransportSequence(transport))
         bridge = HarnessControlBridge(_identity(), adapter)
         await bridge.start(_launch())
         try:
@@ -502,7 +494,7 @@ class PiRpcAdapterTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_malformed_transport_frame_fails_adapter_loudly(self) -> None:
         transport = _FakePiTransport()
-        adapter = PiRpcAdapter(version="0.80.6", transport_factory=_TransportSequence(transport))
+        adapter = PiRpcAdapter(transport_factory=_TransportSequence(transport))
         await adapter.start(_launch())
         stream = cast(AsyncGenerator[AdapterEvent], adapter.subscribe())
         try:

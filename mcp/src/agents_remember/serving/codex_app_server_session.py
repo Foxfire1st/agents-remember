@@ -10,7 +10,6 @@ from typing import Literal
 from agents_remember.errors import CodexAppServerError
 from agents_remember.serving.codex_app_server_protocol import (
     CODEX_APP_SERVER_PROTOCOL,
-    PINNED_CODEX_CLI_VERSION,
     CodexAppServerTransport,
     CodexStdioTransport,
     JsonObject,
@@ -89,6 +88,7 @@ class CodexAppServerSession:
         self.transport: CodexAppServerTransport | None = None
         self.launch: LaunchSpec | None = None
         self.thread_id: str | None = None
+        self.cli_version: str | None = None
         self.model: CodexModelCapability | None = None
         self.effective_effort: str | None = None
 
@@ -115,10 +115,9 @@ class CodexAppServerSession:
                     "capabilities": {"experimentalApi": False},
                 },
             )
-            initialize_evidence = validate_initialize_response(
+            cli_version, initialize_evidence = validate_initialize_response(
                 initialize,
                 client_name=self.settings.client_name,
-                expected_cli_version=PINNED_CODEX_CLI_VERSION,
             )
             await transport.notify("initialized", {})
             models = await self._read_models(transport)
@@ -141,12 +140,18 @@ class CodexAppServerSession:
                     f"Codex {method} echoed model {thread.model!r}; "
                     f"selected model was {selected.model!r}"
                 )
+            if thread.cli_version != cli_version:
+                raise CodexAppServerError(
+                    f"Codex {method} cliVersion {thread.cli_version!r} differs from negotiated "
+                    f"initialize version {cli_version!r}"
+                )
             if Path(thread.cwd) != launch.cwd:
                 raise CodexAppServerError(
                     f"Codex {method} echoed cwd {thread.cwd!r}; "
                     f"requested cwd was {str(launch.cwd)!r}"
                 )
             self.thread_id = thread.thread_id
+            self.cli_version = cli_version
             self.model = selected
             self.effective_effort = thread.effective_effort
             activity, acceptance = activity_from_thread_status(thread.status)
@@ -179,8 +184,12 @@ class CodexAppServerSession:
 
     def capability_snapshot(self) -> JsonObject:
         model = self.model
+        protocol = CODEX_APP_SERVER_PROTOCOL
+        if self.cli_version is not None:
+            protocol = f"{protocol}/{self.cli_version}"
         return {
-            "protocol": CODEX_APP_SERVER_PROTOCOL,
+            "protocol": protocol,
+            "codexCliVersion": self.cli_version,
             "experimentalApi": False,
             "model": model.model if model else None,
             "advertisedReasoningEfforts": list(model.supported_efforts) if model else [],

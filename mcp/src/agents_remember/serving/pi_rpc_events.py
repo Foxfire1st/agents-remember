@@ -39,12 +39,10 @@ class PiRpcEventMapper:
         self,
         identity: ControlIdentity,
         *,
-        version: str,
         interaction_limit: int,
         clock: Clock,
     ) -> None:
         self._identity = identity
-        self._version = version
         self._interaction_limit = interaction_limit
         self._clock = clock
         self._dialogs: OrderedDict[str, Mapping[str, object]] = OrderedDict()
@@ -84,7 +82,6 @@ class PiRpcEventMapper:
             last_event_sequence=self._event_sequence,
             raw={
                 **dict(state.raw),
-                "piVersion": self._version,
                 "vendorProtocol": PI_RPC_PROTOCOL,
                 "entryCursor": cursor,
             },

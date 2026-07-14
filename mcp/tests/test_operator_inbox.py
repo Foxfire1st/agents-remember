@@ -12,11 +12,14 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from unittest import mock
 
+from pydantic import Field, ValidationError
+
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
 from agents_remember.controlplane.interaction_retention import INBOX_MAX_CURRENT_ROWS
 from agents_remember.controlplane.operator_inbox_records import (
+    OperatorInboxCompatibleRecord,
     OperatorInboxEntry,
     consume_operator_inbox_entry,
     create_operator_inbox_entry,
@@ -96,6 +99,48 @@ class OperatorInboxRecordTests(unittest.TestCase):
         line = entry.model_dump_json(by_alias=True, exclude_none=True)
         self.assertIn('"schema":"ar-operator-inbox-entry/v1"', line)
         self.assertEqual(OperatorInboxEntry.model_validate_json(line), entry)
+
+    def test_legacy_reader_preserves_named_adapter_evidence_only(self) -> None:
+        class LegacyOperatorInboxEntry(OperatorInboxCompatibleRecord):
+            schema_version: str = Field(alias="schema")
+            id: str
+            ts: str
+            state: str
+            ask: str
+            response: str
+            createdAt: str
+            createdBy: str
+            createdVia: str
+
+        payload: dict[str, object] = {
+            "schema": "ar-operator-inbox-entry/v1",
+            "id": "01H",
+            "ts": T1,
+            "state": "pending",
+            "ask": "Continue?",
+            "response": "Yes.",
+            "createdAt": T1,
+            "createdBy": "developer",
+            "createdVia": "dashboard",
+            "adapterDeliveryState": "queued",
+            "adapterDeliveryDetail": "accepted by exact adapter request",
+        }
+        legacy = LegacyOperatorInboxEntry.model_validate(payload)
+        self.assertEqual(
+            legacy.model_extra,
+            {
+                "adapterDeliveryState": "queued",
+                "adapterDeliveryDetail": "accepted by exact adapter request",
+            },
+        )
+        roundtrip = legacy.model_dump(by_alias=True, exclude_none=True)
+        self.assertEqual(roundtrip["adapterDeliveryState"], "queued")
+        self.assertEqual(
+            roundtrip["adapterDeliveryDetail"], "accepted by exact adapter request"
+        )
+
+        with self.assertRaisesRegex(ValidationError, "unsupported fields: futureEvidence"):
+            LegacyOperatorInboxEntry.model_validate({**payload, "futureEvidence": True})
 
 
 class OperatorInboxStoreTests(unittest.TestCase):

@@ -88,14 +88,14 @@ class PiRpcRealSmokeTests(unittest.IsolatedAsyncioTestCase):
                 ),
                 env=launch_env,
             )
-            adapter = PiRpcAdapter(version=PI_RPC_VERSION)
+            adapter = PiRpcAdapter()
             handshake = await adapter.start(launch)
             try:
                 state = await adapter.snapshot()
-                self.assertEqual(handshake.adapter_id, f"pi-rpc:{PI_RPC_VERSION}")
+                self.assertEqual(handshake.adapter_id, "pi-rpc")
                 self.assertEqual(state.control, "ready")
                 self.assertEqual(state.activity, "idle")
                 self.assertTrue(state.vendor_session_id)
-                self.assertEqual(state.raw["piVersion"], PI_RPC_VERSION)
+                self.assertEqual(state.raw["vendorProtocol"], "pi-rpc/jsonl")
             finally:
                 await adapter.stop("graceful")

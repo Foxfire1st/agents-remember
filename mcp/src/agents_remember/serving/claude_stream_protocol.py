@@ -1,9 +1,8 @@
-"""Pinned Claude Code 2.1.207 stream-json framing and schema parsing."""
+"""Strict Claude Code stream-json framing and capability parsing."""
 
 from __future__ import annotations
 
 import json
-import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -14,10 +13,8 @@ from agents_remember.serving.harness_control_models import (
     TerminalOutcome,
 )
 
-CLAUDE_CODE_PROTOCOL_VERSION = "2.1.207"
-CLAUDE_ADAPTER_ID = f"claude-stream-json:{CLAUDE_CODE_PROTOCOL_VERSION}"
+CLAUDE_STREAM_PROTOCOL = "claude-stream-json"
 MAX_TRANSCRIPT_TEXT_CHARS = 128 * 1024
-_VERSION_PATTERN = re.compile(r"^(\d+\.\d+\.\d+) \(Claude Code\)$")
 _IDENTITY_CHANGING_COMMANDS = frozenset(
     {"clear", "continue", "exit", "fork", "login", "logout", "quit", "resume"}
 )
@@ -37,13 +34,6 @@ class ClaudeSystemInitialization:
     model: str
     permission_mode: str
     commands: frozenset[str]
-
-
-def parse_claude_version(output: str) -> str:
-    match = _VERSION_PATTERN.fullmatch(output.strip())
-    if match is None:
-        raise HarnessControlError("Claude Code returned an unrecognized version string")
-    return match.group(1)
 
 
 def build_claude_stream_argv(argv: Sequence[str]) -> tuple[str, ...]:
@@ -205,8 +195,7 @@ def command_unsupported_detail(command: str, advertised: frozenset[str]) -> str 
         )
     if command not in advertised:
         return (
-            f"Claude Code {CLAUDE_CODE_PROTOCOL_VERSION} did not advertise /{command}; "
-            "the command was not sent"
+            f"Claude Code did not advertise /{command}; the command was not sent"
         )
     return None
 

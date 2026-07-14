@@ -231,6 +231,46 @@ async def test_handshake_uses_stable_protocol_and_exposes_effort_menu() -> None:
 
 
 @pytest.mark.anyio
+async def test_compatible_patch_version_is_accepted_after_capability_negotiation() -> None:
+    data = fixture()
+    initialize = fixture_object(data, "initializeResult")
+    initialize["userAgent"] = str(initialize["userAgent"]).replace("0.144.3", "0.144.4")
+    fixture_object(data, "threadStartResult", "thread")["cliVersion"] = "0.144.4"
+    transport = FakeCodexTransport()
+    prime_start(transport, data)
+    adapter = make_adapter(transport)
+
+    handshake = await adapter.start(launch())
+    try:
+        assert handshake.snapshot.control == "ready"
+        assert handshake.adapter_id == "codex-app-server:0.144.4"
+        assert handshake.raw["protocol"] == "codex-app-server/0.144.4"
+        assert handshake.raw["codexCliVersion"] == "0.144.4"
+    finally:
+        await adapter.stop("forced")
+
+
+@pytest.mark.anyio
+async def test_missing_initialize_field_and_version_identity_mismatch_fail_loudly() -> None:
+    missing_data = fixture()
+    fixture_object(missing_data, "initializeResult").pop("platformOs")
+    missing_transport = FakeCodexTransport()
+    prime_start(missing_transport, missing_data)
+    with pytest.raises(CodexAppServerError, match="requires non-empty platformOs"):
+        await make_adapter(missing_transport).start(launch())
+    assert missing_transport.stop_modes == ["forced"]
+
+    mismatch_data = fixture()
+    initialize = fixture_object(mismatch_data, "initializeResult")
+    initialize["userAgent"] = str(initialize["userAgent"]).replace("0.144.3", "0.144.4")
+    mismatch_transport = FakeCodexTransport()
+    prime_start(mismatch_transport, mismatch_data)
+    with pytest.raises(CodexAppServerError, match="differs from negotiated initialize version"):
+        await make_adapter(mismatch_transport).start(launch())
+    assert mismatch_transport.stop_modes == ["forced"]
+
+
+@pytest.mark.anyio
 async def test_absent_or_unconfirmed_effort_fails_loudly() -> None:
     data = fixture()
     absent_transport = FakeCodexTransport()

@@ -1,8 +1,9 @@
-"""Strict 0.144.3 capability, thread, state, and interaction mapping."""
+"""Strict Codex app-server capability, thread, state, and interaction mapping."""
 
 from __future__ import annotations
 
 import json
+import re
 from collections import OrderedDict
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -106,20 +107,25 @@ def validate_initialize_response(
     result: Mapping[str, object],
     *,
     client_name: str,
-    expected_cli_version: str,
-) -> JsonObject:
+) -> tuple[str, JsonObject]:
     user_agent = required_text(result, "userAgent", context="initialize response")
-    expected_prefix = f"{client_name}/{expected_cli_version} "
-    if not user_agent.startswith(expected_prefix):
+    match = re.fullmatch(
+        rf"{re.escape(client_name)}/(?P<version>\S+)(?: \S(?:.*\S)?)?",
+        user_agent,
+    )
+    if match is None:
         raise CodexAppServerError(
-            "Codex app-server version mismatch: expected userAgent prefix "
-            f"{expected_prefix!r}, received {user_agent!r}"
+            "Codex initialize response has incompatible userAgent; expected "
+            f"{client_name}/<reported-version> with an optional diagnostic suffix, "
+            f"received {user_agent!r}"
         )
+    cli_version = match.group("version")
     codex_home = required_text(result, "codexHome", context="initialize response")
     platform_family = required_text(result, "platformFamily", context="initialize response")
     platform_os = required_text(result, "platformOs", context="initialize response")
-    return {
+    return cli_version, {
         "userAgent": user_agent,
+        "cliVersion": cli_version,
         "codexHomePresent": bool(codex_home),
         "platformFamily": platform_family,
         "platformOs": platform_os,

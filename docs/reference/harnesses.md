@@ -42,6 +42,55 @@ put on the command line and no effort vocabulary is enforced. Growing a
 mapping for a builtin is a one-line registry edit — or a settings override,
 below.
 
+### Structured-protocol compatibility
+
+Production adapters launch the installed harness and decide compatibility from
+the structured protocol evidence Agents Remember consumes, not from an exact
+CLI package-version comparison:
+
+- Claude must complete `control_request/initialize` and `system/init`, including
+  the command/model/account capability payload and the session, cwd, model,
+  permission, tool, and slash-command fields.
+- Codex must complete `initialize`, `model/list`, and `thread/start` or
+  `thread/resume`; the reported client identity and thread CLI-version token
+  must agree, and the selected model, reasoning-effort menu, cwd, thread state,
+  and configured policies must validate.
+- Pi RPC does not expose an installed package version in its startup protocol.
+  Compatibility therefore comes from correlated `get_state` and `get_entries`
+  responses plus the documented event/interaction fields. The exact Pi package
+  used by a smoke fixture is not a production launch pin.
+
+Reported version text remains diagnostic evidence. Missing, malformed, or
+contradictory required fields fail loudly; there is no pane/log fallback or
+version-range guess.
+
+### Serving-cutover restart contract
+
+The dashboard daemon and MCP servers share durable operator-inbox and terminal
+catalog files while keeping their Python schemas loaded in memory. A serving
+upgrade is therefore one reload boundary, not a dashboard-only restart. After
+live work is saved and reported, reload every long-lived consumer before
+post-cutover validation:
+
+1. Restart the `agents-remember dashboard` daemon (including an auto-started
+   daemon supervised by an MCP server) so its FastAPI routes, projector,
+   supervisor, inbox store, catalog models, and packaged dashboard assets come
+   from the new build.
+2. Restart or reload every connected harness/client process that owns an
+   Agents Remember MCP server subprocess. Each Claude, Codex, Pi, or other MCP
+   client has its own in-memory `OperatorInboxEntry` and catalog reader; leaving
+   even one pre-cutover process alive can make `operator_inbox_post`, poll, or
+   consume fail against rows written by the new daemon.
+3. End and recreate each bridge-backed hosted session that must be validated.
+   Its per-session `harness_control_runner` and vendor adapter are separate
+   long-lived Python processes and do not hot-reload when only the dashboard
+   daemon changes. Preserve/report session work before replacement.
+4. Reload open browser dashboard tabs after the daemon is serving the new build
+   so the JavaScript projection models match the server response shape.
+
+One-shot CLI commands started after the cutover load the current package and do
+not need a separate reload. Settings do not need mutation for this contract.
+
 ### Extending or overriding via settings (`orchestration.harnesses`)
 
 The registry is **good defaults, never a rigid wall** (developer ruling

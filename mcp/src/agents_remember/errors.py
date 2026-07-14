@@ -43,7 +43,7 @@ class HarnessAdapterDisconnectedError(HarnessControlError):
 
 
 class CodexAppServerError(HarnessControlError):
-    """The pinned Codex app-server protocol or its configured contract was violated."""
+    """The negotiated Codex app-server protocol or its configured contract was violated."""
 
 
 class CodexAppServerRpcError(CodexAppServerError):

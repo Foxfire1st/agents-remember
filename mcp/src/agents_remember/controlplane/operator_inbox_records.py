@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
-from typing import Literal
+from typing import Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 OPERATOR_INBOX_RECORD_SCHEMA = "ar-operator-inbox-entry/v1"
 
@@ -42,6 +42,9 @@ InboxDeliveryState = Literal["queued", "no-hosted-session", "delivered", "unconf
 AdapterDeliveryState = Literal[
     "accepted", "queued", "rejected", "unknown", "completed", "unsupported"
 ]
+OPERATOR_INBOX_FORWARD_COMPATIBLE_FIELDS = frozenset(
+    {"adapterDeliveryState", "adapterDeliveryDetail"}
+)
 
 
 def require_inbox_address(
@@ -55,10 +58,22 @@ def require_inbox_address(
         raise ValueError("operator inbox requires lifecycle_id, agent_id, or recipient_role")
 
 
-class OperatorInboxEntry(BaseModel):
-    """One append-only ``ar-operator-inbox-entry/v1`` snapshot."""
+class OperatorInboxCompatibleRecord(BaseModel):
+    """Preserve only the named additive fields older inbox readers may not model yet."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="allow")
+
+    @model_validator(mode="after")
+    def reject_unknown_extensions(self) -> Self:
+        unsupported = set(self.model_extra or {}) - OPERATOR_INBOX_FORWARD_COMPATIBLE_FIELDS
+        if unsupported:
+            names = ", ".join(sorted(unsupported))
+            raise ValueError(f"operator inbox record has unsupported fields: {names}")
+        return self
+
+
+class OperatorInboxEntry(OperatorInboxCompatibleRecord):
+    """One append-only ``ar-operator-inbox-entry/v1`` snapshot."""
 
     schema_version: str = Field(default=OPERATOR_INBOX_RECORD_SCHEMA, alias="schema")
     id: str

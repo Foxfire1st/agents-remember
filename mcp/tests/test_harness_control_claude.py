@@ -123,27 +123,16 @@ def _launch(
     )
 
 
-async def _version_207(executable: str, cwd: Path, env: Mapping[str, str]) -> str:
-    del executable, cwd, env
-    return "2.1.207 (Claude Code)"
-
-
 def _adapter(
     transport: _FakeClaudeTransport,
     *,
     correlations: list[str] | None = None,
     limits: ClaudeAdapterLimits | None = None,
-    version: str = "2.1.207 (Claude Code)",
 ) -> ClaudeStreamJsonAdapter:
     values = iter(correlations or [FIRST_CORRELATION])
 
-    async def probe(executable: str, cwd: Path, env: Mapping[str, str]) -> str:
-        del executable, cwd, env
-        return version
-
     return ClaudeStreamJsonAdapter(
         transport_factory=lambda: transport,
-        version_probe=probe,
         clock=lambda: NOW,
         correlation_factory=lambda: next(values),
         limits=limits,
@@ -214,16 +203,22 @@ class ClaudeStreamJsonAdapterTests(unittest.IsolatedAsyncioTestCase):
         finally:
             await adapter.stop("forced")
 
-    async def test_version_and_capability_mismatch_are_explicitly_unsupported(self) -> None:
-        wrong_version_transport = _FakeClaudeTransport()
-        wrong_version = _adapter(wrong_version_transport, version="2.1.209 (Claude Code)")
-        handshake = await wrong_version.start(_launch())
-        self.assertEqual(handshake.snapshot.control, "unsupported")
-        self.assertFalse(wrong_version_transport.started)
-        receipt = await wrong_version.submit(PromptRequest("request", "durable", "hello", NOW))
-        self.assertEqual(receipt.acceptance, "unsupported")
-        self.assertIn("2.1.209", receipt.detail or "")
+    async def test_compatible_patch_version_is_accepted_after_structured_negotiation(self) -> None:
+        frames = _load_fixture("initialization.jsonl")
+        frames[1]["claude_code_version"] = "2.1.209"
+        transport = _FakeClaudeTransport(frames)
+        adapter = _adapter(transport)
 
+        handshake = await adapter.start(_launch())
+        try:
+            self.assertEqual(handshake.snapshot.control, "ready")
+            self.assertEqual(handshake.adapter_id, "claude-stream-json:2.1.209")
+            self.assertEqual(handshake.raw["claudeCodeVersion"], "2.1.209")
+            self.assertTrue(transport.started)
+        finally:
+            await adapter.stop("forced")
+
+    async def test_missing_protocol_capability_fails_loudly(self) -> None:
         frames = _load_fixture("initialization.jsonl")
         response = frames[0]["response"]
         assert isinstance(response, dict)
