@@ -74,6 +74,8 @@ class CodexServerInteraction:
 class SubmissionEvidence:
     request: PromptRequest
     state: Literal["queued", "accepted", "unknown", "completed", "rejected"]
+    model: CodexModelCapability
+    effort: str
     turn_id: str | None = None
 
 
@@ -84,7 +86,13 @@ class CodexSubmissionLedger:
         self._limit = limit
         self._items: OrderedDict[str, SubmissionEvidence] = OrderedDict()
 
-    def reserve(self, request: PromptRequest) -> SubmissionEvidence | None:
+    def reserve(
+        self,
+        request: PromptRequest,
+        *,
+        model: CodexModelCapability,
+        effort: str,
+    ) -> SubmissionEvidence | None:
         if request.request_id in self._items:
             raise CodexAppServerError(f"duplicate Codex request id {request.request_id!r}")
         while len(self._items) >= self._limit:
@@ -99,7 +107,12 @@ class CodexSubmissionLedger:
             if evictable is None:
                 return None
             self._items.pop(evictable)
-        evidence = SubmissionEvidence(request=request, state="queued")
+        evidence = SubmissionEvidence(
+            request=request,
+            state="queued",
+            model=model,
+            effort=effort,
+        )
         self._items[request.request_id] = evidence
         return evidence
 

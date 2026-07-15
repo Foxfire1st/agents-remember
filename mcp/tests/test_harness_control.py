@@ -12,12 +12,13 @@ from collections import deque
 from collections.abc import AsyncIterator
 from dataclasses import replace
 from pathlib import Path
+from typing import Any, cast
 
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
 from agents_remember.errors import HarnessAdapterDisconnectedError, HarnessControlError
-from agents_remember.serving.harness_capabilities import CapabilitySnapshot
+from agents_remember.serving.harness_capabilities import CapabilitySnapshot, SetResult
 from agents_remember.serving.harness_control_adapter import (
     HarnessProtocolRegistry,
     protocol_adapter_status,
@@ -71,9 +72,12 @@ class _FakeAdapter:
         self.responses: list[InteractionResponse] = []
         self.stop_modes: list[ShutdownMode] = []
         self.launches: list[LaunchSpec] = []
+        self.control_log: list[tuple[str, str]] = []
+        self.set_results: deque[SetResult] = deque()
 
     async def start(self, launch: LaunchSpec) -> AdapterHandshake:
         self.launches.append(launch)
+        self.control_log.append(("launch", launch.harness_id))
         identity = self.handshake_identity or launch.identity
         self.current = AdapterSnapshot(
             identity=identity,
@@ -110,6 +114,7 @@ class _FakeAdapter:
 
     async def submit(self, request: PromptRequest) -> SubmissionReceipt:
         self.submissions.append(request)
+        self.control_log.append(("prompt", request.request_id))
         if self.disconnects:
             may_have_sent = self.disconnects.popleft()
             if may_have_sent is not None:
@@ -125,6 +130,28 @@ class _FakeAdapter:
             submitted_at=request.submitted_at,
             vendor_correlation_id=f"vendor-{request.request_id}",
             accepted_at=request.submitted_at if acceptance == "immediate" else None,
+        )
+
+    async def set_model(self, model_key: str) -> SetResult:
+        self.control_log.append(("model", model_key))
+        if self.set_results:
+            return self.set_results.popleft()
+        return SetResult(
+            ok=True,
+            acceptance="immediate",
+            requested_value=model_key,
+            detail="fake accepted without an effective echo",
+        )
+
+    async def set_effort(self, effort: str) -> SetResult:
+        self.control_log.append(("effort", effort))
+        if self.set_results:
+            return self.set_results.popleft()
+        return SetResult(
+            ok=True,
+            acceptance="immediate",
+            requested_value=effort,
+            detail="fake accepted without an effective echo",
         )
 
     async def respond(self, response: InteractionResponse) -> None:
@@ -171,6 +198,24 @@ class _BlockingSubmitAdapter(_FakeAdapter):
         if self.error is not None:
             raise self.error
         return await super().submit(request)
+
+
+class _BlockingSetAdapter(_FakeAdapter):
+    def __init__(self) -> None:
+        super().__init__()
+        self.set_started = asyncio.Event()
+        self.release_set = asyncio.Event()
+
+    async def set_model(self, model_key: str) -> SetResult:
+        self.control_log.append(("model", model_key))
+        self.set_started.set()
+        await self.release_set.wait()
+        return SetResult(
+            ok=True,
+            acceptance="queued",
+            requested_value=model_key,
+            detail="fake queued set",
+        )
 
 
 class _ObservedHarnessControlServer(HarnessControlServer):
@@ -237,6 +282,101 @@ class HarnessControlConformanceTests(unittest.IsolatedAsyncioTestCase):
                 await bridge.start(_launch(identity))
         finally:
             await bridge.stop("forced")
+
+    async def test_capability_setters_share_launch_set_prompt_queue_order(self) -> None:
+        identity = _identity()
+        adapter = _FakeAdapter()
+        bridge = HarnessControlBridge(identity, adapter)
+        await bridge.start(_launch(identity))
+        try:
+            model_task = asyncio.create_task(bridge.set_model("model-b"))
+            await asyncio.sleep(0)
+            prompt_task = asyncio.create_task(
+                bridge.submit(
+                    bridge.prompt("after set", source="durable", request_id="after-set")
+                )
+            )
+            model, receipt = await asyncio.gather(model_task, prompt_task)
+            self.assertEqual((model.ok, model.acceptance), (True, "immediate"))
+            self.assertEqual(receipt.acceptance, "immediate")
+            self.assertEqual(
+                adapter.control_log,
+                [
+                    ("launch", "fake"),
+                    ("model", "model-b"),
+                    ("prompt", "after-set"),
+                ],
+            )
+        finally:
+            await bridge.stop("forced")
+
+    async def test_cancelled_setter_late_completion_does_not_kill_command_queue(self) -> None:
+        identity = _identity()
+        adapter = _BlockingSetAdapter()
+        bridge = HarnessControlBridge(identity, adapter)
+        await bridge.start(_launch(identity))
+        try:
+            setter = asyncio.create_task(bridge.set_model("model-b"))
+            await asyncio.wait_for(adapter.set_started.wait(), timeout=1.0)
+            setter.cancel()
+            with self.assertRaises(asyncio.CancelledError):
+                await setter
+            adapter.release_set.set()
+
+            receipt = await asyncio.wait_for(
+                bridge.submit(
+                    bridge.prompt(
+                        "still alive",
+                        source="durable",
+                        request_id="after-cancel",
+                    )
+                ),
+                timeout=1.0,
+            )
+            self.assertEqual(receipt.acceptance, "immediate")
+            self.assertEqual(adapter.control_log[-1], ("prompt", "after-cancel"))
+            self.assertEqual(bridge.snapshot().control, "ready")
+        finally:
+            await bridge.stop("forced")
+
+    async def test_set_result_truth_invariants_fail_bad_adapter_results_without_poisoning(self) -> None:
+        invalid = (
+            SetResult(True, "echo-verified", "value"),
+            SetResult(True, "queued", "value", effective_value="value"),
+            SetResult(True, "unknown", "value"),
+            SetResult(False, "immediate", "value"),
+            SetResult(False, "unsupported", "value", effective_value="value"),
+            SetResult(False, cast(Any, "garbage"), "value"),
+            SetResult(False, cast(Any, "rejected"), "value"),
+            SetResult(False, cast(Any, ""), "value"),
+        )
+        for result in invalid:
+            with self.subTest(result=result):
+                identity = _identity()
+                adapter = _FakeAdapter()
+                adapter.set_results.append(result)
+                bridge = HarnessControlBridge(identity, adapter)
+                await bridge.start(_launch(identity))
+                try:
+                    with self.assertRaises(HarnessControlError):
+                        await bridge.set_model("value")
+                    receipt = await bridge.submit(
+                        bridge.prompt(
+                            "runner survives",
+                            source="durable",
+                            request_id="survives",
+                        )
+                    )
+                    self.assertEqual(receipt.acceptance, "immediate")
+                finally:
+                    await bridge.stop("forced")
+
+    async def test_unregistered_adapter_setters_remain_explicitly_unsupported(self) -> None:
+        adapter = HarnessProtocolRegistry().create("custom-harness")
+        model = await adapter.set_model("anything")
+        effort = await adapter.set_effort("anything")
+        self.assertEqual((model.ok, model.acceptance), (False, "unsupported"))
+        self.assertEqual((effort.ok, effort.acceptance), (False, "unsupported"))
 
     async def test_automated_delivery_preserves_draft_and_draft_submits_next(self) -> None:
         identity = _identity()

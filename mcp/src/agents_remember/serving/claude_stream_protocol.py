@@ -18,6 +18,7 @@ MAX_TRANSCRIPT_TEXT_CHARS = 128 * 1024
 _IDENTITY_CHANGING_COMMANDS = frozenset(
     {"clear", "continue", "exit", "fork", "login", "logout", "quit", "resume"}
 )
+_NATIVE_CAPABILITY_COMMANDS = frozenset({"effort", "model"})
 
 
 @dataclass(frozen=True)
@@ -193,13 +194,35 @@ def session_command(text: str) -> str | None:
     return _normalize_command(stripped[1:].split(maxsplit=1)[0])
 
 
+def session_command_replay_text(text: str) -> str:
+    """Return Claude's replay body for one native slash command.
+
+    Claude accepts the ordinary ``/command args`` user frame but replays it under the original
+    UUID as a canonical command body. Correlation therefore remains exact without pretending the
+    replay body is byte-identical to the submitted wire text.
+    """
+
+    command = session_command(text)
+    if command is None:
+        return text
+    command_text = text.lstrip()[1:]
+    _, separator, arguments = command_text.partition(" ")
+    if not separator:
+        arguments = ""
+    return (
+        f"<command-name>/{command}</command-name>\n"
+        f"            <command-message>{command}</command-message>\n"
+        f"            <command-args>{arguments}</command-args>"
+    )
+
+
 def command_unsupported_detail(command: str, advertised: frozenset[str]) -> str | None:
     if command in _IDENTITY_CHANGING_COMMANDS:
         return (
             f"Claude session command /{command} changes process/session identity and is unsupported "
             "inside one long-lived control adapter"
         )
-    if command not in advertised:
+    if command not in advertised and command not in _NATIVE_CAPABILITY_COMMANDS:
         return f"Claude Code did not advertise /{command}; the command was not sent"
     return None
 

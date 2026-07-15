@@ -107,6 +107,30 @@ def fixture_list(data: Mapping[str, object], *path: str) -> list[object]:
     return value
 
 
+def add_model(
+    data: JsonObject,
+    *,
+    model: str = "gpt-5.6-mini",
+    efforts: tuple[str, ...] = ("low", "medium"),
+    default_effort: str = "medium",
+) -> None:
+    fixture_list(data, "modelListResult", "data").append(
+        {
+            "id": f"model-{model}",
+            "model": model,
+            "displayName": "GPT-5.6 Mini",
+            "description": "Second fixture model",
+            "hidden": False,
+            "isDefault": False,
+            "defaultReasoningEffort": default_effort,
+            "supportedReasoningEfforts": [
+                {"reasoningEffort": effort, "description": effort.title()}
+                for effort in efforts
+            ],
+        }
+    )
+
+
 def identity() -> ControlIdentity:
     return ControlIdentity(
         ar_session_id="ar-session-1",
@@ -501,6 +525,289 @@ async def test_busy_policy_steers_or_queues_explicitly() -> None:
         ]
     finally:
         await queued_adapter.stop("forced")
+
+
+@pytest.mark.anyio
+async def test_set_model_and_effort_stay_pending_until_same_thread_turn_accepts() -> None:
+    data = fixture()
+    add_model(data)
+    transport = FakeCodexTransport()
+    prime_start(transport, data)
+    next_turn = deepcopy(fixture_object(data, "turnStartResult"))
+    fixture_object(next_turn, "turn")["id"] = "turn-2"
+    transport.queue_response("turn/start", next_turn)
+    adapter = make_adapter(transport)
+    await adapter.start(launch())
+    try:
+        model = await adapter.set_model("gpt-5.6-mini")
+        assert (model.ok, model.acceptance, model.effective_value) == (True, "queued", None)
+        assert "rebased" in (model.detail or "")
+        assert adapter.advertise().selected_model_key == "gpt-5.6-sol"
+        pending = await adapter.snapshot()
+        assert pending.raw["desiredModel"] == "gpt-5.6-mini"
+        assert pending.raw["desiredReasoningEffort"] == "medium"
+        assert pending.raw["settingsPending"] is True
+
+        effort = await adapter.set_effort("low")
+        assert (effort.ok, effort.acceptance, effort.effective_value) == (True, "queued", None)
+        receipt = await adapter.submit(request("switch-turn"))
+        assert receipt.acceptance == "immediate"
+        method, params = transport.requests[-1]
+        assert method == "turn/start"
+        assert params["threadId"] == "thread-1"
+        assert params["model"] == "gpt-5.6-mini"
+        assert params["effort"] == "low"
+        assert adapter.advertise().selected_model_key == "gpt-5.6-mini"
+        assert adapter.advertise().selected_effort == "low"
+        assert (await adapter.snapshot()).raw["settingsPending"] is False
+        assert len(transport.launches) == 1
+        assert not any(method == "thread/resume" for method, _ in transport.requests)
+    finally:
+        await adapter.stop("forced")
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("status", "acceptance", "promoted"),
+    [
+        ("inProgress", "immediate", True),
+        ("completed", "immediate", True),
+        ("failed", "rejected", False),
+        ("interrupted", "rejected", False),
+    ],
+)
+async def test_turn_start_promotes_only_successful_submission_status(
+    status: str,
+    acceptance: str,
+    promoted: bool,
+) -> None:
+    data = fixture()
+    add_model(data)
+    transport = FakeCodexTransport()
+    prime_start(transport, data)
+    transport.queue_response(
+        "turn/start",
+        {"turn": {"id": f"turn-{status}", "status": status, "items": []}},
+    )
+    adapter = make_adapter(transport)
+    await adapter.start(launch())
+    try:
+        await adapter.set_model("gpt-5.6-mini")
+        receipt = await adapter.submit(request(f"request-{status}"))
+        assert receipt.acceptance == acceptance
+        assert receipt.vendor_correlation_id == f"turn-{status}"
+        assert adapter.advertise().selected_model_key == (
+            "gpt-5.6-mini" if promoted else "gpt-5.6-sol"
+        )
+        snapshot = await adapter.snapshot()
+        assert snapshot.raw["settingsPending"] is (not promoted)
+        assert snapshot.raw["freshTurnRequired"] is (not promoted)
+        assert snapshot.vendor_session_id == "thread-1"
+        assert len(transport.launches) == 1
+    finally:
+        await adapter.stop("forced")
+
+
+@pytest.mark.anyio
+async def test_busy_queue_preserves_prompt_selection_epoch_across_later_setter() -> None:
+    data = fixture()
+    add_model(data)
+    transport = FakeCodexTransport()
+    prime_start(transport, data)
+    for turn_id in ("turn-1", "turn-2", "turn-3"):
+        transport.queue_response(
+            "turn/start",
+            {"turn": {"id": turn_id, "status": "inProgress", "items": []}},
+        )
+    adapter = make_adapter(transport, busy_policy="queue")
+    await adapter.start(launch())
+    try:
+        await adapter.submit(request("active-before-set"))
+        queued_before = await adapter.submit(request("queued-before-set"))
+        assert queued_before.acceptance == "queued"
+
+        await adapter.set_model("gpt-5.6-mini")
+        queued_after = await adapter.submit(request("queued-after-set"))
+        assert queued_after.acceptance == "queued"
+
+        completed = deepcopy(fixture_object(data, "notifications", "completed"))
+        transport.emit(completed)
+        await settle()
+        starts = [params for method, params in transport.requests if method == "turn/start"]
+        assert starts[1]["clientUserMessageId"] == "queued-before-set"
+        assert (starts[1]["model"], starts[1]["effort"]) == ("gpt-5.6-sol", "xhigh")
+        assert adapter.advertise().selected_model_key == "gpt-5.6-sol"
+        assert (await adapter.snapshot()).raw["settingsPending"] is True
+
+        fixture_object(completed, "params", "turn")["id"] = "turn-2"
+        transport.emit(completed)
+        await settle()
+        starts = [params for method, params in transport.requests if method == "turn/start"]
+        assert starts[2]["clientUserMessageId"] == "queued-after-set"
+        assert (starts[2]["model"], starts[2]["effort"]) == ("gpt-5.6-mini", "medium")
+        assert adapter.advertise().selected_model_key == "gpt-5.6-mini"
+        assert (await adapter.snapshot()).raw["settingsPending"] is False
+        assert len(transport.launches) == 1
+    finally:
+        await adapter.stop("forced")
+
+
+@pytest.mark.anyio
+async def test_reversing_pending_codex_settings_clears_fresh_turn_barrier() -> None:
+    data = fixture()
+    add_model(data, efforts=("low", "medium", "xhigh"))
+    transport = FakeCodexTransport()
+    prime_start(transport, data)
+    transport.queue_response("turn/start", fixture_object(data, "turnStartResult"))
+    adapter = make_adapter(transport)
+    await adapter.start(launch())
+    try:
+        assert (await adapter.set_model("gpt-5.6-mini")).acceptance == "queued"
+        reverted_model = await adapter.set_model("gpt-5.6-sol")
+        assert reverted_model.acceptance == "immediate"
+
+        assert (await adapter.set_effort("low")).acceptance == "queued"
+        reverted_effort = await adapter.set_effort("xhigh")
+        assert reverted_effort.acceptance == "immediate"
+
+        snapshot = await adapter.snapshot()
+        assert snapshot.raw["settingsPending"] is False
+        assert snapshot.raw["freshTurnRequired"] is False
+        receipt = await adapter.submit(request("after-reversal"))
+        assert receipt.acceptance == "immediate"
+        params = transport.requests[-1][1]
+        assert (params["model"], params["effort"]) == ("gpt-5.6-sol", "xhigh")
+    finally:
+        await adapter.stop("forced")
+
+
+@pytest.mark.anyio
+async def test_codex_set_rejects_unadvertised_model_and_model_local_effort_without_rpc() -> None:
+    data = fixture()
+    add_model(data)
+    transport = FakeCodexTransport()
+    prime_start(transport, data)
+    adapter = make_adapter(transport)
+    await adapter.start(launch())
+    try:
+        request_count = len(transport.requests)
+        unknown = await adapter.set_model("not-advertised")
+        assert (unknown.ok, unknown.acceptance, unknown.effective_value) == (
+            False,
+            "unsupported",
+            None,
+        )
+        await adapter.set_model("gpt-5.6-mini")
+        invalid_effort = await adapter.set_effort("xhigh")
+        assert (invalid_effort.ok, invalid_effort.acceptance) == (False, "unsupported")
+        assert len(transport.requests) == request_count
+        assert adapter.advertise().selected_model_key == "gpt-5.6-sol"
+    finally:
+        await adapter.stop("forced")
+
+
+@pytest.mark.anyio
+async def test_pending_codex_settings_force_fresh_turn_instead_of_steering_active_turn() -> None:
+    data = fixture()
+    add_model(data)
+    transport = FakeCodexTransport()
+    prime_start(transport, data)
+    transport.queue_response("turn/start", fixture_object(data, "turnStartResult"))
+    next_turn = deepcopy(fixture_object(data, "turnStartResult"))
+    fixture_object(next_turn, "turn")["id"] = "turn-2"
+    transport.queue_response("turn/start", next_turn)
+    adapter = make_adapter(transport, busy_policy="steer")
+    await adapter.start(launch())
+    try:
+        await adapter.submit(request("active"))
+        await adapter.set_model("gpt-5.6-mini")
+        queued = await adapter.submit(request("after-switch"))
+        assert queued.acceptance == "queued"
+        assert queued.raw["busyPolicy"] == "settings-change"
+        assert not any(method == "turn/steer" for method, _ in transport.requests)
+
+        transport.emit(fixture_object(data, "notifications", "completed"))
+        await settle()
+        starts = [params for method, params in transport.requests if method == "turn/start"]
+        assert [params["clientUserMessageId"] for params in starts] == [
+            "active",
+            "after-switch",
+        ]
+        assert starts[-1]["model"] == "gpt-5.6-mini"
+        assert starts[-1]["effort"] == "medium"
+        assert len(transport.launches) == 1
+    finally:
+        await adapter.stop("forced")
+
+
+@pytest.mark.anyio
+async def test_settings_notification_promotes_only_deliberate_match_and_keeps_drift_guard() -> None:
+    data = fixture()
+    add_model(data)
+    transport = FakeCodexTransport()
+    prime_start(transport, data)
+    adapter = make_adapter(transport)
+    await adapter.start(launch())
+    try:
+        await adapter.set_model("gpt-5.6-mini")
+        transport.emit(
+            {
+                "method": "thread/settings/updated",
+                "params": {
+                    "threadId": "thread-1",
+                    "threadSettings": {"model": "gpt-5.6-sol", "effort": "xhigh"},
+                },
+            }
+        )
+        await settle()
+        assert adapter.advertise().selected_model_key == "gpt-5.6-sol"
+        assert (await adapter.snapshot()).raw["settingsPending"] is True
+
+        transport.emit(
+            {
+                "method": "thread/settings/updated",
+                "params": {
+                    "threadId": "thread-1",
+                    "threadSettings": {"model": "gpt-5.6-mini", "effort": "medium"},
+                },
+            }
+        )
+        await settle()
+        assert adapter.advertise().selected_model_key == "gpt-5.6-mini"
+        assert adapter.advertise().selected_effort == "medium"
+
+        transport.emit(
+            {
+                "method": "thread/settings/updated",
+                "params": {
+                    "threadId": "thread-1",
+                    "threadSettings": {"model": "gpt-5.6-sol", "effort": "low"},
+                },
+            }
+        )
+        await settle()
+        assert (await adapter.snapshot()).control == "failed"
+        assert "outside the deliberate adapter setter" in str(
+            (await adapter.snapshot()).raw["protocolError"]
+        )
+    finally:
+        await adapter.stop("forced")
+
+
+@pytest.mark.anyio
+async def test_idempotent_codex_set_is_immediate_without_invented_effective_evidence() -> None:
+    data = fixture()
+    transport = FakeCodexTransport()
+    prime_start(transport, data)
+    adapter = make_adapter(transport)
+    await adapter.start(launch())
+    try:
+        model = await adapter.set_model("gpt-5.6-sol")
+        effort = await adapter.set_effort("xhigh")
+        assert (model.acceptance, model.effective_value) == ("immediate", None)
+        assert (effort.acceptance, effort.effective_value) == ("immediate", None)
+    finally:
+        await adapter.stop("forced")
 
 
 @pytest.mark.anyio

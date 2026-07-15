@@ -35,6 +35,10 @@ class HarnessProtocolAdapter(Protocol):
 
     def advertise(self) -> CapabilitySnapshot: ...
 
+    async def set_model(self, model_key: str) -> SetResult: ...
+
+    async def set_effort(self, effort: str) -> SetResult: ...
+
     async def snapshot(self) -> AdapterSnapshot: ...
 
     def subscribe(self) -> AsyncIterator[AdapterEvent]: ...
@@ -71,7 +75,7 @@ class LaunchableHarnessProtocolAdapter(
     HarnessCapabilityDiscoverer,
     Protocol,
 ):
-    """L2 adapter seam: runtime protocol plus token-free discovery and native launch knobs."""
+    """Native runtime plus token-free discovery, launch knobs, and live capability setters."""
 
     def launch_knobs(self, *, model_key: str, effort: str | None) -> LaunchKnobs: ...
 
@@ -149,6 +153,22 @@ class UnsupportedHarnessProtocolAdapter:
     def launch_knobs(self, *, model_key: str, effort: str | None) -> LaunchKnobs:
         del model_key, effort
         raise HarnessControlError(f"no protocol adapter is registered for {self._harness_id!r}")
+
+    async def set_model(self, model_key: str) -> SetResult:
+        return SetResult(
+            ok=False,
+            acceptance="unsupported",
+            requested_value=model_key,
+            detail=f"no protocol adapter is registered for {self._harness_id!r}",
+        )
+
+    async def set_effort(self, effort: str) -> SetResult:
+        return SetResult(
+            ok=False,
+            acceptance="unsupported",
+            requested_value=effort,
+            detail=f"no protocol adapter is registered for {self._harness_id!r}",
+        )
 
     def subscribe(self) -> AsyncIterator[AdapterEvent]:
         raise HarnessControlError("unsupported adapter has no event subscription")

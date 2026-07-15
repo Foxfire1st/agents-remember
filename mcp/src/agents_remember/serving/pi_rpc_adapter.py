@@ -14,6 +14,7 @@ from agents_remember.serving.harness_capabilities import (
     CapabilitySnapshot,
     LaunchKnobs,
     ModelCapability,
+    SetResult,
 )
 from agents_remember.serving.harness_control_models import (
     CONTROL_PROTOCOL_VERSION,
@@ -29,6 +30,10 @@ from agents_remember.serving.harness_control_models import (
     SubmissionReceipt,
 )
 from agents_remember.serving.harness_launch import ResolvedLaunch, verify_effective_launch
+from agents_remember.serving.pi_rpc_configuration import (
+    DEFAULT_PI_MUTATION_TIMEOUT_SECONDS,
+    PiRpcConfiguration,
+)
 from agents_remember.serving.pi_rpc_events import PiRpcEventMapper
 from agents_remember.serving.pi_rpc_process import PiRpcSubprocess, PiRpcTransport
 from agents_remember.serving.pi_rpc_protocol import (
@@ -69,6 +74,7 @@ class PiRpcAdapter:
         transport_factory: TransportFactory = PiRpcSubprocess,
         submission_limit: int = 256,
         interaction_limit: int = 64,
+        configuration_timeout_seconds: float = DEFAULT_PI_MUTATION_TIMEOUT_SECONDS,
         clock: Clock = lambda: datetime.now(UTC).isoformat(),
         expected_launch: ResolvedLaunch | None = None,
     ) -> None:
@@ -90,6 +96,15 @@ class PiRpcAdapter:
         self._transport_generation = 0
         self._transport_changed = asyncio.Event()
         self._stopped = False
+        self._configuration = PiRpcConfiguration(
+            transport=self._require_transport,
+            read_state=self._read_configuration_state,
+            read_capabilities=self._read_available_models,
+            capabilities=self.advertise,
+            commit=self._commit_configuration,
+            request_id=self._internal_id,
+            timeout_seconds=configuration_timeout_seconds,
+        )
 
     async def start(self, launch: LaunchSpec) -> AdapterHandshake:
         if self._transport is not None:
@@ -189,6 +204,14 @@ class PiRpcAdapter:
             argv=("--model", model_key, "--thinking", effort),
             owned_argv_options=("--model", "--thinking"),
         )
+
+    async def set_model(self, model_key: str) -> SetResult:
+        self._require_started()
+        return await self._configuration.set_model(model_key)
+
+    async def set_effort(self, effort: str) -> SetResult:
+        self._require_started()
+        return await self._configuration.set_effort(effort)
 
     async def _event_stream(self) -> AsyncIterator[AdapterEvent]:
         self._require_started()
@@ -354,6 +377,19 @@ class PiRpcAdapter:
         state = await self._request_state(self._require_transport())
         self._state = state
         return state
+
+    async def _read_configuration_state(self) -> PiSessionState:
+        """Read a candidate state without publishing it before catalog validation."""
+
+        return await self._request_state(self._require_transport())
+
+    def _commit_configuration(
+        self,
+        state: PiSessionState,
+        capabilities: CapabilitySnapshot,
+    ) -> None:
+        self._state = state
+        self._capabilities = capabilities
 
     async def _request_state(self, transport: PiRpcTransport) -> PiSessionState:
         request_id = self._internal_id("state")

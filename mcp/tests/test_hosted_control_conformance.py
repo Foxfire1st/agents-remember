@@ -13,7 +13,7 @@ from dataclasses import replace
 from pathlib import Path
 
 from agents_remember.errors import HarnessAdapterDisconnectedError, HarnessControlError
-from agents_remember.serving.harness_capabilities import CapabilitySnapshot
+from agents_remember.serving.harness_capabilities import CapabilitySnapshot, SetResult
 from agents_remember.serving.harness_control_bridge import HarnessControlBridge
 from agents_remember.serving.harness_control_client import (
     read_control_snapshot,
@@ -91,6 +91,20 @@ class _Adapter:
 
     def subscribe(self) -> AsyncIterator[AdapterEvent]:
         return self._subscribe()
+
+    async def set_model(self, model_key: str) -> SetResult:
+        return SetResult(
+            ok=True,
+            acceptance="immediate",
+            requested_value=model_key,
+        )
+
+    async def set_effort(self, effort: str) -> SetResult:
+        return SetResult(
+            ok=True,
+            acceptance="immediate",
+            requested_value=effort,
+        )
 
     async def submit(self, request: PromptRequest) -> SubmissionReceipt:
         if self.disconnect_next:

@@ -99,9 +99,11 @@ class CodexAppServerSession:
         self.thread_id: str | None = None
         self.cli_version: str | None = None
         self.model: CodexModelCapability | None = None
+        self.desired_model: CodexModelCapability | None = None
         self.models: tuple[CodexModelCapability, ...] = ()
         self.desired_effort: str | None = None
         self.effective_effort: str | None = None
+        self._settings_overridden = False
 
     async def connect(
         self,
@@ -117,9 +119,19 @@ class CodexAppServerSession:
             await transport.start(launch)
             cli_version, initialize_evidence = await self._initialize(transport)
             models = await self._read_models(transport)
-            selected = select_model(models, self.settings.model)
-            desired_effort = self.settings.reasoning_effort or selected.default_effort
+            requested_model = (
+                self.desired_model.model
+                if self._settings_overridden and self.desired_model is not None
+                else self.settings.model
+            )
+            selected = select_model(models, requested_model)
+            desired_effort = (
+                self.desired_effort
+                if self._settings_overridden and self.desired_effort is not None
+                else self.settings.reasoning_effort or selected.default_effort
+            )
             validate_reasoning_effort(selected, desired_effort)
+            self.desired_model = selected
             self.desired_effort = desired_effort
             method = "thread/resume" if resume_thread_id else "thread/start"
             response = await transport.request(
@@ -155,6 +167,7 @@ class CodexAppServerSession:
             self.thread_id = thread.thread_id
             self.cli_version = cli_version
             self.model = selected
+            self.desired_model = selected
             self.models = models
             self.effective_effort = thread.effective_effort
             activity, acceptance = activity_from_thread_status(thread.status)
@@ -194,8 +207,87 @@ class CodexAppServerSession:
         finally:
             await transport.stop("forced")
 
-    def record_effective_effort(self, effort: str) -> None:
+    def set_desired_model(self, model_key: str) -> str | None:
+        target = next((model for model in self.models if model.model == model_key), None)
+        if target is None:
+            advertised = ", ".join(model.model for model in self.models)
+            raise CodexAppServerError(
+                f"Codex model {model_key!r} is not dynamically advertised; options: {advertised}"
+            )
+        current = self.require_desired_model()
+        if target.model == current.model:
+            return None
+        self.desired_model = target
+        self._settings_overridden = True
+        desired_effort = self.require_desired_effort()
+        if desired_effort in target.supported_efforts:
+            return None
+        self.desired_effort = target.default_effort
+        return (
+            f"reasoning effort {desired_effort!r} is unavailable for {target.model!r}; "
+            f"rebased to its dynamic default {target.default_effort!r}"
+        )
+
+    def set_desired_effort(self, effort: str) -> None:
+        model = self.require_desired_model()
+        validate_reasoning_effort(model, effort)
+        if effort == self.desired_effort:
+            return
+        self.desired_effort = effort
+        self._settings_overridden = True
+
+    @property
+    def has_pending_settings(self) -> bool:
+        desired = self.desired_model
+        effective = self.model
+        return bool(
+            desired is not None
+            and effective is not None
+            and (
+                desired.model != effective.model
+                or self.desired_effort != self.effective_effort
+            )
+        )
+
+    def accept_settings_selection(
+        self,
+        *,
+        model: CodexModelCapability,
+        effort: str,
+    ) -> None:
+        """Promote only the selection carried by one accepted turn submission."""
+
+        catalog_model = next(
+            (candidate for candidate in self.models if candidate.model == model.model),
+            None,
+        )
+        if catalog_model is None or catalog_model != model:
+            raise CodexAppServerError(
+                "Codex accepted turn selection is absent from the negotiated model catalog"
+            )
+        validate_reasoning_effort(catalog_model, effort)
+        self.model = catalog_model
         self.effective_effort = effort
+
+    def accept_settings_update(self, *, model: str, effort: str) -> bool:
+        desired = self.require_desired_model()
+        desired_effort = self.require_desired_effort()
+        if model == desired.model and effort == desired_effort:
+            changed = self.has_pending_settings
+            self.accept_settings_selection(model=desired, effort=desired_effort)
+            return changed
+        effective = self.model
+        if (
+            self.has_pending_settings
+            and effective is not None
+            and model == effective.model
+            and effort == self.effective_effort
+        ):
+            return False
+        raise CodexAppServerError(
+            "Codex thread/settings/updated changed model or reasoning effort outside the "
+            "deliberate adapter setter"
+        )
 
     def capability_snapshot(self) -> JsonObject:
         model = self.model
@@ -207,10 +299,12 @@ class CodexAppServerSession:
             "codexCliVersion": self.cli_version,
             "experimentalApi": False,
             "model": model.model if model else None,
+            "desiredModel": self.desired_model.model if self.desired_model else None,
             "advertisedReasoningEfforts": list(model.supported_efforts) if model else [],
             "defaultReasoningEffort": model.default_effort if model else None,
             "desiredReasoningEffort": self.desired_effort,
             "effectiveReasoningEffort": self.effective_effort,
+            "settingsPending": self.has_pending_settings,
             "busyPolicy": self.settings.busy_policy,
         }
 
@@ -302,12 +396,20 @@ class CodexAppServerSession:
         assert self.launch is not None
         config = dict(self.settings.config)
         configured_model = config.get("model")
-        if configured_model is not None and configured_model != selected.model:
+        if (
+            not self._settings_overridden
+            and configured_model is not None
+            and configured_model != selected.model
+        ):
             raise CodexAppServerError(
                 "Codex thread config model conflicts with the dynamically selected model"
             )
         configured_effort = config.get("model_reasoning_effort")
-        if configured_effort is not None and configured_effort != desired_effort:
+        if (
+            not self._settings_overridden
+            and configured_effort is not None
+            and configured_effort != desired_effort
+        ):
             raise CodexAppServerError(
                 "Codex thread config model_reasoning_effort conflicts with the settings desired effort"
             )
@@ -335,3 +437,8 @@ class CodexAppServerSession:
         if self.desired_effort is None:
             raise CodexAppServerError("Codex session has not resolved a reasoning effort")
         return self.desired_effort
+
+    def require_desired_model(self) -> CodexModelCapability:
+        if self.desired_model is None:
+            raise CodexAppServerError("Codex session has not resolved a desired model")
+        return self.desired_model

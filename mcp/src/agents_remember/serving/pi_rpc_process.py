@@ -75,10 +75,13 @@ class PiRpcSubprocess:
         self._pending[request_id] = future
         try:
             await self.send(command)
+            return await future
+        except asyncio.CancelledError:
+            self._pending.pop(request_id, None)
+            raise
         except HarnessControlError:
             self._pending.pop(request_id, None)
             raise
-        return await future
 
     async def send(self, command: Mapping[str, object]) -> None:
         self._raise_if_failed(_optional_command_id(command))
@@ -188,7 +191,9 @@ class PiRpcSubprocess:
                 raise HarnessControlError("Pi RPC response requires a non-empty correlation id")
             future = self._pending.pop(request_id, None)
             if future is None:
-                raise HarnessControlError(f"unexpected Pi RPC response id: {request_id}")
+                # Cancelled callers leave no consumable future. A later correlated response is
+                # therefore stale and can be dropped without retaining an unbounded tombstone.
+                return
             if not future.done():
                 future.set_result(frame)
             return

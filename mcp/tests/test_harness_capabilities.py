@@ -1,8 +1,11 @@
 from __future__ import annotations
 
-from typing import cast
+from pathlib import Path
+from typing import Any, cast
 
+import pytest
 from agents_remember.serving.harness_capabilities import (
+    SET_ACCEPTANCE_VALUES,
     CapabilitySnapshot,
     EffortOption,
     ModelCapability,
@@ -127,6 +130,13 @@ def test_acp_projection_omits_selects_without_an_honest_current_value() -> None:
 
 
 def test_set_result_serialization_keeps_the_five_value_acceptance_contract() -> None:
+    assert {
+        "echo-verified",
+        "immediate",
+        "queued",
+        "unknown",
+        "unsupported",
+    } == SET_ACCEPTANCE_VALUES
     result = SetResult(
         ok=True,
         acceptance="echo-verified",
@@ -142,3 +152,43 @@ def test_set_result_serialization_keeps_the_five_value_acceptance_contract() -> 
         "effectiveValue": "high",
         "detail": "provider clamped the requested effort",
     }
+    with pytest.raises(ValueError, match="unsupported acceptance"):
+        set_result_json(SetResult(False, cast(Any, "garbage"), "max"))
+
+
+def test_native_setter_modules_have_no_terminal_or_chat_paste_dependency() -> None:
+    serving = Path(__file__).resolve().parents[1] / "src" / "agents_remember" / "serving"
+    sources = "\n".join(
+        (serving / name).read_text(encoding="utf-8")
+        for name in (
+            "harness_capabilities.py",
+            "harness_control_adapter.py",
+            "harness_control_bridge.py",
+            "harness_control_queue.py",
+            "harness_control_claude.py",
+            "claude_stream_state.py",
+            "claude_stream_protocol.py",
+            "claude_stream_transport.py",
+            "claude_stream_submission.py",
+            "codex_app_server_adapter.py",
+            "codex_app_server_session.py",
+            "codex_app_server_state.py",
+            "codex_app_server_protocol.py",
+            "pi_rpc_configuration.py",
+            "pi_rpc_adapter.py",
+            "pi_rpc_process.py",
+            "pi_rpc_protocol.py",
+        )
+    )
+
+    for forbidden in (
+        "RailChat",
+        "Chats",
+        "sessionCommands",
+        "tmux",
+        "terminal_paste",
+        "injector",
+        "composer",
+        "harness_terminal_surface",
+    ):
+        assert forbidden not in sources

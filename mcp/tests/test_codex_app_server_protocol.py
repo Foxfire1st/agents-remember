@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import sys
 from pathlib import Path
 
@@ -86,6 +87,61 @@ async def test_stdio_transport_fails_oversized_stream_message_loudly(tmp_path: P
     try:
         with pytest.raises(CodexAppServerError, match="stream limit"):
             await anext(messages)
+    finally:
+        await transport.stop("forced")
+
+
+@pytest.mark.anyio
+async def test_cancelled_request_neutralizes_late_response_and_next_request_survives(
+    tmp_path: Path,
+) -> None:
+    script = r"""
+import json
+import sys
+
+first = json.loads(sys.stdin.readline())
+second = json.loads(sys.stdin.readline())
+print(json.dumps({"id": first["id"], "result": {"late": True}}), flush=True)
+print(json.dumps({"id": second["id"], "result": {"pong": True}}), flush=True)
+"""
+    transport = CodexStdioTransport()
+    await transport.start(launch(tmp_path, script))
+    try:
+        cancelled = asyncio.create_task(transport.request("slow", {}))
+        await asyncio.sleep(0.01)
+        cancelled.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await cancelled
+        assert await transport.request("ping", {}) == {"pong": True}
+    finally:
+        await transport.stop("forced")
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("size", [8, 64])
+async def test_cancelled_requests_without_responses_need_no_retained_tombstones(
+    tmp_path: Path,
+    size: int,
+) -> None:
+    script = f"""
+import json
+import sys
+
+for _ in range({size}):
+    json.loads(sys.stdin.readline())
+next_request = json.loads(sys.stdin.readline())
+print(json.dumps({{"id": next_request["id"], "result": {{"pong": True}}}}), flush=True)
+"""
+    transport = CodexStdioTransport()
+    await transport.start(launch(tmp_path, script))
+    try:
+        for index in range(size):
+            cancelled = asyncio.create_task(transport.request(f"slow-{index}", {}))
+            await asyncio.sleep(0.001)
+            cancelled.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await cancelled
+        assert await transport.request("ping", {}) == {"pong": True}
     finally:
         await transport.stop("forced")
 

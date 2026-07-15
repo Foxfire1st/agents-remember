@@ -100,6 +100,10 @@ class _FakePiTransport:
         self.commands: list[dict[str, object]] = []
         self.stop_modes: list[ShutdownMode] = []
         self.prompt_failures: deque[HarnessAdapterDisconnectedError] = deque()
+        self.thinking_clamps: dict[str, str] = {}
+        self.command_failures: dict[str, deque[Exception]] = {}
+        self.command_hangs: dict[str, int] = {}
+        self.hide_selected_model_after_set = False
         self.event_queue: asyncio.Queue[
             Mapping[str, object] | HarnessControlError | HarnessAdapterDisconnectedError | None
         ] = asyncio.Queue()
@@ -112,6 +116,13 @@ class _FakePiTransport:
         self.commands.append(copied)
         request_id = cast(str, command["id"])
         command_type = cast(str, command["type"])
+        remaining_hangs = self.command_hangs.get(command_type, 0)
+        if remaining_hangs:
+            self.command_hangs[command_type] = remaining_hangs - 1
+            await asyncio.Future()
+        failures = self.command_failures.get(command_type)
+        if failures:
+            raise failures.popleft()
         if command_type == "get_state":
             return _success(request_id, "get_state", dict(self.session))
         if command_type == "get_entries":
@@ -146,6 +157,44 @@ class _FakePiTransport:
                 "get_available_models",
                 {"models": self.models},
             )
+        if command_type == "set_model":
+            key = f"{command.get('provider')}/{command.get('modelId')}"
+            selected = next(
+                (
+                    model
+                    for model in self.models
+                    if f"{model['provider']}/{model['id']}" == key
+                ),
+                None,
+            )
+            if selected is None:
+                return {
+                    "id": request_id,
+                    "type": "response",
+                    "command": "set_model",
+                    "success": False,
+                    "error": f"Model not found: {key}",
+                }
+            self.session["model"] = dict(selected)
+            if selected.get("reasoning") is False:
+                self.session["thinkingLevel"] = "off"
+            if self.hide_selected_model_after_set:
+                self.models.remove(selected)
+            return {
+                "id": request_id,
+                "type": "response",
+                "command": "set_model",
+                "success": True,
+            }
+        if command_type == "set_thinking_level":
+            requested = cast(str, command["level"])
+            self.session["thinkingLevel"] = self.thinking_clamps.get(requested, requested)
+            return {
+                "id": request_id,
+                "type": "response",
+                "command": "set_thinking_level",
+                "success": True,
+            }
         if command_type == "prompt":
             if self.prompt_failures:
                 raise self.prompt_failures.popleft()
@@ -437,6 +486,194 @@ class PiRpcAdapterTests(unittest.IsolatedAsyncioTestCase):
             )
         finally:
             await adapter.stop("forced")
+
+    async def test_set_model_uses_exact_provider_id_and_vendor_error_readback(self) -> None:
+        transport = _FakePiTransport()
+        transport.models.append(
+            {
+                "id": "nested/model-id",
+                "name": "Nested Test",
+                "api": "test",
+                "provider": "provider-x",
+                "reasoning": True,
+                "thinkingLevelMap": {"high": "high"},
+            }
+        )
+        adapter = PiRpcAdapter(transport_factory=_TransportSequence(transport))
+        await adapter.start(_launch())
+        try:
+            changed = await adapter.set_model("provider-x/nested/model-id")
+            self.assertEqual(
+                (changed.ok, changed.acceptance, changed.effective_value),
+                (True, "echo-verified", "provider-x/nested/model-id"),
+            )
+            set_command = next(
+                command for command in transport.commands if command["type"] == "set_model"
+            )
+            self.assertEqual(set_command["provider"], "provider-x")
+            self.assertEqual(set_command["modelId"], "nested/model-id")
+            self.assertEqual(adapter.advertise().selected_model_key, "provider-x/nested/model-id")
+
+            unknown = await adapter.set_model("provider-x/not-authorized")
+            self.assertEqual((unknown.ok, unknown.acceptance), (False, "unsupported"))
+            self.assertEqual(unknown.detail, "Model not found: provider-x/not-authorized")
+
+            write_count = len(transport.commands)
+            malformed = await adapter.set_model("missing-provider-qualification")
+            self.assertEqual((malformed.ok, malformed.acceptance), (False, "unsupported"))
+            self.assertEqual(len(transport.commands), write_count)
+        finally:
+            await adapter.stop("forced")
+
+    async def test_set_thinking_reports_exact_and_clamped_readback_without_notification(self) -> None:
+        transport = _FakePiTransport()
+        thinking_map = transport.models[0]["thinkingLevelMap"]
+        assert isinstance(thinking_map, dict)
+        thinking_map["xhigh"] = "xhigh"
+        transport.thinking_clamps["xhigh"] = "high"
+        adapter = PiRpcAdapter(transport_factory=_TransportSequence(transport))
+        await adapter.start(_launch())
+        try:
+            exact = await adapter.set_effort("low")
+            self.assertEqual(
+                (exact.ok, exact.acceptance, exact.requested_value, exact.effective_value),
+                (True, "echo-verified", "low", "low"),
+            )
+
+            transport.session["thinkingLevel"] = "high"
+            clamped = await adapter.set_effort("xhigh")
+            self.assertEqual(
+                (
+                    clamped.ok,
+                    clamped.acceptance,
+                    clamped.requested_value,
+                    clamped.effective_value,
+                ),
+                (True, "echo-verified", "xhigh", "high"),
+            )
+            self.assertIn("clamped", clamped.detail or "")
+            self.assertTrue(transport.event_queue.empty())
+            self.assertEqual(
+                [command["type"] for command in transport.commands[-3:]],
+                ["set_thinking_level", "get_state", "get_available_models"],
+            )
+
+            write_count = len(transport.commands)
+            arbitrary = await adapter.set_effort("vendor-invented-token")
+            self.assertEqual((arbitrary.ok, arbitrary.acceptance), (False, "unsupported"))
+            self.assertEqual(len(transport.commands), write_count)
+        finally:
+            await adapter.stop("forced")
+
+    async def test_model_then_effort_uses_new_model_gate(self) -> None:
+        transport = _FakePiTransport()
+        adapter = PiRpcAdapter(transport_factory=_TransportSequence(transport))
+        await adapter.start(_launch())
+        try:
+            model = await adapter.set_model("local/chat-test")
+            self.assertEqual(model.acceptance, "echo-verified")
+            self.assertEqual(adapter.advertise().selected_model_key, "local/chat-test")
+            self.assertEqual(adapter.advertise().selected_effort, "off")
+
+            effort = await adapter.set_effort("high")
+            self.assertEqual(
+                (effort.ok, effort.acceptance, effort.effective_value),
+                (False, "unsupported", None),
+            )
+            self.assertEqual(adapter.advertise().selected_effort, "off")
+        finally:
+            await adapter.stop("forced")
+
+    async def test_set_timeout_never_claims_effect_without_readback(self) -> None:
+        transport = _FakePiTransport()
+        adapter = PiRpcAdapter(transport_factory=_TransportSequence(transport))
+        await adapter.start(_launch())
+        try:
+            transport.command_failures["get_state"] = deque([TimeoutError()])
+            result = await adapter.set_model("local/chat-test")
+            self.assertEqual((result.ok, result.acceptance), (False, "unknown"))
+            self.assertIsNone(result.effective_value)
+        finally:
+            await adapter.stop("forced")
+
+    async def test_mutation_state_and_catalog_timeouts_release_shared_control_queue(self) -> None:
+        for stalled_command in ("set_model", "get_state", "get_available_models"):
+            with self.subTest(stalled_command=stalled_command):
+                transport = _FakePiTransport()
+                adapter = PiRpcAdapter(
+                    transport_factory=_TransportSequence(transport),
+                    configuration_timeout_seconds=0.01,
+                )
+                bridge = HarnessControlBridge(_identity(), adapter)
+                await bridge.start(_launch())
+                try:
+                    transport.command_hangs[stalled_command] = 1
+                    timed_out = await asyncio.wait_for(
+                        bridge.set_model("local/chat-test"),
+                        timeout=1.0,
+                    )
+                    self.assertEqual(
+                        (timed_out.ok, timed_out.acceptance, timed_out.effective_value),
+                        (False, "unknown", None),
+                    )
+                    later = await asyncio.wait_for(
+                        bridge.set_model("anthropic/claude-test"),
+                        timeout=1.0,
+                    )
+                    self.assertEqual((later.ok, later.acceptance), (True, "echo-verified"))
+                    self.assertEqual(
+                        adapter.advertise().selected_model_key,
+                        "anthropic/claude-test",
+                    )
+                finally:
+                    await bridge.stop("forced")
+
+    async def test_incoherent_pi_readback_never_promotes_or_breaks_advertise(self) -> None:
+        clamp_transport = _FakePiTransport()
+        thinking_map = clamp_transport.models[0]["thinkingLevelMap"]
+        assert isinstance(thinking_map, dict)
+        thinking_map["xhigh"] = "xhigh"
+        clamp_transport.thinking_clamps["xhigh"] = "vendor-weird"
+        clamp_adapter = PiRpcAdapter(
+            transport_factory=_TransportSequence(clamp_transport)
+        )
+        await clamp_adapter.start(_launch())
+        try:
+            invalid_clamp = await clamp_adapter.set_effort("xhigh")
+            self.assertEqual(
+                (invalid_clamp.ok, invalid_clamp.acceptance, invalid_clamp.effective_value),
+                (False, "unknown", None),
+            )
+            self.assertEqual(clamp_adapter.advertise().selected_effort, "high")
+        finally:
+            await clamp_adapter.stop("forced")
+
+        model_transport = _FakePiTransport()
+        model_transport.models.append(
+            {
+                "id": "ephemeral-model",
+                "name": "Ephemeral Model",
+                "api": "test",
+                "provider": "provider-x",
+                "reasoning": True,
+                "thinkingLevelMap": {"high": "high"},
+            }
+        )
+        model_transport.hide_selected_model_after_set = True
+        model_adapter = PiRpcAdapter(transport_factory=_TransportSequence(model_transport))
+        await model_adapter.start(_launch())
+        try:
+            invalid_model = await model_adapter.set_model("provider-x/ephemeral-model")
+            self.assertEqual(
+                (invalid_model.ok, invalid_model.acceptance, invalid_model.effective_value),
+                (False, "unknown", None),
+            )
+            self.assertEqual(
+                model_adapter.advertise().selected_model_key,
+                "anthropic/claude-test",
+            )
+        finally:
+            await model_adapter.stop("forced")
 
     async def test_streaming_prompts_use_source_specific_queue_behavior(self) -> None:
         transport = _FakePiTransport()

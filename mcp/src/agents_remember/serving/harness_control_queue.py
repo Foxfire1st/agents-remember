@@ -6,8 +6,10 @@ import asyncio
 from collections import OrderedDict
 from collections.abc import Callable
 from dataclasses import dataclass, replace
+from typing import TypeVar
 
 from agents_remember.errors import HarnessAdapterDisconnectedError, HarnessControlError
+from agents_remember.serving.harness_capabilities import SET_ACCEPTANCE_VALUES, SetResult
 from agents_remember.serving.harness_control_adapter import HarnessProtocolAdapter
 from agents_remember.serving.harness_control_models import (
     AdapterSnapshot,
@@ -22,6 +24,7 @@ Clock = Callable[[], str]
 SnapshotGetter = Callable[[], AdapterSnapshot]
 SnapshotSetter = Callable[[AdapterSnapshot], None]
 Publisher = Callable[[], None]
+T = TypeVar("T")
 
 
 @dataclass
@@ -51,6 +54,18 @@ class _ResolveCommand:
 
 
 @dataclass
+class _SetModelCommand:
+    model_key: str
+    future: asyncio.Future[SetResult]
+
+
+@dataclass
+class _SetEffortCommand:
+    effort: str
+    future: asyncio.Future[SetResult]
+
+
+@dataclass
 class _StopCommand:
     future: asyncio.Future[None]
 
@@ -71,7 +86,13 @@ class HarnessControlQueue:
     ) -> None:
         self._adapter = adapter
         self._commands: asyncio.Queue[
-            _SubmitCommand | _RespondCommand | _ReconcileCommand | _ResolveCommand | _StopCommand
+            _SubmitCommand
+            | _RespondCommand
+            | _ReconcileCommand
+            | _ResolveCommand
+            | _SetModelCommand
+            | _SetEffortCommand
+            | _StopCommand
         ] = asyncio.Queue(maxsize=queue_limit)
         self._submissions: OrderedDict[str, SubmissionReceipt] = OrderedDict()
         self._pending_submissions: set[str] = set()
@@ -140,6 +161,16 @@ class HarnessControlQueue:
         self._put(_ResolveCommand(request_id=request_id, state=state, detail=detail, future=future))
         return await future
 
+    async def set_model(self, model_key: str) -> SetResult:
+        future = asyncio.get_running_loop().create_future()
+        self._put(_SetModelCommand(model_key=model_key, future=future))
+        return await future
+
+    async def set_effort(self, effort: str) -> SetResult:
+        future = asyncio.get_running_loop().create_future()
+        self._put(_SetEffortCommand(effort=effort, future=future))
+        return await future
+
     async def graceful_stop(self) -> None:
         self._require_accepting()
         self._accepting = False
@@ -180,7 +211,13 @@ class HarnessControlQueue:
 
     def _put(
         self,
-        command: _RespondCommand | _ReconcileCommand | _ResolveCommand,
+        command: (
+            _RespondCommand
+            | _ReconcileCommand
+            | _ResolveCommand
+            | _SetModelCommand
+            | _SetEffortCommand
+        ),
     ) -> None:
         self._require_accepting()
         try:
@@ -257,6 +294,8 @@ class HarnessControlQueue:
         | _RespondCommand
         | _ReconcileCommand
         | _ResolveCommand
+        | _SetModelCommand
+        | _SetEffortCommand
         | _StopCommand,
     ) -> bool:
         if isinstance(command, _SubmitCommand):
@@ -267,6 +306,10 @@ class HarnessControlQueue:
             await self._execute_reconcile(command)
         elif isinstance(command, _ResolveCommand):
             self._execute_resolution(command)
+        elif isinstance(command, _SetModelCommand):
+            await self._execute_set_model(command)
+        elif isinstance(command, _SetEffortCommand):
+            await self._execute_set_effort(command)
         else:
             await self._execute_stop(command)
             return True
@@ -283,7 +326,7 @@ class HarnessControlQueue:
             )
         )
         self._publish()
-        command.future.set_result(None)
+        self._complete_future(command.future, None)
 
     async def _execute_submit(self, command: _SubmitCommand) -> None:
         try:
@@ -309,7 +352,7 @@ class HarnessControlQueue:
             raise HarnessControlError("adapter receipt request id does not match the submission")
         self._remember(receipt)
         self._pending_submissions.discard(command.request.request_id)
-        command.future.set_result(receipt)
+        self._complete_future(command.future, receipt)
 
     async def _execute_response(self, command: _RespondCommand) -> None:
         await self._adapter.respond(command.response)
@@ -320,7 +363,7 @@ class HarnessControlQueue:
             )
         self._set_snapshot(snapshot)
         self._publish()
-        command.future.set_result(snapshot)
+        self._complete_future(command.future, snapshot)
 
     async def _execute_reconcile(self, command: _ReconcileCommand) -> None:
         self._require_unknown(command.request_id, action="reconciled")
@@ -328,7 +371,21 @@ class HarnessControlQueue:
         if result.request_id != command.request_id:
             raise HarnessControlError("adapter reconciliation request id does not match")
         self._apply_reconciliation(result)
-        command.future.set_result(result)
+        self._complete_future(command.future, result)
+
+    async def _execute_set_model(self, command: _SetModelCommand) -> None:
+        result = await self._adapter.set_model(command.model_key)
+        self._validate_set_result(result, command.model_key)
+        if result.acceptance in {"immediate", "queued"}:
+            await self._refresh_snapshot_after_set()
+        self._complete_future(command.future, result)
+
+    async def _execute_set_effort(self, command: _SetEffortCommand) -> None:
+        result = await self._adapter.set_effort(command.effort)
+        self._validate_set_result(result, command.effort)
+        if result.acceptance in {"immediate", "queued"}:
+            await self._refresh_snapshot_after_set()
+        self._complete_future(command.future, result)
 
     def _execute_resolution(self, command: _ResolveCommand) -> None:
         self._require_unknown(command.request_id, action="operator-resolved")
@@ -339,7 +396,14 @@ class HarnessControlQueue:
             detail=command.detail,
         )
         self._apply_reconciliation(result)
-        command.future.set_result(result)
+        self._complete_future(command.future, result)
+
+    async def _refresh_snapshot_after_set(self) -> None:
+        snapshot = await self._adapter.snapshot()
+        if snapshot.identity != self._snapshot().identity:
+            raise HarnessControlError("adapter snapshot identity changed after capability mutation")
+        self._set_snapshot(snapshot)
+        self._publish()
 
     def _apply_reconciliation(self, result: ReconciliationResult) -> None:
         prior = self._submissions.get(result.request_id)
@@ -370,6 +434,8 @@ class HarnessControlQueue:
         | _RespondCommand
         | _ReconcileCommand
         | _ResolveCommand
+        | _SetModelCommand
+        | _SetEffortCommand
         | _StopCommand,
         error: HarnessControlError,
         *,
@@ -405,6 +471,42 @@ class HarnessControlQueue:
             )
         )
         self._publish()
+
+    @staticmethod
+    def _validate_set_result(result: SetResult, requested_value: str) -> None:
+        if result.requested_value != requested_value:
+            raise HarnessControlError("adapter set result does not match the requested value")
+        if result.acceptance not in SET_ACCEPTANCE_VALUES:
+            raise HarnessControlError(
+                f"adapter set result has unsupported acceptance {result.acceptance!r}"
+            )
+        if result.acceptance == "echo-verified":
+            if not result.ok or result.effective_value is None:
+                raise HarnessControlError(
+                    "echo-verified adapter set result requires an evidenced effective value"
+                )
+            return
+        if result.acceptance in {"immediate", "queued"}:
+            if not result.ok:
+                raise HarnessControlError(
+                    f"{result.acceptance} adapter set result must be accepted"
+                )
+            if result.effective_value is not None:
+                raise HarnessControlError(
+                    f"{result.acceptance} adapter set result cannot claim an effective value"
+                )
+            return
+        if result.ok or result.effective_value is not None:
+            raise HarnessControlError(
+                f"{result.acceptance} adapter set result cannot claim acceptance or effect"
+            )
+
+    @staticmethod
+    def _complete_future(future: asyncio.Future[T], result: T) -> None:
+        """Leave a caller-cancelled command unobserved without terminating the queue."""
+
+        if not future.done():
+            future.set_result(result)
 
     @staticmethod
     def _unexpected_adapter_error(error: Exception) -> HarnessControlError:

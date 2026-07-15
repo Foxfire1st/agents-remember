@@ -97,10 +97,13 @@ class CodexStdioTransport:
         self._pending[request_id] = (method, future)
         try:
             await self._write({"id": request_id, "method": method, "params": dict(params)})
+            return await future
+        except asyncio.CancelledError:
+            self._pending.pop(request_id, None)
+            raise
         except HarnessAdapterDisconnectedError:
             self._pending.pop(request_id, None)
             raise
-        return await future
 
     async def notify(self, method: str, params: Mapping[str, object]) -> None:
         await self._write({"method": method, "params": dict(params)})
@@ -216,9 +219,18 @@ class CodexStdioTransport:
 
     def _resolve_response(self, message: JsonObject) -> None:
         response_id = message.get("id")
-        if not isinstance(response_id, int) or response_id not in self._pending:
-            raise CodexAppServerError("Codex app-server response has an unknown request id")
-        method, future = self._pending.pop(response_id)
+        if (
+            not isinstance(response_id, int)
+            or isinstance(response_id, bool)
+            or response_id < 1
+        ):
+            raise CodexAppServerError("Codex app-server response has an invalid request id")
+        pending = self._pending.pop(response_id, None)
+        if pending is None:
+            # A caller may cancel after the request is written. Once its future is removed, a
+            # syntactically valid late response cannot satisfy any live request and is discarded.
+            return
+        method, future = pending
         error = message.get("error")
         if error is not None:
             if not isinstance(error, dict):

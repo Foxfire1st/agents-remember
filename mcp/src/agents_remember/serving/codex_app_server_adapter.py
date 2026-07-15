@@ -42,7 +42,11 @@ from agents_remember.serving.codex_app_server_state import (
     terminal_result,
     transcript_from_item,
 )
-from agents_remember.serving.harness_capabilities import CapabilitySnapshot, LaunchKnobs
+from agents_remember.serving.harness_capabilities import (
+    CapabilitySnapshot,
+    LaunchKnobs,
+    SetResult,
+)
 from agents_remember.serving.harness_control_models import (
     CONTROL_PROTOCOL_VERSION,
     REQUIRED_ADAPTER_CAPABILITIES,
@@ -82,6 +86,7 @@ class CodexAppServerAdapter:
         self._pending_interaction: CodexServerInteraction | None = None
         self._submissions = CodexSubmissionLedger(settings.submission_limit)
         self._busy_queue: deque[SubmissionEvidence] = deque()
+        self._fresh_turn_required = False
         self._event_sequence = 0
         self._transcript_sequence = 0
 
@@ -145,6 +150,63 @@ class CodexAppServerAdapter:
             owned_config_keys=("model", "model_reasoning_effort"),
         )
 
+    async def set_model(self, model_key: str) -> SetResult:
+        self._require_ready()
+        try:
+            rebase_detail = self._session.set_desired_model(model_key)
+        except CodexAppServerError as exc:
+            return SetResult(
+                ok=False,
+                acceptance="unsupported",
+                requested_value=model_key,
+                detail=str(exc),
+            )
+        self._fresh_turn_required = self._session.has_pending_settings
+        self._refresh_capability_snapshot()
+        if not self._session.has_pending_settings:
+            return SetResult(
+                ok=True,
+                acceptance="immediate",
+                requested_value=model_key,
+                detail="Codex already has this model as its effective thread setting",
+            )
+        detail = "queued for the next fresh Codex turn on the existing thread"
+        if rebase_detail is not None:
+            detail = f"{detail}; {rebase_detail}"
+        return SetResult(
+            ok=True,
+            acceptance="queued",
+            requested_value=model_key,
+            detail=detail,
+        )
+
+    async def set_effort(self, effort: str) -> SetResult:
+        self._require_ready()
+        try:
+            self._session.set_desired_effort(effort)
+        except CodexAppServerError as exc:
+            return SetResult(
+                ok=False,
+                acceptance="unsupported",
+                requested_value=effort,
+                detail=str(exc),
+            )
+        self._fresh_turn_required = self._session.has_pending_settings
+        self._refresh_capability_snapshot()
+        if not self._session.has_pending_settings:
+            return SetResult(
+                ok=True,
+                acceptance="immediate",
+                requested_value=effort,
+                detail="Codex already has this effort as its effective thread setting",
+            )
+        return SetResult(
+            ok=True,
+            acceptance="queued",
+            requested_value=effort,
+            detail="queued for the next fresh Codex turn on the existing thread",
+        )
+
     async def _event_stream(self) -> AsyncIterator[AdapterEvent]:
         while True:
             event = await self._events.get()
@@ -157,7 +219,11 @@ class CodexAppServerAdapter:
 
     async def submit(self, request: PromptRequest) -> SubmissionReceipt:
         self._require_ready()
-        evidence = self._submissions.reserve(request)
+        evidence = self._submissions.reserve(
+            request,
+            model=self._session.require_desired_model(),
+            effort=self._session.require_desired_effort(),
+        )
         if evidence is None:
             return SubmissionReceipt(
                 request_id=request.request_id,
@@ -167,24 +233,43 @@ class CodexAppServerAdapter:
             )
         if self._active_turn_id is None:
             return await self._start_turn(evidence)
+        if self._fresh_turn_required:
+            return self._queue_submission(
+                evidence,
+                detail="queued for a fresh Codex turn because model/effort settings are pending",
+                policy="settings-change",
+            )
         if self._settings.busy_policy == "steer":
             return await self._steer_turn(evidence)
+        return self._queue_submission(
+            evidence,
+            detail="queued until the active Codex turn completes",
+            policy="queue",
+        )
+
+    def _queue_submission(
+        self,
+        evidence: SubmissionEvidence,
+        *,
+        detail: str,
+        policy: str,
+    ) -> SubmissionReceipt:
         if len(self._busy_queue) >= self._settings.busy_queue_limit:
             evidence.state = "rejected"
             return SubmissionReceipt(
-                request_id=request.request_id,
+                request_id=evidence.request.request_id,
                 acceptance="rejected",
-                submitted_at=request.submitted_at,
+                submitted_at=evidence.request.submitted_at,
                 detail="Codex busy queue is full",
             )
         evidence.state = "queued"
         self._busy_queue.append(evidence)
         return SubmissionReceipt(
-            request_id=request.request_id,
+            request_id=evidence.request.request_id,
             acceptance="queued",
-            submitted_at=request.submitted_at,
-            detail="queued until the active Codex turn completes",
-            raw={"busyPolicy": "queue", "queuePosition": len(self._busy_queue)},
+            submitted_at=evidence.request.submitted_at,
+            detail=detail,
+            raw={"busyPolicy": policy, "queuePosition": len(self._busy_queue)},
         )
 
     async def respond(self, response: InteractionResponse) -> None:
@@ -258,15 +343,15 @@ class CodexAppServerAdapter:
 
     async def _start_turn(self, evidence: SubmissionEvidence) -> SubmissionReceipt:
         launch = self._session.launch
-        model = self._session.model
-        assert launch is not None and model is not None
+        model = evidence.model
+        assert launch is not None
         params: JsonObject = {
             "threadId": self._require_thread_id(),
             "input": [{"type": "text", "text": evidence.request.text}],
             "clientUserMessageId": evidence.request.request_id,
             "model": model.model,
             "cwd": str(launch.cwd),
-            "effort": self._session.require_desired_effort(),
+            "effort": evidence.effort,
         }
         for key, value in (
             ("approvalPolicy", self._settings.approval_policy),
@@ -295,9 +380,29 @@ class CodexAppServerAdapter:
             ) from exc
         turn = parse_turn(result, context="turn/start response")
         turn_id = required_text(turn, "id", context="turn/start response.turn")
-        evidence.state = "accepted"
         evidence.turn_id = turn_id
-        if turn.get("status") == "inProgress":
+        status = required_text(turn, "status", context="turn/start response.turn")
+        if status in {"failed", "interrupted"}:
+            evidence.state = "rejected"
+            self._fresh_turn_required = self._session.has_pending_settings
+            self._refresh_capability_snapshot()
+            return SubmissionReceipt(
+                request_id=evidence.request.request_id,
+                acceptance="rejected",
+                submitted_at=evidence.request.submitted_at,
+                vendor_correlation_id=turn_id,
+                detail=f"Codex turn/start returned terminal status {status!r}",
+                raw={
+                    "method": "turn/start",
+                    "clientUserMessageId": evidence.request.request_id,
+                    "turnStatus": status,
+                },
+            )
+        evidence.state = "accepted" if status == "inProgress" else "completed"
+        self._session.accept_settings_selection(model=evidence.model, effort=evidence.effort)
+        self._fresh_turn_required = self._session.has_pending_settings
+        self._refresh_capability_snapshot()
+        if status == "inProgress":
             self._active_turn_id = turn_id
             await self._set_activity("running", turn_id=turn_id)
         return SubmissionReceipt(
@@ -493,35 +598,24 @@ class CodexAppServerAdapter:
         )
         effort = required_text(settings, "effort", context="thread/settings/updated")
         model = required_text(settings, "model", context="thread/settings/updated")
-        selected = self._session.model
-        assert selected is not None
-        if effort != self._session.require_desired_effort() or model != selected.model:
-            raise CodexAppServerError(
-                "Codex thread/settings/updated changed the configured model or reasoning effort"
-            )
-        self._session.record_effective_effort(effort)
-        assert self._snapshot is not None
-        self._snapshot = replace(
-            self._snapshot,
-            raw={**self._snapshot.raw, "effectiveReasoningEffort": effort},
-        )
+        self._session.accept_settings_update(model=model, effort=effort)
+        self._refresh_capability_snapshot()
 
     async def _dispatch_queued(self) -> None:
-        if not self._busy_queue or self._active_turn_id is not None:
-            return
-        evidence = self._busy_queue.popleft()
-        receipt = await self._start_turn(evidence)
-        if receipt.acceptance == "rejected":
-            assert self._snapshot is not None
-            self._snapshot = replace(
-                self._snapshot,
-                acceptance="rejected",
-                raw={
-                    **self._snapshot.raw,
-                    "queuedDispatchRejected": evidence.request.request_id,
-                },
-            )
-            await self._emit("state", raw={"codexMethod": "turn/start"})
+        while self._busy_queue and self._active_turn_id is None:
+            evidence = self._busy_queue.popleft()
+            receipt = await self._start_turn(evidence)
+            if receipt.acceptance == "rejected":
+                assert self._snapshot is not None
+                self._snapshot = replace(
+                    self._snapshot,
+                    acceptance="rejected",
+                    raw={
+                        **self._snapshot.raw,
+                        "queuedDispatchRejected": evidence.request.request_id,
+                    },
+                )
+                await self._emit("state", raw={"codexMethod": "turn/start"})
 
     async def _reconnect(self) -> None:
         thread_id = self._require_thread_id()
@@ -609,6 +703,18 @@ class CodexAppServerAdapter:
         thread_id = required_text(params, "threadId", context="Codex notification")
         if thread_id != self._session.thread_id:
             raise CodexAppServerError("Codex message belongs to a different thread")
+
+    def _refresh_capability_snapshot(self) -> None:
+        if self._snapshot is None:
+            return
+        self._snapshot = replace(
+            self._snapshot,
+            raw={
+                **self._snapshot.raw,
+                **self._session.capability_snapshot(),
+                "freshTurnRequired": self._fresh_turn_required,
+            },
+        )
 
     def _require_ready(self) -> None:
         if self._stopped:

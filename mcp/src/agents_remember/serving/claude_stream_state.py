@@ -21,6 +21,7 @@ from agents_remember.serving.claude_stream_protocol import (
     raw_message_text,
     result_detail,
     session_command,
+    session_command_replay_text,
     terminal_metadata,
     terminal_outcome,
 )
@@ -100,6 +101,16 @@ class ClaudeStreamState:
 
     async def submit(self, request: PromptRequest) -> SubmissionReceipt:
         self._require_available()
+        if any(record.abandoned and not record.completed for record in self._history.values()):
+            return SubmissionReceipt(
+                request_id=request.request_id,
+                acceptance="rejected",
+                submitted_at=request.submitted_at,
+                detail=(
+                    "Claude has not terminated an earlier abandoned session command; "
+                    "a later command was not sent"
+                ),
+            )
         command = session_command(request.text)
         if command is not None:
             unsupported = command_unsupported_detail(command, self._supported_commands)
@@ -116,7 +127,8 @@ class ClaudeStreamState:
             if command is not None
             else correlation_envelope(request.request_id, correlation_id, request.text)
         )
-        record = self._reserve_submission(request, correlation_id, wire_text)
+        replay_text = session_command_replay_text(request.text) if command is not None else wire_text
+        record = self._reserve_submission(request, correlation_id, wire_text, replay_text)
         if record is None:
             return SubmissionReceipt(
                 request_id=request.request_id,
@@ -126,6 +138,34 @@ class ClaudeStreamState:
             )
         await self._write_submission(record)
         return await self._await_acceptance(record)
+
+    async def wait_terminal(self, request_id: str) -> TerminalResult | None:
+        """Wait for the terminal result that follows one accepted structured command."""
+
+        record = self._history.get(request_id)
+        if record is None or record.acceptance not in {"immediate", "queued"}:
+            raise HarnessControlError(
+                "Claude terminal evidence requires a retained accepted submission"
+            )
+        try:
+            return await asyncio.wait_for(
+                asyncio.shield(record.terminal_future),
+                timeout=self._limits.acceptance_timeout_seconds,
+            )
+        except TimeoutError:
+            record.terminal_future.add_done_callback(consume_future_exception)
+            self.abandon_submission(request_id)
+            return None
+
+    def abandon_submission(self, request_id: str) -> None:
+        """Neutralize a cancelled/expired setter while retaining its late-frame tombstone."""
+
+        record = self._history.get(request_id)
+        if record is None or record.completed:
+            return
+        record.abandoned = True
+        record.acceptance = "unknown"
+        self._remove_pending(record)
 
     async def respond(self, response: InteractionResponse) -> None:
         self._require_available()
@@ -247,9 +287,14 @@ class ClaudeStreamState:
         request: PromptRequest,
         correlation_id: str,
         wire_text: str,
+        replay_text: str,
     ) -> ClaudeSubmission | None:
         if request.request_id in self._history:
             raise HarnessControlError(f"duplicate Claude request id: {request.request_id}")
+        if any(record.correlation_id == correlation_id for record in self._history.values()):
+            raise HarnessControlError(
+                f"duplicate retained Claude correlation id: {correlation_id}"
+            )
         if wire_text in self._pending_by_text:
             raise HarnessControlError("an identical Claude message is still awaiting replay")
         if len(self._history) >= self._limits.history_limit and not self._evict_submission():
@@ -258,9 +303,12 @@ class ClaudeStreamState:
             request=request,
             correlation_id=correlation_id,
             wire_text=wire_text,
+            replay_text=replay_text,
             queued=bool(self._accepted_order),
             acceptance_future=asyncio.get_running_loop().create_future(),
+            terminal_future=asyncio.get_running_loop().create_future(),
         )
+        record.terminal_future.add_done_callback(consume_future_exception)
         self._history[request.request_id] = record
         self._pending_by_text[wire_text] = request.request_id
         self._pending_by_correlation[correlation_id] = request.request_id
@@ -272,7 +320,11 @@ class ClaudeStreamState:
             (
                 request_id
                 for request_id, record in self._history.items()
-                if request_id not in active and record.acceptance != "unknown"
+                if request_id not in active
+                and (
+                    record.acceptance != "unknown"
+                    or (record.abandoned and record.completed)
+                )
             ),
             None,
         )
@@ -362,14 +414,48 @@ class ClaudeStreamState:
         correlation = frame.get("uuid")
         request_id = (
             self._pending_by_correlation.get(correlation) if isinstance(correlation, str) else None
-        ) or self._pending_by_text.get(wire_text)
+        )
         if request_id is None:
+            abandoned = next(
+                (
+                    record
+                    for record in self._history.values()
+                    if isinstance(correlation, str)
+                    and record.correlation_id == correlation
+                    and record.abandoned
+                ),
+                None,
+            )
+            if abandoned is not None:
+                if frame.get("session_id") != self._snapshot.vendor_session_id:
+                    raise HarnessControlError("Claude replay-user-message changed session identity")
+                if abandoned.replay_text != wire_text:
+                    raise HarnessControlError(
+                        "Claude replay-user-message body changed for its retained correlation"
+                    )
+                if abandoned.completed:
+                    await self._emit(
+                        "state",
+                        raw={"completedClaudeReplayIgnored": abandoned.request.request_id},
+                    )
+                    return
+                if abandoned.request.request_id not in self._accepted_order:
+                    self._accepted_order.append(abandoned.request.request_id)
+                await self._emit(
+                    "state",
+                    raw={"lateClaudeReplayIgnored": abandoned.request.request_id},
+                )
+                return
             raise HarnessControlError(
                 "Claude replayed a user message without a retained correlation"
             )
         record = self._history[request_id]
         if frame.get("session_id") != self._snapshot.vendor_session_id:
             raise HarnessControlError("Claude replay-user-message changed session identity")
+        if record.replay_text != wire_text:
+            raise HarnessControlError(
+                "Claude replay-user-message body changed for its retained correlation"
+            )
         accepted_at = self._created_at(frame)
         acceptance: AcceptanceState = "queued" if record.queued else "immediate"
         record.acceptance = acceptance
@@ -441,11 +527,10 @@ class ClaudeStreamState:
         return "running" if self._accepted_order else "idle"
 
     async def _handle_result(self, frame: Mapping[str, object]) -> None:
+        if frame.get("session_id") != self._snapshot.vendor_session_id:
+            raise HarnessControlError("Claude result changed session identity")
         request_id = self._accepted_order.popleft() if self._accepted_order else None
-        if request_id is not None:
-            record = self._history[request_id]
-            record.completed = True
-            self._history.move_to_end(request_id)
+        record: ClaudeSubmission | None = None
         outcome = terminal_outcome(frame)
         completed_at = self._created_at(frame)
         detail = result_detail(frame)
@@ -455,6 +540,10 @@ class ClaudeStreamState:
             detail=detail or None,
             raw=terminal_metadata(frame),
         )
+        if request_id is not None:
+            record = self._history[request_id]
+            record.completed = True
+            self._history.move_to_end(request_id)
         transcript = self._transcript_entry(
             role="result",
             text=detail or outcome,
@@ -470,6 +559,8 @@ class ClaudeStreamState:
         )
         self._snapshot = replace(self._snapshot, activity=activity)
         await self._emit("completed", transcript=(transcript,), raw={"terminalOutcome": outcome})
+        if record is not None and not record.terminal_future.done():
+            record.terminal_future.set_result(terminal)
 
     async def _handle_interaction_cancel(self, frame: Mapping[str, object]) -> None:
         pending = self._snapshot.pending_interaction
@@ -580,6 +671,20 @@ class ClaudeStreamState:
                     )
                 record.acceptance_future.set_exception(error)
             self._remove_pending(record)
+        for request_id in tuple(self._accepted_order):
+            record = self._history[request_id]
+            if not record.terminal_future.done():
+                error = (
+                    HarnessControlError(detail)
+                    if control_error
+                    else HarnessAdapterDisconnectedError(
+                        detail,
+                        may_have_sent=True,
+                        vendor_correlation_id=record.correlation_id,
+                    )
+                )
+                record.terminal_future.set_exception(error)
+        self._accepted_order.clear()
 
     def _current_request_id(self) -> str | None:
         return self._accepted_order[0] if self._accepted_order else None
