@@ -229,11 +229,39 @@ async def test_handshake_uses_stable_protocol_and_exposes_effort_menu() -> None:
         thread_params = transport.requests[2][1]
         assert thread_params["config"] == {
             "feature_flag": True,
+            "model": "gpt-5.6-sol",
             "model_reasoning_effort": "xhigh",
         }
         assert thread_params["model"] == "gpt-5.6-sol"
         assert thread_params["cwd"] == "/workspace"
         assert launch().argv == ("codex", "app-server")
+    finally:
+        await adapter.stop("forced")
+
+
+@pytest.mark.anyio
+async def test_roleless_start_uses_dynamic_model_and_model_local_effort_defaults() -> None:
+    data = fixture()
+    fixture_object(data, "threadStartResult")["reasoningEffort"] = "low"
+    transport = FakeCodexTransport()
+    prime_start(transport, data)
+    adapter = CodexAppServerAdapter(
+        CodexAppServerSettings(ephemeral=True),
+        transport_factory=lambda: transport,
+    )
+
+    handshake = await adapter.start(launch())
+    try:
+        assert handshake.snapshot.control == "ready"
+        assert handshake.snapshot.raw["model"] == "gpt-5.6-sol"
+        assert handshake.snapshot.raw["desiredReasoningEffort"] == "low"
+        assert handshake.snapshot.raw["effectiveReasoningEffort"] == "low"
+        thread_params = transport.requests[-1][1]
+        assert thread_params["model"] == "gpt-5.6-sol"
+        assert thread_params["config"] == {
+            "model": "gpt-5.6-sol",
+            "model_reasoning_effort": "low",
+        }
     finally:
         await adapter.stop("forced")
 
@@ -377,7 +405,10 @@ async def test_resume_preserves_exact_thread_and_effective_settings() -> None:
         assert handshake.snapshot.vendor_session_id == "thread-1"
         assert [method for method, _ in transport.requests][-1] == "thread/resume"
         assert transport.requests[-1][1]["threadId"] == "thread-1"
-        assert transport.requests[-1][1]["config"] == {"model_reasoning_effort": "xhigh"}
+        assert transport.requests[-1][1]["config"] == {
+            "model": "gpt-5.6-sol",
+            "model_reasoning_effort": "xhigh",
+        }
     finally:
         await adapter.stop("forced")
 

@@ -42,7 +42,7 @@ from agents_remember.serving.codex_app_server_state import (
     terminal_result,
     transcript_from_item,
 )
-from agents_remember.serving.harness_capabilities import CapabilitySnapshot
+from agents_remember.serving.harness_capabilities import CapabilitySnapshot, LaunchKnobs
 from agents_remember.serving.harness_control_models import (
     CONTROL_PROTOCOL_VERSION,
     REQUIRED_ADAPTER_CAPABILITIES,
@@ -124,6 +124,26 @@ class CodexAppServerAdapter:
     def advertise(self) -> CapabilitySnapshot:
         self._require_ready()
         return self._session.advertise()
+
+    def launch_knobs(self, *, model_key: str, effort: str | None) -> LaunchKnobs:
+        """Carry native Codex launch state through thread/start, never CODEX_CONFIG."""
+
+        if not model_key or model_key != model_key.strip():
+            raise CodexAppServerError(
+                "Codex launch model must be non-empty with no outer whitespace"
+            )
+        if effort is None or not effort or effort != effort.strip():
+            raise CodexAppServerError(
+                "Codex launch effort must be non-empty with no outer whitespace"
+            )
+        return LaunchKnobs(
+            session_config={
+                "model": model_key,
+                "model_reasoning_effort": effort,
+            },
+            owned_argv_options=("--model", "-m"),
+            owned_config_keys=("model", "model_reasoning_effort"),
+        )
 
     async def _event_stream(self) -> AsyncIterator[AdapterEvent]:
         while True:
@@ -246,7 +266,7 @@ class CodexAppServerAdapter:
             "clientUserMessageId": evidence.request.request_id,
             "model": model.model,
             "cwd": str(launch.cwd),
-            "effort": self._settings.reasoning_effort,
+            "effort": self._session.require_desired_effort(),
         }
         for key, value in (
             ("approvalPolicy", self._settings.approval_policy),
@@ -475,7 +495,7 @@ class CodexAppServerAdapter:
         model = required_text(settings, "model", context="thread/settings/updated")
         selected = self._session.model
         assert selected is not None
-        if effort != self._settings.reasoning_effort or model != selected.model:
+        if effort != self._session.require_desired_effort() or model != selected.model:
             raise CodexAppServerError(
                 "Codex thread/settings/updated changed the configured model or reasoning effort"
             )

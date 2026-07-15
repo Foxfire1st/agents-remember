@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
+from agents_remember.errors import HarnessControlError
 from agents_remember.kernel.agentic_settings import (
     AgenticSettings,
     RoleKnobs,
@@ -15,6 +16,8 @@ from agents_remember.kernel.agentic_settings import (
 )
 from agents_remember.observer.ambient import ambient
 from agents_remember.observer.events import now_iso
+from agents_remember.serving.harness_control_adapter import BUILTIN_PROTOCOL_HARNESSES
+from agents_remember.serving.harness_launch import ResolvedLaunch, resolve_settings_launch
 from agents_remember.serving.harnesses import (
     Harness,
     Which,
@@ -253,13 +256,14 @@ class _HarnessDispatch:
 
     Everything the settings rungs resolved for this seat: the harness id (effective-registry
     validated), the effective registry itself, the resolved model/effort, the settings-owned free-form
-    escape hatch, the RESOLVED session-command list (effort vehicle first), and the level provenance.
+    escape hatch, the resolved free-form session-command list, and the level provenance.
     """
 
     harness_id: str
     registry: tuple[Harness, ...]
-    model: str | None
-    effort: str | None
+    resolved_launch: ResolvedLaunch | None
+    legacy_model: str | None
+    legacy_effort: str | None
     launch_args: list[str] | None
     prompt_keywords: list[str] | None
     session_commands: list[str]
@@ -281,8 +285,8 @@ def _resolve_harness_dispatch(
     repo-local role default > global role default > spawn preference > detection-gated default: the
     settings rungs come from ``resolved_role_knobs(AR_SPAWN_ROLE, level)`` (per-use read; the repo-local
     layer selected by the qualified leaf key), the harness resolves against the EFFECTIVE registry, and
-    model/effort are refused per-harness (``model-invalid``/``effort-invalid``) before any tmux exists.
-    A session-vocabulary effort (claude ``ultracode``) contributes the FIRST session command. Returns
+    model/effort must both be present. Their vendor validity is checked token-free against L1's
+    dynamic catalog inside the hosted runner before the real harness process starts. Returns
     ``(dispatch, refusal)`` with exactly one side set.
     """
     spawn_level = level or "leaf"
@@ -313,24 +317,45 @@ def _resolve_harness_dispatch(
     if refusal is not None:
         return None, refusal
     assert found is not None  # no refusal => a resolved effective-registry harness
-    # Validate the settings-resolved values. Caller-provided AR_SPAWN_MODEL/AR_SPAWN_EFFORT keys are
-    # rejected before this function runs, so env cannot replace the developer's settings.
-    effective_model = model
-    effective_effort = effort
-    refusal = _knob_refusal(found, effective_model, effective_effort)
-    if refusal is not None:
-        return None, refusal
-    # A session-vocabulary effort is delivered as the FIRST post-launch session command, ahead of
-    # any settings-owned free-form ones, then the brief.
-    resolved_session_commands = (
-        effort_session_commands(found, effective_effort) + resolved_session_commands
-    )
+    # Caller-provided AR_SPAWN_MODEL/AR_SPAWN_EFFORT keys are rejected before this function runs,
+    # so settings remain the only authority. Native adapters require one complete structured
+    # selection; unknown/model-gated values fail against dynamic advertise in the runner before the
+    # configured vendor process starts. Settings-defined non-native harnesses keep their explicit
+    # registry mapping contract because they have no normalized native adapter.
+    resolved_launch = None
+    legacy_model = None
+    legacy_effort = None
+    if role is not None and found.id in BUILTIN_PROTOCOL_HARNESSES:
+        try:
+            resolved_launch = resolve_settings_launch(
+                harness_id=found.id,
+                model=model,
+                effort=effort,
+                workspace=config.workspace_root,
+            )
+        except HarnessControlError as exc:
+            return None, _spawn_refusal(
+                "launch-selection-invalid",
+                found.id,
+                "harness",
+                detail=str(exc),
+            )
+    elif found.id not in BUILTIN_PROTOCOL_HARNESSES:
+        refusal = _knob_refusal(found, model, effort)
+        if refusal is not None:
+            return None, refusal
+        resolved_session_commands = (
+            effort_session_commands(found, effort) + resolved_session_commands
+        )
+        legacy_model = model
+        legacy_effort = effort
     return (
         _HarnessDispatch(
             harness_id=found.id,
             registry=settings.harnesses,
-            model=model,
-            effort=effort,
+            resolved_launch=resolved_launch,
+            legacy_model=legacy_model,
+            legacy_effort=legacy_effort,
             launch_args=launch_args,
             prompt_keywords=prompt_keywords,
             session_commands=resolved_session_commands,
@@ -344,7 +369,8 @@ def _resolve_harness_dispatch(
 def _knob_refusal(
     found: Harness, effective_model: str | None, effective_effort: str | None
 ) -> dict[str, Any] | None:
-    """The ``model-invalid``/``effort-invalid`` pre-spawn refusal, or ``None`` when the knobs apply."""
+    """Preserve explicit static validation for settings-defined non-native harnesses."""
+
     checks = (
         (
             "model-invalid",
@@ -485,9 +511,10 @@ def spawn_agent_session_payload(
     default > detection-gated default. ``level`` is the dispatcher's declaration (leaf|master|portfolio,
     default leaf); the RESOLVED level + its source (explicit/default) are recorded in spawn provenance.
 
-    Settings-resolved model/effort continue to ride spawn env and harness argv. A session-vocabulary
-    effort remains the first settings-owned session command. The free-form settings values remain
-    recorded verbatim and caller-controlled spend inputs still refuse before spawning.
+    Settings-resolved model/effort ride the spawn env and one typed runner payload. The adapter
+    validates and applies them through its native launch channel; no model/effort session command
+    is synthesized. Free-form settings values remain recorded verbatim and caller-controlled spend
+    inputs still refuse before spawning.
     """
     del paster, session_log  # retained injection parameters; bridge runner owns launch commands
     brief_refusal = _brief_delivery_separate_refusal(context, submit, kind=kind)
@@ -515,8 +542,7 @@ def spawn_agent_session_payload(
     resolved_session_commands = list(session_commands or [])
     spawn_level: str | None = None
     spawn_level_source: str | None = None
-    resolved_model: str | None = None
-    resolved_effort: str | None = None
+    resolved_launch: ResolvedLaunch | None = None
     harnesses: tuple[Harness, ...] | None = None
     if kind == "harness":
         dispatch, refusal = _resolve_harness_dispatch(
@@ -530,15 +556,22 @@ def spawn_agent_session_payload(
             return refusal
         assert dispatch is not None  # no refusal => a resolved dispatch bundle
         harness = dispatch.harness_id
-        model = dispatch.model
-        effort = dispatch.effort
+        resolved_launch = dispatch.resolved_launch
+        model = (
+            resolved_launch.model_key
+            if resolved_launch is not None
+            else dispatch.legacy_model
+        )
+        effort = (
+            resolved_launch.effort
+            if resolved_launch is not None
+            else dispatch.legacy_effort
+        )
         launch_args = dispatch.launch_args
         prompt_keywords = dispatch.prompt_keywords
         resolved_session_commands = dispatch.session_commands
         spawn_level = dispatch.spawn_level
         spawn_level_source = dispatch.spawn_level_source
-        resolved_model = dispatch.model
-        resolved_effort = dispatch.effort
         harnesses = dispatch.registry
 
     sid = session_id or uuid4().hex
@@ -565,8 +598,9 @@ def spawn_agent_session_payload(
         session_commands=resolved_session_commands or None,
         spawn_level=spawn_level,
         spawn_level_source=spawn_level_source,
-        resolved_model=resolved_model,
-        resolved_effort=resolved_effort,
+        resolved_launch=resolved_launch,
+        legacy_model=model if resolved_launch is None else None,
+        legacy_effort=effort if resolved_launch is None else None,
         spawned_by_session=spawned_by_session,
         spawned_by_lifecycle=provenance_lifecycle,
         control_root=config.coordination_root / "runtime" / "harness-control",

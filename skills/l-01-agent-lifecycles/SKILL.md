@@ -311,18 +311,20 @@ defaults < global settings < repo-local settings.
 ```jsonc
 {
   "orchestration": {
+    // Illustrative installed catalog values: choose exact model keys and model-local efforts from
+    // each native adapter's dynamic advertise result on the target install/account.
     "roles": {  // role → knob override; validated: harness/model/effort · free-form: launchArgs/promptKeywords/sessionCommands
-      "architect":    { "harness": "claude", "effort": "high" },
-      "orchestrator": { "harness": "claude", "effort": "high" },
-      "strategist":   { "effort": "ultracode" },  // session-vocabulary value → "/effort ultracode" post-launch
-      "reviewer":     { "harness": "claude", "model": "sonnet", "effort": "high" },
-      "system-specialist": { "harness": "claude", "model": "fable", "effort": "high" },
-      "curator":      { "harness": "codex",  "effort": "medium" },
-      "worker":       { "harness": "codex",  "effort": "medium" }
+      "architect":    { "harness": "claude", "model": "claude-fable-5", "effort": "max" },
+      "orchestrator": { "harness": "codex", "model": "gpt-5.6-sol", "effort": "high" },
+      "strategist":   { "harness": "claude", "model": "claude-fable-5", "effort": "max" },
+      "reviewer":     { "harness": "claude", "model": "claude-fable-5", "effort": "xhigh" },
+      "system-specialist": { "harness": "claude", "model": "claude-fable-5", "effort": "high" },
+      "curator":      { "harness": "codex", "model": "gpt-5.6-sol", "effort": "medium" },
+      "worker":       { "harness": "codex", "model": "gpt-5.6-sol", "effort": "medium" }
     },
     "rolesPerLevel": {  // per-LEVEL agent sets (leaf|master|portfolio), deep-merged over roles
-      "master":    { "reviewer": { "model": "opus",  "effort": "xhigh" } },
-      "portfolio": { "reviewer": { "model": "fable", "effort": "ultracode" } }
+      "master":    { "reviewer": { "model": "claude-fable-5", "effort": "xhigh" } },
+      "portfolio": { "reviewer": { "model": "claude-fable-5", "effort": "max" } }
     },
     "concurrency": { "maxParallelMasters": 2, "maxParallelLeaves": 3, "maxSubAgents": 4 },
     "spawn": { "harness": "claude" },  // fallback when no role/level knob supplies one
@@ -351,14 +353,17 @@ repo-local level override > global level override > repo-local role default > gl
 leaf) and the resolved level rides spawn provenance. Legacy caller-supplied `harness`/`model`/
 `effort`, direct launch/session controls, `AR_SPAWN_MODEL`/`AR_SPAWN_EFFORT`, or harness-native
 spend/endpoint env keys refuse before spawning with `spend-override-unsupported`. Resolved knobs are
-**applied** at the harness boundary: model/effort ride as `AR_SPAWN_MODEL`/`AR_SPAWN_EFFORT` env AND map onto the launch argv
-per-harness via the effective registry (claude `--model`/`--effort`; a mapping-less harness stays
-env-only; a session-vocabulary effort like claude's `ultracode` is delivered as a post-launch
-`/effort` paste). Unknown effort values REFUSE at dispatch naming the harness's vocabulary — the
-CLI would warn-and-silently-degrade. The free-form escape hatch (`launchArgs` verbatim argv,
+**applied** through one typed native launch selection. `AR_SPAWN_MODEL`/`AR_SPAWN_EFFORT` remain
+spawn provenance, not a second authority. Before the configured vendor session starts, the native
+adapter advertises its token-free, per-install/account catalog and validates the exact model plus
+that model's launch-settable effort. Claude uses native `--model`/`--effort`, Pi uses the exact
+provider-qualified key through `--model` plus `--thinking`, and Codex sends model plus
+`model_reasoning_effort` in `thread/start` configuration. Missing, stale, unsupported, or conflicting
+native selections fail through the hosted control state; there is no static builtin vocabulary,
+vendor-default substitution, or normalized model/effort composer paste. The free-form escape hatch (`launchArgs` verbatim argv,
 `promptKeywords` riding the post-readiness brief exactly once, `sessionCommands` applied during
-fresh-session launch) is never
-validated, only recorded in spawn provenance; `orchestration.harnesses` teaches the framework new
+fresh-session launch) remains explicitly user-authored, is never validated, and is never synthesized
+from normalized model/effort. It is recorded in spawn provenance; `orchestration.harnesses` teaches the framework new
 TUIs or pre-customizes builtin launches (manual: `docs/reference/harnesses.md`).
 `orchestration.loops` (the three-party-loop knobs: per-level loop sets, round cap, reviewer
 reuse, complexity thresholds) lives in the same block — meaning in

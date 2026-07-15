@@ -2,7 +2,7 @@
 
 The single manual for the spawn surface (260703-L16): what a harness is to
 Agents Remember, every role-knob parameter and its delivery vehicle, the
-per-harness vocabularies as built, detection and refusal behavior, and a
+dynamic native catalogs, detection and refusal behavior, and a
 worked example that teaches the system a brand-new harness through settings.
 
 Related references: `settings-json.md` (the settings families and merge
@@ -22,25 +22,25 @@ Each harness is described by an entry with:
 | `name` | Display name (dashboard buttons). |
 | `command` | The executable probed on `PATH` for detection. |
 | `argv` | The exact launch command array, e.g. `["claude"]`. Fixed server-side. |
-| `modelFlag` | The launch flag the model knob maps onto (`--model <value>`), if any. |
-| `effortFlag` + `effortFlagValues` | The launch flag the effort knob maps onto, and the values that flag ACCEPTS. Declared together. A settings-declared vocabulary is authoritative even when overriding a dynamic builtin. |
-| `effortSessionValues` + `effortSessionCommand` | Effort values the launch flag rejects but the RUNNING session accepts as a command; the command template (`{value}` placeholder) that delivers them post-launch. Declared together. |
+| `modelFlag` | Optional compatibility mapping for a settings-defined non-native harness. Native adapters do not use it. |
+| `effortFlag` + `effortFlagValues` | Optional launch mapping and vocabulary for a settings-defined non-native harness. Declared together. |
+| `effortSessionValues` + `effortSessionCommand` | Optional explicit session-command mapping for a settings-defined non-native harness. Declared together. |
 
 ### Built-in registry (good defaults, not a wall)
 
 The curated defaults live in `mcp/src/agents_remember/serving/harnesses.py`:
 
-| id | argv | modelFlag | effortFlag (values) | session effort (command) |
+| id | base argv | token-free catalog | initial configuration | acceptance evidence |
 | --- | --- | --- | --- | --- |
-| `claude` (Claude Code) | `["claude"]` | `--model` | `--effort` (`low`, `medium`, `high`, `xhigh`, `max`) | `ultracode` → `/effort ultracode` |
-| `codex` (Codex) | `["codex"]` | `--model` | `--config model_reasoning_effort={value}` (any stripped-non-empty model-advertised value; known examples: `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`) | — |
-| `pi` (Pi.dev) | `["pi"]` | — (env-only) | — (env-only) | — |
+| `claude` (Claude Code) | `["claude"]` | `list_models` control request | `--model <key> --effort <level>` | model echoed by `system/init`; effort is catalog-validated because stream-json init has no effort echo |
+| `codex` (Codex) | `["codex"]` | `model/list` | `thread/start` model + `config.model_reasoning_effort` | thread/model/effort echo validation |
+| `pi` (Pi.dev) | `["pi"]` | `get_available_models` | `--model <provider/id> --thinking <level>` plus adapter-owned `--mode rpc` | `get_state` model/thinking echo validation |
 
-**Env-only** (currently Pi.dev) means: the model/effort knobs still ride the spawn env as
-`AR_SPAWN_MODEL`/`AR_SPAWN_EFFORT` (session-start visibility), but nothing is
-put on the command line and no effort vocabulary is enforced. Growing a
-mapping for a builtin is a one-line registry edit — or a settings override,
-below.
+For role-configured native spawns, `model` and `effort` are a required pair. They still ride
+`AR_SPAWN_MODEL`/`AR_SPAWN_EFFORT` as provenance, but those env names are not the vendor
+configuration mechanism. The adapter first discovers the installed/account catalog with the base
+argv, validates the model-gated selection, then applies its native launch material to a fresh real
+adapter. A stale value never falls back to the vendor default.
 
 ### Structured-protocol compatibility
 
@@ -104,17 +104,15 @@ merges over the registry **by id**:
   `[command]`).
 - An **existing id OVERRIDES the defaults per field**: its `argv` array
   REPLACES ours — launch the harness exactly the way you would run it
-  yourself (our curated knob mapping survives unless you override it too).
+  yourself. Native model/effort ownership remains in the adapter, not this registry entry.
 - Detection still applies: the `command` is probed on `PATH` at dispatch; an
   undetected harness refuses with `harness-not-detected`.
 - Vocabulary fields come in delivery-vehicle pairs and must resolve together:
   `effortFlag` with `effortFlagValues`, `effortSessionValues` with
   `effortSessionCommand`. A flag without a vocabulary would reintroduce the
   silent-degrade risk, so the loader refuses it.
-- A settings override that declares `effortFlagValues` makes that enum
-  authoritative for the effective harness. This includes Codex: its builtin accepts
-  model-advertised stripped-non-empty values, but a settings-supplied custom flag and
-  vocabulary accept exactly the values the settings entry declares.
+- For a new non-native id, a settings-declared `effortFlagValues` enum is authoritative. Native
+  Claude/Codex/Pi ids always validate against their dynamic adapter catalog.
 - The `effortSessionCommand` **template** must render with `{value}` and
   reference no other placeholder: a stray field (`/set {mode}={value}`), a
   positional `{}`, or an unmatched brace is refused by the loader naming the
@@ -139,32 +137,26 @@ settings layers have distinct validation postures:
 | Knob | Delivery vehicle | Validation |
 | --- | --- | --- |
 | `harness` | Selects the harness entry (argv comes from it). | Must be a known id: builtin or `orchestration.harnesses`-defined. Checked at settings load AND at dispatch. |
-| `model` | The harness's `modelFlag` on the launch argv, e.g. `--model opus`; also rides env as `AR_SPAWN_MODEL`. | Model names are NOT enum-validated (they evolve faster than any registry). A settings-defined harness with no `modelFlag` refuses the knob with guidance (`model-invalid`). |
-| `effort` | Per value: a flag value rides the harness's `effortFlag` on the argv; a session value rides a post-launch session command; either way it rides env as `AR_SPAWN_EFFORT`. | Enumerated harnesses validate at DISPATCH against their vocabulary (flag values ∪ session values), with unknown values refused (`effort-invalid`) naming both sets. Builtin Codex accepts any stripped-non-empty model-advertised value; a Codex settings override that declares `effortFlagValues` instead enforces that declared enum. Pi.dev remains env-only. |
+| `model` | Native adapter launch port; also rides env as `AR_SPAWN_MODEL` provenance. | Required for a role-configured native spawn and validated against the installed/account dynamic catalog. A settings-defined non-native harness uses its declared `modelFlag`. |
+| `effort` | Native adapter launch port; also rides env as `AR_SPAWN_EFFORT` provenance. | Required for a role-configured native spawn and validated under the selected model against only `launchSettable` dynamic options. A settings-defined non-native harness uses its declared mapping. |
 
-Why dispatch-time effort validation exists: the installed claude CLI accepts
-`--effort low|medium|high|xhigh|max` and **warns-then-silently-degrades** on
-anything else (probed 2026-07-07 with `ultracode`). Without the refusal, an
-out-of-vocabulary value would quietly downgrade the most reasoning-hungry
-seats. The two-vehicle split exists because claude's interactive `/effort`
-command accepts `ultracode` ("xhigh + workflows") while the launch flag
-rejects it — one harness, two vocabularies, each value carrying its own
-delivery vehicle.
+This model-gated dynamic validation prevents both stale package enums and silent CLI clamping. For
+example, Claude's launch flag accepts `low|medium|high|xhigh|max`; `ultracode` is not launch-settable
+and is refused rather than converted into a `/effort` prompt. Pi's silently clamped thinking input
+is likewise verified against `get_state` after launch.
 
 ### Layer 2 — launch free-form: `launchArgs`
 
-A list of strings appended VERBATIM to the harness launch argv, after the
-mapped knob flags. Never validated (it is the escape hatch for flags we never
-enumerated); recorded in spawn provenance (the session catalog row and the
-tool payload). Example: `["--dangerously-skip-permissions"]`.
+A list of strings appended VERBATIM to the settings-owned base argv before adapter preparation.
+It remains the escape hatch for unrelated flags and is recorded in spawn provenance. A value that
+duplicates an adapter-owned selector (`--model`, `--effort`, `--thinking`, or Codex model/reasoning
+config) refuses instead of creating two authorities. Example: `["--dangerously-skip-permissions"]`.
 
 ### Layer 3 — session free-form: `sessionCommands` and `promptKeywords`
 
-- `sessionCommands`: a list of lines, each pasted into the freshly spawned
-  session as its OWN entry and submitted during launch, before any task
-  assignment — the vehicle for any session-level harness feature (a
-  session-vocabulary effort like claude's `ultracode` is delivered this way
-  automatically, ahead of configured session commands). This launch-command outcome is distinct
+- `sessionCommands`: a list of explicit lines submitted through the protocol bridge during launch,
+  before any task assignment. Native model/effort is never synthesized into this list. This
+  launch-command outcome is distinct
   from brief delivery and cannot make a seat active work. Once the later dispatch brief binds the
   harness log, an evidence-capable adapter (currently Claude) retroactively proves every pre-brief
   command from command entry + successful stdout; a missing or errored command alone is re-issued,
@@ -196,7 +188,7 @@ makes that expressible (ruling 2026-07-07T08:15):
   },
   "rolesPerLevel": {               // per-level overrides; vocabulary = leaf|master|portfolio
     "master":    { "reviewer": { "model": "opus",  "effort": "xhigh" } },
-    "portfolio": { "reviewer": { "model": "fable", "effort": "ultracode" } }
+    "portfolio": { "reviewer": { "model": "fable", "effort": "max" } }
   }
 }
 ```
@@ -229,7 +221,7 @@ env as `AR_SPAWN_ROLE=reviewer`):
 | --- | --- | --- | --- | --- |
 | `level="leaf"` (or omitted) | claude (flat) | sonnet (flat) | high (flat) | `--effort high` |
 | `level="master"` | claude (inherited) | opus (master override) | xhigh (master override) | `--effort xhigh` |
-| `level="portfolio"` | claude (inherited) | fable (portfolio override) | ultracode (portfolio override) | `/effort ultracode` session command |
+| `level="portfolio"` | claude (inherited) | fable (portfolio override) | max (portfolio override) | native `--effort max` |
 
 The RESOLVED level and its source (`explicit`/`default`) are recorded in
 spawn provenance (`spawnLevel`/`spawnLevelSource` on the catalog row and the
@@ -245,17 +237,23 @@ detected effective-registry harness.
 
 ## Refusals (never crashes)
 
-All pre-spawn, nothing mutated:
-
 | Status | Trigger | Message carries |
 | --- | --- | --- |
 | `harness-unknown` | id known neither in the registry nor in settings | the id, the known set, and a pointer to `orchestration.harnesses` + this manual |
 | `harness-not-detected` | known id whose command is not on `PATH` | the id (and the settings source when a configured preference caused it) |
 | `effort-invalid` | effort outside the harness's vocabulary, or any effort for a mapping-less settings-defined harness | the harness, BOTH value sets (flag + session), and the launchArgs/sessionCommands guidance |
 | `model-invalid` | model knob for a settings-defined harness with no `modelFlag` | the harness and the declare-or-launchArgs guidance |
+| `launch-selection-invalid` | role-configured native launch omitted model or effort | the exact missing field; refused before tmux creation |
 | `spend-override-unsupported` | ordinary caller supplied removed spend fields (`harness`, `model`, `effort`, launch/session controls, `AR_SPAWN_MODEL`/`AR_SPAWN_EFFORT`, or harness-native spend/endpoint env keys such as `ANTHROPIC_MODEL` / `OPENAI_BASE_URL`) | the removed fields and the settings families that own them |
 | `level-invalid` | dispatch level outside `leaf|master|portfolio` | the value and the valid set |
 | `leaf-taken` | the target leaf already has a running same-role session | the owning session (server-arbitrated, never overridden) |
+
+Unknown, unselectable, non-launch-settable, or conflicting native selections fail at the hosted
+runner launch boundary after the catalog row/tmux exists but before the configured real vendor
+session starts. The endpoint remains addressable with `control=failed`, `acceptance=rejected`, and
+the exact message in `raw.bridgeError`, so readiness/daemon consumers do not see a generic fallback
+or disconnect. Roleless legacy/dashboard opens remain selection-less until the L4 per-session
+request/default authority is available.
 
 ## Worked Example: Teaching The System `hermes`
 
@@ -304,7 +302,7 @@ Pre-customizing a BUILTIN works the same way — override by id:
 ```jsonc
 "orchestration": {
   "harnesses": {
-    "claude": { "argv": ["claude", "--continue"] }   // replaces our argv; knob mapping survives
+    "claude": { "argv": ["claude", "--continue"] }   // replaces base argv; native adapter still owns model/effort
   }
 }
 ```

@@ -4,6 +4,7 @@ follow-up step."""
 
 from __future__ import annotations
 
+import json
 import sys
 import tempfile
 import unittest
@@ -13,6 +14,7 @@ MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
 from agents_remember.controlplane.expectation_rows import ExpectationRowStore
+from agents_remember.kernel.agentic_settings import agentic_settings_path
 from agents_remember.mcp.config import McpRuntimeConfig
 from agents_remember.mcp.tools import gates as gate_tools
 from agents_remember.mcp.tools import operator_inbox as inbox_tools
@@ -86,6 +88,24 @@ class SpawnExpectationRowTests(unittest.TestCase):
         reset_ambient()
 
     def test_spawn_starts_no_assignment_clocks(self) -> None:
+        settings_path = agentic_settings_path(self.tmp)
+        settings_path.parent.mkdir(parents=True, exist_ok=True)
+        settings_path.write_text(
+            json.dumps(
+                {
+                    "orchestration": {
+                        "roles": {
+                            "worker": {
+                                "harness": "claude",
+                                "model": "claude-fable-5",
+                                "effort": "max",
+                            }
+                        }
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
         payload = spawn_agent_session_payload(
             self.config,
             session_id="worker-1",

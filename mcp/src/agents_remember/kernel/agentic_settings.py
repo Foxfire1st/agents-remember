@@ -256,9 +256,9 @@ class LoopSettings:
 class RoleKnobs:
     """One role's knob overrides (``orchestration.roles.<role>``); ``None`` = role-file default.
 
-    ``harness`` must be a registry id; ``model``/``effort`` are free strings HERE -- the per-harness
-    effort vocabulary is enforced at DISPATCH time by the spawn path (the harness is only known
-    then), refusing loudly instead of letting the CLI warn-and-silently-degrade (260703-L16). The
+    ``harness`` must be a registry id; ``model``/``effort`` are free strings HERE. Native adapters
+    validate them against their token-free dynamic catalog at launch; settings-defined non-native
+    harnesses use their explicit registry mappings at dispatch. The
     free-form escape hatch (``launch_args``/``prompt_keywords``/``session_commands``, JSON keys
     ``launchArgs``/``promptKeywords``/``sessionCommands``) is shape-checked only (a list of
     non-empty strings) and NEVER content-validated; the spawn path records it in spawn provenance.
@@ -1093,8 +1093,8 @@ def _parse_roles(
             model = _require_string(knobs["model"], f"{owner}.{role}.model", source)
         effort = None
         if "effort" in knobs:
-            # Deliberately a free string here: the per-harness effort vocabulary (flag values +
-            # session values) is enforced at DISPATCH, where the harness is known (260703-L16).
+            # Deliberately a free string here: the native adapter's dynamic catalog validates it at
+            # launch; an explicitly mapped non-native harness validates it at dispatch.
             effort = _require_string(knobs["effort"], f"{owner}.{role}.effort", source)
         # The free-form escape hatch (260703-L16): shape-checked, never content-validated.
         launch_args: tuple[str, ...] = ()

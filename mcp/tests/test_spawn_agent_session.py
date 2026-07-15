@@ -34,6 +34,7 @@ from agents_remember.observer import (
 from agents_remember.observer.ambient import ambient
 from agents_remember.serving.app import create_app
 from agents_remember.serving.harness_control_runner import parse_runner_config
+from agents_remember.serving.harness_launch import ResolvedLaunch
 from agents_remember.serving.harness_logs import CommandEvidence
 from agents_remember.serving.terminal import TerminalSessionBinding
 from agents_remember.serving.terminal_catalog import TerminalCatalog, TerminalCatalogEntry
@@ -265,6 +266,24 @@ class SpawnAgentSessionTests(unittest.TestCase):
     def test_spawn_records_role_from_env_and_reports_it(self) -> None:
         # L14: the AR_SPAWN_ROLE riding the caller's env is persisted on the catalog row and
         # reported in the payload — the Chats command tree groups command chats by it.
+        path = agentic_settings_path(self.tmp)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            json.dumps(
+                {
+                    "orchestration": {
+                        "roles": {
+                            "manager": {
+                                "harness": "claude",
+                                "model": "claude-fable-5",
+                                "effort": "max",
+                            }
+                        }
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
         payload = self._spawn(env={"AR_SPAWN_ROLE": "manager"})
         self.assertEqual(payload["status"], "spawned-unbriefed")
         self.assertEqual(payload["spawnRole"], "manager")
@@ -382,9 +401,7 @@ class SpawnAgentSessionTests(unittest.TestCase):
 
 
 class SpawnKnobApplicationTests(unittest.TestCase):
-    """260703-L16: per-harness knob application at the dispatch seam -- flags on the argv, the
-    two-vehicle claude effort vocabulary, dispatch-time refusals, and the free-form escape hatch
-    (launchArgs / promptKeywords / sessionCommands) riding spawn + paste + provenance."""
+    """Structured native launch selection plus the free-form spawn/provenance escape hatch."""
 
     def setUp(self) -> None:
         self.tmp = Path(tempfile.mkdtemp())
@@ -414,7 +431,7 @@ class SpawnKnobApplicationTests(unittest.TestCase):
             base["session_log"] = paster.log
         return spawn_agent_session_payload(self.config, **base)  # type: ignore[arg-type]
 
-    def test_flag_vocabulary_effort_rides_the_argv_with_no_session_command(self) -> None:
+    def test_native_launch_selection_rides_the_runner_config_with_no_session_command(self) -> None:
         self._write_settings(
             {
                 "roles": {
@@ -432,55 +449,82 @@ class SpawnKnobApplicationTests(unittest.TestCase):
             paster=paster,
         )
         self.assertEqual(payload["status"], "spawned-unbriefed")
+        runner = _runner_config(self.host)
+        self.assertEqual(runner.argv, ("claude",))
         self.assertEqual(
-            _runner_config(self.host).argv,
-            ("claude", "--model", "claude-fable-5", "--effort", "max"),
+            runner.resolved_launch,
+            ResolvedLaunch("claude", "claude-fable-5", "max", self.tmp),
         )
-        # Flag-vehicle effort needs no session command, and spawn never pastes a brief.
+        # The runner validates dynamically before its adapter emits the native flags; spawn never
+        # pastes a model/effort command or a task brief.
         self.assertEqual(paster.calls, [])
         self.assertNotIn("sessionCommands", payload)
         self.assertNotIn("sessionCommandsDelivered", payload)
 
-    def test_ultracode_rides_a_launch_session_command_not_the_flag(self) -> None:
-        self._write_settings({"roles": {"worker": {"harness": "claude", "effort": "ultracode"}}})
+    def test_ultracode_is_not_synthesized_into_a_session_command(self) -> None:
+        self._write_settings(
+            {
+                "roles": {
+                    "worker": {
+                        "harness": "claude",
+                        "model": "claude-fable-5",
+                        "effort": "ultracode",
+                    }
+                }
+            }
+        )
         paster = _ObservedPaster(
             capture="Fable 5 with ultracode effort · Claude Max\n◉ ultracode · /effort\n"
         )
         payload = self._spawn(env={"AR_SPAWN_ROLE": "worker"}, paster=paster)
         self.assertEqual(payload["status"], "spawned-unbriefed")
-        # NO --effort flag (the CLI would warn-and-degrade); the env still rides the value.
+        # Dynamic launch validation rejects this stale value when the runner starts. The spawn seam
+        # carries it honestly and never turns it into a composer/session paste.
         self.assertEqual(_runner_config(self.host).argv, ("claude",))
         self.assertEqual(
             self.host.ensured[0]["env"],
-            {"AR_SPAWN_ROLE": "worker", "AR_SPAWN_EFFORT": "ultracode"},
+            {
+                "AR_SPAWN_ROLE": "worker",
+                "AR_SPAWN_MODEL": "claude-fable-5",
+                "AR_SPAWN_EFFORT": "ultracode",
+            },
         )
-        # The settings-owned session command remains launch behavior; no task brief follows.
         self.assertEqual(paster.calls, [])
-        self.assertEqual(_runner_config(self.host).session_commands, ("/effort ultracode",))
-        self.assertEqual(payload["sessionCommands"], ["/effort ultracode"])
+        self.assertEqual(_runner_config(self.host).session_commands, ())
+        self.assertNotIn("sessionCommands", payload)
         self.assertNotIn("sessionCommandsDelivered", payload)
 
-    def test_unknown_effort_refuses_at_dispatch_naming_both_sets(self) -> None:
-        self._write_settings({"roles": {"worker": {"harness": "claude", "effort": "turbo"}}})
+    def test_unknown_effort_is_carried_to_dynamic_runner_validation(self) -> None:
+        self._write_settings(
+            {
+                "roles": {
+                    "worker": {
+                        "harness": "claude",
+                        "model": "claude-fable-5",
+                        "effort": "turbo",
+                    }
+                }
+            }
+        )
         payload = self._spawn(env={"AR_SPAWN_ROLE": "worker"})
-        self.assertFalse(payload["ok"])
-        self.assertEqual(payload["status"], "effort-invalid")
-        self.assertIn("'claude'", payload["detail"])
-        self.assertIn("low, medium, high, xhigh, max", payload["detail"])
-        self.assertIn("ultracode", payload["detail"])
-        # Nothing spawned, nothing upserted.
-        self.assertEqual(self.host.ensured, [])
-        self.assertIsNone(self.catalog.get("worker-1"))
+        self.assertEqual(payload["status"], "spawned-unbriefed")
+        self.assertEqual(
+            _runner_config(self.host).resolved_launch,
+            ResolvedLaunch("claude", "claude-fable-5", "turbo", self.tmp),
+        )
+        self.assertEqual(_runner_config(self.host).session_commands, ())
 
-    def test_codex_builtin_harness_receives_resolved_knobs_on_argv(self) -> None:
+    def test_codex_builtin_harness_receives_structured_launch_selection(self) -> None:
         self._write_settings(
             {"roles": {"worker": {"harness": "codex", "model": "gpt-5.6-sol", "effort": "xhigh"}}}
         )
         payload = self._spawn(env={"AR_SPAWN_ROLE": "worker"})
         self.assertEqual(payload["status"], "spawned-unbriefed")
+        runner = _runner_config(self.host)
+        self.assertEqual(runner.argv, ("codex",))
         self.assertEqual(
-            _runner_config(self.host).argv,
-            ("codex", "--model", "gpt-5.6-sol", "--config", "model_reasoning_effort=xhigh"),
+            runner.resolved_launch,
+            ResolvedLaunch("codex", "gpt-5.6-sol", "xhigh", self.tmp),
         )
         self.assertEqual(
             self.host.ensured[0]["env"],
@@ -517,9 +561,11 @@ class SpawnKnobApplicationTests(unittest.TestCase):
             self.assertEqual(payload["resolvedEffort"], effort)
             self.assertNotIn("sessionLogEntryId", payload)
             self.assertNotIn("sessionLogPath", payload)
+            runner = _runner_config(self.host, -1)
+            self.assertEqual(runner.argv, ("codex",))
             self.assertEqual(
-                _runner_config(self.host, -1).argv,
-                ("codex", "--model", model, "--config", f"model_reasoning_effort={effort}"),
+                runner.resolved_launch,
+                ResolvedLaunch("codex", model, effort, self.tmp),
             )
             row = self.catalog.get(f"{role}-tier")
             assert row is not None
@@ -556,6 +602,7 @@ class SpawnKnobApplicationTests(unittest.TestCase):
                 "roles": {
                     "worker": {
                         "harness": "claude",
+                        "model": "claude-fable-5",
                         "effort": "max",
                         "launchArgs": ["--dangerously-skip-permissions"],
                     }
@@ -566,7 +613,11 @@ class SpawnKnobApplicationTests(unittest.TestCase):
         self.assertEqual(payload["status"], "spawned-unbriefed")
         self.assertEqual(
             _runner_config(self.host).argv,
-            ("claude", "--effort", "max", "--dangerously-skip-permissions"),
+            ("claude", "--dangerously-skip-permissions"),
+        )
+        self.assertEqual(
+            _runner_config(self.host).resolved_launch,
+            ResolvedLaunch("claude", "claude-fable-5", "max", self.tmp),
         )
         self.assertEqual(payload["launchArgs"], ["--dangerously-skip-permissions"])
         row = self.catalog.get("worker-1")
@@ -581,6 +632,7 @@ class SpawnKnobApplicationTests(unittest.TestCase):
                 "roles": {
                     "strategist": {
                         "harness": "claude",
+                        "model": "claude-fable-5",
                         "effort": "max",
                         "promptKeywords": ["ultracode"],
                     }
@@ -593,7 +645,7 @@ class SpawnKnobApplicationTests(unittest.TestCase):
             paster=paster,
         )
         self.assertEqual(payload["status"], "spawned-unbriefed")
-        self.assertEqual(_runner_config(self.host).argv, ("claude", "--effort", "max"))
+        self.assertEqual(_runner_config(self.host).argv, ("claude",))
         self.assertEqual(paster.calls, [])
         self.assertEqual(payload["promptKeywords"], ["ultracode"])
         row = self.catalog.get("worker-1")
@@ -602,7 +654,16 @@ class SpawnKnobApplicationTests(unittest.TestCase):
 
     def test_prompt_keywords_without_a_brief_stay_deferred(self) -> None:
         self._write_settings(
-            {"roles": {"strategist": {"harness": "claude", "promptKeywords": ["ultracode"]}}}
+            {
+                "roles": {
+                    "strategist": {
+                        "harness": "claude",
+                        "model": "claude-fable-5",
+                        "effort": "max",
+                        "promptKeywords": ["ultracode"],
+                    }
+                }
+            }
         )
         paster = _ObservedPaster(
             capture="Fable 5 with ultracode effort · Claude Max\n◉ ultracode · /effort\n"
@@ -612,13 +673,14 @@ class SpawnKnobApplicationTests(unittest.TestCase):
         self.assertEqual(paster.calls, [])
         self.assertEqual(payload["promptKeywords"], ["ultracode"])
 
-    def test_session_command_order_is_effort_vehicle_then_free_form_without_brief(self) -> None:
+    def test_free_form_session_command_is_not_joined_by_a_synthesized_effort_command(self) -> None:
         self._write_settings(
             {
                 "roles": {
                     "worker": {
                         "harness": "claude",
-                        "effort": "ultracode",
+                        "model": "claude-fable-5",
+                        "effort": "max",
                         "sessionCommands": ["/statusline off"],
                         "promptKeywords": ["ultracode"],
                     }
@@ -634,26 +696,33 @@ class SpawnKnobApplicationTests(unittest.TestCase):
         )
         self.assertEqual(payload["status"], "spawned-unbriefed")
         self.assertEqual(paster.calls, [])
-        self.assertEqual(
-            _runner_config(self.host).session_commands,
-            ("/effort ultracode", "/statusline off"),
-        )
-        # The RESOLVED session-command list (effort vehicle first) is the recorded provenance.
-        self.assertEqual(payload["sessionCommands"], ["/effort ultracode", "/statusline off"])
+        self.assertEqual(_runner_config(self.host).session_commands, ("/statusline off",))
+        self.assertEqual(payload["sessionCommands"], ["/statusline off"])
         row = self.catalog.get("worker-1")
         assert row is not None
-        self.assertEqual(row.session_commands, ("/effort ultracode", "/statusline off"))
+        self.assertEqual(row.session_commands, ("/statusline off",))
         self.assertEqual(row.prompt_keywords, ("ultracode",))
 
     def test_session_command_never_falls_back_to_terminal_paste(self) -> None:
-        self._write_settings({"roles": {"worker": {"harness": "claude", "effort": "ultracode"}}})
+        self._write_settings(
+            {
+                "roles": {
+                    "worker": {
+                        "harness": "claude",
+                        "model": "claude-fable-5",
+                        "effort": "max",
+                        "sessionCommands": ["/statusline off"],
+                    }
+                }
+            }
+        )
         paster = _FakePaster(delivered=False, submitted=False, capture="claude> (booting)")
         payload = self._spawn(env={"AR_SPAWN_ROLE": "worker"}, paster=paster)
         self.assertEqual(payload["status"], "spawned-unbriefed")
         self.assertNotIn("sessionCommandsDelivered", payload)
         self.assertNotIn("deliveryCapture", payload)
         self.assertEqual(paster.calls, [])
-        self.assertEqual(_runner_config(self.host).session_commands, ("/effort ultracode",))
+        self.assertEqual(_runner_config(self.host).session_commands, ("/statusline off",))
 
     def test_direct_free_form_spend_controls_are_refused(self) -> None:
         payload = self._spawn(
@@ -731,14 +800,26 @@ class SettingsDefinedHarnessTests(unittest.TestCase):
             self.coordination_root,
             {
                 "harnesses": {"claude": {"argv": ["claude", "--continue"]}},
-                "roles": {"worker": {"harness": "claude", "effort": "max"}},
+                "roles": {
+                    "worker": {
+                        "harness": "claude",
+                        "model": "claude-fable-5",
+                        "effort": "max",
+                    }
+                },
             },
         )
         payload = self._spawn(env={"AR_SPAWN_ROLE": "worker"})
         self.assertEqual(payload["status"], "spawned-unbriefed")
-        # The user's command array replaces ours; the builtin knob mapping survives the override.
+        # The user's command array replaces ours; the native adapter applies the structured knobs
+        # after dynamic validation.
+        runner = _runner_config(self.host)
+        self.assertEqual(runner.argv, ("claude", "--continue"))
         self.assertEqual(
-            _runner_config(self.host).argv, ("claude", "--continue", "--effort", "max")
+            runner.resolved_launch,
+            ResolvedLaunch(
+                "claude", "claude-fable-5", "max", self.config.workspace_root
+            ),
         )
 
     def test_vocab_less_settings_harness_refuses_effort_with_guidance(self) -> None:
@@ -874,9 +955,11 @@ class SpawnLevelResolutionTests(unittest.TestCase):
         self.assertEqual(payload["status"], "spawned-unbriefed")
         # harness inherited from the flat default; model/effort from the master override.
         self.assertEqual(payload["harness"], "claude")
+        runner = _runner_config(self.host)
+        self.assertEqual(runner.argv, ("claude",))
         self.assertEqual(
-            _runner_config(self.host).argv,
-            ("claude", "--model", "opus", "--effort", "xhigh"),
+            runner.resolved_launch,
+            ResolvedLaunch("claude", "opus", "xhigh", self.config.workspace_root),
         )
         # The resolved knobs also ride the env for session-start visibility.
         spawn_env = self.host.ensured[0]["env"]
@@ -888,24 +971,31 @@ class SpawnLevelResolutionTests(unittest.TestCase):
         self._write_settings(self.coordination_root, self.ECONOMICS)
         payload = self._spawn(env={"AR_SPAWN_ROLE": "reviewer"})
         self.assertEqual(payload["status"], "spawned-unbriefed")
+        runner = _runner_config(self.host)
+        self.assertEqual(runner.argv, ("claude",))
         self.assertEqual(
-            _runner_config(self.host).argv,
-            ("claude", "--model", "sonnet", "--effort", "high"),
+            runner.resolved_launch,
+            ResolvedLaunch("claude", "sonnet", "high", self.config.workspace_root),
         )
         self.assertEqual(payload["spawnLevel"], "leaf")
         self.assertEqual(payload["spawnLevelSource"], "default")
 
-    def test_portfolio_ultracode_rides_the_session_vehicle(self) -> None:
-        # The economics end-to-end: portfolio reviewer = fable + ultracode -- the session-value
-        # effort must stay OFF the flag and arrive as the /effort session command.
+    def test_portfolio_ultracode_is_carried_without_a_paste_substitution(self) -> None:
+        # The stale portfolio setting reaches dynamic validation exactly as authored. It never
+        # becomes a synthesized /effort command.
         self._write_settings(self.coordination_root, self.ECONOMICS)
         paster = _FakePaster()
         payload = self._spawn(env={"AR_SPAWN_ROLE": "reviewer"}, level="portfolio", paster=paster)
         self.assertEqual(payload["status"], "spawned-unbriefed")
-        self.assertEqual(_runner_config(self.host).argv, ("claude", "--model", "fable"))
+        runner = _runner_config(self.host)
+        self.assertEqual(runner.argv, ("claude",))
+        self.assertEqual(
+            runner.resolved_launch,
+            ResolvedLaunch("claude", "fable", "ultracode", self.config.workspace_root),
+        )
         self.assertEqual(paster.calls, [])
-        self.assertEqual(_runner_config(self.host).session_commands, ("/effort ultracode",))
-        self.assertEqual(payload["sessionCommands"], ["/effort ultracode"])
+        self.assertEqual(runner.session_commands, ())
+        self.assertNotIn("sessionCommands", payload)
 
     def test_legacy_model_effort_args_are_refused_instead_of_beating_settings(self) -> None:
         self._write_settings(self.coordination_root, self.ECONOMICS)
@@ -1025,9 +1115,11 @@ class SpawnLevelResolutionTests(unittest.TestCase):
         )
         self.assertEqual(payload["status"], "spawned-unbriefed")
         # model: repo-local master override; effort: global master override; harness: flat default.
+        runner = _runner_config(self.host)
+        self.assertEqual(runner.argv, ("claude",))
         self.assertEqual(
-            _runner_config(self.host).argv,
-            ("claude", "--model", "fable", "--effort", "xhigh"),
+            runner.resolved_launch,
+            ResolvedLaunch("claude", "fable", "xhigh", self.config.workspace_root),
         )
 
     def test_provenance_records_the_resolved_level_and_source(self) -> None:
@@ -1058,15 +1150,16 @@ class SpawnLevelResolutionTests(unittest.TestCase):
         self.assertEqual(self.host.ensured, [])
 
     def test_role_free_form_knobs_flow_from_settings(self) -> None:
-        # The strategist acceptance case expressed purely in settings: effort ultracode +
-        # promptKeywords ride the dispatch with NO explicit knob arguments.
+        # Free-form settings keep riding the dispatch, but model/effort remain a complete native
+        # launch selection and are never translated into a session command.
         self._write_settings(
             self.coordination_root,
             {
                 "roles": {
                     "strategist": {
                         "harness": "claude",
-                        "effort": "ultracode",
+                        "model": "claude-fable-5",
+                        "effort": "max",
                         "promptKeywords": ["ultracode"],
                     }
                 }
@@ -1082,11 +1175,11 @@ class SpawnLevelResolutionTests(unittest.TestCase):
         self.assertEqual(payload["status"], "spawned-unbriefed")
         self.assertEqual(_runner_config(self.host).argv, ("claude",))
         self.assertEqual(paster.calls, [])
-        self.assertEqual(_runner_config(self.host).session_commands, ("/effort ultracode",))
+        self.assertEqual(_runner_config(self.host).session_commands, ())
         row = self.catalog.get("seat-1")
         assert row is not None
         self.assertEqual(row.prompt_keywords, ("ultracode",))
-        self.assertEqual(row.session_commands, ("/effort ultracode",))
+        self.assertIsNone(row.session_commands)
 
 
 class SpawnHarnessResolutionTests(unittest.TestCase):

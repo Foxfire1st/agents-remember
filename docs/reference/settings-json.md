@@ -331,17 +331,18 @@ knobs come in a THREE-LAYER model (260703-L16; the full spawn-surface manual
 with every parameter, vocabulary, and refusal is
 **`docs/reference/harnesses.md`**):
 
-1. **Validated enum knobs** — `harness` (a known harness id: builtin
+1. **Validated native selection** — `harness` (a known harness id: builtin
    `claude`/`codex`/`pi` or an `orchestration.harnesses`-defined one),
-   `model`, `effort`. The spawn path seeds `model`/`effort` into the spawn env
-   (`AR_SPAWN_MODEL`/`AR_SPAWN_EFFORT`) AND applies them onto the harness
-   launch argv per-harness (claude: `--model`/`--effort`; codex: `--model` plus
-   `--config model_reasoning_effort=<value>`; only mapping-less harnesses stay env-only).
-   `effort` is validated per-harness at DISPATCH:
-   unknown values refuse loudly naming the harness and its valid sets.
+   `model`, `effort`. Role-configured native spawns require all three. The spawn
+   path records model/effort in `AR_SPAWN_MODEL`/`AR_SPAWN_EFFORT` provenance and
+   carries one typed selection to the adapter. The adapter discovers its token-free,
+   installed/account-accurate catalog, validates effort under the selected model, and
+   then applies Claude `--model`/`--effort`, Pi `--model`/`--thinking`, or Codex
+   `thread/start` model + `config.model_reasoning_effort`. Unknown values fail at the
+   runner launch boundary before the configured real vendor session starts.
 2. **`launchArgs`** (list of strings) — appended VERBATIM to the harness
-   launch argv. Never validated; recorded in spawn provenance.
-3. **`sessionCommands`** (list of strings; each line pasted + submitted as
+   base argv and recorded in spawn provenance. Adapter-owned selector conflicts refuse.
+3. **`sessionCommands`** (list of strings; each explicit line submitted through the protocol as
    fresh-session launch configuration before task assignment) and **`promptKeywords`** (list of
    strings prepended exactly once to the later post-readiness `dispatch-brief`). Never validated;
    recorded in spawn provenance. For evidence-capable harness logs (currently Claude), the brief
@@ -357,18 +358,11 @@ not-ready seats are not active work. Briefed requires both `deliveryState=delive
 `deliveryDetail=harness-log-confirmed`; failure leaves the original row pending without duplicate
 brief or respawn.
 
-The claude effort vocabulary (empirical, 2026-07-07) is TWO-VEHICLE:
-
-| Value | Delivery vehicle |
-| --- | --- |
-| `low`, `medium`, `high`, `xhigh`, `max` | the `--effort` launch flag |
-| `ultracode` | the `/effort ultracode` session command, applied during fresh-session launch |
-
-Rationale: the installed claude CLI **warns-then-silently-degrades** on
-unknown `--effort` values (probed with `ultracode`, which its interactive
-`/effort` command DOES accept), so unvalidated values would quietly downgrade
-the most reasoning-hungry seats — dispatch accepts the union of both sets and
-refuses anything in neither.
+Native effort options are dynamic and model-gated. Claude currently advertises launch-settable
+`low|medium|high|xhigh|max`; `ultracode` is not converted into a session command. Pi validation also
+prevents its native silently-clamped thinking behavior from hiding a stale setting. After startup,
+Pi and Codex provide model/effort echo evidence; Claude echoes model while its initial effort is
+reported as catalog-validated native flag evidence because stream-json init has no effort echo.
 
 `orchestration.rolesPerLevel.<level>.<role>` (ruling 2026-07-07T08:15) adds
 the per-LEVEL agent sets the L12 doctrine promises: `leaf` | `master` |
@@ -392,9 +386,11 @@ Extends/overrides the builtin harness registry (developer ruling 2026-07-07:
 the registry is good defaults, not a wall). Entries are keyed by harness id:
 a NEW id adds a harness (`command` and/or `argv` required — the command array
 launches it exactly the way you would run it yourself), an EXISTING id
-pre-customizes the builtin defaults (its `argv` replaces ours). Optional
-knob-mapping fields: `name`, `modelFlag`, `effortFlag` + `effortFlagValues`,
+pre-customizes the builtin defaults (its `argv` replaces ours). Optional compatibility
+knob-mapping fields for a NEW non-native id: `name`, `modelFlag`, `effortFlag` + `effortFlagValues`,
 `effortSessionValues` + `effortSessionCommand` (pairs required together).
+Native Claude/Codex/Pi model and effort always belong to their adapter, even when settings override
+the builtin base argv.
 Detection still gates dispatch; an id known nowhere refuses loudly pointing
 at the manual. Schema, semantics, and a worked add-`hermes` example:
 `docs/reference/harnesses.md`.
@@ -438,17 +434,17 @@ argv is definable only in the explicit `orchestration.harnesses` family.
 ```jsonc
 "orchestration": {
   "roles": {
-    "architect":    { "harness": "claude", "effort": "high" },
-    "orchestrator": { "harness": "claude", "effort": "high" },
-    "strategist":   { "effort": "ultracode" },  // session-vocabulary value → "/effort ultracode" post-launch
-    "reviewer":     { "harness": "claude", "model": "sonnet", "effort": "high" },
-    "system-specialist": { "harness": "claude", "model": "fable", "effort": "high" },
-    "curator":      { "harness": "codex",  "effort": "medium" },
-    "worker":       { "harness": "codex",  "effort": "medium" }
+    "architect":    { "harness": "claude", "model": "claude-opus-4-8", "effort": "high" },
+    "orchestrator": { "harness": "claude", "model": "claude-opus-4-8", "effort": "high" },
+    "strategist":   { "harness": "claude", "model": "claude-fable-5", "effort": "max" },
+    "reviewer":     { "harness": "claude", "model": "claude-sonnet-5", "effort": "high" },
+    "system-specialist": { "harness": "claude", "model": "claude-fable-5", "effort": "high" },
+    "curator":      { "harness": "codex", "model": "gpt-5.6-luna", "effort": "medium" },
+    "worker":       { "harness": "codex", "model": "gpt-5.6-sol", "effort": "medium" }
   },
   "rolesPerLevel": {
-    "master":    { "reviewer": { "model": "opus",  "effort": "xhigh" } },
-    "portfolio": { "reviewer": { "model": "fable", "effort": "ultracode" } }
+    "master":    { "reviewer": { "model": "claude-opus-4-8", "effort": "xhigh" } },
+    "portfolio": { "reviewer": { "model": "claude-fable-5", "effort": "max" } }
   },
   "concurrency": { "maxParallelMasters": 2, "maxParallelLeaves": 3, "maxSubAgents": 4 },
   "spawn": { "harness": "claude" }

@@ -28,6 +28,7 @@ from agents_remember.serving.harness_control_models import (
     ControlState,
 )
 from agents_remember.serving.harness_control_runner import RunnerConfig, control_runner_command
+from agents_remember.serving.harness_launch import ResolvedLaunch
 from agents_remember.serving.harnesses import (
     Harness,
     Which,
@@ -92,14 +93,12 @@ def resolve_terminal_launch(
     means the builtin defaults. An id known nowhere raises the loud teach-it-via-settings refusal
     (``unknown_harness_detail``), never a crash.
 
-    Knob application (260703-L16, harness kind only): ``model``/``effort`` are validated FIRST --
-    an out-of-vocabulary effort (or a knob a settings-defined harness declares no mapping for)
-    raises ``ValueError`` naming the harness and its valid sets rather than letting the CLI
-    warn-and-silently-degrade -- then they are mapped onto the harness's registry flags
-    (``knob_argv``: env-only builtins get no flags, and session-level effort values stay OFF the
-    flag) and ``launch_args`` is appended VERBATIM (the free-form escape hatch -- never validated).
-    A plain ``terminal`` spawn takes no knobs: model/effort/launch_args are harness launch material
-    and are ignored for it.
+    L2 keeps native-adapter launches focused on the settings-owned base command and free-form launch
+    args. Their typed :class:`ResolvedLaunch` rides the runner payload; the adapter validates it
+    against dynamic advertise and applies model/effort after this function returns. ``model`` and
+    ``effort`` remain an explicit compatibility seam for settings-defined non-native harnesses,
+    whose declared registry mappings are their only launch port. A plain ``terminal`` spawn ignores
+    harness launch material.
     """
     if kind == "terminal":
         return workspace_root, [shell]
@@ -181,6 +180,7 @@ def _session_command(
     control_endpoint: Path | None,
     control_root: Path | None,
     session_commands: Sequence[str] | None,
+    resolved_launch: ResolvedLaunch | None,
     created_at: str,
     tmux_name: str,
 ) -> tuple[list[str], Path | None, bool]:
@@ -210,6 +210,7 @@ def _session_command(
             argv=tuple(vendor_command),
             endpoint_root=endpoint_root,
             session_commands=tuple(session_commands or ()),
+            resolved_launch=resolved_launch,
         )
     )
     return list(command), endpoint, False
@@ -326,8 +327,9 @@ def open_terminal_session(
     session_commands: Sequence[str] | None = None,
     spawn_level: str | None = None,
     spawn_level_source: str | None = None,
-    resolved_model: str | None = None,
-    resolved_effort: str | None = None,
+    resolved_launch: ResolvedLaunch | None = None,
+    legacy_model: str | None = None,
+    legacy_effort: str | None = None,
     spawned_by_session: str | None = None,
     spawned_by_lifecycle: str | None = None,
     control_endpoint: Path | None = None,
@@ -343,10 +345,11 @@ def open_terminal_session(
     catalog row (carrying spawned-by provenance). A taken leaf returns ``leaf-taken`` WITHOUT spawning
     or mutating; an unknown/undetected kind/harness returns ``bad-kind``.
 
-    Knob application (260703-L16): the ``AR_SPAWN_MODEL``/``AR_SPAWN_EFFORT`` values riding ``env``
-    are ALSO mapped onto the harness argv per-harness via the registry (the env keeps riding for
-    session-start visibility); an out-of-vocabulary effort refuses (``bad-kind`` with the naming
-    detail). ``harnesses`` is the effective registry (builtin merged with the
+    L2 carries one typed ``ResolvedLaunch`` into the hosted runner. The runner performs token-free
+    dynamic catalog validation and applies adapter-native launch knobs before the real vendor
+    process starts. ``legacy_model``/``legacy_effort`` are used only for explicitly mapped
+    settings-defined non-native harnesses. The namespaced spawn env remains as settings provenance.
+    ``harnesses`` is the effective registry (builtin merged with the
     ``orchestration.harnesses`` settings family) ids resolve against; ``None`` = builtin defaults.
     The free-form escape hatch is recorded on the durable row as spawn provenance:
     ``launch_args`` (appended verbatim to the argv), ``prompt_keywords`` (the caller prepends them
@@ -361,8 +364,8 @@ def open_terminal_session(
             shell=shell,
             harness=harness,
             which=which,
-            model=spawn_env.get("AR_SPAWN_MODEL"),
-            effort=spawn_env.get("AR_SPAWN_EFFORT"),
+            model=legacy_model,
+            effort=legacy_effort,
             launch_args=launch_args,
             harnesses=harnesses,
         )
@@ -386,6 +389,7 @@ def open_terminal_session(
         control_endpoint=control_endpoint,
         control_root=control_root,
         session_commands=session_commands,
+        resolved_launch=resolved_launch,
         created_at=created_at,
         tmux_name=tmux_name,
     )
@@ -446,8 +450,8 @@ def open_terminal_session(
         session_commands=session_commands,
         spawn_level=spawn_level,
         spawn_level_source=spawn_level_source,
-        resolved_model=resolved_model,
-        resolved_effort=resolved_effort,
+        resolved_model=(resolved_launch.model_key if resolved_launch is not None else None),
+        resolved_effort=(resolved_launch.effort if resolved_launch is not None else None),
         legacy_running=legacy_running,
         control_endpoint=resolved_control_endpoint,
     )

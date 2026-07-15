@@ -22,7 +22,7 @@ from agents_remember.serving.claude_stream_transport import (
     ClaudeStreamTransport,
     ClaudeSubprocessTransport,
 )
-from agents_remember.serving.harness_capabilities import CapabilitySnapshot
+from agents_remember.serving.harness_capabilities import CapabilitySnapshot, LaunchKnobs
 from agents_remember.serving.harness_control_models import (
     CONTROL_PROTOCOL_VERSION,
     REQUIRED_ADAPTER_CAPABILITIES,
@@ -37,6 +37,7 @@ from agents_remember.serving.harness_control_models import (
     ShutdownMode,
     SubmissionReceipt,
 )
+from agents_remember.serving.harness_launch import ResolvedLaunch, verify_effective_launch
 
 Clock = Callable[[], str]
 CorrelationFactory = Callable[[], str]
@@ -53,11 +54,13 @@ class ClaudeStreamJsonAdapter:
         clock: Clock = lambda: datetime.now(UTC).isoformat(),
         correlation_factory: CorrelationFactory = lambda: str(uuid4()),
         limits: ClaudeAdapterLimits | None = None,
+        expected_launch: ResolvedLaunch | None = None,
     ) -> None:
         self._transport = transport_factory()
         self._clock = clock
         self._correlation_factory = correlation_factory
         self._limits = limits or ClaudeAdapterLimits()
+        self._expected_launch = expected_launch
         self._identity: ControlIdentity | None = None
         self._unsupported_snapshot: AdapterSnapshot | None = None
         self._capabilities: CapabilitySnapshot | None = None
@@ -96,6 +99,19 @@ class ClaudeStreamJsonAdapter:
             )
         except HarnessControlError as exc:
             return await self._unsupported_handshake(launch, str(exc), version=version)
+        if self._expected_launch is not None:
+            try:
+                verify_effective_launch(
+                    self._expected_launch,
+                    self._capabilities,
+                    require_effort_echo=False,
+                )
+            except HarnessControlError:
+                # Negotiation succeeded, so an expected-launch echo mismatch is a rejected launch,
+                # not an unsupported protocol. Close here and let the runner expose bridgeError.
+                await self._transport.stop("forced")
+                self._transport_started = False
+                raise
         snapshot = AdapterSnapshot(
             identity=launch.identity,
             control="ready",
@@ -109,6 +125,17 @@ class ClaudeStreamJsonAdapter:
                 "permissionMode": system_init.permission_mode,
                 "supportedSessionCommands": sorted(supported_commands),
                 "transport": "stream-json",
+                "requestedLaunchModel": (
+                    self._expected_launch.model_key if self._expected_launch is not None else None
+                ),
+                "requestedLaunchEffort": (
+                    self._expected_launch.effort if self._expected_launch is not None else None
+                ),
+                "launchEffortEvidence": (
+                    "catalog-validated native --effort; stream-json init has no effort echo"
+                    if self._expected_launch is not None
+                    else None
+                ),
             },
         )
         self._state = ClaudeStreamState(
@@ -157,6 +184,22 @@ class ClaudeStreamJsonAdapter:
         ):
             raise HarnessControlError(self._unsupported_detail or "Claude adapter is unsupported")
         return self._capabilities
+
+    def launch_knobs(self, *, model_key: str, effort: str | None) -> LaunchKnobs:
+        """Use Claude's documented launch flags, including the Fable-5-only model path."""
+
+        if not model_key or model_key != model_key.strip():
+            raise HarnessControlError(
+                "Claude launch model must be non-empty with no outer whitespace"
+            )
+        if effort is None or not effort or effort != effort.strip():
+            raise HarnessControlError(
+                "Claude launch effort must be non-empty with no outer whitespace"
+            )
+        return LaunchKnobs(
+            argv=("--model", model_key, "--effort", effort),
+            owned_argv_options=("--model", "--effort"),
+        )
 
     def subscribe(self) -> AsyncIterator[AdapterEvent]:
         if self._state is None:

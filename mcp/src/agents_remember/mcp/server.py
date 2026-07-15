@@ -208,7 +208,8 @@ def create_server(config: McpRuntimeConfig) -> Any:
         active/`spawned_by_lifecycle` lifecycle) is recorded on the catalog row so the dashboard can
         render the orchestration tree. Status `spawned-unbriefed` on success;
         `brief-delivery-separate`, `spend-override-unsupported`, `harness-unknown`/
-        `harness-not-detected`/`effort-invalid`/`model-invalid`/`level-invalid`/`bad-kind` are
+        `harness-not-detected`/`effort-invalid`/`model-invalid`/`launch-selection-invalid`/
+        `level-invalid`/`bad-kind` are
         pre-spawn refusals."""
         return spawn_agent_session_payload(
             config,

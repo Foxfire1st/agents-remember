@@ -132,11 +132,17 @@ class CapabilitySnapshot:
 
 @dataclass(frozen=True)
 class LaunchKnobs:
-    """Additive native launch material resolved from one model/effort selection."""
+    """Additive native launch material plus selectors the adapter exclusively owns.
+
+    ``owned_*`` makes free-form launch arguments fail on conflicts instead of silently overriding
+    or being overridden by the normalized selection.
+    """
 
     argv: tuple[str, ...] = ()
     env: Mapping[str, str] = field(default_factory=dict)
     session_config: Mapping[str, object] = field(default_factory=dict)
+    owned_argv_options: tuple[str, ...] = ()
+    owned_config_keys: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)

@@ -12,12 +12,20 @@ from unittest import mock
 
 from agents_remember.errors import HarnessControlError
 from agents_remember.serving.codex_app_server_adapter import CodexAppServerAdapter
+from agents_remember.serving.harness_capabilities import (
+    CapabilitySnapshot,
+    EffortOption,
+    LaunchKnobs,
+    ModelCapability,
+)
 from agents_remember.serving.harness_control_adapter import UnsupportedHarnessProtocolAdapter
+from agents_remember.serving.harness_control_bridge import HarnessControlBridge
 from agents_remember.serving.harness_control_claude import ClaudeStreamJsonAdapter
 from agents_remember.serving.harness_control_factories import create_harness_protocol_adapter
 from agents_remember.serving.harness_control_models import (
     AdapterSnapshot,
     ControlIdentity,
+    LaunchSpec,
     SubmissionReceipt,
     TerminalResult,
     TranscriptEntry,
@@ -25,11 +33,14 @@ from agents_remember.serving.harness_control_models import (
 from agents_remember.serving.harness_control_runner import (
     RunnerConfig,
     _adapter_argv,
+    _prepare_controlled_launch,
     _read_terminal_input,
     _render_updates,
     control_runner_command,
     parse_runner_config,
+    run_controlled_session,
 )
+from agents_remember.serving.harness_launch import ResolvedLaunch
 from agents_remember.serving.harness_terminal_surface import HarnessTerminalSurface
 from agents_remember.serving.pi_rpc_adapter import PiRpcAdapter
 
@@ -46,9 +57,10 @@ class RunnerConfigTests(unittest.TestCase):
             identity=_identity(),
             harness_id="claude",
             cwd=Path("/workspace"),
-            argv=("claude", "--model", "opus"),
+            argv=("claude",),
             endpoint_root=Path("/runtime/control"),
-            session_commands=("/effort high",),
+            session_commands=("/color blue",),
+            resolved_launch=ResolvedLaunch("claude", "claude-fable-5", "max", Path("/workspace")),
         )
         command = control_runner_command(config)
         self.assertEqual(command[1:3], ("-m", "agents_remember.serving.harness_control_runner"))
@@ -57,7 +69,9 @@ class RunnerConfigTests(unittest.TestCase):
             with self.subTest(malformed=malformed), self.assertRaises(HarnessControlError):
                 parse_runner_config(malformed)
 
-    def test_codex_runner_uses_app_server_and_removes_tui_only_knobs(self) -> None:
+    def test_codex_runner_uses_app_server_and_preserves_arguments_for_conflict_validation(
+        self,
+    ) -> None:
         config = RunnerConfig(
             identity=_identity(),
             harness_id="codex",
@@ -76,7 +90,17 @@ class RunnerConfigTests(unittest.TestCase):
         )
         self.assertEqual(
             _adapter_argv(config),
-            ("codex", "app-server", "--sandbox", "workspace-write", "--model"),
+            (
+                "codex",
+                "app-server",
+                "--model",
+                "gpt-5.6-sol",
+                "--config",
+                "model_reasoning_effort=xhigh",
+                "--sandbox",
+                "workspace-write",
+                "--model",
+            ),
         )
         self.assertEqual(
             _adapter_argv(replace(config, harness_id="claude", argv=("claude", "--verbose"))),
@@ -88,9 +112,7 @@ class RunnerConfigTests(unittest.TestCase):
             create_harness_protocol_adapter("claude", env={}), ClaudeStreamJsonAdapter
         )
         self.assertIsInstance(
-            create_harness_protocol_adapter(
-                "codex", env={"AR_SPAWN_MODEL": "gpt-test", "AR_SPAWN_EFFORT": "high"}
-            ),
+            create_harness_protocol_adapter("codex", env={}),
             CodexAppServerAdapter,
         )
         self.assertIsInstance(create_harness_protocol_adapter("pi", env={}), PiRpcAdapter)
@@ -98,6 +120,352 @@ class RunnerConfigTests(unittest.TestCase):
             create_harness_protocol_adapter("custom", env={}),
             UnsupportedHarnessProtocolAdapter,
         )
+
+    def test_native_adapters_own_their_exact_launch_channels(self) -> None:
+        claude = create_harness_protocol_adapter("claude", env={})
+        codex = create_harness_protocol_adapter(
+            "codex",
+            env={},
+            resolved_launch=ResolvedLaunch("codex", "gpt-test", "high", Path("/workspace")),
+            launch_knobs=LaunchKnobs(
+                session_config={"model": "gpt-test", "model_reasoning_effort": "high"}
+            ),
+        )
+        pi = create_harness_protocol_adapter("pi", env={})
+
+        self.assertEqual(
+            claude.launch_knobs(model_key="claude-fable-5", effort="max").argv,
+            ("--model", "claude-fable-5", "--effort", "max"),
+        )
+        self.assertEqual(
+            codex.launch_knobs(model_key="gpt-test", effort="high").session_config,
+            {"model": "gpt-test", "model_reasoning_effort": "high"},
+        )
+        self.assertEqual(
+            pi.launch_knobs(model_key="provider/model", effort="xhigh").argv,
+            ("--model", "provider/model", "--thinking", "xhigh"),
+        )
+
+
+class _LaunchAdapter:
+    def __init__(self) -> None:
+        self.discovered_argv: tuple[str, ...] | None = None
+
+    async def discover(self, launch: LaunchSpec) -> CapabilitySnapshot:
+        self.discovered_argv = launch.argv
+        return CapabilitySnapshot(
+            models=(
+                ModelCapability(
+                    key="provider/model",
+                    display_name="Model",
+                    supports_effort=True,
+                    effort_options=(EffortOption("high", "high"),),
+                    default_effort="high",
+                ),
+            ),
+            selected_model_key=None,
+            selected_effort=None,
+        )
+
+    def launch_knobs(self, *, model_key: str, effort: str | None) -> LaunchKnobs:
+        assert effort is not None
+        return LaunchKnobs(argv=("--model", model_key, "--thinking", effort))
+
+
+class LaunchPreparationTests(unittest.IsolatedAsyncioTestCase):
+    async def test_roleless_codex_ignores_ambient_spawn_knobs_and_keeps_dynamic_defaults(
+        self,
+    ) -> None:
+        config = RunnerConfig(
+            identity=_identity(),
+            harness_id="codex",
+            cwd=Path("/workspace"),
+            argv=("codex", "--sandbox", "workspace-write"),
+            endpoint_root=Path("/runtime/control"),
+        )
+
+        adapter, launch = await _prepare_controlled_launch(
+            config,
+            env={"AR_SPAWN_MODEL": "ambient-model", "AR_SPAWN_EFFORT": "ambient-effort"},
+        )
+
+        self.assertIsInstance(adapter, CodexAppServerAdapter)
+        codex = cast(CodexAppServerAdapter, adapter)
+        self.assertIsNone(codex._settings.model)
+        self.assertIsNone(codex._settings.reasoning_effort)
+        self.assertEqual(launch.argv, ("codex", "app-server", "--sandbox", "workspace-write"))
+
+    async def test_dynamic_discovery_precedes_native_launch_knob_application(self) -> None:
+        discoverer = _LaunchAdapter()
+        runtime = _LaunchAdapter()
+        config = RunnerConfig(
+            identity=_identity(),
+            harness_id="pi",
+            cwd=Path("/workspace"),
+            argv=("pi", "--no-session"),
+            endpoint_root=Path("/runtime/control"),
+            resolved_launch=ResolvedLaunch("pi", "provider/model", "high", Path("/workspace")),
+        )
+        with mock.patch(
+            "agents_remember.serving.harness_control_runner.create_harness_protocol_adapter",
+            side_effect=[discoverer, runtime],
+        ):
+            adapter, launch = await _prepare_controlled_launch(config, env={"KEEP": "yes"})
+
+        self.assertIs(adapter, runtime)
+        self.assertEqual(discoverer.discovered_argv, ("pi", "--no-session"))
+        self.assertEqual(
+            launch.argv,
+            (
+                "pi",
+                "--model",
+                "provider/model",
+                "--thinking",
+                "high",
+                "--no-session",
+            ),
+        )
+        self.assertEqual(launch.env["KEEP"], "yes")
+
+    async def test_dynamic_refusal_stops_before_the_fresh_runtime_adapter_is_created(self) -> None:
+        discoverer = _LaunchAdapter()
+        config = RunnerConfig(
+            identity=_identity(),
+            harness_id="pi",
+            cwd=Path("/workspace"),
+            argv=("pi",),
+            endpoint_root=Path("/runtime/control"),
+            resolved_launch=ResolvedLaunch("pi", "provider/model", "ultracode", Path("/workspace")),
+        )
+        factory = mock.Mock(return_value=discoverer)
+        with (
+            mock.patch(
+                "agents_remember.serving.harness_control_runner.create_harness_protocol_adapter",
+                factory,
+            ),
+            self.assertRaisesRegex(
+                HarnessControlError,
+                r"launch effort 'ultracode'.*advertised launch efforts: \[high\]",
+            ),
+        ):
+            await _prepare_controlled_launch(config, env={})
+
+        factory.assert_called_once()
+        self.assertEqual(discoverer.discovered_argv, ("pi",))
+
+    async def test_launch_args_cannot_duplicate_an_adapter_owned_selector(self) -> None:
+        discoverer = _LaunchAdapter()
+        config = RunnerConfig(
+            identity=_identity(),
+            harness_id="pi",
+            cwd=Path("/workspace"),
+            argv=("pi", "--model", "other/provider-model"),
+            endpoint_root=Path("/runtime/control"),
+            resolved_launch=ResolvedLaunch("pi", "provider/model", "high", Path("/workspace")),
+        )
+        factory = mock.Mock(return_value=discoverer)
+        with (
+            mock.patch(
+                "agents_remember.serving.harness_control_runner.create_harness_protocol_adapter",
+                factory,
+            ),
+            self.assertRaisesRegex(HarnessControlError, r"adapter-owned option.*--model"),
+        ):
+            await _prepare_controlled_launch(config, env={})
+
+        factory.assert_called_once()
+        self.assertIsNone(discoverer.discovered_argv)
+
+    async def test_codex_launch_args_cannot_duplicate_adapter_owned_config(self) -> None:
+        discoverer = _LaunchAdapter()
+        config = RunnerConfig(
+            identity=_identity(),
+            harness_id="codex",
+            cwd=Path("/workspace"),
+            argv=("codex", "--config", "model_reasoning_effort=low"),
+            endpoint_root=Path("/runtime/control"),
+            resolved_launch=ResolvedLaunch("codex", "provider/model", "high", Path("/workspace")),
+        )
+        factory = mock.Mock(return_value=discoverer)
+        discoverer.launch_knobs = mock.Mock(
+            return_value=LaunchKnobs(
+                session_config={
+                    "model": "provider/model",
+                    "model_reasoning_effort": "high",
+                },
+                owned_argv_options=("--model", "-m"),
+                owned_config_keys=("model", "model_reasoning_effort"),
+            )
+        )
+        with (
+            mock.patch(
+                "agents_remember.serving.harness_control_runner.create_harness_protocol_adapter",
+                factory,
+            ),
+            self.assertRaisesRegex(
+                HarnessControlError,
+                r"adapter-owned config key.*model_reasoning_effort",
+            ),
+        ):
+            await _prepare_controlled_launch(config, env={})
+
+        factory.assert_called_once()
+        self.assertIsNone(discoverer.discovered_argv)
+
+    async def test_codex_attached_config_conflict_preflights_the_production_adapter(self) -> None:
+        config = RunnerConfig(
+            identity=_identity(),
+            harness_id="codex",
+            cwd=Path("/workspace"),
+            argv=("codex", "-cmodel_reasoning_effort=low"),
+            endpoint_root=Path("/runtime/control"),
+            resolved_launch=ResolvedLaunch("codex", "gpt-5.6-sol", "xhigh", Path("/workspace")),
+        )
+        discover = mock.AsyncMock()
+        with (
+            mock.patch.object(CodexAppServerAdapter, "discover", discover),
+            self.assertRaisesRegex(
+                HarnessControlError,
+                r"adapter-owned config key.*model_reasoning_effort",
+            ),
+        ):
+            await _prepare_controlled_launch(config, env={})
+
+        discover.assert_not_awaited()
+
+
+class _CaptureServer:
+    latest: _CaptureServer | None = None
+
+    def __init__(self, _endpoint: object, bridge: HarnessControlBridge) -> None:
+        self.bridge = bridge
+        self.started = False
+        self.closed = False
+        self.snapshot_on_close: AdapterSnapshot | None = None
+        type(self).latest = self
+
+    async def start(self) -> None:
+        self.started = True
+
+    async def close(self) -> None:
+        self.snapshot_on_close = self.bridge.snapshot()
+        self.closed = True
+
+
+class _StartFailureAdapter(_LaunchAdapter):
+    def __init__(self, detail: str) -> None:
+        super().__init__()
+        self.detail = detail
+        self.stop_modes: list[str] = []
+
+    async def start(self, _launch: LaunchSpec) -> object:
+        raise HarnessControlError(self.detail)
+
+    async def stop(self, mode: str) -> None:
+        self.stop_modes.append(mode)
+
+
+async def _completed_surface_task(_surface: object) -> None:
+    return None
+
+
+class RunnerStartupFailureTests(unittest.IsolatedAsyncioTestCase):
+    async def test_preparation_failure_is_exposed_as_exact_runner_control_state(self) -> None:
+        config = RunnerConfig(
+            identity=_identity(),
+            harness_id="pi",
+            cwd=Path("/workspace"),
+            argv=("pi",),
+            endpoint_root=Path("/runtime/control"),
+            resolved_launch=ResolvedLaunch("pi", "provider/missing", "high", Path("/workspace")),
+        )
+        detail = (
+            "pi launch model 'provider/missing' is absent from the dynamic catalog; "
+            "advertised models: [provider/model]"
+        )
+        _CaptureServer.latest = None
+        stdout = io.StringIO()
+        with (
+            mock.patch(
+                "agents_remember.serving.harness_control_runner._prepare_controlled_launch",
+                side_effect=HarnessControlError(detail),
+            ),
+            mock.patch(
+                "agents_remember.serving.harness_control_runner.HarnessControlServer",
+                _CaptureServer,
+            ),
+            mock.patch(
+                "agents_remember.serving.harness_control_runner._render_updates",
+                _completed_surface_task,
+            ),
+            mock.patch(
+                "agents_remember.serving.harness_control_runner._read_terminal_input",
+                _completed_surface_task,
+            ),
+            redirect_stdout(stdout),
+        ):
+            await run_controlled_session(config)
+
+        server = _CaptureServer.latest
+        assert server is not None
+        snapshot = server.snapshot_on_close
+        assert snapshot is not None
+        self.assertTrue(server.started)
+        self.assertTrue(server.closed)
+        self.assertEqual(snapshot.control, "failed")
+        self.assertEqual(snapshot.acceptance, "rejected")
+        self.assertEqual(snapshot.raw["bridgeError"], detail)
+        self.assertIn(f"[control] launch failed: {detail}", stdout.getvalue())
+
+    async def test_adapter_start_mismatch_is_persistent_failed_rejected_evidence(self) -> None:
+        config = RunnerConfig(
+            identity=_identity(),
+            harness_id="claude",
+            cwd=Path("/workspace"),
+            argv=("claude",),
+            endpoint_root=Path("/runtime/control"),
+            resolved_launch=ResolvedLaunch("claude", "sonnet", "high", Path("/workspace")),
+        )
+        detail = "claude launch selected model 'sonnet', but the running harness reported 'haiku'"
+        adapter = _StartFailureAdapter(detail)
+        launch = LaunchSpec(
+            identity=config.identity,
+            harness_id="claude",
+            cwd=config.cwd,
+            argv=("claude", "--model", "sonnet", "--effort", "high"),
+        )
+        _CaptureServer.latest = None
+        stdout = io.StringIO()
+        with (
+            mock.patch(
+                "agents_remember.serving.harness_control_runner._prepare_controlled_launch",
+                return_value=(adapter, launch),
+            ),
+            mock.patch(
+                "agents_remember.serving.harness_control_runner.HarnessControlServer",
+                _CaptureServer,
+            ),
+            mock.patch(
+                "agents_remember.serving.harness_control_runner._render_updates",
+                _completed_surface_task,
+            ),
+            mock.patch(
+                "agents_remember.serving.harness_control_runner._read_terminal_input",
+                _completed_surface_task,
+            ),
+            redirect_stdout(stdout),
+        ):
+            await run_controlled_session(config)
+
+        server = _CaptureServer.latest
+        assert server is not None
+        snapshot = server.snapshot_on_close
+        assert snapshot is not None
+        self.assertEqual(snapshot.control, "failed")
+        self.assertEqual(snapshot.acceptance, "rejected")
+        self.assertEqual(snapshot.raw["bridgeError"], detail)
+        self.assertIn(f"[control] launch failed: {detail}", stdout.getvalue())
+        self.assertEqual(adapter.stop_modes, ["forced"])
 
 
 class _InputSurface:

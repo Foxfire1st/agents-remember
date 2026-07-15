@@ -18,6 +18,7 @@ MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
 from agents_remember.serving.harness_control_runner import parse_runner_config
+from agents_remember.serving.harness_launch import ResolvedLaunch
 from agents_remember.serving.harnesses import Harness
 from agents_remember.serving.terminal import TerminalSessionBinding
 from agents_remember.serving.terminal_catalog import TerminalCatalog, TerminalCatalogEntry
@@ -263,9 +264,7 @@ class OpenTerminalSessionTests(unittest.TestCase):
 
 
 class KnobApplicationTests(unittest.TestCase):
-    """260703-L16: the opener maps the env-riding knobs onto the harness argv per-harness via the
-    registry (the env keeps riding for session-start visibility), applies launch_args verbatim, and
-    records the free-form escape hatch on the durable row as spawn provenance."""
+    """The opener carries one typed launch to the runner and preserves spawn provenance."""
 
     def setUp(self) -> None:
         self.tmp = Path(tempfile.mkdtemp())
@@ -286,70 +285,50 @@ class KnobApplicationTests(unittest.TestCase):
         base.update(kwargs)
         return open_terminal_session(**base)  # type: ignore[arg-type]
 
-    def test_claude_env_knobs_ride_the_argv_as_flags(self) -> None:
-        result = self._open(env={"AR_SPAWN_MODEL": "opus", "AR_SPAWN_EFFORT": "max"})
-        self.assertEqual(result.status, "opened")
-        self.assertEqual(
-            _runner_config(self.host).argv,
-            ("claude", "--model", "opus", "--effort", "max"),
+    def test_claude_resolved_launch_rides_the_runner_payload(self) -> None:
+        resolved = ResolvedLaunch("claude", "claude-fable-5", "max", self.tmp)
+        result = self._open(
+            env={"AR_SPAWN_MODEL": "claude-fable-5", "AR_SPAWN_EFFORT": "max"},
+            resolved_launch=resolved,
         )
-        # The env vars KEEP riding for session-start visibility.
+        self.assertEqual(result.status, "opened")
+        runner = _runner_config(self.host)
+        self.assertEqual(runner.argv, ("claude",))
+        self.assertEqual(runner.resolved_launch, resolved)
         self.assertEqual(
             self.host.ensured[0]["env"],
-            {"AR_SPAWN_MODEL": "opus", "AR_SPAWN_EFFORT": "max"},
+            {"AR_SPAWN_MODEL": "claude-fable-5", "AR_SPAWN_EFFORT": "max"},
         )
 
-    def test_session_vocabulary_effort_stays_off_the_flag(self) -> None:
-        result = self._open(env={"AR_SPAWN_EFFORT": "ultracode"})
+    def test_no_effort_is_synthesized_as_a_session_command(self) -> None:
+        resolved = ResolvedLaunch("claude", "claude-fable-5", "ultracode", self.tmp)
+        result = self._open(resolved_launch=resolved)
         self.assertEqual(result.status, "opened")
-        # No --effort flag: the claude CLI would warn-and-degrade on it; the session vehicle
-        # ("/effort ultracode") is delivered by the dispatch layer, not the launch argv.
-        self.assertEqual(_runner_config(self.host).argv, ("claude",))
-        self.assertEqual(self.host.ensured[0]["env"], {"AR_SPAWN_EFFORT": "ultracode"})
+        self.assertEqual(_runner_config(self.host).session_commands, ())
 
-    def test_unknown_effort_refuses_naming_harness_and_both_sets(self) -> None:
-        result = self._open(env={"AR_SPAWN_EFFORT": "turbo"})
-        self.assertEqual(result.status, "bad-kind")
-        assert result.detail is not None
-        self.assertIn("'turbo'", result.detail)
-        self.assertIn("'claude'", result.detail)
-        self.assertIn("low, medium, high, xhigh, max", result.detail)
-        self.assertIn("ultracode", result.detail)
-        # Refused BEFORE spawning anything.
-        self.assertEqual(self.host.ensured, [])
-        self.assertIsNone(self.catalog.get("worker-1"))
-
-    def test_codex_knobs_are_explicit_argv(self) -> None:
+    def test_codex_selection_is_structured_not_a_tui_argv_override(self) -> None:
+        resolved = ResolvedLaunch("codex", "gpt-5.6-sol", "xhigh", self.tmp)
         result = self._open(
-            harness="codex", env={"AR_SPAWN_MODEL": "gpt-5.6-sol", "AR_SPAWN_EFFORT": "xhigh"}
+            harness="codex",
+            env={"AR_SPAWN_MODEL": "gpt-5.6-sol", "AR_SPAWN_EFFORT": "xhigh"},
+            resolved_launch=resolved,
         )
         self.assertEqual(result.status, "opened")
-        self.assertEqual(
-            _runner_config(self.host).argv,
-            ("codex", "--model", "gpt-5.6-sol", "--config", "model_reasoning_effort=xhigh"),
-        )
+        self.assertEqual(_runner_config(self.host).argv, ("codex",))
+        self.assertEqual(_runner_config(self.host).resolved_launch, resolved)
         self.assertEqual(
             self.host.ensured[0]["env"],
             {"AR_SPAWN_MODEL": "gpt-5.6-sol", "AR_SPAWN_EFFORT": "xhigh"},
         )
 
-    def test_codex_max_effort_uses_the_model_advertised_config_value(self) -> None:
-        result = self._open(harness="codex", env={"AR_SPAWN_EFFORT": "max"})
-        self.assertEqual(result.status, "opened")
-        self.assertEqual(
-            _runner_config(self.host).argv,
-            ("codex", "--config", "model_reasoning_effort=max"),
-        )
-
-    def test_launch_args_append_verbatim_after_the_knob_flags(self) -> None:
+    def test_launch_args_remain_on_the_base_command_before_adapter_preparation(self) -> None:
         result = self._open(
-            env={"AR_SPAWN_EFFORT": "max"},
             launch_args=["--dangerously-skip-permissions", "--foo", "bar"],
         )
         self.assertEqual(result.status, "opened")
         self.assertEqual(
             _runner_config(self.host).argv,
-            ("claude", "--effort", "max", "--dangerously-skip-permissions", "--foo", "bar"),
+            ("claude", "--dangerously-skip-permissions", "--foo", "bar"),
         )
 
     def test_free_form_provenance_is_recorded_and_round_trips(self) -> None:
@@ -402,19 +381,15 @@ class KnobApplicationTests(unittest.TestCase):
         self.assertIn("docs/reference/harnesses.md", result.detail)
         self.assertEqual(self.host.ensured, [])
 
-    def test_vocab_less_settings_harness_refuses_the_effort_knob_with_guidance(self) -> None:
+    def test_custom_harness_launch_mapping_is_not_guessed_by_the_native_opener(self) -> None:
         hermes = Harness(
             id="hermes", name="Hermes", command="hermes", argv=("hermes",), defined_in="settings"
         )
         result = self._open(
             harness="hermes", harnesses=(hermes,), env={"AR_SPAWN_EFFORT": "high"}
         )
-        self.assertEqual(result.status, "bad-kind")
-        assert result.detail is not None
-        self.assertIn("'hermes'", result.detail)
-        self.assertIn("effortFlag", result.detail)
-        self.assertIn("launchArgs", result.detail)
-        self.assertEqual(self.host.ensured, [])
+        self.assertEqual(result.status, "opened")
+        self.assertEqual(_runner_config(self.host).argv, ("hermes",))
 
 
 if __name__ == "__main__":

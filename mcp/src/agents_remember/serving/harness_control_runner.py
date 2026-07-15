@@ -14,6 +14,10 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from agents_remember.errors import HarnessControlError
+from agents_remember.serving.harness_control_adapter import (
+    LaunchableHarnessProtocolAdapter,
+    UnsupportedHarnessProtocolAdapter,
+)
 from agents_remember.serving.harness_control_bridge import HarnessControlBridge
 from agents_remember.serving.harness_control_factories import create_harness_protocol_adapter
 from agents_remember.serving.harness_control_ipc import HarnessControlServer, LocalControlEndpoint
@@ -21,6 +25,11 @@ from agents_remember.serving.harness_control_models import (
     ControlIdentity,
     LaunchSpec,
     PromptRequest,
+)
+from agents_remember.serving.harness_launch import (
+    ResolvedLaunch,
+    apply_launch_knobs,
+    validate_launch_selection,
 )
 from agents_remember.serving.harness_terminal_surface import HarnessTerminalSurface
 
@@ -33,6 +42,7 @@ class RunnerConfig:
     argv: tuple[str, ...]
     endpoint_root: Path
     session_commands: tuple[str, ...] = ()
+    resolved_launch: ResolvedLaunch | None = None
 
 
 def control_runner_command(config: RunnerConfig) -> tuple[str, ...]:
@@ -43,6 +53,9 @@ def control_runner_command(config: RunnerConfig) -> tuple[str, ...]:
         "argv": list(config.argv),
         "endpointRoot": str(config.endpoint_root),
         "sessionCommands": list(config.session_commands),
+        "resolvedLaunch": (
+            config.resolved_launch.to_json() if config.resolved_launch is not None else None
+        ),
     }
     encoded = base64.urlsafe_b64encode(
         json.dumps(payload, separators=(",", ":")).encode("utf-8")
@@ -60,48 +73,71 @@ def parse_runner_config(encoded: str) -> RunnerConfig:
     identity = raw.get("identity")
     argv = raw.get("argv")
     session_commands = raw.get("sessionCommands", [])
-    if not isinstance(identity, dict) or not isinstance(argv, list) or not all(
-        isinstance(part, str) and part for part in argv
-    ) or not isinstance(session_commands, list) or not all(
-        isinstance(command, str) and command for command in session_commands
+    if (
+        not isinstance(identity, dict)
+        or not isinstance(argv, list)
+        or not all(isinstance(part, str) and part for part in argv)
+        or not isinstance(session_commands, list)
+        or not all(isinstance(command, str) and command for command in session_commands)
     ):
         raise HarnessControlError("hosted control runner requires identity and argv")
-    return RunnerConfig(
+    resolved_raw = raw.get("resolvedLaunch")
+    resolved_launch = ResolvedLaunch.from_json(resolved_raw) if resolved_raw is not None else None
+    config = RunnerConfig(
         identity=ControlIdentity.from_json(identity),
         harness_id=_required_text(raw, "harnessId"),
         cwd=Path(_required_text(raw, "cwd")),
         argv=tuple(argv),
         endpoint_root=Path(_required_text(raw, "endpointRoot")),
         session_commands=tuple(session_commands),
+        resolved_launch=resolved_launch,
     )
+    if resolved_launch is not None:
+        if resolved_launch.harness_id != config.harness_id:
+            raise HarnessControlError("runner resolved launch harness does not match harnessId")
+        if resolved_launch.workspace != config.cwd:
+            raise HarnessControlError("runner resolved launch workspace does not match cwd")
+    return config
 
 
 async def run_controlled_session(config: RunnerConfig) -> None:
-    adapter = create_harness_protocol_adapter(config.harness_id, env=os.environ)
+    prepare_error: Exception | None = None
+    try:
+        adapter, launch = await _prepare_controlled_launch(config, env=os.environ)
+    except Exception as exc:
+        prepare_error = exc
+        adapter = UnsupportedHarnessProtocolAdapter(config.harness_id)
+        launch = None
     bridge = HarnessControlBridge(config.identity, adapter)
     endpoint = LocalControlEndpoint.for_session(config.endpoint_root, config.identity)
     server = HarnessControlServer(endpoint, bridge)
     await server.start()
     try:
-        try:
-            await bridge.start(
-                LaunchSpec(
-                    identity=config.identity,
-                    harness_id=config.harness_id,
-                    cwd=config.cwd,
-                    argv=_adapter_argv(config),
-                    env=dict(os.environ),
-                )
-            )
-        except Exception as exc:
-            bridge.mark_failed(str(exc))
+        if prepare_error is not None:
+            bridge.mark_failed(str(prepare_error))
+        else:
+            assert launch is not None
+            try:
+                await bridge.start(launch)
+            except Exception as exc:
+                bridge.mark_failed(str(exc))
         surface = HarnessTerminalSurface(bridge)
-        await _submit_session_commands(bridge, config.session_commands)
+        if bridge.snapshot().control == "ready":
+            await _submit_session_commands(bridge, config.session_commands)
         print(
-            f"Agents Remember protocol session {config.harness_id}: "
-            f"{bridge.snapshot().control}",
+            f"Agents Remember protocol session {config.harness_id}: {bridge.snapshot().control}",
             flush=True,
         )
+        if bridge.snapshot().control == "failed":
+            # Keep the failed endpoint addressable so readiness and daemon consumers can retrieve
+            # the exact bridgeError. Exiting here would tear down tmux/socket before that evidence
+            # could be observed, turning a precise launch refusal into a generic disconnect.
+            print(
+                f"[control] launch failed: {bridge.snapshot().raw.get('bridgeError', 'unknown error')}",
+                flush=True,
+            )
+            await _read_terminal_input(surface)
+            return
         render = asyncio.create_task(_render_updates(surface))
         terminal_input = asyncio.create_task(_read_terminal_input(surface))
         await asyncio.wait({render, terminal_input}, return_when=asyncio.FIRST_COMPLETED)
@@ -111,6 +147,48 @@ async def run_controlled_session(config: RunnerConfig) -> None:
     finally:
         await server.close()
         await bridge.stop("forced")
+
+
+async def _prepare_controlled_launch(
+    config: RunnerConfig,
+    *,
+    env: Mapping[str, str],
+) -> tuple[LaunchableHarnessProtocolAdapter, LaunchSpec]:
+    """Discover, validate, then apply native knobs before the real harness process starts."""
+
+    base = LaunchSpec(
+        identity=config.identity,
+        harness_id=config.harness_id,
+        cwd=config.cwd,
+        argv=_adapter_argv(config),
+        env=dict(env),
+    )
+    selection = config.resolved_launch
+    if selection is None:
+        return create_harness_protocol_adapter(config.harness_id, env=env), base
+
+    discovery_env = {
+        **env,
+        "AR_SPAWN_MODEL": selection.model_key,
+        "AR_SPAWN_EFFORT": selection.effort,
+    }
+    discoverer = create_harness_protocol_adapter(config.harness_id, env=discovery_env)
+    knobs = discoverer.launch_knobs(
+        model_key=selection.model_key,
+        effort=selection.effort,
+    )
+    # This is a pure preflight. Owned selector/config conflicts must refuse before the transient
+    # discovery adapter is allowed to start a vendor process.
+    launch = apply_launch_knobs(base, knobs)
+    snapshot = await discoverer.discover(base)
+    validate_launch_selection(selection, snapshot)
+    adapter = create_harness_protocol_adapter(
+        config.harness_id,
+        env=env,
+        resolved_launch=selection,
+        launch_knobs=knobs,
+    )
+    return adapter, launch
 
 
 async def _render_updates(surface: HarnessTerminalSurface) -> None:
@@ -158,9 +236,7 @@ async def _read_terminal_input(surface: HarnessTerminalSurface) -> None:
         )
 
 
-async def _submit_session_commands(
-    bridge: HarnessControlBridge, commands: tuple[str, ...]
-) -> None:
+async def _submit_session_commands(bridge: HarnessControlBridge, commands: tuple[str, ...]) -> None:
     for index, command in enumerate(commands, start=1):
         now = datetime.now(UTC).isoformat()
         receipt = await bridge.submit(
@@ -186,24 +262,10 @@ def _committed_line(line: str) -> str:
 def _adapter_argv(config: RunnerConfig) -> tuple[str, ...]:
     if config.harness_id != "codex":
         return config.argv
-    executable = config.argv[0]
-    passthrough: list[str] = []
-    index = 1
-    while index < len(config.argv):
-        argument = config.argv[index]
-        if argument == "--model" and index + 1 < len(config.argv):
-            index += 2
-            continue
-        if (
-            argument == "--config"
-            and index + 1 < len(config.argv)
-            and config.argv[index + 1].startswith("model_reasoning_effort=")
-        ):
-            index += 2
-            continue
-        passthrough.append(argument)
-        index += 1
-    return (executable, "app-server", *passthrough)
+    # Keep every settings/user-supplied argument. The normalized adapter owns model and effort;
+    # silently deleting an older ``--model`` or ``--config model_reasoning_effort=...`` here would
+    # hide conflicting authority instead of letting ``apply_launch_knobs`` refuse it explicitly.
+    return (config.argv[0], "app-server", *config.argv[1:])
 
 
 def _readable(text: str) -> str:

@@ -10,7 +10,11 @@ from datetime import UTC, datetime
 from typing import Literal
 
 from agents_remember.errors import HarnessAdapterDisconnectedError, HarnessControlError
-from agents_remember.serving.harness_capabilities import CapabilitySnapshot, ModelCapability
+from agents_remember.serving.harness_capabilities import (
+    CapabilitySnapshot,
+    LaunchKnobs,
+    ModelCapability,
+)
 from agents_remember.serving.harness_control_models import (
     CONTROL_PROTOCOL_VERSION,
     REQUIRED_ADAPTER_CAPABILITIES,
@@ -24,6 +28,7 @@ from agents_remember.serving.harness_control_models import (
     ShutdownMode,
     SubmissionReceipt,
 )
+from agents_remember.serving.harness_launch import ResolvedLaunch, verify_effective_launch
 from agents_remember.serving.pi_rpc_events import PiRpcEventMapper
 from agents_remember.serving.pi_rpc_process import PiRpcSubprocess, PiRpcTransport
 from agents_remember.serving.pi_rpc_protocol import (
@@ -65,6 +70,7 @@ class PiRpcAdapter:
         submission_limit: int = 256,
         interaction_limit: int = 64,
         clock: Clock = lambda: datetime.now(UTC).isoformat(),
+        expected_launch: ResolvedLaunch | None = None,
     ) -> None:
         if submission_limit < 1 or interaction_limit < 1:
             raise HarnessControlError("Pi RPC adapter limits must be positive")
@@ -72,6 +78,7 @@ class PiRpcAdapter:
         self._submission_limit = submission_limit
         self._interaction_limit = interaction_limit
         self._clock = clock
+        self._expected_launch = expected_launch
         self._transport: PiRpcTransport | None = None
         self._launch: LaunchSpec | None = None
         self._state: PiSessionState | None = None
@@ -103,9 +110,25 @@ class PiRpcAdapter:
             )
             state = await self._read_state()
             self._capabilities = await self._read_available_models(state)
+            if self._expected_launch is not None:
+                verify_effective_launch(
+                    self._expected_launch,
+                    self._capabilities,
+                    require_effort_echo=True,
+                )
             entries = await self._read_entries()
             self._cursor = entries.leaf_id
             snapshot = self._events.apply_state(state, cursor=self._cursor)
+            if self._expected_launch is not None:
+                snapshot = replace(
+                    snapshot,
+                    raw={
+                        **snapshot.raw,
+                        "requestedLaunchModel": self._expected_launch.model_key,
+                        "requestedLaunchEffort": self._expected_launch.effort,
+                        "launchAcceptance": "echo-verified",
+                    },
+                )
             ready = True
             return AdapterHandshake(
                 protocol_version=CONTROL_PROTOCOL_VERSION,
@@ -154,6 +177,18 @@ class PiRpcAdapter:
         if capabilities is None or state is None:
             raise HarnessControlError("Pi RPC model catalog is not available")
         return self._current_capabilities(capabilities.models, state)
+
+    def launch_knobs(self, *, model_key: str, effort: str | None) -> LaunchKnobs:
+        """Use Pi 0.80.7's exact native model/thinking flags; RPC mode stays protocol-owned."""
+
+        if not model_key or model_key != model_key.strip():
+            raise HarnessControlError("Pi launch model must be non-empty with no outer whitespace")
+        if effort is None or not effort or effort != effort.strip():
+            raise HarnessControlError("Pi launch effort must be non-empty with no outer whitespace")
+        return LaunchKnobs(
+            argv=("--model", model_key, "--thinking", effort),
+            owned_argv_options=("--model", "--thinking"),
+        )
 
     async def _event_stream(self) -> AsyncIterator[AdapterEvent]:
         self._require_started()

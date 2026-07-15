@@ -840,9 +840,10 @@ class HarnessesFamilyTests(unittest.TestCase):
         claude = settings.find_harness("claude")
         assert claude is not None
         self.assertEqual(claude.argv, ("claude", "--continue"))
-        # The curated knob mapping and identity survive a partial override.
+        # Native knob ownership stays out of the static registry; identity survives a partial
+        # command override.
         self.assertEqual(claude.command, "claude")
-        self.assertEqual(claude.effort_flag, "--effort")
+        self.assertIsNone(claude.effort_flag)
         self.assertEqual(claude.defined_in, "registry")
 
     def test_replacing_codex_effort_flag_drops_its_config_value_template(self) -> None:
@@ -868,12 +869,12 @@ class HarnessesFamilyTests(unittest.TestCase):
         self.assertIn("high, xhigh", detail)
         self.assertEqual(knob_argv(codex, effort="bogus-effort"), [])
 
-    def test_partial_codex_override_keeps_builtin_dynamic_effort_policy(self) -> None:
+    def test_partial_codex_override_does_not_invent_a_static_effort_policy(self) -> None:
         settings = self._load({"harnesses": {"codex": {"argv": ["codex", "--search"]}}})
         codex = settings.find_harness("codex")
         assert codex is not None
-        self.assertEqual(codex.effort_validation, "non-empty")
-        self.assertIsNone(invalid_effort_detail(codex, "future-model-effort"))
+        self.assertEqual(codex.effort_validation, "enumerated")
+        self.assertEqual(codex.effort_flag_values, ())
 
     def test_new_id_without_command_or_argv_fails_loud(self) -> None:
         with self.assertRaisesRegex(AgenticSettingsError, "command and/or argv"):

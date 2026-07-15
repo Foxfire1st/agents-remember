@@ -25,6 +25,7 @@ from agents_remember.serving.harness_control_models import (
     PromptRequest,
     ShutdownMode,
 )
+from agents_remember.serving.harness_launch import ResolvedLaunch
 
 FIXTURE_ROOT = Path(__file__).parent / "fixtures" / "claude_stream_json" / "2.1.210"
 SESSION_ID = "11111111-1111-4111-8111-111111111111"
@@ -128,6 +129,7 @@ def _adapter(
     *,
     correlations: list[str] | None = None,
     limits: ClaudeAdapterLimits | None = None,
+    expected_launch: ResolvedLaunch | None = None,
 ) -> ClaudeStreamJsonAdapter:
     values = iter(correlations or [FIRST_CORRELATION])
 
@@ -136,6 +138,7 @@ def _adapter(
         clock=lambda: NOW,
         correlation_factory=lambda: next(values),
         limits=limits,
+        expected_launch=expected_launch,
     )
 
 
@@ -311,6 +314,24 @@ class ClaudeStreamJsonAdapterTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(handshake.snapshot.control, "unsupported")
         self.assertEqual(incompatible_transport.stop_modes, ["forced"])
         self.assertIn("command capabilities", str(handshake.raw["detail"]))
+
+    async def test_expected_launch_model_mismatch_closes_and_propagates_as_failure(self) -> None:
+        frames = _load_fixture("initialization.jsonl")
+        system_init = frames[1]
+        system_init["model"] = "haiku"
+        transport = _FakeClaudeTransport(frames)
+        adapter = _adapter(
+            transport,
+            expected_launch=ResolvedLaunch("claude", "sonnet", "high", Path("/workspace")),
+        )
+
+        with self.assertRaisesRegex(
+            HarnessControlError,
+            "selected model 'sonnet'.*running harness reported 'haiku'",
+        ):
+            await adapter.start(_launch())
+
+        self.assertEqual(transport.stop_modes, ["forced"])
 
     async def test_correlated_acceptance_retry_activity_and_terminal_result_are_distinct(
         self,

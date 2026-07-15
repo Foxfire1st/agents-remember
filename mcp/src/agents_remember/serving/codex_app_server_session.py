@@ -37,7 +37,7 @@ TransportFactory = Callable[[], CodexAppServerTransport]
 class CodexAppServerSettings:
     """Settings-owned desired state sent through app-server, never an effort argv mapping."""
 
-    reasoning_effort: str
+    reasoning_effort: str | None = None
     model: str | None = None
     resume_thread_id: str | None = None
     approval_policy: object | None = None
@@ -56,7 +56,6 @@ class CodexAppServerSettings:
 
     def __post_init__(self) -> None:
         for name, value in (
-            ("reasoning_effort", self.reasoning_effort),
             ("client_name", self.client_name),
             ("client_title", self.client_title),
             ("client_version", self.client_version),
@@ -65,6 +64,12 @@ class CodexAppServerSettings:
                 raise CodexAppServerError(
                     f"Codex {name} must be non-empty with no outer whitespace"
                 )
+        if self.reasoning_effort is not None and (
+            not self.reasoning_effort or self.reasoning_effort != self.reasoning_effort.strip()
+        ):
+            raise CodexAppServerError(
+                "Codex reasoning_effort must be non-empty with no outer whitespace"
+            )
         if self.model is not None and (not self.model or self.model != self.model.strip()):
             raise CodexAppServerError("Codex model must be non-empty with no outer whitespace")
         if self.busy_policy not in {"steer", "queue"}:
@@ -95,6 +100,7 @@ class CodexAppServerSession:
         self.cli_version: str | None = None
         self.model: CodexModelCapability | None = None
         self.models: tuple[CodexModelCapability, ...] = ()
+        self.desired_effort: str | None = None
         self.effective_effort: str | None = None
 
     async def connect(
@@ -112,16 +118,22 @@ class CodexAppServerSession:
             cli_version, initialize_evidence = await self._initialize(transport)
             models = await self._read_models(transport)
             selected = select_model(models, self.settings.model)
-            validate_reasoning_effort(selected, self.settings.reasoning_effort)
+            desired_effort = self.settings.reasoning_effort or selected.default_effort
+            validate_reasoning_effort(selected, desired_effort)
+            self.desired_effort = desired_effort
             method = "thread/resume" if resume_thread_id else "thread/start"
             response = await transport.request(
                 method,
-                self._thread_params(resume_thread_id=resume_thread_id, selected=selected),
+                self._thread_params(
+                    resume_thread_id=resume_thread_id,
+                    selected=selected,
+                    desired_effort=desired_effort,
+                ),
             )
             thread = parse_thread_open_response(
                 response,
                 method=method,
-                desired_effort=self.settings.reasoning_effort,
+                desired_effort=desired_effort,
             )
             if resume_thread_id is not None and thread.thread_id != resume_thread_id:
                 raise CodexAppServerError("thread/resume returned a different Codex thread id")
@@ -197,7 +209,7 @@ class CodexAppServerSession:
             "model": model.model if model else None,
             "advertisedReasoningEfforts": list(model.supported_efforts) if model else [],
             "defaultReasoningEffort": model.default_effort if model else None,
-            "desiredReasoningEffort": self.settings.reasoning_effort,
+            "desiredReasoningEffort": self.desired_effort,
             "effectiveReasoningEffort": self.effective_effort,
             "busyPolicy": self.settings.busy_policy,
         }
@@ -285,15 +297,22 @@ class CodexAppServerSession:
         *,
         resume_thread_id: str | None,
         selected: CodexModelCapability,
+        desired_effort: str,
     ) -> JsonObject:
         assert self.launch is not None
         config = dict(self.settings.config)
+        configured_model = config.get("model")
+        if configured_model is not None and configured_model != selected.model:
+            raise CodexAppServerError(
+                "Codex thread config model conflicts with the dynamically selected model"
+            )
         configured_effort = config.get("model_reasoning_effort")
-        if configured_effort is not None and configured_effort != self.settings.reasoning_effort:
+        if configured_effort is not None and configured_effort != desired_effort:
             raise CodexAppServerError(
                 "Codex thread config model_reasoning_effort conflicts with the settings desired effort"
             )
-        config["model_reasoning_effort"] = self.settings.reasoning_effort
+        config["model"] = selected.model
+        config["model_reasoning_effort"] = desired_effort
         params: JsonObject = {
             "model": selected.model,
             "cwd": str(self.launch.cwd),
@@ -311,3 +330,8 @@ class CodexAppServerSession:
             if value is not None:
                 params[key] = value
         return params
+
+    def require_desired_effort(self) -> str:
+        if self.desired_effort is None:
+            raise CodexAppServerError("Codex session has not resolved a reasoning effort")
+        return self.desired_effort
