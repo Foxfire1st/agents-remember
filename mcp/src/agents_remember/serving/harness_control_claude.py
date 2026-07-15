@@ -13,12 +13,16 @@ from agents_remember.serving.claude_stream_protocol import (
     build_claude_stream_argv,
     restore_pending_interaction,
 )
-from agents_remember.serving.claude_stream_startup import negotiate_claude_startup
+from agents_remember.serving.claude_stream_startup import (
+    negotiate_claude_catalog,
+    negotiate_claude_startup,
+)
 from agents_remember.serving.claude_stream_state import ClaudeStreamState
 from agents_remember.serving.claude_stream_transport import (
     ClaudeStreamTransport,
     ClaudeSubprocessTransport,
 )
+from agents_remember.serving.harness_capabilities import CapabilitySnapshot
 from agents_remember.serving.harness_control_models import (
     CONTROL_PROTOCOL_VERSION,
     REQUIRED_ADAPTER_CAPABILITIES,
@@ -56,6 +60,7 @@ class ClaudeStreamJsonAdapter:
         self._limits = limits or ClaudeAdapterLimits()
         self._identity: ControlIdentity | None = None
         self._unsupported_snapshot: AdapterSnapshot | None = None
+        self._capabilities: CapabilitySnapshot | None = None
         self._state: ClaudeStreamState | None = None
         self._transport_started = False
         self._started = False
@@ -77,6 +82,11 @@ class ClaudeStreamJsonAdapter:
             control_init, system_init = await negotiate_claude_startup(
                 self._transport,
                 cwd=launch.cwd,
+                timeout_seconds=self._limits.startup_timeout_seconds,
+            )
+            self._capabilities = await negotiate_claude_catalog(
+                self._transport,
+                current_model=system_init.model,
                 timeout_seconds=self._limits.startup_timeout_seconds,
             )
             version = system_init.version
@@ -131,6 +141,22 @@ class ClaudeStreamJsonAdapter:
         if self._unsupported_snapshot is not None:
             return self._unsupported_snapshot
         raise HarnessControlError("Claude stream-json adapter is not started")
+
+    async def discover(self, launch: LaunchSpec) -> CapabilitySnapshot:
+        await self.start(launch)
+        try:
+            return self.advertise()
+        finally:
+            await self.stop("forced")
+
+    def advertise(self) -> CapabilitySnapshot:
+        if (
+            self._state is None
+            or self._state.snapshot.control != "ready"
+            or self._capabilities is None
+        ):
+            raise HarnessControlError(self._unsupported_detail or "Claude adapter is unsupported")
+        return self._capabilities
 
     def subscribe(self) -> AsyncIterator[AdapterEvent]:
         if self._state is None:

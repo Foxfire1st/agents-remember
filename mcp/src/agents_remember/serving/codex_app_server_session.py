@@ -23,6 +23,10 @@ from agents_remember.serving.codex_app_server_state import (
     validate_initialize_response,
     validate_reasoning_effort,
 )
+from agents_remember.serving.harness_capabilities import (
+    CapabilitySnapshot,
+    ModelCapability,
+)
 from agents_remember.serving.harness_control_models import AdapterSnapshot, LaunchSpec
 
 BusyPolicy = Literal["steer", "queue"]
@@ -90,6 +94,7 @@ class CodexAppServerSession:
         self.thread_id: str | None = None
         self.cli_version: str | None = None
         self.model: CodexModelCapability | None = None
+        self.models: tuple[CodexModelCapability, ...] = ()
         self.effective_effort: str | None = None
 
     async def connect(
@@ -104,22 +109,7 @@ class CodexAppServerSession:
         connected = False
         try:
             await transport.start(launch)
-            initialize = await transport.request(
-                "initialize",
-                {
-                    "clientInfo": {
-                        "name": self.settings.client_name,
-                        "title": self.settings.client_title,
-                        "version": self.settings.client_version,
-                    },
-                    "capabilities": {"experimentalApi": False},
-                },
-            )
-            cli_version, initialize_evidence = validate_initialize_response(
-                initialize,
-                client_name=self.settings.client_name,
-            )
-            await transport.notify("initialized", {})
+            cli_version, initialize_evidence = await self._initialize(transport)
             models = await self._read_models(transport)
             selected = select_model(models, self.settings.model)
             validate_reasoning_effort(selected, self.settings.reasoning_effort)
@@ -153,6 +143,7 @@ class CodexAppServerSession:
             self.thread_id = thread.thread_id
             self.cli_version = cli_version
             self.model = selected
+            self.models = models
             self.effective_effort = thread.effective_effort
             activity, acceptance = activity_from_thread_status(thread.status)
             snapshot = AdapterSnapshot(
@@ -179,6 +170,18 @@ class CodexAppServerSession:
         if self.transport is not None:
             await self.transport.stop("forced")
 
+    async def discover(self, launch: LaunchSpec) -> CapabilitySnapshot:
+        """Enumerate through initialize/model-list only; do not create a Codex thread."""
+
+        transport = self._transport_factory()
+        await transport.start(launch)
+        try:
+            await self._initialize(transport)
+            models = await self._read_models(transport)
+            return self._normalized_capabilities(models, selected=None, effort=None)
+        finally:
+            await transport.stop("forced")
+
     def record_effective_effort(self, effort: str) -> None:
         self.effective_effort = effort
 
@@ -198,6 +201,64 @@ class CodexAppServerSession:
             "effectiveReasoningEffort": self.effective_effort,
             "busyPolicy": self.settings.busy_policy,
         }
+
+    def advertise(self) -> CapabilitySnapshot:
+        model = self.model
+        if model is None or not self.models:
+            raise CodexAppServerError("Codex model catalog is not available")
+        return self._normalized_capabilities(
+            self.models,
+            selected=model,
+            effort=self.effective_effort,
+        )
+
+    def _normalized_capabilities(
+        self,
+        models: tuple[CodexModelCapability, ...],
+        *,
+        selected: CodexModelCapability | None,
+        effort: str | None,
+    ) -> CapabilitySnapshot:
+        return CapabilitySnapshot(
+            models=tuple(
+                ModelCapability(
+                    key=item.model,
+                    display_name=item.display_name,
+                    resolved_model=item.model,
+                    description=item.description,
+                    supports_effort=bool(item.effort_options),
+                    effort_options=item.effort_options,
+                    default_effort=item.default_effort,
+                    is_default=item.is_default,
+                    hidden=item.hidden,
+                )
+                for item in models
+            ),
+            selected_model_key=selected.model if selected is not None else None,
+            selected_effort=effort,
+        )
+
+    async def _initialize(
+        self,
+        transport: CodexAppServerTransport,
+    ) -> tuple[str, JsonObject]:
+        initialize = await transport.request(
+            "initialize",
+            {
+                "clientInfo": {
+                    "name": self.settings.client_name,
+                    "title": self.settings.client_title,
+                    "version": self.settings.client_version,
+                },
+                "capabilities": {"experimentalApi": False},
+            },
+        )
+        cli_version, evidence = validate_initialize_response(
+            initialize,
+            client_name=self.settings.client_name,
+        )
+        await transport.notify("initialized", {})
+        return cli_version, evidence
 
     async def _read_models(
         self,

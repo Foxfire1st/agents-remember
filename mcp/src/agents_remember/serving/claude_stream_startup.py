@@ -7,18 +7,22 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from agents_remember.errors import HarnessControlError
+from agents_remember.serving.claude_stream_capabilities import parse_list_models_response
 from agents_remember.serving.claude_stream_protocol import (
     ClaudeControlInitialization,
     ClaudeSystemInitialization,
     bootstrap_message,
     initialization_request,
     is_successful_bootstrap_result,
+    list_models_request,
     parse_control_initialization,
     parse_system_initialization,
 )
 from agents_remember.serving.claude_stream_transport import ClaudeStreamTransport
+from agents_remember.serving.harness_capabilities import CapabilitySnapshot
 
 INITIALIZE_REQUEST_ID = "ar-claude-initialize"
+LIST_MODELS_REQUEST_ID = "ar-claude-list-models"
 
 
 @dataclass
@@ -75,3 +79,31 @@ async def negotiate_claude_startup(
     except TimeoutError as exc:
         raise HarnessControlError("Claude protocol initialization timed out") from exc
     return collector.result()
+
+
+async def negotiate_claude_catalog(
+    transport: ClaudeStreamTransport,
+    *,
+    current_model: str,
+    timeout_seconds: float,
+) -> CapabilitySnapshot:
+    """Fetch the dynamic catalog before the long-running state reader owns stdout."""
+
+    await transport.write_frame(list_models_request(LIST_MODELS_REQUEST_ID))
+    try:
+        async with asyncio.timeout(timeout_seconds):
+            frame = await transport.read_frame()
+            if frame is None:
+                raise HarnessControlError("Claude Code disconnected before list_models completed")
+            capabilities = parse_list_models_response(
+                frame,
+                LIST_MODELS_REQUEST_ID,
+                current_model=current_model,
+            )
+            if capabilities is None:
+                raise HarnessControlError(
+                    "Claude Code emitted an unexpected frame during list_models"
+                )
+            return capabilities
+    except TimeoutError as exc:
+        raise HarnessControlError("Claude list_models request timed out") from exc

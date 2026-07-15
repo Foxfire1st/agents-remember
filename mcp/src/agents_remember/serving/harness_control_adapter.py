@@ -8,6 +8,11 @@ from datetime import UTC, datetime
 from typing import Protocol
 
 from agents_remember.errors import HarnessControlError
+from agents_remember.serving.harness_capabilities import (
+    CapabilitySnapshot,
+    LaunchKnobs,
+    SetResult,
+)
 from agents_remember.serving.harness_control_models import (
     CONTROL_PROTOCOL_VERSION,
     AdapterEvent,
@@ -28,6 +33,8 @@ class HarnessProtocolAdapter(Protocol):
 
     async def start(self, launch: LaunchSpec) -> AdapterHandshake: ...
 
+    def advertise(self) -> CapabilitySnapshot: ...
+
     async def snapshot(self) -> AdapterSnapshot: ...
 
     def subscribe(self) -> AsyncIterator[AdapterEvent]: ...
@@ -39,6 +46,24 @@ class HarnessProtocolAdapter(Protocol):
     async def reconcile(self, request_id: str) -> ReconciliationResult: ...
 
     async def stop(self, mode: ShutdownMode) -> None: ...
+
+
+class HarnessCapabilityDiscoverer(Protocol):
+    """Transient token-free discovery used before a hosted session exists."""
+
+    async def discover(self, launch: LaunchSpec) -> CapabilitySnapshot: ...
+
+
+class HarnessCapabilityPort(Protocol):
+    """Foundation contract implemented progressively by L1, L2, and L3."""
+
+    def advertise(self) -> CapabilitySnapshot: ...
+
+    def launch_knobs(self, *, model_key: str, effort: str | None) -> LaunchKnobs: ...
+
+    async def set_model(self, model_key: str) -> SetResult: ...
+
+    async def set_effort(self, effort: str) -> SetResult: ...
 
 
 class HarnessProtocolRegistry:
@@ -103,6 +128,13 @@ class UnsupportedHarnessProtocolAdapter:
         if self._snapshot is None:
             raise HarnessControlError("unsupported adapter was not started")
         return self._snapshot
+
+    def advertise(self) -> CapabilitySnapshot:
+        raise HarnessControlError(f"no protocol adapter is registered for {self._harness_id!r}")
+
+    async def discover(self, launch: LaunchSpec) -> CapabilitySnapshot:
+        del launch
+        return self.advertise()
 
     def subscribe(self) -> AsyncIterator[AdapterEvent]:
         raise HarnessControlError("unsupported adapter has no event subscription")

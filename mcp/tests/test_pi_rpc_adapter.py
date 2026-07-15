@@ -29,6 +29,7 @@ from agents_remember.serving.pi_rpc_protocol import (
     PI_RPC_PACKAGE,
     PiRpcJsonlDecoder,
     encode_pi_rpc_frame,
+    parse_pi_models,
     pi_rpc_launch,
 )
 
@@ -44,8 +45,42 @@ class _FakePiTransport:
         entries: list[dict[str, object]] | None = None,
         leaf_id: str | None = "entry-0",
     ) -> None:
+        self.models = [
+            {
+                "id": "claude-test",
+                "name": "Claude Test",
+                "api": "anthropic-messages",
+                "provider": "anthropic",
+                "baseUrl": "https://api.anthropic.test",
+                "reasoning": True,
+                "input": ["text"],
+                "contextWindow": 200000,
+                "maxTokens": 32000,
+                "cost": {"input": 1, "output": 2},
+                "thinkingLevelMap": {
+                    "off": "off",
+                    "minimal": "minimal",
+                    "low": "low",
+                    "medium": "medium",
+                    "high": "high",
+                    "max": "max",
+                },
+            },
+            {
+                "id": "chat-test",
+                "name": "Chat Test",
+                "api": "openai-completions",
+                "provider": "local",
+                "baseUrl": "http://localhost:8080",
+                "reasoning": False,
+                "input": ["text"],
+                "contextWindow": 32000,
+                "maxTokens": 8000,
+                "cost": {"input": 0, "output": 0},
+            },
+        ]
         self.session = {
-            "model": None,
+            "model": {**self.models[0], "headers": {"Authorization": "secret-test-value"}},
             "thinkingLevel": "high",
             "isStreaming": False,
             "isCompacting": False,
@@ -104,6 +139,12 @@ class _FakePiTransport:
                 request_id,
                 "get_entries",
                 {"entries": entries, "leafId": self.leaf_id},
+            )
+        if command_type == "get_available_models":
+            return _success(
+                request_id,
+                "get_available_models",
+                {"models": self.models},
             )
         if command_type == "prompt":
             if self.prompt_failures:
@@ -237,6 +278,15 @@ class PiRpcProtocolTests(unittest.TestCase):
                     argv=("pi", "--mode", "text"),
                 )
             )
+        with self.assertRaisesRegex(HarnessControlError, "harness_id='pi'"):
+            pi_rpc_launch(
+                LaunchSpec(
+                    identity=launch.identity,
+                    harness_id="pi-near-miss",
+                    cwd=launch.cwd,
+                    argv=launch.argv,
+                )
+            )
 
     def test_capability_fixture_documents_the_smoke_baseline(self) -> None:
         fixture = json.loads((FIXTURES / "0.80.6-capabilities.json").read_text())
@@ -245,8 +295,102 @@ class PiRpcProtocolTests(unittest.TestCase):
         self.assertEqual(set(fixture["dialogMethods"]), PI_RPC_DIALOG_METHODS)
         self.assertEqual(set(fixture["fireAndForgetMethods"]), PI_RPC_FIRE_AND_FORGET_METHODS)
 
+    def test_available_models_preserve_provider_identity_and_model_gated_thinking(self) -> None:
+        models = parse_pi_models(
+            {
+                "data": {
+                    "models": [
+                        {
+                            "provider": "provider-a",
+                            "id": "shared/id",
+                            "name": "Reasoning A",
+                            "reasoning": True,
+                            "thinkingLevelMap": {
+                                "low": None,
+                                "xhigh": None,
+                                "max": "provider-max",
+                            },
+                        },
+                        {
+                            "provider": "provider-b",
+                            "id": "shared/id",
+                            "name": "Chat B",
+                            "reasoning": False,
+                        },
+                    ]
+                }
+            }
+        )
+
+        self.assertEqual(
+            [model.key for model in models],
+            ["provider-a/shared/id", "provider-b/shared/id"],
+        )
+        self.assertEqual(
+            [option.key for option in models[0].effort_options],
+            ["off", "minimal", "medium", "high", "max"],
+        )
+        self.assertFalse(models[1].supports_effort)
+        self.assertEqual([option.key for option in models[1].effort_options], ["off"])
+
+    def test_available_models_accept_empty_auth_catalog_and_reject_bad_maps(self) -> None:
+        self.assertEqual(parse_pi_models({"data": {"models": []}}), ())
+        with self.assertRaisesRegex(HarnessControlError, "thinkingLevelMap.low"):
+            parse_pi_models(
+                {
+                    "data": {
+                        "models": [
+                            {
+                                "provider": "provider",
+                                "id": "model",
+                                "name": "Model",
+                                "reasoning": True,
+                                "thinkingLevelMap": {"low": 7},
+                            }
+                        ]
+                    }
+                }
+            )
+
 
 class PiRpcAdapterTests(unittest.IsolatedAsyncioTestCase):
+    async def test_discover_is_token_free_and_stops_the_transient_rpc_process(self) -> None:
+        transport = _FakePiTransport()
+        adapter = PiRpcAdapter(transport_factory=_TransportSequence(transport))
+
+        advertised = await adapter.discover(_launch())
+
+        self.assertEqual(advertised.selected_model_key, "anthropic/claude-test")
+        self.assertEqual(
+            [command["type"] for command in transport.commands],
+            ["get_state", "get_available_models"],
+        )
+        self.assertFalse(any(command["type"] == "prompt" for command in transport.commands))
+        self.assertEqual(transport.stop_modes, ["forced"])
+
+    async def test_catalog_failure_stops_and_resets_start_and_discover_processes(self) -> None:
+        start_transport = _FakePiTransport()
+        start_transport.models = []
+        retry_transport = _FakePiTransport()
+        adapter = PiRpcAdapter(
+            transport_factory=_TransportSequence(start_transport, retry_transport)
+        )
+
+        with self.assertRaisesRegex(HarnessControlError, "absent from get_available_models"):
+            await adapter.start(_launch())
+        self.assertEqual(start_transport.stop_modes, ["forced"])
+
+        handshake = await adapter.start(_launch())
+        self.assertEqual(handshake.snapshot.control, "ready")
+        await adapter.stop("forced")
+
+        discover_transport = _FakePiTransport()
+        discover_transport.models = []
+        discover = PiRpcAdapter(transport_factory=_TransportSequence(discover_transport))
+        with self.assertRaisesRegex(HarnessControlError, "absent from get_available_models"):
+            await discover.discover(_launch())
+        self.assertEqual(discover_transport.stop_modes, ["forced"])
+
     async def test_handshake_and_prompt_ack_preserve_launch_and_correlation(self) -> None:
         transport = _FakePiTransport()
         adapter = PiRpcAdapter(
@@ -263,12 +407,34 @@ class PiRpcAdapterTests(unittest.IsolatedAsyncioTestCase):
             self.assertNotIn("piVersion", handshake.raw)
             self.assertEqual(receipt.acceptance, "immediate")
             self.assertEqual(receipt.vendor_correlation_id, "request-1")
+            advertised = adapter.advertise()
+            self.assertEqual(advertised.selected_model_key, "anthropic/claude-test")
+            self.assertEqual(advertised.selected_effort, "high")
+            self.assertEqual(
+                [option.key for option in advertised.models[0].effort_options],
+                ["off", "minimal", "low", "medium", "high", "max"],
+            )
+            self.assertEqual(
+                [option.key for option in advertised.models[1].effort_options],
+                ["off"],
+            )
+            safe_model = handshake.snapshot.raw["model"]
+            assert isinstance(safe_model, dict)
+            self.assertNotIn("headers", safe_model)
             self.assertEqual(
                 transport.launches[0].argv, ("pi", "--mode", "rpc", *_launch().argv[1:])
             )
             prompt = next(command for command in transport.commands if command["type"] == "prompt")
             self.assertEqual(prompt["id"], "request-1")
             self.assertNotIn("streamingBehavior", prompt)
+            self.assertEqual(
+                [
+                    command["type"]
+                    for command in transport.commands
+                    if command["type"] == "get_available_models"
+                ],
+                ["get_available_models"],
+            )
         finally:
             await adapter.stop("forced")
 

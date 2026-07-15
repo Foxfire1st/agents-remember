@@ -10,6 +10,7 @@ from datetime import UTC, datetime
 from typing import Literal
 
 from agents_remember.errors import HarnessAdapterDisconnectedError, HarnessControlError
+from agents_remember.serving.harness_capabilities import CapabilitySnapshot, ModelCapability
 from agents_remember.serving.harness_control_models import (
     CONTROL_PROTOCOL_VERSION,
     REQUIRED_ADAPTER_CAPABILITIES,
@@ -32,6 +33,7 @@ from agents_remember.serving.pi_rpc_protocol import (
     has_no_session,
     non_negative_int,
     parse_pi_entries,
+    parse_pi_models,
     parse_pi_response,
     parse_pi_state,
     pi_entry_user_text,
@@ -73,6 +75,7 @@ class PiRpcAdapter:
         self._transport: PiRpcTransport | None = None
         self._launch: LaunchSpec | None = None
         self._state: PiSessionState | None = None
+        self._capabilities: CapabilitySnapshot | None = None
         self._events: PiRpcEventMapper | None = None
         self._cursor: str | None = None
         self._submissions: OrderedDict[str, _SubmissionEvidence] = OrderedDict()
@@ -86,34 +89,71 @@ class PiRpcAdapter:
             raise HarnessControlError("Pi RPC adapter is already started")
         rpc_launch = pi_rpc_launch(launch)
         transport = self._transport_factory()
-        await transport.start(rpc_launch)
-        self._transport = transport
-        self._launch = rpc_launch
-        self._events = PiRpcEventMapper(
-            launch.identity,
-            interaction_limit=self._interaction_limit,
-            clock=self._clock,
-        )
-        state = await self._read_state()
-        entries = await self._read_entries()
-        self._cursor = entries.leaf_id
-        snapshot = self._events.apply_state(state, cursor=self._cursor)
-        return AdapterHandshake(
-            protocol_version=CONTROL_PROTOCOL_VERSION,
-            adapter_id="pi-rpc",
-            identity=launch.identity,
-            capabilities=REQUIRED_ADAPTER_CAPABILITIES,
-            snapshot=snapshot,
-            raw={
-                "vendorProtocol": PI_RPC_PROTOCOL,
-                "entryCursor": self._cursor,
-            },
-        )
+        transport_started = False
+        ready = False
+        try:
+            await transport.start(rpc_launch)
+            transport_started = True
+            self._transport = transport
+            self._launch = rpc_launch
+            self._events = PiRpcEventMapper(
+                launch.identity,
+                interaction_limit=self._interaction_limit,
+                clock=self._clock,
+            )
+            state = await self._read_state()
+            self._capabilities = await self._read_available_models(state)
+            entries = await self._read_entries()
+            self._cursor = entries.leaf_id
+            snapshot = self._events.apply_state(state, cursor=self._cursor)
+            ready = True
+            return AdapterHandshake(
+                protocol_version=CONTROL_PROTOCOL_VERSION,
+                adapter_id="pi-rpc",
+                identity=launch.identity,
+                capabilities=REQUIRED_ADAPTER_CAPABILITIES,
+                snapshot=snapshot,
+                raw={
+                    "vendorProtocol": PI_RPC_PROTOCOL,
+                    "entryCursor": self._cursor,
+                },
+            )
+        finally:
+            if not ready:
+                if transport_started:
+                    await transport.stop("forced")
+                self._transport = None
+                self._launch = None
+                self._state = None
+                self._capabilities = None
+                self._events = None
+                self._cursor = None
 
     async def snapshot(self) -> AdapterSnapshot:
         self._require_started()
         state = await self._read_state()
         return self._require_event_mapper().apply_state(state, cursor=self._cursor)
+
+    async def discover(self, launch: LaunchSpec) -> CapabilitySnapshot:
+        rpc_launch = pi_rpc_launch(launch)
+        transport = self._transport_factory()
+        transport_started = False
+        try:
+            await transport.start(rpc_launch)
+            transport_started = True
+            state = await self._request_state(transport)
+            return await self._request_available_models(transport, state)
+        finally:
+            if transport_started:
+                await transport.stop("forced")
+
+    def advertise(self) -> CapabilitySnapshot:
+        self._require_started()
+        capabilities = self._capabilities
+        state = self._state
+        if capabilities is None or state is None:
+            raise HarnessControlError("Pi RPC model catalog is not available")
+        return self._current_capabilities(capabilities.models, state)
 
     async def _event_stream(self) -> AsyncIterator[AdapterEvent]:
         self._require_started()
@@ -276,13 +316,16 @@ class PiRpcAdapter:
         return self._require_event_mapper().retained_interaction_count
 
     async def _read_state(self) -> PiSessionState:
-        request_id = self._internal_id("state")
-        frame = await self._require_transport().request({"id": request_id, "type": "get_state"})
-        response = parse_pi_response(frame, request_id=request_id, command="get_state")
-        require_pi_success(response, "get_state")
-        state = parse_pi_state(response)
+        state = await self._request_state(self._require_transport())
         self._state = state
         return state
+
+    async def _request_state(self, transport: PiRpcTransport) -> PiSessionState:
+        request_id = self._internal_id("state")
+        frame = await transport.request({"id": request_id, "type": "get_state"})
+        response = parse_pi_response(frame, request_id=request_id, command="get_state")
+        require_pi_success(response, "get_state")
+        return parse_pi_state(response)
 
     async def _read_entries(self, *, since: str | None = None) -> PiEntries:
         request_id = self._internal_id("entries")
@@ -293,6 +336,52 @@ class PiRpcAdapter:
         response = parse_pi_response(frame, request_id=request_id, command="get_entries")
         require_pi_success(response, "get_entries")
         return parse_pi_entries(response)
+
+    async def _read_available_models(self, state: PiSessionState) -> CapabilitySnapshot:
+        return await self._request_available_models(self._require_transport(), state)
+
+    async def _request_available_models(
+        self,
+        transport: PiRpcTransport,
+        state: PiSessionState,
+    ) -> CapabilitySnapshot:
+        request_id = self._internal_id("models")
+        frame = await transport.request({"id": request_id, "type": "get_available_models"})
+        response = parse_pi_response(
+            frame,
+            request_id=request_id,
+            command="get_available_models",
+        )
+        require_pi_success(response, "get_available_models")
+        return self._current_capabilities(parse_pi_models(response), state)
+
+    def _current_capabilities(
+        self,
+        models: tuple[ModelCapability, ...],
+        state: PiSessionState,
+    ) -> CapabilitySnapshot:
+        if state.model_key is None:
+            return CapabilitySnapshot(
+                models=models,
+                selected_model_key=None,
+                selected_effort=None,
+            )
+        selected = next((model for model in models if model.key == state.model_key), None)
+        if selected is None:
+            raise HarnessControlError(
+                f"Pi current model {state.model_key!r} is absent from get_available_models"
+            )
+        supported = {option.key for option in selected.effort_options}
+        if state.thinking_level not in supported:
+            raise HarnessControlError(
+                f"Pi current thinking level {state.thinking_level!r} is not advertised for "
+                f"{state.model_key!r}"
+            )
+        return CapabilitySnapshot(
+            models=models,
+            selected_model_key=state.model_key,
+            selected_effort=state.thinking_level,
+        )
 
     async def _reconnect(self) -> bool:
         launch = self._require_launch()

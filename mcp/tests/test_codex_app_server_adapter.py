@@ -210,6 +210,14 @@ async def test_handshake_uses_stable_protocol_and_exposes_effort_menu() -> None:
         ]
         assert handshake.snapshot.raw["defaultReasoningEffort"] == "low"
         assert handshake.snapshot.raw["effectiveReasoningEffort"] == "xhigh"
+        request_count = len(transport.requests)
+        advertised = adapter.advertise()
+        assert advertised.selected_model_key == "gpt-5.6-sol"
+        assert advertised.selected_effort == "xhigh"
+        assert advertised.models[0].display_name == "GPT-5.6 Sol"
+        assert advertised.models[0].description
+        assert advertised.models[0].effort_options[0].description
+        assert len(transport.requests) == request_count
         assert transport.notifications == [("initialized", {})]
         assert [method for method, _ in transport.requests] == [
             "initialize",
@@ -228,6 +236,73 @@ async def test_handshake_uses_stable_protocol_and_exposes_effort_menu() -> None:
         assert launch().argv == ("codex", "app-server")
     finally:
         await adapter.stop("forced")
+
+
+@pytest.mark.anyio
+async def test_discover_retains_paginated_hidden_catalog_without_opening_a_thread() -> None:
+    data = fixture()
+    first_page = fixture_object(data, "modelListResult")
+    first_page["nextCursor"] = "page-2"
+    first_model = cast(JsonObject, fixture_list(first_page, "data")[0])
+    hidden_model = deepcopy(first_model)
+    hidden_model.update(
+        {
+            "id": "model-hidden",
+            "model": "gpt-hidden",
+            "displayName": "Hidden Model",
+            "description": "Installed but hidden model",
+            "hidden": True,
+            "isDefault": False,
+            "defaultReasoningEffort": "low",
+            "supportedReasoningEfforts": [{"reasoningEffort": "low", "description": "Low only"}],
+        }
+    )
+    transport = FakeCodexTransport()
+    transport.queue_response("initialize", fixture_object(data, "initializeResult"))
+    transport.queue_response("model/list", first_page)
+    transport.queue_response(
+        "model/list",
+        {"data": [hidden_model], "nextCursor": None},
+    )
+    adapter = make_adapter(transport)
+
+    advertised = await adapter.discover(launch())
+
+    assert [model.key for model in advertised.models] == ["gpt-5.6-sol", "gpt-hidden"]
+    assert advertised.models[1].hidden is True
+    assert [option.key for option in advertised.models[1].effort_options] == ["low"]
+    assert advertised.selected_model_key is None
+    assert advertised.selected_effort is None
+    assert [method for method, _ in transport.requests] == [
+        "initialize",
+        "model/list",
+        "model/list",
+    ]
+    assert transport.requests[1][1] == {"includeHidden": True}
+    assert transport.requests[2][1] == {"includeHidden": True, "cursor": "page-2"}
+    assert not any(
+        method.startswith("thread/") or method.startswith("turn/")
+        for method, _ in transport.requests
+    )
+    assert transport.stop_modes == ["forced"]
+
+
+@pytest.mark.anyio
+async def test_discover_rejects_repeated_model_cursor_without_opening_a_thread() -> None:
+    data = fixture()
+    page = fixture_object(data, "modelListResult")
+    page["nextCursor"] = "repeated"
+    transport = FakeCodexTransport()
+    transport.queue_response("initialize", fixture_object(data, "initializeResult"))
+    transport.queue_response("model/list", page)
+    transport.queue_response("model/list", page)
+    adapter = make_adapter(transport)
+
+    with pytest.raises(CodexAppServerError, match="repeated a pagination cursor"):
+        await adapter.discover(launch())
+
+    assert not any(method.startswith("thread/") for method, _ in transport.requests)
+    assert transport.stop_modes == ["forced"]
 
 
 @pytest.mark.anyio

@@ -8,6 +8,7 @@ from dataclasses import dataclass, replace
 from typing import Literal, cast
 
 from agents_remember.errors import HarnessControlError
+from agents_remember.serving.harness_capabilities import EffortOption, ModelCapability
 from agents_remember.serving.harness_control_models import LaunchSpec
 
 PI_RPC_PACKAGE = "@earendil-works/pi-coding-agent"
@@ -25,6 +26,8 @@ PI_RPC_ACTIVITY_EVENTS: Mapping[str, PiActivityTransition] = {
     "compaction_start": ("settling", "queued"),
     "compaction_end": ("settling", "queued"),
 }
+PI_THINKING_LEVELS = ("off", "minimal", "low", "medium", "high", "xhigh", "max")
+PI_DEFAULT_THINKING_LEVELS = frozenset(PI_THINKING_LEVELS[:5])
 
 
 @dataclass(frozen=True)
@@ -37,6 +40,7 @@ class PiSessionState:
     is_compacting: bool
     pending_message_count: int
     thinking_level: str
+    model_key: str | None
     raw: Mapping[str, object]
 
 
@@ -110,6 +114,8 @@ def encode_pi_rpc_frame(value: Mapping[str, object]) -> bytes:
 def pi_rpc_launch(launch: LaunchSpec) -> LaunchSpec:
     """Add ``--mode rpc`` without changing any other argv, cwd, settings, or environment."""
 
+    if launch.harness_id != "pi":
+        raise HarnessControlError("Pi RPC launch requires harness_id='pi'")
     if not launch.argv:
         raise HarnessControlError("Pi RPC launch requires a non-empty argv")
     for index, argument in enumerate(launch.argv):
@@ -172,6 +178,9 @@ def parse_pi_state(frame: Mapping[str, object]) -> PiSessionState:
     pending = data.get("pendingMessageCount")
     if not isinstance(pending, int) or isinstance(pending, bool) or pending < 0:
         raise HarnessControlError("Pi RPC get_state requires non-negative pendingMessageCount")
+    model_key, safe_model = _pi_model_identity(data.get("model"), context="get_state model")
+    safe_raw = dict(data)
+    safe_raw["model"] = safe_model
     state = PiSessionState(
         session_id=_required_text(data, "sessionId"),
         session_file=_optional_text(data, "sessionFile"),
@@ -179,9 +188,50 @@ def parse_pi_state(frame: Mapping[str, object]) -> PiSessionState:
         is_compacting=_required_bool(data, "isCompacting"),
         pending_message_count=pending,
         thinking_level=_required_text(data, "thinkingLevel"),
-        raw=dict(data),
+        model_key=model_key,
+        raw=safe_raw,
     )
     return state
+
+
+def parse_pi_models(frame: Mapping[str, object]) -> tuple[ModelCapability, ...]:
+    """Project the auth-filtered ``get_available_models`` result into the shared contract."""
+
+    data = _required_mapping(frame, "data")
+    raw_models = data.get("models")
+    if not isinstance(raw_models, list):
+        raise HarnessControlError("Pi RPC get_available_models requires a models array")
+    models: list[ModelCapability] = []
+    seen: set[str] = set()
+    for index, value in enumerate(raw_models):
+        if not isinstance(value, dict):
+            raise HarnessControlError(
+                f"Pi RPC get_available_models models[{index}] must be an object"
+            )
+        model = cast(Mapping[str, object], value)
+        provider = _required_text(model, "provider")
+        model_id = _required_text(model, "id")
+        key = f"{provider}/{model_id}"
+        if key in seen:
+            raise HarnessControlError(
+                f"Pi RPC get_available_models repeated model identity {key!r}"
+            )
+        seen.add(key)
+        reasoning = _required_bool(model, "reasoning")
+        effort_options = _pi_effort_options(model, reasoning=reasoning)
+        models.append(
+            ModelCapability(
+                key=key,
+                display_name=_required_text(model, "name"),
+                resolved_model=model_id,
+                description=None,
+                supports_effort=reasoning,
+                effort_options=effort_options,
+                default_effort=None,
+                provider=provider,
+            )
+        )
+    return tuple(models)
 
 
 def parse_pi_entries(frame: Mapping[str, object]) -> PiEntries:
@@ -328,6 +378,53 @@ def _required_bool(raw: Mapping[str, object], key: str) -> bool:
     if not isinstance(value, bool):
         raise HarnessControlError(f"Pi RPC payload requires boolean {key}")
     return value
+
+
+def _pi_model_identity(
+    value: object,
+    *,
+    context: str,
+) -> tuple[str | None, dict[str, str] | None]:
+    if value is None:
+        return None, None
+    if not isinstance(value, dict):
+        raise HarnessControlError(f"Pi RPC {context} must be an object or null")
+    model = cast(Mapping[str, object], value)
+    provider = _required_text(model, "provider")
+    model_id = _required_text(model, "id")
+    safe = {"provider": provider, "id": model_id}
+    name = model.get("name")
+    if isinstance(name, str) and name:
+        safe["name"] = name
+    return f"{provider}/{model_id}", safe
+
+
+def _pi_effort_options(
+    model: Mapping[str, object],
+    *,
+    reasoning: bool,
+) -> tuple[EffortOption, ...]:
+    if not reasoning:
+        return (EffortOption(key="off", display_name="off"),)
+    raw_map = model.get("thinkingLevelMap")
+    if raw_map is None:
+        level_map: Mapping[str, object] = {}
+    elif isinstance(raw_map, dict):
+        level_map = cast(Mapping[str, object], raw_map)
+    else:
+        raise HarnessControlError("Pi model thinkingLevelMap must be an object when present")
+    options: list[EffortOption] = []
+    for level in PI_THINKING_LEVELS:
+        mapped = level_map.get(level)
+        if mapped is not None and not isinstance(mapped, str):
+            raise HarnessControlError(f"Pi model thinkingLevelMap.{level} must be text or null")
+        if level in PI_DEFAULT_THINKING_LEVELS:
+            supported = level not in level_map or isinstance(mapped, str)
+        else:
+            supported = isinstance(mapped, str)
+        if supported:
+            options.append(EffortOption(key=level, display_name=level))
+    return tuple(options)
 
 
 def _content_text(content: object, *, accepted_types: set[str]) -> str | None:

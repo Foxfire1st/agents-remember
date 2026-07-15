@@ -13,6 +13,7 @@ from dataclasses import replace
 from pathlib import Path
 
 from agents_remember.errors import HarnessAdapterDisconnectedError, HarnessControlError
+from agents_remember.serving.harness_capabilities import CapabilitySnapshot
 from agents_remember.serving.harness_control_bridge import HarnessControlBridge
 from agents_remember.serving.harness_control_client import (
     read_control_snapshot,
@@ -77,6 +78,9 @@ class _Adapter:
     async def snapshot(self) -> AdapterSnapshot:
         assert self.current is not None
         return self.current
+
+    def advertise(self) -> CapabilitySnapshot:
+        return CapabilitySnapshot(models=(), selected_model_key=None, selected_effort=None)
 
     async def _subscribe(self) -> AsyncIterator[AdapterEvent]:
         while True:

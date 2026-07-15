@@ -42,6 +42,7 @@ from agents_remember.serving.codex_app_server_state import (
     terminal_result,
     transcript_from_item,
 )
+from agents_remember.serving.harness_capabilities import CapabilitySnapshot
 from agents_remember.serving.harness_control_models import (
     CONTROL_PROTOCOL_VERSION,
     REQUIRED_ADAPTER_CAPABILITIES,
@@ -114,6 +115,15 @@ class CodexAppServerAdapter:
         if self._snapshot is None:
             raise CodexAppServerError("Codex adapter is not started")
         return self._snapshot
+
+    async def discover(self, launch: LaunchSpec) -> CapabilitySnapshot:
+        if launch.harness_id != "codex":
+            raise CodexAppServerError("Codex adapter requires harness_id='codex'")
+        return await self._session.discover(launch)
+
+    def advertise(self) -> CapabilitySnapshot:
+        self._require_ready()
+        return self._session.advertise()
 
     async def _event_stream(self) -> AsyncIterator[AdapterEvent]:
         while True:

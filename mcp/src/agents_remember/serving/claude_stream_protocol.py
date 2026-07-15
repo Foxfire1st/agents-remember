@@ -61,6 +61,14 @@ def initialization_request(request_id: str) -> dict[str, object]:
     }
 
 
+def list_models_request(request_id: str) -> dict[str, object]:
+    return {
+        "type": "control_request",
+        "request_id": request_id,
+        "request": {"subtype": "list_models"},
+    }
+
+
 def bootstrap_message() -> dict[str, object]:
     """Trigger system/init without a model query or visible user message."""
 
@@ -86,8 +94,6 @@ def parse_control_initialization(
         raise HarnessControlError("Claude initialize control request was rejected")
     payload = _mapping(response.get("response"), "Claude initialize capability payload")
     commands = _commands_from_control(payload.get("commands"))
-    if not isinstance(payload.get("models"), list) or not isinstance(payload.get("account"), dict):
-        raise HarnessControlError("Claude initialize response lacks models/account capabilities")
     pending = _pending_requests(response)
     return ClaudeControlInitialization(commands=frozenset(commands), pending_requests=pending)
 
@@ -194,9 +200,7 @@ def command_unsupported_detail(command: str, advertised: frozenset[str]) -> str 
             "inside one long-lived control adapter"
         )
     if command not in advertised:
-        return (
-            f"Claude Code did not advertise /{command}; the command was not sent"
-        )
+        return f"Claude Code did not advertise /{command}; the command was not sent"
     return None
 
 

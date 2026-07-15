@@ -12,6 +12,7 @@ from typing import Literal
 
 from agents_remember.errors import CodexAppServerError
 from agents_remember.serving.codex_app_server_protocol import JsonObject, RequestId
+from agents_remember.serving.harness_capabilities import EffortOption
 from agents_remember.serving.harness_control_models import (
     AcceptanceState,
     ActivityState,
@@ -37,10 +38,16 @@ EXPERIMENTAL_SERVER_REQUESTS = frozenset({"item/tool/requestUserInput"})
 class CodexModelCapability:
     id: str
     model: str
+    display_name: str
+    description: str
     default_effort: str
-    supported_efforts: tuple[str, ...]
+    effort_options: tuple[EffortOption, ...]
     hidden: bool
     is_default: bool
+
+    @property
+    def supported_efforts(self) -> tuple[str, ...]:
+        return tuple(option.key for option in self.effort_options)
 
 
 @dataclass(frozen=True)
@@ -144,25 +151,41 @@ def parse_model_page(
             "supportedReasoningEfforts",
             context=f"model/list data[{index}]",
         )
-        supported: list[str] = []
+        supported: list[EffortOption] = []
         for effort_index, raw_effort in enumerate(supported_values):
             option = required_object(
                 raw_effort,
                 context=f"model/list data[{index}].supportedReasoningEfforts[{effort_index}]",
             )
             supported.append(
-                required_text(option, "reasoningEffort", context="reasoning effort option")
+                EffortOption(
+                    key=required_text(
+                        option,
+                        "reasoningEffort",
+                        context="reasoning effort option",
+                    ),
+                    display_name=required_text(
+                        option,
+                        "reasoningEffort",
+                        context="reasoning effort option",
+                    ),
+                    description=required_text(
+                        option,
+                        "description",
+                        context="reasoning effort option",
+                    ),
+                )
             )
-            required_text(option, "description", context="reasoning effort option")
         default_effort = required_text(
             model,
             "defaultReasoningEffort",
             context=f"model/list data[{index}]",
         )
-        if default_effort not in supported:
+        supported_keys = tuple(option.key for option in supported)
+        if default_effort not in supported_keys:
             raise CodexAppServerError(
                 f"Codex model {model.get('model')!r} advertises default effort "
-                f"{default_effort!r} outside its supported menu {supported!r}"
+                f"{default_effort!r} outside its supported menu {supported_keys!r}"
             )
         hidden = model.get("hidden")
         is_default = model.get("isDefault")
@@ -172,8 +195,14 @@ def parse_model_page(
             CodexModelCapability(
                 id=required_text(model, "id", context=f"model/list data[{index}]"),
                 model=required_text(model, "model", context=f"model/list data[{index}]"),
+                display_name=required_text(
+                    model, "displayName", context=f"model/list data[{index}]"
+                ),
+                description=required_text(
+                    model, "description", context=f"model/list data[{index}]"
+                ),
                 default_effort=default_effort,
-                supported_efforts=tuple(supported),
+                effort_options=tuple(supported),
                 hidden=hidden,
                 is_default=is_default,
             )

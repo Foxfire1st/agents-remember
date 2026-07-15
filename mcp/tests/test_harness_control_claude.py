@@ -26,7 +26,7 @@ from agents_remember.serving.harness_control_models import (
     ShutdownMode,
 )
 
-FIXTURE_ROOT = Path(__file__).parent / "fixtures" / "claude_stream_json" / "2.1.207"
+FIXTURE_ROOT = Path(__file__).parent / "fixtures" / "claude_stream_json" / "2.1.210"
 SESSION_ID = "11111111-1111-4111-8111-111111111111"
 FIRST_CORRELATION = "22222222-2222-4222-8222-222222222222"
 NOW = "2026-07-14T10:00:00+00:00"
@@ -168,6 +168,22 @@ async def _settle() -> None:
 
 
 class ClaudeStreamJsonAdapterTests(unittest.IsolatedAsyncioTestCase):
+    async def test_discover_uses_only_token_free_bootstrap_and_list_models(self) -> None:
+        fixture_frames = _load_fixture("initialization.jsonl")
+        transport = _FakeClaudeTransport(fixture_frames)
+        adapter = _adapter(transport)
+
+        advertised = await adapter.discover(_launch())
+
+        self.assertEqual(advertised.selected_model_key, "sonnet")
+        user_frames = [frame for frame in transport.writes if frame["type"] == "user"]
+        self.assertEqual(len(user_frames), 1)
+        self.assertEqual(user_frames[0]["shouldQuery"], False)
+        bootstrap_result = next(frame for frame in fixture_frames if frame["type"] == "result")
+        self.assertEqual(bootstrap_result["num_turns"], 0)
+        self.assertEqual(bootstrap_result["total_cost_usd"], 0)
+        self.assertEqual(transport.stop_modes, ["forced"])
+
     async def test_launch_preserves_arguments_environment_and_requires_structured_init(
         self,
     ) -> None:
@@ -178,7 +194,7 @@ class ClaudeStreamJsonAdapterTests(unittest.IsolatedAsyncioTestCase):
         try:
             self.assertEqual(handshake.snapshot.control, "ready")
             self.assertEqual(handshake.snapshot.vendor_session_id, SESSION_ID)
-            self.assertEqual(handshake.raw["claudeCodeVersion"], "2.1.207")
+            self.assertEqual(handshake.raw["claudeCodeVersion"], "2.1.210")
             assert transport.argv is not None
             self.assertEqual(
                 transport.argv[:9],
@@ -197,11 +213,75 @@ class ClaudeStreamJsonAdapterTests(unittest.IsolatedAsyncioTestCase):
             self.assertNotIn("AUTH_TOKEN_FOR_TEST", json.dumps(handshake.raw))
             self.assertEqual(
                 [frame["type"] for frame in transport.writes],
-                ["control_request", "user"],
+                ["control_request", "user", "control_request"],
             )
             self.assertEqual(transport.writes[1]["shouldQuery"], False)
+            list_request = transport.writes[2]
+            self.assertEqual(list_request["request"], {"subtype": "list_models"})
+            advertised = adapter.advertise()
+            self.assertEqual(advertised.selected_model_key, "sonnet")
+            self.assertIsNone(advertised.selected_effort)
+            self.assertEqual(
+                [option.key for option in advertised.models[0].effort_options],
+                ["low", "medium", "high", "xhigh", "max"],
+            )
+            self.assertEqual(advertised.models[1].effort_options, ())
+            self.assertFalse(advertised.models[2].selectable)
+            self.assertEqual(len(transport.writes), 3)
         finally:
             await adapter.stop("forced")
+
+    async def test_current_initialize_without_models_or_account_is_accepted(self) -> None:
+        frames = _load_fixture("initialization.jsonl")
+        response = frames[0]["response"]
+        assert isinstance(response, dict)
+        payload = response["response"]
+        assert isinstance(payload, dict)
+        self.assertNotIn("models", payload)
+        self.assertNotIn("account", payload)
+        transport = _FakeClaudeTransport(frames)
+        adapter = _adapter(transport)
+
+        handshake = await adapter.start(_launch())
+        try:
+            self.assertEqual(handshake.snapshot.control, "ready")
+            self.assertEqual(adapter.advertise().models[0].key, "sonnet")
+        finally:
+            await adapter.stop("forced")
+
+    async def test_malformed_or_rejected_list_models_fails_loud_without_fallback(self) -> None:
+        duplicate_frames = _load_fixture("initialization.jsonl")
+        response = duplicate_frames[-1]["response"]
+        assert isinstance(response, dict)
+        payload = response["response"]
+        assert isinstance(payload, dict)
+        models = payload["models"]
+        assert isinstance(models, list)
+        models.append(dict(models[0]))
+        duplicate_transport = _FakeClaudeTransport(duplicate_frames)
+        duplicate = _adapter(duplicate_transport)
+
+        duplicate_handshake = await duplicate.start(_launch())
+
+        self.assertEqual(duplicate_handshake.snapshot.control, "unsupported")
+        self.assertIn("repeated model value", str(duplicate_handshake.raw["detail"]))
+        with self.assertRaisesRegex(HarnessControlError, "repeated model value"):
+            duplicate.advertise()
+
+        rejected_frames = _load_fixture("initialization.jsonl")
+        rejected_response = rejected_frames[-1]["response"]
+        assert isinstance(rejected_response, dict)
+        rejected_response["subtype"] = "error"
+        rejected_transport = _FakeClaudeTransport(rejected_frames)
+        rejected = _adapter(rejected_transport)
+
+        rejected_handshake = await rejected.start(_launch())
+
+        self.assertEqual(rejected_handshake.snapshot.control, "unsupported")
+        self.assertIn(
+            "list_models control request was rejected",
+            str(rejected_handshake.raw["detail"]),
+        )
 
     async def test_compatible_patch_version_is_accepted_after_structured_negotiation(self) -> None:
         frames = _load_fixture("initialization.jsonl")
@@ -243,7 +323,7 @@ class ClaudeStreamJsonAdapterTests(unittest.IsolatedAsyncioTestCase):
             bridge.submit(bridge.prompt("first prompt", source="durable", request_id="request-1"))
         )
         try:
-            await transport.wait_for_writes(3)
+            await transport.wait_for_writes(4)
             turn = _load_fixture("turn.jsonl")
             transport.feed(turn[0])
             receipt = await asyncio.wait_for(submission, timeout=1.0)
@@ -286,19 +366,19 @@ class ClaudeStreamJsonAdapterTests(unittest.IsolatedAsyncioTestCase):
             first_task = asyncio.create_task(
                 bridge.submit(bridge.prompt("first", source="terminal", request_id="first"))
             )
-            await transport.wait_for_writes(3)
-            transport.feed(_replay(transport.writes[2]))
+            await transport.wait_for_writes(4)
+            transport.feed(_replay(transport.writes[3]))
             first = await asyncio.wait_for(first_task, timeout=1.0)
 
             second_task = asyncio.create_task(
                 bridge.submit(bridge.prompt("second", source="durable", request_id="second"))
             )
-            await transport.wait_for_writes(4)
-            transport.feed(_replay(transport.writes[3]))
+            await transport.wait_for_writes(5)
+            transport.feed(_replay(transport.writes[4]))
             second = await asyncio.wait_for(second_task, timeout=1.0)
             self.assertEqual((first.acceptance, second.acceptance), ("immediate", "queued"))
-            self.assertIn("\n\nfirst", _wire_text(transport.writes[2]))
-            self.assertIn("\n\nsecond", _wire_text(transport.writes[3]))
+            self.assertIn("\n\nfirst", _wire_text(transport.writes[3]))
+            self.assertIn("\n\nsecond", _wire_text(transport.writes[4]))
 
             transport.feed(_result("first done"))
             transport.feed(_result("second done"))
@@ -371,14 +451,14 @@ class ClaudeStreamJsonAdapterTests(unittest.IsolatedAsyncioTestCase):
             )
             self.assertIn("did not advertise", unknown.detail or "")
             self.assertIn("changes process/session identity", identity_change.detail or "")
-            self.assertEqual(len(transport.writes), 2)
+            self.assertEqual(len(transport.writes), 3)
 
             compact_task = asyncio.create_task(
                 bridge.submit(bridge.prompt("/compact", source="terminal", request_id="compact"))
             )
-            await transport.wait_for_writes(3)
-            self.assertEqual(_wire_text(transport.writes[2]), "/compact")
-            transport.feed(_replay(transport.writes[2]))
+            await transport.wait_for_writes(4)
+            self.assertEqual(_wire_text(transport.writes[3]), "/compact")
+            transport.feed(_replay(transport.writes[3]))
             compact = await asyncio.wait_for(compact_task, timeout=1.0)
             self.assertEqual(compact.acceptance, "immediate")
         finally:
@@ -393,7 +473,7 @@ class ClaudeStreamJsonAdapterTests(unittest.IsolatedAsyncioTestCase):
             bridge.submit(bridge.prompt("ambiguous", source="durable", request_id="ambiguous"))
         )
         try:
-            await transport.wait_for_writes(3)
+            await transport.wait_for_writes(4)
             transport.disconnect()
             receipt = await asyncio.wait_for(submission, timeout=1.0)
             self.assertEqual(receipt.acceptance, "unknown")
@@ -460,8 +540,8 @@ class ClaudeStreamJsonAdapterTests(unittest.IsolatedAsyncioTestCase):
             submission = asyncio.create_task(
                 bridge.submit(bridge.prompt("limited", source="terminal", request_id="limited"))
             )
-            await transport.wait_for_writes(3)
-            transport.feed(_replay(transport.writes[2]))
+            await transport.wait_for_writes(4)
+            transport.feed(_replay(transport.writes[3]))
             await asyncio.wait_for(submission, timeout=1.0)
             transport.feed(
                 {
@@ -520,8 +600,8 @@ class ClaudeStreamJsonAdapterTests(unittest.IsolatedAsyncioTestCase):
                 for index in range(total):
                     request = PromptRequest(f"request-{index}", "durable", f"message-{index}", NOW)
                     task = asyncio.create_task(adapter.submit(request))
-                    await transport.wait_for_writes(index + 3)
-                    transport.feed(_replay(transport.writes[index + 2]))
+                    await transport.wait_for_writes(index + 4)
+                    transport.feed(_replay(transport.writes[index + 3]))
                     receipt = await asyncio.wait_for(task, timeout=1.0)
                     self.assertEqual(receipt.acceptance, "immediate")
                     transport.feed(_result(f"done-{index}"))

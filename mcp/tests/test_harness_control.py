@@ -17,6 +17,7 @@ MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
 from agents_remember.errors import HarnessAdapterDisconnectedError, HarnessControlError
+from agents_remember.serving.harness_capabilities import CapabilitySnapshot
 from agents_remember.serving.harness_control_adapter import (
     HarnessProtocolRegistry,
     protocol_adapter_status,
@@ -93,6 +94,9 @@ class _FakeAdapter:
     async def snapshot(self) -> AdapterSnapshot:
         assert self.current is not None
         return self.current
+
+    def advertise(self) -> CapabilitySnapshot:
+        return CapabilitySnapshot(models=(), selected_model_key=None, selected_effort=None)
 
     async def _event_stream(self) -> AsyncIterator[AdapterEvent]:
         while True:
