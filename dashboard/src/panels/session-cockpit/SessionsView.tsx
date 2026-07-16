@@ -1,0 +1,506 @@
+// The sessions cockpit view shell (260715-FEUI-L1 S2): rail / stage / inspector as a
+// react-resizable-panels group with the narrow-width rules (inspector auto-collapses <~1100px,
+// rail <~900px — both reopenable) and the ~80-col PTY floor hint chip. The panel CONTENT is
+// deliberate scaffolding — empty placeholder panels with the marker classes, focus targets, and
+// keyboard-zone markers later leaves fill (L2 rail, L4 controls, L5 composer, L6 PTY, L7
+// inspector). The view root carries [data-view="sessions"]: the WebTUI scope root (S1) and the
+// keyboard layer's home. No animation is introduced here, so html[data-effects="off"] and
+// prefers-reduced-motion are trivially respected.
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  Panel,
+  PanelGroup,
+  PanelResizeHandle,
+  type ImperativePanelHandle,
+} from "react-resizable-panels";
+
+import { css, cx } from "../../../styled-system/css";
+import {
+  createCommandRegistry,
+  registerDefaultCommands,
+  type CommandContext,
+  type PalettePage,
+} from "../../data/commands";
+import {
+  FOCUS_REGIONS,
+  nextRegion,
+  PTY_HOST_SELECTOR,
+  regionTargetSelector,
+  STAGE_HEADER_SELECTOR,
+  type FocusRegion,
+} from "../../data/keymap/focus";
+import {
+  autoCollapseTransition,
+  hasPersistedPanelLayout,
+  INSPECTOR_AUTO_COLLAPSE_PX,
+  PTY_MIN_COLS,
+  RAIL_AUTO_COLLAPSE_PX,
+  RAIL_FALLBACK_PERCENT,
+  railDefaultPercent,
+  stageBelowPtyFloor,
+} from "../../data/sessionLayout";
+import { CommandPalette } from "./CommandPalette";
+import { useKeyboardZones } from "./useKeyboardZones";
+
+const root = css({
+  position: "relative", // anchors the palette overlay inside the scope root
+  display: "flex",
+  flexDirection: "column",
+  flex: "1",
+  minHeight: "0",
+  minWidth: "0",
+  gap: "0.4rem",
+});
+const pane = css({
+  height: "100%",
+  minWidth: "0",
+  display: "flex",
+  flexDirection: "column",
+  gap: "0.4rem",
+  background: "bgPanel",
+  borderWidth: "1px",
+  borderStyle: "solid",
+  borderColor: "grid",
+  borderRadius: "3px",
+  padding: "0.5rem 0.6rem",
+  overflow: "hidden",
+});
+const stagePane = css({
+  height: "100%",
+  minWidth: "0",
+  display: "flex",
+  flexDirection: "column",
+  gap: "0.4rem",
+  overflow: "hidden",
+});
+const stageHeader = css({
+  display: "flex",
+  alignItems: "baseline",
+  gap: "0.5rem",
+  flexWrap: "wrap",
+  borderBottomWidth: "1px",
+  borderBottomStyle: "solid",
+  borderBottomColor: "grid",
+  paddingBottom: "0.3rem",
+  fontSize: "0.78rem",
+  color: "ink",
+  _focusVisible: { outlineWidth: "1px", outlineStyle: "solid", outlineColor: "amber", outlineOffset: "1px" },
+});
+const floorChip = css({
+  fontSize: "0.64rem",
+  color: "amber",
+  borderWidth: "1px",
+  borderStyle: "solid",
+  borderColor: "amber",
+  borderRadius: "2px",
+  paddingInline: "0.35rem",
+});
+const placeholder = css({
+  flex: "1",
+  minHeight: "0",
+  display: "grid",
+  placeItems: "center",
+  padding: "0.8rem",
+  color: "muted",
+  fontSize: "0.74rem",
+  lineHeight: "1.5",
+  textAlign: "center",
+  borderWidth: "1px",
+  borderStyle: "dashed",
+  borderColor: "grid",
+  borderRadius: "2px",
+});
+const ptyPlaceholder = css({
+  flex: "1",
+  minHeight: "0",
+  display: "grid",
+  placeItems: "center",
+  padding: "0.8rem",
+  color: "muted",
+  fontSize: "0.74rem",
+  lineHeight: "1.5",
+  textAlign: "center",
+  background: "bg",
+  borderWidth: "1px",
+  borderStyle: "solid",
+  borderColor: "grid",
+  borderRadius: "2px",
+  _focusVisible: { outlineWidth: "1px", outlineStyle: "solid", outlineColor: "amber", outlineOffset: "1px" },
+});
+const composerBox = css({
+  font: "inherit",
+  fontSize: "0.8rem",
+  minHeight: "44px",
+  resize: "none",
+  background: "bg",
+  color: "ink",
+  borderWidth: "1px",
+  borderStyle: "solid",
+  borderColor: "grid",
+  borderRadius: "2px",
+  padding: "0.4rem 0.55rem",
+  _focusVisible: { outlineWidth: "1px", outlineStyle: "solid", outlineColor: "amber", outlineOffset: "1px" },
+});
+const statusLine = css({
+  display: "flex",
+  flexShrink: 0,
+  alignItems: "baseline",
+  gap: "0.8rem",
+  flexWrap: "wrap",
+  borderTopWidth: "1px",
+  borderTopStyle: "solid",
+  borderTopColor: "grid",
+  paddingTop: "0.35rem",
+  fontSize: "0.72rem",
+  color: "muted",
+});
+const statusFocus = css({
+  _focusVisible: { outlineWidth: "1px", outlineStyle: "solid", outlineColor: "amber", outlineOffset: "1px" },
+});
+const reopenButton = css({
+  font: "inherit",
+  fontSize: "0.68rem",
+  letterSpacing: "0.06em",
+  paddingInline: "0.45rem",
+  paddingBlock: "0.06rem",
+  background: "transparent",
+  color: "muted",
+  borderWidth: "1px",
+  borderStyle: "solid",
+  borderColor: "grid",
+  borderRadius: "2px",
+  cursor: "pointer",
+  _hover: { color: "amber", borderColor: "amber" },
+  _focusVisible: { outlineWidth: "1px", outlineStyle: "solid", outlineColor: "amber", outlineOffset: "1px" },
+});
+const resizeHandle = css({
+  width: "3px",
+  background: "grid",
+  transition: "background 0.15s ease",
+  _hover: { background: "amber" },
+  "&[data-resize-handle-state='drag']": { background: "amber" },
+});
+const paneHeading = css({ flexShrink: 0 });
+
+const PANELS_AUTOSAVE_ID = "cockpit.sessions.panels";
+// The rail panel's percentage bounds — shared by the Panel props and the ~280px calibration.
+const RAIL_MIN_PERCENT = 12;
+const RAIL_MAX_PERCENT = 40;
+
+export function SessionsView({ active }: { active: boolean }) {
+  const rootRef = useRef<HTMLDivElement>(null);
+  const stageRef = useRef<HTMLElement>(null);
+  const railRef = useRef<ImperativePanelHandle>(null);
+  const inspectorRef = useRef<ImperativePanelHandle>(null);
+  const lastWidthRef = useRef<number | null>(null);
+  const paletteInvokerRef = useRef<HTMLElement | null>(null);
+
+  const [railCollapsed, setRailCollapsed] = useState(false);
+  const [inspectorCollapsed, setInspectorCollapsed] = useState(false);
+  const [stageNarrow, setStageNarrow] = useState(false);
+  const [palette, setPalette] = useState<{ open: boolean; page: PalettePage }>({
+    open: false,
+    page: "commands",
+  });
+
+  const registry = useMemo(() => registerDefaultCommands(createCommandRegistry()), []);
+
+  const focusSelector = useCallback((selector: string) => {
+    const target = rootRef.current?.querySelector<HTMLElement>(selector);
+    target?.focus();
+  }, []);
+
+  const focusRegion = useCallback(
+    (region: FocusRegion) => focusSelector(regionTargetSelector(region)),
+    [focusSelector],
+  );
+
+  // The F6 cycle: rail → stage → inspector → status line, collapsed panels excluded (design §5.3).
+  const cycleRegion = useCallback(
+    (direction: 1 | -1) => {
+      const available = FOCUS_REGIONS.filter(
+        (region) =>
+          (region !== "rail" || !railCollapsed) && (region !== "inspector" || !inspectorCollapsed),
+      );
+      const activeElement = document.activeElement;
+      const currentHost =
+        activeElement instanceof Element ? activeElement.closest("[data-region]") : null;
+      const current = (currentHost?.getAttribute("data-region") ?? null) as FocusRegion | null;
+      const next = nextRegion(current, direction, available);
+      if (next) focusRegion(next);
+    },
+    [focusRegion, inspectorCollapsed, railCollapsed],
+  );
+
+  const openPalette = useCallback((page: PalettePage = "commands") => {
+    const activeElement = document.activeElement;
+    setPalette((current) => {
+      // Keep the ORIGINAL invoker across an in-palette page switch so close returns focus there.
+      if (!current.open)
+        paletteInvokerRef.current = activeElement instanceof HTMLElement ? activeElement : null;
+      return { open: true, page };
+    });
+  }, []);
+
+  const closePalette = useCallback(() => {
+    setPalette({ open: false, page: "commands" });
+    // R7: palette close returns focus to its invoker (when it is still in the document).
+    const invoker = paletteInvokerRef.current;
+    if (invoker?.isConnected) invoker.focus();
+    paletteInvokerRef.current = null;
+  }, []);
+
+  const buildContext = useCallback(
+    (): CommandContext => ({
+      railCollapsed,
+      inspectorCollapsed,
+      paletteOpen: palette.open,
+      actions: {
+        openPalette,
+        closePalette,
+        toggleRail: () =>
+          railCollapsed ? railRef.current?.expand() : railRef.current?.collapse(),
+        toggleInspector: () =>
+          inspectorCollapsed ? inspectorRef.current?.expand() : inspectorRef.current?.collapse(),
+        focusRegion,
+        cycleRegion,
+        focusStageHeader: () => focusSelector(STAGE_HEADER_SELECTOR),
+        focusTerminal: () => focusSelector(PTY_HOST_SELECTOR),
+        // Honest stubs — L2 (session switch), L4 (effort), L5 (submit) replace the ACTION,
+        // the command ids and chords are already final.
+        switchSession: () => {},
+        cycleEffort: () => {},
+        submitComposer: () => {},
+      },
+    }),
+    [
+      closePalette,
+      cycleRegion,
+      focusRegion,
+      focusSelector,
+      inspectorCollapsed,
+      openPalette,
+      palette.open,
+      railCollapsed,
+    ],
+  );
+  const contextRef = useRef(buildContext);
+  contextRef.current = buildContext;
+  const getContext = useCallback(() => contextRef.current(), []);
+
+  const dispatch = useCallback(
+    (commandId: string) => {
+      registry.run(commandId, getContext());
+    },
+    [getContext, registry],
+  );
+
+  useKeyboardZones({ active, dispatch });
+
+  // The ~80-col floor chip (design §2, R3): the chip must always reflect the STAGE's actual
+  // width — it is re-measured from every path that can change it (root resizes via the observer
+  // below, and panel-layout changes via the PanelGroup onLayout callback), so a divider drag or a
+  // palette-driven collapse can neither miss a squeeze nor leave a stale false alarm (review
+  // round 2, finding 1).
+  const measureStage = useCallback(() => {
+    setStageNarrow(stageBelowPtyFloor(stageRef.current?.clientWidth ?? 0));
+  }, []);
+
+  // ~280px rail default (review round 2, finding 4): react-resizable-panels is percentage-only,
+  // so on the FIRST real width measurement — and only when the user has no persisted layout —
+  // the rail is resized to the percentage equivalent of the design's ~280px target. One-shot;
+  // the persisted layout (autoSaveId) owns everything afterwards.
+  const railCalibratedRef = useRef(false);
+  const calibrateRail = useCallback((rootWidth: number) => {
+    if (railCalibratedRef.current || rootWidth <= 0) return;
+    railCalibratedRef.current = true;
+    if (hasPersistedPanelLayout(PANELS_AUTOSAVE_ID)) return;
+    railRef.current?.resize(railDefaultPercent(rootWidth, RAIL_MIN_PERCENT, RAIL_MAX_PERCENT));
+  }, []);
+
+  // Panel-layout changes (divider drags, collapse/expand — including palette-driven ones) never
+  // resize the view ROOT, so they re-measure the stage here.
+  const handlePanelLayout = useCallback(() => {
+    measureStage();
+    calibrateRail(rootRef.current?.clientWidth ?? 0);
+  }, [calibrateRail, measureStage]);
+
+  // Narrow-width rules (R3): auto-collapse on a downward threshold crossing, auto-expand on the
+  // way back up; a manual reopen below the threshold is respected (pure decision — sessionLayout).
+  useEffect(() => {
+    const node = rootRef.current;
+    const stage = stageRef.current;
+    if (!node) return undefined;
+    const measure = () => {
+      measureStage();
+      const width = node.clientWidth;
+      if (!width) return; // hidden keep-alive layer (display:none) — never react to a 0-measure
+      calibrateRail(width);
+      const previous = lastWidthRef.current;
+      lastWidthRef.current = width;
+      const railMove = autoCollapseTransition(previous, width, RAIL_AUTO_COLLAPSE_PX);
+      if (railMove === "collapse") railRef.current?.collapse();
+      else if (railMove === "expand") railRef.current?.expand();
+      const inspectorMove = autoCollapseTransition(previous, width, INSPECTOR_AUTO_COLLAPSE_PX);
+      if (inspectorMove === "collapse") inspectorRef.current?.collapse();
+      else if (inspectorMove === "expand") inspectorRef.current?.expand();
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(node);
+    // The stage element itself is observed too: a divider drag changes the stage width with NO
+    // root resize, and the observer callback re-runs measureStage first.
+    if (stage) observer.observe(stage);
+    return () => observer.disconnect();
+  }, [calibrateRail, measureStage]);
+
+  return (
+    <div
+      ref={rootRef}
+      className={cx(root, "sessions--view")}
+      data-view="sessions"
+      data-testid="sessions-view"
+    >
+      <PanelGroup
+        direction="horizontal"
+        autoSaveId={PANELS_AUTOSAVE_ID}
+        onLayout={handlePanelLayout}
+      >
+        <Panel
+          ref={railRef}
+          collapsible
+          collapsedSize={0}
+          // The 1280px-reference fallback; the first real measurement calibrates toward ~280px
+          // (calibrateRail above) unless a persisted layout exists.
+          defaultSize={RAIL_FALLBACK_PERCENT}
+          minSize={RAIL_MIN_PERCENT}
+          maxSize={RAIL_MAX_PERCENT}
+          onCollapse={() => setRailCollapsed(true)}
+          onExpand={() => setRailCollapsed(false)}
+          order={1}
+        >
+          <aside
+            className={cx(pane, "sessions__rail")}
+            data-region="rail"
+            data-testid="sessions-rail"
+            aria-label="Session rail"
+          >
+            <h2 className={paneHeading}>Sessions</h2>
+            <div className={placeholder} data-focus-target tabIndex={-1}>
+              session rows land here (L2) — dot · role · title · status · End
+            </div>
+          </aside>
+        </Panel>
+        <PanelResizeHandle className={resizeHandle} data-testid="sessions-handle-rail" />
+        {/* An explicit defaultSize on EVERY panel keeps the group's layout state complete before
+            any DOM measurement — the imperative collapse/expand handles depend on it. */}
+        <Panel defaultSize={54} minSize={35} order={2}>
+          <section
+            ref={stageRef}
+            className={cx(stagePane, "sessions__stage")}
+            data-region="stage"
+            data-testid="sessions-stage"
+            aria-label="Session stage"
+          >
+            <header className={stageHeader} data-stage-header tabIndex={-1}>
+              <span>stage</span>
+              <span className={css({ color: "muted", fontSize: "0.72rem" })}>
+                HeaderStrip lands in L2/L4
+              </span>
+              {stageNarrow ? (
+                <span
+                  className={floorChip}
+                  data-testid="sessions-pty-floor-chip"
+                  title={`The stage is narrower than ~${PTY_MIN_COLS} columns — a squeezed hosted TUI is a layout fact, not harness misbehavior.`}
+                >
+                  pane narrower than ~{PTY_MIN_COLS} cols
+                </span>
+              ) : null}
+            </header>
+            <div
+              className={ptyPlaceholder}
+              data-kbzone="pty"
+              data-testid="sessions-pty-placeholder"
+              tabIndex={-1}
+              aria-label="Terminal placeholder"
+            >
+              PTY surface lands here (L6) — every key passes to the harness except the reserved
+              set (? lists it); F6 exits to chrome
+            </div>
+            <textarea
+              className={composerBox}
+              data-kbzone="composer"
+              data-focus-target
+              data-testid="sessions-composer-placeholder"
+              aria-label="Composer placeholder"
+              rows={2}
+              placeholder="composer lands here (L5) — ctrl+↵ send (stub) · esc → stage header · / at line start opens the palette"
+            />
+          </section>
+        </Panel>
+        <PanelResizeHandle className={resizeHandle} data-testid="sessions-handle-inspector" />
+        <Panel
+          ref={inspectorRef}
+          collapsible
+          collapsedSize={0}
+          defaultSize={24}
+          minSize={14}
+          maxSize={40}
+          onCollapse={() => setInspectorCollapsed(true)}
+          onExpand={() => setInspectorCollapsed(false)}
+          order={3}
+        >
+          <aside
+            className={cx(pane, "sessions__inspector")}
+            data-region="inspector"
+            data-testid="sessions-inspector"
+            aria-label="Inspector"
+          >
+            <h2 className={paneHeading}>Inspector</h2>
+            <div className={placeholder} data-focus-target tabIndex={-1}>
+              Evidence · Capabilities · Bus tabs land here (L7)
+            </div>
+          </aside>
+        </Panel>
+      </PanelGroup>
+      <footer
+        className={cx(statusLine, "sessions__statusline")}
+        data-region="statusline"
+        data-testid="sessions-statusline"
+      >
+        <span className={statusFocus} data-focus-target tabIndex={-1}>
+          sessions scaffold — StatusLine lands in L7
+        </span>
+        {railCollapsed ? (
+          <button
+            type="button"
+            className={reopenButton}
+            onClick={() => railRef.current?.expand()}
+            data-testid="sessions-reopen-rail"
+          >
+            ☰ rail
+          </button>
+        ) : null}
+        {inspectorCollapsed ? (
+          <button
+            type="button"
+            className={reopenButton}
+            onClick={() => inspectorRef.current?.expand()}
+            data-testid="sessions-reopen-inspector"
+          >
+            ◫ inspector
+          </button>
+        ) : null}
+        <span className={css({ marginLeft: "auto" })}>ctrl+k palette · ? keys · F6 regions</span>
+      </footer>
+      <CommandPalette
+        open={palette.open}
+        page={palette.page}
+        registry={registry}
+        getContext={getContext}
+        onClose={closePalette}
+        onPage={(page) => setPalette({ open: true, page })}
+      />
+    </div>
+  );
+}

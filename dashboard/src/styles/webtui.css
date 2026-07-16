@@ -1,0 +1,43 @@
+/* WebTUI skin for the sessions cockpit — THE one mapping file (260715-FEUI-L1 S1, OQ-D: adopted).
+   @webtui/css is pinned EXACTLY at 0.1.9 (0.x churn risk — design §17). Imports carry
+   layer(webtui): each file's own @layer base/utils/components blocks nest inside our `webtui`
+   layer, which index.css slots between `effects` and `tokens` — so Panda tokens/recipes/utilities
+   beat WebTUI on any conflict, and the unlayered !important effects freeze always wins (WebTUI
+   ships no !important animation/transition declarations; the spike test asserts that stays true).
+   Scoping: postcss-prefix-selector (postcss.config.cjs + webtui-scope.config.cjs) prefixes every
+   imported rule under [data-view="sessions"] at build time — no WebTUI rule can match outside the
+   cockpit root. The blocks below are authored already-scoped (the transform leaves them alone). */
+/* Relative node_modules paths: Vite 8's bundled postcss-import does not resolve bare package
+   specifiers inside CSS @import, and a JS-side import could not carry layer(webtui). */
+@import "../../node_modules/@webtui/css/dist/base.css" layer(webtui);
+@import "../../node_modules/@webtui/css/dist/utils/box.css" layer(webtui);
+@import "../../node_modules/@webtui/css/dist/components/badge.css" layer(webtui);
+@import "../../node_modules/@webtui/css/dist/components/separator.css" layer(webtui);
+
+@layer webtui {
+  /* WebTUI palette vars mapped onto the existing podracer OKLCH tokens (styles/tokens.css) —
+     ONE color system; the session-surface spec §2.1 roles table is this mapping's semantic
+     contract. No raw color literals here: every color is a token var (color-mix only blends
+     tokens). These direct-in-layer rules outrank the imports' nested webtui.base defaults. */
+  [data-view="sessions"] {
+    --background0: var(--bg);
+    --background1: var(--bg-panel);
+    --background2: var(--grid);
+    --background3: color-mix(in oklch, var(--grid) 55%, var(--muted));
+    --foreground0: var(--ink);
+    --foreground1: var(--muted);
+    --foreground2: color-mix(in oklch, var(--muted) 60%, var(--bg-panel));
+    --box-border-color: var(--grid);
+    --font-family: var(--font-mono);
+    --font-size: 14px;
+    --line-height: 1.3;
+  }
+
+  /* WebTUI's base resets `* { outline: none }` inside the scope. Restore a visible ring for
+     anything a higher layer does not style — Panda's _focusVisible rules (utilities layer)
+     still win, so React Aria focus styling is untouched (spike assertion d). */
+  [data-view="sessions"] :focus-visible {
+    outline: 1px solid var(--amber);
+    outline-offset: 1px;
+  }
+}

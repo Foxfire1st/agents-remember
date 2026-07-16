@@ -32,6 +32,7 @@ import { LifecycleList } from "../panels/LifecycleList";
 import { MemoryMirror } from "../panels/MemoryMirror";
 import { RailChat } from "../panels/RailChat";
 import { usePersistedFlag, usePersistedNumber } from "../panels/file-viewer/usePersistedFlag";
+import { SessionsView } from "../panels/session-cockpit/SessionsView";
 import { Topology } from "../panels/Topology";
 import type { EngineProcessNode, TaskDocNode } from "../types/projection";
 
@@ -48,7 +49,15 @@ const EMPTY_ENGINE_PROCESSES: EngineProcessNode[] = [];
 // Slice 5f S1 (§4.1): the "machine map" views (Engine Room / Topology) and the Chats terminal
 // (slice 6e) drop the rails and span the full body width; the top-bar caution stays visible so an
 // alarm is never hidden.
-type View = "operations" | "files" | "engine" | "memory" | "topology" | "hangar" | "chats";
+type View =
+  | "operations"
+  | "files"
+  | "engine"
+  | "memory"
+  | "topology"
+  | "hangar"
+  | "chats"
+  | "sessions";
 
 const VIEWS: { id: View; label: string }[] = [
   { id: "operations", label: "Operations" },
@@ -58,6 +67,7 @@ const VIEWS: { id: View; label: string }[] = [
   { id: "topology", label: "Topology" },
   { id: "hangar", label: "Hangar" },
   { id: "chats", label: "Chats" },
+  { id: "sessions", label: "Sessions" },
 ];
 
 // Shell layout (slice 5d: co-located Panda css). The shell pins to the viewport so the top + mode
@@ -307,6 +317,10 @@ const filesLayer = chatsLayer;
 // view back to the master overview on return. Hidden-not-unmounted preserves the drilled leaf (and the
 // rail's reported leaf key with it). Same layout as the other persistent layers, so it reuses it.
 const operationsLayer = chatsLayer;
+// The sessions cockpit (260715-FEUI-L1 R1) joins the persistent keep-alive layers for the same
+// reason as Chats: its PTY panes (xterm buffers + WebSockets, from L6 on) must survive a view
+// switch. Same layout, so it reuses it.
+const sessionsLayer = chatsLayer;
 
 // Cockpit wires the live SSE streams, then renders the presentational shell. The shell is split
 // out so the dev gallery (/dev/bench) renders the exact same surface against fixture state.
@@ -362,9 +376,14 @@ export function CockpitShell() {
     masterFolderForSelection(selectedId, s.lifecycles, s.analytics),
   );
 
-  // The machine-map views + the Chats terminal span full width: the rails hide and the view's own
-  // layout breathes.
-  const fullBleed = view === "files" || view === "engine" || view === "topology" || view === "chats";
+  // The machine-map views + the Chats terminal + the sessions cockpit span full width: the rails
+  // hide and the view's own layout breathes.
+  const fullBleed =
+    view === "files" ||
+    view === "engine" ||
+    view === "topology" ||
+    view === "chats" ||
+    view === "sessions";
   // A takeover (Change-Set Viewer or the L17 Notes Reader) replaces the railed body full-bleed.
   const takeover = Boolean(changeSet) || notesOpen;
 
@@ -465,9 +484,10 @@ export function CockpitShell() {
           </motion.aside>
         )}
         <main className={cx(viewport, "viewport")} data-view={view}>
-          {/* Engine / Memory / Topology / Hangar render transiently; Operations, File Viewer, and Chats
-              are persistent hidden layers below so their in-panel state survives a view switch. */}
-          {view !== "chats" && view !== "files" && view !== "operations" && (
+          {/* Engine / Memory / Topology / Hangar render transiently; Operations, File Viewer, Chats,
+              and Sessions are persistent hidden layers below so their in-panel state survives a
+              view switch. */}
+          {view !== "chats" && view !== "files" && view !== "operations" && view !== "sessions" && (
             <ViewBody view={view} onOpen={open} />
           )}
           {/* Operations' DetailPanel is never unmounted — only hidden — so the drilled-open sub-task
@@ -507,6 +527,17 @@ export function CockpitShell() {
               taskDocuments={taskDocuments}
               contextMaster={contextMaster}
             />
+          </div>
+          {/* The sessions cockpit (260715-FEUI-L1 R1) is never unmounted — only hidden — so its
+              future xterm buffers + WebSockets survive a view switch, exactly like Chats. Its
+              root carries [data-view="sessions"], the WebTUI scope + keyboard-layer home;
+              `active` gates the window-level key bindings so the hidden layer never grabs keys. */}
+          <div
+            className={sessionsLayer}
+            style={{ display: view === "sessions" ? "flex" : "none" }}
+            aria-hidden={view !== "sessions"}
+          >
+            <SessionsView active={view === "sessions"} />
           </div>
         </main>
         {!fullBleed && (
@@ -556,9 +587,9 @@ function ViewBody({ view, onOpen }: { view: View; onOpen: (id: string) => void }
       return <Topology onSelect={onOpen} />;
     case "hangar":
       return <Hangar onSelect={onOpen} />;
-    // "operations", "files", and "chats" are intentionally not here — all three are kept mounted in
-    // CockpitShell (hidden via CSS) so their in-panel state survives a view switch; routing them through
-    // this transient switch would unmount them.
+    // "operations", "files", "chats", and "sessions" are intentionally not here — all four are kept
+    // mounted in CockpitShell (hidden via CSS) so their in-panel state survives a view switch; routing
+    // them through this transient switch would unmount them.
     default:
       return null;
   }

@@ -607,6 +607,39 @@ describe("Operations drill survives a view switch (DetailPanel mount preservatio
   });
 });
 
+describe("Sessions view: full-bleed keep-alive layer (260715-FEUI-L1 R1)", () => {
+  it("registers Sessions in the mode bar, goes full-bleed, and hides-not-unmounts on leave", () => {
+    seed("engine-fleet");
+    const { container, getByRole } = render(<CockpitShell />);
+
+    // Mounted from the start as a persistent hidden layer (like Chats): the future xterm
+    // buffers + WebSockets survive view switches because the layer is never unmounted.
+    const sessions = container.querySelector('[data-testid="sessions-view"]');
+    expect(sessions).not.toBeNull();
+    const layer = sessions?.parentElement as HTMLElement;
+    expect(layer.style.display).toBe("none");
+    expect(layer.getAttribute("aria-hidden")).toBe("true");
+    // The scope root carries the WebTUI marker even while hidden (S1).
+    expect(sessions?.getAttribute("data-view")).toBe("sessions");
+
+    // Switching to Sessions reveals the SAME node (never remounted), full-bleed (no shell rails).
+    fireEvent.click(getByRole("radio", { name: "Sessions" }));
+    expect(container.querySelector(".shell__body")?.getAttribute("data-fullbleed")).toBe("true");
+    expect(container.querySelector(".rail--left")).toBeNull();
+    expect(container.querySelector('[data-testid="sessions-view"]')).toBe(sessions);
+    expect(layer.style.display).toBe("flex");
+    // React renders aria-* booleans literally: visible = aria-hidden="false" (the house pattern
+    // used by the Chats/Files layers too).
+    expect(layer.getAttribute("aria-hidden")).toBe("false");
+
+    // Leaving hides it again without unmounting (still the same node).
+    fireEvent.click(getByRole("radio", { name: "Operations" }));
+    expect(container.querySelector('[data-testid="sessions-view"]')).toBe(sessions);
+    expect(layer.style.display).toBe("none");
+    expect(layer.getAttribute("aria-hidden")).toBe("true");
+  });
+});
+
 describe("Chats persistence across view switches (6e hardening)", () => {
   it("keeps <Chats> mounted (hidden) on other views and shows the same node on Chats", () => {
     seed("engine-fleet");

@@ -23,6 +23,12 @@ if (typeof globalThis.ResizeObserver === "undefined") {
   } as unknown as typeof globalThis.ResizeObserver;
 }
 
+// jsdom omits scrollIntoView; cmdk (the sessions command palette, FEUI-L1) calls it on the
+// selected item. Inert stub — tests assert selection state, never scroll geometry.
+if (typeof Element !== "undefined" && typeof Element.prototype.scrollIntoView !== "function") {
+  Element.prototype.scrollIntoView = () => {};
+}
+
 // SVG geometry APIs jsdom omits or stubs-to-throw — GSAP's DrawSVG / MotionPath (engine-room timeline, 05n)
 // call getBBox / getTotalLength / getPointAtLength when the effects-on path builds the GSAP context (the
 // EnclosureProcessMap GSAP-gate test). Assign inert stubs across the SVG prototype chain so the plugins

@@ -2,8 +2,11 @@
    postcss plugin injects the generated `tokens` / `recipes` / `utilities` layers, while `reset` /
    `base` / `effects` are ours. Effects stay global + isolated (note 09), never per-component.
    Imported first in main.tsx. Token *values* still live in styles/tokens.css `:root` during the
-   migration (referenced here as var(--…)); they move into Panda tokens as panels are ported. */
-@layer reset, base, effects, tokens, recipes, utilities;
+   migration (referenced here as var(--…)); they move into Panda tokens as panels are ported.
+   `webtui` (260715-FEUI-L1 S1) hosts the scoped WebTUI skin for the sessions cockpit — slotted
+   between `effects` and `tokens` so Panda tokens/recipes/utilities always win a conflict, and the
+   unlayered html[data-effects="off"] freeze below stays above it all. */
+@layer reset, base, effects, webtui, tokens, recipes, utilities;
 
 @layer reset {
   * {
