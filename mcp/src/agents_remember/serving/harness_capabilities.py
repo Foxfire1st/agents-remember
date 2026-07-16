@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import Literal
+from typing import Literal, cast
 
 CapabilityCategory = Literal["model", "thought_level"]
 SetAcceptance = Literal[
@@ -225,3 +225,103 @@ def set_result_json(value: SetResult) -> dict[str, object]:
         "effectiveValue": value.effective_value,
         "detail": value.detail,
     }
+
+
+def capability_snapshot_from_json(raw: object) -> CapabilitySnapshot:
+    """Strictly parse the normalized snapshot returned by an exact-session IPC peer."""
+
+    payload = _object(raw, "capability snapshot")
+    models_raw = payload.get("models")
+    if not isinstance(models_raw, list):
+        raise ValueError("capability snapshot models must be a list")
+    models = tuple(_model_capability_from_json(item) for item in models_raw)
+    snapshot = CapabilitySnapshot(
+        models=models,
+        selected_model_key=_optional_text(payload, "selectedModelKey"),
+        selected_effort=_optional_text(payload, "selectedEffort"),
+    )
+    config_options = payload.get("configOptions")
+    if config_options is not None and config_options != [
+        config_option_json(option) for option in snapshot.config_options
+    ]:
+        raise ValueError("capability snapshot configOptions do not match the model-gated catalog")
+    return snapshot
+
+
+def set_result_from_json(raw: object) -> SetResult:
+    """Strictly parse honest setter acceptance returned by the exact-session IPC peer."""
+
+    payload = _object(raw, "set result")
+    ok = payload.get("ok")
+    if not isinstance(ok, bool):
+        raise ValueError("set result ok must be a boolean")
+    acceptance = payload.get("acceptance")
+    if acceptance not in SET_ACCEPTANCE_VALUES:
+        raise ValueError("set result acceptance is invalid")
+    return SetResult(
+        ok=ok,
+        acceptance=cast(SetAcceptance, acceptance),
+        requested_value=_required_text(payload, "requestedValue"),
+        effective_value=_optional_text(payload, "effectiveValue"),
+        detail=_optional_text(payload, "detail"),
+    )
+
+
+def _model_capability_from_json(raw: object) -> ModelCapability:
+    payload = _object(raw, "model capability")
+    efforts_raw = payload.get("effortOptions")
+    if not isinstance(efforts_raw, list):
+        raise ValueError("model capability effortOptions must be a list")
+    return ModelCapability(
+        key=_required_text(payload, "key"),
+        display_name=_required_text(payload, "displayName"),
+        resolved_model=_optional_text(payload, "resolvedModel"),
+        description=_optional_text(payload, "description"),
+        supports_effort=_required_bool(payload, "supportsEffort"),
+        effort_options=tuple(_effort_option_from_json(item) for item in efforts_raw),
+        default_effort=_optional_text(payload, "defaultEffort"),
+        is_default=_required_bool(payload, "isDefault"),
+        hidden=_required_bool(payload, "hidden"),
+        selectable=_required_bool(payload, "selectable"),
+        provider=_optional_text(payload, "provider"),
+    )
+
+
+def _effort_option_from_json(raw: object) -> EffortOption:
+    payload = _object(raw, "effort option")
+    return EffortOption(
+        key=_required_text(payload, "key"),
+        display_name=_required_text(payload, "displayName"),
+        description=_optional_text(payload, "description"),
+        launch_settable=_required_bool(payload, "launchSettable"),
+        session_settable=_required_bool(payload, "sessionSettable"),
+    )
+
+
+def _object(raw: object, label: str) -> Mapping[str, object]:
+    if not isinstance(raw, Mapping) or not all(isinstance(key, str) for key in raw):
+        raise ValueError(f"{label} must be an object")
+    return cast(Mapping[str, object], raw)
+
+
+def _required_text(raw: Mapping[str, object], key: str) -> str:
+    value = raw.get(key)
+    if not isinstance(value, str) or not value:
+        raise ValueError(f"capability payload requires non-empty {key}")
+    return value
+
+
+def _optional_text(raw: Mapping[str, object], key: str) -> str | None:
+    value = raw.get(key)
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise ValueError(f"capability payload {key} must be a string or null")
+    return value
+
+
+def _required_bool(raw: Mapping[str, object], key: str) -> bool:
+    value = raw.get(key)
+    if not isinstance(value, bool):
+        raise ValueError(f"capability payload {key} must be a boolean")
+    return value

@@ -13,6 +13,10 @@ from pathlib import Path
 from typing import Any, cast
 
 from agents_remember.errors import HarnessControlError
+from agents_remember.serving.harness_capabilities import (
+    capability_snapshot_json,
+    set_result_json,
+)
 from agents_remember.serving.harness_control_bridge import HarnessControlBridge
 from agents_remember.serving.harness_control_models import (
     CONTROL_PROTOCOL_VERSION,
@@ -140,6 +144,8 @@ class HarnessControlServer:
                 "protocol": CONTROL_PROTOCOL_VERSION,
                 "snapshot": snapshot_json(self.bridge.snapshot()),
             }
+        if action in {"advertise", "set-model", "set-effort"}:
+            return await self._dispatch_capability_action(action, payload)
         if action == "submit":
             return await self._submit(payload)
         if action == "respond":
@@ -155,6 +161,21 @@ class HarnessControlServer:
         if action == "stop":
             return await self._stop(payload)
         raise HarnessControlError(f"unknown control action: {action}")
+
+    async def _dispatch_capability_action(
+        self, action: str, payload: Mapping[str, object]
+    ) -> object:
+        if action == "advertise":
+            return capability_snapshot_json(self.bridge.advertise())
+        if action == "set-model":
+            return set_result_json(
+                await self.bridge.set_model(_required_text(payload, "modelKey"))
+            )
+        if action == "set-effort":
+            return set_result_json(
+                await self.bridge.set_effort(_required_text(payload, "effort"))
+            )
+        raise HarnessControlError(f"unknown capability action: {action}")
 
     async def _submit(self, payload: Mapping[str, object]) -> dict[str, object]:
         source = payload.get("source")

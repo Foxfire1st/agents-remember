@@ -557,16 +557,8 @@ def spawn_agent_session_payload(
         assert dispatch is not None  # no refusal => a resolved dispatch bundle
         harness = dispatch.harness_id
         resolved_launch = dispatch.resolved_launch
-        model = (
-            resolved_launch.model_key
-            if resolved_launch is not None
-            else dispatch.legacy_model
-        )
-        effort = (
-            resolved_launch.effort
-            if resolved_launch is not None
-            else dispatch.legacy_effort
-        )
+        model = resolved_launch.model_key if resolved_launch is not None else dispatch.legacy_model
+        effort = resolved_launch.effort if resolved_launch is not None else dispatch.legacy_effort
         launch_args = dispatch.launch_args
         prompt_keywords = dispatch.prompt_keywords
         resolved_session_commands = dispatch.session_commands
@@ -610,6 +602,8 @@ def spawn_agent_session_payload(
 
     if result.status == "bad-kind":
         return _spawn_refusal("bad-kind", harness, kind, detail=result.detail)
+    if result.status == "launch-conflict":
+        return _spawn_refusal("launch-selection-invalid", harness, kind, detail=result.detail)
     if result.status == "leaf-taken":
         return _tool_payload(
             "spawn_agent_session",

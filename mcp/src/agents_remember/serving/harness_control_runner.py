@@ -160,7 +160,7 @@ async def _prepare_controlled_launch(
         identity=config.identity,
         harness_id=config.harness_id,
         cwd=config.cwd,
-        argv=_adapter_argv(config),
+        argv=adapter_argv(config.harness_id, config.argv),
         env=dict(env),
     )
     selection = config.resolved_launch
@@ -259,13 +259,15 @@ def _committed_line(line: str) -> str:
     return line.replace("\x1b[200~", "").replace("\x1b[201~", "").rstrip("\r\n")
 
 
-def _adapter_argv(config: RunnerConfig) -> tuple[str, ...]:
-    if config.harness_id != "codex":
-        return config.argv
+def adapter_argv(harness_id: str, argv: tuple[str, ...]) -> tuple[str, ...]:
+    """Normalize one registry argv for the native protocol boundary."""
+
+    if harness_id != "codex":
+        return argv
     # Keep every settings/user-supplied argument. The normalized adapter owns model and effort;
     # silently deleting an older ``--model`` or ``--config model_reasoning_effort=...`` here would
     # hide conflicting authority instead of letting ``apply_launch_knobs`` refuse it explicitly.
-    return (config.argv[0], "app-server", *config.argv[1:])
+    return (argv[0], "app-server", *argv[1:])
 
 
 def _readable(text: str) -> str:

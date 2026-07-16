@@ -10,7 +10,7 @@ from datetime import UTC, datetime
 from uuid import uuid4
 
 from agents_remember.errors import HarnessAdapterDisconnectedError, HarnessControlError
-from agents_remember.serving.harness_capabilities import SetResult
+from agents_remember.serving.harness_capabilities import CapabilitySnapshot, SetResult
 from agents_remember.serving.harness_control_adapter import (
     HarnessProtocolAdapter,
     reduce_adapter_event,
@@ -182,6 +182,10 @@ class HarnessControlBridge:
     ) -> ReconciliationResult:
         self._require_running()
         return await self._command_queue.resolve_unknown(request_id, state=state, detail=detail)
+
+    def advertise(self) -> CapabilitySnapshot:
+        self._require_running()
+        return self._adapter.advertise()
 
     async def set_model(self, model_key: str) -> SetResult:
         self._require_running()

@@ -15,7 +15,13 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Protocol, cast
 
-from agents_remember.errors import HarnessControlError
+from agents_remember.errors import HarnessControlClientError, HarnessControlError
+from agents_remember.serving.harness_capabilities import (
+    CapabilitySnapshot,
+    SetResult,
+    capability_snapshot_from_json,
+    set_result_from_json,
+)
 from agents_remember.serving.harness_control_ipc import MAX_CONTROL_MESSAGE_BYTES
 from agents_remember.serving.harness_control_models import (
     CONTROL_PROTOCOL_VERSION,
@@ -30,6 +36,9 @@ from agents_remember.serving.harness_control_models import (
     SubmissionReceipt,
     SubmissionSource,
 )
+
+SET_CONTROL_TIMEOUT_SECONDS = 35.0
+"""Bound a native setter above Claude's 30-second correlated acceptance window."""
 
 
 class ControlledSession(Protocol):
@@ -69,6 +78,24 @@ def read_control_snapshot(entry: ControlledSession) -> AdapterSnapshot:
     return snapshot
 
 
+def read_control_capabilities(entry: ControlledSession) -> CapabilitySnapshot:
+    """Read the live adapter's normalized, model-gated capability snapshot."""
+
+    result = request_control(entry, "advertise")
+    try:
+        return capability_snapshot_from_json(result)
+    except (HarnessControlError, ValueError) as exc:
+        raise HarnessControlError(f"control capability response is invalid: {exc}") from exc
+
+
+def set_control_model(entry: ControlledSession, model_key: str) -> SetResult:
+    return _set_control_value(entry, "set-model", "modelKey", model_key)
+
+
+def set_control_effort(entry: ControlledSession, effort: str) -> SetResult:
+    return _set_control_value(entry, "set-effort", "effort", effort)
+
+
 def submit_control_prompt(
     entry: ControlledSession,
     text: str,
@@ -78,33 +105,35 @@ def submit_control_prompt(
     submitted_at: str | None = None,
 ) -> SubmissionReceipt:
     stamp = submitted_at or datetime.now(UTC).isoformat()
-    result = request_control(
-        entry,
-        "submit",
-        {
-            "requestId": request_id,
-            "source": source,
-            "text": text,
-            "submittedAt": stamp,
-        },
-    )
-    if not isinstance(result, Mapping):
-        raise HarnessControlError("control submission response must be an object")
-    acceptance = result.get("acceptance")
-    if acceptance not in {"immediate", "queued", "rejected", "unknown", "unsupported"}:
-        raise HarnessControlError("control submission response has invalid acceptance")
-    response_request = _required_text(result, "requestId")
-    if response_request != request_id:
-        raise HarnessControlError("control submission response request id mismatch")
-    return SubmissionReceipt(
-        request_id=response_request,
-        acceptance=cast(AcceptanceState, acceptance),
-        submitted_at=_required_text(result, "submittedAt"),
-        vendor_correlation_id=_optional_text(result, "vendorCorrelationId"),
-        accepted_at=_optional_text(result, "acceptedAt"),
-        detail=_optional_text(result, "detail"),
-        raw=_object(result.get("raw")),
-    )
+    try:
+        result = request_control(
+            entry,
+            "submit",
+            {
+                "requestId": request_id,
+                "source": source,
+                "text": text,
+                "submittedAt": stamp,
+            },
+        )
+    except HarnessControlClientError as exc:
+        if not exc.may_have_sent:
+            raise
+        return SubmissionReceipt(
+            request_id=request_id,
+            acceptance="unknown",
+            submitted_at=stamp,
+            detail=f"control submission response was lost after request bytes were sent: {exc}",
+        )
+    try:
+        return _submission_receipt(result, request_id=request_id)
+    except HarnessControlError as exc:
+        return SubmissionReceipt(
+            request_id=request_id,
+            acceptance="unknown",
+            submitted_at=stamp,
+            detail=f"control submission returned incoherent post-dispatch evidence: {exc}",
+        )
 
 
 def reconcile_control_prompt(
@@ -183,6 +212,16 @@ def request_control(
     endpoint = entry.control_endpoint
     if endpoint is None:
         raise HarnessControlError("catalog session has no protocol control endpoint")
+    encoded = _encode_control_request(entry, action, payload)
+    response = _exchange_control(endpoint, encoded, timeout_seconds=timeout_seconds)
+    return _decode_control_response(response)
+
+
+def _encode_control_request(
+    entry: ControlledSession,
+    action: str,
+    payload: Mapping[str, object] | None,
+) -> bytes:
     request = {
         "protocol": CONTROL_PROTOCOL_VERSION,
         "identity": control_identity(entry).to_json(),
@@ -192,23 +231,110 @@ def request_control(
     encoded = json.dumps(request, separators=(",", ":"), ensure_ascii=False).encode() + b"\n"
     if len(encoded) > MAX_CONTROL_MESSAGE_BYTES:
         raise HarnessControlError("control request exceeds the message limit")
-    try:
-        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
-            client.settimeout(timeout_seconds)
+    return encoded
+
+
+def _exchange_control(endpoint: Path, encoded: bytes, *, timeout_seconds: float) -> bytes:
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
+        client.settimeout(timeout_seconds)
+        try:
             client.connect(str(endpoint))
-            client.sendall(encoded)
-            response = _read_line(client)
-    except (OSError, TimeoutError) as exc:
-        raise HarnessControlError(f"control endpoint unavailable: {exc}") from exc
+        except (OSError, TimeoutError) as exc:
+            raise HarnessControlClientError(
+                f"control endpoint unavailable before write: {exc}", may_have_sent=False
+            ) from exc
+        bytes_handed = False
+        try:
+            first_write = client.send(encoded)
+            if first_write <= 0:
+                raise OSError("control socket accepted no request bytes")
+            bytes_handed = True
+            client.sendall(encoded[first_write:])
+            return _read_line(client)
+        except (HarnessControlError, OSError, TimeoutError) as exc:
+            stage = (
+                "after request bytes were sent"
+                if bytes_handed
+                else "before any request bytes were accepted"
+            )
+            raise HarnessControlClientError(
+                f"control endpoint unavailable {stage}: {exc}",
+                may_have_sent=bytes_handed,
+            ) from exc
+
+
+def _decode_control_response(response: bytes) -> object:
     try:
         raw = json.loads(response)
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-        raise HarnessControlError("control endpoint returned malformed JSON") from exc
+        raise HarnessControlClientError(
+            "control endpoint returned malformed JSON", may_have_sent=True
+        ) from exc
     if not isinstance(raw, dict):
-        raise HarnessControlError("control endpoint response must be an object")
+        raise HarnessControlClientError(
+            "control endpoint response must be an object", may_have_sent=True
+        )
     if raw.get("ok") is not True:
         raise HarnessControlError(str(raw.get("error") or "control request failed"))
     return raw.get("result")
+
+
+def _set_control_value(
+    entry: ControlledSession,
+    action: str,
+    payload_key: str,
+    requested_value: str,
+) -> SetResult:
+    try:
+        result = request_control(
+            entry,
+            action,
+            {payload_key: requested_value},
+            timeout_seconds=SET_CONTROL_TIMEOUT_SECONDS,
+        )
+    except HarnessControlClientError as exc:
+        if not exc.may_have_sent:
+            raise
+        return _unknown_set_result(requested_value, str(exc))
+    try:
+        parsed = set_result_from_json(result)
+    except (HarnessControlError, ValueError) as exc:
+        return _unknown_set_result(requested_value, f"invalid setter response: {exc}")
+    if parsed.requested_value != requested_value:
+        return _unknown_set_result(
+            requested_value,
+            f"setter response request mismatch: {parsed.requested_value!r}",
+        )
+    return parsed
+
+
+def _unknown_set_result(requested_value: str, detail: str) -> SetResult:
+    return SetResult(
+        ok=False,
+        acceptance="unknown",
+        requested_value=requested_value,
+        detail=f"setter outcome is unknown after request bytes were sent: {detail}",
+    )
+
+
+def _submission_receipt(result: object, *, request_id: str) -> SubmissionReceipt:
+    if not isinstance(result, Mapping):
+        raise HarnessControlError("control submission response must be an object")
+    acceptance = result.get("acceptance")
+    if acceptance not in {"immediate", "queued", "rejected", "unknown", "unsupported"}:
+        raise HarnessControlError("control submission response has invalid acceptance")
+    response_request = _required_text(result, "requestId")
+    if response_request != request_id:
+        raise HarnessControlError("control submission response request id mismatch")
+    return SubmissionReceipt(
+        request_id=response_request,
+        acceptance=cast(AcceptanceState, acceptance),
+        submitted_at=_required_text(result, "submittedAt"),
+        vendor_correlation_id=_optional_text(result, "vendorCorrelationId"),
+        accepted_at=_optional_text(result, "acceptedAt"),
+        detail=_optional_text(result, "detail"),
+        raw=_object(result.get("raw")),
+    )
 
 
 def _read_line(client: socket.socket) -> bytes:

@@ -10,9 +10,12 @@ from __future__ import annotations
 
 import sys
 import tempfile
+import threading
 import unittest
 from collections.abc import Mapping, Sequence
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from unittest import mock
 
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
@@ -300,6 +303,102 @@ class KnobApplicationTests(unittest.TestCase):
             {"AR_SPAWN_MODEL": "claude-fable-5", "AR_SPAWN_EFFORT": "max"},
         )
 
+    def test_live_reopen_preserves_actual_pair_command_and_endpoint(self) -> None:
+        selected = ResolvedLaunch("claude", "model-a", "high", self.tmp)
+        first = self._open(resolved_launch=selected)
+        assert first.entry is not None
+        actual = first.entry
+
+        reopened = self._open(
+            resolved_launch=selected,
+            label="attempted metadata rewrite",
+        )
+
+        self.assertEqual(reopened.status, "opened")
+        self.assertEqual(reopened.entry, actual)
+        self.assertEqual(self.catalog.get("worker-1"), actual)
+        self.assertEqual(len(self.host.ensured), 1)
+        self.assertEqual(_runner_config(self.host).resolved_launch, selected)
+
+    def test_live_reopen_changed_pair_or_identity_conflicts_without_mutation(self) -> None:
+        original = ResolvedLaunch("claude", "model-a", "high", self.tmp)
+        changed = ResolvedLaunch("claude", "model-b", "max", self.tmp)
+        first = self._open(resolved_launch=original)
+        assert first.entry is not None
+        actual = first.entry
+
+        pair_conflict = self._open(resolved_launch=changed)
+        identity_conflict = self._open(kind="terminal", harness=None)
+
+        self.assertEqual(pair_conflict.status, "launch-conflict")
+        self.assertEqual(identity_conflict.status, "launch-conflict")
+        self.assertEqual(pair_conflict.entry, actual)
+        self.assertEqual(identity_conflict.entry, actual)
+        self.assertEqual(self.catalog.get("worker-1"), actual)
+        self.assertEqual(len(self.host.ensured), 1)
+        self.assertEqual(_runner_config(self.host).resolved_launch, original)
+
+    def test_dead_replacement_uses_new_pair_and_fresh_control_generation(self) -> None:
+        original = ResolvedLaunch("claude", "model-a", "high", self.tmp)
+        changed = ResolvedLaunch("claude", "model-b", "max", self.tmp)
+        with mock.patch(
+            "agents_remember.serving.terminal_opener.now_iso",
+            side_effect=(
+                "2026-07-16T08:00:00+00:00",
+                "2026-07-16T08:01:00+00:00",
+            ),
+        ):
+            first = self._open(resolved_launch=original)
+            assert first.entry is not None
+            self.host.known.discard(first.entry.tmux_name)
+            replacement = self._open(resolved_launch=changed)
+
+        assert replacement.entry is not None
+        self.assertEqual(replacement.status, "opened")
+        self.assertEqual(len(self.host.ensured), 2)
+        second_command = self.host.ensured[1]["command"]
+        assert isinstance(second_command, tuple)
+        second_runner = parse_runner_config(second_command[3])
+        self.assertEqual(second_runner.resolved_launch, changed)
+        self.assertEqual(
+            (replacement.entry.resolved_model, replacement.entry.resolved_effort),
+            ("model-b", "max"),
+        )
+        self.assertNotEqual(replacement.entry.control_endpoint, first.entry.control_endpoint)
+        self.assertEqual(replacement.entry.created_at, "2026-07-16T08:01:00+00:00")
+        self.assertEqual(replacement.entry.control_state, "starting")
+        self.assertIsNone(replacement.entry.control_vendor_session_id)
+        self.assertIsNone(replacement.entry.control_raw)
+
+    def test_concurrent_different_pair_opens_keep_one_process_and_one_truth(self) -> None:
+        selections = (
+            ResolvedLaunch("claude", "model-a", "high", self.tmp),
+            ResolvedLaunch("claude", "model-b", "max", self.tmp),
+        )
+        start = threading.Barrier(2)
+
+        def open_after_barrier(selection: ResolvedLaunch):
+            start.wait(timeout=2)
+            return self._open(resolved_launch=selection)
+
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            futures = [executor.submit(open_after_barrier, selection) for selection in selections]
+            results = [future.result(timeout=3) for future in futures]
+
+        self.assertEqual({result.status for result in results}, {"opened", "launch-conflict"})
+        self.assertEqual(len(self.host.ensured), 1)
+        actual = self.catalog.get("worker-1")
+        assert actual is not None
+        opened = next(result.entry for result in results if result.status == "opened")
+        self.assertEqual(actual, opened)
+        self.assertTrue(all(result.entry == actual for result in results))
+        self.assertEqual(
+            _runner_config(self.host).resolved_launch,
+            ResolvedLaunch(
+                "claude", actual.resolved_model or "", actual.resolved_effort or "", self.tmp
+            ),
+        )
+
     def test_no_effort_is_synthesized_as_a_session_command(self) -> None:
         resolved = ResolvedLaunch("claude", "claude-fable-5", "ultracode", self.tmp)
         result = self._open(resolved_launch=resolved)
@@ -385,9 +484,7 @@ class KnobApplicationTests(unittest.TestCase):
         hermes = Harness(
             id="hermes", name="Hermes", command="hermes", argv=("hermes",), defined_in="settings"
         )
-        result = self._open(
-            harness="hermes", harnesses=(hermes,), env={"AR_SPAWN_EFFORT": "high"}
-        )
+        result = self._open(harness="hermes", harnesses=(hermes,), env={"AR_SPAWN_EFFORT": "high"})
         self.assertEqual(result.status, "opened")
         self.assertEqual(_runner_config(self.host).argv, ("hermes",))
 

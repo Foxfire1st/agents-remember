@@ -271,6 +271,31 @@ def reconciliation_json(value: ReconciliationResult) -> dict[str, object]:
     }
 
 
+def public_receipt_json(value: SubmissionReceipt) -> dict[str, object]:
+    """Serialize normalized submission evidence without internal vendor diagnostics."""
+
+    return {
+        "requestId": value.request_id,
+        "acceptance": value.acceptance,
+        "submittedAt": value.submitted_at,
+        "vendorCorrelationId": value.vendor_correlation_id,
+        "acceptedAt": value.accepted_at,
+        "detail": value.detail,
+    }
+
+
+def public_reconciliation_json(value: ReconciliationResult) -> dict[str, object]:
+    """Serialize normalized reconciliation evidence without internal vendor diagnostics."""
+
+    return {
+        "requestId": value.request_id,
+        "state": value.state,
+        "reconciledAt": value.reconciled_at,
+        "vendorCorrelationId": value.vendor_correlation_id,
+        "detail": value.detail,
+    }
+
+
 def _required_text(raw: Mapping[str, object], key: str) -> str:
     value = raw.get(key)
     if not isinstance(value, str) or not value:

@@ -32,10 +32,10 @@ from agents_remember.serving.harness_control_models import (
 )
 from agents_remember.serving.harness_control_runner import (
     RunnerConfig,
-    _adapter_argv,
     _prepare_controlled_launch,
     _read_terminal_input,
     _render_updates,
+    adapter_argv,
     control_runner_command,
     parse_runner_config,
     run_controlled_session,
@@ -89,7 +89,7 @@ class RunnerConfigTests(unittest.TestCase):
             endpoint_root=Path("/runtime/control"),
         )
         self.assertEqual(
-            _adapter_argv(config),
+            adapter_argv(config.harness_id, config.argv),
             (
                 "codex",
                 "app-server",
@@ -103,7 +103,7 @@ class RunnerConfigTests(unittest.TestCase):
             ),
         )
         self.assertEqual(
-            _adapter_argv(replace(config, harness_id="claude", argv=("claude", "--verbose"))),
+            adapter_argv("claude", ("claude", "--verbose")),
             ("claude", "--verbose"),
         )
 

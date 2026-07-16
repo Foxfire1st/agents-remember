@@ -194,9 +194,7 @@ class TerminalCatalogEntry:
             control_activity=_control_activity(data.get("controlActivity")),
             control_acceptance=_control_acceptance(data.get("controlAcceptance")),
             control_vendor_session_id=_optional_str(data, "controlVendorSessionId"),
-            control_pending_interaction=_optional_object(
-                data.get("controlPendingInteraction")
-            ),
+            control_pending_interaction=_optional_object(data.get("controlPendingInteraction")),
             control_last_event_sequence=_optional_non_negative_int(
                 data.get("controlLastEventSequence")
             ),
@@ -712,20 +710,21 @@ class TerminalCatalog:
             if self._batch is not None:
                 yield
                 return
-        with exclusive_terminal_catalog_lock(self.path):
-            with self._lock:
-                self._batch = self._read_disk()
-                self._batch_dirty = False
+        with exclusive_terminal_catalog_lock(self.path), self._lock:
+            self._batch = self._read_disk()
+            self._batch_dirty = False
+            # Keep the existing RLock across the unit of work. Same-thread catalog mutators
+            # re-enter it, while another FastAPI thread must wait instead of mistaking this
+            # process-wide buffer for its own nested batch.
             try:
                 yield
             finally:
-                with self._lock:
-                    entries = self._batch
-                    dirty = self._batch_dirty
-                    self._batch = None
-                    self._batch_dirty = False
-                    if dirty and entries is not None:
-                        self._write_disk(entries)
+                entries = self._batch
+                dirty = self._batch_dirty
+                self._batch = None
+                self._batch_dirty = False
+                if dirty and entries is not None:
+                    self._write_disk(entries)
 
     def compact(
         self, *, now: datetime, retain_seconds: float = TERMINATED_RETENTION_SECONDS

@@ -10,20 +10,35 @@ import tempfile
 import unittest
 from collections import deque
 from collections.abc import AsyncIterator
-from dataclasses import replace
+from dataclasses import dataclass, replace
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
+from unittest import mock
+
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
 
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
+from agents_remember.controlplane.operator_inbox_records import create_operator_inbox_entry
+from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
 from agents_remember.errors import HarnessAdapterDisconnectedError, HarnessControlError
 from agents_remember.serving.harness_capabilities import CapabilitySnapshot, SetResult
 from agents_remember.serving.harness_control_adapter import (
     HarnessProtocolRegistry,
     protocol_adapter_status,
 )
+from agents_remember.serving.harness_control_api import register_harness_control_routes
 from agents_remember.serving.harness_control_bridge import HarnessControlBridge
+from agents_remember.serving.harness_control_client import (
+    read_control_capabilities,
+    reconcile_control_prompt,
+    set_control_effort,
+    set_control_model,
+    submit_control_prompt,
+)
 from agents_remember.serving.harness_control_ipc import (
     HarnessControlClient,
     HarnessControlServer,
@@ -50,6 +65,13 @@ from agents_remember.serving.harness_control_models import (
     TranscriptEntry,
 )
 from agents_remember.serving.harness_terminal_surface import HarnessTerminalSurface
+from agents_remember.serving.inbox_delivery import deliver_inbox_entry
+from agents_remember.serving.terminal import TerminalHost
+from agents_remember.serving.terminal_catalog import TerminalCatalog, TerminalCatalogEntry
+from agents_remember.serving.terminal_liveness import (
+    TerminalCatalogLivenessConfig,
+    TerminalLivenessObservation,
+)
 
 
 class _FakeAdapter:
@@ -68,6 +90,7 @@ class _FakeAdapter:
         self.acceptances: deque[AcceptanceState] = deque()
         self.disconnects: deque[bool | None] = deque()
         self.reconciliations: dict[str, ReconciliationResult] = {}
+        self.reconciliation_requests: list[str] = []
         self.submissions: list[PromptRequest] = []
         self.responses: list[InteractionResponse] = []
         self.stop_modes: list[ShutdownMode] = []
@@ -165,6 +188,7 @@ class _FakeAdapter:
         )
 
     async def reconcile(self, request_id: str) -> ReconciliationResult:
+        self.reconciliation_requests.append(request_id)
         return self.reconciliations.get(
             request_id,
             ReconciliationResult(
@@ -236,6 +260,38 @@ class _ObservedHarnessControlServer(HarnessControlServer):
             self.connection_finished.set()
 
 
+class _DropFirstSubmitResponseServer(HarnessControlServer):
+    """Dispatch one real submit, then close its outer socket before writing the receipt."""
+
+    def __init__(self, endpoint: LocalControlEndpoint, bridge: HarnessControlBridge) -> None:
+        super().__init__(endpoint, bridge)
+        self.dropped = asyncio.Event()
+
+    async def _handle_connection(
+        self,
+        reader: asyncio.StreamReader,
+        writer: asyncio.StreamWriter,
+    ) -> None:
+        if self.dropped.is_set():
+            await super()._handle_connection(reader, writer)
+            return
+        line = await reader.readline()
+        raw = json.loads(line)
+        assert isinstance(raw, dict) and raw.get("action") == "submit"
+        await self._dispatch(raw)
+        self.dropped.set()
+        writer.close()
+        await writer.wait_closed()
+
+
+@dataclass(frozen=True)
+class _ControlledEntry:
+    id: str
+    tmux_name: str
+    created_at: str
+    control_endpoint: Path
+
+
 def _identity(session: str = "ar-session-1") -> ControlIdentity:
     return ControlIdentity(
         ar_session_id=session,
@@ -292,9 +348,7 @@ class HarnessControlConformanceTests(unittest.IsolatedAsyncioTestCase):
             model_task = asyncio.create_task(bridge.set_model("model-b"))
             await asyncio.sleep(0)
             prompt_task = asyncio.create_task(
-                bridge.submit(
-                    bridge.prompt("after set", source="durable", request_id="after-set")
-                )
+                bridge.submit(bridge.prompt("after set", source="durable", request_id="after-set"))
             )
             model, receipt = await asyncio.gather(model_task, prompt_task)
             self.assertEqual((model.ok, model.acceptance), (True, "immediate"))
@@ -339,7 +393,9 @@ class HarnessControlConformanceTests(unittest.IsolatedAsyncioTestCase):
         finally:
             await bridge.stop("forced")
 
-    async def test_set_result_truth_invariants_fail_bad_adapter_results_without_poisoning(self) -> None:
+    async def test_set_result_truth_invariants_fail_bad_adapter_results_without_poisoning(
+        self,
+    ) -> None:
         invalid = (
             SetResult(True, "echo-verified", "value"),
             SetResult(True, "queued", "value", effective_value="value"),
@@ -614,6 +670,84 @@ class HarnessControlConformanceTests(unittest.IsolatedAsyncioTestCase):
         finally:
             await bridge.stop("forced")
 
+    async def test_duplicate_request_id_returns_retained_result_without_resubmission(self) -> None:
+        identity = _identity()
+        adapter = _FakeAdapter()
+        bridge = HarnessControlBridge(identity, adapter)
+        await bridge.start(_launch(identity))
+        try:
+            first = await bridge.submit(
+                bridge.prompt("only once", source="terminal", request_id="request-duplicate")
+            )
+            self.assertEqual(first.acceptance, "immediate")
+            duplicate = await bridge.submit(
+                bridge.prompt(
+                    "must not replace the first payload",
+                    source="terminal",
+                    request_id="request-duplicate",
+                )
+            )
+            self.assertEqual(duplicate, first)
+            self.assertEqual(
+                [request.request_id for request in adapter.submissions],
+                ["request-duplicate"],
+            )
+            self.assertEqual(adapter.submissions[0].text, "only once")
+        finally:
+            await bridge.stop("forced")
+
+    async def test_pending_duplicate_waits_for_first_result_without_resubmission(self) -> None:
+        identity = _identity()
+        adapter = _BlockingSubmitAdapter()
+        bridge = HarnessControlBridge(identity, adapter)
+        await bridge.start(_launch(identity))
+        try:
+            first = asyncio.create_task(
+                bridge.submit(
+                    bridge.prompt("first payload", source="terminal", request_id="pending-id")
+                )
+            )
+            await asyncio.wait_for(adapter.submit_started.wait(), timeout=1.0)
+            duplicate = asyncio.create_task(
+                bridge.submit(
+                    bridge.prompt(
+                        "ignored duplicate payload",
+                        source="terminal",
+                        request_id="pending-id",
+                    )
+                )
+            )
+            await asyncio.sleep(0)
+            self.assertFalse(duplicate.done())
+            adapter.release_submit.set()
+            first_receipt, duplicate_receipt = await asyncio.gather(first, duplicate)
+            self.assertEqual(duplicate_receipt, first_receipt)
+            self.assertEqual(len(adapter.submissions), 1)
+            self.assertEqual(adapter.submissions[0].text, "first payload")
+        finally:
+            adapter.release_submit.set()
+            await bridge.stop("forced")
+
+    async def test_known_receipts_reconcile_without_native_reconciliation(self) -> None:
+        identity = _identity()
+        adapter = _FakeAdapter()
+        adapter.acceptances.extend(("immediate", "queued", "rejected", "unsupported"))
+        bridge = HarnessControlBridge(identity, adapter)
+        await bridge.start(_launch(identity))
+        expected = ("accepted", "accepted", "rejected", "unsupported")
+        try:
+            for index, state in enumerate(expected):
+                request_id = f"known-{index}"
+                receipt = await bridge.submit(
+                    bridge.prompt("payload", source="terminal", request_id=request_id)
+                )
+                result = await bridge.reconcile(request_id)
+                self.assertEqual(result.state, state)
+                self.assertEqual(result.vendor_correlation_id, receipt.vendor_correlation_id)
+            self.assertEqual(adapter.reconciliation_requests, [])
+        finally:
+            await bridge.stop("forced")
+
     async def test_operator_resolution_and_ambiguous_ledger_are_bounded(self) -> None:
         identity = _identity()
         adapter = _FakeAdapter()
@@ -732,7 +866,7 @@ class HarnessControlConformanceTests(unittest.IsolatedAsyncioTestCase):
         try:
             await bridge.submit(bridge.prompt("old", source="terminal", request_id="old"))
             await bridge.submit(bridge.prompt("new", source="terminal", request_id="new"))
-            with self.assertRaisesRegex(HarnessControlError, "only an unknown submission"):
+            with self.assertRaisesRegex(HarnessControlError, "no longer retained"):
                 await asyncio.wait_for(bridge.reconcile("old"), timeout=1.0)
             survived = await asyncio.wait_for(
                 bridge.submit(bridge.prompt("after", source="terminal", request_id="after")),
@@ -864,6 +998,246 @@ class HarnessControlConformanceTests(unittest.IsolatedAsyncioTestCase):
 
 
 class HarnessControlIpcTests(unittest.IsolatedAsyncioTestCase):
+    async def test_exact_session_ipc_advertises_and_returns_set_acceptance(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_str:
+            identity = _identity()
+            adapter = _FakeAdapter()
+            adapter.set_results.extend(
+                (
+                    SetResult(True, "queued", "model-b", detail="next turn"),
+                    SetResult(False, "unsupported", "max", detail="model gated"),
+                )
+            )
+            bridge = HarnessControlBridge(identity, adapter)
+            await bridge.start(_launch(identity))
+            endpoint = LocalControlEndpoint.for_session(Path(tmp_str), identity)
+            server = HarnessControlServer(endpoint, bridge)
+            await server.start()
+            entry = _ControlledEntry(
+                identity.ar_session_id,
+                identity.tmux_name,
+                identity.created_at,
+                endpoint.path,
+            )
+            try:
+                capabilities = await asyncio.to_thread(read_control_capabilities, entry)
+                model = await asyncio.to_thread(set_control_model, entry, "model-b")
+                effort = await asyncio.to_thread(set_control_effort, entry, "max")
+                self.assertEqual(capabilities.models, ())
+                self.assertEqual((model.ok, model.acceptance), (True, "queued"))
+                self.assertEqual((effort.ok, effort.acceptance), (False, "unsupported"))
+                self.assertEqual(
+                    adapter.control_log[-2:], [("model", "model-b"), ("effort", "max")]
+                )
+            finally:
+                await server.close()
+                await bridge.stop("forced")
+
+    async def test_outer_socket_lost_receipt_reconciles_retained_known_truth(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_str:
+            identity = _identity("outer-loss")
+            adapter = _FakeAdapter()
+            bridge = HarnessControlBridge(identity, adapter)
+            await bridge.start(_launch(identity))
+            endpoint = LocalControlEndpoint.for_session(Path(tmp_str), identity)
+            server = _DropFirstSubmitResponseServer(endpoint, bridge)
+            await server.start()
+            entry = _ControlledEntry(
+                identity.ar_session_id,
+                identity.tmux_name,
+                identity.created_at,
+                endpoint.path,
+            )
+            try:
+                receipt = await asyncio.to_thread(
+                    submit_control_prompt,
+                    entry,
+                    "one complete message",
+                    source="durable",
+                    request_id="outer-loss-request",
+                )
+                self.assertEqual(receipt.acceptance, "unknown")
+                self.assertEqual(receipt.request_id, "outer-loss-request")
+                await asyncio.wait_for(server.dropped.wait(), timeout=1.0)
+
+                reconciled = await asyncio.to_thread(
+                    reconcile_control_prompt, entry, "outer-loss-request"
+                )
+
+                self.assertEqual(reconciled.state, "accepted")
+                self.assertEqual(
+                    reconciled.vendor_correlation_id,
+                    "vendor-outer-loss-request",
+                )
+                self.assertEqual(len(adapter.submissions), 1)
+                self.assertEqual(adapter.reconciliation_requests, [])
+            finally:
+                await server.close()
+                await bridge.stop("forced")
+
+    async def test_durable_inbox_outer_loss_converges_by_reconcile_without_resend(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_str:
+            root = Path(tmp_str)
+            identity = _identity("durable-outer-loss")
+            adapter = _FakeAdapter()
+            bridge = HarnessControlBridge(identity, adapter)
+            await bridge.start(_launch(identity))
+            endpoint = LocalControlEndpoint.for_session(root / "control", identity)
+            server = _DropFirstSubmitResponseServer(endpoint, bridge)
+            await server.start()
+            catalog = TerminalCatalog(root / "terminal-sessions.json")
+            catalog.upsert(
+                TerminalCatalogEntry(
+                    id=identity.ar_session_id,
+                    label="Worker",
+                    kind="harness",
+                    harness="claude",
+                    lifecycle_id="L1",
+                    cwd=root,
+                    tmux_name=identity.tmux_name,
+                    command=("claude",),
+                    created_at=identity.created_at,
+                    last_attached_at=identity.created_at,
+                    status="running",
+                    control_state="ready",
+                    control_endpoint=endpoint.path,
+                    control_protocol=CONTROL_PROTOCOL_VERSION,
+                )
+            )
+            store = OperatorInboxStore(root)
+            inbox = create_operator_inbox_entry(
+                entry_id="durable-request",
+                now=identity.created_at,
+                lifecycle_id="L1",
+                agent_id=identity.ar_session_id,
+                ask="Continue",
+                response="Review the result",
+                created_by="manager",
+                created_via="cli",
+            )
+            store.append(inbox)
+            paster = mock.Mock()
+            host = TerminalHost(tmux_probe=lambda _name: True)
+            try:
+                first = await asyncio.to_thread(
+                    deliver_inbox_entry,
+                    store=store,
+                    catalog=catalog,
+                    host=host,
+                    paster=paster,
+                    entry=inbox,
+                )
+                self.assertEqual(first.adapterDeliveryState, "unknown")
+                self.assertEqual(first.adapterRequestId, "durable-request")
+
+                recovered = await asyncio.to_thread(
+                    deliver_inbox_entry,
+                    store=store,
+                    catalog=catalog,
+                    host=host,
+                    paster=paster,
+                    entry=first,
+                )
+
+                self.assertEqual(recovered.deliveryState, "delivered")
+                self.assertEqual(recovered.adapterDeliveryState, "accepted")
+                self.assertEqual(
+                    recovered.adapterVendorCorrelationId,
+                    "vendor-durable-request",
+                )
+                self.assertEqual(len(adapter.submissions), 1)
+                self.assertEqual(adapter.reconciliation_requests, [])
+                paster.paste.assert_not_called()
+            finally:
+                await server.close()
+                await bridge.stop("forced")
+
+    async def test_public_duplicate_returns_retained_result_with_one_adapter_call(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_str:
+            root = Path(tmp_str)
+            identity = _identity("api-idempotent")
+            adapter = _BlockingSubmitAdapter()
+            bridge = HarnessControlBridge(identity, adapter)
+            await bridge.start(_launch(identity))
+            endpoint = LocalControlEndpoint.for_session(root / "control", identity)
+            server = HarnessControlServer(endpoint, bridge)
+            await server.start()
+            catalog = TerminalCatalog(root / "terminal-sessions.json")
+            entry = TerminalCatalogEntry(
+                id=identity.ar_session_id,
+                label="Worker",
+                kind="harness",
+                harness="claude",
+                lifecycle_id=None,
+                cwd=root,
+                tmux_name=identity.tmux_name,
+                command=("claude",),
+                created_at=identity.created_at,
+                last_attached_at=identity.created_at,
+                status="running",
+                control_state="ready",
+                control_endpoint=endpoint.path,
+                control_protocol=CONTROL_PROTOCOL_VERSION,
+            )
+            catalog.upsert(entry)
+            app = FastAPI()
+            register_harness_control_routes(
+                app,
+                workspace_root=root,
+                harness_registry=lambda: (),
+                catalog=catalog,
+                host=TerminalHost(tmux_probe=lambda _name: True),
+                liveness_clock=lambda: datetime(2026, 7, 16, 8, 0, tzinfo=UTC),
+                liveness_config=TerminalCatalogLivenessConfig(),
+            )
+            try:
+                with (
+                    mock.patch(
+                        "agents_remember.serving.harness_control_api.observe_terminal_liveness",
+                        return_value=TerminalLivenessObservation(entry, True),
+                    ),
+                    TestClient(app) as client,
+                ):
+                    first_call = asyncio.create_task(
+                        asyncio.to_thread(
+                            client.post,
+                            f"/api/terminal/{identity.ar_session_id}/submit",
+                            json={"requestId": "same-id", "text": "first payload"},
+                        )
+                    )
+                    await asyncio.wait_for(adapter.submit_started.wait(), timeout=1.0)
+                    duplicate_call = asyncio.create_task(
+                        asyncio.to_thread(
+                            client.post,
+                            f"/api/terminal/{identity.ar_session_id}/submit",
+                            json={
+                                "requestId": "same-id",
+                                "text": "ignored replacement",
+                            },
+                        )
+                    )
+                    await asyncio.sleep(0)
+                    adapter.release_submit.set()
+                    first, duplicate = await asyncio.gather(first_call, duplicate_call)
+                    reconciled = await asyncio.to_thread(
+                        client.post,
+                        f"/api/terminal/{identity.ar_session_id}/reconcile",
+                        json={"requestId": "same-id"},
+                    )
+
+                self.assertEqual((first.status_code, duplicate.status_code), (200, 200))
+                self.assertEqual(duplicate.json(), first.json())
+                self.assertEqual(reconciled.status_code, 200)
+                self.assertEqual(reconciled.json()["state"], "accepted")
+                self.assertEqual(reconciled.json()["vendorCorrelationId"], "vendor-same-id")
+                self.assertEqual(len(adapter.submissions), 1)
+                self.assertEqual(adapter.submissions[0].text, "first payload")
+                self.assertEqual(adapter.reconciliation_requests, [])
+            finally:
+                adapter.release_submit.set()
+                await server.close()
+                await bridge.stop("forced")
+
     async def test_peer_timeout_after_submit_preserves_reconciliation_result(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_str:
             identity = _identity()

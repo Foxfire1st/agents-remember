@@ -96,6 +96,7 @@ class HarnessControlQueue:
         ] = asyncio.Queue(maxsize=queue_limit)
         self._submissions: OrderedDict[str, SubmissionReceipt] = OrderedDict()
         self._pending_submissions: set[str] = set()
+        self._submission_futures: dict[str, asyncio.Future[SubmissionReceipt]] = {}
         self._submission_limit = submission_limit
         self._clock = clock
         self._snapshot = snapshot
@@ -112,8 +113,14 @@ class HarnessControlQueue:
 
     async def submit(self, request: PromptRequest) -> SubmissionReceipt:
         self._require_accepting()
-        if request.request_id in self._submissions:
-            raise HarnessControlError(f"duplicate request id: {request.request_id}")
+        retained = self._submissions.get(request.request_id)
+        if retained is not None:
+            pending = self._submission_futures.get(request.request_id)
+            if pending is not None:
+                # requestId is the idempotency key. A retry waits for the first command's result;
+                # it never changes or resubmits the original whole-message payload.
+                return await asyncio.shield(pending)
+            return retained
         if not self._reserve(request):
             return SubmissionReceipt(
                 request_id=request.request_id,
@@ -122,18 +129,20 @@ class HarnessControlQueue:
                 detail="submission ledger is full of unresolved ambiguous sends",
             )
         future = asyncio.get_running_loop().create_future()
+        self._submission_futures[request.request_id] = future
         try:
             self._commands.put_nowait(_SubmitCommand(request=request, future=future))
         except asyncio.QueueFull:
             self._submissions.pop(request.request_id, None)
             self._pending_submissions.discard(request.request_id)
+            self._submission_futures.pop(request.request_id, None)
             return SubmissionReceipt(
                 request_id=request.request_id,
                 acceptance="rejected",
                 submitted_at=request.submitted_at,
                 detail="control bridge input queue is full",
             )
-        return await future
+        return await asyncio.shield(future)
 
     async def respond(self, response: InteractionResponse) -> AdapterSnapshot:
         pending = self._snapshot().pending_interaction
@@ -352,6 +361,7 @@ class HarnessControlQueue:
             raise HarnessControlError("adapter receipt request id does not match the submission")
         self._remember(receipt)
         self._pending_submissions.discard(command.request.request_id)
+        self._submission_futures.pop(command.request.request_id, None)
         self._complete_future(command.future, receipt)
 
     async def _execute_response(self, command: _RespondCommand) -> None:
@@ -366,12 +376,39 @@ class HarnessControlQueue:
         self._complete_future(command.future, snapshot)
 
     async def _execute_reconcile(self, command: _ReconcileCommand) -> None:
-        self._require_unknown(command.request_id, action="reconciled")
-        result = await self._adapter.reconcile(command.request_id)
-        if result.request_id != command.request_id:
-            raise HarnessControlError("adapter reconciliation request id does not match")
-        self._apply_reconciliation(result)
+        receipt = self._submissions.get(command.request_id)
+        if receipt is None:
+            raise HarnessControlError(
+                f"submission {command.request_id!r} is no longer retained for reconciliation"
+            )
+        result = self._known_reconciliation(receipt)
+        if result is None:
+            result = await self._adapter.reconcile(command.request_id)
+            if result.request_id != command.request_id:
+                raise HarnessControlError("adapter reconciliation request id does not match")
+            self._apply_reconciliation(result)
+        else:
+            self._submissions.move_to_end(command.request_id)
         self._complete_future(command.future, result)
+
+    def _known_reconciliation(self, receipt: SubmissionReceipt) -> ReconciliationResult | None:
+        if receipt.acceptance == "unknown":
+            return None
+        state: ReconciliationState
+        if receipt.acceptance in {"immediate", "queued"}:
+            state = "accepted"
+        elif receipt.acceptance == "rejected":
+            state = "rejected"
+        else:
+            state = "unsupported"
+        return ReconciliationResult(
+            request_id=receipt.request_id,
+            state=state,
+            reconciled_at=receipt.accepted_at or self._clock(),
+            vendor_correlation_id=receipt.vendor_correlation_id,
+            detail=receipt.detail,
+            raw=receipt.raw,
+        )
 
     async def _execute_set_model(self, command: _SetModelCommand) -> None:
         result = await self._adapter.set_model(command.model_key)
@@ -444,6 +481,7 @@ class HarnessControlQueue:
         if isinstance(command, _SubmitCommand):
             request_id = command.request.request_id
             self._pending_submissions.discard(request_id)
+            self._submission_futures.pop(request_id, None)
             prior = self._submissions.get(request_id)
             if ambiguous and prior is not None:
                 self._remember(replace(prior, acceptance="unknown", detail=str(error)))

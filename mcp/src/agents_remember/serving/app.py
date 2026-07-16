@@ -96,7 +96,12 @@ from agents_remember.serving.change_watcher import ProjectionInputWatcher
 from agents_remember.serving.changeset import register_changeset_routes
 from agents_remember.serving.events import stream_raw_events
 from agents_remember.serving.files import register_files_routes
+from agents_remember.serving.harness_capability_catalog import HarnessCapabilityCatalog
 from agents_remember.serving.harness_control_adapter import protocol_adapter_status
+from agents_remember.serving.harness_control_api import (
+    register_harness_control_routes,
+    resolve_terminal_open_selection,
+)
 from agents_remember.serving.harness_control_client import (
     stop_control_session,
     submit_control_prompt,
@@ -351,6 +356,8 @@ class TerminalOpenRequest(BaseModel):
 
     kind: str = "terminal"
     harness: str | None = None
+    model: str | None = None
+    effort: str | None = None
     label: str | None = None
     lifecycle_id: str | None = Field(default=None, alias="lifecycleId")
     # The durable leaf-identity key the chat claims at open (qualified leaf id ``repo/master/leaf-id``).
@@ -481,6 +488,7 @@ def create_app(
     terminal_host: TerminalHost | None = None,
     terminal_catalog: TerminalCatalog | None = None,
     terminal_paster: TerminalPaster | None = None,
+    harness_capability_catalog: HarnessCapabilityCatalog | None = None,
 ) -> FastAPI:
     """Build the dashboard app bound to one shared projector for ``config``.
 
@@ -520,7 +528,9 @@ def create_app(
         host,
         now=now,
         config=liveness_config,
-        on_turn_state_change=lambda observation: log_turn_state_change_event(config, observation.entry),
+        on_turn_state_change=lambda observation: log_turn_state_change_event(
+            config, observation.entry
+        ),
         on_control_snapshot=interaction_synchronizer.observe,
     )
     # Resolved ONCE at boot (260703-L15): the stamp that makes a stale serving process visible.
@@ -942,6 +952,19 @@ def create_app(
             leaf_key = _resolve_request_leaf_key(config, request.leaf_key)
         except LeafRefResolutionError as exc:
             return _leaf_ref_response(exc, request.leaf_key or "")
+        try:
+            resolved_launch = resolve_terminal_open_selection(
+                kind=request.kind,
+                harness=request.harness,
+                model=request.model,
+                effort=request.effort,
+                workspace=config.workspace_root,
+            )
+        except HarnessControlError as exc:
+            return JSONResponse(
+                content={"status": "launch-selection-invalid", "detail": str(exc)},
+                status_code=400,
+            )
         shell = os.environ.get("SHELL") or DEFAULT_SHELL
         result = open_terminal_session(
             catalog=catalog,
@@ -954,6 +977,7 @@ def create_app(
             label=request.label,
             lifecycle_id=request.lifecycle_id,
             leaf_key=leaf_key,
+            resolved_launch=resolved_launch,
             # 260703-L16: resolve harness ids against the effective GLOBAL registry (builtin merged
             # with orchestration.harnesses) so dashboard launches and MCP dispatches agree on argv.
             # Loaded only for harness-kind opens (review L16R-1): a malformed settings file must
@@ -980,21 +1004,45 @@ def create_app(
                 status_code=409,
             )
         entry = result.entry
-        assert entry is not None  # opened => an upserted row
+        assert entry is not None  # opened/conflict => the actual durable row
+        if result.status == "launch-conflict":
+            return JSONResponse(
+                content={
+                    "status": "launch-selection-conflict",
+                    "detail": result.detail,
+                    "session": entry.id,
+                    "kind": entry.kind,
+                    "harness": entry.harness,
+                    "tmuxName": entry.tmux_name,
+                    "controlState": entry.control_state,
+                    "controlEndpoint": (
+                        str(entry.control_endpoint) if entry.control_endpoint is not None else None
+                    ),
+                    "controlProtocol": entry.control_protocol,
+                    "resolvedModel": entry.resolved_model,
+                    "resolvedEffort": entry.resolved_effort,
+                },
+                status_code=409,
+            )
         return JSONResponse(
             content={
                 "session": entry.id,
                 "label": entry.label,
-                "kind": request.kind,
-                "harness": request.harness,
-                "lifecycleId": request.lifecycle_id,
+                "kind": entry.kind,
+                "harness": entry.harness,
+                "lifecycleId": entry.lifecycle_id,
                 "leafKey": entry.leaf_key,
                 "seatRole": entry.binding_role,
                 "cwd": str(entry.cwd),
                 "tmuxName": entry.tmux_name,
                 "status": "running",
                 "controlState": entry.control_state,
+                "controlEndpoint": (
+                    str(entry.control_endpoint) if entry.control_endpoint is not None else None
+                ),
                 "controlProtocol": entry.control_protocol,
+                "resolvedModel": entry.resolved_model,
+                "resolvedEffort": entry.resolved_effort,
             },
             status_code=200,
         )
@@ -1214,7 +1262,9 @@ def create_app(
             reason=request.reason,
             edge="manual",
         )
-        assert updated is not None  # the entry existed above; no concurrent delete path removes rows
+        assert (
+            updated is not None
+        )  # the entry existed above; no concurrent delete path removes rows
         log_retire_event(config, updated)
         return JSONResponse(
             content={
@@ -1289,5 +1339,15 @@ def create_app(
     register_files_routes(app, config)
     register_changeset_routes(app, config)
     register_notes_routes(app, config)
+    register_harness_control_routes(
+        app,
+        workspace_root=config.workspace_root,
+        harness_registry=lambda: load_agentic_settings(config.coordination_root).harnesses,
+        catalog=catalog,
+        host=host,
+        liveness_clock=liveness_clock,
+        liveness_config=liveness_config,
+        capability_catalog=harness_capability_catalog,
+    )
     mount_static(app)
     return app

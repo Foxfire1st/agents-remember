@@ -27,6 +27,18 @@ class HarnessControlError(AgentsRememberError):
     """The hosted harness control contract or exact-session identity was violated."""
 
 
+class HarnessControlClientError(HarnessControlError):
+    """The serving process lost an exact-session IPC request before or after its first byte.
+
+    ``may_have_sent`` is retry-safety evidence: callers may retry a pre-write failure, while a
+    post-write failure must remain ``unknown`` until the same request id is reconciled.
+    """
+
+    def __init__(self, detail: str, *, may_have_sent: bool) -> None:
+        super().__init__(detail)
+        self.may_have_sent = may_have_sent
+
+
 class HarnessAdapterDisconnectedError(HarnessControlError):
     """A protocol adapter disconnected before or after a prompt might have been sent."""
 

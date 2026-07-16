@@ -490,33 +490,29 @@ class TerminalWebSocketTests(unittest.TestCase):
         self.host.probe_names.add("ar-live")
 
     def test_unknown_session_is_refused(self) -> None:
-        with TestClient(self.app) as client, client.websocket_connect(
-            "/api/terminal/ghost"
-        ) as ws, self.assertRaises(WebSocketDisconnect) as ctx:
+        with (
+            TestClient(self.app) as client,
+            client.websocket_connect("/api/terminal/ghost") as ws,
+            self.assertRaises(WebSocketDisconnect) as ctx,
+        ):
             ws.receive_text()
         self.assertEqual(ctx.exception.code, 4404)
 
     def test_pty_output_forwarded_as_binary(self) -> None:
         self._register_live()
-        with TestClient(self.app) as client, client.websocket_connect(
-            "/api/terminal/live"
-        ) as ws:
+        with TestClient(self.app) as client, client.websocket_connect("/api/terminal/live") as ws:
             self.host.feed(b"\x1b[32mok\x1b[0m")
             self.assertEqual(ws.receive_bytes(), b"\x1b[32mok\x1b[0m")
 
     def test_client_stdin_written_to_pty(self) -> None:
         self._register_live()
-        with TestClient(self.app) as client, client.websocket_connect(
-            "/api/terminal/live"
-        ) as ws:
+        with TestClient(self.app) as client, client.websocket_connect("/api/terminal/live") as ws:
             ws.send_text(json.dumps({"type": "stdin", "data": "echo hi\n"}))
             self.assertEqual(self.host.read_child_input(), b"echo hi\n")
 
     def test_client_resize_forwarded_in_order(self) -> None:
         self._register_live()
-        with TestClient(self.app) as client, client.websocket_connect(
-            "/api/terminal/live"
-        ) as ws:
+        with TestClient(self.app) as client, client.websocket_connect("/api/terminal/live") as ws:
             ws.send_text(json.dumps({"type": "resize", "cols": 100, "rows": 30}))
             # A following stdin we can read back proves the resize frame was processed first.
             ws.send_text(json.dumps({"type": "stdin", "data": "x"}))
@@ -552,9 +548,7 @@ class TerminalWebSocketTests(unittest.TestCase):
 
     def test_child_exit_sends_exit_frame_then_closes(self) -> None:
         self._register_live()
-        with TestClient(self.app) as client, client.websocket_connect(
-            "/api/terminal/live"
-        ) as ws:
+        with TestClient(self.app) as client, client.websocket_connect("/api/terminal/live") as ws:
             self.host.end()
             self.assertEqual(ws.receive_text(), _TERMINAL_EXIT_FRAME)
             with self.assertRaises(WebSocketDisconnect):
@@ -637,9 +631,10 @@ class TerminalWebSocketTests(unittest.TestCase):
             _catalog_entry("restored", cwd=self.tmp, tmux_name="ar-restored", command=("bash",))
         )
         self.host.probe_names.add("ar-restored")
-        with TestClient(self.app) as client, client.websocket_connect(
-            "/api/terminal/restored"
-        ) as ws:
+        with (
+            TestClient(self.app) as client,
+            client.websocket_connect("/api/terminal/restored") as ws,
+        ):
             self.host.feed(b"restored-output")
             self.assertEqual(ws.receive_bytes(), b"restored-output")
         self.assertEqual(self.host.attached[0]["sid"], "restored")
@@ -655,9 +650,7 @@ class TerminalWebSocketTests(unittest.TestCase):
             )
         )
         self.host.probe_names.add("ar-landed")
-        with TestClient(self.app) as client, client.websocket_connect(
-            "/api/terminal/landed"
-        ) as ws:
+        with TestClient(self.app) as client, client.websocket_connect("/api/terminal/landed") as ws:
             self.host.feed(b"landed-output")
             self.assertEqual(ws.receive_bytes(), b"landed-output")
         self.assertEqual(self.host.attached[0]["sid"], "landed")
@@ -667,9 +660,11 @@ class TerminalWebSocketTests(unittest.TestCase):
 
     def test_websocket_marks_stale_catalog_session_exited(self) -> None:
         self.catalog.upsert(_catalog_entry("stale", cwd=self.tmp, tmux_name="ar-stale"))
-        with TestClient(self.app) as client, client.websocket_connect(
-            "/api/terminal/stale"
-        ) as ws, self.assertRaises(WebSocketDisconnect) as ctx:
+        with (
+            TestClient(self.app) as client,
+            client.websocket_connect("/api/terminal/stale") as ws,
+            self.assertRaises(WebSocketDisconnect) as ctx,
+        ):
             ws.receive_text()
         self.assertEqual(ctx.exception.code, 4404)
         entry = self.catalog.get("stale")
@@ -695,9 +690,13 @@ class TerminalWebSocketTests(unittest.TestCase):
         self.assertEqual(entry.status, "terminated")
 
     def test_landed_cleanup_closes_only_landed_rows_and_reports_skips(self) -> None:
-        self.catalog.upsert(_catalog_entry("landed", cwd=self.tmp, status="landed", tmux_name="ar-landed"))
+        self.catalog.upsert(
+            _catalog_entry("landed", cwd=self.tmp, status="landed", tmux_name="ar-landed")
+        )
         self.catalog.upsert(_catalog_entry("running", cwd=self.tmp, tmux_name="ar-running"))
-        self.catalog.upsert(_catalog_entry("exited", cwd=self.tmp, status="exited", tmux_name="ar-exited"))
+        self.catalog.upsert(
+            _catalog_entry("exited", cwd=self.tmp, status="exited", tmux_name="ar-exited")
+        )
 
         with TestClient(self.app) as client:
             response = client.post(
@@ -945,6 +944,93 @@ class TerminalWebSocketTests(unittest.TestCase):
         self.assertEqual(entry.kind, "harness")
         self.assertEqual(entry.harness, "claude")
 
+    def test_post_open_harness_carries_complete_model_effort_pair_once(self) -> None:
+        with patch("shutil.which", _which("claude")), TestClient(self.app) as client:
+            response = client.post(
+                "/api/terminal/h-selected",
+                json={
+                    "kind": "harness",
+                    "harness": "claude",
+                    "model": "claude-opus-4-8",
+                    "effort": "high",
+                },
+            )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["resolvedModel"], "claude-opus-4-8")
+        self.assertEqual(response.json()["resolvedEffort"], "high")
+        self.assertEqual(len(self.host.ensured), 1)
+        command = self.host.ensured[0]["command"]
+        assert isinstance(command, list)
+        runner = parse_runner_config(command[3])
+        selection = runner.resolved_launch
+        assert selection is not None
+        self.assertEqual(selection.model_key, "claude-opus-4-8")
+        self.assertEqual(selection.effort, "high")
+
+    def test_post_open_reopen_preserves_live_truth_conflicts_then_replaces_dead(self) -> None:
+        first_body = {
+            "kind": "harness",
+            "harness": "claude",
+            "model": "model-a",
+            "effort": "high",
+        }
+        changed_body = {**first_body, "model": "model-b", "effort": "max"}
+        with patch("shutil.which", _which("claude")), TestClient(self.app) as client:
+            first = client.post("/api/terminal/reopen-selected", json=first_body)
+            same = client.post("/api/terminal/reopen-selected", json=first_body)
+            conflict = client.post("/api/terminal/reopen-selected", json=changed_body)
+
+            first_entry = self.catalog.get("reopen-selected")
+            assert first_entry is not None and first_entry.control_endpoint is not None
+            first_endpoint = str(first_entry.control_endpoint)
+            self.host.probe_names.discard(first_entry.tmux_name)
+            replacement = client.post("/api/terminal/reopen-selected", json=changed_body)
+
+        self.assertEqual((first.status_code, same.status_code), (200, 200))
+        self.assertEqual(len(self.host.ensured), 2)
+        self.assertEqual(same.json()["resolvedModel"], "model-a")
+        self.assertEqual(same.json()["controlEndpoint"], first_endpoint)
+        self.assertEqual(conflict.status_code, 409)
+        self.assertEqual(conflict.json()["status"], "launch-selection-conflict")
+        self.assertEqual(conflict.json()["resolvedModel"], "model-a")
+        self.assertEqual(conflict.json()["resolvedEffort"], "high")
+        self.assertEqual(conflict.json()["controlEndpoint"], first_endpoint)
+        self.assertEqual(replacement.status_code, 200)
+        self.assertEqual(replacement.json()["resolvedModel"], "model-b")
+        self.assertEqual(replacement.json()["resolvedEffort"], "max")
+        self.assertNotEqual(replacement.json()["controlEndpoint"], first_endpoint)
+        second_command = self.host.ensured[1]["command"]
+        assert isinstance(second_command, list)
+        second_selection = parse_runner_config(second_command[3]).resolved_launch
+        assert second_selection is not None
+        self.assertEqual((second_selection.model_key, second_selection.effort), ("model-b", "max"))
+
+    def test_post_open_rejects_partial_or_non_harness_selection_before_spawn(self) -> None:
+        with patch("shutil.which", _which("claude")), TestClient(self.app) as client:
+            partial = client.post(
+                "/api/terminal/h-partial",
+                json={"kind": "harness", "harness": "claude", "model": "opus"},
+            )
+            terminal = client.post(
+                "/api/terminal/plain-selected",
+                json={"kind": "terminal", "model": "opus", "effort": "high"},
+            )
+            non_native = client.post(
+                "/api/terminal/custom-selected",
+                json={
+                    "kind": "harness",
+                    "harness": "gemini",
+                    "model": "pro",
+                    "effort": "high",
+                },
+            )
+        self.assertEqual(
+            (partial.status_code, terminal.status_code, non_native.status_code),
+            (400, 400, 400),
+        )
+        self.assertEqual(partial.json()["status"], "launch-selection-invalid")
+        self.assertEqual(self.host.ensured, [])
+
     def test_post_open_harness_rejects_uninstalled(self) -> None:
         with patch("shutil.which", _which()), TestClient(self.app) as client:
             response = client.post(
@@ -1023,7 +1109,8 @@ class TerminalImageEndpointTests(unittest.TestCase):
         # Magic-byte sniff: an image extension with non-image bytes is rejected, not saved as a .png.
         with TestClient(self.app) as client:
             response = client.post(
-                "/api/terminal/live/image", files={"file": ("shot.png", b"not a real png", "image/png")}
+                "/api/terminal/live/image",
+                files={"file": ("shot.png", b"not a real png", "image/png")},
             )
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.json()["status"], "bad-type")
@@ -1037,9 +1124,13 @@ class TerminalImageEndpointTests(unittest.TestCase):
         self.assertEqual(response.json()["status"], "bad-type")
 
     def test_rejects_oversize_post_read(self) -> None:
-        with patch("agents_remember.serving.app._MAX_IMAGE_BYTES", 8), TestClient(self.app) as client:
+        with (
+            patch("agents_remember.serving.app._MAX_IMAGE_BYTES", 8),
+            TestClient(self.app) as client,
+        ):
             response = client.post(
-                "/api/terminal/live/image", files={"file": ("big.png", b"\x89PNG\r\n\x1a\n" + b"xx", "image/png")}
+                "/api/terminal/live/image",
+                files={"file": ("big.png", b"\x89PNG\r\n\x1a\n" + b"xx", "image/png")},
             )
         self.assertEqual(response.status_code, 413)
         self.assertEqual(response.json()["status"], "too-large")
