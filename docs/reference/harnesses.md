@@ -48,9 +48,17 @@ Production adapters launch the installed harness and decide compatibility from
 the structured protocol evidence Agents Remember consumes, not from an exact
 CLI package-version comparison:
 
-- Claude must complete `control_request/initialize` and `system/init`, including
-  the command/model/account capability payload and the session, cwd, model,
-  permission, tool, and slash-command fields.
+- Claude startup uses three distinct evidence sources. The correlated
+  `control_request/initialize` success must contain `commands` rows with `name` and optional
+  `aliases`; its envelope may also carry `pending_permission_requests` and
+  `pending_user_dialog_requests`. `system/init` must contain `session_id`,
+  `claude_code_version`, `cwd`, the current `model`, `permissionMode`, `tools`, and
+  `slash_commands`. Agents Remember then separately issues a correlated
+  `control_request/list_models`; its dynamic `models` rows contain `value`, `displayName`,
+  `description`, optional `resolvedModel`/`disabled`, and model-local
+  `supportsEffort`/`supportedEffortLevels`, and the current model must resolve to one row. In
+  Claude 2.1.210 neither `control_request/initialize` nor `system/init` provides account or
+  catalog data; the separate `list_models` response is the catalog source.
 - Codex must complete `initialize`, `model/list`, and `thread/start` or
   `thread/resume`; the reported client identity and thread CLI-version token
   must agree, and the selected model, reasoning-effort menu, cwd, thread state,

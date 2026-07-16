@@ -206,7 +206,149 @@ class ClaudeStreamJsonAdapterTests(unittest.IsolatedAsyncioTestCase):
         bootstrap_result = next(frame for frame in fixture_frames if frame["type"] == "result")
         self.assertEqual(bootstrap_result["num_turns"], 0)
         self.assertEqual(bootstrap_result["total_cost_usd"], 0)
+        assert transport.argv is not None
+        self.assertEqual(transport.argv[:9], _launch().argv)
+        self.assertEqual(
+            transport.argv[9:12],
+            ("--mcp-config", '{"mcpServers":{}}', "--strict-mcp-config"),
+        )
         self.assertEqual(transport.stop_modes, ["forced"])
+
+    async def test_discover_replaces_all_installed_mcp_selector_spellings(self) -> None:
+        executable = "/opt/claude"
+        empty = ("--mcp-config", '{"mcpServers":{}}', "--strict-mcp-config")
+        # Live 2.1.210 startup accepts the exact strict flag below, but rejects
+        # --no-strict-mcp-config and the =true/=false boolean forms; those are not its grammar.
+        cases = (
+            (
+                "separate-single",
+                (
+                    executable,
+                    "--model",
+                    "sonnet",
+                    "--mcp-config",
+                    '{"mcpServers":{"touch":{}}}',
+                    "--effort",
+                    "high",
+                ),
+                (executable, "--model", "sonnet", "--effort", "high", *empty),
+            ),
+            (
+                "separate-multiple-and-repeated",
+                (
+                    executable,
+                    "--mcp-config",
+                    "/tmp/one.json",
+                    '{"mcpServers":{"two":{}}}',
+                    "/tmp/three.json",
+                    "--settings",
+                    "/tmp/settings.json",
+                    "--mcp-config",
+                    "/tmp/four.json",
+                    "/tmp/five.json",
+                    "--resume",
+                    SESSION_ID,
+                ),
+                (
+                    executable,
+                    "--settings",
+                    "/tmp/settings.json",
+                    "--resume",
+                    SESSION_ID,
+                    *empty,
+                ),
+            ),
+            (
+                "equals-attached-preserves-following-positionals",
+                (
+                    executable,
+                    "--append-system-prompt",
+                    "keep-before",
+                    "--mcp-config=/tmp/attached.json",
+                    "literal-positional",
+                    "--strict-mcp-config",
+                    '--mcp-config={"mcpServers":{"other":{}}}',
+                    "--append-system-prompt",
+                    "keep-after",
+                ),
+                (
+                    executable,
+                    "--append-system-prompt",
+                    "keep-before",
+                    "literal-positional",
+                    "--append-system-prompt",
+                    "keep-after",
+                    *empty,
+                ),
+            ),
+            (
+                "end-of-options-preserves-positional-suffix",
+                (
+                    executable,
+                    "--model",
+                    "sonnet",
+                    "--mcp-config=/tmp/attached.json",
+                    "--",
+                    "--mcp-config",
+                    "literal-positional",
+                    "--strict-mcp-config",
+                ),
+                (
+                    executable,
+                    "--model",
+                    "sonnet",
+                    *empty,
+                    "--",
+                    "--mcp-config",
+                    "literal-positional",
+                    "--strict-mcp-config",
+                ),
+            ),
+        )
+        for label, argv, expected_prefix in cases:
+            with self.subTest(label=label):
+                transport = _FakeClaudeTransport(_load_fixture("initialization.jsonl"))
+                adapter = _adapter(transport)
+
+                await adapter.discover(_launch(argv=argv))
+
+                assert transport.argv is not None
+                self.assertEqual(transport.argv[: len(expected_prefix)], expected_prefix)
+                discovery_prefix = transport.argv[: len(expected_prefix)]
+                separator = (
+                    discovery_prefix.index("--")
+                    if "--" in discovery_prefix
+                    else len(discovery_prefix)
+                )
+                parsed_options = discovery_prefix[:separator]
+                self.assertEqual(parsed_options.count("--mcp-config"), 1)
+                self.assertEqual(parsed_options.count("--strict-mcp-config"), 1)
+                self.assertFalse(
+                    any(argument.startswith("--mcp-config=") for argument in parsed_options)
+                )
+                self.assertEqual(transport.stop_modes, ["forced"])
+
+    async def test_normal_start_preserves_existing_mcp_selectors_byte_for_byte(self) -> None:
+        argv = (
+            "/opt/claude",
+            "--model",
+            "sonnet",
+            "--mcp-config",
+            "/tmp/one.json",
+            "/tmp/two.json",
+            "--strict-mcp-config",
+            "--settings",
+            "/tmp/settings.json",
+        )
+        transport = _FakeClaudeTransport(_load_fixture("initialization.jsonl"))
+        adapter = _adapter(transport)
+
+        await adapter.start(_launch(argv=argv))
+        try:
+            assert transport.argv is not None
+            self.assertEqual(transport.argv[: len(argv)], argv)
+        finally:
+            await adapter.stop("forced")
 
     async def test_launch_preserves_arguments_environment_and_requires_structured_init(
         self,
@@ -233,6 +375,8 @@ class ClaudeStreamJsonAdapterTests(unittest.IsolatedAsyncioTestCase):
                 "--permission-prompt-tool",
             ):
                 self.assertIn(required, transport.argv)
+            self.assertNotIn("--mcp-config", transport.argv)
+            self.assertNotIn("--strict-mcp-config", transport.argv)
             self.assertEqual(transport.env, _launch().env)
             self.assertNotIn("AUTH_TOKEN_FOR_TEST", json.dumps(handshake.raw))
             self.assertEqual(

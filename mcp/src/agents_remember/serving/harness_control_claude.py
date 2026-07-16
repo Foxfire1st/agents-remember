@@ -13,6 +13,7 @@ from agents_remember.errors import HarnessAdapterDisconnectedError, HarnessContr
 from agents_remember.serving.claude_stream_limits import ClaudeAdapterLimits
 from agents_remember.serving.claude_stream_protocol import (
     CLAUDE_STREAM_PROTOCOL,
+    build_claude_discovery_argv,
     build_claude_stream_argv,
     restore_pending_interaction,
 )
@@ -189,7 +190,16 @@ class ClaudeStreamJsonAdapter:
         raise HarnessControlError("Claude stream-json adapter is not started")
 
     async def discover(self, launch: LaunchSpec) -> CapabilitySnapshot:
-        await self.start(launch)
+        # Catalog discovery needs Claude itself, its account, and its model controls, but none of
+        # the user's configured MCP servers. Loading those unrelated children made one token-free
+        # catalog probe pay their full startup cost. Claude accumulates repeated --mcp-config
+        # values, so isolation requires removing inherited selectors before adding the native
+        # strict empty set. The real session launch remains untouched.
+        discovery_launch = replace(
+            launch,
+            argv=build_claude_discovery_argv(launch.argv),
+        )
+        await self.start(discovery_launch)
         try:
             return self.advertise()
         finally:

@@ -15,6 +15,7 @@ from agents_remember.serving.harness_control_models import (
 
 CLAUDE_STREAM_PROTOCOL = "claude-stream-json"
 MAX_TRANSCRIPT_TEXT_CHARS = 128 * 1024
+_DISCOVERY_MCP_CONFIG = '{"mcpServers":{}}'
 _IDENTITY_CHANGING_COMMANDS = frozenset(
     {"clear", "continue", "exit", "fork", "login", "logout", "quit", "resume"}
 )
@@ -52,6 +53,38 @@ def build_claude_stream_argv(argv: Sequence[str]) -> tuple[str, ...]:
         if flag not in result:
             result.append(flag)
     return tuple(result)
+
+
+def build_claude_discovery_argv(argv: Sequence[str]) -> tuple[str, ...]:
+    """Replace Claude 2.1.210's accumulated MCP selectors with one strict empty set."""
+
+    if not argv:
+        return tuple(argv)
+    discovery_options = ("--mcp-config", _DISCOVERY_MCP_CONFIG, "--strict-mcp-config")
+    kept = [argv[0]]
+    index = 1
+    while index < len(argv):
+        argument = argv[index]
+        if argument == "--":
+            return (*kept, *discovery_options, *argv[index:])
+        if argument == "--mcp-config":
+            index += 1
+            # The installed CLI declares ``<configs...>``: every following non-option token is
+            # another JSON string or file until the next option (or ``--`` separator).
+            while index < len(argv) and not argv[index].startswith("-"):
+                index += 1
+            continue
+        if argument.startswith("--mcp-config="):
+            # The attached spelling owns only its attached value. A following positional token
+            # is unrelated argv and must remain byte-for-byte intact.
+            index += 1
+            continue
+        if argument == "--strict-mcp-config":
+            index += 1
+            continue
+        kept.append(argument)
+        index += 1
+    return (*kept, *discovery_options)
 
 
 def initialization_request(request_id: str) -> dict[str, object]:
