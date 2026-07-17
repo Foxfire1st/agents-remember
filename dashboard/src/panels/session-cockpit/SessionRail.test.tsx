@@ -70,7 +70,28 @@ describe("rail-state matrix (R14 — one grammar on real DOM)", () => {
       expect(dot.getAttribute("data-state"), session.id).toBe(visual.key);
       expect(dot.getAttribute("data-state-pulse"), session.id).toBe(String(visual.pulse));
       expect(dot.getAttribute("data-state-color"), session.id).toBe(visual.color);
+      // L4 R8: the rail dot SPEAKS its state word (aria-label), never color-only.
+      expect(dot.getAttribute("role"), session.id).toBe("img");
+      expect(dot.getAttribute("aria-label"), session.id).toBe(`state: ${visual.word}`);
     }
+  });
+
+  it("L4 R6: an unacknowledged set outcome renders the row attention marker; acknowledged clears it", () => {
+    sessionCockpitStore.getState().appendSetLedger("worker-l4", {
+      at: 1,
+      kind: "effort",
+      requestedValue: "max",
+      result: { acceptance: "unsupported", requestedValue: "max", detail: "refused" },
+      acknowledged: false,
+    });
+    const first = renderRail();
+    const marker = first.getByTestId("rail-set-unacked-worker-l4");
+    expect(marker.getAttribute("aria-label")).toContain("unacknowledged set outcome");
+    expect(first.queryByTestId("rail-set-unacked-scout")).toBeNull();
+    first.unmount();
+    act(() => sessionCockpitStore.getState().acknowledgeSetOutcomes("worker-l4"));
+    const second = renderRail();
+    expect(second.queryByTestId("rail-set-unacked-worker-l4")).toBeNull();
   });
 
   it("status chips carry the status vocabulary ONLY — the model never renders in the rail (R6)", () => {

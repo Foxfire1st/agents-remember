@@ -1,7 +1,8 @@
 import { useStore } from "zustand";
 import { createStore } from "zustand/vanilla";
 
-import type { HarnessAcceptanceState } from "../types/terminalCatalog";
+import type { CapabilitySnapshotWire, SetAcceptance } from "../types/harnessCapabilities";
+import type { PairChangeState } from "./pairChange";
 import { sessionStore } from "./sessions";
 
 // The sessions-cockpit client store (260715-FEUI-L2 S3, design §4.3). HONESTY INVARIANTS live in
@@ -20,9 +21,11 @@ export interface PendingSet {
   phase: "inflight" | "queued-awaiting-turn" | "unknown-verifying";
 }
 
-/** The set-route outcome as the server reported it (requested ≠ effective, words as text). */
+/** The set-route outcome as the server reported it (requested ≠ effective, words as text).
+ *  acceptance is the SET vocabulary (harness_capabilities.py SET_ACCEPTANCE_VALUES) — it includes
+ *  'echo-verified'; the submit-receipt vocabulary ('rejected') never appears here. */
 export interface SetResultSnapshot {
-  acceptance: HarnessAcceptanceState;
+  acceptance: SetAcceptance;
   requestedValue: string;
   /** Present only when the server proved the value took effect — never inferred client-side. */
   effectiveValue?: string;
@@ -42,7 +45,38 @@ export interface SetLedgerEntry {
 export interface CapabilitySnapshot {
   sessionId: string;
   fetchedAt: number;
-  payload: Record<string, unknown>;
+  payload: CapabilitySnapshotWire;
+}
+
+/** An exact-session capability GET failure, verbatim (F16) — the control disables on it. */
+export interface SnapshotErrorInfo {
+  /** null = the fetch itself threw (network loss / malformed body). */
+  httpStatus: number | null;
+  /** The server's own status word (`unknown-session` / `unsupported` / `control-unavailable`)
+   *  or `transport` when the server never said one. */
+  status: string;
+  detail: string;
+  at: number;
+}
+
+/** A set-model/set-effort HTTP-boundary failure (R3) — NEVER a 200 unknown/unsupported. */
+export interface SetRouteErrorInfo {
+  kind: "model" | "effort";
+  /** The value the failed POST carried — the retry affordance resends exactly it. */
+  requestedValue: string;
+  httpStatus: number | null;
+  status: string;
+  detail: string;
+  /** 503 outage — the only route error with a retry affordance (R3). */
+  retryable: boolean;
+  at: number;
+}
+
+/** One echo-verified effective value (SetResult evidence) — server truth, timestamped so the
+ *  freshest of {snapshot, echo} wins; never a client inference. */
+export interface EchoEvidence {
+  value: string;
+  at: number;
 }
 
 export interface QueuedSubmit {
@@ -55,6 +89,16 @@ export interface QueuedSubmit {
 
 export interface PerSessionCockpit {
   liveSnapshot?: CapabilitySnapshot;
+  /** The exact-session GET is in flight (popover spinner / chrome chip honesty). */
+  snapshotLoading: boolean;
+  /** Last exact-session GET failure — cleared by the next successful snapshot (F16). */
+  snapshotError?: SnapshotErrorInfo;
+  /** Per-kind echo-verified effective values (SetResult evidence) — see EchoEvidence. */
+  echoEvidence: { model?: EchoEvidence; effort?: EchoEvidence };
+  /** Last set-route HTTP failure (R3: 404/409/503/transport) — cleared on the next set. */
+  setRouteError?: SetRouteErrorInfo;
+  /** The serialized model+effort pair change in progress (R5) — absent when none. */
+  pairChange?: PairChangeState;
   /** Per-kind so a pair change never clobbers the other knob's in-flight set. */
   pendingSets: { model?: PendingSet; effort?: PendingSet };
   setLedger: SetLedgerEntry[];
@@ -82,6 +126,8 @@ export interface InteractionAnswerState {
 }
 
 const emptyPerSession = (): PerSessionCockpit => ({
+  snapshotLoading: false,
+  echoEvidence: {},
   pendingSets: {},
   setLedger: [],
   launchEvidence: { tier: "pending" },
@@ -135,10 +181,20 @@ export interface SessionCockpitState {
   setComposerDraft: (id: string, draft: string) => void;
   recordPendingSet: (id: string, kind: "model" | "effort", pending: PendingSet) => void;
   clearPendingSet: (id: string, kind: "model" | "effort") => void;
-  appendSetLedger: (id: string, entry: Omit<SetLedgerEntry, "acknowledged">) => void;
+  appendSetLedger: (
+    id: string,
+    entry: Omit<SetLedgerEntry, "acknowledged"> & { acknowledged?: boolean },
+  ) => void;
   acknowledgeSetOutcomes: (id: string) => void;
+  /** Acknowledge only the entries a definitive readback made moot (kind + requested value). */
+  acknowledgeMatchingOutcomes: (id: string, kind: "model" | "effort", requestedValue: string) => void;
   setLaunchEvidence: (id: string, evidence: PerSessionCockpit["launchEvidence"]) => void;
   setLiveSnapshot: (id: string, snapshot: CapabilitySnapshot) => void;
+  setSnapshotLoading: (id: string, loading: boolean) => void;
+  setSnapshotError: (id: string, error: SnapshotErrorInfo | undefined) => void;
+  recordEchoEvidence: (id: string, kind: "model" | "effort", evidence: EchoEvidence) => void;
+  setSetRouteError: (id: string, error: SetRouteErrorInfo | undefined) => void;
+  setPairChange: (id: string, pairChange: PairChangeState | undefined) => void;
   enqueueSubmit: (id: string, submit: Omit<QueuedSubmit, "superseded">) => void;
   supersedeLastQueued: (id: string) => QueuedSubmit | null;
   dequeueSubmit: (id: string, requestId: string) => void;
@@ -210,7 +266,10 @@ export const sessionCockpitStore = createStore<SessionCockpitState>((set) => ({
     set((state) =>
       withPerSession(state, id, (current) => ({
         ...current,
-        setLedger: [...current.setLedger, { ...entry, acknowledged: false }],
+        // acknowledged defaults false; benign outcomes (immediate, non-clamp echo-verified,
+        // queued) are appended pre-acknowledged by the set client — only outcomes that DEMAND
+        // attention (unsupported / clamp / unknown) drive the rail marker (R6).
+        setLedger: [...current.setLedger, { acknowledged: false, ...entry }],
         // Deliberately NOT touching launchEvidence here: a set outcome — even `immediate` — is
         // its own ledger fact; the effective marker moves only via setLaunchEvidence with proof.
       })),
@@ -224,10 +283,50 @@ export const sessionCockpitStore = createStore<SessionCockpitState>((set) => ({
         ),
       })),
     ),
+  acknowledgeMatchingOutcomes: (id, kind, requestedValue) =>
+    set((state) =>
+      withPerSession(state, id, (current) => ({
+        ...current,
+        setLedger: current.setLedger.map((entry) =>
+          !entry.acknowledged && entry.kind === kind && entry.requestedValue === requestedValue
+            ? { ...entry, acknowledged: true }
+            : entry,
+        ),
+      })),
+    ),
   setLaunchEvidence: (id, launchEvidence) =>
     set((state) => withPerSession(state, id, (current) => ({ ...current, launchEvidence }))),
   setLiveSnapshot: (id, liveSnapshot) =>
-    set((state) => withPerSession(state, id, (current) => ({ ...current, liveSnapshot }))),
+    set((state) =>
+      withPerSession(state, id, (current) => ({
+        ...current,
+        liveSnapshot,
+        // A successful readback clears the fetch-failure state — the two never coexist (F16).
+        snapshotLoading: false,
+        snapshotError: undefined,
+      })),
+    ),
+  setSnapshotLoading: (id, snapshotLoading) =>
+    set((state) => withPerSession(state, id, (current) => ({ ...current, snapshotLoading }))),
+  setSnapshotError: (id, snapshotError) =>
+    set((state) =>
+      withPerSession(state, id, (current) => ({
+        ...current,
+        snapshotError,
+        snapshotLoading: false,
+      })),
+    ),
+  recordEchoEvidence: (id, kind, evidence) =>
+    set((state) =>
+      withPerSession(state, id, (current) => ({
+        ...current,
+        echoEvidence: { ...current.echoEvidence, [kind]: evidence },
+      })),
+    ),
+  setSetRouteError: (id, setRouteError) =>
+    set((state) => withPerSession(state, id, (current) => ({ ...current, setRouteError }))),
+  setPairChange: (id, pairChange) =>
+    set((state) => withPerSession(state, id, (current) => ({ ...current, pairChange }))),
   enqueueSubmit: (id, submit) =>
     set((state) =>
       withPerSession(state, id, (current) => ({

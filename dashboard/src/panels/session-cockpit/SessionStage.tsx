@@ -49,6 +49,7 @@ export function SessionStage({
   handoff,
   headerExtra,
   workingLine,
+  controlPopover,
   children,
 }: {
   focused: OpenSession | undefined;
@@ -59,6 +60,8 @@ export function SessionStage({
   headerExtra?: React.ReactNode;
   /** L6's WorkingLine (spec §1.2-2) — the reserved slot's ONLY tenant. */
   workingLine?: React.ReactNode;
+  /** L4: controlled ModelEffortControl popover state (palette commands open the same popover). */
+  controlPopover?: { open: boolean; onOpenChange: (open: boolean) => void };
   /** The surface + composer placeholders (owned by SessionsView so L1's zone markers persist). */
   children: React.ReactNode;
 }) {
@@ -67,7 +70,7 @@ export function SessionStage({
       <header className={headerRow} data-stage-header tabIndex={-1}>
         {focused ? (
           <span className={headerHost}>
-            <HeaderStrip session={focused} cockpit={cockpit} />
+            <HeaderStrip session={focused} cockpit={cockpit} controlPopover={controlPopover} />
           </span>
         ) : (
           <span className={emptyIdentity} data-testid="stage-empty-identity">

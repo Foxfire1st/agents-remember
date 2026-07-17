@@ -156,14 +156,18 @@ export function registerDefaultCommands(registry: CommandRegistry): CommandRegis
       run: (ctx) => ctx.actions.switchSession(1),
     },
     {
+      // L4 R7: cycles the REQUESTED value through the current model's sessionSettable effort
+      // options — no dialog; the requested-vs-effective chips carry the async honesty story.
       id: "effort.decrease",
-      title: "Decrease effort (stub — L4)",
+      title: "Cycle effort down",
+      keywords: ["effort", "thinking", "reasoning", "cycle"],
       chord: "alt+,",
       run: (ctx) => ctx.actions.cycleEffort(-1),
     },
     {
       id: "effort.increase",
-      title: "Increase effort (stub — L4)",
+      title: "Cycle effort up",
+      keywords: ["effort", "thinking", "reasoning", "cycle"],
       chord: "alt+.",
       run: (ctx) => ctx.actions.cycleEffort(1),
     },

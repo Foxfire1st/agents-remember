@@ -99,6 +99,11 @@ describe("registerDefaultCommands", () => {
     expect(context.actions.openPalette).toHaveBeenCalledWith("keys");
     registry.run("session.next", context);
     expect(context.actions.switchSession).toHaveBeenCalledWith(1);
+    // L4 R7: the cycle-effort chords route the direction into the live action — no dialog.
+    registry.run("effort.decrease", context);
+    expect(context.actions.cycleEffort).toHaveBeenCalledWith(-1);
+    registry.run("effort.increase", context);
+    expect(context.actions.cycleEffort).toHaveBeenCalledWith(1);
   });
 
   it("gates palette.open on the palette being closed", () => {

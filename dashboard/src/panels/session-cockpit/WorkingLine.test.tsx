@@ -17,6 +17,8 @@ const NOW = 1_800_000_000_000;
 
 function cockpitWorkingSince(at: number | null): PerSessionCockpit {
   return {
+    snapshotLoading: false,
+    echoEvidence: {},
     pendingSets: {},
     setLedger: [],
     launchEvidence: { tier: "pending" },

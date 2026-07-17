@@ -41,8 +41,11 @@ import {
   smartDefaultFocus,
   waitingSeats,
 } from "../../data/railModel";
+import { startSeatStateAnnouncer } from "../../data/announcer";
 import { sessionCockpitStore, startCockpitMirror, useSessionCockpit } from "../../data/sessionCockpitStore";
 import { startRetireResidualSweep } from "../../data/sessionLifecycle";
+import { cycleEffortRequested, startSetPromotionWatcher } from "../../data/setClient";
+import { hasUnackedSetAttention, queuedComposerHint } from "../../data/setChips";
 import { seatVisualState } from "../../data/stateGrammar";
 import {
   autoCollapseTransition,
@@ -57,6 +60,7 @@ import {
 import { useSessions } from "../../data/sessions";
 import { useDashboard } from "../../data/store";
 import type { AgentPickupNode, TaskDocNode } from "../../types/projection";
+import { CockpitLiveRegions } from "./CockpitLiveRegions";
 import { CommandPalette } from "./CommandPalette";
 import { FailedLaunchBanner } from "./FailedLaunchBanner";
 import { InteractionBar } from "./InteractionBar";
@@ -66,6 +70,7 @@ import { PtySurface } from "./PtySurface";
 import { SeatInspector } from "./SeatInspector";
 import { endLanded, SessionRail } from "./SessionRail";
 import { SessionStage } from "./SessionStage";
+import { SetOutcomeToasts } from "./SetOutcomeToasts";
 import { StopResidualNotes } from "./StopResidualNotes";
 import { useKeyboardZones } from "./useKeyboardZones";
 import { WorkingLine } from "./WorkingLine";
@@ -127,6 +132,11 @@ const ptyPlaceholder = css({
   borderColor: "grid",
   borderRadius: "2px",
   _focusVisible: { outlineWidth: "1px", outlineStyle: "solid", outlineColor: "amber", outlineOffset: "1px" },
+});
+const composerHint = css({
+  fontSize: "0.66rem",
+  color: "amber",
+  flexShrink: 0,
 });
 const composerBox = css({
   font: "inherit",
@@ -226,6 +236,9 @@ export function SessionsView({ active }: { active: boolean }) {
   const [launch, setLaunch] = useState<{ open: boolean; prefill?: LaunchPrefill }>({
     open: false,
   });
+  // L4: the ModelEffortControl popover state lives here so the palette commands open the SAME
+  // popover the header trigger opens (one control, two surfaces — design FQ2).
+  const [controlPopoverOpen, setControlPopoverOpen] = useState(false);
 
   // The feed must outlive view switches (the layer is keep-alive) — refcounted, shared with
   // Cockpit's own subscription, so this never double-polls.
@@ -234,6 +247,10 @@ export function SessionsView({ active }: { active: boolean }) {
   // Review F1 (sev-3): retire residuals are captured for EVERY row — focus-independent — so an
   // unfocused seat's retireControlStopError still surfaces (and resurfaces after a reload).
   useEffect(() => startRetireResidualSweep(), []);
+  // L4 R4: the promotion/drift watcher (turn-ended + focus re-GETs) and the assertive
+  // failed/awaiting-input announcer — both refcounted, view-lifetime.
+  useEffect(() => startSetPromotionWatcher(), []);
+  useEffect(() => startSeatStateAnnouncer(), []);
 
   const focused = sessions.find((session) => session.id === focusedSessionId);
 
@@ -245,7 +262,7 @@ export function SessionsView({ active }: { active: boolean }) {
   const unackedIds = useMemo(
     () =>
       sessions
-        .filter((session) => (perSession[session.id]?.setLedger ?? []).some((entry) => !entry.acknowledged))
+        .filter((session) => hasUnackedSetAttention(perSession[session.id]))
         .map((session) => session.id),
     [sessions, perSession],
   );
@@ -260,6 +277,8 @@ export function SessionsView({ active }: { active: boolean }) {
 
   const focusSession = useCallback((id: string | null) => {
     setHandoff(null);
+    // A focus switch never carries the previous seat's open control popover along.
+    setControlPopoverOpen(false);
     sessionCockpitStore.getState().setFocusedSession(id);
   }, []);
 
@@ -309,6 +328,33 @@ export function SessionsView({ active }: { active: boolean }) {
       run: () => setLaunch({ open: true }),
     });
   }, [registry]);
+
+  // L4: the ModelEffortControl's palette surface — the SAME popover the header trigger opens.
+  useEffect(() => {
+    const controlAvailable = () =>
+      focused !== undefined &&
+      focused.harness !== undefined &&
+      (focused.status ?? "running") === "running";
+    const disposers = [
+      registry.register({
+        id: "control.setModel",
+        title: "Set model…",
+        keywords: ["model", "switch", "change", "capability"],
+        when: controlAvailable,
+        run: () => setControlPopoverOpen(true),
+      }),
+      registry.register({
+        id: "control.setEffort",
+        title: "Set effort…",
+        keywords: ["effort", "thinking", "reasoning", "capability"],
+        when: controlAvailable,
+        run: () => setControlPopoverOpen(true),
+      }),
+    ];
+    return () => {
+      for (const dispose of disposers) dispose();
+    };
+  }, [registry, focused]);
 
   // L2 palette commands (dynamic titles carry the HONEST preview counts + names): the tree
   // toggle, jump-to-attention, bulk end at sprint + master level, and question triage (R16).
@@ -473,8 +519,11 @@ export function SessionsView({ active }: { active: boolean }) {
               : order[(index + direction + order.length) % order.length];
           focusSession(next);
         },
-        // Honest stubs — L4 (effort), L5 (submit) replace the ACTION; ids/chords are final.
-        cycleEffort: () => {},
+        // L4 R7: cycle the REQUESTED effort through the live menu — no dialog; the chips carry
+        // the async honesty story. L5 replaces submitComposer.
+        cycleEffort: (direction) => {
+          if (focusedSessionId) cycleEffortRequested(focusedSessionId, direction);
+        },
         submitComposer: () => {},
       },
     }),
@@ -616,6 +665,7 @@ export function SessionsView({ active }: { active: boolean }) {
             <SessionStage
               focused={focused}
               cockpit={focused ? perSession[focused.id] : undefined}
+              controlPopover={{ open: controlPopoverOpen, onOpenChange: setControlPopoverOpen }}
               handoff={handoff}
               headerExtra={
                 // R8: with a live pane the chip reflects the pane's REAL column count; the pixel
@@ -668,6 +718,13 @@ export function SessionsView({ active }: { active: boolean }) {
                 </div>
               )}
               {focused ? <InteractionBar session={focused} composerRef={composerRef} /> : null}
+              {/* L4 R2: the composer-hint slot — a queued set promotes on the NEXT turn, and a
+                  submit is one way to start one. */}
+              {focused && queuedComposerHint(perSession[focused.id]) ? (
+                <span className={composerHint} data-testid="composer-queued-set-hint">
+                  {queuedComposerHint(perSession[focused.id])}
+                </span>
+              ) : null}
               <textarea
                 ref={composerRef}
                 className={composerBox}
@@ -756,6 +813,13 @@ export function SessionsView({ active }: { active: boolean }) {
         onClose={() => setLaunch({ open: false })}
         onFocusSession={focusSession}
       />
+      {/* L4 R6: unfocused set outcomes persist until dismissed; R8: the two live regions. */}
+      <SetOutcomeToasts
+        sessions={sessions}
+        focusedSessionId={focusedSessionId}
+        onFocusSession={focusSession}
+      />
+      <CockpitLiveRegions />
     </div>
   );
 }

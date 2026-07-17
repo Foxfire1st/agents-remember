@@ -35,7 +35,17 @@ const dot = cva({
   },
 });
 
-export function StateDot({ state, testId }: { state: SeatVisualState; testId?: string }) {
+export function StateDot({
+  state,
+  testId,
+  ariaLabel,
+}: {
+  state: SeatVisualState;
+  testId?: string;
+  /** When given, the dot becomes an accessible image carrying the state word (L4 R8 — rail
+   *  dots). Absent ⇒ aria-hidden (surfaces that render the word beside the dot, HeaderStrip). */
+  ariaLabel?: string;
+}) {
   return (
     <span
       className={dot({ color: state.color, pulse: state.pulse })}
@@ -43,7 +53,9 @@ export function StateDot({ state, testId }: { state: SeatVisualState; testId?: s
       data-state-color={state.color}
       data-state-pulse={state.pulse ? "true" : "false"}
       data-testid={testId}
-      aria-hidden="true"
+      {...(ariaLabel !== undefined
+        ? { role: "img", "aria-label": ariaLabel }
+        : { "aria-hidden": "true" as const })}
     />
   );
 }

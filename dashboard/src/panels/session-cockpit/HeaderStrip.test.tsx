@@ -1,6 +1,6 @@
 // HeaderStrip anatomy + stage container (260715-FEUI-L2 S5, spec §1.2): identity → controls →
-// state → diagnostics; the EMPTY ModelEffortControl slot; freshness honesty; provenance badges
-// (R7); the reserved WorkingLine slot and the focus-handoff note on the stage.
+// state → diagnostics; the ModelEffortControl slot (L4 fills it); freshness honesty; provenance
+// badges (R7); the reserved WorkingLine slot and the focus-handoff note on the stage.
 import { cleanup, render } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -23,12 +23,12 @@ describe("HeaderStrip (R10)", () => {
     expect(segments).toEqual(["identity", "controls", "state", "leaf-seat", "diagnostics"]);
   });
 
-  it("ships the ModelEffortControl slot EMPTY (L4 fills it)", () => {
+  it("mounts the ModelEffortControl into the reserved slot (L4)", () => {
     const { getByTestId } = render(<HeaderStrip session={worker} cockpit={undefined} />);
     const slot = getByTestId("header-control-slot");
     expect(slot.getAttribute("data-slot")).toBe("model-effort-control");
-    expect(slot.childElementCount).toBe(0);
-    expect(slot.textContent).toBe("");
+    expect(slot.querySelector('[data-testid="model-effort-control"]')).not.toBeNull();
+    expect(slot.querySelector('[data-testid="model-effort-trigger"]')).not.toBeNull();
   });
 
   it("renders the state dot + word from the shared grammar", () => {
@@ -50,6 +50,8 @@ describe("HeaderStrip (R10)", () => {
         session={worker}
         now={now}
         cockpit={{
+          snapshotLoading: false,
+          echoEvidence: {},
           pendingSets: {},
           setLedger: [],
           launchEvidence: { tier: "pending" },

@@ -1,7 +1,10 @@
+import { useEffect, useState } from "react";
+
 import { css } from "../../../styled-system/css";
 import { launchTier } from "../../data/launchEvidence";
 import type { OpenSession } from "../../data/sessions";
-import type { PerSessionCockpit } from "../../data/sessionCockpitStore";
+import type { PerSessionCockpit, SetLedgerEntry } from "../../data/sessionCockpitStore";
+import { acknowledgeSetAttention } from "../../data/setClient";
 import { seatVisualState } from "../../data/stateGrammar";
 import { paneArchetypeCopy, retireResidualCopy } from "./lifecycleCopy";
 
@@ -9,6 +12,8 @@ import { paneArchetypeCopy, retireResidualCopy } from "./lifecycleCopy";
 // half of moat 1 — spawn provenance, requested model/effort at its honest tier, spawned-by edge,
 // landed/retired reasons — rendered from catalog truth only. The L7 inspector (Evidence /
 // Capabilities / Bus tabs) replaces this pane; the card keeps the facts visible until then.
+// L4 R6 adds the SET LEDGER section: collapsed by default; EXPANDING it is the viewing act that
+// acknowledges outcomes (F22 — an explicit gesture, mirrored by the toast's dismiss).
 
 const card = css({
   display: "grid",
@@ -44,6 +49,81 @@ function Fact({ label, value, testId }: { label: string; value: string | undefin
   );
 }
 
+const ledgerToggle = css({
+  font: "inherit",
+  fontSize: "0.68rem",
+  textAlign: "left",
+  paddingInline: "0.35rem",
+  paddingBlock: "0.1rem",
+  background: "transparent",
+  color: "muted",
+  borderWidth: "1px",
+  borderStyle: "solid",
+  borderColor: "grid",
+  borderRadius: "2px",
+  cursor: "pointer",
+  _hover: { color: "amber", borderColor: "amber" },
+  _focusVisible: { outline: "1px solid token(colors.amber)", outlineOffset: "1px" },
+});
+const ledgerList = css({ display: "grid", gap: "0.25rem", minWidth: "0" });
+const ledgerEntryLine = css({
+  fontSize: "0.66rem",
+  color: "ink",
+  minWidth: "0",
+  overflowWrap: "anywhere",
+});
+
+/** One ledger line: acceptance WORD first, requested and effective never merged. */
+export function setLedgerEntryLine(entry: SetLedgerEntry): string {
+  const result = entry.result;
+  const effective =
+    result.effectiveValue !== undefined ? ` → effective ${result.effectiveValue}` : "";
+  const detail = result.detail ? ` — ${result.detail}` : "";
+  const seen = entry.acknowledged ? "" : " · unacknowledged";
+  return `${result.acceptance}: ${entry.kind} requested ${entry.requestedValue}${effective}${detail}${seen}`;
+}
+
+function SetLedgerSection({
+  sessionId,
+  ledger,
+}: {
+  sessionId: string;
+  ledger: SetLedgerEntry[];
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const unacked = ledger.filter((entry) => !entry.acknowledged).length;
+  // VIEWING THE LEDGER ACKNOWLEDGES (R6/F22): while the list is open on this seat, its
+  // outcomes are being seen — the marker and toasts clear.
+  useEffect(() => {
+    if (expanded && unacked > 0) acknowledgeSetAttention(sessionId);
+  }, [expanded, unacked, sessionId]);
+  if (ledger.length === 0) return null;
+  return (
+    <>
+      <span className={heading}>Set changes</span>
+      <button
+        type="button"
+        className={ledgerToggle}
+        aria-expanded={expanded}
+        onClick={() => setExpanded((current) => !current)}
+        data-testid="inspector-set-ledger-toggle"
+      >
+        {ledger.length} set change{ledger.length === 1 ? "" : "s"}
+        {unacked > 0 ? ` · ${unacked} unacknowledged` : ""} — {expanded ? "hide" : "view (acknowledges)"}
+      </button>
+      {expanded ? (
+        <div className={ledgerList} data-testid="inspector-set-ledger">
+          {[...ledger].reverse().map((entry, index) => (
+            <span key={`${entry.at}-${index}`} className={ledgerEntryLine} data-testid="inspector-set-ledger-entry">
+              {setLedgerEntryLine(entry)}
+            </span>
+          ))}
+        </div>
+      ) : null}
+    </>
+  );
+}
+
 export function SeatInspector({
   session,
   cockpit,
@@ -59,7 +139,6 @@ export function SeatInspector({
     );
   }
   const visual = seatVisualState(session);
-  void cockpit; // set-evidence rendering joins in L4; launch tier derives from row truth (L3 R7)
   const tier = launchTier(session);
   const rawRetireStop = session.controlRaw?.retireControlStopError;
   const retireStopNote = typeof rawRetireStop === "string" ? rawRetireStop : undefined;
@@ -97,6 +176,8 @@ export function SeatInspector({
       />
       <Fact label="spawned by" value={session.spawnedBySession} testId="inspector-spawned-by" />
       <Fact label="original label" value={session.spawnedLabel} />
+      {/* Keyed per seat: a focus switch remounts this collapsed before acknowledgment effects. */}
+      <SetLedgerSection key={session.id} sessionId={session.id} ledger={cockpit?.setLedger ?? []} />
       {session.landedReason || session.retiredReason ? (
         <>
           <span className={heading}>Outcome</span>

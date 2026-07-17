@@ -5,14 +5,15 @@ import type { PerSessionCockpit } from "../../data/sessionCockpitStore";
 import { seatVisualState } from "../../data/stateGrammar";
 import { leafIdFromKey } from "../../data/taskIdentity";
 import { EvidenceBadge } from "../../grammar/EvidenceBadge";
+import { ModelEffortControl } from "./ModelEffortControl";
 import { StateDot } from "./StateDot";
 
 // The HeaderStrip (260715-FEUI-L2 S5, spec §1.2 — R10): identity → controls → state →
 // diagnostics, in that order. Elision runs diagnostics-first (highest flex-shrink), then
-// leaf/seat; identity + state NEVER elide (flex: none). The ModelEffortControl slot ships EMPTY —
-// L4 fills it; reserving it now keeps the layout stable when the control arrives. Provenance
-// badges (R7 — moat 1, read-only) ride the diagnostics cluster: honest requested-tier wording
-// only, never a claim the server did not make.
+// leaf/seat; identity + state NEVER elide (flex: none). The controls slot hosts L4's
+// ModelEffortControl (design §6 — the chrome is the ONLY place model/effort exist for controlled
+// sessions, §1.5-1). Provenance badges (R7 — moat 1, read-only) ride the diagnostics cluster:
+// honest requested-tier wording only, never a claim the server did not make.
 
 const strip = css({
   display: "flex",
@@ -25,7 +26,16 @@ const strip = css({
 const identity = css({ flex: "none", display: "inline-flex", alignItems: "baseline", gap: "0.4rem" });
 const sessionName = css({ fontSize: "0.82rem", color: "ink" });
 const harnessName = css({ fontSize: "0.74rem", color: "muted" });
-const controlSlot = css({ flex: "none", display: "inline-flex", gap: "0.35rem", minHeight: "1rem" });
+// The control + its chips may shrink (after diagnostics, before leaf/seat) — never the trigger's
+// identity words themselves; chip text elides inside AcceptanceChip.
+const controlSlot = css({
+  flex: "0 1 auto",
+  minWidth: "0",
+  overflow: "hidden",
+  display: "inline-flex",
+  gap: "0.35rem",
+  minHeight: "1rem",
+});
 const stateCluster = css({
   flex: "none",
   display: "inline-flex",
@@ -81,10 +91,13 @@ const WS_WORDS: Record<PerSessionCockpit["freshness"]["ptyWs"], string> = {
 export function HeaderStrip({
   session,
   cockpit,
+  controlPopover,
   now = Date.now(),
 }: {
   session: OpenSession;
   cockpit: PerSessionCockpit | undefined;
+  /** Controlled ModelEffortControl popover state — the palette commands open the same popover. */
+  controlPopover?: { open: boolean; onOpenChange: (open: boolean) => void };
   now?: number;
 }) {
   const visual = seatVisualState(session);
@@ -106,8 +119,15 @@ export function HeaderStrip({
         data-header-segment="controls"
         data-slot="model-effort-control"
         data-testid="header-control-slot"
-        // EMPTY by design: the ModelEffortControl lands in L4; the slot reserves its place.
-      />
+      >
+        {/* L4: the one ModelEffortControl — renders nothing for non-harness/ended sessions. */}
+        <ModelEffortControl
+          session={session}
+          cockpit={cockpit}
+          open={controlPopover?.open}
+          onOpenChange={controlPopover?.onOpenChange}
+        />
+      </span>
       <span className={stateCluster} data-header-segment="state" data-testid="header-state">
         <StateDot state={visual} testId="header-dot" />
         <span>{visual.word}</span>

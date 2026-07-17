@@ -246,6 +246,91 @@ export const SET_RESULTS: Record<SetAcceptance, SetResultWire> = {
   },
 };
 
+// ── L4 fixture extensions (260715-FEUI-L4 R9): clamp, queued→immediate, unknown→readback ──────
+
+/** Pi's silent thinking clamp (L5 evidence): echo-verified with effective ≠ requested — BOTH
+ *  values render persistently and the chip demands acknowledgment. */
+export const SET_RESULT_CLAMP: SetResultWire = {
+  ok: true,
+  acceptance: "echo-verified",
+  requestedValue: "max",
+  effectiveValue: "high",
+  detail: "thinking level clamped by the model",
+};
+
+/** Defensive shape: echo-verified but the adapter echoed no value — proves nothing, marker
+ *  must not move to the requested value. */
+export const SET_RESULT_ECHO_NO_VALUE: SetResultWire = {
+  ok: true,
+  acceptance: "echo-verified",
+  requestedValue: "xhigh",
+  effectiveValue: null,
+  detail: null,
+};
+
+/** The repeat-set resolution sequence (R4): a queued set, then the SAME value re-set returning
+ *  'immediate' — which resolves the queued pending without a readback. */
+export const QUEUED_THEN_IMMEDIATE_SEQUENCE: SetResultWire[] = [
+  {
+    ok: true,
+    acceptance: "queued",
+    requestedValue: "xhigh",
+    effectiveValue: null,
+    detail: "applies when the next accepted turn starts",
+  },
+  {
+    ok: true,
+    acceptance: "immediate",
+    requestedValue: "xhigh",
+    effectiveValue: "xhigh",
+    detail: "requested value already effective",
+  },
+];
+
+/** A LIVE Codex exact-session snapshot (bare capability_snapshot_json — no envelope). */
+export function codexLiveSessionSnapshot(
+  selectedModelKey: string,
+  selectedEffort: string | null,
+): CapabilitySnapshotWire {
+  return {
+    models: CODEX_MODEL_ROWS,
+    selectedModelKey,
+    selectedEffort,
+    configOptions: [], // the serializer's projection — deliberately NOT consumed by the menu
+  };
+}
+
+/** The unknown-then-readback pair (R9): the unknown SetResult plus the snapshot whose readback
+ *  CONFIRMS the requested effort took effect. */
+export const UNKNOWN_THEN_READBACK: {
+  result: SetResultWire;
+  confirmingSnapshot: CapabilitySnapshotWire;
+  disprovingSnapshot: CapabilitySnapshotWire;
+} = {
+  result: {
+    ok: false,
+    acceptance: "unknown",
+    requestedValue: "high",
+    effectiveValue: null,
+    detail: "outcome unresolved — refresh the exact-session snapshot",
+  },
+  confirmingSnapshot: codexLiveSessionSnapshot("gpt-5.6-sol", "high"),
+  disprovingSnapshot: codexLiveSessionSnapshot("gpt-5.6-sol", "low"),
+};
+
+/** Exact-session error bodies, verbatim server wording (harness_control_api.py). */
+export const SESSION_CAPABILITY_ERROR_BODIES = {
+  sessionGone: { httpStatus: 404, body: { status: "unknown-session" } },
+  noNativeControl: {
+    httpStatus: 409,
+    body: { status: "unsupported", detail: "session has no native protocol control endpoint" },
+  },
+  outage: {
+    httpStatus: 503,
+    body: { status: "control-unavailable", detail: "harness control socket did not answer" },
+  },
+} as const;
+
 // ── Capability-route errors, verbatim server wording (R1) ──────────────────────────────────────
 
 export const CAPABILITY_ERROR_BODIES: Record<

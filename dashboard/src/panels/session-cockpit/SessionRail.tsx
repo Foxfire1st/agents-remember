@@ -18,6 +18,7 @@ import {
 } from "../../data/railModel";
 import { turnHintWord, usePtyHarvest } from "../../data/ptyHarvest";
 import { useSessionCockpit } from "../../data/sessionCockpitStore";
+import { hasUnackedSetAttention } from "../../data/setChips";
 import {
   endLandedDetailed,
   endSessionDetailed,
@@ -370,6 +371,8 @@ export function SessionRail({ onFocusSession, focusedSessionId, model, rollup }:
   const treeView = useSessionCockpit((state) => state.orchestrationTreeView);
   const setTreeView = useSessionCockpit((state) => state.setOrchestrationTreeView);
   const pollHealth = useSessionCockpit((state) => state.pollHealth);
+  // L4 R6: unacknowledged set outcomes drive a per-row attention marker (the L2 slot).
+  const perSessionCockpit = useSessionCockpit((state) => state.perSession);
   const taskDocuments = useDashboard((state) => state.analytics?.taskDocuments ?? EMPTY_DOCS);
   const lifecycles = useDashboard((state) => state.lifecycles);
   const pickups = useDashboard((state) => state.analytics?.agentPickups ?? EMPTY_PICKUPS);
@@ -488,7 +491,13 @@ export function SessionRail({ onFocusSession, focusedSessionId, model, rollup }:
           }
         }}
       >
-        <StateDot state={visual} testId={`rail-dot-${session.id}`} />
+        {/* L4 R8: rail dots carry the state WORD as their accessible name — the dot is the
+            truncation-surviving signal and must speak, not just color. */}
+        <StateDot
+          state={visual}
+          testId={`rail-dot-${session.id}`}
+          ariaLabel={`state: ${visual.word}`}
+        />
         {code ? (
           <span
             className={roleChip({ role: code in ROLE_CHIP_TONES ? (code as keyof typeof ROLE_CHIP_TONES) : undefined })}
@@ -529,6 +538,19 @@ export function SessionRail({ onFocusSession, focusedSessionId, model, rollup }:
               data-testid={`rail-gate-${session.id}`}
             >
               gate
+            </span>
+          ) : null}
+          {/* L4 R6: unacknowledged set outcomes (unsupported/clamp/unknown, pair failures) —
+              cleared by viewing the ledger or dismissing the toast (mark seen). */}
+          {hasUnackedSetAttention(perSessionCockpit[session.id]) ? (
+            <span
+              className={markerChip({ tone: "warn" })}
+              role="img"
+              aria-label="unacknowledged set outcome — view the set ledger to acknowledge"
+              title="unacknowledged set outcome (unsupported / clamp / unknown) — view the set ledger in the inspector to acknowledge"
+              data-testid={`rail-set-unacked-${session.id}`}
+            >
+              set!
             </span>
           ) : null}
         </span>
