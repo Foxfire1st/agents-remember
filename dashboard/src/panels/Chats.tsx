@@ -522,6 +522,7 @@ export function Chats({
                           <Terminal
                             sessionId={session.id}
                             readOnly={session.status === "landed"}
+                            ariaLabel={`terminal: ${session.label}`}
                             onConnection={(conn) => registerConnection(session.id, conn)}
                           />
                         </Suspense>

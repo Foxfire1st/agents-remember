@@ -47,6 +47,10 @@ vi.mock("@xterm/xterm", () => ({
       return { mouseTrackingMode: mocks.mouseTrackingMode };
     }
 
+    // The L6 surface reads/writes these (screenReaderMode effect, stream hooks, key filter).
+    options: Record<string, unknown> = {};
+    parser = { registerOscHandler: () => ({ dispose: vi.fn() }) };
+
     constructor(options: unknown) {
       mocks.terminalOptions(options);
     }
@@ -54,7 +58,15 @@ vi.mock("@xterm/xterm", () => ({
     loadAddon() {}
     open() {}
     write() {}
+    focus() {}
+    attachCustomKeyEventHandler() {}
     onData() {
+      return { dispose: vi.fn() };
+    }
+    onBell() {
+      return { dispose: vi.fn() };
+    }
+    onTitleChange() {
       return { dispose: vi.fn() };
     }
     scrollLines(amount: number) {
@@ -81,6 +93,19 @@ afterEach(() => {
 });
 
 describe("Terminal", () => {
+  it("the group landmark is ALWAYS named — explicit label or the sessionId fallback (L6 review finding 6)", () => {
+    Object.defineProperty(document, "fonts", {
+      configurable: true,
+      value: { ready: Promise.resolve() },
+    });
+    const { getByTestId, rerender } = render(<Terminal sessionId="s1" />);
+    const host = getByTestId("terminal-host");
+    expect(host.getAttribute("role")).toBe("group");
+    expect(host.getAttribute("aria-label")).toBe("terminal session s1"); // never an unnamed group
+    rerender(<Terminal sessionId="s1" ariaLabel="terminal: scout-claude" />);
+    expect(getByTestId("terminal-host").getAttribute("aria-label")).toBe("terminal: scout-claude");
+  });
+
   it("enables scrollback on the xterm instance", () => {
     Object.defineProperty(document, "fonts", {
       configurable: true,

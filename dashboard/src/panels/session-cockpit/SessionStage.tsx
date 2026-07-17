@@ -48,6 +48,7 @@ export function SessionStage({
   cockpit,
   handoff,
   headerExtra,
+  workingLine,
   children,
 }: {
   focused: OpenSession | undefined;
@@ -56,6 +57,8 @@ export function SessionStage({
   handoff: string | null;
   /** View-owned header chips (the ~80-col floor hint) — rendered after the strip. */
   headerExtra?: React.ReactNode;
+  /** L6's WorkingLine (spec §1.2-2) — the reserved slot's ONLY tenant. */
+  workingLine?: React.ReactNode;
   /** The surface + composer placeholders (owned by SessionsView so L1's zone markers persist). */
   children: React.ReactNode;
 }) {
@@ -79,7 +82,8 @@ export function SessionStage({
         </div>
       ) : null}
       <div data-slot="working-line" className={workingLineSlot} data-testid="stage-working-line-slot">
-        {/* Reserved: the WorkingLine (turn theater — verb, ~elapsed, ⏹ stop) is rendered by L6. */}
+        {/* The reserved WorkingLine slot — L6's turn theater (verb, ~elapsed, ⏹ stop). */}
+        {workingLine}
       </div>
       {children}
     </div>

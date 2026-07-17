@@ -82,14 +82,51 @@ function hasViewportScrollback(term: XtermTerminal): boolean {
   return term.buffer.active.type === "normal" && term.buffer.active.baseY > 0;
 }
 
+/** Byte-stream observation hooks (260715-FEUI-L6 R7) — wired by PtySurface for LEGACY RAW panes
+ *  only; controlled panes render the runner line-log and need none of this. Held in refs so a
+ *  changing identity never tears the terminal down. */
+export interface TerminalStreamHooks {
+  onBell?: () => void;
+  /** OSC 0/2 window-title changes (xterm's own title tracking stays active). */
+  onTitle?: (title: string) => void;
+  /** OSC 133 payload (`A`/`B`/`C`/`D;exit` shell-integration marks), verbatim. */
+  onOsc133?: (data: string) => void;
+  /** OSC 9 payload (`4;st;pr` ConEmu progress and friends), verbatim. */
+  onOsc9?: (data: string) => void;
+}
+
 export function Terminal({
   sessionId,
   onConnection,
   readOnly = false,
+  renderer = "dom",
+  screenReaderMode = false,
+  ariaLabel,
+  keyEventFilter,
+  hooks,
+  onOutput,
+  onSocketState,
+  onResizeCols,
 }: {
   sessionId: string;
   onConnection?: (conn: TerminalConnection | null) => void;
   readOnly?: boolean;
+  /** Renderer choice (260715-FEUI-L6 R1 / master OQ-B): DOM baseline by measurement; `webgl`
+   *  loads @xterm/addon-webgl lazily and falls back to DOM on failure or context loss. */
+  renderer?: "dom" | "webgl";
+  /** xterm screenReaderMode (R2): opt-in — it maintains an a11y tree at a rendering cost. */
+  screenReaderMode?: boolean;
+  /** Accessible pane name (R2): label + harness + state, applied to the host group. */
+  ariaLabel?: string;
+  /** Return false to keep xterm from consuming a key (the PTY reserved set, defence-in-depth
+   *  under the window-capture tinykeys layer). Default: xterm handles everything. */
+  keyEventFilter?: (event: KeyboardEvent) => boolean;
+  hooks?: TerminalStreamHooks;
+  /** Fires on every PTY output chunk (freshness `lastOutputAt`; caller throttles). */
+  onOutput?: () => void;
+  onSocketState?: (state: "connected" | "dropped") => void;
+  /** The pane's REAL column count after every fit — the ~80-col floor truth (R8). */
+  onResizeCols?: (cols: number) => void;
 }) {
   const hostRef = useRef<HTMLDivElement>(null);
   const socketFactory = useContext(TerminalSocketContext);
@@ -98,6 +135,24 @@ export function Terminal({
   // (which would tear down + reconnect the terminal).
   const onConnRef = useRef(onConnection);
   onConnRef.current = onConnection;
+  const hooksRef = useRef(hooks);
+  hooksRef.current = hooks;
+  const onOutputRef = useRef(onOutput);
+  onOutputRef.current = onOutput;
+  const onSocketStateRef = useRef(onSocketState);
+  onSocketStateRef.current = onSocketState;
+  const onResizeColsRef = useRef(onResizeCols);
+  onResizeColsRef.current = onResizeCols;
+  const keyEventFilterRef = useRef(keyEventFilter);
+  keyEventFilterRef.current = keyEventFilter;
+  const termRef = useRef<XtermTerminal | null>(null);
+  const screenReaderModeRef = useRef(screenReaderMode);
+  screenReaderModeRef.current = screenReaderMode;
+
+  // screenReaderMode toggles live on the existing instance — never a teardown/reconnect.
+  useEffect(() => {
+    if (termRef.current) termRef.current.options.screenReaderMode = screenReaderMode;
+  }, [screenReaderMode]);
 
   useEffect(() => {
     const node = hostRef.current;
@@ -110,17 +165,64 @@ export function Terminal({
       theme: THEME,
       convertEol: false,
       scrollback: 5000,
+      screenReaderMode: screenReaderModeRef.current,
     });
+    termRef.current = term;
     const fit = new FitAddon();
     term.loadAddon(fit);
+    if (keyEventFilterRef.current) {
+      // xterm-level guard for the reserved set: even when the window-capture layer is inactive,
+      // a reserved chord is never consumed by (or leaked into) the pane.
+      term.attachCustomKeyEventHandler((event) => keyEventFilterRef.current?.(event) ?? true);
+    }
     term.open(node);
+    // Stream-observation hooks (R7) — registration is unconditional-cheap; the callbacks decide.
+    const bellSub = term.onBell(() => hooksRef.current?.onBell?.());
+    const titleSub = term.onTitleChange((title) => hooksRef.current?.onTitle?.(title));
+    const osc133Sub = term.parser.registerOscHandler(133, (data) => {
+      hooksRef.current?.onOsc133?.(data);
+      return false; // observe only — never swallow the sequence from other handlers
+    });
+    const osc9Sub = term.parser.registerOscHandler(9, (data) => {
+      hooksRef.current?.onOsc9?.(data);
+      return false;
+    });
+    // Renderer decision (OQ-B): DOM is the measured baseline; webgl loads lazily and demotes
+    // itself back to DOM on load failure or GPU context loss (xterm's documented contract).
+    let webglAddon: { dispose(): void } | null = null;
+    let disposed = false;
+    if (renderer === "webgl") {
+      void import("@xterm/addon-webgl").then(
+        ({ WebglAddon }) => {
+          if (disposed) return;
+          try {
+            const addon = new WebglAddon();
+            addon.onContextLoss(() => {
+              addon.dispose();
+              webglAddon = null;
+            });
+            term.loadAddon(addon);
+            webglAddon = addon;
+          } catch {
+            webglAddon = null; // DOM renderer stays active — never a dead pane
+          }
+        },
+        () => undefined,
+      );
+    }
     const conn = connectTerminal(
       sessionId,
       {
-        write: (bytes) => term.write(bytes),
+        write: (bytes) => {
+          term.write(bytes);
+          onOutputRef.current?.();
+        },
         onExit: () => term.write("\r\n\x1b[2m— session ended —\x1b[0m\r\n"),
       },
-      socketFactory ? { socketFactory } : {},
+      {
+        ...(socketFactory ? { socketFactory } : {}),
+        onSocketState: (state) => onSocketStateRef.current?.(state),
+      },
     );
     onConnRef.current?.(conn);
 
@@ -166,6 +268,7 @@ export function Terminal({
       if (!node.clientWidth || !node.clientHeight) return;
       fit.fit();
       conn.sendResize(term.cols, term.rows);
+      onResizeColsRef.current?.(term.cols);
     };
     refit();
     let alive = true;
@@ -178,15 +281,40 @@ export function Terminal({
 
     return () => {
       alive = false;
+      disposed = true;
       cancelAnimationFrame(raf);
       onConnRef.current?.(null);
       node.removeEventListener("wheel", handleWheel, { capture: true });
       observer.disconnect();
       dataSub?.dispose();
+      bellSub.dispose();
+      titleSub.dispose();
+      osc133Sub.dispose();
+      osc9Sub.dispose();
+      webglAddon?.dispose();
+      webglAddon = null;
       conn.dispose();
       term.dispose();
+      if (termRef.current === term) termRef.current = null;
     };
-  }, [readOnly, sessionId, socketFactory]);
+  }, [readOnly, renderer, sessionId, socketFactory]);
 
-  return <div ref={hostRef} className={host} data-testid="terminal-host" />;
+  return (
+    <div
+      ref={hostRef}
+      className={host}
+      data-testid="terminal-host"
+      role="group"
+      // A group landmark must always carry a name (review finding 6): the cockpit passes the
+      // full label+harness+state name; legacy call sites pass their session label; the
+      // sessionId fallback keeps the landmark named even with neither.
+      aria-label={ariaLabel ?? `terminal session ${sessionId}`}
+      tabIndex={-1}
+      // Focus delegation: the focus-terminal command / region routing focuses the host; typing
+      // must land in xterm's own textarea.
+      onFocus={(event) => {
+        if (event.target === hostRef.current) termRef.current?.focus();
+      }}
+    />
+  );
 }

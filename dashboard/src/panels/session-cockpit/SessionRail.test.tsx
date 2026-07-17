@@ -5,7 +5,9 @@ import { act, cleanup, fireEvent, render, within } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { attentionRollup, buildRailModel } from "../../data/railModel";
+import { ptyHarvestStore } from "../../data/ptyHarvest";
 import { sessionCockpitStore } from "../../data/sessionCockpitStore";
+import { lifecycleNoticeStore } from "../../data/sessionLifecycle";
 import { fromTerminalSessionInfo, sessionStore } from "../../data/sessions";
 import { seatVisualState } from "../../data/stateGrammar";
 import { dashboardStore } from "../../data/store";
@@ -353,5 +355,119 @@ describe("zero-state (R9 — never an unexplained empty rail)", () => {
       color: "mutedAmber",
       pulse: false,
     });
+  });
+});
+
+describe("L6: honest terminate confirm + cleanup outcome + legacy-raw bell marker", () => {
+  beforeEach(() => {
+    lifecycleNoticeStore.setState({ residuals: [], cleanupOutcome: null, sweptRetire: {} });
+    ptyHarvestStore.setState({ bySession: {} });
+  });
+
+  it("End arms an inline confirm NAMING session · leaf · state before terminating (R5)", async () => {
+    const terminated: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        const target = String(url);
+        if (target.includes("/terminate")) {
+          terminated.push(target);
+          return { ok: true, json: async () => ({ status: "terminated" }) } as Response;
+        }
+        return { ok: true, json: async () => ({ sessions: [] }) } as Response;
+      }),
+    );
+    const { getByTestId, findByTestId } = renderRail();
+    fireEvent.click(getByTestId("rail-end-worker-l4"));
+    expect(terminated).toHaveLength(0); // arming alone never kills anything
+    const confirm = await findByTestId("rail-end-confirm-worker-l4");
+    expect(confirm.textContent).toContain("worker-L4-serving");
+    expect(confirm.textContent).toContain("leaf 04_serving");
+    expect(confirm.textContent).toContain("state working");
+    fireEvent.click(getByTestId("rail-end-execute-worker-l4"));
+    await act(async () => {});
+    expect(terminated).toEqual(["/api/terminal/worker-l4/terminate"]);
+  });
+
+  it("a FAILED terminate POST renders verbatim with a retry — never a silent disarm (review finding 4)", async () => {
+    let failing = true;
+    const terminated: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        const target = String(url);
+        if (target.includes("/terminate")) {
+          if (failing) {
+            return { ok: false, status: 502, text: async () => "bridge host unavailable" } as Response;
+          }
+          terminated.push(target);
+          return { ok: true, json: async () => ({ status: "terminated" }) } as Response;
+        }
+        return { ok: true, json: async () => ({ sessions: [] }) } as Response;
+      }),
+    );
+    const { getByTestId, findByTestId } = renderRail();
+    fireEvent.click(getByTestId("rail-end-worker-l4"));
+    fireEvent.click(getByTestId("rail-end-execute-worker-l4"));
+    const error = await findByTestId("rail-end-error-worker-l4");
+    expect(error.getAttribute("role")).toBe("alert");
+    expect(error.textContent).toContain("bridge host unavailable"); // verbatim
+    // Retry re-runs the SAME terminate once the server recovers.
+    failing = false;
+    fireEvent.click(getByTestId("rail-end-retry-worker-l4"));
+    await act(async () => {});
+    expect(terminated).toEqual(["/api/terminal/worker-l4/terminate"]);
+  });
+
+  it("cancel disarms without terminating", async () => {
+    const fetchSpy = vi.fn();
+    vi.stubGlobal("fetch", fetchSpy);
+    const { getByTestId, findByTestId, queryByTestId } = renderRail();
+    fireEvent.click(getByTestId("rail-end-worker-l4"));
+    await findByTestId("rail-end-confirm-worker-l4");
+    fireEvent.click(getByTestId("rail-end-cancel-worker-l4"));
+    expect(queryByTestId("rail-end-confirm-worker-l4")).toBeNull();
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("renders the landed-cleanup route's own outcome, skips included (R5)", () => {
+    lifecycleNoticeStore.getState().recordCleanupOutcome({
+      closed: 2,
+      skipped: 1,
+      closedSessions: ["a", "b"],
+      skippedSessions: [{ session: "c", reason: "status:running" }],
+    });
+    const { getByTestId } = renderRail();
+    const note = getByTestId("rail-cleanup-outcome");
+    expect(note.textContent).toContain("ended 2");
+    expect(note.textContent).toContain("skipped 1 (c: status:running)");
+    fireEvent.click(getByTestId("rail-cleanup-outcome-dismiss"));
+    expect(lifecycleNoticeStore.getState().cleanupOutcome).toBeNull();
+  });
+
+  it("a harvested bell renders the rail attention marker with a text equivalent (R7)", () => {
+    act(() => {
+      ptyHarvestStore.getState().recordBell("scout", Date.now());
+    });
+    const { getByTestId } = renderRail();
+    const marker = getByTestId("rail-bell-scout");
+    expect(marker.textContent).toBe("bell");
+    expect(marker.getAttribute("aria-label")).toContain("bell");
+  });
+
+  it("harvested title/turn hints join the row TOOLTIP as labeled hints — never the grammar dot", () => {
+    act(() => {
+      ptyHarvestStore.getState().recordTitle("scout", "vim · adapter.rs");
+      ptyHarvestStore.getState().recordTurnHint("scout", { hint: "command-running", at: 1 });
+    });
+    const { getByTestId, sessions } = renderRail();
+    const row = getByTestId("rail-row-scout");
+    expect(row.getAttribute("title")).toContain("pty title: vim · adapter.rs");
+    expect(row.getAttribute("title")).toContain("pty hint: command running");
+    // The dot still renders pure grammar truth (failed scout stays failed).
+    const scout = sessions.find((session) => session.id === "scout")!;
+    expect(getByTestId("rail-dot-scout").getAttribute("data-state")).toBe(
+      seatVisualState(scout).key,
+    );
   });
 });

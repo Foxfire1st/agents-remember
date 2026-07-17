@@ -36,6 +36,10 @@ export interface ConnectTerminalOptions {
   socketFactory?: TerminalSocketFactory;
   /** Override the resolved `ws(s)://…` URL (tests). */
   url?: string;
+  /** Freshness honesty (260715-FEUI-L6 R15 wiring): `connected` on the WS handshake, `dropped`
+   *  on a non-deliberate close/exit. A deliberate `dispose()` reports nothing — the pane is
+   *  gone, not lying about health. There is no auto-reconnect, so `reconnecting` never fires. */
+  onSocketState?: (state: "connected" | "dropped") => void;
 }
 
 /** Resolve the same-origin `ws(s)://<host>/api/terminal/{id}` URL for a session id (pure). */
@@ -201,6 +205,7 @@ export function connectTerminal(
   const end = () => {
     if (!ended) {
       ended = true;
+      options.onSocketState?.("dropped");
       sink.onExit();
     }
   };
@@ -225,6 +230,7 @@ export function connectTerminal(
   // Flush the buffered size once the socket is OPEN so the PTY winsize syncs to the fitted xterm even
   // though the first fit() fired mid-handshake (the resize race that left the terminal rendering small).
   socket.onopen = () => {
+    options.onSocketState?.("connected");
     if (pendingResize) send({ type: "resize", cols: pendingResize.cols, rows: pendingResize.rows });
     for (const data of pendingInput) send({ type: "stdin", data });
     pendingInput = [];

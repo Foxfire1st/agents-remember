@@ -1,8 +1,7 @@
 import { useMemo, useState, type ReactNode } from "react";
 
 import { css, cva } from "../../../styled-system/css";
-import { notifySessionCatalogChanged, sessionStore, useSessions, type OpenSession } from "../../data/sessions";
-import { hydrateTerminalSessionsFromCatalog } from "../../data/catalogPoll";
+import { useSessions, type OpenSession } from "../../data/sessions";
 import {
   attentionZeroState,
   briefPendingSessionIds,
@@ -17,12 +16,18 @@ import {
   type RailMasterSection,
   type RailModel,
 } from "../../data/railModel";
+import { turnHintWord, usePtyHarvest } from "../../data/ptyHarvest";
 import { useSessionCockpit } from "../../data/sessionCockpitStore";
+import {
+  endLandedDetailed,
+  endSessionDetailed,
+  useLifecycleNotices,
+} from "../../data/sessionLifecycle";
 import { seatVisualState } from "../../data/stateGrammar";
 import { useDashboard } from "../../data/store";
 import { leafIdFromKey } from "../../data/taskIdentity";
-import { cleanupLandedTerminalSessions, terminateTerminalSession } from "../../data/terminal";
 import type { AgentPickupNode, TaskDocNode } from "../../types/projection";
+import { cleanupOutcomeCopy, terminateConfirmCopy } from "./lifecycleCopy";
 import { StateDot } from "./StateDot";
 
 // The session rail (260715-FEUI-L2 S4): the ruled role-driven hierarchy (spec §1.6b) — flat
@@ -339,24 +344,15 @@ const busFooter = css({
 const EMPTY_DOCS: TaskDocNode[] = [];
 const EMPTY_PICKUPS: AgentPickupNode[] = [];
 
-export async function endSession(id: string): Promise<void> {
-  if (await terminateTerminalSession(id)) {
-    sessionStore.getState().setStatus(id, "terminated");
-    sessionStore.getState().close(id);
-    notifySessionCatalogChanged("terminate", id);
-  }
+/** Terminate one seat (L6 R5: the detailed flow keeps the stop residual — data/sessionLifecycle). */
+export async function endSession(session: OpenSession): Promise<void> {
+  await endSessionDetailed(session);
 }
 
-/** Bulk-end landed seats (master/sprint bulk affordances + their palette mirrors). */
+/** Bulk-end landed seats (master/sprint bulk affordances + their palette mirrors). The detailed
+ *  flow records the route's honest outcome (closed + skipped with reasons) for the rail note. */
 export async function endLanded(sessions: OpenSession[]): Promise<void> {
-  const result = await cleanupLandedTerminalSessions(sessions.map((session) => session.id));
-  if (!result) return;
-  for (const id of result.closedSessions) {
-    sessionStore.getState().setStatus(id, "terminated");
-    sessionStore.getState().close(id);
-  }
-  notifySessionCatalogChanged("terminate");
-  void hydrateTerminalSessionsFromCatalog(true, new Set(result.closedSessions));
+  await endLandedDetailed(sessions);
 }
 
 type BulkTarget = { scope: "sprint" } | { scope: "master"; key: string };
@@ -381,6 +377,16 @@ export function SessionRail({ onFocusSession, focusedSessionId, model, rollup }:
 
   const [openDoneFolders, setOpenDoneFolders] = useState<Record<string, boolean>>({});
   const [armedBulk, setArmedBulk] = useState<BulkTarget | null>(null);
+  // L6 R5: single-End arms an inline honest confirm naming session · leaf · state.
+  const [armedEnd, setArmedEnd] = useState<string | null>(null);
+  // A FAILED terminate POST (review finding 4): the confirm implied execution, so the failure
+  // renders verbatim with a retry — never a silent disarm. Distinct from stop residuals, which
+  // are informational facts about SUCCESSFUL terminations.
+  const [endFailure, setEndFailure] = useState<{ sessionId: string; error: string } | null>(null);
+  const cleanupOutcome = useLifecycleNotices((state) => state.cleanupOutcome);
+  const dismissCleanupOutcome = useLifecycleNotices((state) => state.dismissCleanupOutcome);
+  // L6 R7: legacy-raw harvest (bell markers + title/turn hints) — raw panes only ever write it.
+  const harvestBySession = usePtyHarvest((state) => state.bySession);
   // The clicked attention CLASS, not a snapshot of ids: the highlighted set derives from the
   // LIVE rollup each render, so a ring expires the moment the seat's state resolves (a stale
   // snapshot kept suggesting attention after it was gone — review finding 3).
@@ -415,6 +421,16 @@ export function SessionRail({ onFocusSession, focusedSessionId, model, rollup }:
     return jumpToAttentionTarget(scoped, sessions);
   };
 
+  const executeEnd = async (session: OpenSession) => {
+    setArmedEnd(null);
+    const outcome = await endSessionDetailed(session);
+    if (!outcome.ok) {
+      setEndFailure({ sessionId: session.id, error: outcome.error ?? "terminate POST failed" });
+    } else {
+      setEndFailure((current) => (current?.sessionId === session.id ? null : current));
+    }
+  };
+
   const executeBulk = (target: BulkTarget) => {
     const doomed = target.scope === "sprint" ? allLanded : (landedByMaster.get(target.key) ?? []);
     setArmedBulk(null);
@@ -444,6 +460,15 @@ export function SessionRail({ onFocusSession, focusedSessionId, model, rollup }:
     const selected = session.id === focusedSessionId;
     const chipTone =
       visual.key === "failed" ? "alarm" : visual.key === "awaiting-input" || visual.key === "waiting" ? "warn" : "muted";
+    // Harvested hints (R7) join the row TOOLTIP as clearly-labeled hints — never the grammar.
+    const harvest = harvestBySession[session.id];
+    const hintParts = [
+      harvest?.title ? `pty title: ${harvest.title}` : null,
+      harvest?.turnHint ? `pty hint: ${turnHintWord(harvest.turnHint)}` : null,
+    ].filter((part): part is string => part !== null);
+    const tooltip =
+      railRowTooltip(session, session.leafKey ? leafIdFromKey(session.leafKey) : undefined) +
+      (hintParts.length > 0 ? ` · ${hintParts.join(" · ")}` : "");
     return (
       <div
         key={session.id}
@@ -454,7 +479,7 @@ export function SessionRail({ onFocusSession, focusedSessionId, model, rollup }:
         data-attention-highlight={highlight?.has(session.id) ? "true" : undefined}
         data-attention-gate={gate ? "true" : undefined}
         data-testid={`rail-row-${session.id}`}
-        title={railRowTooltip(session, session.leafKey ? leafIdFromKey(session.leafKey) : undefined)}
+        title={tooltip}
         onClick={() => onFocusSession(session.id)}
         onKeyDown={(event) => {
           if (event.key === "Enter" || event.key === " ") {
@@ -474,6 +499,19 @@ export function SessionRail({ onFocusSession, focusedSessionId, model, rollup }:
         ) : null}
         <span className={rowTitle}>{session.label}</span>
         <span className={attentionSlot} data-slot="attention-marker">
+          {/* Legacy-raw bell (L6 R7): the vendor TUI rang — the ONLY attention signal a raw
+              pane has. Cleared by focusing the seat. */}
+          {harvest?.bellPending ? (
+            <span
+              className={markerChip({ tone: "warn" })}
+              role="img"
+              aria-label="terminal bell — the vendor TUI rang"
+              title="terminal bell — the vendor TUI rang; focusing the seat clears this"
+              data-testid={`rail-bell-${session.id}`}
+            >
+              bell
+            </span>
+          ) : null}
           {/* Two-state brief column (R8): marker present = brief pending; absent = none. */}
           {briefPending.has(session.id) ? (
             <span
@@ -505,19 +543,75 @@ export function SessionRail({ onFocusSession, focusedSessionId, model, rollup }:
           </span>
         ) : null}
         {/* The End segment renders on EVERY row (ruled anatomy): live rows say "End", dormant
-            (landed) rows carry the mockup's compact ✕ — same terminate path as bulk end. */}
-        <button
-          type="button"
-          className={endButton}
-          aria-label={`End ${session.label}`}
-          onClick={(event) => {
-            event.stopPropagation();
-            void endSession(session.id);
-          }}
-          data-testid={`rail-end-${session.id}`}
-        >
-          {options.dormant ? "✕" : "End"}
-        </button>
+            (landed) rows carry the mockup's compact ✕. Arming shows the honest confirm naming
+            session · leaf · state (L6 R5) before anything is killed. */}
+        {endFailure?.sessionId === session.id ? (
+          <span className={confirmRow} role="alert" data-testid={`rail-end-error-${session.id}`}>
+            <span title={endFailure.error}>end failed: {endFailure.error}</span>
+            <button
+              type="button"
+              className={bulkButton}
+              onClick={(event) => {
+                event.stopPropagation();
+                void executeEnd(session);
+              }}
+              data-testid={`rail-end-retry-${session.id}`}
+            >
+              retry
+            </button>
+            <button
+              type="button"
+              className={doneToggle}
+              onClick={(event) => {
+                event.stopPropagation();
+                setEndFailure(null);
+              }}
+              data-testid={`rail-end-error-dismiss-${session.id}`}
+            >
+              dismiss
+            </button>
+          </span>
+        ) : armedEnd === session.id ? (
+          <span className={confirmRow} data-testid={`rail-end-confirm-${session.id}`}>
+            <span title={terminateConfirmCopy(session)}>{terminateConfirmCopy(session)}</span>
+            <button
+              type="button"
+              className={bulkButton}
+              onClick={(event) => {
+                event.stopPropagation();
+                void executeEnd(session);
+              }}
+              data-testid={`rail-end-execute-${session.id}`}
+            >
+              confirm
+            </button>
+            <button
+              type="button"
+              className={doneToggle}
+              onClick={(event) => {
+                event.stopPropagation();
+                setArmedEnd(null);
+              }}
+              data-testid={`rail-end-cancel-${session.id}`}
+            >
+              cancel
+            </button>
+          </span>
+        ) : (
+          <button
+            type="button"
+            className={endButton}
+            aria-label={`End ${session.label}`}
+            title={terminateConfirmCopy(session)}
+            onClick={(event) => {
+              event.stopPropagation();
+              setArmedEnd(session.id);
+            }}
+            data-testid={`rail-end-${session.id}`}
+          >
+            {options.dormant ? "✕" : "End"}
+          </button>
+        )}
       </div>
     );
   };
@@ -656,6 +750,22 @@ export function SessionRail({ onFocusSession, focusedSessionId, model, rollup }:
       {!pollHealth.healthy ? (
         <div className={staleBanner} data-testid="rail-poll-stale" role="status">
           catalog poll stale — {pollHealth.missedBeats} beats missed; rows may be frozen
+        </div>
+      ) : null}
+      {cleanupOutcome ? (
+        // L6 R5: the landed-cleanup route's OWN outcome — closed AND skipped (with reasons) —
+        // rendered after a bulk end instead of silently dropping the skips.
+        <div className={sprintRow} role="status" data-testid="rail-cleanup-outcome">
+          <span title={cleanupOutcomeCopy(cleanupOutcome)}>{cleanupOutcomeCopy(cleanupOutcome)}</span>
+          <button
+            type="button"
+            className={doneToggle}
+            onClick={dismissCleanupOutcome}
+            aria-label="Dismiss cleanup outcome"
+            data-testid="rail-cleanup-outcome-dismiss"
+          >
+            ✕
+          </button>
         </div>
       ) : null}
       {strip}

@@ -2,18 +2,28 @@
 // foundation wired end-to-end under jsdom — zones resolved from real DOM markers, tinykeys at the
 // window, cmdk palette pages, and the F6 focus cycle (design §5.3).
 import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { sessionCockpitStore } from "../../data/sessionCockpitStore";
+import { lifecycleNoticeStore } from "../../data/sessionLifecycle";
 import { fromTerminalSessionInfo, sessionStore } from "../../data/sessions";
 import { FLEET } from "../../test/fixtures/catalogRows";
 import { SessionsView } from "./SessionsView";
+
+// xterm cannot mount under jsdom (L6 rule: xterm stays OUT of jsdom) — the PtySurface's lazy
+// Terminal resolves to this inert stand-in; the real terminal rules live in Terminal.tsx.
+vi.mock("../Terminal", () => ({
+  Terminal: ({ sessionId }: { sessionId: string }) => (
+    <div data-testid={`mock-terminal-${sessionId}`} />
+  ),
+}));
 
 afterEach(() => {
   cleanup();
   window.localStorage.clear(); // react-resizable-panels persists layout under autoSaveId
   sessionStore.getState().hydrate([]);
-  sessionCockpitStore.setState({ focusedSessionId: null });
+  sessionCockpitStore.setState({ focusedSessionId: null, perSession: {} });
+  lifecycleNoticeStore.setState({ residuals: [], cleanupOutcome: null, sweptRetire: {} });
 });
 
 describe("scaffold structure (S2)", () => {
@@ -292,5 +302,121 @@ describe("smart-default focus + handoff + session cycling (L2: R9, F17)", () => 
     expect(sessionCockpitStore.getState().focusedSessionId).toBe("scout");
     fireEvent.keyDown(document.body, { key: "ArrowUp", code: "ArrowUp", altKey: true });
     expect(sessionCockpitStore.getState().focusedSessionId).toBe("worker-tui");
+  });
+});
+
+describe("L6: stage surface, WorkingLine, InteractionBar, stop residuals", () => {
+  beforeEach(() => {
+    sessionStore.getState().hydrate(FLEET.map(fromTerminalSessionInfo));
+    sessionCockpitStore.setState({ focusedSessionId: null });
+  });
+
+  it("mounts the real PTY surface for the focused seat (the placeholder covers only the empty stage)", async () => {
+    const { findByTestId, queryByTestId } = render(<SessionsView active />);
+    await waitFor(() => expect(sessionCockpitStore.getState().focusedSessionId).toBe("worker-tui"));
+    expect(queryByTestId("sessions-pty-placeholder")).toBeNull();
+    const surface = await findByTestId("pty-surface");
+    expect(surface.getAttribute("data-kbzone")).toBe("pty"); // the zone contract survives L6
+    await findByTestId("mock-terminal-worker-tui");
+  });
+
+  it("renders the WorkingLine in the reserved slot ONLY for a working focused seat", async () => {
+    const { getByTestId, queryByTestId } = render(<SessionsView active />);
+    await waitFor(() => expect(sessionCockpitStore.getState().focusedSessionId).toBe("worker-tui"));
+    // worker-tui is awaiting-input — no turn theater.
+    expect(queryByTestId("working-line")).toBeNull();
+    fireEvent.click(getByTestId("rail-row-worker-l4")); // working seat
+    await waitFor(() => expect(queryByTestId("working-line")).not.toBeNull());
+    expect(getByTestId("stage-working-line-slot").contains(getByTestId("working-line"))).toBe(true);
+    expect(getByTestId("working-line-verb").textContent).toBe("working");
+    const stop = getByTestId("working-line-stop") as HTMLButtonElement;
+    expect(stop.disabled).toBe(true);
+    expect(stop.getAttribute("data-disabled-reason")).toContain("UA-7");
+  });
+
+  it("renders the InteractionBar on the interaction axis: above the composer, never replacing it", async () => {
+    const { findByTestId, getByTestId } = render(<SessionsView active />);
+    await waitFor(() => expect(sessionCockpitStore.getState().focusedSessionId).toBe("worker-tui"));
+    const bar = await findByTestId("interaction-bar");
+    const composer = getByTestId("sessions-composer-placeholder");
+    expect(composer).not.toBeNull(); // the composer is never replaced
+    // DOCUMENT_POSITION_FOLLOWING = 4: the composer renders after (below) the bar.
+    expect(bar.compareDocumentPosition(composer) & 4).toBe(4);
+    expect(getByTestId("interaction-bar-prompt").textContent).toContain("harness_control_api");
+  });
+
+  it("surfaces a retired seat's stop residual as an INFORMATIONAL line — never a failure state", async () => {
+    const { getByTestId, queryByTestId } = render(<SessionsView active />);
+    await waitFor(() => expect(sessionCockpitStore.getState().focusedSessionId).toBe("worker-tui"));
+    fireEvent.click(getByTestId("rail-row-worker-l4"));
+    await waitFor(() =>
+      expect(getByTestId("rail-row-worker-l4").getAttribute("data-selected")).toBe("true"),
+    );
+    act(() => {
+      sessionStore.getState().patch("worker-l4", {
+        status: "terminated",
+        retiredAt: "2026-07-17T10:00:00Z",
+        retiredReason: "seat superseded",
+        controlRaw: { retireControlStopError: "control command queue is stopped" },
+      });
+    });
+    await waitFor(() => expect(queryByTestId("stage-handoff-note")).not.toBeNull());
+    await waitFor(() => expect(queryByTestId("stop-residual-worker-l4")).not.toBeNull());
+    const note = getByTestId("stop-residual-worker-l4");
+    expect(note.getAttribute("role")).toBe("status");
+    expect(note.textContent).toContain("informational");
+    expect(note.textContent).toContain("control command queue is stopped");
+    expect(note.textContent?.toLowerCase()).not.toContain("fail");
+  });
+
+  it("offers the UA-7-gated Stop-turn palette command that names the gap", async () => {
+    const { getByTestId, getByText } = render(<SessionsView active />);
+    await waitFor(() => expect(sessionCockpitStore.getState().focusedSessionId).toBe("worker-tui"));
+    fireEvent.click(getByTestId("rail-row-worker-l4")); // a WORKING seat — the command applies
+    fireEvent.keyDown(document.body, { key: "k", code: "KeyK", ctrlKey: true });
+    const input = getByTestId("sessions-palette-input");
+    fireEvent.change(input, { target: { value: "stop turn" } });
+    expect(getByText(/Stop turn — unavailable: interrupt requires UA-7/)).not.toBeNull();
+  });
+
+  it("Stop-turn gates on the WorkingLine's OWN grammar state — never offered when the line is absent (review finding 3)", async () => {
+    const { getByTestId, queryByText, queryByTestId } = render(<SessionsView active />);
+    await waitFor(() => expect(sessionCockpitStore.getState().focusedSessionId).toBe("worker-tui"));
+    fireEvent.click(getByTestId("rail-row-worker-l4"));
+    await waitFor(() => expect(queryByTestId("working-line")).not.toBeNull());
+    // A pending interaction yields the grammar to awaiting-input: the WorkingLine unmounts...
+    act(() => {
+      sessionStore.getState().patch("worker-l4", {
+        controlPendingInteraction: { interactionId: "ix-stop-gate", kind: "input", prompt: "?" },
+      });
+    });
+    await waitFor(() => expect(queryByTestId("working-line")).toBeNull());
+    // ...so the palette must not offer a stop control that is not on screen.
+    fireEvent.keyDown(document.body, { key: "k", code: "KeyK", ctrlKey: true });
+    const input = getByTestId("sessions-palette-input");
+    fireEvent.change(input, { target: { value: "stop turn" } });
+    expect(queryByText(/Stop turn — unavailable/)).toBeNull();
+  });
+
+  it("captures an UNFOCUSED seat's retire residual — never silently discarded (review F1, sev-3)", async () => {
+    const { queryByTestId, getByTestId } = render(<SessionsView active />);
+    await waitFor(() => expect(sessionCockpitStore.getState().focusedSessionId).toBe("worker-tui"));
+    // worker-caps was never focused; another actor retires it with a failed graceful stop.
+    act(() => {
+      sessionStore.getState().patch("worker-caps", {
+        status: "terminated",
+        retiredAt: "2026-07-17T11:00:00Z",
+        retiredReason: "seat superseded",
+        controlRaw: { retireControlStopError: "control command queue is stopped" },
+      });
+    });
+    await waitFor(() => expect(queryByTestId("stop-residual-worker-caps")).not.toBeNull());
+    const note = getByTestId("stop-residual-worker-caps");
+    expect(note.getAttribute("role")).toBe("status");
+    expect(note.textContent).toContain("informational");
+    expect(note.textContent?.toLowerCase()).not.toContain("fail");
+    // No handoff fired — focus never touched this seat.
+    expect(sessionCockpitStore.getState().focusedSessionId).toBe("worker-tui");
+    expect(queryByTestId("stage-handoff-note")).toBeNull();
   });
 });

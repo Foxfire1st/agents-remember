@@ -451,6 +451,7 @@ export function RailChat({
                 <Suspense fallback={null}>
                   <Terminal
                     sessionId={session.id}
+                    ariaLabel={`terminal: ${session.label}`}
                     onConnection={(conn) => registerConnection(session.id, conn)}
                   />
                 </Suspense>
@@ -495,6 +496,7 @@ function Pane({
         <Suspense fallback={<div className={empty}>Opening {role}…</div>}>
           <Terminal
             sessionId={session.id}
+            ariaLabel={`terminal: ${session.label}`}
             onConnection={(conn) => registerConnection(session.id, conn)}
           />
         </Suspense>

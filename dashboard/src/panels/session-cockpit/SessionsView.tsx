@@ -42,6 +42,8 @@ import {
   waitingSeats,
 } from "../../data/railModel";
 import { sessionCockpitStore, startCockpitMirror, useSessionCockpit } from "../../data/sessionCockpitStore";
+import { startRetireResidualSweep } from "../../data/sessionLifecycle";
+import { seatVisualState } from "../../data/stateGrammar";
 import {
   autoCollapseTransition,
   hasPersistedPanelLayout,
@@ -56,10 +58,15 @@ import { useSessions } from "../../data/sessions";
 import { useDashboard } from "../../data/store";
 import type { AgentPickupNode, TaskDocNode } from "../../types/projection";
 import { CommandPalette } from "./CommandPalette";
+import { InteractionBar } from "./InteractionBar";
+import { STOP_TURN_DISABLED_REASON } from "./lifecycleCopy";
+import { PtySurface } from "./PtySurface";
 import { SeatInspector } from "./SeatInspector";
 import { endLanded, SessionRail } from "./SessionRail";
 import { SessionStage } from "./SessionStage";
+import { StopResidualNotes } from "./StopResidualNotes";
 import { useKeyboardZones } from "./useKeyboardZones";
+import { WorkingLine } from "./WorkingLine";
 
 const root = css({
   position: "relative", // anchors the palette overlay inside the scope root
@@ -193,6 +200,10 @@ export function SessionsView({ active }: { active: boolean }) {
   const [railCollapsed, setRailCollapsed] = useState(false);
   const [inspectorCollapsed, setInspectorCollapsed] = useState(false);
   const [stageNarrow, setStageNarrow] = useState(false);
+  // The VISIBLE pane's real column count (L6 R8): when a pane reports, the ~80-col floor chip
+  // reflects the pane truth instead of the pixel estimate.
+  const [ptyCols, setPtyCols] = useState<number | null>(null);
+  const composerRef = useRef<HTMLTextAreaElement>(null);
   const [palette, setPalette] = useState<{ open: boolean; page: PalettePage }>({
     open: false,
     page: "commands",
@@ -213,6 +224,9 @@ export function SessionsView({ active }: { active: boolean }) {
   // Cockpit's own subscription, so this never double-polls.
   useEffect(() => startCatalogPollDriver(), []);
   useEffect(() => startCockpitMirror(), []);
+  // Review F1 (sev-3): retire residuals are captured for EVERY row — focus-independent — so an
+  // unfocused seat's retireControlStopError still surfaces (and resurfaces after a reload).
+  useEffect(() => startRetireResidualSweep(), []);
 
   const focused = sessions.find((session) => session.id === focusedSessionId);
 
@@ -261,6 +275,8 @@ export function SessionsView({ active }: { active: boolean }) {
       const why = current?.landedReason ?? current?.retiredReason;
       const word = status === "landed" ? "landed" : status === "gone" ? "ended" : "retired";
       setHandoff(`${current?.label ?? previous.id} ${word}${why ? ` — ${why}` : ""} · focus handed off`);
+      // Retire residuals are NOT captured here: the focus-independent sweep
+      // (startRetireResidualSweep) owns that for every row, focused or not (review F1).
       sessionCockpitStore.getState().setFocusedSession(smartDefaultFocus(sessions));
     } else if (focusedSessionId === null) {
       const next = smartDefaultFocus(sessions);
@@ -297,6 +313,24 @@ export function SessionsView({ active }: { active: boolean }) {
           if (target) focusSession(target);
         },
       }),
+      // L6 R6 (design §9.7): Stop turn exists, UA-7-gated — the palette names the gap instead
+      // of hiding the command; running it reveals the welded (disabled) control + its reason.
+      registry.register({
+        id: "turn.stop",
+        title: `Stop turn — unavailable: ${STOP_TURN_DISABLED_REASON}`,
+        keywords: ["stop", "interrupt", "cancel", "turn"],
+        // The gate matches the WorkingLine's OWN render condition (review finding 3): the
+        // grammar yields working to awaiting-input/failed, and the command must never offer a
+        // stop control that is not on screen.
+        when: () => focused !== undefined && seatVisualState(focused).key === "working",
+        run: () => {
+          window.requestAnimationFrame(() =>
+            rootRef.current
+              ?.querySelector<HTMLElement>('[data-testid="working-line-stop"]')
+              ?.focus(),
+          );
+        },
+      }),
     ];
     const allLanded = [
       ...model.masters.flatMap((master) => master.completed),
@@ -330,14 +364,23 @@ export function SessionsView({ active }: { active: boolean }) {
           id: `triage.${seat.id}`,
           title: `Answer pending question — ${seat.label}${preview ? `: “${preview}”` : ""}`,
           keywords: ["answer", "question", "pending", "input"],
-          run: () => focusSession(seat.id),
+          // L6 R4: answering was the user's explicit intent — focus the seat's InteractionBar
+          // (the palette invoked it; this is the invoked action, not a focus steal).
+          run: () => {
+            focusSession(seat.id);
+            window.requestAnimationFrame(() =>
+              rootRef.current
+                ?.querySelector<HTMLElement>('[data-testid="interaction-bar"] button')
+                ?.focus(),
+            );
+          },
         }),
       );
     }
     return () => {
       for (const dispose of disposers) dispose();
     };
-  }, [registry, model, rollup, sessions, treeView, focusSession]);
+  }, [registry, model, rollup, sessions, treeView, focused, focusSession]);
 
   const focusSelector = useCallback((selector: string) => {
     const target = rootRef.current?.querySelector<HTMLElement>(selector);
@@ -558,28 +601,49 @@ export function SessionsView({ active }: { active: boolean }) {
               cockpit={focused ? perSession[focused.id] : undefined}
               handoff={handoff}
               headerExtra={
-                stageNarrow ? (
+                // R8: with a live pane the chip reflects the pane's REAL column count; the pixel
+                // estimate only covers the pane-less stage.
+                (ptyCols !== null ? ptyCols < PTY_MIN_COLS : stageNarrow) ? (
                   <span
                     className={floorChip}
                     data-testid="sessions-pty-floor-chip"
-                    title={`The stage is narrower than ~${PTY_MIN_COLS} columns — a squeezed hosted TUI is a layout fact, not harness misbehavior.`}
+                    title={
+                      ptyCols !== null
+                        ? `The pane is ${ptyCols} columns wide (< ${PTY_MIN_COLS}) — a squeezed hosted TUI is a layout fact, not harness misbehavior.`
+                        : `The stage is narrower than ~${PTY_MIN_COLS} columns — a squeezed hosted TUI is a layout fact, not harness misbehavior.`
+                    }
                   >
-                    pane narrower than ~{PTY_MIN_COLS} cols
+                    {ptyCols !== null
+                      ? `pane ${ptyCols} cols (< ${PTY_MIN_COLS})`
+                      : `pane narrower than ~${PTY_MIN_COLS} cols`}
                   </span>
                 ) : null
               }
+              workingLine={
+                focused ? (
+                  <WorkingLine session={focused} cockpit={perSession[focused.id]} />
+                ) : undefined
+              }
             >
-              <div
-                className={ptyPlaceholder}
-                data-kbzone="pty"
-                data-testid="sessions-pty-placeholder"
-                tabIndex={-1}
-                aria-label="Terminal placeholder"
-              >
-                PTY surface lands here (L6) — every key passes to the harness except the reserved
-                set (? lists it); F6 exits to chrome
-              </div>
+              <StopResidualNotes />
+              {focused ? (
+                <PtySurface focused={focused} onVisibleCols={setPtyCols} />
+              ) : (
+                <div
+                  className={ptyPlaceholder}
+                  data-kbzone="pty"
+                  data-testid="sessions-pty-placeholder"
+                  tabIndex={-1}
+                  aria-label="Terminal placeholder"
+                >
+                  no focused session — the terminal renders here once a seat is focused; every
+                  key passes to the harness except the reserved set (? lists it); F6 exits to
+                  chrome
+                </div>
+              )}
+              {focused ? <InteractionBar session={focused} composerRef={composerRef} /> : null}
               <textarea
+                ref={composerRef}
                 className={composerBox}
                 data-kbzone="composer"
                 data-focus-target

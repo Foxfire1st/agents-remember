@@ -67,6 +67,18 @@ export interface PerSessionCockpit {
   freshness: { ptyWs: "none" | "connected" | "reconnecting" | "dropped"; lastOutputAt: number | null };
   /** The cockpit's OWN queued submits (a list, not a chip — F13); whole truth is UA-8-gated. */
   queue: QueuedSubmit[];
+  /** InteractionBar round-trip state (L6 R4 / design §7.3 F7) — absent when nothing in flight. */
+  interactionAnswer?: InteractionAnswerState;
+}
+
+/** One pending-interaction answer round-trip: in-flight → verbatim error | answered-waiting. */
+export interface InteractionAnswerState {
+  interactionId: string;
+  inflight: boolean;
+  /** The POST failure, verbatim (never silent) — cleared by retry. */
+  error?: string;
+  /** Set on 202: the bar renders "answered — waiting for the agent" until the row clears. */
+  answeredAt?: number;
 }
 
 const emptyPerSession = (): PerSessionCockpit => ({
@@ -133,6 +145,7 @@ export interface SessionCockpitState {
   setPtyWs: (id: string, ptyWs: PerSessionCockpit["freshness"]["ptyWs"]) => void;
   recordPtyOutput: (id: string, at: number) => void;
   recordTurnObservation: (id: string, turnState: string | undefined, at: number) => void;
+  setInteractionAnswer: (id: string, answer: InteractionAnswerState | undefined) => void;
 }
 
 function withPerSession(
@@ -274,6 +287,10 @@ export const sessionCockpitStore = createStore<SessionCockpitState>((set) => ({
           },
         };
       }),
+    ),
+  setInteractionAnswer: (id, answer) =>
+    set((state) =>
+      withPerSession(state, id, (current) => ({ ...current, interactionAnswer: answer })),
     ),
 }));
 
