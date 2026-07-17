@@ -5,9 +5,13 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Awaitable, Callable, Mapping
 
-from agents_remember.errors import HarnessAdapterDisconnectedError, HarnessControlError
+from agents_remember.errors import (
+    HarnessAdapterBusyError,
+    HarnessAdapterDisconnectedError,
+    HarnessControlError,
+)
 from agents_remember.serving.harness_capabilities import CapabilitySnapshot, SetResult
-from agents_remember.serving.pi_rpc_process import PiRpcTransport
+from agents_remember.serving.pi_rpc_process import PiRpcTransport, WriteGuard
 from agents_remember.serving.pi_rpc_protocol import (
     PiSessionState,
     parse_pi_response,
@@ -49,7 +53,9 @@ class PiRpcConfiguration:
         self._timeout_seconds = timeout_seconds
         self._lock = asyncio.Lock()
 
-    async def set_model(self, model_key: str) -> SetResult:
+    async def set_model(
+        self, model_key: str, *, before_write: WriteGuard | None = None
+    ) -> SetResult:
         identity = _provider_model(model_key)
         if identity is None:
             return _unsupported(
@@ -63,6 +69,7 @@ class PiRpcConfiguration:
                 purpose="model",
                 command="set_model",
                 values={"provider": provider, "modelId": model_id},
+                before_write=before_write,
             )
         if isinstance(transaction, SetResult):
             return transaction
@@ -81,7 +88,9 @@ class PiRpcConfiguration:
             detail="Pi correlated set_model success with exact get_state model readback",
         )
 
-    async def set_effort(self, effort: str) -> SetResult:
+    async def set_effort(
+        self, effort: str, *, before_write: WriteGuard | None = None
+    ) -> SetResult:
         capabilities = self._capabilities()
         selected = next(
             (
@@ -108,6 +117,7 @@ class PiRpcConfiguration:
                 purpose="thinking",
                 command="set_thinking_level",
                 values={"level": effort},
+                before_write=before_write,
             )
         if isinstance(transaction, SetResult):
             return transaction
@@ -137,12 +147,14 @@ class PiRpcConfiguration:
         purpose: str,
         command: str,
         values: Mapping[str, object],
+        before_write: WriteGuard | None,
     ) -> tuple[PiSessionState, CapabilitySnapshot] | SetResult:
         try:
             async with asyncio.timeout(self._timeout_seconds):
                 request_id = self._request_id(command)
                 frame = await self._transport().request(
-                    {"id": request_id, "type": command, **dict(values)}
+                    {"id": request_id, "type": command, **dict(values)},
+                    before_write=before_write,
                 )
                 response = parse_pi_response(frame, request_id=request_id, command=command)
                 if response["success"] is False:
@@ -160,6 +172,8 @@ class PiRpcConfiguration:
                 requested,
                 f"Pi {purpose} mutation lost its correlated response or readback",
             )
+        except HarnessAdapterBusyError:
+            raise
         except HarnessControlError as exc:
             return _unknown(
                 requested,

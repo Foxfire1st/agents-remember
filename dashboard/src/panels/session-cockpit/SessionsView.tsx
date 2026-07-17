@@ -3,8 +3,8 @@
 // <~1100px, rail <~900px — both reopenable) and the ~80-col PTY floor hint chip. L2 fills the
 // rail (SessionRail — ruled role hierarchy + fleet attention), the stage container + HeaderStrip
 // (empty ModelEffortControl slot for L4, reserved WorkingLine slot for L6), and the focused-seat
-// inspector card (L7 replaces it with the tabbed inspector). The PTY/composer placeholders stay —
-// they are the keyboard-zone anchors L6/L5 fill. The view root carries [data-view="sessions"]:
+// inspector card (L7 replaces it with the tabbed inspector). The PTY and reliable composer are
+// keyboard-zone anchors. The view root carries [data-view="sessions"]:
 // the WebTUI scope root (S1) and the keyboard layer's home.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -74,6 +74,7 @@ import { SetOutcomeToasts } from "./SetOutcomeToasts";
 import { StopResidualNotes } from "./StopResidualNotes";
 import { useKeyboardZones } from "./useKeyboardZones";
 import { WorkingLine } from "./WorkingLine";
+import { SessionComposer, type SessionComposerHandle } from "../SessionComposer";
 
 const root = css({
   position: "relative", // anchors the palette overlay inside the scope root
@@ -131,25 +132,6 @@ const ptyPlaceholder = css({
   borderStyle: "solid",
   borderColor: "grid",
   borderRadius: "2px",
-  _focusVisible: { outlineWidth: "1px", outlineStyle: "solid", outlineColor: "amber", outlineOffset: "1px" },
-});
-const composerHint = css({
-  fontSize: "0.66rem",
-  color: "amber",
-  flexShrink: 0,
-});
-const composerBox = css({
-  font: "inherit",
-  fontSize: "0.8rem",
-  minHeight: "44px",
-  resize: "none",
-  background: "bg",
-  color: "ink",
-  borderWidth: "1px",
-  borderStyle: "solid",
-  borderColor: "grid",
-  borderRadius: "2px",
-  padding: "0.4rem 0.55rem",
   _focusVisible: { outlineWidth: "1px", outlineStyle: "solid", outlineColor: "amber", outlineOffset: "1px" },
 });
 const statusLine = css({
@@ -215,10 +197,15 @@ export function SessionsView({ active }: { active: boolean }) {
   // The VISIBLE pane's real column count (L6 R8): when a pane reports, the ~80-col floor chip
   // reflects the pane truth instead of the pixel estimate.
   const [ptyCols, setPtyCols] = useState<number | null>(null);
-  const composerRef = useRef<HTMLTextAreaElement>(null);
-  const [palette, setPalette] = useState<{ open: boolean; page: PalettePage }>({
+  const composerRef = useRef<SessionComposerHandle>(null);
+  const [palette, setPalette] = useState<{
+    open: boolean;
+    page: PalettePage;
+    initialQuery: string;
+  }>({
     open: false,
     page: "commands",
+    initialQuery: "",
   });
 
   const registry = useMemo(() => registerDefaultCommands(createCommandRegistry()), []);
@@ -472,18 +459,18 @@ export function SessionsView({ active }: { active: boolean }) {
     [focusRegion, inspectorCollapsed, railCollapsed],
   );
 
-  const openPalette = useCallback((page: PalettePage = "commands") => {
+  const openPalette = useCallback((page: PalettePage = "commands", initialQuery = "") => {
     const activeElement = document.activeElement;
     setPalette((current) => {
       // Keep the ORIGINAL invoker across an in-palette page switch so close returns focus there.
       if (!current.open)
         paletteInvokerRef.current = activeElement instanceof HTMLElement ? activeElement : null;
-      return { open: true, page };
+      return { open: true, page, initialQuery };
     });
   }, []);
 
   const closePalette = useCallback(() => {
-    setPalette({ open: false, page: "commands" });
+    setPalette({ open: false, page: "commands", initialQuery: "" });
     // R7: palette close returns focus to its invoker (when it is still in the document).
     const invoker = paletteInvokerRef.current;
     if (invoker?.isConnected) invoker.focus();
@@ -520,11 +507,12 @@ export function SessionsView({ active }: { active: boolean }) {
           focusSession(next);
         },
         // L4 R7: cycle the REQUESTED effort through the live menu — no dialog; the chips carry
-        // the async honesty story. L5 replaces submitComposer.
+        // the async honesty story.
         cycleEffort: (direction) => {
           if (focusedSessionId) cycleEffortRequested(focusedSessionId, direction);
         },
-        submitComposer: () => {},
+        submitComposer: () => composerRef.current?.submit(),
+        popBackComposer: () => composerRef.current?.popBack(),
       },
     }),
     [
@@ -717,24 +705,21 @@ export function SessionsView({ active }: { active: boolean }) {
                   chrome
                 </div>
               )}
-              {focused ? <InteractionBar session={focused} composerRef={composerRef} /> : null}
-              {/* L4 R2: the composer-hint slot — a queued set promotes on the NEXT turn, and a
-                  submit is one way to start one. */}
-              {focused && queuedComposerHint(perSession[focused.id]) ? (
-                <span className={composerHint} data-testid="composer-queued-set-hint">
-                  {queuedComposerHint(perSession[focused.id])}
-                </span>
+              {focused ? (
+                <InteractionBar
+                  session={focused}
+                  composerRef={composerRef}
+                />
               ) : null}
-              <textarea
-                ref={composerRef}
-                className={composerBox}
-                data-kbzone="composer"
-                data-focus-target
-                data-testid="sessions-composer-placeholder"
-                aria-label="Composer placeholder"
-                rows={2}
-                placeholder="composer lands here (L5) — ctrl+↵ send (stub) · esc → stage header · / at line start opens the palette"
-              />
+              {focused ? (
+                <SessionComposer
+                  ref={composerRef}
+                  session={focused}
+                  queuedSetHint={queuedComposerHint(perSession[focused.id])}
+                  onSlashAtLineStart={() => openPalette("commands", "/")}
+                  onEscape={() => focusSelector(STAGE_HEADER_SELECTOR)}
+                />
+              ) : null}
             </SessionStage>
           </section>
         </Panel>
@@ -801,10 +786,11 @@ export function SessionsView({ active }: { active: boolean }) {
       <CommandPalette
         open={palette.open}
         page={palette.page}
+        initialQuery={palette.initialQuery}
         registry={registry}
         getContext={getContext}
         onClose={closePalette}
-        onPage={(page) => setPalette({ open: true, page })}
+        onPage={(page) => setPalette({ open: true, page, initialQuery: "" })}
       />
       <LaunchFlow
         open={launch.open}

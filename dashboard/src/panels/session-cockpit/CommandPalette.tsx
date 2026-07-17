@@ -95,11 +95,19 @@ const pageHint = css({
   padding: "0.25rem 0.6rem",
 });
 
+function paletteFilter(value: string, search: string, keywords?: string[]): number {
+  const query = (search.startsWith("/") ? search.slice(1) : search).trim().toLocaleLowerCase();
+  if (!query) return 1;
+  const haystack = [value, ...(keywords ?? [])].join(" ").toLocaleLowerCase();
+  return query.split(/\s+/).every((term) => haystack.includes(term)) ? 1 : 0;
+}
+
 export function CommandPalette({
   open,
   page,
   registry,
   getContext,
+  initialQuery,
   onClose,
   onPage,
 }: {
@@ -107,14 +115,15 @@ export function CommandPalette({
   page: PalettePage;
   registry: CommandRegistry;
   getContext: () => CommandContext;
+  initialQuery?: string;
   onClose: () => void;
   onPage: (page: PalettePage) => void;
 }) {
   const [query, setQuery] = useState("");
-  // A fresh query per open — the palette is transient, never a standing filter.
+  // A fresh query per open — slash-to-palette can seed "/", otherwise it starts empty.
   useEffect(() => {
-    if (open) setQuery("");
-  }, [open]);
+    if (open) setQuery(initialQuery ?? "");
+  }, [initialQuery, open]);
 
   if (!open) return null;
 
@@ -149,7 +158,12 @@ export function CommandPalette({
         className={cx(box, "sessions__palette")}
         onClick={(event) => event.stopPropagation()}
       >
-        <Command label="Command palette" onKeyDown={onKeyDown} shouldFilter={page === "commands"}>
+        <Command
+          label="Command palette"
+          onKeyDown={onKeyDown}
+          shouldFilter={page === "commands"}
+          filter={paletteFilter}
+        >
           <Command.Input
             autoFocus
             value={query}

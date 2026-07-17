@@ -15,7 +15,12 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Protocol, cast
 
-from agents_remember.errors import HarnessControlClientError, HarnessControlError
+from agents_remember.errors import (
+    HarnessBridgeEpochMismatchError,
+    HarnessControlClientError,
+    HarnessControlError,
+    HarnessRequestConflictError,
+)
 from agents_remember.serving.harness_capabilities import (
     CapabilitySnapshot,
     SetResult,
@@ -33,8 +38,14 @@ from agents_remember.serving.harness_control_models import (
     PendingInteraction,
     ReconciliationResult,
     ReconciliationState,
+    SubmissionAuthorityDescriptor,
+    SubmissionLifecycleState,
+    SubmissionLookup,
     SubmissionReceipt,
     SubmissionSource,
+    SubmissionStatus,
+    SubmissionStatusBatch,
+    WithdrawalResult,
 )
 
 SET_CONTROL_TIMEOUT_SECONDS = 35.0
@@ -88,6 +99,51 @@ def read_control_capabilities(entry: ControlledSession) -> CapabilitySnapshot:
         raise HarnessControlError(f"control capability response is invalid: {exc}") from exc
 
 
+def read_submission_authority(entry: ControlledSession) -> SubmissionAuthorityDescriptor:
+    result = request_control(entry, "submission-authority")
+    if not isinstance(result, Mapping):
+        raise HarnessControlError("submission authority response must be an object")
+    return SubmissionAuthorityDescriptor(bridge_epoch=_required_text(result, "bridgeEpoch"))
+
+
+def read_submission_status(
+    entry: ControlledSession,
+    *,
+    expected_bridge_epoch: str,
+    request_ids: tuple[str, ...],
+) -> SubmissionStatusBatch:
+    result = request_control(
+        entry,
+        "submission-status",
+        {
+            "expectedBridgeEpoch": expected_bridge_epoch,
+            "requestIds": list(request_ids),
+        },
+    )
+    return _submission_status_batch(
+        result,
+        expected_bridge_epoch=expected_bridge_epoch,
+        request_ids=request_ids,
+    )
+
+
+def withdraw_control_submission(
+    entry: ControlledSession,
+    *,
+    expected_bridge_epoch: str,
+    request_id: str,
+) -> WithdrawalResult:
+    result = request_control(
+        entry,
+        "withdraw",
+        {
+            "expectedBridgeEpoch": expected_bridge_epoch,
+            "requestId": request_id,
+        },
+    )
+    return _withdrawal_result(result, request_id=request_id)
+
+
 def set_control_model(entry: ControlledSession, model_key: str) -> SetResult:
     return _set_control_value(entry, "set-model", "modelKey", model_key)
 
@@ -103,18 +159,22 @@ def submit_control_prompt(
     source: SubmissionSource,
     request_id: str,
     submitted_at: str | None = None,
+    expected_bridge_epoch: str | None = None,
 ) -> SubmissionReceipt:
     stamp = submitted_at or datetime.now(UTC).isoformat()
+    payload: dict[str, object] = {
+        "requestId": request_id,
+        "source": source,
+        "text": text,
+        "submittedAt": stamp,
+    }
+    if expected_bridge_epoch is not None:
+        payload["expectedBridgeEpoch"] = expected_bridge_epoch
     try:
         result = request_control(
             entry,
             "submit",
-            {
-                "requestId": request_id,
-                "source": source,
-                "text": text,
-                "submittedAt": stamp,
-            },
+            payload,
         )
     except HarnessControlClientError as exc:
         if not exc.may_have_sent:
@@ -124,22 +184,33 @@ def submit_control_prompt(
             acceptance="unknown",
             submitted_at=stamp,
             detail=f"control submission response was lost after request bytes were sent: {exc}",
+            bridge_epoch=expected_bridge_epoch,
         )
     try:
-        return _submission_receipt(result, request_id=request_id)
+        receipt = _submission_receipt(result, request_id=request_id)
+        if expected_bridge_epoch is not None and receipt.bridge_epoch != expected_bridge_epoch:
+            raise HarnessControlError("control submission response bridge epoch mismatch")
+        return receipt
     except HarnessControlError as exc:
         return SubmissionReceipt(
             request_id=request_id,
             acceptance="unknown",
             submitted_at=stamp,
             detail=f"control submission returned incoherent post-dispatch evidence: {exc}",
+            bridge_epoch=expected_bridge_epoch,
         )
 
 
 def reconcile_control_prompt(
-    entry: ControlledSession, request_id: str
+    entry: ControlledSession,
+    request_id: str,
+    *,
+    expected_bridge_epoch: str | None = None,
 ) -> ReconciliationResult:
-    result = request_control(entry, "reconcile", {"requestId": request_id})
+    payload: dict[str, object] = {"requestId": request_id}
+    if expected_bridge_epoch is not None:
+        payload["expectedBridgeEpoch"] = expected_bridge_epoch
+    result = request_control(entry, "reconcile", payload)
     if not isinstance(result, Mapping):
         raise HarnessControlError("control reconciliation response must be an object")
     state = result.get("state")
@@ -148,6 +219,9 @@ def reconcile_control_prompt(
     response_request = _required_text(result, "requestId")
     if response_request != request_id:
         raise HarnessControlError("control reconciliation response request id mismatch")
+    bridge_epoch = _optional_text(result, "bridgeEpoch")
+    if expected_bridge_epoch is not None and bridge_epoch != expected_bridge_epoch:
+        raise HarnessControlError("control reconciliation response bridge epoch mismatch")
     return ReconciliationResult(
         request_id=response_request,
         state=cast(ReconciliationState, state),
@@ -155,6 +229,8 @@ def reconcile_control_prompt(
         vendor_correlation_id=_optional_text(result, "vendorCorrelationId"),
         detail=_optional_text(result, "detail"),
         raw=_object(result.get("raw")),
+        bridge_epoch=bridge_epoch,
+        submission_state=_submission_state(result.get("submissionState"), optional=True),
     )
 
 
@@ -275,7 +351,15 @@ def _decode_control_response(response: bytes) -> object:
             "control endpoint response must be an object", may_have_sent=True
         )
     if raw.get("ok") is not True:
-        raise HarnessControlError(str(raw.get("error") or "control request failed"))
+        detail = str(raw.get("error") or "control request failed")
+        if raw.get("status") == "bridge-epoch-mismatch":
+            raise HarnessBridgeEpochMismatchError(
+                _required_text(raw, "expectedBridgeEpoch"),
+                _required_text(raw, "actualBridgeEpoch"),
+            )
+        if raw.get("status") == "request-id-conflict":
+            raise HarnessRequestConflictError(detail)
+        raise HarnessControlError(detail)
     return raw.get("result")
 
 
@@ -334,7 +418,98 @@ def _submission_receipt(result: object, *, request_id: str) -> SubmissionReceipt
         accepted_at=_optional_text(result, "acceptedAt"),
         detail=_optional_text(result, "detail"),
         raw=_object(result.get("raw")),
+        bridge_epoch=_optional_text(result, "bridgeEpoch"),
     )
+
+
+def _submission_status_batch(
+    result: object,
+    *,
+    expected_bridge_epoch: str,
+    request_ids: tuple[str, ...],
+) -> SubmissionStatusBatch:
+    if not isinstance(result, Mapping):
+        raise HarnessControlError("submission status response must be an object")
+    bridge_epoch = _required_text(result, "bridgeEpoch")
+    if bridge_epoch != expected_bridge_epoch:
+        raise HarnessControlError("submission status response bridge epoch mismatch")
+    raw_submissions = result.get("submissions")
+    if not isinstance(raw_submissions, list) or len(raw_submissions) != len(request_ids):
+        raise HarnessControlError("submission status response has the wrong result count")
+    lookups: list[SubmissionLookup] = []
+    for expected_id, raw_lookup in zip(request_ids, raw_submissions, strict=True):
+        if not isinstance(raw_lookup, Mapping):
+            raise HarnessControlError("submission lookup must be an object")
+        request_id = _required_text(raw_lookup, "requestId")
+        if request_id != expected_id:
+            raise HarnessControlError("submission lookup request id or order mismatch")
+        outcome = raw_lookup.get("outcome")
+        if outcome == "not-found":
+            lookups.append(SubmissionLookup(request_id=request_id, outcome="not-found"))
+            continue
+        if outcome != "found" or not isinstance(raw_lookup.get("submission"), Mapping):
+            raise HarnessControlError("submission lookup has invalid outcome or evidence")
+        raw_status = cast(Mapping[str, object], raw_lookup["submission"])
+        withdrawable = raw_status.get("withdrawable")
+        if not isinstance(withdrawable, bool):
+            raise HarnessControlError("submission status withdrawable must be boolean")
+        state = _submission_state(raw_status.get("state"))
+        if state is None:
+            raise HarnessControlError("found submission status requires lifecycle state")
+        lookups.append(
+            SubmissionLookup(
+                request_id=request_id,
+                outcome="found",
+                submission=SubmissionStatus(
+                    request_id=request_id,
+                    state=state,
+                    submitted_at=_required_text(raw_status, "submittedAt"),
+                    updated_at=_required_text(raw_status, "updatedAt"),
+                    accepted_at=_optional_text(raw_status, "acceptedAt"),
+                    withdrawable=withdrawable,
+                    detail=_optional_text(raw_status, "detail"),
+                ),
+            )
+        )
+    return SubmissionStatusBatch(bridge_epoch=bridge_epoch, submissions=tuple(lookups))
+
+
+def _withdrawal_result(result: object, *, request_id: str) -> WithdrawalResult:
+    if not isinstance(result, Mapping):
+        raise HarnessControlError("withdrawal response must be an object")
+    response_id = _required_text(result, "requestId")
+    if response_id != request_id:
+        raise HarnessControlError("withdrawal response request id mismatch")
+    outcome = result.get("outcome")
+    if outcome not in {"withdrawn", "not-withdrawable", "not-found"}:
+        raise HarnessControlError("withdrawal response has invalid outcome")
+    return WithdrawalResult(
+        request_id=request_id,
+        outcome=outcome,
+        state=_submission_state(result.get("state"), optional=True),
+        withdrawn_at=_optional_text(result, "withdrawnAt"),
+        detail=_optional_text(result, "detail"),
+    )
+
+
+def _submission_state(
+    value: object,
+    *,
+    optional: bool = False,
+) -> SubmissionLifecycleState | None:
+    if value is None and optional:
+        return None
+    if value not in {
+        "queued",
+        "dispatching",
+        "delivered",
+        "withdrawn",
+        "unknown",
+        "rejected",
+        "unsupported",
+    }:
+        raise HarnessControlError("control response has invalid submission lifecycle state")
+    return cast(SubmissionLifecycleState, value)
 
 
 def _read_line(client: socket.socket) -> bytes:

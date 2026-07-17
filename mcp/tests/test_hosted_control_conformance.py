@@ -33,6 +33,7 @@ from agents_remember.serving.harness_control_models import (
     AdapterHandshake,
     AdapterSnapshot,
     ControlIdentity,
+    ControlOperationRef,
     InteractionResponse,
     LaunchSpec,
     PendingInteraction,
@@ -55,6 +56,7 @@ class _Adapter:
         self.acceptances: deque[AcceptanceState] = deque()
         self.disconnect_next = False
         self.reconciliations: dict[str, ReconciliationResult] = {}
+        self.submissions: list[PromptRequest] = []
         self.responses: list[InteractionResponse] = []
         self.stop_modes: list[str] = []
 
@@ -92,14 +94,23 @@ class _Adapter:
     def subscribe(self) -> AsyncIterator[AdapterEvent]:
         return self._subscribe()
 
-    async def set_model(self, model_key: str) -> SetResult:
+    async def preflight_operation(self, operation: ControlOperationRef) -> None:
+        del operation
+
+    async def set_model(
+        self, model_key: str, *, operation: ControlOperationRef | None = None
+    ) -> SetResult:
+        del operation
         return SetResult(
             ok=True,
             acceptance="immediate",
             requested_value=model_key,
         )
 
-    async def set_effort(self, effort: str) -> SetResult:
+    async def set_effort(
+        self, effort: str, *, operation: ControlOperationRef | None = None
+    ) -> SetResult:
+        del operation
         return SetResult(
             ok=True,
             acceptance="immediate",
@@ -107,6 +118,7 @@ class _Adapter:
         )
 
     async def submit(self, request: PromptRequest) -> SubmissionReceipt:
+        self.submissions.append(request)
         if self.disconnect_next:
             self.disconnect_next = False
             raise HarnessAdapterDisconnectedError(
@@ -207,7 +219,6 @@ class HostedControlConformanceTests(unittest.IsolatedAsyncioTestCase):
                     self.assertEqual(snapshot.control, "ready")
                     self.assertEqual(snapshot.vendor_session_id, f"{harness_id}-vendor-session")
 
-                    adapter.acceptances.extend(("immediate", "queued"))
                     first = await asyncio.to_thread(
                         submit_control_prompt,
                         entry,
@@ -223,6 +234,8 @@ class HostedControlConformanceTests(unittest.IsolatedAsyncioTestCase):
                         request_id=f"{harness_id}-queued",
                     )
                     self.assertEqual((first.acceptance, second.acceptance), ("immediate", "queued"))
+                    first_operation = adapter.submissions[-1].operation
+                    assert first_operation is not None
 
                     assert adapter.current is not None
                     blocked = replace(
@@ -256,6 +269,7 @@ class HostedControlConformanceTests(unittest.IsolatedAsyncioTestCase):
                         response="allow",
                     )
                     self.assertEqual(adapter.responses[-1].response, "allow")
+                    self.assertEqual(adapter.responses[-1].operation, first_operation)
 
                     completed = replace(
                         adapter.current,
@@ -282,14 +296,30 @@ class HostedControlConformanceTests(unittest.IsolatedAsyncioTestCase):
                                     ),
                                 ),
                             ),
+                            operation=first_operation,
                         )
                     )
-                    await asyncio.sleep(0)
+                    while len(adapter.submissions) < 2:
+                        await asyncio.sleep(0)
                     transcript = await asyncio.to_thread(read_control_transcript, entry)
                     terminal_result = transcript[-1]["terminalResult"]
                     self.assertIsInstance(terminal_result, dict)
                     assert isinstance(terminal_result, dict)
                     self.assertEqual(terminal_result["outcome"], "completed")
+
+                    second_operation = adapter.submissions[-1].operation
+                    assert second_operation is not None
+                    adapter.emit(
+                        AdapterEvent(
+                            sequence=3,
+                            kind="completed",
+                            identity=completed.identity,
+                            created_at="2026-07-14T10:02:30+00:00",
+                            snapshot=completed,
+                            operation=second_operation,
+                        )
+                    )
+                    await asyncio.sleep(0)
 
                     adapter.disconnect_next = True
                     unknown = await asyncio.to_thread(

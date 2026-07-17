@@ -1,8 +1,11 @@
 import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { sessionStore } from "../data/sessions";
-import type { TaskDocNode } from "../types/projection";
+import { sessionCockpitStore } from "../data/sessionCockpitStore";
+import { fromTerminalSessionInfo, sessionStore } from "../data/sessions";
+import { dashboardStore } from "../data/store";
+import { L6_INTERACTION_FREETEXT } from "../test/fixtures/catalogRows";
+import type { LifecycleProjection, TaskDocNode } from "../types/projection";
 import { Chats } from "./Chats";
 
 const LEAF_KEY = "agents-remember/260628_operations-integration/260628-L5";
@@ -87,7 +90,68 @@ afterEach(() => {
   vi.unstubAllGlobals();
   window.localStorage.clear();
   sessionStore.setState({ sessions: [], activeId: null, count: 0 });
+  sessionCockpitStore.setState({ perSession: {} });
+  dashboardStore.setState({ lifecycles: {} });
   FakeBroadcastChannel.reset();
+});
+
+describe("Chats shared-composer interaction invariant (L5 F3)", () => {
+  it("routes a pending non-choice answer through the gate and never /submit", async () => {
+    const session = fromTerminalSessionInfo({
+      ...L6_INTERACTION_FREETEXT,
+      id: "chats-answer",
+      lifecycleId: "lc-chats-answer",
+      controlPendingInteraction: {
+        ...L6_INTERACTION_FREETEXT.controlPendingInteraction,
+        interactionId: "ix-chats-answer",
+      },
+    });
+    sessionStore.getState().hydrate([session]);
+    dashboardStore.setState({
+      lifecycles: {
+        "lc-chats-answer": {
+          id: "lc-chats-answer",
+          gate: {
+            id: "gate-chats-answer",
+            kind: "agent-question",
+            state: "open",
+            decisions: [],
+            ts: "2026-07-17T09:00:00Z",
+            packet: {
+              adapterInteraction: {
+                sessionId: session.id,
+                interactionId: "ix-chats-answer",
+              },
+            },
+          },
+        } as unknown as LifecycleProjection,
+      },
+    });
+    const urls: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        urls.push(url);
+        if (url === "/api/harnesses") {
+          return { ok: true, json: async () => ({ harnesses: [] }) } as Response;
+        }
+        if (url === "/api/terminal/sessions") {
+          return { ok: true, json: async () => ({ sessions: [] }) } as Response;
+        }
+        if (url === "/api/actions/approve") {
+          return { status: 202, text: async () => "" } as Response;
+        }
+        throw new Error(`unexpected URL ${url}`);
+      }),
+    );
+    const { findByTestId } = render(<Chats />);
+    await findByTestId("session-composer-answer-mode");
+    act(() => sessionCockpitStore.getState().setComposerDraft(session.id, "start from ar/base"));
+    fireEvent.click(await findByTestId("session-composer-send"));
+    await waitFor(() => expect(urls).toContain("/api/actions/approve"));
+    expect(urls.some((url) => url.endsWith("/submit"))).toBe(false);
+  });
 });
 
 // These render-only tests deliberately never click a launch button: opening a session would

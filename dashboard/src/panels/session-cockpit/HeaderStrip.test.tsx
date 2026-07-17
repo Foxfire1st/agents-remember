@@ -60,6 +60,7 @@ describe("HeaderStrip (R10)", () => {
           turnClock: { workingSince: null },
           freshness: { ptyWs: "connected", lastOutputAt: now - 3000 },
           queue: [],
+          submitHistory: [],
         }}
       />,
     );

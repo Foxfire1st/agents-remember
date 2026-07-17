@@ -12,7 +12,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
 
-from agents_remember.errors import HarnessControlError
+from agents_remember.errors import (
+    HarnessBridgeEpochMismatchError,
+    HarnessControlError,
+    HarnessRequestConflictError,
+)
 from agents_remember.serving.harness_capabilities import (
     capability_snapshot_json,
     set_result_json,
@@ -21,6 +25,7 @@ from agents_remember.serving.harness_control_bridge import HarnessControlBridge
 from agents_remember.serving.harness_control_models import (
     CONTROL_PROTOCOL_VERSION,
     ControlIdentity,
+    ControlOperationKind,
     InteractionResponse,
     PromptRequest,
     ReconciliationState,
@@ -29,8 +34,12 @@ from agents_remember.serving.harness_control_models import (
     receipt_json,
     reconciliation_json,
     snapshot_json,
+    submission_authority_json,
+    submission_status_batch_json,
     transcript_entry_json,
+    withdrawal_result_json,
 )
+from agents_remember.serving.harness_submission_authority import OperationResolution
 
 MAX_CONTROL_MESSAGE_BYTES = 64 * 1024
 MAX_TRANSCRIPT_PAGE = 500
@@ -110,7 +119,7 @@ class HarnessControlServer:
             result = await self._dispatch(raw)
             response = {"ok": True, "result": result}
         except (HarnessControlError, KeyError, TypeError, ValueError) as exc:
-            response = {"ok": False, "error": str(exc)}
+            response = _error_response(exc)
         try:
             writer.write(json.dumps(response, separators=(",", ":")).encode("utf-8") + b"\n")
             await writer.drain()
@@ -148,14 +157,37 @@ class HarnessControlServer:
             return await self._dispatch_capability_action(action, payload)
         if action == "submit":
             return await self._submit(payload)
+        if action == "submission-authority":
+            return submission_authority_json(self.bridge.submission_authority())
+        if action == "submission-status":
+            return submission_status_batch_json(
+                await self.bridge.submission_status(
+                    _required_text(payload, "expectedBridgeEpoch"),
+                    _required_text_list(payload, "requestIds", minimum=1, maximum=64),
+                    cockpit_only=True,
+                )
+            )
+        if action == "withdraw":
+            return withdrawal_result_json(
+                await self.bridge.withdraw_submission(
+                    _required_text(payload, "expectedBridgeEpoch"),
+                    _required_text(payload, "requestId"),
+                    cockpit_only=True,
+                )
+            )
         if action == "respond":
             return await self._respond(payload)
         if action == "reconcile":
             return reconciliation_json(
-                await self.bridge.reconcile(_required_text(payload, "requestId"))
+                await self.bridge.reconcile(
+                    _required_text(payload, "requestId"),
+                    expected_bridge_epoch=_optional_text(payload, "expectedBridgeEpoch"),
+                )
             )
         if action == "resolve":
             return await self._resolve(payload)
+        if action == "resolve-operation":
+            return await self._resolve_operation(payload)
         if action == "transcript":
             return self._transcript(payload)
         if action == "stop":
@@ -168,25 +200,25 @@ class HarnessControlServer:
         if action == "advertise":
             return capability_snapshot_json(self.bridge.advertise())
         if action == "set-model":
-            return set_result_json(
-                await self.bridge.set_model(_required_text(payload, "modelKey"))
-            )
+            return set_result_json(await self.bridge.set_model(_required_text(payload, "modelKey")))
         if action == "set-effort":
-            return set_result_json(
-                await self.bridge.set_effort(_required_text(payload, "effort"))
-            )
+            return set_result_json(await self.bridge.set_effort(_required_text(payload, "effort")))
         raise HarnessControlError(f"unknown capability action: {action}")
 
     async def _submit(self, payload: Mapping[str, object]) -> dict[str, object]:
         source = payload.get("source")
-        if source not in {"terminal", "durable"}:
-            raise HarnessControlError("submission source must be terminal or durable")
+        if source not in {"cockpit", "terminal", "durable"}:
+            raise HarnessControlError("submission source must be cockpit, terminal, or durable")
+        expected_bridge_epoch = _optional_text(payload, "expectedBridgeEpoch")
+        if source == "cockpit" and expected_bridge_epoch is None:
+            raise HarnessControlError("cockpit submission requires expectedBridgeEpoch")
         receipt = await self.bridge.submit(
             PromptRequest(
                 request_id=_required_text(payload, "requestId"),
                 source=cast(SubmissionSource, source),
                 text=_required_text(payload, "text"),
                 submitted_at=_required_text(payload, "submittedAt"),
+                expected_bridge_epoch=expected_bridge_epoch,
             )
         )
         return receipt_json(receipt)
@@ -211,6 +243,21 @@ class HarnessControlServer:
             detail=_required_text(payload, "detail"),
         )
         return reconciliation_json(result)
+
+    async def _resolve_operation(self, payload: Mapping[str, object]) -> dict[str, object]:
+        operation_kind = payload.get("operationKind")
+        if operation_kind not in {"prompt", "set-model", "set-effort"}:
+            raise HarnessControlError("operationKind must identify a control operation")
+        resolution = payload.get("resolution")
+        if resolution not in {"applied", "not-applied"}:
+            raise HarnessControlError("resolution must be applied or not-applied")
+        await self.bridge.resolve_operation(
+            _required_text(payload, "operationId"),
+            cast(ControlOperationKind, operation_kind),
+            resolution=cast(OperationResolution, resolution),
+            detail=_required_text(payload, "detail"),
+        )
+        return {"resolved": True}
 
     def _transcript(self, payload: Mapping[str, object]) -> dict[str, object]:
         after = _optional_non_negative_int(payload, "afterSequence", default=0)
@@ -262,7 +309,7 @@ class HarnessControlClient:
         if not isinstance(raw, dict):
             raise HarnessControlError("control response must be a JSON object")
         if raw.get("ok") is not True:
-            raise HarnessControlError(str(raw.get("error") or "control request failed"))
+            _raise_control_response_error(raw)
         return raw.get("result")
 
 
@@ -271,6 +318,64 @@ def _required_text(raw: Mapping[str, object], key: str) -> str:
     if not isinstance(value, str) or not value:
         raise HarnessControlError(f"control payload requires non-empty {key}")
     return value
+
+
+def _optional_text(raw: Mapping[str, object], key: str) -> str | None:
+    value = raw.get(key)
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value:
+        raise HarnessControlError(f"control payload {key} must be non-empty text")
+    return value
+
+
+def _required_text_list(
+    raw: Mapping[str, object],
+    key: str,
+    *,
+    minimum: int,
+    maximum: int,
+) -> tuple[str, ...]:
+    value = raw.get(key)
+    if (
+        not isinstance(value, list)
+        or not minimum <= len(value) <= maximum
+        or not all(isinstance(item, str) and item for item in value)
+    ):
+        raise HarnessControlError(
+            f"control payload {key} requires {minimum}..{maximum} non-empty strings"
+        )
+    if len(set(value)) != len(value):
+        raise HarnessControlError(f"control payload {key} must be unique")
+    return tuple(value)
+
+
+def _error_response(error: Exception) -> dict[str, object]:
+    response: dict[str, object] = {"ok": False, "error": str(error)}
+    if isinstance(error, HarnessBridgeEpochMismatchError):
+        response.update(
+            {
+                "status": "bridge-epoch-mismatch",
+                "expectedBridgeEpoch": error.expected,
+                "actualBridgeEpoch": error.actual,
+            }
+        )
+    elif isinstance(error, HarnessRequestConflictError):
+        response["status"] = "request-id-conflict"
+    return response
+
+
+def _raise_control_response_error(raw: Mapping[str, object]) -> None:
+    detail = str(raw.get("error") or "control request failed")
+    status = raw.get("status")
+    if status == "bridge-epoch-mismatch":
+        raise HarnessBridgeEpochMismatchError(
+            _required_text(raw, "expectedBridgeEpoch"),
+            _required_text(raw, "actualBridgeEpoch"),
+        )
+    if status == "request-id-conflict":
+        raise HarnessRequestConflictError(detail)
+    raise HarnessControlError(detail)
 
 
 def _optional_non_negative_int(raw: Mapping[str, object], key: str, *, default: int) -> int:

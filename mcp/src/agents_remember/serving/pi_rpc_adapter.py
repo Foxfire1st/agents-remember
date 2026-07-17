@@ -9,7 +9,11 @@ from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from typing import Literal
 
-from agents_remember.errors import HarnessAdapterDisconnectedError, HarnessControlError
+from agents_remember.errors import (
+    HarnessAdapterBusyError,
+    HarnessAdapterDisconnectedError,
+    HarnessControlError,
+)
 from agents_remember.serving.harness_capabilities import (
     CapabilitySnapshot,
     LaunchKnobs,
@@ -22,6 +26,7 @@ from agents_remember.serving.harness_control_models import (
     AdapterEvent,
     AdapterHandshake,
     AdapterSnapshot,
+    ControlOperationRef,
     InteractionResponse,
     LaunchSpec,
     PromptRequest,
@@ -41,7 +46,6 @@ from agents_remember.serving.pi_rpc_protocol import (
     PiEntries,
     PiSessionState,
     has_no_session,
-    non_negative_int,
     parse_pi_entries,
     parse_pi_models,
     parse_pi_response,
@@ -94,6 +98,9 @@ class PiRpcAdapter:
         self._submissions: OrderedDict[str, _SubmissionEvidence] = OrderedDict()
         self._request_sequence = 0
         self._transport_generation = 0
+        self._activity_token = 0
+        self._prepared_operation: tuple[ControlOperationRef, int, int, int] | None = None
+        self._active_operation: ControlOperationRef | None = None
         self._transport_changed = asyncio.Event()
         self._stopped = False
         self._configuration = PiRpcConfiguration(
@@ -205,13 +212,46 @@ class PiRpcAdapter:
             owned_argv_options=("--model", "--thinking"),
         )
 
-    async def set_model(self, model_key: str) -> SetResult:
+    async def set_model(
+        self, model_key: str, *, operation: ControlOperationRef | None = None
+    ) -> SetResult:
         self._require_started()
-        return await self._configuration.set_model(model_key)
+        operation = self._require_operation(operation, "set-model")
+        guard = self._claim_prepared_operation(operation)
+        try:
+            return await self._configuration.set_model(model_key, before_write=guard)
+        finally:
+            self._clear_operation(operation)
 
-    async def set_effort(self, effort: str) -> SetResult:
+    async def set_effort(
+        self, effort: str, *, operation: ControlOperationRef | None = None
+    ) -> SetResult:
         self._require_started()
-        return await self._configuration.set_effort(effort)
+        operation = self._require_operation(operation, "set-effort")
+        guard = self._claim_prepared_operation(operation)
+        try:
+            return await self._configuration.set_effort(effort, before_write=guard)
+        finally:
+            self._clear_operation(operation)
+
+    async def preflight_operation(self, operation: ControlOperationRef) -> None:
+        """Capture fresh idle evidence while the authority still owns a withdrawable queue row."""
+
+        self._require_started()
+        if self._active_operation is not None:
+            raise HarnessAdapterBusyError("Pi already has an active ordinary operation")
+        state = await self._read_state()
+        mapper = self._require_event_mapper()
+        mapper.apply_state(state, cursor=self._cursor)
+        self._require_idle_state(state)
+        if mapper.snapshot.pending_interaction is not None:
+            raise HarnessAdapterBusyError("Pi has a pending extension interaction")
+        self._prepared_operation = (
+            operation,
+            self._transport_generation,
+            self._activity_token,
+            self._require_transport().event_token,
+        )
 
     async def _event_stream(self) -> AsyncIterator[AdapterEvent]:
         self._require_started()
@@ -221,10 +261,22 @@ class PiRpcAdapter:
             generation = self._transport_generation
             try:
                 async for frame in transport.events():
+                    self._activity_token += 1
+                    completion_operation = (
+                        self._active_operation if frame.get("type") == "agent_settled" else None
+                    )
                     settled_state = (
                         await self._read_state() if frame.get("type") == "agent_settled" else None
                     )
-                    yield mapper.translate(frame, settled_state=settled_state, cursor=self._cursor)
+                    event = mapper.translate(
+                        frame,
+                        settled_state=settled_state,
+                        cursor=self._cursor,
+                        operation=completion_operation,
+                    )
+                    if event.kind == "completed" and completion_operation is not None:
+                        self._clear_operation(completion_operation)
+                    yield event
             except HarnessAdapterDisconnectedError as exc:
                 if generation == self._transport_generation:
                     yield mapper.disconnected(exc)
@@ -245,6 +297,9 @@ class PiRpcAdapter:
 
     async def submit(self, request: PromptRequest) -> SubmissionReceipt:
         self._require_started()
+        operation = self._require_operation(request.operation, "prompt")
+        if operation.operation_id != request.request_id:
+            raise HarnessControlError("Pi prompt operation id does not match request id")
         if request.request_id in self._submissions:
             raise HarnessControlError(f"duplicate Pi RPC request id: {request.request_id}")
         try:
@@ -260,21 +315,26 @@ class PiRpcAdapter:
             request.request_id,
             _SubmissionEvidence(request=request, cursor_before=self._cursor, state="pending"),
         )
-        behavior = self._streaming_behavior(request)
         command: dict[str, object] = {
             "id": request.request_id,
             "type": "prompt",
             "message": request.text,
         }
-        if behavior is not None:
-            command["streamingBehavior"] = behavior
+        guard = self._claim_prepared_operation(operation)
         try:
-            frame = await self._require_transport().request(command)
+            frame = await self._require_transport().request(command, before_write=guard)
+        except HarnessAdapterBusyError:
+            self._submissions.pop(request.request_id, None)
+            self._clear_operation(operation)
+            raise
         except HarnessAdapterDisconnectedError as exc:
             knowledge: SubmissionKnowledge = "unknown" if exc.may_have_sent else "rejected"
             self._submissions[request.request_id] = replace(
                 self._submissions[request.request_id], state=knowledge
             )
+            if not exc.may_have_sent:
+                self._submissions.pop(request.request_id, None)
+                self._clear_operation(operation)
             raise HarnessAdapterDisconnectedError(
                 str(exc),
                 may_have_sent=exc.may_have_sent,
@@ -285,6 +345,7 @@ class PiRpcAdapter:
             self._submissions[request.request_id] = replace(
                 self._submissions[request.request_id], state="rejected"
             )
+            self._clear_operation(operation)
             return SubmissionReceipt(
                 request_id=request.request_id,
                 acceptance="rejected",
@@ -293,21 +354,22 @@ class PiRpcAdapter:
                 detail=pi_response_error(response),
                 raw=dict(response),
             )
-        acceptance = "queued" if behavior is not None else "immediate"
         self._submissions[request.request_id] = replace(
             self._submissions[request.request_id], state="accepted"
         )
-        self._require_event_mapper().set_acceptance(acceptance)
+        self._require_event_mapper().mark_prompt_accepted()
         return SubmissionReceipt(
             request_id=request.request_id,
-            acceptance=acceptance,
+            acceptance="immediate",
             submitted_at=request.submitted_at,
             vendor_correlation_id=request.request_id,
             accepted_at=self._clock(),
-            raw={"streamingBehavior": behavior, **dict(response)},
+            raw=dict(response),
         )
 
     async def respond(self, response: InteractionResponse) -> None:
+        if response.operation is None or response.operation != self._active_operation:
+            raise HarnessControlError("Pi interaction response does not match the active operation")
         mapper = self._require_event_mapper()
         payload = mapper.response_payload(response)
         await self._require_transport().send(payload)
@@ -373,9 +435,14 @@ class PiRpcAdapter:
 
         return self._require_event_mapper().retained_interaction_count
 
+    @property
+    def active_operation(self) -> ControlOperationRef | None:
+        return self._active_operation
+
     async def _read_state(self) -> PiSessionState:
         state = await self._request_state(self._require_transport())
         self._state = state
+        self._activity_token += 1
         return state
 
     async def _read_configuration_state(self) -> PiSessionState:
@@ -462,6 +529,7 @@ class PiRpcAdapter:
         previous_session_id = state.session_id
         old_transport = self._require_transport()
         self._transport_generation += 1
+        self._prepared_operation = None
         self._transport_changed.clear()
         await old_transport.stop("forced")
         transport = self._transport_factory()
@@ -494,19 +562,6 @@ class PiRpcAdapter:
             self._submissions.pop(evictable)
         self._submissions[request_id] = evidence
 
-    def _streaming_behavior(self, request: PromptRequest) -> str | None:
-        snapshot = self._require_event_mapper().snapshot
-        raw = snapshot.raw
-        busy = (
-            snapshot.activity in {"running", "blocked", "settling"}
-            or raw.get("isStreaming") is True
-            or raw.get("isCompacting") is True
-            or non_negative_int(raw.get("pendingMessageCount")) > 0
-        )
-        if not busy:
-            return None
-        return "steer" if request.source == "terminal" else "followUp"
-
     def _unresolved(
         self, request_id: str, detail: str, *, entries: PiEntries | None = None
     ) -> ReconciliationResult:
@@ -522,6 +577,54 @@ class PiRpcAdapter:
     def _internal_id(self, purpose: str) -> str:
         self._request_sequence += 1
         return f"ar-pi-{purpose}-{self._request_sequence}"
+
+    def _claim_prepared_operation(self, operation: ControlOperationRef) -> Callable[[], None]:
+        prepared = self._prepared_operation
+        if prepared is None or prepared[0] != operation:
+            raise HarnessAdapterBusyError("Pi operation lacks matching fresh idle preflight")
+        if self._active_operation is not None:
+            raise HarnessAdapterBusyError("Pi already has an active ordinary operation")
+        self._active_operation = operation
+        generation, activity_token, event_token = prepared[1], prepared[2], prepared[3]
+
+        def guard() -> None:
+            if self._active_operation != operation or self._prepared_operation != prepared:
+                raise HarnessAdapterBusyError("Pi operation changed before its guarded write")
+            if self._transport_generation != generation:
+                raise HarnessAdapterBusyError("Pi transport generation changed before prompt write")
+            if self._activity_token != activity_token:
+                raise HarnessAdapterBusyError("Pi activity changed after fresh idle preflight")
+            if self._require_transport().event_token != event_token:
+                raise HarnessAdapterBusyError("Pi received an event after fresh idle preflight")
+            state = self._state
+            if state is None:
+                raise HarnessAdapterBusyError("Pi has no cached state at guarded write")
+            self._require_idle_state(state)
+            snapshot = self._require_event_mapper().snapshot
+            if snapshot.pending_interaction is not None or snapshot.activity != "idle":
+                raise HarnessAdapterBusyError("Pi became busy before the guarded write")
+
+        return guard
+
+    def _clear_operation(self, operation: ControlOperationRef) -> None:
+        if self._active_operation == operation:
+            self._active_operation = None
+        if self._prepared_operation is not None and self._prepared_operation[0] == operation:
+            self._prepared_operation = None
+
+    @staticmethod
+    def _require_operation(
+        operation: ControlOperationRef | None,
+        kind: Literal["prompt", "set-model", "set-effort"],
+    ) -> ControlOperationRef:
+        if operation is None or operation.kind != kind:
+            raise HarnessControlError(f"Pi {kind} requires its exact operation ref")
+        return operation
+
+    @staticmethod
+    def _require_idle_state(state: PiSessionState) -> None:
+        if state.is_streaming or state.is_compacting or state.pending_message_count:
+            raise HarnessAdapterBusyError("Pi fresh state is not idle")
 
     def _require_started(self) -> None:
         if self._events is None or self._launch is None or self._transport is None:

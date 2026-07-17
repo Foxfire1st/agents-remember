@@ -5,7 +5,6 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Literal
 
 from agents_remember.errors import CodexAppServerError
 from agents_remember.serving.codex_app_server_protocol import (
@@ -29,7 +28,6 @@ from agents_remember.serving.harness_capabilities import (
 )
 from agents_remember.serving.harness_control_models import AdapterSnapshot, LaunchSpec
 
-BusyPolicy = Literal["steer", "queue"]
 TransportFactory = Callable[[], CodexAppServerTransport]
 
 
@@ -45,8 +43,6 @@ class CodexAppServerSettings:
     sandbox: str | None = None
     turn_sandbox_policy: Mapping[str, object] | None = None
     config: Mapping[str, object] = field(default_factory=dict)
-    busy_policy: BusyPolicy = "steer"
-    busy_queue_limit: int = 64
     submission_limit: int = 256
     model_page_limit: int = 32
     ephemeral: bool = False
@@ -72,10 +68,7 @@ class CodexAppServerSettings:
             )
         if self.model is not None and (not self.model or self.model != self.model.strip()):
             raise CodexAppServerError("Codex model must be non-empty with no outer whitespace")
-        if self.busy_policy not in {"steer", "queue"}:
-            raise CodexAppServerError("Codex busy policy must be 'steer' or 'queue'")
         for name, value in (
-            ("busy_queue_limit", self.busy_queue_limit),
             ("submission_limit", self.submission_limit),
             ("model_page_limit", self.model_page_limit),
         ):
@@ -305,7 +298,6 @@ class CodexAppServerSession:
             "desiredReasoningEffort": self.desired_effort,
             "effectiveReasoningEffort": self.effective_effort,
             "settingsPending": self.has_pending_settings,
-            "busyPolicy": self.settings.busy_policy,
         }
 
     def advertise(self) -> CapabilitySnapshot:

@@ -6,13 +6,15 @@ import asyncio
 import json
 import sys
 import unittest
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
+from itertools import count
 from pathlib import Path
 
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
 from agents_remember.errors import HarnessControlError
+from agents_remember.serving.harness_capabilities import SetResult
 from agents_remember.serving.harness_control_bridge import HarnessControlBridge
 from agents_remember.serving.harness_control_claude import (
     ClaudeAdapterLimits,
@@ -20,6 +22,8 @@ from agents_remember.serving.harness_control_claude import (
 )
 from agents_remember.serving.harness_control_models import (
     ControlIdentity,
+    ControlOperationKind,
+    ControlOperationRef,
     InteractionResponse,
     LaunchSpec,
     PromptRequest,
@@ -31,6 +35,7 @@ FIXTURE_ROOT = Path(__file__).parent / "fixtures" / "claude_stream_json" / "2.1.
 SESSION_ID = "11111111-1111-4111-8111-111111111111"
 FIRST_CORRELATION = "22222222-2222-4222-8222-222222222222"
 NOW = "2026-07-14T10:00:00+00:00"
+_OPERATION_SEQUENCE = count(1)
 
 
 def _load_fixture(name: str) -> list[dict[str, object]]:
@@ -70,7 +75,14 @@ class _FakeClaudeTransport:
     async def read_frame(self) -> dict[str, object] | None:
         return await self.frames.get()
 
-    async def write_frame(self, frame: Mapping[str, object]) -> None:
+    async def write_frame(
+        self,
+        frame: Mapping[str, object],
+        *,
+        before_write: Callable[[], None] | None = None,
+    ) -> None:
+        if before_write is not None:
+            before_write()
         self.writes.append(dict(frame))
         self._write_event.set()
 
@@ -189,6 +201,28 @@ def _result(text: str = "done") -> dict[str, object]:
 async def _settle() -> None:
     for _ in range(4):
         await asyncio.sleep(0)
+
+
+def _operation(kind: ControlOperationKind) -> ControlOperationRef:
+    sequence = next(_OPERATION_SEQUENCE)
+    return ControlOperationRef(
+        bridge_epoch="claude-test-epoch",
+        sequence=sequence,
+        operation_id=f"claude-test-{kind}-{sequence}",
+        kind=kind,
+    )
+
+
+async def _set_model(adapter: ClaudeStreamJsonAdapter, model_key: str) -> SetResult:
+    operation = _operation("set-model")
+    await adapter.preflight_operation(operation)
+    return await adapter.set_model(model_key, operation=operation)
+
+
+async def _set_effort(adapter: ClaudeStreamJsonAdapter, effort: str) -> SetResult:
+    operation = _operation("set-effort")
+    await adapter.preflight_operation(operation)
+    return await adapter.set_effort(effort, operation=operation)
 
 
 class ClaudeStreamJsonAdapterTests(unittest.IsolatedAsyncioTestCase):
@@ -539,7 +573,7 @@ class ClaudeStreamJsonAdapterTests(unittest.IsolatedAsyncioTestCase):
                 await asyncio.gather(submission, return_exceptions=True)
             await bridge.stop("forced")
 
-    async def test_multiple_messages_keep_wire_order_and_queued_acceptance(self) -> None:
+    async def test_multiple_messages_use_only_the_authoritative_bridge_queue(self) -> None:
         correlations = [
             "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
             "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
@@ -556,17 +590,17 @@ class ClaudeStreamJsonAdapterTests(unittest.IsolatedAsyncioTestCase):
             transport.feed(_replay(transport.writes[3]))
             first = await asyncio.wait_for(first_task, timeout=1.0)
 
-            second_task = asyncio.create_task(
-                bridge.submit(bridge.prompt("second", source="durable", request_id="second"))
+            second = await bridge.submit(
+                bridge.prompt("second", source="durable", request_id="second")
             )
-            await transport.wait_for_writes(5)
-            transport.feed(_replay(transport.writes[4]))
-            second = await asyncio.wait_for(second_task, timeout=1.0)
             self.assertEqual((first.acceptance, second.acceptance), ("immediate", "queued"))
+            self.assertEqual(len(transport.writes), 4)
             self.assertIn("\n\nfirst", _wire_text(transport.writes[3]))
-            self.assertIn("\n\nsecond", _wire_text(transport.writes[4]))
 
             transport.feed(_result("first done"))
+            await transport.wait_for_writes(5)
+            self.assertIn("\n\nsecond", _wire_text(transport.writes[4]))
+            transport.feed(_replay(transport.writes[4]))
             transport.feed(_result("second done"))
             await _settle()
             results = [entry for entry in bridge.transcript() if entry.role == "result"]
@@ -581,6 +615,14 @@ class ClaudeStreamJsonAdapterTests(unittest.IsolatedAsyncioTestCase):
         await bridge.start(_launch())
         permission, question = _load_fixture("interactions.jsonl")
         try:
+            active = asyncio.create_task(
+                bridge.submit(
+                    bridge.prompt("interaction turn", source="terminal", request_id="interaction")
+                )
+            )
+            await transport.wait_for_writes(4)
+            transport.feed(_replay(transport.writes[3]))
+            self.assertEqual((await active).acceptance, "immediate")
             transport.feed(permission)
             await _settle()
             pending = bridge.snapshot().pending_interaction
@@ -614,6 +656,8 @@ class ClaudeStreamJsonAdapterTests(unittest.IsolatedAsyncioTestCase):
             updated = result["updatedInput"]
             assert isinstance(updated, dict)
             self.assertEqual(updated["answers"], {"Which mode should be used?": "Safe"})
+            transport.feed(_result("interaction done"))
+            await _wait_for_activity(adapter, "idle")
         finally:
             await bridge.stop("forced")
 
@@ -693,9 +737,7 @@ class ClaudeStreamJsonAdapterTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(_wire_text(transport.writes[5]), "/effort low")
             transport.feed(_replay(transport.writes[5]))
             transport.feed(
-                _result(
-                    "Set effort level to low (this session only): Quick implementation"
-                )
+                _result("Set effort level to low (this session only): Quick implementation")
             )
             effort = await asyncio.wait_for(effort_task, timeout=1.0)
             self.assertEqual(
@@ -719,7 +761,7 @@ class ClaudeStreamJsonAdapterTests(unittest.IsolatedAsyncioTestCase):
                 adapter = _adapter(transport, correlations=["terminal-evidence"])
                 await adapter.start(_launch())
                 try:
-                    task = asyncio.create_task(adapter.set_model("haiku"))
+                    task = asyncio.create_task(_set_model(adapter, "haiku"))
                     await transport.wait_for_writes(4)
                     transport.feed(_replay(transport.writes[3]))
                     transport.feed(result_frame)
@@ -754,7 +796,7 @@ class ClaudeStreamJsonAdapterTests(unittest.IsolatedAsyncioTestCase):
         adapter = _adapter(transport, correlations=["regional-fable-set"])
         await adapter.start(_launch())
         try:
-            task = asyncio.create_task(adapter.set_model("regional-fable"))
+            task = asyncio.create_task(_set_model(adapter, "regional-fable"))
             await transport.wait_for_writes(4)
             transport.feed(_replay(transport.writes[3]))
             transport.feed({**_result("noninteractive_set_blocked"), "is_error": True})
@@ -785,7 +827,7 @@ class ClaudeStreamJsonAdapterTests(unittest.IsolatedAsyncioTestCase):
         alias_adapter = _adapter(alias_transport, correlations=["custom-alias-set"])
         await alias_adapter.start(_launch())
         try:
-            task = asyncio.create_task(alias_adapter.set_model("fable"))
+            task = asyncio.create_task(_set_model(alias_adapter, "fable"))
             await alias_transport.wait_for_writes(4)
             alias_transport.feed(_replay(alias_transport.writes[3]))
             alias_transport.feed(_result("Set model to Sonnet 5 for this session only"))
@@ -824,7 +866,7 @@ class ClaudeStreamJsonAdapterTests(unittest.IsolatedAsyncioTestCase):
                 adapter = _adapter(transport, correlations=["exact-label"])
                 await adapter.start(_launch())
                 try:
-                    task = asyncio.create_task(adapter.set_model("regional-sonnet"))
+                    task = asyncio.create_task(_set_model(adapter, "regional-sonnet"))
                     await transport.wait_for_writes(4)
                     transport.feed(_replay(transport.writes[3]))
                     transport.feed(_result(terminal))
@@ -873,7 +915,7 @@ class ClaudeStreamJsonAdapterTests(unittest.IsolatedAsyncioTestCase):
                 adapter = _adapter(transport, correlations=["default-label"])
                 await adapter.start(_launch())
                 try:
-                    task = asyncio.create_task(adapter.set_model("default"))
+                    task = asyncio.create_task(_set_model(adapter, "default"))
                     await transport.wait_for_writes(4)
                     transport.feed(_replay(transport.writes[3]))
                     transport.feed(_result(terminal))
@@ -891,11 +933,11 @@ class ClaudeStreamJsonAdapterTests(unittest.IsolatedAsyncioTestCase):
         )
         await adapter.start(_launch())
         try:
-            expired = await adapter.set_model("haiku")
+            expired = await _set_model(adapter, "haiku")
             self.assertEqual((expired.ok, expired.acceptance), (False, "unknown"))
             expired_frame = transport.writes[3]
 
-            blocked = await adapter.set_model("haiku")
+            blocked = await _set_model(adapter, "haiku")
             self.assertEqual((blocked.ok, blocked.acceptance), (False, "unknown"))
             self.assertEqual(len(transport.writes), 4)
 
@@ -907,7 +949,7 @@ class ClaudeStreamJsonAdapterTests(unittest.IsolatedAsyncioTestCase):
             transport.feed(_replay(expired_frame))
             await _settle()
 
-            retry_task = asyncio.create_task(adapter.set_model("haiku"))
+            retry_task = asyncio.create_task(_set_model(adapter, "haiku"))
             await transport.wait_for_writes(5)
             transport.feed(_replay(transport.writes[4]))
             transport.feed(_result("Set model to Haiku for this session only"))
@@ -924,7 +966,7 @@ class ClaudeStreamJsonAdapterTests(unittest.IsolatedAsyncioTestCase):
         )
         await adapter.start(_launch())
         try:
-            cancelled = asyncio.create_task(adapter.set_model("haiku"))
+            cancelled = asyncio.create_task(_set_model(adapter, "haiku"))
             await transport.wait_for_writes(4)
             cancelled.cancel()
             with self.assertRaises(asyncio.CancelledError):
@@ -935,7 +977,7 @@ class ClaudeStreamJsonAdapterTests(unittest.IsolatedAsyncioTestCase):
             await _settle()
             self.assertEqual(adapter.advertise().selected_model_key, "sonnet")
 
-            retry = asyncio.create_task(adapter.set_model("haiku"))
+            retry = asyncio.create_task(_set_model(adapter, "haiku"))
             await transport.wait_for_writes(5)
             transport.feed(_replay(transport.writes[4]))
             transport.feed(_result("Set model to Haiku for this session only"))
@@ -958,7 +1000,7 @@ class ClaudeStreamJsonAdapterTests(unittest.IsolatedAsyncioTestCase):
                 adapter = _adapter(transport, correlations=["strict-correlation"])
                 await adapter.start(_launch())
                 try:
-                    task = asyncio.create_task(adapter.set_model("sonnet"))
+                    task = asyncio.create_task(_set_model(adapter, "sonnet"))
                     await transport.wait_for_writes(4)
                     transport.feed({**_replay(transport.writes[3]), **mutation})
                     result = await asyncio.wait_for(task, timeout=1.0)
@@ -976,7 +1018,7 @@ class ClaudeStreamJsonAdapterTests(unittest.IsolatedAsyncioTestCase):
         )
         await adapter.start(_launch())
         try:
-            first_task = asyncio.create_task(adapter.set_model("haiku"))
+            first_task = asyncio.create_task(_set_model(adapter, "haiku"))
             await transport.wait_for_writes(4)
             transport.feed(_replay(transport.writes[3]))
             transport.feed(_result("Set model to Haiku for this session only"))
@@ -984,7 +1026,7 @@ class ClaudeStreamJsonAdapterTests(unittest.IsolatedAsyncioTestCase):
                 (await asyncio.wait_for(first_task, timeout=1.0)).acceptance,
                 "echo-verified",
             )
-            second = await adapter.set_model("sonnet")
+            second = await _set_model(adapter, "sonnet")
             self.assertEqual((second.ok, second.acceptance), (False, "unknown"))
             self.assertIn("duplicate retained", second.detail or "")
             self.assertEqual(len(transport.writes), 4)
@@ -1011,10 +1053,10 @@ class ClaudeStreamJsonAdapterTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(reconciliation.state, "unresolved")
             self.assertIn("was not resent", reconciliation.detail or "")
             self.assertEqual(len(transport.writes), write_count)
-            with self.assertRaisesRegex(HarnessControlError, "not available: disconnected"):
-                await bridge.submit(
-                    bridge.prompt("must not resend", source="durable", request_id="after-exit")
-                )
+            blocked = await bridge.submit(
+                bridge.prompt("must not resend", source="durable", request_id="after-exit")
+            )
+            self.assertEqual(blocked.acceptance, "queued")
             self.assertEqual(len(transport.writes), write_count)
         finally:
             await bridge.stop("forced")
@@ -1125,7 +1167,15 @@ class ClaudeStreamJsonAdapterTests(unittest.IsolatedAsyncioTestCase):
             drain_task = asyncio.create_task(drain())
             try:
                 for index in range(total):
-                    request = PromptRequest(f"request-{index}", "durable", f"message-{index}", NOW)
+                    operation = _operation("prompt")
+                    request = PromptRequest(
+                        f"request-{index}",
+                        "durable",
+                        f"message-{index}",
+                        NOW,
+                        operation,
+                    )
+                    await adapter.preflight_operation(operation)
                     task = asyncio.create_task(adapter.submit(request))
                     await transport.wait_for_writes(index + 4)
                     transport.feed(_replay(transport.writes[index + 3]))

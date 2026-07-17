@@ -16,6 +16,7 @@ from agents_remember.serving.codex_app_server_adapter import (
 from agents_remember.serving.codex_app_server_protocol import (
     CodexStdioTransport,
     JsonObject,
+    WriteGuard,
 )
 from agents_remember.serving.harness_control_models import (
     ControlIdentity,
@@ -45,8 +46,14 @@ class RecordingCodexTransport(CodexStdioTransport):
         assert process is not None
         return process.pid
 
-    async def request(self, method: str, params: Mapping[str, object]) -> JsonObject:
-        result = await super().request(method, params)
+    async def request(
+        self,
+        method: str,
+        params: Mapping[str, object],
+        *,
+        before_write: WriteGuard | None = None,
+    ) -> JsonObject:
+        result = await super().request(method, params, before_write=before_write)
         evidence: dict[str, object] = {"method": method}
         for key in ("model", "effort", "threadId"):
             value = params.get(key)

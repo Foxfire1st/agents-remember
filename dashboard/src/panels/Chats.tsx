@@ -18,17 +18,14 @@ import {
   createSession,
   notifySessionCatalogChanged,
   registerConnection,
-  sendToSession,
   sessionStore,
   subscribeSessionCatalogChanges,
   useSessions,
 } from "../data/sessions";
 import {
   attachSessionToLeaf,
-  bracketedPaste,
   cleanupLandedTerminalSessions,
   fetchHarnesses,
-  sanitizeForInjection,
   terminateTerminalSession,
   type HarnessInfo,
 } from "../data/terminal";
@@ -52,7 +49,7 @@ const Terminal = lazy(() => import("./Terminal").then((module) => ({ default: mo
 // terminal attaches over the 6d WebSocket — the dashboard owns the session it created. Per-harness
 // launch buttons (slice 6e-2b) sit beside ＋ Terminal — one per *detected* harness (Claude Code /
 // Codex / Pi.dev). Open sessions live in a left-rail switcher (slice 6e-2c, `SessionList`); the
-// context composer (slice 6e-3) injects text into the active session's stdin. The session registry
+// context composer submits through the reliable native-control route. The session registry
 // lives in the `data/sessions` store (6e hardening). Cockpit view switches keep <Chats> mounted. After
 // a browser refresh, only the restored active row attaches immediately; each other row mounts on first
 // selection and then stays mounted while hidden so tab switches keep the xterm buffer intact.
@@ -535,11 +532,7 @@ export function Chats({
                   );
                 })}
               {activeSessionIsRunning ? (
-                <SessionComposer
-                  onSend={(text) =>
-                    sendToSession(activeSession.id, bracketedPaste(sanitizeForInjection(text)))
-                  }
-                />
+                <SessionComposer session={activeSession} />
               ) : null}
             </>
           ) : (

@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Literal
+from typing import Literal, cast
 
 from agents_remember.errors import HarnessControlError
 
@@ -14,7 +14,19 @@ CONTROL_PROTOCOL_VERSION = "ar-harness-control/v1"
 ControlState = Literal["starting", "ready", "disconnected", "failed", "unsupported"]
 ActivityState = Literal["idle", "running", "blocked", "settling", "unknown"]
 AcceptanceState = Literal["immediate", "queued", "rejected", "unknown", "unsupported"]
-SubmissionSource = Literal["terminal", "durable"]
+SubmissionSource = Literal["cockpit", "terminal", "durable"]
+ControlOperationKind = Literal["prompt", "set-model", "set-effort"]
+SubmissionLifecycleState = Literal[
+    "queued",
+    "dispatching",
+    "delivered",
+    "withdrawn",
+    "unknown",
+    "rejected",
+    "unsupported",
+]
+WithdrawalOutcome = Literal["withdrawn", "not-withdrawable", "not-found"]
+SubmissionLookupOutcome = Literal["found", "not-found"]
 TranscriptRole = Literal["user", "assistant", "system", "interaction", "result"]
 TerminalOutcome = Literal["completed", "failed", "cancelled"]
 ReconciliationState = Literal["accepted", "rejected", "unresolved", "unsupported"]
@@ -143,6 +155,8 @@ class PromptRequest:
     source: SubmissionSource
     text: str
     submitted_at: str
+    operation: ControlOperationRef | None = None
+    expected_bridge_epoch: str | None = None
 
 
 @dataclass(frozen=True)
@@ -166,6 +180,7 @@ class SubmissionReceipt:
     accepted_at: str | None = None
     detail: str | None = None
     raw: Mapping[str, object] = field(default_factory=dict)
+    bridge_epoch: str | None = None
 
 
 @dataclass(frozen=True)
@@ -173,6 +188,7 @@ class InteractionResponse:
     interaction_id: str
     response: str
     responded_at: str
+    operation: ControlOperationRef | None = None
 
 
 @dataclass(frozen=True)
@@ -183,6 +199,79 @@ class ReconciliationResult:
     vendor_correlation_id: str | None = None
     detail: str | None = None
     raw: Mapping[str, object] = field(default_factory=dict)
+    bridge_epoch: str | None = None
+    submission_state: SubmissionLifecycleState | None = None
+
+
+@dataclass(frozen=True)
+class ControlOperationRef:
+    """Exact ordinary-operation identity shared by the authority and adapter events."""
+
+    bridge_epoch: str
+    sequence: int
+    operation_id: str
+    kind: ControlOperationKind
+
+    def to_json(self) -> dict[str, object]:
+        return {
+            "bridgeEpoch": self.bridge_epoch,
+            "operationSequence": self.sequence,
+            "operationId": self.operation_id,
+            "operationKind": self.kind,
+        }
+
+    @classmethod
+    def from_json(cls, raw: Mapping[str, object]) -> ControlOperationRef:
+        sequence = raw.get("operationSequence")
+        if not isinstance(sequence, int) or isinstance(sequence, bool) or sequence < 1:
+            raise HarnessControlError("operation ref requires positive operationSequence")
+        kind = raw.get("operationKind")
+        if kind not in {"prompt", "set-model", "set-effort"}:
+            raise HarnessControlError("operation ref has invalid operationKind")
+        return cls(
+            bridge_epoch=_required_text(raw, "bridgeEpoch"),
+            sequence=sequence,
+            operation_id=_required_text(raw, "operationId"),
+            kind=cast(ControlOperationKind, kind),
+        )
+
+
+@dataclass(frozen=True)
+class SubmissionAuthorityDescriptor:
+    bridge_epoch: str
+
+
+@dataclass(frozen=True)
+class SubmissionStatus:
+    request_id: str
+    state: SubmissionLifecycleState
+    submitted_at: str
+    updated_at: str
+    accepted_at: str | None
+    withdrawable: bool
+    detail: str | None = None
+
+
+@dataclass(frozen=True)
+class SubmissionLookup:
+    request_id: str
+    outcome: SubmissionLookupOutcome
+    submission: SubmissionStatus | None = None
+
+
+@dataclass(frozen=True)
+class SubmissionStatusBatch:
+    bridge_epoch: str
+    submissions: tuple[SubmissionLookup, ...]
+
+
+@dataclass(frozen=True)
+class WithdrawalResult:
+    request_id: str
+    outcome: WithdrawalOutcome
+    state: SubmissionLifecycleState | None
+    withdrawn_at: str | None = None
+    detail: str | None = None
 
 
 @dataclass(frozen=True)
@@ -196,6 +285,7 @@ class AdapterEvent:
     snapshot: AdapterSnapshot | None = None
     transcript: tuple[TranscriptEntry, ...] = ()
     raw: Mapping[str, object] = field(default_factory=dict)
+    operation: ControlOperationRef | None = None
 
 
 def pending_interaction_json(value: PendingInteraction | None) -> dict[str, object] | None:
@@ -257,6 +347,7 @@ def receipt_json(value: SubmissionReceipt) -> dict[str, object]:
         "acceptedAt": value.accepted_at,
         "detail": value.detail,
         "raw": dict(value.raw),
+        "bridgeEpoch": value.bridge_epoch,
     }
 
 
@@ -268,6 +359,8 @@ def reconciliation_json(value: ReconciliationResult) -> dict[str, object]:
         "vendorCorrelationId": value.vendor_correlation_id,
         "detail": value.detail,
         "raw": dict(value.raw),
+        "bridgeEpoch": value.bridge_epoch,
+        "submissionState": value.submission_state,
     }
 
 
@@ -281,6 +374,7 @@ def public_receipt_json(value: SubmissionReceipt) -> dict[str, object]:
         "vendorCorrelationId": value.vendor_correlation_id,
         "acceptedAt": value.accepted_at,
         "detail": value.detail,
+        "bridgeEpoch": value.bridge_epoch,
     }
 
 
@@ -292,6 +386,54 @@ def public_reconciliation_json(value: ReconciliationResult) -> dict[str, object]
         "state": value.state,
         "reconciledAt": value.reconciled_at,
         "vendorCorrelationId": value.vendor_correlation_id,
+        "detail": value.detail,
+        "bridgeEpoch": value.bridge_epoch,
+        "submissionState": value.submission_state,
+    }
+
+
+def submission_authority_json(value: SubmissionAuthorityDescriptor) -> dict[str, str]:
+    return {"bridgeEpoch": value.bridge_epoch}
+
+
+def submission_status_json(value: SubmissionStatus) -> dict[str, object]:
+    """Raw-free public status for one exact caller-owned cockpit request id."""
+
+    return {
+        "state": value.state,
+        "submittedAt": value.submitted_at,
+        "updatedAt": value.updated_at,
+        "acceptedAt": value.accepted_at,
+        "withdrawable": value.withdrawable,
+        "detail": value.detail,
+    }
+
+
+def submission_lookup_json(value: SubmissionLookup) -> dict[str, object]:
+    if value.outcome == "not-found":
+        return {"requestId": value.request_id, "outcome": "not-found"}
+    if value.submission is None:
+        raise HarnessControlError("found submission lookup requires submission evidence")
+    return {
+        "requestId": value.request_id,
+        "outcome": "found",
+        "submission": submission_status_json(value.submission),
+    }
+
+
+def submission_status_batch_json(value: SubmissionStatusBatch) -> dict[str, object]:
+    return {
+        "bridgeEpoch": value.bridge_epoch,
+        "submissions": [submission_lookup_json(item) for item in value.submissions],
+    }
+
+
+def withdrawal_result_json(value: WithdrawalResult) -> dict[str, object]:
+    return {
+        "requestId": value.request_id,
+        "outcome": value.outcome,
+        "state": value.state,
+        "withdrawnAt": value.withdrawn_at,
         "detail": value.detail,
     }
 

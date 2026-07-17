@@ -17,14 +17,24 @@ from fastapi.testclient import TestClient
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
-from agents_remember.errors import HarnessControlError
+from agents_remember.errors import (
+    HarnessBridgeEpochMismatchError,
+    HarnessControlClientError,
+    HarnessControlError,
+    HarnessRequestConflictError,
+)
 from agents_remember.serving import harness_control_api
 from agents_remember.serving.harness_capabilities import CapabilitySnapshot, SetResult
 from agents_remember.serving.harness_capability_catalog import CapabilityCatalogResult
 from agents_remember.serving.harness_control_api import register_harness_control_routes
 from agents_remember.serving.harness_control_models import (
     ReconciliationResult,
+    SubmissionAuthorityDescriptor,
+    SubmissionLookup,
     SubmissionReceipt,
+    SubmissionStatus,
+    SubmissionStatusBatch,
+    WithdrawalResult,
 )
 from agents_remember.serving.harnesses import HARNESSES
 from agents_remember.serving.terminal_catalog import TerminalCatalog, TerminalCatalogEntry
@@ -34,6 +44,7 @@ from agents_remember.serving.terminal_liveness import (
 )
 
 NOW = datetime(2026, 7, 16, 8, 0, tzinfo=UTC)
+BRIDGE_EPOCH = "bridge-epoch-1"
 
 
 class _CapabilityCatalog:
@@ -181,7 +192,11 @@ class HarnessControlApiTests(unittest.TestCase):
         ) as submit:
             response = self.client.post(
                 "/api/terminal/live/submit",
-                json={"requestId": "request-7", "text": "one complete\nmessage"},
+                json={
+                    "requestId": "request-7",
+                    "text": "one complete\nmessage",
+                    "expectedBridgeEpoch": BRIDGE_EPOCH,
+                },
             )
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["requestId"], "request-7")
@@ -193,8 +208,265 @@ class HarnessControlApiTests(unittest.TestCase):
         self.assertEqual(submit.call_args.args[1], "one complete\nmessage")
         self.assertEqual(
             submit.call_args.kwargs,
-            {"source": "terminal", "request_id": "request-7"},
+            {
+                "source": "cockpit",
+                "request_id": "request-7",
+                "expected_bridge_epoch": BRIDGE_EPOCH,
+            },
         )
+
+    def test_authority_status_and_withdraw_routes_are_epoch_bound_and_raw_free(self) -> None:
+        status = SubmissionStatusBatch(
+            bridge_epoch=BRIDGE_EPOCH,
+            submissions=(
+                SubmissionLookup(
+                    request_id="request-queued",
+                    outcome="found",
+                    submission=SubmissionStatus(
+                        request_id="request-queued",
+                        state="queued",
+                        submitted_at="2026-07-16T08:00:00+00:00",
+                        updated_at="2026-07-16T08:00:01+00:00",
+                        accepted_at=None,
+                        withdrawable=True,
+                        detail="queued in authority",
+                    ),
+                ),
+                SubmissionLookup(request_id="missing", outcome="not-found"),
+            ),
+        )
+        withdrawn = WithdrawalResult(
+            request_id="request-queued",
+            outcome="withdrawn",
+            state="withdrawn",
+            withdrawn_at="2026-07-16T08:00:02+00:00",
+            detail="withdrawn before dispatch",
+        )
+        with (
+            mock.patch(
+                "agents_remember.serving.harness_control_api.read_submission_authority",
+                return_value=SubmissionAuthorityDescriptor(bridge_epoch=BRIDGE_EPOCH),
+            ) as descriptor_call,
+            mock.patch(
+                "agents_remember.serving.harness_control_api.read_submission_status",
+                return_value=status,
+            ) as status_call,
+            mock.patch(
+                "agents_remember.serving.harness_control_api.withdraw_control_submission",
+                return_value=withdrawn,
+            ) as withdraw_call,
+        ):
+            descriptor = self.client.get("/api/terminal/live/submission-authority")
+            status_response = self.client.post(
+                "/api/terminal/live/submission-status",
+                json={
+                    "expectedBridgeEpoch": BRIDGE_EPOCH,
+                    "requestIds": ["request-queued", "missing"],
+                },
+            )
+            withdraw_response = self.client.post(
+                "/api/terminal/live/withdraw",
+                json={
+                    "expectedBridgeEpoch": BRIDGE_EPOCH,
+                    "requestId": "request-queued",
+                },
+            )
+
+        self.assertEqual(descriptor.json(), {"bridgeEpoch": BRIDGE_EPOCH})
+        self.assertEqual(status_response.status_code, 200)
+        self.assertEqual(status_response.json()["submissions"][0]["submission"]["state"], "queued")
+        self.assertEqual(status_response.json()["submissions"][1]["outcome"], "not-found")
+        self.assertEqual(withdraw_response.json()["outcome"], "withdrawn")
+        def keys(value: object) -> set[str]:
+            if isinstance(value, dict):
+                return set(value) | set().union(*(keys(item) for item in value.values()))
+            if isinstance(value, list):
+                return set().union(*(keys(item) for item in value))
+            return set()
+
+        public_keys = keys(
+            [descriptor.json(), status_response.json(), withdraw_response.json()]
+        )
+        self.assertNotIn("text", public_keys)
+        self.assertNotIn("raw", public_keys)
+        self.assertEqual(descriptor_call.call_args.args[0].id, self.live.id)
+        self.assertEqual(
+            status_call.call_args.kwargs,
+            {
+                "expected_bridge_epoch": BRIDGE_EPOCH,
+                "request_ids": ("request-queued", "missing"),
+            },
+        )
+        self.assertEqual(
+            withdraw_call.call_args.kwargs,
+            {"expected_bridge_epoch": BRIDGE_EPOCH, "request_id": "request-queued"},
+        )
+
+    def test_epoch_mismatch_is_409_for_every_epoch_bound_route(self) -> None:
+        cases = (
+            (
+                "submit_control_prompt",
+                "/api/terminal/live/submit",
+                {"requestId": "r", "text": "message", "expectedBridgeEpoch": "old"},
+            ),
+            (
+                "read_submission_status",
+                "/api/terminal/live/submission-status",
+                {"requestIds": ["r"], "expectedBridgeEpoch": "old"},
+            ),
+            (
+                "withdraw_control_submission",
+                "/api/terminal/live/withdraw",
+                {"requestId": "r", "expectedBridgeEpoch": "old"},
+            ),
+            (
+                "reconcile_control_prompt",
+                "/api/terminal/live/reconcile",
+                {"requestId": "r", "expectedBridgeEpoch": "old"},
+            ),
+        )
+        for function, path, body in cases:
+            with self.subTest(path=path), mock.patch(
+                f"agents_remember.serving.harness_control_api.{function}",
+                side_effect=HarnessBridgeEpochMismatchError("old", BRIDGE_EPOCH),
+            ):
+                response = self.client.post(path, json=body)
+                self.assertEqual(response.status_code, 409)
+                self.assertEqual(
+                    response.json()["status"],
+                    "bridge-epoch-mismatch",
+                )
+                self.assertEqual(response.json()["actualBridgeEpoch"], BRIDGE_EPOCH)
+
+    def test_submit_request_id_conflict_is_409(self) -> None:
+        with mock.patch(
+            "agents_remember.serving.harness_control_api.submit_control_prompt",
+            side_effect=HarnessRequestConflictError("request id belongs to another payload"),
+        ):
+            response = self.client.post(
+                "/api/terminal/live/submit",
+                json={
+                    "requestId": "conflict",
+                    "text": "different",
+                    "expectedBridgeEpoch": BRIDGE_EPOCH,
+                },
+            )
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.json()["status"], "request-id-conflict")
+
+    def test_submission_status_rejects_invalid_batches_before_control_ipc(self) -> None:
+        bodies = (
+            {"expectedBridgeEpoch": BRIDGE_EPOCH, "requestIds": []},
+            {"expectedBridgeEpoch": BRIDGE_EPOCH, "requestIds": ["same", "same"]},
+            {
+                "expectedBridgeEpoch": BRIDGE_EPOCH,
+                "requestIds": [f"request-{index}" for index in range(65)],
+            },
+        )
+        with mock.patch(
+            "agents_remember.serving.harness_control_api.read_submission_status"
+        ) as status_call:
+            for body in bodies:
+                with self.subTest(size=len(body["requestIds"])):
+                    response = self.client.post(
+                        "/api/terminal/live/submission-status", json=body
+                    )
+                    self.assertEqual(response.status_code, 422)
+        status_call.assert_not_called()
+
+    def test_submit_exposes_retry_safety_only_for_certified_zero_control_socket_bytes(self) -> None:
+        with mock.patch(
+            "agents_remember.serving.harness_control_api.submit_control_prompt",
+            side_effect=HarnessControlClientError(
+                "control socket refused before write", may_have_sent=False
+            ),
+        ):
+            response = self.client.post(
+                "/api/terminal/live/submit",
+                json={
+                    "requestId": "request-prewrite",
+                    "text": "one message",
+                    "expectedBridgeEpoch": BRIDGE_EPOCH,
+                },
+            )
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(
+            response.json(),
+            {
+                "status": "pre-dispatch-failed",
+                "detail": "control socket refused before write",
+                "retrySafe": True,
+                "stage": "control-ipc",
+            },
+        )
+
+    def test_submit_generic_503_has_no_retry_safe_claim(self) -> None:
+        with mock.patch(
+            "agents_remember.serving.harness_control_api.submit_control_prompt",
+            side_effect=HarnessControlError("generic control outage"),
+        ):
+            response = self.client.post(
+                "/api/terminal/live/submit",
+                json={
+                    "requestId": "request-outage",
+                    "text": "one message",
+                    "expectedBridgeEpoch": BRIDGE_EPOCH,
+                },
+            )
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(
+            response.json(),
+            {"status": "control-unavailable", "detail": "generic control outage"},
+        )
+        self.assertNotIn("retrySafe", response.json())
+
+    def test_submit_client_error_that_may_have_sent_has_no_retry_safe_claim(self) -> None:
+        with mock.patch(
+            "agents_remember.serving.harness_control_api.submit_control_prompt",
+            side_effect=HarnessControlClientError(
+                "control response lost after write", may_have_sent=True
+            ),
+        ):
+            response = self.client.post(
+                "/api/terminal/live/submit",
+                json={
+                    "requestId": "request-may-have-sent",
+                    "text": "one message",
+                    "expectedBridgeEpoch": BRIDGE_EPOCH,
+                },
+            )
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(
+            response.json(),
+            {
+                "status": "control-unavailable",
+                "detail": "control response lost after write",
+            },
+        )
+        self.assertNotIn("retrySafe", response.json())
+
+    def test_post_write_unknown_stays_a_receipt_without_retry_safe_claim(self) -> None:
+        receipt = SubmissionReceipt(
+            request_id="request-postwrite",
+            acceptance="unknown",
+            submitted_at="2026-07-16T08:00:00+00:00",
+            detail="control response lost after request bytes were sent",
+        )
+        with mock.patch(
+            "agents_remember.serving.harness_control_api.submit_control_prompt",
+            return_value=receipt,
+        ):
+            response = self.client.post(
+                "/api/terminal/live/submit",
+                json={
+                    "requestId": "request-postwrite",
+                    "text": "one message",
+                    "expectedBridgeEpoch": BRIDGE_EPOCH,
+                },
+            )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["acceptance"], "unknown")
+        self.assertNotIn("retrySafe", response.json())
 
     def test_reconcile_keeps_the_same_request_correlation(self) -> None:
         result = ReconciliationResult(
@@ -209,7 +481,11 @@ class HarnessControlApiTests(unittest.TestCase):
             return_value=result,
         ):
             response = self.client.post(
-                "/api/terminal/live/reconcile", json={"requestId": "request-7"}
+                "/api/terminal/live/reconcile",
+                json={
+                    "requestId": "request-7",
+                    "expectedBridgeEpoch": BRIDGE_EPOCH,
+                },
             )
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["state"], "accepted")

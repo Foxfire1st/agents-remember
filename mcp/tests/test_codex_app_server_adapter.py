@@ -3,21 +3,25 @@ from __future__ import annotations
 import asyncio
 import json
 from collections import defaultdict, deque
-from collections.abc import AsyncIterator, Mapping
+from collections.abc import AsyncIterator, Callable, Mapping
 from copy import deepcopy
 from pathlib import Path
 from typing import cast
 
 import pytest
-from agents_remember.errors import CodexAppServerError, HarnessAdapterDisconnectedError
+from agents_remember.errors import (
+    CodexAppServerError,
+    HarnessAdapterBusyError,
+    HarnessAdapterDisconnectedError,
+)
 from agents_remember.serving.codex_app_server_adapter import (
     CodexAppServerAdapter,
     CodexAppServerSettings,
 )
 from agents_remember.serving.codex_app_server_protocol import JsonObject, RequestId
-from agents_remember.serving.codex_app_server_session import BusyPolicy
 from agents_remember.serving.harness_control_models import (
     ControlIdentity,
+    ControlOperationRef,
     InteractionResponse,
     LaunchSpec,
     PromptRequest,
@@ -42,11 +46,22 @@ class FakeCodexTransport:
         self.launches: list[LaunchSpec] = []
         self.stop_modes: list[ShutdownMode] = []
         self.incoming: asyncio.Queue[JsonObject | Exception | None] = asyncio.Queue()
+        self.before_write_hook: Callable[[str, Mapping[str, object]], None] | None = None
 
     async def start(self, launch: LaunchSpec) -> None:
         self.launches.append(launch)
 
-    async def request(self, method: str, params: Mapping[str, object]) -> JsonObject:
+    async def request(
+        self,
+        method: str,
+        params: Mapping[str, object],
+        *,
+        before_write: Callable[[], None] | None = None,
+    ) -> JsonObject:
+        if self.before_write_hook is not None:
+            self.before_write_hook(method, params)
+        if before_write is not None:
+            before_write()
         self.requests.append((method, dict(params)))
         response = self.responses[method].popleft()
         if isinstance(response, Exception):
@@ -83,6 +98,34 @@ class FakeCodexTransport:
 
     def emit(self, message: JsonObject) -> None:
         self.incoming.put_nowait(deepcopy(message))
+
+
+class BlockingTurnStartTransport(FakeCodexTransport):
+    def __init__(self) -> None:
+        super().__init__()
+        self.turn_start_requested = asyncio.Event()
+        self.release_turn_start = asyncio.Event()
+
+    async def request(
+        self,
+        method: str,
+        params: Mapping[str, object],
+        *,
+        before_write: Callable[[], None] | None = None,
+    ) -> JsonObject:
+        if method != "turn/start":
+            return await super().request(method, params, before_write=before_write)
+        if self.before_write_hook is not None:
+            self.before_write_hook(method, params)
+        if before_write is not None:
+            before_write()
+        self.requests.append((method, dict(params)))
+        self.turn_start_requested.set()
+        await self.release_turn_start.wait()
+        response = self.responses[method].popleft()
+        if isinstance(response, Exception):
+            raise response
+        return deepcopy(response)
 
 
 def fixture() -> JsonObject:
@@ -155,6 +198,12 @@ def request(request_id: str, text: str = "hello") -> PromptRequest:
         source="durable",
         text=text,
         submitted_at="2026-07-14T12:01:00+00:00",
+        operation=ControlOperationRef(
+            bridge_epoch="codex-test-epoch",
+            sequence=1,
+            operation_id=request_id,
+            kind="prompt",
+        ),
     )
 
 
@@ -180,7 +229,7 @@ def make_adapter(
     sandbox: str | None = None,
     turn_sandbox_policy: Mapping[str, object] | None = None,
     config: Mapping[str, object] | None = None,
-    busy_policy: BusyPolicy = "steer",
+    submission_limit: int = 256,
 ) -> CodexAppServerAdapter:
     settings = CodexAppServerSettings(
         reasoning_effort="xhigh",
@@ -192,7 +241,7 @@ def make_adapter(
         sandbox=sandbox,
         turn_sandbox_policy=turn_sandbox_policy,
         config=config or {},
-        busy_policy=busy_policy,
+        submission_limit=submission_limit,
     )
     return CodexAppServerAdapter(
         settings,
@@ -204,6 +253,20 @@ def make_adapter(
 async def settle() -> None:
     await asyncio.sleep(0)
     await asyncio.sleep(0)
+
+
+def turn_start_result(data: JsonObject, turn_id: str, status: str = "inProgress") -> JsonObject:
+    result = deepcopy(fixture_object(data, "turnStartResult"))
+    turn = fixture_object(result, "turn")
+    turn["id"] = turn_id
+    turn["status"] = status
+    return result
+
+
+def turn_completed_notification(data: JsonObject, turn_id: str) -> JsonObject:
+    notification = deepcopy(fixture_object(data, "notifications", "completed"))
+    fixture_object(notification, "params", "turn")["id"] = turn_id
+    return notification
 
 
 @pytest.mark.anyio
@@ -478,53 +541,21 @@ async def test_turn_acceptance_blocking_and_terminal_mapping(status: str, outcom
 
 
 @pytest.mark.anyio
-async def test_busy_policy_steers_or_queues_explicitly() -> None:
+async def test_busy_second_submit_certifies_zero_bytes_without_steer_or_adapter_queue() -> None:
     data = fixture()
-    steer_transport = FakeCodexTransport()
-    prime_start(steer_transport, data)
-    steer_transport.queue_response("turn/start", fixture_object(data, "turnStartResult"))
-    steer_transport.queue_response("turn/steer", {"turnId": "turn-1"})
-    steer = make_adapter(steer_transport)
-    await steer.start(launch())
+    transport = FakeCodexTransport()
+    prime_start(transport, data)
+    transport.queue_response("turn/start", fixture_object(data, "turnStartResult"))
+    adapter = make_adapter(transport)
+    await adapter.start(launch())
     try:
-        await steer.submit(request("request-1"))
-        steered = await steer.submit(request("request-2"))
-        assert steered.acceptance == "immediate"
-        assert steer_transport.requests[-1] == (
-            "turn/steer",
-            {
-                "threadId": "thread-1",
-                "expectedTurnId": "turn-1",
-                "input": [{"type": "text", "text": "hello"}],
-                "clientUserMessageId": "request-2",
-            },
-        )
+        await adapter.submit(request("request-1"))
+        with pytest.raises(HarnessAdapterBusyError, match="active ordinary operation"):
+            await adapter.submit(request("request-2"))
+        assert [method for method, _ in transport.requests].count("turn/start") == 1
+        assert not any(method == "turn/steer" for method, _ in transport.requests)
     finally:
-        await steer.stop("forced")
-
-    queue_transport = FakeCodexTransport()
-    prime_start(queue_transport, data)
-    queue_transport.queue_response("turn/start", fixture_object(data, "turnStartResult"))
-    second_turn = deepcopy(fixture_object(data, "turnStartResult"))
-    fixture_object(second_turn, "turn")["id"] = "turn-2"
-    queue_transport.queue_response("turn/start", second_turn)
-    queued_adapter = make_adapter(queue_transport, busy_policy="queue")
-    await queued_adapter.start(launch())
-    try:
-        await queued_adapter.submit(request("request-1"))
-        queued = await queued_adapter.submit(request("request-2"))
-        assert queued.acceptance == "queued"
-        queue_transport.emit(fixture_object(data, "notifications", "completed"))
-        await settle()
-        turn_starts = [
-            params for method, params in queue_transport.requests if method == "turn/start"
-        ]
-        assert [params["clientUserMessageId"] for params in turn_starts] == [
-            "request-1",
-            "request-2",
-        ]
-    finally:
-        await queued_adapter.stop("forced")
+        await adapter.stop("forced")
 
 
 @pytest.mark.anyio
@@ -609,45 +640,242 @@ async def test_turn_start_promotes_only_successful_submission_status(
 
 
 @pytest.mark.anyio
-async def test_busy_queue_preserves_prompt_selection_epoch_across_later_setter() -> None:
+async def test_codex_terminal_correlation_is_bounded_across_many_synchronous_turns() -> None:
+    data = fixture()
+    transport = FakeCodexTransport()
+    prime_start(transport, data)
+    for index in range(5):
+        transport.queue_response(
+            "turn/start",
+            {"turn": {"id": f"turn-sync-{index}", "status": "completed", "items": []}},
+        )
+    adapter = make_adapter(transport, submission_limit=2)
+    await adapter.start(launch())
+    try:
+        for index in range(5):
+            receipt = await adapter.submit(request(f"request-sync-{index}"))
+            assert receipt.raw["terminalCompletion"] is True
+            assert adapter._turn_operations == {}
+            assert len(adapter._completed_turns) <= 2
+        assert list(adapter._completed_turns) == ["turn-sync-3", "turn-sync-4"]
+    finally:
+        await adapter.stop("forced")
+
+
+@pytest.mark.anyio
+async def test_early_codex_completion_releases_live_correlation_and_late_duplicate_is_inert(
+) -> None:
+    data = fixture()
+    transport = BlockingTurnStartTransport()
+    prime_start(transport, data)
+    transport.queue_response("turn/start", turn_start_result(data, "turn-early"))
+    adapter = make_adapter(transport, submission_limit=2)
+    await adapter.start(launch())
+    events = adapter.subscribe()
+    early_notification = turn_completed_notification(data, "turn-early")
+    try:
+        first_request = request("request-early")
+        first_task = asyncio.create_task(adapter.submit(first_request))
+        await asyncio.wait_for(transport.turn_start_requested.wait(), 1)
+        transport.emit(early_notification)
+        await settle()
+        assert list(adapter._unbound_completions) == ["turn-early"]
+
+        transport.release_turn_start.set()
+        first_receipt = await asyncio.wait_for(first_task, 1)
+        assert first_receipt.acceptance == "immediate"
+        while True:
+            first_event = await asyncio.wait_for(anext(events), 1)
+            if first_event.kind == "completed":
+                break
+        assert first_event.operation == first_request.operation
+        assert adapter._turn_operations == {}
+        assert adapter._unbound_completions == {}
+        assert adapter._completed_turns["turn-early"] == first_request.operation
+
+        transport.turn_start_requested = asyncio.Event()
+        transport.release_turn_start = asyncio.Event()
+        transport.queue_response("turn/start", turn_start_result(data, "turn-successor"))
+        successor_request = request("request-successor")
+        successor_task = asyncio.create_task(adapter.submit(successor_request))
+        await asyncio.wait_for(transport.turn_start_requested.wait(), 1)
+        while not adapter._events.empty():
+            adapter._events.get_nowait()
+        event_sequence = adapter._event_sequence
+
+        # A retained old duplicate is discarded even while the successor start is pending.
+        transport.emit(early_notification)
+        await settle()
+        assert adapter._event_sequence == event_sequence
+        assert adapter._unbound_completions == {}
+
+        transport.release_turn_start.set()
+        await asyncio.wait_for(successor_task, 1)
+        assert adapter._turn_operations == {"turn-successor": successor_request.operation}
+        while not adapter._events.empty():
+            adapter._events.get_nowait()
+        event_sequence = adapter._event_sequence
+
+        transport.emit(early_notification)
+        await settle()
+        assert adapter._event_sequence == event_sequence
+        assert adapter._active_operation == successor_request.operation
+        assert adapter._turn_operations == {"turn-successor": successor_request.operation}
+
+        successor_notification = turn_completed_notification(data, "turn-successor")
+        transport.emit(successor_notification)
+        await settle()
+        assert adapter._active_operation is None
+        assert adapter._turn_operations == {}
+        assert list(adapter._completed_turns) == ["turn-early", "turn-successor"]
+    finally:
+        transport.release_turn_start.set()
+        await adapter.stop("forced")
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("status", ["failed", "interrupted"])
+async def test_early_completion_plus_rejected_turn_start_clears_all_correlation(
+    status: str,
+) -> None:
+    data = fixture()
+    transport = BlockingTurnStartTransport()
+    prime_start(transport, data)
+    turn_id = f"turn-early-{status}"
+    transport.queue_response("turn/start", turn_start_result(data, turn_id, status))
+    adapter = make_adapter(transport, submission_limit=2)
+    await adapter.start(launch())
+    notification = turn_completed_notification(data, turn_id)
+    try:
+        submit_task = asyncio.create_task(adapter.submit(request(f"request-{status}")))
+        await asyncio.wait_for(transport.turn_start_requested.wait(), 1)
+        transport.emit(notification)
+        await settle()
+        assert list(adapter._unbound_completions) == [turn_id]
+
+        transport.release_turn_start.set()
+        receipt = await asyncio.wait_for(submit_task, 1)
+        assert receipt.acceptance == "rejected"
+        assert adapter._unbound_completions == {}
+        assert adapter._turn_operations == {}
+        assert adapter._active_operation is None
+        assert adapter._completed_turns[turn_id] == request(f"request-{status}").operation
+
+        event_sequence = adapter._event_sequence
+        transport.emit(notification)
+        await settle()
+        assert adapter._event_sequence == event_sequence
+    finally:
+        transport.release_turn_start.set()
+        await adapter.stop("forced")
+
+
+@pytest.mark.anyio
+async def test_mismatched_early_completion_is_cleared_before_successor_activation() -> None:
+    data = fixture()
+    transport = BlockingTurnStartTransport()
+    prime_start(transport, data)
+    transport.queue_response("turn/start", turn_start_result(data, "turn-evicted-old", "completed"))
+    transport.queue_response("turn/start", turn_start_result(data, "turn-newest", "completed"))
+    transport.queue_response("turn/start", turn_start_result(data, "turn-successor"))
+    adapter = make_adapter(transport, submission_limit=1)
+    await adapter.start(launch())
+    try:
+        transport.release_turn_start.set()
+        await adapter.submit(request("request-evicted-old"))
+        await adapter.submit(request("request-newest"))
+        assert list(adapter._completed_turns) == ["turn-newest"]
+
+        transport.turn_start_requested = asyncio.Event()
+        transport.release_turn_start = asyncio.Event()
+        submit_task = asyncio.create_task(adapter.submit(request("request-successor")))
+        await asyncio.wait_for(transport.turn_start_requested.wait(), 1)
+        transport.emit(turn_completed_notification(data, "turn-evicted-old"))
+        await settle()
+        assert list(adapter._unbound_completions) == ["turn-evicted-old"]
+
+        transport.release_turn_start.set()
+        with pytest.raises(CodexAppServerError, match="does not match"):
+            await submit_task
+        assert adapter._unbound_completions == {}
+        assert adapter._turn_operations == {}
+        assert adapter._active_operation is None
+        assert adapter._active_turn_id is None
+    finally:
+        transport.release_turn_start.set()
+        await adapter.stop("forced")
+
+
+@pytest.mark.anyio
+async def test_retained_terminal_turn_id_cannot_be_reused_for_a_successor() -> None:
+    data = fixture()
+    transport = FakeCodexTransport()
+    prime_start(transport, data)
+    transport.queue_response("turn/start", turn_start_result(data, "turn-reused", "completed"))
+    transport.queue_response("turn/start", turn_start_result(data, "turn-reused"))
+    adapter = make_adapter(transport, submission_limit=2)
+    await adapter.start(launch())
+    try:
+        first = await adapter.submit(request("request-first"))
+        assert first.raw["terminalCompletion"] is True
+        with pytest.raises(CodexAppServerError, match="reused a retained terminal"):
+            await adapter.submit(request("request-successor"))
+        assert adapter._turn_operations == {}
+        assert adapter._active_operation is None
+        assert list(adapter._completed_turns) == ["turn-reused"]
+    finally:
+        await adapter.stop("forced")
+
+
+@pytest.mark.anyio
+async def test_codex_terminal_correlation_is_bounded_across_many_async_turns() -> None:
+    data = fixture()
+    transport = FakeCodexTransport()
+    prime_start(transport, data)
+    for index in range(5):
+        transport.queue_response("turn/start", turn_start_result(data, f"turn-async-{index}"))
+    adapter = make_adapter(transport, submission_limit=2)
+    await adapter.start(launch())
+    events = adapter.subscribe()
+    try:
+        for index in range(5):
+            await adapter.submit(request(f"request-async-{index}"))
+            transport.emit(turn_completed_notification(data, f"turn-async-{index}"))
+            while True:
+                event = await asyncio.wait_for(anext(events), 1)
+                if event.kind == "completed":
+                    break
+            assert adapter._turn_operations == {}
+            assert len(adapter._completed_turns) <= 2
+        assert list(adapter._completed_turns) == ["turn-async-3", "turn-async-4"]
+    finally:
+        await adapter.stop("forced")
+
+
+@pytest.mark.anyio
+async def test_preflight_refuses_prompt_and_setter_while_exact_turn_is_active() -> None:
     data = fixture()
     add_model(data)
     transport = FakeCodexTransport()
     prime_start(transport, data)
-    for turn_id in ("turn-1", "turn-2", "turn-3"):
-        transport.queue_response(
-            "turn/start",
-            {"turn": {"id": turn_id, "status": "inProgress", "items": []}},
-        )
-    adapter = make_adapter(transport, busy_policy="queue")
+    transport.queue_response("turn/start", fixture_object(data, "turnStartResult"))
+    adapter = make_adapter(transport)
     await adapter.start(launch())
     try:
         await adapter.submit(request("active-before-set"))
-        queued_before = await adapter.submit(request("queued-before-set"))
-        assert queued_before.acceptance == "queued"
-
-        await adapter.set_model("gpt-5.6-mini")
-        queued_after = await adapter.submit(request("queued-after-set"))
-        assert queued_after.acceptance == "queued"
-
-        completed = deepcopy(fixture_object(data, "notifications", "completed"))
-        transport.emit(completed)
-        await settle()
-        starts = [params for method, params in transport.requests if method == "turn/start"]
-        assert starts[1]["clientUserMessageId"] == "queued-before-set"
-        assert (starts[1]["model"], starts[1]["effort"]) == ("gpt-5.6-sol", "xhigh")
-        assert adapter.advertise().selected_model_key == "gpt-5.6-sol"
-        assert (await adapter.snapshot()).raw["settingsPending"] is True
-
-        fixture_object(completed, "params", "turn")["id"] = "turn-2"
-        transport.emit(completed)
-        await settle()
-        starts = [params for method, params in transport.requests if method == "turn/start"]
-        assert starts[2]["clientUserMessageId"] == "queued-after-set"
-        assert (starts[2]["model"], starts[2]["effort"]) == ("gpt-5.6-mini", "medium")
-        assert adapter.advertise().selected_model_key == "gpt-5.6-mini"
-        assert (await adapter.snapshot()).raw["settingsPending"] is False
-        assert len(transport.launches) == 1
+        for operation in (
+            request("second-prompt").operation,
+            ControlOperationRef(
+                bridge_epoch="codex-test-epoch",
+                sequence=2,
+                operation_id="setter-2",
+                kind="set-model",
+            ),
+        ):
+            assert operation is not None
+            with pytest.raises(HarnessAdapterBusyError, match="not idle"):
+                await adapter.preflight_operation(operation)
+        assert not any(method == "turn/steer" for method, _ in transport.requests)
     finally:
         await adapter.stop("forced")
 
@@ -713,28 +941,18 @@ async def test_pending_codex_settings_force_fresh_turn_instead_of_steering_activ
     transport = FakeCodexTransport()
     prime_start(transport, data)
     transport.queue_response("turn/start", fixture_object(data, "turnStartResult"))
-    next_turn = deepcopy(fixture_object(data, "turnStartResult"))
-    fixture_object(next_turn, "turn")["id"] = "turn-2"
-    transport.queue_response("turn/start", next_turn)
-    adapter = make_adapter(transport, busy_policy="steer")
+    adapter = make_adapter(transport)
     await adapter.start(launch())
     try:
-        await adapter.submit(request("active"))
         await adapter.set_model("gpt-5.6-mini")
-        queued = await adapter.submit(request("after-switch"))
-        assert queued.acceptance == "queued"
-        assert queued.raw["busyPolicy"] == "settings-change"
+        await adapter.submit(request("active"))
+        with pytest.raises(HarnessAdapterBusyError):
+            await adapter.submit(request("after-switch"))
         assert not any(method == "turn/steer" for method, _ in transport.requests)
-
-        transport.emit(fixture_object(data, "notifications", "completed"))
-        await settle()
         starts = [params for method, params in transport.requests if method == "turn/start"]
-        assert [params["clientUserMessageId"] for params in starts] == [
-            "active",
-            "after-switch",
-        ]
-        assert starts[-1]["model"] == "gpt-5.6-mini"
-        assert starts[-1]["effort"] == "medium"
+        assert [params["clientUserMessageId"] for params in starts] == ["active"]
+        assert starts[0]["model"] == "gpt-5.6-mini"
+        assert starts[0]["effort"] == "medium"
         assert len(transport.launches) == 1
     finally:
         await adapter.stop("forced")
@@ -815,9 +1033,13 @@ async def test_correlated_server_approval_and_elicitation_responses() -> None:
     data = fixture()
     transport = FakeCodexTransport()
     prime_start(transport, data)
+    transport.queue_response("turn/start", fixture_object(data, "turnStartResult"))
     adapter = make_adapter(transport)
     await adapter.start(launch())
     try:
+        active = request("interaction-active")
+        await adapter.submit(active)
+        assert active.operation is not None
         transport.emit(fixture_object(data, "serverRequests", "commandApproval"))
         await settle()
         pending = (await adapter.snapshot()).pending_interaction
@@ -827,6 +1049,7 @@ async def test_correlated_server_approval_and_elicitation_responses() -> None:
                 interaction_id=pending.interaction_id,
                 response="accept",
                 responded_at="2026-07-14T12:03:00+00:00",
+                operation=active.operation,
             )
         )
         assert transport.server_responses[-1] == ("approval-1", {"decision": "accept"})
@@ -840,6 +1063,7 @@ async def test_correlated_server_approval_and_elicitation_responses() -> None:
                 interaction_id=pending.interaction_id,
                 response='{"action":"accept","content":{"value":"chosen"}}',
                 responded_at="2026-07-14T12:04:00+00:00",
+                operation=active.operation,
             )
         )
         assert transport.server_responses[-1] == (

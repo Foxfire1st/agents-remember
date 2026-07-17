@@ -26,6 +26,7 @@ function ctx(over: Partial<CommandContext> = {}): CommandContext {
       switchSession: vi.fn(),
       cycleEffort: vi.fn(),
       submitComposer: vi.fn(),
+      popBackComposer: vi.fn(),
     },
     ...over,
   };
@@ -83,6 +84,7 @@ describe("registerDefaultCommands", () => {
       "effort.decrease",
       "effort.increase",
       "composer.submit",
+      "composer.popBack",
     ]) {
       expect(ids, `missing default command ${id}`).toContain(id);
     }
@@ -104,6 +106,8 @@ describe("registerDefaultCommands", () => {
     expect(context.actions.cycleEffort).toHaveBeenCalledWith(-1);
     registry.run("effort.increase", context);
     expect(context.actions.cycleEffort).toHaveBeenCalledWith(1);
+    registry.run("composer.popBack", context);
+    expect(context.actions.popBackComposer).toHaveBeenCalledTimes(1);
   });
 
   it("gates palette.open on the palette being closed", () => {

@@ -103,9 +103,18 @@ export interface SubmissionReceiptWire {
   vendorCorrelationId: string | null;
   acceptedAt: string | null;
   detail: string | null;
+  bridgeEpoch: string;
 }
 
 export type ReconciliationState = "accepted" | "rejected" | "unresolved" | "unsupported";
+export type SubmissionLifecycleState =
+  | "queued"
+  | "dispatching"
+  | "delivered"
+  | "withdrawn"
+  | "unknown"
+  | "rejected"
+  | "unsupported";
 
 /** `public_reconciliation_json` — resolve an ambiguous submit by requestId, never a resend. */
 export interface ReconciliationResultWire {
@@ -114,4 +123,6 @@ export interface ReconciliationResultWire {
   reconciledAt: string;
   vendorCorrelationId: string | null;
   detail: string | null;
+  bridgeEpoch: string;
+  submissionState: SubmissionLifecycleState | null;
 }

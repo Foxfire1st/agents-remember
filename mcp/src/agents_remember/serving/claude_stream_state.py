@@ -7,7 +7,11 @@ from collections import OrderedDict, deque
 from collections.abc import AsyncIterator, Callable, Mapping
 from dataclasses import replace
 
-from agents_remember.errors import HarnessAdapterDisconnectedError, HarnessControlError
+from agents_remember.errors import (
+    HarnessAdapterBusyError,
+    HarnessAdapterDisconnectedError,
+    HarnessControlError,
+)
 from agents_remember.serving.claude_stream_limits import ClaudeAdapterLimits
 from agents_remember.serving.claude_stream_protocol import (
     clip_transcript_text,
@@ -35,6 +39,7 @@ from agents_remember.serving.harness_control_models import (
     AdapterEvent,
     AdapterSnapshot,
     ControlIdentity,
+    ControlOperationRef,
     InteractionResponse,
     PromptRequest,
     ReconciliationResult,
@@ -101,6 +106,8 @@ class ClaudeStreamState:
 
     async def submit(self, request: PromptRequest) -> SubmissionReceipt:
         self._require_available()
+        if request.operation is None:
+            raise HarnessControlError("Claude submission requires an exact operation ref")
         if any(record.abandoned and not record.completed for record in self._history.values()):
             return SubmissionReceipt(
                 request_id=request.request_id,
@@ -127,8 +134,16 @@ class ClaudeStreamState:
             if command is not None
             else correlation_envelope(request.request_id, correlation_id, request.text)
         )
-        replay_text = session_command_replay_text(request.text) if command is not None else wire_text
-        record = self._reserve_submission(request, correlation_id, wire_text, replay_text)
+        replay_text = (
+            session_command_replay_text(request.text) if command is not None else wire_text
+        )
+        record = self._reserve_submission(
+            request,
+            correlation_id,
+            wire_text,
+            replay_text,
+            request.operation,
+        )
         if record is None:
             return SubmissionReceipt(
                 request_id=request.request_id,
@@ -138,6 +153,18 @@ class ClaudeStreamState:
             )
         await self._write_submission(record)
         return await self._await_acceptance(record)
+
+    def preflight_operation(self, operation: ControlOperationRef) -> None:
+        self._require_available()
+        if (
+            self._accepted_order
+            or self._pending_by_text
+            or self._pending_interaction_frame is not None
+            or self._snapshot.activity != "idle"
+        ):
+            raise HarnessAdapterBusyError(
+                f"Claude is not idle for {operation.kind} operation preflight"
+            )
 
     async def wait_terminal(self, request_id: str) -> TerminalResult | None:
         """Wait for the terminal result that follows one accepted structured command."""
@@ -179,6 +206,9 @@ class ClaudeStreamState:
             raise HarnessControlError(
                 "Claude interaction response does not match the pending request"
             )
+        active = self.active_operation()
+        if response.operation is None or response.operation != active:
+            raise HarnessControlError("Claude interaction response changed operation identity")
         await self._transport.write_frame(
             interaction_response_frame(vendor_frame, response.response)
         )
@@ -241,7 +271,8 @@ class ClaudeStreamState:
                     session_id=self._snapshot.vendor_session_id or "",
                     correlation_id=record.correlation_id,
                     text=record.wire_text,
-                )
+                ),
+                before_write=lambda: self._guard_submission_write(record),
             )
         except HarnessAdapterDisconnectedError:
             self._remove_pending(record)
@@ -288,13 +319,12 @@ class ClaudeStreamState:
         correlation_id: str,
         wire_text: str,
         replay_text: str,
+        operation: ControlOperationRef,
     ) -> ClaudeSubmission | None:
         if request.request_id in self._history:
             raise HarnessControlError(f"duplicate Claude request id: {request.request_id}")
         if any(record.correlation_id == correlation_id for record in self._history.values()):
-            raise HarnessControlError(
-                f"duplicate retained Claude correlation id: {correlation_id}"
-            )
+            raise HarnessControlError(f"duplicate retained Claude correlation id: {correlation_id}")
         if wire_text in self._pending_by_text:
             raise HarnessControlError("an identical Claude message is still awaiting replay")
         if len(self._history) >= self._limits.history_limit and not self._evict_submission():
@@ -304,7 +334,7 @@ class ClaudeStreamState:
             correlation_id=correlation_id,
             wire_text=wire_text,
             replay_text=replay_text,
-            queued=bool(self._accepted_order),
+            operation=operation,
             acceptance_future=asyncio.get_running_loop().create_future(),
             terminal_future=asyncio.get_running_loop().create_future(),
         )
@@ -321,10 +351,7 @@ class ClaudeStreamState:
                 request_id
                 for request_id, record in self._history.items()
                 if request_id not in active
-                and (
-                    record.acceptance != "unknown"
-                    or (record.abandoned and record.completed)
-                )
+                and (record.acceptance != "unknown" or (record.abandoned and record.completed))
             ),
             None,
         )
@@ -457,7 +484,9 @@ class ClaudeStreamState:
                 "Claude replay-user-message body changed for its retained correlation"
             )
         accepted_at = self._created_at(frame)
-        acceptance: AcceptanceState = "queued" if record.queued else "immediate"
+        if self._accepted_order:
+            raise HarnessControlError("Claude accepted a second ordinary prompt")
+        acceptance: AcceptanceState = "immediate"
         record.acceptance = acceptance
         record.accepted_at = accepted_at
         self._accepted_order.append(request_id)
@@ -558,7 +587,14 @@ class ClaudeStreamState:
             else ("running" if self._accepted_order else "idle")
         )
         self._snapshot = replace(self._snapshot, activity=activity)
-        await self._emit("completed", transcript=(transcript,), raw={"terminalOutcome": outcome})
+        if record is None:
+            raise HarnessControlError("Claude result has no exact active operation")
+        await self._emit(
+            "completed",
+            transcript=(transcript,),
+            raw={"terminalOutcome": outcome},
+            operation=record.operation,
+        )
         if record is not None and not record.terminal_future.done():
             record.terminal_future.set_result(terminal)
 
@@ -610,6 +646,7 @@ class ClaudeStreamState:
         *,
         transcript: tuple[TranscriptEntry, ...] = (),
         raw: Mapping[str, object] | None = None,
+        operation: ControlOperationRef | None = None,
     ) -> None:
         self._event_sequence += 1
         event_raw = dict(raw or {})
@@ -627,6 +664,7 @@ class ClaudeStreamState:
                 snapshot=self._snapshot,
                 transcript=transcript,
                 raw=event_raw,
+                operation=operation,
             )
         )
 
@@ -688,6 +726,27 @@ class ClaudeStreamState:
 
     def _current_request_id(self) -> str | None:
         return self._accepted_order[0] if self._accepted_order else None
+
+    def active_operation(self) -> ControlOperationRef | None:
+        if self._accepted_order:
+            return self._history[self._accepted_order[0]].operation
+        if len(self._pending_by_text) == 1:
+            request_id = next(iter(self._pending_by_text.values()))
+            return self._history[request_id].operation
+        return None
+
+    def _guard_submission_write(self, record: ClaudeSubmission) -> None:
+        """Final no-await guard under the shared Claude transport write lock."""
+
+        if (
+            self._accepted_order
+            or self._pending_interaction_frame is not None
+            or self._pending_by_text.get(record.wire_text) != record.request.request_id
+            or self.active_operation() != record.operation
+        ):
+            raise HarnessAdapterBusyError(
+                "Claude became busy before the guarded prompt/setter frame write"
+            )
 
     def _created_at(self, frame: Mapping[str, object]) -> str:
         timestamp = frame.get("timestamp")

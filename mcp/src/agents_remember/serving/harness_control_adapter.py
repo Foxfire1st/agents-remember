@@ -18,6 +18,7 @@ from agents_remember.serving.harness_control_models import (
     AdapterEvent,
     AdapterHandshake,
     AdapterSnapshot,
+    ControlOperationRef,
     ControlState,
     InteractionResponse,
     LaunchSpec,
@@ -35,9 +36,15 @@ class HarnessProtocolAdapter(Protocol):
 
     def advertise(self) -> CapabilitySnapshot: ...
 
-    async def set_model(self, model_key: str) -> SetResult: ...
+    async def set_model(
+        self, model_key: str, *, operation: ControlOperationRef | None = None
+    ) -> SetResult: ...
 
-    async def set_effort(self, effort: str) -> SetResult: ...
+    async def set_effort(
+        self, effort: str, *, operation: ControlOperationRef | None = None
+    ) -> SetResult: ...
+
+    async def preflight_operation(self, operation: ControlOperationRef) -> None: ...
 
     async def snapshot(self) -> AdapterSnapshot: ...
 
@@ -154,7 +161,10 @@ class UnsupportedHarnessProtocolAdapter:
         del model_key, effort
         raise HarnessControlError(f"no protocol adapter is registered for {self._harness_id!r}")
 
-    async def set_model(self, model_key: str) -> SetResult:
+    async def set_model(
+        self, model_key: str, *, operation: ControlOperationRef | None = None
+    ) -> SetResult:
+        del operation
         return SetResult(
             ok=False,
             acceptance="unsupported",
@@ -162,7 +172,10 @@ class UnsupportedHarnessProtocolAdapter:
             detail=f"no protocol adapter is registered for {self._harness_id!r}",
         )
 
-    async def set_effort(self, effort: str) -> SetResult:
+    async def set_effort(
+        self, effort: str, *, operation: ControlOperationRef | None = None
+    ) -> SetResult:
+        del operation
         return SetResult(
             ok=False,
             acceptance="unsupported",
@@ -172,6 +185,9 @@ class UnsupportedHarnessProtocolAdapter:
 
     def subscribe(self) -> AsyncIterator[AdapterEvent]:
         raise HarnessControlError("unsupported adapter has no event subscription")
+
+    async def preflight_operation(self, operation: ControlOperationRef) -> None:
+        del operation
 
     async def submit(self, request: PromptRequest) -> SubmissionReceipt:
         return SubmissionReceipt(

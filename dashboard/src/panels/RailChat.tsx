@@ -5,9 +5,7 @@ import {
   attachSeatRole,
   createSession,
   notifySessionCatalogChanged,
-  pasteDraftToSession,
   registerConnection,
-  sendToSession,
   sessionRole,
   sessionSeatRole,
   sessionStore,
@@ -15,11 +13,10 @@ import {
   type OpenSession,
   type SessionRole,
 } from "../data/sessions";
+import { submitSessionText, waitForSubmissionReady } from "../data/submitClient";
 import {
   attachSessionToLeaf,
-  bracketedPaste,
   fetchHarnesses,
-  sanitizeForInjection,
   terminateTerminalSession,
   type HarnessInfo,
 } from "../data/terminal";
@@ -312,8 +309,26 @@ export function RailChat({
     setLeafContextNote(null);
     const packet = buildLeafContextPackage({ leafKey: lk, taskDocuments, engineProcesses });
     if (!packet) return;
-    const status = await pasteDraftToSession(sessionId, packet);
-    if (status === "unconfirmed") setLeafContextNote("context delivery unconfirmed");
+    const gate = await waitForSubmissionReady(sessionId);
+    if (!gate.ready) {
+      setLeafContextNote(gate.reason ?? "context submit is unavailable");
+      return;
+    }
+    const outcome = await submitSessionText(sessionId, packet, {
+      source: "leaf-context",
+      clearDraftOnAccept: false,
+    });
+    if (outcome.status === "blocked") {
+      setLeafContextNote(outcome.reason);
+      return;
+    }
+    if (outcome.status === "empty") return;
+    const { record } = outcome;
+    if (record.phase === "accepted") setLeafContextNote("leaf context accepted");
+    else if (record.phase === "queued") setLeafContextNote("leaf context queued · yours");
+    else {
+      setLeafContextNote(record.detail ?? `leaf context submit ${record.phase}`);
+    }
   };
 
   // Start is NEVER gated on a leaf: pass the viewed leaf (may be undefined → an unattached/free chat).
@@ -501,9 +516,7 @@ function Pane({
           />
         </Suspense>
       </div>
-      <SessionComposer
-        onSend={(text) => sendToSession(session.id, bracketedPaste(sanitizeForInjection(text)))}
-      />
+      <SessionComposer session={session} />
     </div>
   );
 }

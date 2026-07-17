@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections import deque
+from collections import OrderedDict
 from collections.abc import AsyncIterator, Callable, Mapping
 from dataclasses import replace
 from datetime import UTC, datetime
@@ -12,6 +12,7 @@ from typing import Literal
 from agents_remember.errors import (
     CodexAppServerError,
     CodexAppServerRpcError,
+    HarnessAdapterBusyError,
     HarnessAdapterDisconnectedError,
     HarnessControlError,
 )
@@ -53,6 +54,7 @@ from agents_remember.serving.harness_control_models import (
     AdapterEvent,
     AdapterHandshake,
     AdapterSnapshot,
+    ControlOperationRef,
     InteractionResponse,
     LaunchSpec,
     PromptRequest,
@@ -85,8 +87,13 @@ class CodexAppServerAdapter:
         self._active_turn_id: str | None = None
         self._pending_interaction: CodexServerInteraction | None = None
         self._submissions = CodexSubmissionLedger(settings.submission_limit)
-        self._busy_queue: deque[SubmissionEvidence] = deque()
         self._fresh_turn_required = False
+        self._pending_operation: ControlOperationRef | None = None
+        self._active_operation: ControlOperationRef | None = None
+        self._turn_operations: dict[str, ControlOperationRef] = {}
+        self._unbound_completions: dict[str, JsonObject] = {}
+        self._completed_turns: OrderedDict[str, ControlOperationRef] = OrderedDict()
+        self._completed_turn_limit = settings.submission_limit
         self._event_sequence = 0
         self._transcript_sequence = 0
 
@@ -150,7 +157,10 @@ class CodexAppServerAdapter:
             owned_config_keys=("model", "model_reasoning_effort"),
         )
 
-    async def set_model(self, model_key: str) -> SetResult:
+    async def set_model(
+        self, model_key: str, *, operation: ControlOperationRef | None = None
+    ) -> SetResult:
+        del operation
         self._require_ready()
         try:
             rebase_detail = self._session.set_desired_model(model_key)
@@ -180,7 +190,10 @@ class CodexAppServerAdapter:
             detail=detail,
         )
 
-    async def set_effort(self, effort: str) -> SetResult:
+    async def set_effort(
+        self, effort: str, *, operation: ControlOperationRef | None = None
+    ) -> SetResult:
+        del operation
         self._require_ready()
         try:
             self._session.set_desired_effort(effort)
@@ -217,8 +230,24 @@ class CodexAppServerAdapter:
     def subscribe(self) -> AsyncIterator[AdapterEvent]:
         return self._event_stream()
 
+    async def preflight_operation(self, operation: ControlOperationRef) -> None:
+        self._require_ready()
+        if (
+            self._active_turn_id is not None
+            or self._pending_operation is not None
+            or self._pending_interaction is not None
+        ):
+            raise HarnessAdapterBusyError(
+                f"Codex is not idle at {operation.kind} preflight"
+            )
+
     async def submit(self, request: PromptRequest) -> SubmissionReceipt:
         self._require_ready()
+        operation = request.operation
+        if operation is None or operation.kind != "prompt":
+            raise CodexAppServerError("Codex submit requires an exact prompt operation ref")
+        if self._active_turn_id is not None or self._pending_operation is not None:
+            raise HarnessAdapterBusyError("Codex already has an active ordinary operation")
         evidence = self._submissions.reserve(
             request,
             model=self._session.require_desired_model(),
@@ -231,46 +260,12 @@ class CodexAppServerAdapter:
                 submitted_at=request.submitted_at,
                 detail="Codex adapter correlation ledger is full",
             )
-        if self._active_turn_id is None:
-            return await self._start_turn(evidence)
-        if self._fresh_turn_required:
-            return self._queue_submission(
-                evidence,
-                detail="queued for a fresh Codex turn because model/effort settings are pending",
-                policy="settings-change",
-            )
-        if self._settings.busy_policy == "steer":
-            return await self._steer_turn(evidence)
-        return self._queue_submission(
-            evidence,
-            detail="queued until the active Codex turn completes",
-            policy="queue",
-        )
-
-    def _queue_submission(
-        self,
-        evidence: SubmissionEvidence,
-        *,
-        detail: str,
-        policy: str,
-    ) -> SubmissionReceipt:
-        if len(self._busy_queue) >= self._settings.busy_queue_limit:
-            evidence.state = "rejected"
-            return SubmissionReceipt(
-                request_id=evidence.request.request_id,
-                acceptance="rejected",
-                submitted_at=evidence.request.submitted_at,
-                detail="Codex busy queue is full",
-            )
-        evidence.state = "queued"
-        self._busy_queue.append(evidence)
-        return SubmissionReceipt(
-            request_id=evidence.request.request_id,
-            acceptance="queued",
-            submitted_at=evidence.request.submitted_at,
-            detail=detail,
-            raw={"busyPolicy": policy, "queuePosition": len(self._busy_queue)},
-        )
+        self._pending_operation = operation
+        try:
+            return await self._start_turn(evidence, operation)
+        finally:
+            if self._pending_operation == operation:
+                self._pending_operation = None
 
     async def respond(self, response: InteractionResponse) -> None:
         pending = self._pending_interaction
@@ -278,6 +273,8 @@ class CodexAppServerAdapter:
             raise CodexAppServerError(
                 "Codex interaction response does not match the pending request"
             )
+        if response.operation is None or response.operation != self._active_operation:
+            raise CodexAppServerError("Codex response does not match the active operation")
         transport = self._require_transport()
         result = interaction_result(pending.method, response.response)
         await transport.respond(pending.rpc_id, result)
@@ -341,7 +338,9 @@ class CodexAppServerAdapter:
             await self._session.transport.stop(mode)
         self._offer_event(None)
 
-    async def _start_turn(self, evidence: SubmissionEvidence) -> SubmissionReceipt:
+    async def _start_turn(
+        self, evidence: SubmissionEvidence, operation: ControlOperationRef
+    ) -> SubmissionReceipt:
         launch = self._session.launch
         model = evidence.model
         assert launch is not None
@@ -361,7 +360,11 @@ class CodexAppServerAdapter:
             if value is not None:
                 params[key] = dict(value) if isinstance(value, Mapping) else value
         try:
-            result = await self._require_transport().request("turn/start", params)
+            result = await self._require_transport().request(
+                "turn/start",
+                params,
+                before_write=lambda: self._guard_turn_start(operation),
+            )
         except CodexAppServerRpcError as exc:
             evidence.state = "rejected"
             return SubmissionReceipt(
@@ -380,10 +383,22 @@ class CodexAppServerAdapter:
             ) from exc
         turn = parse_turn(result, context="turn/start response")
         turn_id = required_text(turn, "id", context="turn/start response.turn")
+        buffered: JsonObject | None = None
+        if self._unbound_completions:
+            buffered_turn_id, buffered = next(iter(self._unbound_completions.items()))
+            self._unbound_completions.clear()
+            if buffered_turn_id != turn_id:
+                raise CodexAppServerError(
+                    "buffered turn/completed id does not match the turn/start response"
+                )
+        if turn_id in self._completed_turns:
+            raise CodexAppServerError("turn/start reused a retained terminal turn id")
         evidence.turn_id = turn_id
+        self._turn_operations[turn_id] = operation
         status = required_text(turn, "status", context="turn/start response.turn")
         if status in {"failed", "interrupted"}:
             evidence.state = "rejected"
+            self._remember_completed_turn(turn_id, operation)
             self._fresh_turn_required = self._session.has_pending_settings
             self._refresh_capability_snapshot()
             return SubmissionReceipt(
@@ -404,49 +419,26 @@ class CodexAppServerAdapter:
         self._refresh_capability_snapshot()
         if status == "inProgress":
             self._active_turn_id = turn_id
+            self._active_operation = operation
             await self._set_activity("running", turn_id=turn_id)
+        completion_emitted = False
+        if buffered is not None:
+            await self._handle_turn_completed(buffered)
+            completion_emitted = True
+        terminal_completion = status != "inProgress" and not completion_emitted
+        if terminal_completion:
+            self._remember_completed_turn(turn_id, operation)
         return SubmissionReceipt(
             request_id=evidence.request.request_id,
             acceptance="immediate",
             submitted_at=evidence.request.submitted_at,
             vendor_correlation_id=turn_id,
             accepted_at=self._clock(),
-            raw={"method": "turn/start", "clientUserMessageId": evidence.request.request_id},
-        )
-
-    async def _steer_turn(self, evidence: SubmissionEvidence) -> SubmissionReceipt:
-        turn_id = self._active_turn_id
-        assert turn_id is not None
-        try:
-            result = await self._require_transport().request(
-                "turn/steer",
-                {
-                    "threadId": self._require_thread_id(),
-                    "expectedTurnId": turn_id,
-                    "input": [{"type": "text", "text": evidence.request.text}],
-                    "clientUserMessageId": evidence.request.request_id,
-                },
-            )
-        except CodexAppServerRpcError as exc:
-            evidence.state = "rejected"
-            return SubmissionReceipt(
-                request_id=evidence.request.request_id,
-                acceptance="rejected",
-                submitted_at=evidence.request.submitted_at,
-                detail=str(exc),
-            )
-        echoed_turn_id = required_text(result, "turnId", context="turn/steer response")
-        if echoed_turn_id != turn_id:
-            raise CodexAppServerError("turn/steer response changed the active Codex turn id")
-        evidence.state = "accepted"
-        evidence.turn_id = turn_id
-        return SubmissionReceipt(
-            request_id=evidence.request.request_id,
-            acceptance="immediate",
-            submitted_at=evidence.request.submitted_at,
-            vendor_correlation_id=turn_id,
-            accepted_at=self._clock(),
-            raw={"method": "turn/steer", "clientUserMessageId": evidence.request.request_id},
+            raw={
+                "method": "turn/start",
+                "clientUserMessageId": evidence.request.request_id,
+                "terminalCompletion": terminal_completion,
+            },
         )
 
     async def _run_messages(self, transport: CodexAppServerTransport) -> None:
@@ -503,8 +495,20 @@ class CodexAppServerAdapter:
         self._validate_thread(params)
         turn = parse_turn(params, context="turn/completed params")
         turn_id = required_text(turn, "id", context="turn/completed turn")
+        if turn_id in self._completed_turns:
+            return
+        operation = self._turn_operations.get(turn_id)
+        if operation is None:
+            # Codex can deliver the notification before the turn/start response binds its turn id
+            # to the pending operation. Keep only that one exact raw completion until binding.
+            if self._pending_operation is None or self._unbound_completions:
+                raise CodexAppServerError("turn/completed has no bindable pending operation")
+            self._unbound_completions[turn_id] = params
+            return
         if self._active_turn_id is not None and turn_id != self._active_turn_id:
             raise CodexAppServerError("turn/completed does not match the active Codex turn")
+        if self._active_operation is not None and operation != self._active_operation:
+            raise CodexAppServerError("turn/completed does not match the active operation")
         completed_at = iso_from_epoch(turn.get("completedAt"), fallback=self._clock())
         self._transcript_sequence += 1
         transcript = TranscriptEntry(
@@ -520,17 +524,19 @@ class CodexAppServerAdapter:
             if evidence.turn_id == turn_id:
                 evidence.state = "completed"
         self._active_turn_id = None
+        self._active_operation = None
+        self._remember_completed_turn(turn_id, operation)
         self._snapshot = replace(
             await self.snapshot(),
-            activity="settling" if self._busy_queue else "idle",
-            acceptance="queued" if self._busy_queue else "immediate",
+            activity="idle",
+            acceptance="immediate",
         )
         await self._emit(
             "completed",
             transcript=(transcript,),
             raw={"codexMethod": "turn/completed", "turnId": turn_id},
+            operation=operation,
         )
-        await self._dispatch_queued()
 
     async def _handle_item_completed(self, params: JsonObject) -> None:
         self._validate_thread(params)
@@ -601,22 +607,6 @@ class CodexAppServerAdapter:
         self._session.accept_settings_update(model=model, effort=effort)
         self._refresh_capability_snapshot()
 
-    async def _dispatch_queued(self) -> None:
-        while self._busy_queue and self._active_turn_id is None:
-            evidence = self._busy_queue.popleft()
-            receipt = await self._start_turn(evidence)
-            if receipt.acceptance == "rejected":
-                assert self._snapshot is not None
-                self._snapshot = replace(
-                    self._snapshot,
-                    acceptance="rejected",
-                    raw={
-                        **self._snapshot.raw,
-                        "queuedDispatchRejected": evidence.request.request_id,
-                    },
-                )
-                await self._emit("state", raw={"codexMethod": "turn/start"})
-
     async def _reconnect(self) -> None:
         thread_id = self._require_thread_id()
         if self._processor is not None:
@@ -639,7 +629,7 @@ class CodexAppServerAdapter:
         self._snapshot = replace(
             self._snapshot,
             activity=activity,
-            acceptance="immediate" if self._settings.busy_policy == "steer" else "queued",
+            acceptance="immediate",
             raw={**self._snapshot.raw, "activeTurnId": turn_id},
         )
         await self._emit("state", raw={"codexMethod": "turn/started", "turnId": turn_id})
@@ -674,6 +664,7 @@ class CodexAppServerAdapter:
         *,
         transcript: tuple[TranscriptEntry, ...] = (),
         raw: Mapping[str, object] | None = None,
+        operation: ControlOperationRef | None = None,
     ) -> None:
         launch = self._session.launch
         assert self._snapshot is not None and launch is not None
@@ -689,6 +680,7 @@ class CodexAppServerAdapter:
             else None,
             transcript=transcript,
             raw=dict(raw or {}),
+            operation=operation,
         )
         if self._events.full():
             raise CodexAppServerError("Codex adapter event queue is full")
@@ -696,8 +688,32 @@ class CodexAppServerAdapter:
 
     def _busy_acceptance(self, activity: str, fallback: str) -> str:
         if activity == "running":
-            return "immediate" if self._settings.busy_policy == "steer" else "queued"
+            return "immediate"
         return fallback
+
+    def _guard_turn_start(self, operation: ControlOperationRef) -> None:
+        """Final synchronous guard executed under the transport write lock."""
+
+        if (
+            self._pending_operation != operation
+            or self._active_turn_id is not None
+            or self._active_operation is not None
+            or self._pending_interaction is not None
+        ):
+            raise HarnessAdapterBusyError(
+                "Codex became busy before the guarded turn/start write"
+            )
+
+    def _remember_completed_turn(
+        self, turn_id: str, operation: ControlOperationRef
+    ) -> None:
+        """Release live correlation and retain only the bounded terminal duplicate window."""
+
+        self._turn_operations.pop(turn_id, None)
+        self._completed_turns[turn_id] = operation
+        self._completed_turns.move_to_end(turn_id)
+        while len(self._completed_turns) > self._completed_turn_limit:
+            self._completed_turns.popitem(last=False)
 
     def _validate_thread(self, params: Mapping[str, object]) -> None:
         thread_id = required_text(params, "threadId", context="Codex notification")

@@ -6,20 +6,28 @@ import asyncio
 import json
 import unittest
 from collections import deque
-from collections.abc import AsyncGenerator, AsyncIterator, Mapping
+from collections.abc import AsyncGenerator, AsyncIterator, Callable, Mapping
 from pathlib import Path
 from typing import cast
 
-from agents_remember.errors import HarnessAdapterDisconnectedError, HarnessControlError
+from agents_remember.errors import (
+    HarnessAdapterBusyError,
+    HarnessAdapterDisconnectedError,
+    HarnessControlError,
+)
+from agents_remember.serving.harness_capabilities import SetResult
 from agents_remember.serving.harness_control_bridge import HarnessControlBridge
 from agents_remember.serving.harness_control_models import (
     AdapterEvent,
     AdapterSnapshot,
     ControlIdentity,
+    ControlOperationKind,
+    ControlOperationRef,
     InteractionResponse,
     LaunchSpec,
     PromptRequest,
     ShutdownMode,
+    SubmissionReceipt,
     SubmissionSource,
 )
 from agents_remember.serving.pi_rpc_adapter import PiRpcAdapter
@@ -104,6 +112,8 @@ class _FakePiTransport:
         self.command_failures: dict[str, deque[Exception]] = {}
         self.command_hangs: dict[str, int] = {}
         self.hide_selected_model_after_set = False
+        self.before_write_hook: Callable[[Mapping[str, object]], None] | None = None
+        self._event_token = 0
         self.event_queue: asyncio.Queue[
             Mapping[str, object] | HarnessControlError | HarnessAdapterDisconnectedError | None
         ] = asyncio.Queue()
@@ -111,11 +121,28 @@ class _FakePiTransport:
     async def start(self, launch: LaunchSpec) -> None:
         self.launches.append(launch)
 
-    async def request(self, command: Mapping[str, object]) -> Mapping[str, object]:
+    @property
+    def event_token(self) -> int:
+        return self._event_token
+
+    async def request(
+        self,
+        command: Mapping[str, object],
+        *,
+        before_write: Callable[[], None] | None = None,
+    ) -> Mapping[str, object]:
         copied = dict(command)
-        self.commands.append(copied)
         request_id = cast(str, command["id"])
         command_type = cast(str, command["type"])
+        if self.before_write_hook is not None:
+            self.before_write_hook(copied)
+        if before_write is not None:
+            before_write()
+        if command_type == "prompt" and self.prompt_failures:
+            failure = self.prompt_failures[0]
+            if not failure.may_have_sent:
+                raise self.prompt_failures.popleft()
+        self.commands.append(copied)
         remaining_hangs = self.command_hangs.get(command_type, 0)
         if remaining_hangs:
             self.command_hangs[command_type] = remaining_hangs - 1
@@ -160,11 +187,7 @@ class _FakePiTransport:
         if command_type == "set_model":
             key = f"{command.get('provider')}/{command.get('modelId')}"
             selected = next(
-                (
-                    model
-                    for model in self.models
-                    if f"{model['provider']}/{model['id']}" == key
-                ),
+                (model for model in self.models if f"{model['provider']}/{model['id']}" == key),
                 None,
             )
             if selected is None:
@@ -206,7 +229,16 @@ class _FakePiTransport:
             }
         raise AssertionError(f"unexpected fake command: {command_type}")
 
-    async def send(self, command: Mapping[str, object]) -> None:
+    async def send(
+        self,
+        command: Mapping[str, object],
+        *,
+        before_write: Callable[[], None] | None = None,
+    ) -> None:
+        if self.before_write_hook is not None:
+            self.before_write_hook(command)
+        if before_write is not None:
+            before_write()
         self.commands.append(dict(command))
 
     async def _events(self) -> AsyncIterator[Mapping[str, object]]:
@@ -228,6 +260,7 @@ class _FakePiTransport:
         self.event_queue.put_nowait(None)
 
     def emit(self, frame: Mapping[str, object]) -> None:
+        self._event_token += 1
         self.event_queue.put_nowait(frame)
 
     def fail_events(self, error: HarnessControlError) -> None:
@@ -281,13 +314,66 @@ def _launch(*, persistent: bool = True) -> LaunchSpec:
     )
 
 
-def _prompt(request_id: str, *, source: SubmissionSource = "durable") -> PromptRequest:
+def _operation(
+    operation_id: str,
+    kind: ControlOperationKind = "prompt",
+    *,
+    sequence: int = 1,
+) -> ControlOperationRef:
+    return ControlOperationRef(
+        bridge_epoch="pi-test-epoch",
+        sequence=sequence,
+        operation_id=operation_id,
+        kind=kind,
+    )
+
+
+def _prompt(
+    request_id: str,
+    *,
+    source: SubmissionSource = "durable",
+    operation: ControlOperationRef | None = None,
+) -> PromptRequest:
     return PromptRequest(
         request_id=request_id,
         source=source,
         text=f"prompt {request_id}",
         submitted_at="2026-07-14T09:01:00+00:00",
+        operation=operation,
     )
+
+
+async def _direct_submit(
+    adapter: PiRpcAdapter,
+    request_id: str,
+    *,
+    source: SubmissionSource = "durable",
+) -> SubmissionReceipt:
+    operation = _operation(request_id)
+    await adapter.preflight_operation(operation)
+    return await adapter.submit(_prompt(request_id, source=source, operation=operation))
+
+
+async def _direct_set_model(
+    adapter: PiRpcAdapter,
+    model_key: str,
+    *,
+    sequence: int = 1,
+) -> SetResult:
+    operation = _operation(f"set-model-{sequence}", "set-model", sequence=sequence)
+    await adapter.preflight_operation(operation)
+    return await adapter.set_model(model_key, operation=operation)
+
+
+async def _direct_set_effort(
+    adapter: PiRpcAdapter,
+    effort: str,
+    *,
+    sequence: int = 1,
+) -> SetResult:
+    operation = _operation(f"set-effort-{sequence}", "set-effort", sequence=sequence)
+    await adapter.preflight_operation(operation)
+    return await adapter.set_effort(effort, operation=operation)
 
 
 class PiRpcProtocolTests(unittest.TestCase):
@@ -448,7 +534,7 @@ class PiRpcAdapterTests(unittest.IsolatedAsyncioTestCase):
         )
         handshake = await adapter.start(_launch())
         try:
-            receipt = await adapter.submit(_prompt("request-1"))
+            receipt = await _direct_submit(adapter, "request-1")
             self.assertEqual(handshake.snapshot.control, "ready")
             self.assertEqual(handshake.snapshot.vendor_session_id, "pi-session-1")
             self.assertEqual(handshake.adapter_id, "pi-rpc")
@@ -502,7 +588,7 @@ class PiRpcAdapterTests(unittest.IsolatedAsyncioTestCase):
         adapter = PiRpcAdapter(transport_factory=_TransportSequence(transport))
         await adapter.start(_launch())
         try:
-            changed = await adapter.set_model("provider-x/nested/model-id")
+            changed = await _direct_set_model(adapter, "provider-x/nested/model-id")
             self.assertEqual(
                 (changed.ok, changed.acceptance, changed.effective_value),
                 (True, "echo-verified", "provider-x/nested/model-id"),
@@ -514,18 +600,31 @@ class PiRpcAdapterTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(set_command["modelId"], "nested/model-id")
             self.assertEqual(adapter.advertise().selected_model_key, "provider-x/nested/model-id")
 
-            unknown = await adapter.set_model("provider-x/not-authorized")
+            unknown = await _direct_set_model(
+                adapter,
+                "provider-x/not-authorized",
+                sequence=2,
+            )
             self.assertEqual((unknown.ok, unknown.acceptance), (False, "unsupported"))
             self.assertEqual(unknown.detail, "Model not found: provider-x/not-authorized")
 
-            write_count = len(transport.commands)
-            malformed = await adapter.set_model("missing-provider-qualification")
+            write_count = len([item for item in transport.commands if item["type"] == "set_model"])
+            malformed = await _direct_set_model(
+                adapter,
+                "missing-provider-qualification",
+                sequence=3,
+            )
             self.assertEqual((malformed.ok, malformed.acceptance), (False, "unsupported"))
-            self.assertEqual(len(transport.commands), write_count)
+            self.assertEqual(
+                len([item for item in transport.commands if item["type"] == "set_model"]),
+                write_count,
+            )
         finally:
             await adapter.stop("forced")
 
-    async def test_set_thinking_reports_exact_and_clamped_readback_without_notification(self) -> None:
+    async def test_set_thinking_reports_exact_and_clamped_readback_without_notification(
+        self,
+    ) -> None:
         transport = _FakePiTransport()
         thinking_map = transport.models[0]["thinkingLevelMap"]
         assert isinstance(thinking_map, dict)
@@ -534,14 +633,14 @@ class PiRpcAdapterTests(unittest.IsolatedAsyncioTestCase):
         adapter = PiRpcAdapter(transport_factory=_TransportSequence(transport))
         await adapter.start(_launch())
         try:
-            exact = await adapter.set_effort("low")
+            exact = await _direct_set_effort(adapter, "low")
             self.assertEqual(
                 (exact.ok, exact.acceptance, exact.requested_value, exact.effective_value),
                 (True, "echo-verified", "low", "low"),
             )
 
             transport.session["thinkingLevel"] = "high"
-            clamped = await adapter.set_effort("xhigh")
+            clamped = await _direct_set_effort(adapter, "xhigh", sequence=2)
             self.assertEqual(
                 (
                     clamped.ok,
@@ -558,10 +657,19 @@ class PiRpcAdapterTests(unittest.IsolatedAsyncioTestCase):
                 ["set_thinking_level", "get_state", "get_available_models"],
             )
 
-            write_count = len(transport.commands)
-            arbitrary = await adapter.set_effort("vendor-invented-token")
+            write_count = len(
+                [item for item in transport.commands if item["type"] == "set_thinking_level"]
+            )
+            arbitrary = await _direct_set_effort(
+                adapter,
+                "vendor-invented-token",
+                sequence=3,
+            )
             self.assertEqual((arbitrary.ok, arbitrary.acceptance), (False, "unsupported"))
-            self.assertEqual(len(transport.commands), write_count)
+            self.assertEqual(
+                len([item for item in transport.commands if item["type"] == "set_thinking_level"]),
+                write_count,
+            )
         finally:
             await adapter.stop("forced")
 
@@ -570,12 +678,12 @@ class PiRpcAdapterTests(unittest.IsolatedAsyncioTestCase):
         adapter = PiRpcAdapter(transport_factory=_TransportSequence(transport))
         await adapter.start(_launch())
         try:
-            model = await adapter.set_model("local/chat-test")
+            model = await _direct_set_model(adapter, "local/chat-test")
             self.assertEqual(model.acceptance, "echo-verified")
             self.assertEqual(adapter.advertise().selected_model_key, "local/chat-test")
             self.assertEqual(adapter.advertise().selected_effort, "off")
 
-            effort = await adapter.set_effort("high")
+            effort = await _direct_set_effort(adapter, "high", sequence=2)
             self.assertEqual(
                 (effort.ok, effort.acceptance, effort.effective_value),
                 (False, "unsupported", None),
@@ -589,14 +697,16 @@ class PiRpcAdapterTests(unittest.IsolatedAsyncioTestCase):
         adapter = PiRpcAdapter(transport_factory=_TransportSequence(transport))
         await adapter.start(_launch())
         try:
+            operation = _operation("set-model-timeout", "set-model")
+            await adapter.preflight_operation(operation)
             transport.command_failures["get_state"] = deque([TimeoutError()])
-            result = await adapter.set_model("local/chat-test")
+            result = await adapter.set_model("local/chat-test", operation=operation)
             self.assertEqual((result.ok, result.acceptance), (False, "unknown"))
             self.assertIsNone(result.effective_value)
         finally:
             await adapter.stop("forced")
 
-    async def test_mutation_state_and_catalog_timeouts_release_shared_control_queue(self) -> None:
+    async def test_mutation_timeouts_hold_unknown_barrier_until_explicit_resolution(self) -> None:
         for stalled_command in ("set_model", "get_state", "get_available_models"):
             with self.subTest(stalled_command=stalled_command):
                 transport = _FakePiTransport()
@@ -607,7 +717,19 @@ class PiRpcAdapterTests(unittest.IsolatedAsyncioTestCase):
                 bridge = HarnessControlBridge(_identity(), adapter)
                 await bridge.start(_launch())
                 try:
-                    transport.command_hangs[stalled_command] = 1
+                    if stalled_command == "get_state":
+
+                        def stall_readback(
+                            command: Mapping[str, object],
+                            target: _FakePiTransport = transport,
+                        ) -> None:
+                            if command.get("type") == "set_model":
+                                target.command_hangs["get_state"] = 1
+                                target.before_write_hook = None
+
+                        transport.before_write_hook = stall_readback
+                    else:
+                        transport.command_hangs[stalled_command] = 1
                     timed_out = await asyncio.wait_for(
                         bridge.set_model("local/chat-test"),
                         timeout=1.0,
@@ -616,10 +738,19 @@ class PiRpcAdapterTests(unittest.IsolatedAsyncioTestCase):
                         (timed_out.ok, timed_out.acceptance, timed_out.effective_value),
                         (False, "unknown", None),
                     )
-                    later = await asyncio.wait_for(
-                        bridge.set_model("anthropic/claude-test"),
-                        timeout=1.0,
+                    active = bridge._command_queue.active_operation
+                    assert active is not None
+                    self.assertEqual(active.kind, "set-model")
+                    later_task = asyncio.create_task(bridge.set_model("anthropic/claude-test"))
+                    await asyncio.sleep(0.02)
+                    self.assertFalse(later_task.done())
+                    await bridge.resolve_operation(
+                        active.operation_id,
+                        active.kind,
+                        resolution="not-applied",
+                        detail="test operator cleared the unknown mutation barrier",
                     )
+                    later = await asyncio.wait_for(later_task, timeout=1.0)
                     self.assertEqual((later.ok, later.acceptance), (True, "echo-verified"))
                     self.assertEqual(
                         adapter.advertise().selected_model_key,
@@ -634,12 +765,10 @@ class PiRpcAdapterTests(unittest.IsolatedAsyncioTestCase):
         assert isinstance(thinking_map, dict)
         thinking_map["xhigh"] = "xhigh"
         clamp_transport.thinking_clamps["xhigh"] = "vendor-weird"
-        clamp_adapter = PiRpcAdapter(
-            transport_factory=_TransportSequence(clamp_transport)
-        )
+        clamp_adapter = PiRpcAdapter(transport_factory=_TransportSequence(clamp_transport))
         await clamp_adapter.start(_launch())
         try:
-            invalid_clamp = await clamp_adapter.set_effort("xhigh")
+            invalid_clamp = await _direct_set_effort(clamp_adapter, "xhigh")
             self.assertEqual(
                 (invalid_clamp.ok, invalid_clamp.acceptance, invalid_clamp.effective_value),
                 (False, "unknown", None),
@@ -663,7 +792,10 @@ class PiRpcAdapterTests(unittest.IsolatedAsyncioTestCase):
         model_adapter = PiRpcAdapter(transport_factory=_TransportSequence(model_transport))
         await model_adapter.start(_launch())
         try:
-            invalid_model = await model_adapter.set_model("provider-x/ephemeral-model")
+            invalid_model = await _direct_set_model(
+                model_adapter,
+                "provider-x/ephemeral-model",
+            )
             self.assertEqual(
                 (invalid_model.ok, invalid_model.acceptance, invalid_model.effective_value),
                 (False, "unknown", None),
@@ -675,25 +807,32 @@ class PiRpcAdapterTests(unittest.IsolatedAsyncioTestCase):
         finally:
             await model_adapter.stop("forced")
 
-    async def test_streaming_prompts_use_source_specific_queue_behavior(self) -> None:
+    async def test_stale_idle_window_rejects_without_native_queue_or_prompt_bytes(self) -> None:
         transport = _FakePiTransport()
         adapter = PiRpcAdapter(transport_factory=_TransportSequence(transport))
         await adapter.start(_launch())
-        stream = cast(AsyncGenerator[AdapterEvent], adapter.subscribe())
         try:
-            transport.emit({"type": "agent_start"})
-            running = await asyncio.wait_for(anext(stream), timeout=1.0)
-            running_snapshot = running.snapshot
-            assert running_snapshot is not None
-            self.assertEqual(running_snapshot.activity, "running")
-            terminal = await adapter.submit(_prompt("terminal-1", source="terminal"))
-            durable = await adapter.submit(_prompt("durable-1", source="durable"))
-            self.assertEqual((terminal.acceptance, durable.acceptance), ("queued", "queued"))
+            operation = _operation("stale-window")
+            await adapter.preflight_operation(operation)
+
+            def become_busy(command: Mapping[str, object]) -> None:
+                if command.get("type") == "prompt":
+                    transport.emit({"type": "agent_start"})
+
+            transport.before_write_hook = become_busy
+            with self.assertRaisesRegex(HarnessAdapterBusyError, "received an event"):
+                await adapter.submit(
+                    _prompt(
+                        "stale-window",
+                        source="terminal",
+                        operation=operation,
+                    )
+                )
             prompts = [item for item in transport.commands if item["type"] == "prompt"]
-            self.assertEqual([item["streamingBehavior"] for item in prompts], ["steer", "followUp"])
+            self.assertEqual(prompts, [])
+            self.assertIsNone(adapter.active_operation)
         finally:
             await adapter.stop("forced")
-            await stream.aclose()
 
     async def test_get_state_drives_stream_compaction_and_pending_activity(self) -> None:
         cases = (
@@ -717,6 +856,8 @@ class PiRpcAdapterTests(unittest.IsolatedAsyncioTestCase):
         transport = _FakePiTransport()
         adapter = PiRpcAdapter(transport_factory=_TransportSequence(transport))
         await adapter.start(_launch())
+        receipt = await _direct_submit(adapter, "activity-fixture")
+        self.assertEqual(receipt.acceptance, "immediate")
         stream = cast(AsyncGenerator[AdapterEvent], adapter.subscribe())
         decoder = PiRpcJsonlDecoder()
         frames: list[Mapping[str, object]] = []
@@ -735,6 +876,7 @@ class PiRpcAdapterTests(unittest.IsolatedAsyncioTestCase):
                 all(snapshot.activity == "settling" for snapshot in typed_snapshots[1:5])
             )
             self.assertEqual(events[-1].kind, "completed")
+            self.assertEqual(events[-1].operation, _operation("activity-fixture"))
             final_snapshot = events[-1].snapshot
             assert final_snapshot is not None
             self.assertEqual(final_snapshot.activity, "idle")
@@ -752,6 +894,14 @@ class PiRpcAdapterTests(unittest.IsolatedAsyncioTestCase):
                     interaction_limit=4,
                 )
                 await adapter.start(_launch())
+                operation = _operation(f"interaction-{size}")
+                await adapter.preflight_operation(operation)
+                await adapter.submit(
+                    _prompt(
+                        f"interaction-{size}",
+                        operation=operation,
+                    )
+                )
                 stream = cast(AsyncGenerator[AdapterEvent], adapter.subscribe())
                 try:
                     for index in range(size):
@@ -776,6 +926,7 @@ class PiRpcAdapterTests(unittest.IsolatedAsyncioTestCase):
                                 interaction_id=interaction_id,
                                 response="true",
                                 responded_at="2026-07-14T09:03:00+00:00",
+                                operation=operation,
                             )
                         )
                         self.assertLessEqual(adapter.retained_interaction_count, 1)
@@ -791,7 +942,7 @@ class PiRpcAdapterTests(unittest.IsolatedAsyncioTestCase):
                     await adapter.stop("forced")
                     await stream.aclose()
 
-    async def test_disconnect_before_ack_rejects_without_resend(self) -> None:
+    async def test_certified_pre_write_disconnect_stays_authoritatively_queued(self) -> None:
         transport = _FakePiTransport()
         transport.prompt_failures.append(
             HarnessAdapterDisconnectedError("closed before write", may_have_sent=False)
@@ -803,9 +954,9 @@ class PiRpcAdapterTests(unittest.IsolatedAsyncioTestCase):
             receipt = await bridge.submit(
                 bridge.prompt("before", source="durable", request_id="before")
             )
-            self.assertEqual(receipt.acceptance, "rejected")
+            self.assertEqual(receipt.acceptance, "queued")
             self.assertEqual(
-                len([item for item in transport.commands if item["type"] == "prompt"]), 1
+                len([item for item in transport.commands if item["type"] == "prompt"]), 0
             )
         finally:
             await bridge.stop("forced")

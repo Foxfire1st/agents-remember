@@ -21,17 +21,22 @@ from agents_remember.serving.harness_control_models import (
     AdapterHandshake,
     AdapterSnapshot,
     ControlIdentity,
+    ControlOperationKind,
     InteractionResponse,
     LaunchSpec,
     PromptRequest,
     ReconciliationResult,
     ReconciliationState,
     ShutdownMode,
+    SubmissionAuthorityDescriptor,
     SubmissionReceipt,
     SubmissionSource,
+    SubmissionStatusBatch,
     TranscriptEntry,
+    WithdrawalResult,
 )
 from agents_remember.serving.harness_control_queue import HarnessControlQueue
+from agents_remember.serving.harness_submission_authority import OperationResolution
 
 Clock = Callable[[], str]
 
@@ -88,12 +93,12 @@ class HarnessControlBridge:
             raise HarnessControlError("control bridge is already started")
         if launch.identity != self.identity:
             raise HarnessControlError("launch identity does not match the control bridge")
-        handshake = await self._adapter.start(launch)
         try:
+            handshake = await self._adapter.start(launch)
             self._validate_handshake(handshake)
-        except HarnessControlError:
-            # The adapter may already own a subprocess. Forced cleanup is required on a rejected
-            # handshake so an identity/capability failure cannot leak that subprocess.
+        except Exception:
+            # Adapter startup can fail after it has acquired a subprocess, before it returns a
+            # handshake. Forced cleanup therefore covers both startup and handshake refusal.
             await self._adapter.stop("forced")
             raise
         self._snapshot = handshake.snapshot
@@ -147,17 +152,51 @@ class HarnessControlBridge:
         *,
         source: SubmissionSource,
         request_id: str | None = None,
+        expected_bridge_epoch: str | None = None,
     ) -> PromptRequest:
         return PromptRequest(
             request_id=request_id or uuid4().hex,
             source=source,
             text=text,
             submitted_at=self._clock(),
+            expected_bridge_epoch=expected_bridge_epoch,
         )
 
     async def submit(self, request: PromptRequest) -> SubmissionReceipt:
         self._require_running()
         return await self._command_queue.submit(request)
+
+    def submission_authority(self) -> SubmissionAuthorityDescriptor:
+        self._require_running()
+        return self._command_queue.descriptor()
+
+    async def submission_status(
+        self,
+        expected_bridge_epoch: str,
+        request_ids: tuple[str, ...],
+        *,
+        cockpit_only: bool = False,
+    ) -> SubmissionStatusBatch:
+        self._require_running()
+        return await self._command_queue.status(
+            expected_bridge_epoch,
+            request_ids,
+            cockpit_only=cockpit_only,
+        )
+
+    async def withdraw_submission(
+        self,
+        expected_bridge_epoch: str,
+        request_id: str,
+        *,
+        cockpit_only: bool = False,
+    ) -> WithdrawalResult:
+        self._require_running()
+        return await self._command_queue.withdraw(
+            expected_bridge_epoch,
+            request_id,
+            cockpit_only=cockpit_only,
+        )
 
     @property
     def retained_submission_count(self) -> int:
@@ -169,9 +208,14 @@ class HarnessControlBridge:
         self._require_running()
         return await self._command_queue.respond(response)
 
-    async def reconcile(self, request_id: str) -> ReconciliationResult:
+    async def reconcile(
+        self, request_id: str, *, expected_bridge_epoch: str | None = None
+    ) -> ReconciliationResult:
         self._require_running()
-        return await self._command_queue.reconcile(request_id)
+        return await self._command_queue.reconcile(
+            request_id,
+            expected_bridge_epoch=expected_bridge_epoch,
+        )
 
     async def resolve_unknown(
         self,
@@ -182,6 +226,24 @@ class HarnessControlBridge:
     ) -> ReconciliationResult:
         self._require_running()
         return await self._command_queue.resolve_unknown(request_id, state=state, detail=detail)
+
+    async def resolve_operation(
+        self,
+        operation_id: str,
+        operation_kind: ControlOperationKind,
+        *,
+        resolution: OperationResolution,
+        detail: str,
+    ) -> None:
+        self._require_running()
+        if resolution not in {"applied", "not-applied"}:
+            raise HarnessControlError("operation resolution must be applied or not-applied")
+        await self._command_queue.resolve_operation(
+            operation_id,
+            operation_kind,
+            resolution=resolution,
+            detail=detail,
+        )
 
     def advertise(self) -> CapabilitySnapshot:
         self._require_running()
@@ -243,6 +305,10 @@ class HarnessControlBridge:
             async for event in self._adapter.subscribe():
                 try:
                     updated = reduce_adapter_event(self._snapshot, event)
+                    # The authority consumes the direct event before public subscribers see the
+                    # coalesced snapshot. Draining from subscribe() would lose intermediate
+                    # completion identity under subscriber backpressure.
+                    await self._command_queue.observe_event(event)
                     self._append_transcript(event.transcript)
                 except HarnessControlError as exc:
                     self._snapshot = replace(
@@ -255,6 +321,7 @@ class HarnessControlBridge:
                     self._publish()
                     return
                 self._snapshot = updated
+                self._command_queue.notify_snapshot_updated()
                 self._publish()
             if not self._stopped and self._snapshot.control == "ready":
                 self._snapshot = replace(

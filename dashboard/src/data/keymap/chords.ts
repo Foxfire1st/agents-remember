@@ -78,6 +78,12 @@ export const COMPOSER_CHORDS: ZoneChord[] = [
     zones: ["composer"],
   },
   {
+    chord: "Alt+ArrowUp",
+    label: "alt+↑",
+    commandId: "composer.popBack",
+    zones: ["composer"],
+  },
+  {
     chord: "Escape",
     label: "esc",
     commandId: "focus.stageHeader",

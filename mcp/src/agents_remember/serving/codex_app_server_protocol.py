@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
-from collections.abc import AsyncIterator, Mapping
+from collections.abc import AsyncIterator, Callable, Mapping
 from typing import Protocol
 
 from agents_remember.errors import (
@@ -20,6 +20,7 @@ DEFAULT_MAX_MESSAGE_BYTES = 4 * 1024 * 1024
 
 JsonObject = dict[str, object]
 RequestId = str | int
+WriteGuard = Callable[[], None]
 
 
 class CodexAppServerTransport(Protocol):
@@ -27,7 +28,13 @@ class CodexAppServerTransport(Protocol):
 
     async def start(self, launch: LaunchSpec) -> None: ...
 
-    async def request(self, method: str, params: Mapping[str, object]) -> JsonObject: ...
+    async def request(
+        self,
+        method: str,
+        params: Mapping[str, object],
+        *,
+        before_write: WriteGuard | None = None,
+    ) -> JsonObject: ...
 
     async def notify(self, method: str, params: Mapping[str, object]) -> None: ...
 
@@ -90,18 +97,32 @@ class CodexStdioTransport:
         )
         self._reader_task = asyncio.create_task(self._read_messages())
 
-    async def request(self, method: str, params: Mapping[str, object]) -> JsonObject:
+    async def request(
+        self,
+        method: str,
+        params: Mapping[str, object],
+        *,
+        before_write: WriteGuard | None = None,
+    ) -> JsonObject:
         request_id = self._next_request_id
         self._next_request_id += 1
         future: asyncio.Future[JsonObject] = asyncio.get_running_loop().create_future()
         self._pending[request_id] = (method, future)
         try:
-            await self._write({"id": request_id, "method": method, "params": dict(params)})
+            await self._write(
+                {"id": request_id, "method": method, "params": dict(params)},
+                before_write=before_write,
+            )
             return await future
         except asyncio.CancelledError:
             self._pending.pop(request_id, None)
             raise
         except HarnessAdapterDisconnectedError:
+            self._pending.pop(request_id, None)
+            raise
+        except Exception:
+            # A final pre-write guard can reject after the pending RPC future was installed. It
+            # certified zero bytes, so this future must be removed before the caller may requeue.
             self._pending.pop(request_id, None)
             raise
 
@@ -157,7 +178,12 @@ class CodexStdioTransport:
         self._fail_pending(CodexAppServerError("Codex app-server transport stopped"))
         self._offer_event(None)
 
-    async def _write(self, message: Mapping[str, object]) -> None:
+    async def _write(
+        self,
+        message: Mapping[str, object],
+        *,
+        before_write: WriteGuard | None = None,
+    ) -> None:
         process = self._process
         if process is None or process.stdin is None or process.returncode is not None:
             raise HarnessAdapterDisconnectedError(
@@ -172,6 +198,10 @@ class CodexStdioTransport:
             raise CodexAppServerError("Codex JSON-RPC payload is not JSON serializable") from exc
         async with self._write_lock:
             try:
+                if before_write is not None:
+                    before_write()
+                # No await is permitted between the guard and first process write. That closes
+                # the stale-active-turn window rather than adding a best-effort pre-check.
                 process.stdin.write(payload)
                 await process.stdin.drain()
             except (BrokenPipeError, ConnectionError) as exc:

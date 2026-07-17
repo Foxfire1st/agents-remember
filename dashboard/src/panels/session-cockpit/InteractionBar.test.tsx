@@ -1,7 +1,7 @@
 // The InteractionBar (260715-FEUI-L6 R4/R9): kind-awareness, the gate-only answer path, and the
 // full round-trip — answering… → verbatim error + retry | answered-waiting (poll-bounded).
 // xterm never appears here: the bar has no terminal dependency by construction.
-import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { createRef } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -14,6 +14,7 @@ import {
   L6_INTERACTION_FREETEXT,
   L6_INTERACTION_UNREPRESENTABLE,
 } from "../../test/fixtures/catalogRows";
+import type { SessionComposerHandle } from "../SessionComposer";
 import { InteractionBar } from "./InteractionBar";
 import { INTERACTION_HONESTY_HINT } from "./lifecycleCopy";
 
@@ -37,6 +38,22 @@ function projectGate(lifecycleId: string, gateId: string, sessionId: string, int
 
 const choicesSession = () => fromTerminalSessionInfo(L6_INTERACTION_CHOICES);
 const freetextSession = () => fromTerminalSessionInfo(L6_INTERACTION_FREETEXT);
+
+function composerHandleRef(text = "") {
+  const element = document.createElement("div");
+  document.body.appendChild(element);
+  const ref = createRef<SessionComposerHandle>();
+  Object.assign(ref, {
+    current: {
+      submit: () => {},
+      popBack: () => {},
+      focus: () => {},
+      getDraft: () => text,
+      getElement: () => element,
+    } satisfies SessionComposerHandle,
+  });
+  return { element, ref };
+}
 
 beforeEach(() => {
   sessionCockpitStore.setState({ perSession: {} });
@@ -62,10 +79,7 @@ describe("kind-awareness (F8)", () => {
   });
 
   it("non-choice kinds mark the composer as the answer input (gate-routed, labeled)", () => {
-    const composer = document.createElement("textarea");
-    document.body.appendChild(composer);
-    const ref = createRef<HTMLTextAreaElement>();
-    Object.assign(ref, { current: composer });
+    const { element: composer, ref } = composerHandleRef();
     const { getByTestId } = render(
       <InteractionBar session={freetextSession()} composerRef={ref} />,
     );
@@ -159,11 +173,7 @@ describe("round-trip states (F7)", () => {
         return { status: 202, text: async () => "" } as Response;
       }),
     );
-    const composer = document.createElement("textarea");
-    composer.value = "start from ar/base";
-    document.body.appendChild(composer);
-    const ref = createRef<HTMLTextAreaElement>();
-    Object.assign(ref, { current: composer });
+    const { element: composer, ref } = composerHandleRef("start from ar/base");
     const { getByTestId, queryByTestId } = render(
       <InteractionBar session={freetextSession()} composerRef={ref} />,
     );
@@ -177,6 +187,53 @@ describe("round-trip states (F7)", () => {
     ]);
     composer.remove();
   });
+
+  it("retries the exact failed composer answer with its original revision and preserves a newer edit", async () => {
+    projectGate("lc-l6-freetext", "g-2", "l6-ix-freetext", "ix_l6_text");
+    const session = freetextSession();
+    sessionCockpitStore.getState().setComposerDraft(session.id, "start from ar/base");
+    const originalRevision =
+      sessionCockpitStore.getState().perSession[session.id].composer.draftRevision;
+    const bodies: Array<Record<string, string>> = [];
+    let status = 500;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string, init?: RequestInit) => {
+        bodies.push(JSON.parse(String(init?.body)));
+        return {
+          status,
+          text: async () => (status === 202 ? "" : "projection not ready"),
+        } as Response;
+      }),
+    );
+    const { element: composer, ref } = composerHandleRef("start from ar/base");
+    const { getByTestId, queryByTestId } = render(
+      <InteractionBar session={session} composerRef={ref} />,
+    );
+    fireEvent.click(getByTestId("interaction-bar-composer-send"));
+    await waitFor(() => expect(queryByTestId("interaction-bar-error")).not.toBeNull());
+    expect(
+      sessionCockpitStore.getState().perSession[session.id].interactionAnswer,
+    ).toMatchObject({
+      answer: "start from ar/base",
+      draftRevision: originalRevision,
+      inflight: false,
+    });
+
+    act(() =>
+      sessionCockpitStore.getState().setComposerDraft(session.id, "newer human edit"),
+    );
+    status = 202;
+    fireEvent.click(getByTestId("interaction-bar-retry"));
+    await waitFor(() => expect(queryByTestId("interaction-bar-answered")).not.toBeNull());
+    expect(bodies).toHaveLength(2);
+    expect(bodies[0]?.note).toBe("start from ar/base");
+    expect(bodies[1]?.note).toBe("start from ar/base");
+    expect(sessionCockpitStore.getState().perSession[session.id].composer.draft).toBe(
+      "newer human edit",
+    );
+    composer.remove();
+  });
 });
 
 describe("stale round-trip state (review finding 5)", () => {
@@ -185,6 +242,7 @@ describe("stale round-trip state (review finding 5)", () => {
     sessionCockpitStore.getState().setInteractionAnswer("l6-ix-choices", {
       interactionId: "ix_l6_choice",
       inflight: false,
+      answer: "allow",
       answeredAt: Date.now(),
     });
     const followUp = fromTerminalSessionInfo({

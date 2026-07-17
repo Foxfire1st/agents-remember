@@ -15,7 +15,7 @@ export interface CommandContext {
   inspectorCollapsed: boolean;
   paletteOpen: boolean;
   actions: {
-    openPalette: (page?: PalettePage) => void;
+    openPalette: (page?: PalettePage, initialQuery?: string) => void;
     closePalette: () => void;
     toggleRail: () => void;
     toggleInspector: () => void;
@@ -23,10 +23,11 @@ export interface CommandContext {
     cycleRegion: (direction: 1 | -1) => void;
     focusStageHeader: () => void;
     focusTerminal: () => void;
-    /** Stubs this leaf — L2 (session switch), L4 (effort), L5 (composer submit) wire them. */
+    /** The cockpit view wires these commands to the focused session surfaces. */
     switchSession: (direction: 1 | -1) => void;
     cycleEffort: (direction: 1 | -1) => void;
     submitComposer: () => void;
+    popBackComposer: () => void;
   };
 }
 
@@ -81,8 +82,8 @@ export function createCommandRegistry(): CommandRegistry {
 
 /**
  * The v1 command set (S3): palette/panel/focus commands are live; session-switch, effort, and
- * composer-submit are honest stubs routed through context actions so L2/L4/L5 replace the action,
- * not the command. Returns the registry for chaining.
+ * composer actions route through context so the command surface and editor keymap share one
+ * focused-session implementation. Returns the registry for chaining.
  */
 export function registerDefaultCommands(registry: CommandRegistry): CommandRegistry {
   const defaults: Command[] = [
@@ -173,9 +174,16 @@ export function registerDefaultCommands(registry: CommandRegistry): CommandRegis
     },
     {
       id: "composer.submit",
-      title: "Submit composer (stub — L5)",
+      title: "Submit composer",
       chord: "ctrl+↵",
       run: (ctx) => ctx.actions.submitComposer(),
+    },
+    {
+      id: "composer.popBack",
+      title: "Edit last queued message",
+      keywords: ["queue", "supersede", "restore", "dequeue"],
+      chord: "alt+↑",
+      run: (ctx) => ctx.actions.popBackComposer(),
     },
   ];
   for (const command of defaults) registry.register(command);

@@ -1,16 +1,25 @@
 import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { findSessionForLeaf, pasteDraftToSession, sessionStore } from "../data/sessions";
-import type { EngineProcessNode, TaskDocNode } from "../types/projection";
+import { sessionCockpitStore } from "../data/sessionCockpitStore";
+import { findSessionForLeaf, fromTerminalSessionInfo, sessionStore } from "../data/sessions";
+import { submitSessionText, waitForSubmissionReady } from "../data/submitClient";
+import { startSubmitRecord } from "../data/submitMachine";
+import { dashboardStore } from "../data/store";
+import { L6_INTERACTION_FREETEXT } from "../test/fixtures/catalogRows";
+import type { EngineProcessNode, LifecycleProjection, TaskDocNode } from "../types/projection";
 import { RailChat } from "./RailChat";
 
 const LEAF_KEY = "agents-remember/260628_operations-integration/260628-L5";
 const SECOND_LEAF_KEY = "agents-remember/260628_operations-integration/260628-L9";
 
-vi.mock("../data/sessions", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../data/sessions")>();
-  return { ...actual, pasteDraftToSession: vi.fn() };
+vi.mock("../data/submitClient", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../data/submitClient")>();
+  return {
+    ...actual,
+    submitSessionText: vi.fn(),
+    waitForSubmissionReady: vi.fn(),
+  };
 });
 
 // A minimal task-doc whose qualified leaf id (`repo / dir(docPath) basename / id`) equals LEAF_KEY.
@@ -109,7 +118,20 @@ class FakeBroadcastChannel {
 }
 
 beforeEach(() => {
-  vi.mocked(pasteDraftToSession).mockResolvedValue("delivered");
+  vi.mocked(waitForSubmissionReady).mockResolvedValue({ ready: true, editable: true });
+  vi.mocked(submitSessionText).mockImplementation(async (_sessionId, text) => ({
+    status: "started",
+    record: {
+      ...startSubmitRecord({
+        requestId: "context-request",
+        text,
+        expectedBridgeEpoch: "bridge-epoch-l5",
+        submittedRevision: 0,
+        at: 1,
+      }),
+      phase: "accepted",
+    },
+  }));
 });
 
 afterEach(() => {
@@ -117,6 +139,8 @@ afterEach(() => {
   vi.clearAllMocks();
   vi.unstubAllGlobals();
   sessionStore.setState({ sessions: [], activeId: null, count: 0 });
+  sessionCockpitStore.setState({ perSession: {} });
+  dashboardStore.setState({ lifecycles: {} });
   FakeBroadcastChannel.reset();
 });
 
@@ -187,8 +211,13 @@ describe("RailChat start affordances (L5 fix 2)", () => {
     );
     fireEvent.click(await findByTestId("rail-start-chat-claude"));
 
-    await waitFor(() => expect(pasteDraftToSession).toHaveBeenCalledWith("chat-id", expect.any(String)));
-    const packet = vi.mocked(pasteDraftToSession).mock.calls[0]?.[1] ?? "";
+    await waitFor(() =>
+      expect(submitSessionText).toHaveBeenCalledWith("chat-id", expect.any(String), {
+        source: "leaf-context",
+        clearDraftOnAccept: false,
+      }),
+    );
+    const packet = vi.mocked(submitSessionText).mock.calls[0]?.[1] ?? "";
     expect(packet).toContain("Task: 260628-L5 -- Sidebar chat attachment");
     expect(packet).toContain(`Leaf key: ${LEAF_KEY}`);
     expect(packet).toContain("Lifecycle: lc-l5");
@@ -238,7 +267,7 @@ describe("RailChat create from anywhere (L5)", () => {
       const free = sessionStore.getState().sessions.find((s) => s.kind === "harness" && !s.leafKey);
       expect(free?.harness).toBe("claude");
     });
-    expect(pasteDraftToSession).not.toHaveBeenCalled();
+    expect(submitSessionText).not.toHaveBeenCalled();
   });
 
   it("offers an attach-to-leaf picker for a free chat, binds the picked leaf, and delivers context", async () => {
@@ -268,8 +297,13 @@ describe("RailChat create from anywhere (L5)", () => {
     fireEvent.click(leaf);
 
     await waitFor(() => expect(sessionStore.getState().sessions[0]?.leafKey).toBe(LEAF_KEY));
-    await waitFor(() => expect(pasteDraftToSession).toHaveBeenCalledWith("f1", expect.any(String)));
-    expect(vi.mocked(pasteDraftToSession).mock.calls[0]?.[1]).toContain("Memory worktree: /worktrees/sidebar-chat-ar/memory-sidebar-chat");
+    await waitFor(() =>
+      expect(submitSessionText).toHaveBeenCalledWith("f1", expect.any(String), {
+        source: "leaf-context",
+        clearDraftOnAccept: false,
+      }),
+    );
+    expect(vi.mocked(submitSessionText).mock.calls[0]?.[1]).toContain("Memory worktree: /worktrees/sidebar-chat-ar/memory-sidebar-chat");
   });
 
   it("offers a move picker for an attached chat and delivers the new leaf context", async () => {
@@ -299,8 +333,13 @@ describe("RailChat create from anywhere (L5)", () => {
     fireEvent.click(next as HTMLElement);
 
     await waitFor(() => expect(sessionStore.getState().sessions[0]?.leafKey).toBe(SECOND_LEAF_KEY));
-    await waitFor(() => expect(pasteDraftToSession).toHaveBeenCalledWith("c1", expect.any(String)));
-    expect(vi.mocked(pasteDraftToSession).mock.calls[0]?.[1]).toContain(
+    await waitFor(() =>
+      expect(submitSessionText).toHaveBeenCalledWith("c1", expect.any(String), {
+        source: "leaf-context",
+        clearDraftOnAccept: false,
+      }),
+    );
+    expect(vi.mocked(submitSessionText).mock.calls[0]?.[1]).toContain(
       "Task: 260628-L9 -- Chat leaf reassignment",
     );
   });
@@ -328,11 +367,24 @@ describe("RailChat create from anywhere (L5)", () => {
     const note = await findByTestId("rail-leaf-attach-error");
     expect(note.textContent).toContain("leaf already has a worker seat");
     expect(sessionStore.getState().sessions[0]?.leafKey).toBeUndefined();
-    expect(pasteDraftToSession).not.toHaveBeenCalled();
+    expect(submitSessionText).not.toHaveBeenCalled();
   });
 
-  it("surfaces unconfirmed context delivery after a successful leaf bind", async () => {
-    vi.mocked(pasteDraftToSession).mockResolvedValue("unconfirmed");
+  it("surfaces a rejected context receipt after a successful leaf bind", async () => {
+    vi.mocked(submitSessionText).mockResolvedValue({
+      status: "started",
+      record: {
+        ...startSubmitRecord({
+          requestId: "context-rejected",
+          text: "context",
+          expectedBridgeEpoch: "bridge-epoch-l5",
+          submittedRevision: 0,
+          at: 1,
+        }),
+        phase: "rejected",
+        detail: "context delivery rejected: queue full",
+      },
+    });
     vi.stubGlobal(
       "fetch",
       vi.fn((input: RequestInfo | URL) => {
@@ -353,11 +405,64 @@ describe("RailChat create from anywhere (L5)", () => {
     fireEvent.click(await findByTestId("rail-attach-leaf-picker-leaf"));
 
     const note = await findByTestId("rail-leaf-context-note");
-    expect(note.textContent).toContain("context delivery unconfirmed");
+    expect(note.textContent).toContain("context delivery rejected: queue full");
   });
 });
 
 describe("RailChat chat + terminal split (L5 fix 2)", () => {
+  it("routes a pane's pending non-choice answer through the gate and never /submit", async () => {
+    const session = fromTerminalSessionInfo({
+      ...L6_INTERACTION_FREETEXT,
+      id: "rail-answer",
+      lifecycleId: "lc-rail-answer",
+      leafKey: LEAF_KEY,
+      controlPendingInteraction: {
+        ...L6_INTERACTION_FREETEXT.controlPendingInteraction,
+        interactionId: "ix-rail-answer",
+      },
+    });
+    sessionStore.getState().hydrate([session]);
+    dashboardStore.setState({
+      lifecycles: {
+        "lc-rail-answer": {
+          id: "lc-rail-answer",
+          gate: {
+            id: "gate-rail-answer",
+            kind: "agent-question",
+            state: "open",
+            decisions: [],
+            ts: "2026-07-17T09:00:00Z",
+            packet: {
+              adapterInteraction: {
+                sessionId: session.id,
+                interactionId: "ix-rail-answer",
+              },
+            },
+          },
+        } as unknown as LifecycleProjection,
+      },
+    });
+    const urls: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        urls.push(url);
+        if (url === "/api/actions/approve") {
+          return { status: 202, text: async () => "" } as Response;
+        }
+        throw new Error(`no backend for ${url}`);
+      }),
+    );
+    const { findByTestId } = render(<RailChat leafKey={LEAF_KEY} />);
+    await findByTestId("session-composer-answer-mode");
+    act(() => sessionCockpitStore.getState().setComposerDraft(session.id, "use ar/base"));
+    fireEvent.click(await findByTestId("session-composer-send"));
+    await waitFor(() => expect(urls).toContain("/api/actions/approve"));
+    expect(submitSessionText).not.toHaveBeenCalled();
+    expect(urls.some((url) => url.endsWith("/submit"))).toBe(false);
+  });
+
   it("shows the current leaf binding role instead of stale spawn provenance", async () => {
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("no backend")));
     sessionStore.getState().hydrate([

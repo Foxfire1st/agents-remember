@@ -54,6 +54,36 @@ class HarnessAdapterDisconnectedError(HarnessControlError):
         self.vendor_correlation_id = vendor_correlation_id
 
 
+class HarnessAdapterBusyError(HarnessControlError):
+    """An adapter's final write-boundary guard proved that zero operation bytes were sent.
+
+    The common submission authority may move ``dispatching`` back to ``queued`` only for this
+    typed error.  A generic exception cannot safely make that claim because vendor bytes might
+    already have crossed the transport.
+    """
+
+    def __init__(self, detail: str, *, may_have_sent: bool = False) -> None:
+        if may_have_sent:
+            raise ValueError("HarnessAdapterBusyError must certify may_have_sent=False")
+        super().__init__(detail)
+        self.may_have_sent = False
+
+
+class HarnessRequestConflictError(HarnessControlError):
+    """A retained request id was reused with a different immutable source or payload."""
+
+
+class HarnessBridgeEpochMismatchError(HarnessControlError):
+    """A caller addressed lifecycle state from a replaced hosted runner generation."""
+
+    def __init__(self, expected: str, actual: str) -> None:
+        super().__init__(
+            f"submission authority epoch changed (expected {expected!r}, actual {actual!r})"
+        )
+        self.expected = expected
+        self.actual = actual
+
+
 class CodexAppServerError(HarnessControlError):
     """The negotiated Codex app-server protocol or its configured contract was violated."""
 

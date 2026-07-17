@@ -27,6 +27,7 @@ function cockpitWorkingSince(at: number | null): PerSessionCockpit {
     turnClock: { workingSince: at, lastObservedTurnState: "working" },
     freshness: { ptyWs: "none", lastOutputAt: null },
     queue: [],
+    submitHistory: [],
   };
 }
 

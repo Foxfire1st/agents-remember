@@ -1,5 +1,8 @@
 import type { GateNode, LifecycleProjection } from "../types/projection";
 import { postGateDecisionDetailed } from "./actions";
+import { sessionCockpitStore } from "./sessionCockpitStore";
+import type { OpenSession } from "./sessions";
+import { dashboardStore } from "./store";
 
 // The InteractionBar's answer path (260715-FEUI-L6 R4, design §7.3 — the ONE ruled channel):
 // pending vendor interactions are already projected into `agent-question` gates server-side
@@ -90,6 +93,10 @@ export type InteractionAnswerOutcome =
   | { status: "answered" }
   | { status: "error"; error: string };
 
+export type InteractionAnswerDispatchOutcome =
+  | InteractionAnswerOutcome
+  | { status: "blocked"; reason: "inflight" | "answered" | "missing-retry" };
+
 /**
  * Answer one pending interaction through the landed gate-decision channel (the SOLE answer path).
  * The answer text rides as the decision note — the backend synchronizer returns it verbatim to
@@ -127,4 +134,89 @@ export async function answerPendingInteraction(args: {
       ? `gate decision POST failed (${result.status}): ${result.detail}`
       : `gate decision POST failed (${result.status})`,
   };
+}
+
+/** Store-backed lock shared by every SessionComposer and InteractionBar surface. */
+export function interactionAnswerIsLocked(sessionId: string, interactionId: string): boolean {
+  const state = sessionCockpitStore.getState().perSession[sessionId]?.interactionAnswer;
+  return Boolean(
+    state?.interactionId === interactionId &&
+      (state.inflight || state.answeredAt !== undefined),
+  );
+}
+
+/**
+ * Start one gate answer while synchronously acquiring the per-interaction lock. The lock lives in
+ * the shared store rather than React button state, because two surface callbacks can fire before
+ * either component re-renders. The exact answer and draft revision stay with an error so Retry can
+ * clear only the unchanged draft after success.
+ */
+export async function submitInteractionAnswer(args: {
+  session: OpenSession;
+  interactionId: string;
+  answer: string;
+  draftRevision?: number;
+}): Promise<InteractionAnswerDispatchOutcome> {
+  const before = sessionCockpitStore.getState().perSession[args.session.id]?.interactionAnswer;
+  if (before?.interactionId === args.interactionId) {
+    if (before.inflight) return { status: "blocked", reason: "inflight" };
+    if (before.answeredAt !== undefined) return { status: "blocked", reason: "answered" };
+  }
+  sessionCockpitStore.getState().setInteractionAnswer(args.session.id, {
+    interactionId: args.interactionId,
+    inflight: true,
+    answer: args.answer,
+    draftRevision: args.draftRevision,
+  });
+  const outcome = await answerPendingInteraction({
+    lifecycles: dashboardStore.getState().lifecycles,
+    sessionId: args.session.id,
+    sessionLifecycleId: args.session.lifecycleId,
+    interactionId: args.interactionId,
+    answer: args.answer,
+  });
+  const store = sessionCockpitStore.getState();
+  if (outcome.status === "answered") {
+    store.setInteractionAnswer(args.session.id, {
+      interactionId: args.interactionId,
+      inflight: false,
+      answer: args.answer,
+      draftRevision: args.draftRevision,
+      answeredAt: Date.now(),
+    });
+    if (args.draftRevision !== undefined) {
+      store.clearComposerDraftIfRevision(args.session.id, args.draftRevision);
+    }
+  } else {
+    store.setInteractionAnswer(args.session.id, {
+      interactionId: args.interactionId,
+      inflight: false,
+      answer: args.answer,
+      draftRevision: args.draftRevision,
+      error: outcome.error,
+    });
+  }
+  return outcome;
+}
+
+export function retryStoredInteractionAnswer(
+  session: OpenSession,
+  interactionId: string,
+): Promise<InteractionAnswerDispatchOutcome> {
+  const previous = sessionCockpitStore.getState().perSession[session.id]?.interactionAnswer;
+  if (
+    !previous ||
+    previous.interactionId !== interactionId ||
+    !previous.error ||
+    previous.inflight ||
+    previous.answeredAt !== undefined
+  ) {
+    return Promise.resolve({ status: "blocked", reason: "missing-retry" });
+  }
+  return submitInteractionAnswer({
+    session,
+    interactionId,
+    answer: previous.answer,
+    draftRevision: previous.draftRevision,
+  });
 }

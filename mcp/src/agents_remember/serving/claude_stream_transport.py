@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Protocol
 
@@ -13,6 +13,7 @@ from agents_remember.serving.harness_control_models import ShutdownMode
 
 MAX_CLAUDE_FRAME_BYTES = 1024 * 1024
 PROCESS_SHUTDOWN_TIMEOUT_SECONDS = 5.0
+WriteGuard = Callable[[], None]
 
 
 class ClaudeStreamTransport(Protocol):
@@ -31,7 +32,12 @@ class ClaudeStreamTransport(Protocol):
 
     async def read_frame(self) -> dict[str, object] | None: ...
 
-    async def write_frame(self, frame: Mapping[str, object]) -> None: ...
+    async def write_frame(
+        self,
+        frame: Mapping[str, object],
+        *,
+        before_write: WriteGuard | None = None,
+    ) -> None: ...
 
     async def stop(self, mode: ShutdownMode) -> None: ...
 
@@ -42,6 +48,7 @@ class ClaudeSubprocessTransport:
     def __init__(self) -> None:
         self._process: asyncio.subprocess.Process | None = None
         self._stderr_task: asyncio.Task[None] | None = None
+        self._write_lock = asyncio.Lock()
 
     @property
     def returncode(self) -> int | None:
@@ -94,7 +101,12 @@ class ClaudeSubprocessTransport:
             raise HarnessControlError("Claude Code stream-json frame must be an object")
         return decoded
 
-    async def write_frame(self, frame: Mapping[str, object]) -> None:
+    async def write_frame(
+        self,
+        frame: Mapping[str, object],
+        *,
+        before_write: WriteGuard | None = None,
+    ) -> None:
         process = self._require_process()
         stdin = process.stdin
         if stdin is None or stdin.is_closing():
@@ -109,14 +121,18 @@ class ClaudeSubprocessTransport:
             raise HarnessControlError(
                 f"Claude Code input frame exceeds {MAX_CLAUDE_FRAME_BYTES} bytes"
             )
-        try:
-            stdin.write(payload)
-            await stdin.drain()
-        except (BrokenPipeError, ConnectionResetError) as exc:
-            raise HarnessAdapterDisconnectedError(
-                "Claude Code disconnected while accepting a message",
-                may_have_sent=True,
-            ) from exc
+        async with self._write_lock:
+            try:
+                if before_write is not None:
+                    before_write()
+                # The final busy/correlation guard and first byte are one lock-held operation.
+                stdin.write(payload)
+                await stdin.drain()
+            except (BrokenPipeError, ConnectionResetError) as exc:
+                raise HarnessAdapterDisconnectedError(
+                    "Claude Code disconnected while accepting a message",
+                    may_have_sent=True,
+                ) from exc
 
     async def stop(self, mode: ShutdownMode) -> None:
         process = self._process

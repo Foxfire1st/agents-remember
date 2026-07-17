@@ -8,9 +8,14 @@ from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
-from agents_remember.errors import HarnessControlError
+from agents_remember.errors import (
+    HarnessBridgeEpochMismatchError,
+    HarnessControlClientError,
+    HarnessControlError,
+    HarnessRequestConflictError,
+)
 from agents_remember.serving.harness_capabilities import (
     capability_snapshot_json,
     set_result_json,
@@ -22,14 +27,20 @@ from agents_remember.serving.harness_capability_catalog import (
 from agents_remember.serving.harness_control_adapter import BUILTIN_PROTOCOL_HARNESSES
 from agents_remember.serving.harness_control_client import (
     read_control_capabilities,
+    read_submission_authority,
+    read_submission_status,
     reconcile_control_prompt,
     set_control_effort,
     set_control_model,
     submit_control_prompt,
+    withdraw_control_submission,
 )
 from agents_remember.serving.harness_control_models import (
     public_receipt_json,
     public_reconciliation_json,
+    submission_authority_json,
+    submission_status_batch_json,
+    withdrawal_result_json,
 )
 from agents_remember.serving.harness_launch import ResolvedLaunch, resolve_settings_launch
 from agents_remember.serving.harnesses import Harness
@@ -55,9 +66,30 @@ class HarnessSetEffortRequest(BaseModel):
 class HarnessSubmitRequest(BaseModel):
     request_id: str = Field(alias="requestId", min_length=1)
     text: str = Field(min_length=1)
+    expected_bridge_epoch: str = Field(alias="expectedBridgeEpoch", min_length=1)
 
 
 class HarnessReconcileRequest(BaseModel):
+    request_id: str = Field(alias="requestId", min_length=1)
+    expected_bridge_epoch: str = Field(alias="expectedBridgeEpoch", min_length=1)
+
+
+class HarnessSubmissionStatusRequest(BaseModel):
+    expected_bridge_epoch: str = Field(alias="expectedBridgeEpoch", min_length=1)
+    request_ids: list[str] = Field(alias="requestIds", min_length=1, max_length=64)
+
+    @field_validator("request_ids")
+    @classmethod
+    def unique_request_ids(cls, value: list[str]) -> list[str]:
+        if len(set(value)) != len(value):
+            raise ValueError("requestIds must be unique")
+        if any(not item for item in value):
+            raise ValueError("requestIds must be non-empty")
+        return value
+
+
+class HarnessWithdrawRequest(BaseModel):
+    expected_bridge_epoch: str = Field(alias="expectedBridgeEpoch", min_length=1)
     request_id: str = Field(alias="requestId", min_length=1)
 
 
@@ -170,6 +202,75 @@ def register_harness_control_routes(
             return _control_unavailable(exc)
         return JSONResponse(content=set_result_json(result), status_code=200)
 
+    @app.get("/api/terminal/{session}/submission-authority")
+    def api_submission_authority(session: str) -> JSONResponse:
+        entry_or_error = _running_control_entry(
+            session,
+            catalog=catalog,
+            host=host,
+            checked_at=liveness_clock(),
+            liveness_config=liveness_config,
+        )
+        if isinstance(entry_or_error, JSONResponse):
+            return entry_or_error
+        try:
+            descriptor = read_submission_authority(entry_or_error)
+        except HarnessControlError as exc:
+            return _control_unavailable(exc)
+        return JSONResponse(content=submission_authority_json(descriptor), status_code=200)
+
+    @app.post("/api/terminal/{session}/submission-status")
+    def api_submission_status(
+        session: str,
+        request: HarnessSubmissionStatusRequest,
+    ) -> JSONResponse:
+        entry_or_error = _running_control_entry(
+            session,
+            catalog=catalog,
+            host=host,
+            checked_at=liveness_clock(),
+            liveness_config=liveness_config,
+        )
+        if isinstance(entry_or_error, JSONResponse):
+            return entry_or_error
+        try:
+            status = read_submission_status(
+                entry_or_error,
+                expected_bridge_epoch=request.expected_bridge_epoch,
+                request_ids=tuple(request.request_ids),
+            )
+        except HarnessBridgeEpochMismatchError as exc:
+            return _bridge_epoch_mismatch(exc)
+        except HarnessControlError as exc:
+            return _control_unavailable(exc)
+        return JSONResponse(content=submission_status_batch_json(status), status_code=200)
+
+    @app.post("/api/terminal/{session}/withdraw")
+    def api_withdraw_submission(
+        session: str,
+        request: HarnessWithdrawRequest,
+    ) -> JSONResponse:
+        entry_or_error = _running_control_entry(
+            session,
+            catalog=catalog,
+            host=host,
+            checked_at=liveness_clock(),
+            liveness_config=liveness_config,
+        )
+        if isinstance(entry_or_error, JSONResponse):
+            return entry_or_error
+        try:
+            result = withdraw_control_submission(
+                entry_or_error,
+                expected_bridge_epoch=request.expected_bridge_epoch,
+                request_id=request.request_id,
+            )
+        except HarnessBridgeEpochMismatchError as exc:
+            return _bridge_epoch_mismatch(exc)
+        except HarnessControlError as exc:
+            return _control_unavailable(exc)
+        return JSONResponse(content=withdrawal_result_json(result), status_code=200)
+
     @app.post("/api/terminal/{session}/submit")
     def api_terminal_submit(session: str, request: HarnessSubmitRequest) -> JSONResponse:
         entry_or_error = _running_control_entry(
@@ -185,9 +286,21 @@ def register_harness_control_routes(
             receipt = submit_control_prompt(
                 entry_or_error,
                 request.text,
-                source="terminal",
+                source="cockpit",
                 request_id=request.request_id,
+                expected_bridge_epoch=request.expected_bridge_epoch,
             )
+        except HarnessBridgeEpochMismatchError as exc:
+            return _bridge_epoch_mismatch(exc)
+        except HarnessRequestConflictError as exc:
+            return JSONResponse(
+                content={"status": "request-id-conflict", "detail": str(exc)},
+                status_code=409,
+            )
+        except HarnessControlClientError as exc:
+            if not exc.may_have_sent:
+                return _pre_dispatch_submit_failure(exc)
+            return _control_unavailable(exc)
         except HarnessControlError as exc:
             return _control_unavailable(exc)
         return JSONResponse(content=public_receipt_json(receipt), status_code=200)
@@ -204,7 +317,13 @@ def register_harness_control_routes(
         if isinstance(entry_or_error, JSONResponse):
             return entry_or_error
         try:
-            result = reconcile_control_prompt(entry_or_error, request.request_id)
+            result = reconcile_control_prompt(
+                entry_or_error,
+                request.request_id,
+                expected_bridge_epoch=request.expected_bridge_epoch,
+            )
+        except HarnessBridgeEpochMismatchError as exc:
+            return _bridge_epoch_mismatch(exc)
         except HarnessControlError as exc:
             return _control_unavailable(exc)
         return JSONResponse(content=public_reconciliation_json(result), status_code=200)
@@ -245,5 +364,31 @@ def _running_control_entry(
 def _control_unavailable(error: HarnessControlError) -> JSONResponse:
     return JSONResponse(
         content={"status": "control-unavailable", "detail": str(error)},
+        status_code=503,
+    )
+
+
+def _bridge_epoch_mismatch(error: HarnessBridgeEpochMismatchError) -> JSONResponse:
+    return JSONResponse(
+        content={
+            "status": "bridge-epoch-mismatch",
+            "expectedBridgeEpoch": error.expected,
+            "actualBridgeEpoch": error.actual,
+            "detail": str(error),
+        },
+        status_code=409,
+    )
+
+
+def _pre_dispatch_submit_failure(error: HarnessControlClientError) -> JSONResponse:
+    """Expose retry safety only for the control client that certified zero socket bytes."""
+
+    return JSONResponse(
+        content={
+            "status": "pre-dispatch-failed",
+            "detail": str(error),
+            "retrySafe": True,
+            "stage": "control-ipc",
+        },
         status_code=503,
     )

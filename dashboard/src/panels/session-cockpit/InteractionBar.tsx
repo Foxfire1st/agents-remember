@@ -1,14 +1,22 @@
-import { useEffect, useRef, type RefObject } from "react";
+import {
+  useCallback,
+  forwardRef,
+  useEffect,
+  useImperativeHandle,
+  useRef,
+  type RefObject,
+} from "react";
 import { Button } from "react-aria-components";
 
 import { css } from "../../../styled-system/css";
 import {
-  answerPendingInteraction,
   representPendingInteraction,
+  retryStoredInteractionAnswer,
+  submitInteractionAnswer,
 } from "../../data/interactionAnswer";
 import { sessionCockpitStore, useSessionCockpit } from "../../data/sessionCockpitStore";
 import type { OpenSession } from "../../data/sessions";
-import { dashboardStore } from "../../data/store";
+import type { SessionComposerHandle } from "../SessionComposer";
 import {
   INTERACTION_ANSWERED,
   INTERACTION_ANSWERING,
@@ -76,15 +84,19 @@ const statusRow = css({ display: "flex", alignItems: "baseline", gap: "0.45rem",
 const errorText = css({ color: "alarm", overflowWrap: "anywhere", minWidth: "0" });
 const answeredText = css({ color: "mint" });
 
-export function InteractionBar({
-  session,
-  composerRef,
-}: {
-  session: OpenSession;
-  /** The composer input (L5's editor later; the placeholder textarea today) — the answer input
+export interface InteractionBarHandle {
+  submitComposerAnswer(text: string, revision: number): void;
+}
+
+export const InteractionBar = forwardRef<
+  InteractionBarHandle,
+  {
+    session: OpenSession;
+    /** The composer input — the answer input
    *  for non-choice kinds. Optional so the bar renders honestly without one. */
-  composerRef?: RefObject<HTMLTextAreaElement | null>;
-}) {
+    composerRef?: RefObject<SessionComposerHandle | null>;
+  }
+>(function InteractionBar({ session, composerRef }, forwardedRef) {
   const answerState = useSessionCockpit(
     (state) => state.perSession[session.id]?.interactionAnswer,
   );
@@ -129,7 +141,7 @@ export function InteractionBar({
   // the answer input while this bar is in composer mode.
   const composerMode = representation?.mode === "composer";
   useEffect(() => {
-    const composer = composerRef?.current;
+    const composer = composerRef?.current?.getElement();
     if (!composer || !composerMode) return undefined;
     composer.setAttribute("data-answer-mode", "true");
     composer.setAttribute("aria-description", INTERACTION_COMPOSER_MODE);
@@ -139,54 +151,43 @@ export function InteractionBar({
     };
   }, [composerMode, composerRef]);
 
-  const lastAnswerRef = useRef<string | null>(null);
-
-  if (!representation) return null;
-
-  const submitAnswer = (text: string) => {
+  const submitAnswer = useCallback((text: string, draftRevision?: number) => {
     if (!interactionId) return;
-    lastAnswerRef.current = text;
-    const store = sessionCockpitStore.getState();
-    store.setInteractionAnswer(session.id, { interactionId, inflight: true });
-    void answerPendingInteraction({
-      lifecycles: dashboardStore.getState().lifecycles,
-      sessionId: session.id,
-      sessionLifecycleId: session.lifecycleId,
+    void submitInteractionAnswer({
+      session,
       interactionId,
       answer: text,
-    }).then((outcome) => {
-      const current = sessionCockpitStore.getState();
-      if (outcome.status === "answered") {
-        current.setInteractionAnswer(session.id, {
-          interactionId,
-          inflight: false,
-          answeredAt: Date.now(),
-        });
-      } else {
-        current.setInteractionAnswer(session.id, {
-          interactionId,
-          inflight: false,
-          error: outcome.error,
-        });
-      }
+      draftRevision,
     });
-  };
+  }, [interactionId, session]);
 
-  const answerFromComposer = () => {
-    const text = composerRef?.current?.value.trim() ?? "";
+  const answerFromComposer = useCallback((providedText?: string, providedRevision?: number) => {
+    const current = sessionCockpitStore.getState().perSession[session.id]?.composer;
+    const text = providedText ?? composerRef?.current?.getDraft() ?? current?.draft ?? "";
     if (!text) {
       if (interactionId) {
         sessionCockpitStore.getState().setInteractionAnswer(session.id, {
           interactionId,
           inflight: false,
+          answer: "",
+          draftRevision: providedRevision ?? current?.draftRevision,
           error: "the answer text is empty — type it in the composer below, then send",
         });
       }
       return;
     }
-    submitAnswer(text);
-    if (composerRef?.current) composerRef.current.value = "";
-  };
+    submitAnswer(text, providedRevision ?? current?.draftRevision);
+  }, [composerRef, interactionId, session.id, submitAnswer]);
+
+  useImperativeHandle(
+    forwardedRef,
+    () => ({
+      submitComposerAnswer: (text, revision) => answerFromComposer(text, revision),
+    }),
+    [answerFromComposer],
+  );
+
+  if (!representation) return null;
 
   const inflight = answerState?.inflight === true;
   const answered = answerState?.answeredAt !== undefined;
@@ -245,7 +246,7 @@ export function InteractionBar({
               <Button
                 className={choiceButton}
                 isDisabled={disabled}
-                onPress={answerFromComposer}
+                onPress={() => answerFromComposer()}
                 data-testid="interaction-bar-composer-send"
               >
                 send composer text as the answer
@@ -266,10 +267,7 @@ export function InteractionBar({
               <Button
                 className={choiceButton}
                 onPress={() => {
-                  if (lastAnswerRef.current !== null) submitAnswer(lastAnswerRef.current);
-                  else if (interactionId) {
-                    sessionCockpitStore.getState().setInteractionAnswer(session.id, undefined);
-                  }
+                  if (interactionId) void retryStoredInteractionAnswer(session, interactionId);
                 }}
                 data-testid="interaction-bar-retry"
               >
@@ -290,4 +288,4 @@ export function InteractionBar({
       ) : null}
     </div>
   );
-}
+});

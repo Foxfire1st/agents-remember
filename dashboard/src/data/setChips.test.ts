@@ -20,6 +20,7 @@ const cockpit = (overrides: Partial<PerSessionCockpit> = {}): PerSessionCockpit 
   turnClock: { workingSince: null },
   freshness: { ptyWs: "none", lastOutputAt: null },
   queue: [],
+  submitHistory: [],
   ...overrides,
 });
 

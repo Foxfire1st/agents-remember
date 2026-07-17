@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator, Mapping
+from collections.abc import AsyncIterator, Callable, Mapping
 from typing import Protocol
 
 from agents_remember.errors import HarnessAdapterDisconnectedError, HarnessControlError
 from agents_remember.serving.harness_control_models import LaunchSpec, ShutdownMode
 from agents_remember.serving.pi_rpc_protocol import PiRpcJsonlDecoder, encode_pi_rpc_frame
+
+WriteGuard = Callable[[], None]
 
 
 class PiRpcTransport(Protocol):
@@ -16,9 +18,22 @@ class PiRpcTransport(Protocol):
 
     async def start(self, launch: LaunchSpec) -> None: ...
 
-    async def request(self, command: Mapping[str, object]) -> Mapping[str, object]: ...
+    @property
+    def event_token(self) -> int: ...
 
-    async def send(self, command: Mapping[str, object]) -> None: ...
+    async def request(
+        self,
+        command: Mapping[str, object],
+        *,
+        before_write: WriteGuard | None = None,
+    ) -> Mapping[str, object]: ...
+
+    async def send(
+        self,
+        command: Mapping[str, object],
+        *,
+        before_write: WriteGuard | None = None,
+    ) -> None: ...
 
     def events(self) -> AsyncIterator[Mapping[str, object]]: ...
 
@@ -47,6 +62,8 @@ class PiRpcSubprocess:
         self._reader_task: asyncio.Task[None] | None = None
         self._stderr_task: asyncio.Task[None] | None = None
         self._pending: dict[str, asyncio.Future[Mapping[str, object]]] = {}
+        self._write_lock = asyncio.Lock()
+        self._event_token = 0
         self._failure: HarnessControlError | None = None
         self._stopping = False
 
@@ -64,7 +81,18 @@ class PiRpcSubprocess:
         self._reader_task = asyncio.create_task(self._read_stdout())
         self._stderr_task = asyncio.create_task(self._read_stderr())
 
-    async def request(self, command: Mapping[str, object]) -> Mapping[str, object]:
+    @property
+    def event_token(self) -> int:
+        """Monotonic raw-event token used by the adapter's guarded prompt write."""
+
+        return self._event_token
+
+    async def request(
+        self,
+        command: Mapping[str, object],
+        *,
+        before_write: WriteGuard | None = None,
+    ) -> Mapping[str, object]:
         request_id = command.get("id")
         if not isinstance(request_id, str) or not request_id:
             raise HarnessControlError("Pi RPC correlated command requires a non-empty id")
@@ -74,7 +102,7 @@ class PiRpcSubprocess:
         future = asyncio.get_running_loop().create_future()
         self._pending[request_id] = future
         try:
-            await self.send(command)
+            await self.send(command, before_write=before_write)
             return await future
         except asyncio.CancelledError:
             self._pending.pop(request_id, None)
@@ -83,30 +111,39 @@ class PiRpcSubprocess:
             self._pending.pop(request_id, None)
             raise
 
-    async def send(self, command: Mapping[str, object]) -> None:
-        self._raise_if_failed(_optional_command_id(command))
-        process = self._process
-        if process is None or process.stdin is None or process.stdin.is_closing():
-            raise HarnessAdapterDisconnectedError(
-                "Pi RPC stdin is not connected", may_have_sent=False
-            )
+    async def send(
+        self,
+        command: Mapping[str, object],
+        *,
+        before_write: WriteGuard | None = None,
+    ) -> None:
         payload = encode_pi_rpc_frame(command)
-        try:
-            process.stdin.write(payload)
-        except (BrokenPipeError, ConnectionResetError) as exc:
-            raise HarnessAdapterDisconnectedError(
-                f"Pi RPC disconnected before writing: {exc}",
-                may_have_sent=False,
-                vendor_correlation_id=_optional_command_id(command),
-            ) from exc
-        try:
-            await process.stdin.drain()
-        except (BrokenPipeError, ConnectionResetError) as exc:
-            raise HarnessAdapterDisconnectedError(
-                f"Pi RPC disconnected while writing: {exc}",
-                may_have_sent=True,
-                vendor_correlation_id=_optional_command_id(command),
-            ) from exc
+        correlation_id = _optional_command_id(command)
+        async with self._write_lock:
+            self._raise_if_failed(correlation_id)
+            process = self._process
+            if process is None or process.stdin is None or process.stdin.is_closing():
+                raise HarnessAdapterDisconnectedError(
+                    "Pi RPC stdin is not connected", may_have_sent=False
+                )
+            if before_write is not None:
+                before_write()
+            try:
+                process.stdin.write(payload)
+            except (BrokenPipeError, ConnectionResetError) as exc:
+                raise HarnessAdapterDisconnectedError(
+                    f"Pi RPC disconnected before writing: {exc}",
+                    may_have_sent=False,
+                    vendor_correlation_id=correlation_id,
+                ) from exc
+            try:
+                await process.stdin.drain()
+            except (BrokenPipeError, ConnectionResetError) as exc:
+                raise HarnessAdapterDisconnectedError(
+                    f"Pi RPC disconnected while writing: {exc}",
+                    may_have_sent=True,
+                    vendor_correlation_id=correlation_id,
+                ) from exc
 
     async def _event_stream(self) -> AsyncIterator[Mapping[str, object]]:
         while True:
@@ -197,6 +234,7 @@ class PiRpcSubprocess:
             if not future.done():
                 future.set_result(frame)
             return
+        self._event_token += 1
         await self._events.put(frame)
 
     async def _fail(self, error: HarnessControlError) -> None:

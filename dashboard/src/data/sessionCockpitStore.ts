@@ -4,6 +4,8 @@ import { createStore } from "zustand/vanilla";
 import type { CapabilitySnapshotWire, SetAcceptance } from "../types/harnessCapabilities";
 import type { PairChangeState } from "./pairChange";
 import { sessionStore } from "./sessions";
+import type { SubmitRecord } from "./submitMachine";
+import { compactSubmitHistory, compactSubmitQueue } from "./submitRetention";
 
 // The sessions-cockpit client store (260715-FEUI-L2 S3, design §4.3). HONESTY INVARIANTS live in
 // this shape: server truth is mirrored, never invented — `requested` and `effective` are separate
@@ -81,11 +83,32 @@ export interface EchoEvidence {
 
 export interface QueuedSubmit {
   requestId: string;
+  /** The immutable message accepted under requestId; alt+up restores this exact text. */
+  text: string;
   preview: string;
   queuedAt: number;
-  /** Popped back into the composer (alt+↑, L5) — client-side supersession, requestId never resent. */
-  superseded: boolean;
+  expectedBridgeEpoch: string;
+  /** QueuePreview renders only the authority's latest explicit queued state. */
+  state: "queued";
 }
+
+export type WithdrawalState =
+  | {
+      phase: "pending";
+      requestId: string;
+      text: string;
+      expectedBridgeEpoch: string;
+      /** Composer revision observed before the first withdrawal request crossed the network. */
+      draftRevision: number;
+      requestedAt: number;
+    }
+  | {
+      phase: "recovery";
+      requestId: string;
+      /** Exact withdrawn text retained outside the bounded submit-history tail until recovery. */
+      text: string;
+      withdrawnAt: number;
+    };
 
 export interface PerSessionCockpit {
   liveSnapshot?: CapabilitySnapshot;
@@ -102,15 +125,29 @@ export interface PerSessionCockpit {
   /** Per-kind so a pair change never clobbers the other knob's in-flight set. */
   pendingSets: { model?: PendingSet; effort?: PendingSet };
   setLedger: SetLedgerEntry[];
-  launchEvidence: { retainedModel?: string; retainedEffort?: string; tier: EvidenceTier };
-  composer: { draft: string; draftRevision: number /* submit lifecycle lands in L5 */ };
+  launchEvidence: {
+    retainedModel?: string;
+    retainedEffort?: string;
+    tier: EvidenceTier;
+  };
+  composer: {
+    draft: string;
+    draftRevision: number /* submit lifecycle lands in L5 */;
+  };
   surfaceTab: "terminal"; // 'transcript' joins when UA-1 lands
   /** Client-measured turn clock (~-labeled, sweep-bounded honesty): observed transitions only. */
   turnClock: { workingSince: number | null; lastObservedTurnState?: string };
   /** Per-pane freshness (R15). 'none' = no PTY attached in this cockpit yet (L6 writes it). */
-  freshness: { ptyWs: "none" | "connected" | "reconnecting" | "dropped"; lastOutputAt: number | null };
+  freshness: {
+    ptyWs: "none" | "connected" | "reconnecting" | "dropped";
+    lastOutputAt: number | null;
+  };
   /** The cockpit's OWN queued submits (a list, not a chip — F13); whole truth is UA-8-gated. */
   queue: QueuedSubmit[];
+  /** Durable-for-the-view receipt/reconciliation ledger; L7 renders this in the inspector. */
+  submitHistory: SubmitRecord[];
+  /** One bounded Alt+Up transaction: response-loss convergence or revision-safe recovery. */
+  withdrawal?: WithdrawalState;
   /** InteractionBar round-trip state (L6 R4 / design §7.3 F7) — absent when nothing in flight. */
   interactionAnswer?: InteractionAnswerState;
 }
@@ -119,6 +156,10 @@ export interface PerSessionCockpit {
 export interface InteractionAnswerState {
   interactionId: string;
   inflight: boolean;
+  /** Exact payload retained for a same-interaction retry. */
+  answer: string;
+  /** Composer revision that owns the answer; retry success may clear only this revision. */
+  draftRevision?: number;
   /** The POST failure, verbatim (never silent) — cleared by retry. */
   error?: string;
   /** Set on 202: the bar renders "answered — waiting for the agent" until the row clears. */
@@ -136,6 +177,7 @@ const emptyPerSession = (): PerSessionCockpit => ({
   turnClock: { workingSince: null },
   freshness: { ptyWs: "none", lastOutputAt: null },
   queue: [],
+  submitHistory: [],
 });
 
 /** Catalog-poll beats missed before the rail shows the stale banner (R15/F3). */
@@ -170,7 +212,11 @@ export interface SessionCockpitState {
   /** The palette-toggled spawn-edge provenance view (R5) — persisted per user (see above). */
   orchestrationTreeView: boolean;
   /** Catalog-poll health (R15/F3): a dead 2500 ms poll freezes every row — global state. */
-  pollHealth: { lastBeatAt: number | null; missedBeats: number; healthy: boolean };
+  pollHealth: {
+    lastBeatAt: number | null;
+    missedBeats: number;
+    healthy: boolean;
+  };
   perSession: Record<string, PerSessionCockpit>;
 
   setFocusedSession: (id: string | null) => void;
@@ -179,6 +225,10 @@ export interface SessionCockpitState {
   setOrchestrationTreeView: (on: boolean) => void;
   recordPollBeat: (ok: boolean) => void;
   setComposerDraft: (id: string, draft: string) => void;
+  /** Replace only the exact visible revision the caller rendered. */
+  replaceComposerDraftIfRevision: (id: string, expectedRevision: number, draft: string) => boolean;
+  /** Clear only the exact draft revision that entered an accepted submit. */
+  clearComposerDraftIfRevision: (id: string, submittedRevision: number) => boolean;
   recordPendingSet: (id: string, kind: "model" | "effort", pending: PendingSet) => void;
   clearPendingSet: (id: string, kind: "model" | "effort") => void;
   appendSetLedger: (
@@ -187,7 +237,11 @@ export interface SessionCockpitState {
   ) => void;
   acknowledgeSetOutcomes: (id: string) => void;
   /** Acknowledge only the entries a definitive readback made moot (kind + requested value). */
-  acknowledgeMatchingOutcomes: (id: string, kind: "model" | "effort", requestedValue: string) => void;
+  acknowledgeMatchingOutcomes: (
+    id: string,
+    kind: "model" | "effort",
+    requestedValue: string,
+  ) => void;
   setLaunchEvidence: (id: string, evidence: PerSessionCockpit["launchEvidence"]) => void;
   setLiveSnapshot: (id: string, snapshot: CapabilitySnapshot) => void;
   setSnapshotLoading: (id: string, loading: boolean) => void;
@@ -195,9 +249,16 @@ export interface SessionCockpitState {
   recordEchoEvidence: (id: string, kind: "model" | "effort", evidence: EchoEvidence) => void;
   setSetRouteError: (id: string, error: SetRouteErrorInfo | undefined) => void;
   setPairChange: (id: string, pairChange: PairChangeState | undefined) => void;
-  enqueueSubmit: (id: string, submit: Omit<QueuedSubmit, "superseded">) => void;
-  supersedeLastQueued: (id: string) => QueuedSubmit | null;
+  enqueueSubmit: (id: string, submit: QueuedSubmit) => void;
   dequeueSubmit: (id: string, requestId: string) => void;
+  upsertSubmitRecord: (id: string, record: SubmitRecord) => void;
+  setWithdrawal: (id: string, withdrawal: WithdrawalState | undefined) => void;
+  /** Clear only the exact recovery choice rendered beside the exact current draft revision. */
+  dismissWithdrawalRecoveryIfMatches: (
+    id: string,
+    requestId: string,
+    expectedDraftRevision: number,
+  ) => boolean;
   setPtyWs: (id: string, ptyWs: PerSessionCockpit["freshness"]["ptyWs"]) => void;
   recordPtyOutput: (id: string, at: number) => void;
   recordTurnObservation: (id: string, turnState: string | undefined, at: number) => void;
@@ -246,6 +307,40 @@ export const sessionCockpitStore = createStore<SessionCockpitState>((set) => ({
         composer: { draft, draftRevision: current.composer.draftRevision + 1 },
       })),
     ),
+  replaceComposerDraftIfRevision: (id, expectedRevision, draft) => {
+    let replaced = false;
+    set((state) =>
+      withPerSession(state, id, (current) => {
+        if (current.composer.draftRevision !== expectedRevision) return current;
+        replaced = true;
+        return {
+          ...current,
+          composer: {
+            draft,
+            draftRevision: current.composer.draftRevision + 1,
+          },
+        };
+      }),
+    );
+    return replaced;
+  },
+  clearComposerDraftIfRevision: (id, submittedRevision) => {
+    let cleared = false;
+    set((state) =>
+      withPerSession(state, id, (current) => {
+        if (current.composer.draftRevision !== submittedRevision) return current;
+        cleared = true;
+        return {
+          ...current,
+          composer: {
+            draft: "",
+            draftRevision: current.composer.draftRevision + 1,
+          },
+        };
+      }),
+    );
+    return cleared;
+  },
   recordPendingSet: (id, kind, pending) =>
     set((state) =>
       withPerSession(state, id, (current) => ({
@@ -331,26 +426,9 @@ export const sessionCockpitStore = createStore<SessionCockpitState>((set) => ({
     set((state) =>
       withPerSession(state, id, (current) => ({
         ...current,
-        queue: [...current.queue, { ...submit, superseded: false }],
+        queue: compactSubmitQueue([...current.queue, submit]),
       })),
     ),
-  supersedeLastQueued: (id) => {
-    let popped: QueuedSubmit | null = null;
-    set((state) =>
-      withPerSession(state, id, (current) => {
-        const lastLive = [...current.queue].reverse().find((item) => !item.superseded);
-        if (!lastLive) return current;
-        popped = lastLive;
-        return {
-          ...current,
-          queue: current.queue.map((item) =>
-            item.requestId === lastLive.requestId ? { ...item, superseded: true } : item,
-          ),
-        };
-      }),
-    );
-    return popped;
-  },
   dequeueSubmit: (id, requestId) =>
     set((state) =>
       withPerSession(state, id, (current) => ({
@@ -358,6 +436,40 @@ export const sessionCockpitStore = createStore<SessionCockpitState>((set) => ({
         queue: current.queue.filter((item) => item.requestId !== requestId),
       })),
     ),
+  upsertSubmitRecord: (id, record) =>
+    set((state) =>
+      withPerSession(state, id, (current) => {
+        const index = current.submitHistory.findIndex(
+          (candidate) => candidate.requestId === record.requestId,
+        );
+        const submitHistory = [...current.submitHistory];
+        if (index === -1) submitHistory.push(record);
+        else submitHistory[index] = record;
+        return {
+          ...current,
+          submitHistory: compactSubmitHistory(submitHistory),
+        };
+      }),
+    ),
+  setWithdrawal: (id, withdrawal) =>
+    set((state) => withPerSession(state, id, (current) => ({ ...current, withdrawal }))),
+  dismissWithdrawalRecoveryIfMatches: (id, requestId, expectedDraftRevision) => {
+    let dismissed = false;
+    set((state) =>
+      withPerSession(state, id, (current) => {
+        if (
+          current.composer.draftRevision !== expectedDraftRevision ||
+          current.withdrawal?.phase !== "recovery" ||
+          current.withdrawal.requestId !== requestId
+        ) {
+          return current;
+        }
+        dismissed = true;
+        return { ...current, withdrawal: undefined };
+      }),
+    );
+    return dismissed;
+  },
   setPtyWs: (id, ptyWs) =>
     set((state) =>
       withPerSession(state, id, (current) => ({
@@ -389,7 +501,10 @@ export const sessionCockpitStore = createStore<SessionCockpitState>((set) => ({
     ),
   setInteractionAnswer: (id, answer) =>
     set((state) =>
-      withPerSession(state, id, (current) => ({ ...current, interactionAnswer: answer })),
+      withPerSession(state, id, (current) => ({
+        ...current,
+        interactionAnswer: answer,
+      })),
     ),
 }));
 

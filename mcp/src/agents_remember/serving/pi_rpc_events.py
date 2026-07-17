@@ -12,6 +12,7 @@ from agents_remember.serving.harness_control_models import (
     AdapterEvent,
     AdapterSnapshot,
     ControlIdentity,
+    ControlOperationRef,
     InteractionResponse,
     PendingInteraction,
     TranscriptEntry,
@@ -60,6 +61,10 @@ class PiRpcEventMapper:
     def retained_interaction_count(self) -> int:
         return len(self._dialogs)
 
+    @property
+    def event_sequence(self) -> int:
+        return self._event_sequence
+
     def apply_state(self, state: PiSessionState, *, cursor: str | None) -> AdapterSnapshot:
         pending = self._pending_interaction()
         activity = _state_activity(state, blocked=pending is not None)
@@ -88,8 +93,10 @@ class PiRpcEventMapper:
         )
         return self._snapshot
 
-    def set_acceptance(self, acceptance: Literal["immediate", "queued"]) -> None:
-        self._snapshot = replace(self.snapshot, acceptance=acceptance)
+    def mark_prompt_accepted(self) -> None:
+        """Close the response-to-agent_start idle window after an immediate prompt ack."""
+
+        self._snapshot = replace(self.snapshot, activity="running", acceptance="immediate")
 
     def response_payload(self, response: InteractionResponse) -> dict[str, object]:
         request = self._dialogs.get(response.interaction_id)
@@ -118,12 +125,18 @@ class PiRpcEventMapper:
         *,
         settled_state: PiSessionState | None = None,
         cursor: str | None = None,
+        operation: ControlOperationRef | None = None,
     ) -> AdapterEvent:
         event_type = frame.get("type")
         if not isinstance(event_type, str) or not event_type:
             raise HarnessControlError("Pi RPC event requires a non-empty type")
         if event_type == "agent_settled":
-            return self._settled_event(frame, settled_state, cursor=cursor)
+            return self._settled_event(
+                frame,
+                settled_state,
+                cursor=cursor,
+                operation=operation,
+            )
         if event_type == "extension_ui_request":
             return self._extension_event(frame)
         if event_type == "message_end":
@@ -164,14 +177,22 @@ class PiRpcEventMapper:
         state: PiSessionState | None,
         *,
         cursor: str | None,
+        operation: ControlOperationRef | None,
     ) -> AdapterEvent:
         if state is None:
             raise HarnessControlError("Pi agent_settled requires a correlated get_state snapshot")
         if state.is_streaming or state.is_compacting or state.pending_message_count:
             raise HarnessControlError("Pi agent_settled contradicted get_state activity")
+        if operation is None:
+            raise HarnessControlError("Pi agent_settled has no active ordinary operation")
         self._dialogs.clear()
         snapshot = self.apply_state(state, cursor=cursor)
-        return self._next_event("completed", frame, snapshot=snapshot)
+        return self._next_event(
+            "completed",
+            frame,
+            snapshot=snapshot,
+            operation=operation,
+        )
 
     def _extension_event(self, frame: Mapping[str, object]) -> AdapterEvent:
         interaction_id = required_pi_text(frame, "id")
@@ -246,6 +267,7 @@ class PiRpcEventMapper:
         *,
         snapshot: AdapterSnapshot | None = None,
         transcript: tuple[TranscriptEntry, ...] = (),
+        operation: ControlOperationRef | None = None,
     ) -> AdapterEvent:
         self._event_sequence += 1
         if snapshot is not None:
@@ -259,6 +281,7 @@ class PiRpcEventMapper:
             snapshot=snapshot,
             transcript=transcript,
             raw={"piEvent": dict(raw)},
+            operation=operation,
         )
 
     def _pending_interaction(self) -> PendingInteraction | None:

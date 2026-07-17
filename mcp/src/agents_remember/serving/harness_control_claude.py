@@ -39,6 +39,7 @@ from agents_remember.serving.harness_control_models import (
     AdapterHandshake,
     AdapterSnapshot,
     ControlIdentity,
+    ControlOperationRef,
     InteractionResponse,
     LaunchSpec,
     PromptRequest,
@@ -230,7 +231,9 @@ class ClaudeStreamJsonAdapter:
             owned_argv_options=("--model", "--effort"),
         )
 
-    async def set_model(self, model_key: str) -> SetResult:
+    async def set_model(
+        self, model_key: str, *, operation: ControlOperationRef | None = None
+    ) -> SetResult:
         capabilities = self.advertise()
         model = next((item for item in capabilities.models if item.key == model_key), None)
         if model is None or not model.selectable:
@@ -240,6 +243,7 @@ class ClaudeStreamJsonAdapter:
             model_key,
             expected_result=f"Set model to {model.display_name} for this session only",
             allowed_results=_model_terminal_results(model, capabilities),
+            operation=operation,
         )
         if result.acceptance == "echo-verified":
             effort_keys = {option.key for option in model.effort_options}
@@ -251,7 +255,9 @@ class ClaudeStreamJsonAdapter:
             )
         return result
 
-    async def set_effort(self, effort: str) -> SetResult:
+    async def set_effort(
+        self, effort: str, *, operation: ControlOperationRef | None = None
+    ) -> SetResult:
         capabilities = self.advertise()
         model = self._selected_model(capabilities)
         option = next((item for item in model.effort_options if item.key == effort), None)
@@ -265,6 +271,7 @@ class ClaudeStreamJsonAdapter:
             effort,
             expected_result=f"Set effort level to {effort} (this session only)",
             prefix_match=True,
+            operation=operation,
         )
         if result.acceptance == "echo-verified":
             self._capabilities = replace(capabilities, selected_effort=effort)
@@ -278,10 +285,13 @@ class ClaudeStreamJsonAdapter:
         expected_result: str,
         prefix_match: bool = False,
         allowed_results: frozenset[str] = frozenset(),
+        operation: ControlOperationRef | None = None,
     ) -> SetResult:
         state = self._state
         if state is None:
-            return self._unsupported_set(value, self._unsupported_detail or "adapter is unavailable")
+            return self._unsupported_set(
+                value, self._unsupported_detail or "adapter is unavailable"
+            )
         expectation = _ClaudeSetExpectation(
             command=command,
             value=value,
@@ -295,6 +305,7 @@ class ClaudeStreamJsonAdapter:
             source="durable",
             text=f"/{command} {value}",
             submitted_at=self._clock(),
+            operation=operation,
         )
         receipt = await _submit_set_request(state, request, value)
         if isinstance(receipt, SetResult):
@@ -330,6 +341,11 @@ class ClaudeStreamJsonAdapter:
         if self._state is None:
             raise HarnessControlError(self._unsupported_detail or "Claude adapter is unsupported")
         return self._state.subscribe()
+
+    async def preflight_operation(self, operation: ControlOperationRef) -> None:
+        if self._state is None:
+            raise HarnessControlError(self._unsupported_detail or "Claude adapter is unsupported")
+        self._state.preflight_operation(operation)
 
     async def submit(self, request: PromptRequest) -> SubmissionReceipt:
         if self._state is not None:
@@ -492,10 +508,7 @@ def _completed_set_result(
 ) -> SetResult:
     matched = (
         detail == expectation.exact_result
-        or (
-            expectation.prefix_match
-            and detail.startswith(f"{expectation.exact_result}: ")
-        )
+        or (expectation.prefix_match and detail.startswith(f"{expectation.exact_result}: "))
         or detail in expectation.allowed_results
     )
     if matched:

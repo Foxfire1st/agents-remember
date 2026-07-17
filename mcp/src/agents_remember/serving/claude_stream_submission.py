@@ -8,6 +8,7 @@ from typing import Any
 
 from agents_remember.serving.harness_control_models import (
     AcceptanceState,
+    ControlOperationRef,
     PromptRequest,
     SubmissionReceipt,
     TerminalResult,
@@ -20,7 +21,7 @@ class ClaudeSubmission:
     correlation_id: str
     wire_text: str
     replay_text: str
-    queued: bool
+    operation: ControlOperationRef
     acceptance_future: asyncio.Future[SubmissionReceipt]
     terminal_future: asyncio.Future[TerminalResult]
     acceptance: AcceptanceState = "unknown"

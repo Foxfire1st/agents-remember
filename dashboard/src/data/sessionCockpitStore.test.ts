@@ -34,6 +34,7 @@ describe("perSession skeleton", () => {
       turnClock: { workingSince: null },
       freshness: { ptyWs: "none", lastOutputAt: null },
       queue: [],
+      submitHistory: [],
     });
   });
 
@@ -80,25 +81,59 @@ describe("set ledger + acknowledgment (F22)", () => {
       result: { acceptance: "queued", requestedValue: "gpt-new" },
     });
     // requested and effective stay separate fields — the marker moved nowhere.
-    expect(per("s1").launchEvidence).toEqual({ retainedModel: "gpt-old", tier: "readback" });
+    expect(per("s1").launchEvidence).toEqual({
+      retainedModel: "gpt-old",
+      tier: "readback",
+    });
     expect(per("s1").setLedger[0].result.effectiveValue).toBeUndefined();
   });
 });
 
 describe("client queue (F13 — a list, labeled 'yours')", () => {
-  it("enqueues, supersedes the LAST live item (alt+↑ pop-back), and dequeues by requestId", () => {
-    store.getState().enqueueSubmit("s1", { requestId: "r1", preview: "first", queuedAt: 1 });
-    store.getState().enqueueSubmit("s1", { requestId: "r2", preview: "second", queuedAt: 2 });
-    const popped = store.getState().supersedeLastQueued("s1");
-    expect(popped?.requestId).toBe("r2");
-    expect(per("s1").queue.map((item) => [item.requestId, item.superseded])).toEqual([
-      ["r1", false],
-      ["r2", true], // marked superseded, requestId never resent — not silently dropped
-    ]);
-    expect(store.getState().supersedeLastQueued("s1")?.requestId).toBe("r1");
-    expect(store.getState().supersedeLastQueued("s1")).toBeNull();
+  it("retains only authoritative queued rows and dequeues by requestId", () => {
+    store.getState().enqueueSubmit("s1", {
+      requestId: "r1",
+      text: "first",
+      preview: "first",
+      queuedAt: 1,
+      expectedBridgeEpoch: "epoch-1",
+      state: "queued",
+    });
+    store.getState().enqueueSubmit("s1", {
+      requestId: "r2",
+      text: "second",
+      preview: "second",
+      queuedAt: 2,
+      expectedBridgeEpoch: "epoch-1",
+      state: "queued",
+    });
     store.getState().dequeueSubmit("s1", "r2");
     expect(per("s1").queue.map((item) => item.requestId)).toEqual(["r1"]);
+  });
+
+  it("dismisses recovery only for the exact request and rendered draft revision", () => {
+    store.getState().setComposerDraft("s1", "newer draft");
+    store.getState().setWithdrawal("s1", {
+      phase: "recovery",
+      requestId: "r-old",
+      text: "withdrawn text",
+      withdrawnAt: 10,
+    });
+
+    expect(store.getState().dismissWithdrawalRecoveryIfMatches("s1", "r-other", 1)).toBe(false);
+    expect(store.getState().dismissWithdrawalRecoveryIfMatches("s1", "r-old", 0)).toBe(false);
+    expect(per("s1").withdrawal).toMatchObject({ requestId: "r-old" });
+    expect(per("s1").composer).toEqual({
+      draft: "newer draft",
+      draftRevision: 1,
+    });
+
+    expect(store.getState().dismissWithdrawalRecoveryIfMatches("s1", "r-old", 1)).toBe(true);
+    expect(per("s1").withdrawal).toBeUndefined();
+    expect(per("s1").composer).toEqual({
+      draft: "newer draft",
+      draftRevision: 1,
+    });
   });
 });
 
@@ -106,7 +141,10 @@ describe("freshness + poll health (R15)", () => {
   it("tracks per-pane ws state and last output", () => {
     store.getState().setPtyWs("s1", "connected");
     store.getState().recordPtyOutput("s1", 1234);
-    expect(per("s1").freshness).toEqual({ ptyWs: "connected", lastOutputAt: 1234 });
+    expect(per("s1").freshness).toEqual({
+      ptyWs: "connected",
+      lastOutputAt: 1234,
+    });
   });
 
   it("poll beats: three misses flip healthy, one success restores it", () => {
@@ -114,21 +152,33 @@ describe("freshness + poll health (R15)", () => {
     store.getState().recordPollBeat(false);
     expect(store.getState().pollHealth.healthy).toBe(true);
     store.getState().recordPollBeat(false);
-    expect(store.getState().pollHealth).toMatchObject({ missedBeats: 3, healthy: false });
+    expect(store.getState().pollHealth).toMatchObject({
+      missedBeats: 3,
+      healthy: false,
+    });
     store.getState().recordPollBeat(true);
-    expect(store.getState().pollHealth).toMatchObject({ missedBeats: 0, healthy: true });
+    expect(store.getState().pollHealth).toMatchObject({
+      missedBeats: 0,
+      healthy: true,
+    });
   });
 });
 
 describe("turn clock (client-measured, ~-labeled)", () => {
   it("starts on an observed transition INTO working and clears on leaving it", () => {
     store.getState().recordTurnObservation("s1", "working", 100);
-    expect(per("s1").turnClock).toEqual({ workingSince: 100, lastObservedTurnState: "working" });
+    expect(per("s1").turnClock).toEqual({
+      workingSince: 100,
+      lastObservedTurnState: "working",
+    });
     // Same state again: no restart (the clock anchors the FIRST observation).
     store.getState().recordTurnObservation("s1", "working", 200);
     expect(per("s1").turnClock.workingSince).toBe(100);
     store.getState().recordTurnObservation("s1", "turn-ended", 300);
-    expect(per("s1").turnClock).toEqual({ workingSince: null, lastObservedTurnState: "turn-ended" });
+    expect(per("s1").turnClock).toEqual({
+      workingSince: null,
+      lastObservedTurnState: "turn-ended",
+    });
   });
 
   it("mirrors the session registry via startCockpitMirror", () => {

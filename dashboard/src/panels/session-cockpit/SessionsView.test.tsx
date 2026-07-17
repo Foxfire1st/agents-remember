@@ -7,9 +7,17 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { sessionCockpitStore } from "../../data/sessionCockpitStore";
 import { lifecycleNoticeStore } from "../../data/sessionLifecycle";
 import { fromTerminalSessionInfo, sessionStore } from "../../data/sessions";
+import { dashboardStore } from "../../data/store";
 import { capabilityEnvelope } from "../../test/fixtures/capabilityEnvelopes";
-import { FLEET } from "../../test/fixtures/catalogRows";
+import { FLEET, L6_INTERACTION_FREETEXT } from "../../test/fixtures/catalogRows";
+import type { LifecycleProjection } from "../../types/projection";
 import { SessionsView } from "./SessionsView";
+
+function seedReadyComposerSession() {
+  const row = FLEET.find((candidate) => candidate.id === "architect")!;
+  sessionStore.getState().hydrate([fromTerminalSessionInfo(row)]);
+  sessionCockpitStore.setState({ focusedSessionId: null });
+}
 
 // xterm cannot mount under jsdom (L6 rule: xterm stays OUT of jsdom) — the PtySurface's lazy
 // Terminal resolves to this inert stand-in; the real terminal rules live in Terminal.tsx.
@@ -24,12 +32,14 @@ afterEach(() => {
   window.localStorage.clear(); // react-resizable-panels persists layout under autoSaveId
   sessionStore.getState().hydrate([]);
   sessionCockpitStore.setState({ focusedSessionId: null, perSession: {} });
+  dashboardStore.setState({ lifecycles: {} });
   lifecycleNoticeStore.setState({ residuals: [], cleanupOutcome: null, sweptRetire: {} });
+  vi.unstubAllGlobals();
 });
 
 describe("scaffold structure (S2)", () => {
   it("renders the scope root + rail/stage/inspector/statusline with markers and zones", () => {
-    const { getByTestId } = render(<SessionsView active />);
+    const { getByTestId, queryByTestId } = render(<SessionsView active />);
     const root = getByTestId("sessions-view");
     expect(root.getAttribute("data-view")).toBe("sessions"); // the WebTUI scope root (S1)
     expect(root.classList.contains("sessions--view")).toBe(true);
@@ -41,9 +51,7 @@ describe("scaffold structure (S2)", () => {
 
     // The keyboard-zone markers the zone contract resolves against.
     expect(getByTestId("sessions-pty-placeholder").getAttribute("data-kbzone")).toBe("pty");
-    expect(getByTestId("sessions-composer-placeholder").getAttribute("data-kbzone")).toBe(
-      "composer",
-    );
+    expect(queryByTestId("session-composer")).toBeNull();
   });
 
   it("hides the ~80-col floor chip while the stage width is unmeasured (0 = hidden, never a false alarm)", () => {
@@ -152,9 +160,11 @@ describe("command palette (S3)", () => {
     expect(getByText("ctrl+;")).not.toBeNull();
   });
 
-  it("? typed into the composer is passthrough (printable suppression, R7)", () => {
-    const { getByTestId, queryByTestId } = render(<SessionsView active />);
-    fireEvent.keyDown(getByTestId("sessions-composer-placeholder"), {
+  it("? typed into the composer is passthrough (printable suppression, R7)", async () => {
+    seedReadyComposerSession();
+    const { findByTestId, queryByTestId } = render(<SessionsView active />);
+    const composer = (await findByTestId("session-composer-editor")).querySelector(".cm-content")!;
+    fireEvent.keyDown(composer, {
       key: "?",
       code: "Slash",
       shiftKey: true,
@@ -162,12 +172,15 @@ describe("command palette (S3)", () => {
     expect(queryByTestId("sessions-palette")).toBeNull();
   });
 
-  it("/ at the start of a composer line opens the palette (§5.2 composer rule)", () => {
-    const { getByTestId } = render(<SessionsView active />);
-    const composer = getByTestId("sessions-composer-placeholder") as HTMLTextAreaElement;
+  it("/ at the start of a composer line opens the palette pre-filtered (§5.2 composer rule)", async () => {
+    seedReadyComposerSession();
+    const { findByTestId, getByTestId } = render(<SessionsView active />);
+    const composer = (await findByTestId("session-composer-editor")).querySelector(".cm-content") as HTMLElement;
     composer.focus();
     fireEvent.keyDown(composer, { key: "/", code: "Slash" });
     expect(getByTestId("sessions-palette")).not.toBeNull();
+    expect((getByTestId("sessions-palette-input") as HTMLInputElement).value).toBe("/");
+    expect(getByTestId("palette-cmd-session.launch")).not.toBeNull();
   });
 
   it("runs a palette command: toggling the rail surfaces the reopen affordance (R3 reopenable)", async () => {
@@ -224,8 +237,10 @@ describe("keyboard zones over the PTY placeholder (S4)", () => {
 });
 
 describe("focus model (S4, design §5.3)", () => {
-  it("F6 cycles rail → stage(composer) → inspector → statusline → rail", () => {
-    const { getByTestId } = render(<SessionsView active />);
+  it("F6 cycles rail → stage(composer) → inspector → statusline → rail", async () => {
+    seedReadyComposerSession();
+    const { findByTestId } = render(<SessionsView active />);
+    const composer = (await findByTestId("session-composer-editor")).querySelector(".cm-content");
     const regionOf = (element: Element | null) =>
       element?.closest("[data-region]")?.getAttribute("data-region");
 
@@ -233,7 +248,7 @@ describe("focus model (S4, design §5.3)", () => {
     expect(regionOf(document.activeElement)).toBe("rail");
     fireEvent.keyDown(document.activeElement as Element, { key: "F6", code: "F6" });
     expect(regionOf(document.activeElement)).toBe("stage");
-    expect(document.activeElement).toBe(getByTestId("sessions-composer-placeholder"));
+    expect(document.activeElement).toBe(composer);
     fireEvent.keyDown(document.activeElement as Element, { key: "F6", code: "F6" });
     expect(regionOf(document.activeElement)).toBe("inspector");
     fireEvent.keyDown(document.activeElement as Element, { key: "F6", code: "F6" });
@@ -251,9 +266,10 @@ describe("focus model (S4, design §5.3)", () => {
     );
   });
 
-  it("Esc from the composer lands on the stage header", () => {
-    const { getByTestId } = render(<SessionsView active />);
-    const composer = getByTestId("sessions-composer-placeholder");
+  it("Esc from the composer lands on the stage header", async () => {
+    seedReadyComposerSession();
+    const { findByTestId, getByTestId } = render(<SessionsView active />);
+    const composer = (await findByTestId("session-composer-editor")).querySelector(".cm-content") as HTMLElement;
     composer.focus();
     fireEvent.keyDown(composer, { key: "Escape", code: "Escape" });
     const header = getByTestId("sessions-stage").querySelector("[data-stage-header]");
@@ -339,11 +355,78 @@ describe("L6: stage surface, WorkingLine, InteractionBar, stop residuals", () =>
     const { findByTestId, getByTestId } = render(<SessionsView active />);
     await waitFor(() => expect(sessionCockpitStore.getState().focusedSessionId).toBe("worker-tui"));
     const bar = await findByTestId("interaction-bar");
-    const composer = getByTestId("sessions-composer-placeholder");
+    const composer = getByTestId("session-composer-editor");
     expect(composer).not.toBeNull(); // the composer is never replaced
     // DOCUMENT_POSITION_FOLLOWING = 4: the composer renders after (below) the bar.
     expect(bar.compareDocumentPosition(composer) & 4).toBe(4);
     expect(getByTestId("interaction-bar-prompt").textContent).toContain("harness_control_api");
+  });
+
+  it("routes the focused shared composer answer once through the gate and never /submit", async () => {
+    const session = fromTerminalSessionInfo({
+      ...L6_INTERACTION_FREETEXT,
+      id: "sessions-answer",
+      lifecycleId: "lc-sessions-answer",
+      controlPendingInteraction: {
+        ...L6_INTERACTION_FREETEXT.controlPendingInteraction,
+        interactionId: "ix-sessions-answer",
+      },
+    });
+    sessionStore.getState().hydrate([session]);
+    sessionCockpitStore.setState({ focusedSessionId: null, perSession: {} });
+    dashboardStore.setState({
+      lifecycles: {
+        "lc-sessions-answer": {
+          id: "lc-sessions-answer",
+          gate: {
+            id: "gate-sessions-answer",
+            kind: "agent-question",
+            state: "open",
+            decisions: [],
+            ts: "2026-07-17T09:00:00Z",
+            packet: {
+              adapterInteraction: {
+                sessionId: session.id,
+                interactionId: "ix-sessions-answer",
+              },
+            },
+          },
+        } as unknown as LifecycleProjection,
+      },
+    });
+    const urls: string[] = [];
+    let release: (response: Response) => void = () => {};
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        urls.push(url);
+        if (url === "/api/actions/approve") {
+          return new Promise<Response>((resolve) => (release = resolve));
+        }
+        return {
+          ok: false,
+          status: 503,
+          json: async () => ({ status: "control-unavailable", detail: "test background fetch" }),
+        } as Response;
+      }),
+    );
+    const { findByTestId } = render(<SessionsView active />);
+    await findByTestId("session-composer-answer-mode");
+    act(() => sessionCockpitStore.getState().setComposerDraft(session.id, "use ar/base"));
+    const send = await findByTestId("session-composer-send");
+    fireEvent.click(send);
+    fireEvent.click(send);
+    await waitFor(() =>
+      expect(urls.filter((url) => url === "/api/actions/approve")).toHaveLength(1),
+    );
+    expect(urls.some((url) => url.endsWith("/submit"))).toBe(false);
+    release({ status: 202, text: async () => "" } as Response);
+    await waitFor(() =>
+      expect(
+        sessionCockpitStore.getState().perSession[session.id]?.interactionAnswer?.answeredAt,
+      ).toBeDefined(),
+    );
   });
 
   it("surfaces a retired seat's stop residual as an INFORMATIONAL line — never a failure state", async () => {
