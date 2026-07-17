@@ -1,11 +1,11 @@
-// The sessions cockpit view shell (260715-FEUI-L1 S2): rail / stage / inspector as a
-// react-resizable-panels group with the narrow-width rules (inspector auto-collapses <~1100px,
-// rail <~900px — both reopenable) and the ~80-col PTY floor hint chip. The panel CONTENT is
-// deliberate scaffolding — empty placeholder panels with the marker classes, focus targets, and
-// keyboard-zone markers later leaves fill (L2 rail, L4 controls, L5 composer, L6 PTY, L7
-// inspector). The view root carries [data-view="sessions"]: the WebTUI scope root (S1) and the
-// keyboard layer's home. No animation is introduced here, so html[data-effects="off"] and
-// prefers-reduced-motion are trivially respected.
+// The sessions cockpit view (260715-FEUI-L1 S2 shell + 260715-FEUI-L2): rail / stage / inspector
+// as a react-resizable-panels group with the narrow-width rules (inspector auto-collapses
+// <~1100px, rail <~900px — both reopenable) and the ~80-col PTY floor hint chip. L2 fills the
+// rail (SessionRail — ruled role hierarchy + fleet attention), the stage container + HeaderStrip
+// (empty ModelEffortControl slot for L4, reserved WorkingLine slot for L6), and the focused-seat
+// inspector card (L7 replaces it with the tabbed inspector). The PTY/composer placeholders stay —
+// they are the keyboard-zone anchors L6/L5 fill. The view root carries [data-view="sessions"]:
+// the WebTUI scope root (S1) and the keyboard layer's home.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Panel,
@@ -15,6 +15,7 @@ import {
 } from "react-resizable-panels";
 
 import { css, cx } from "../../../styled-system/css";
+import { startCatalogPollDriver } from "../../data/catalogPoll";
 import {
   createCommandRegistry,
   registerDefaultCommands,
@@ -30,6 +31,18 @@ import {
   type FocusRegion,
 } from "../../data/keymap/focus";
 import {
+  attentionRollup,
+  buildRailModel,
+  criticalBusSessionIds,
+  interactionPromptPreview,
+  jumpToAttentionTarget,
+  masterLabels,
+  railCycleOrder,
+  smartDefaultFocus,
+  waitingSeats,
+} from "../../data/railModel";
+import { sessionCockpitStore, startCockpitMirror, useSessionCockpit } from "../../data/sessionCockpitStore";
+import {
   autoCollapseTransition,
   hasPersistedPanelLayout,
   INSPECTOR_AUTO_COLLAPSE_PX,
@@ -39,7 +52,13 @@ import {
   railDefaultPercent,
   stageBelowPtyFloor,
 } from "../../data/sessionLayout";
+import { useSessions } from "../../data/sessions";
+import { useDashboard } from "../../data/store";
+import type { AgentPickupNode, TaskDocNode } from "../../types/projection";
 import { CommandPalette } from "./CommandPalette";
+import { SeatInspector } from "./SeatInspector";
+import { endLanded, SessionRail } from "./SessionRail";
+import { SessionStage } from "./SessionStage";
 import { useKeyboardZones } from "./useKeyboardZones";
 
 const root = css({
@@ -73,19 +92,6 @@ const stagePane = css({
   gap: "0.4rem",
   overflow: "hidden",
 });
-const stageHeader = css({
-  display: "flex",
-  alignItems: "baseline",
-  gap: "0.5rem",
-  flexWrap: "wrap",
-  borderBottomWidth: "1px",
-  borderBottomStyle: "solid",
-  borderBottomColor: "grid",
-  paddingBottom: "0.3rem",
-  fontSize: "0.78rem",
-  color: "ink",
-  _focusVisible: { outlineWidth: "1px", outlineStyle: "solid", outlineColor: "amber", outlineOffset: "1px" },
-});
 const floorChip = css({
   fontSize: "0.64rem",
   color: "amber",
@@ -95,21 +101,7 @@ const floorChip = css({
   borderRadius: "2px",
   paddingInline: "0.35rem",
 });
-const placeholder = css({
-  flex: "1",
-  minHeight: "0",
-  display: "grid",
-  placeItems: "center",
-  padding: "0.8rem",
-  color: "muted",
-  fontSize: "0.74rem",
-  lineHeight: "1.5",
-  textAlign: "center",
-  borderWidth: "1px",
-  borderStyle: "dashed",
-  borderColor: "grid",
-  borderRadius: "2px",
-});
+const inspectorScroll = css({ flex: "1", minHeight: "0", overflowY: "auto" });
 const ptyPlaceholder = css({
   flex: "1",
   minHeight: "0",
@@ -187,6 +179,9 @@ const PANELS_AUTOSAVE_ID = "cockpit.sessions.panels";
 const RAIL_MIN_PERCENT = 12;
 const RAIL_MAX_PERCENT = 40;
 
+const EMPTY_DOCS: TaskDocNode[] = [];
+const EMPTY_PICKUPS: AgentPickupNode[] = [];
+
 export function SessionsView({ active }: { active: boolean }) {
   const rootRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<HTMLElement>(null);
@@ -204,6 +199,145 @@ export function SessionsView({ active }: { active: boolean }) {
   });
 
   const registry = useMemo(() => registerDefaultCommands(createCommandRegistry()), []);
+
+  // ── L2: the shared session feed + cockpit state ─────────────────────────────────────────
+  const sessions = useSessions((state) => state.sessions);
+  const focusedSessionId = useSessionCockpit((state) => state.focusedSessionId);
+  const treeView = useSessionCockpit((state) => state.orchestrationTreeView);
+  const perSession = useSessionCockpit((state) => state.perSession);
+  const taskDocuments = useDashboard((state) => state.analytics?.taskDocuments ?? EMPTY_DOCS);
+  const pickups = useDashboard((state) => state.analytics?.agentPickups ?? EMPTY_PICKUPS);
+  const [handoff, setHandoff] = useState<string | null>(null);
+
+  // The feed must outlive view switches (the layer is keep-alive) — refcounted, shared with
+  // Cockpit's own subscription, so this never double-polls.
+  useEffect(() => startCatalogPollDriver(), []);
+  useEffect(() => startCockpitMirror(), []);
+
+  const focused = sessions.find((session) => session.id === focusedSessionId);
+
+  const labels = useMemo(() => masterLabels(taskDocuments), [taskDocuments]);
+  const model = useMemo(
+    () => buildRailModel(sessions, { masterLabel: (key) => labels.get(key) }),
+    [sessions, labels],
+  );
+  const unackedIds = useMemo(
+    () =>
+      sessions
+        .filter((session) => (perSession[session.id]?.setLedger ?? []).some((entry) => !entry.acknowledged))
+        .map((session) => session.id),
+    [sessions, perSession],
+  );
+  const criticalBus = useMemo(
+    () => [...criticalBusSessionIds(pickups, sessions)],
+    [pickups, sessions],
+  );
+  const rollup = useMemo(
+    () => attentionRollup(sessions, { unackedSessionIds: unackedIds, criticalBusSessionIds: criticalBus }),
+    [sessions, unackedIds, criticalBus],
+  );
+
+  const focusSession = useCallback((id: string | null) => {
+    setHandoff(null);
+    sessionCockpitStore.getState().setFocusedSession(id);
+  }, []);
+
+  // R9 smart-default focus (never an empty landing) + F17 focus handoff: refocus happens ONLY
+  // when nothing is focused or the focused seat stopped running UNDER us — a user deliberately
+  // inspecting a landed row is never fought.
+  const lastFocusRef = useRef<{ id: string | null; status: string }>({ id: null, status: "none" });
+  useEffect(() => {
+    const previous = lastFocusRef.current;
+    const current = focusedSessionId
+      ? sessions.find((session) => session.id === focusedSessionId)
+      : undefined;
+    const status = current ? (current.status ?? "running") : focusedSessionId ? "gone" : "none";
+    if (
+      previous.id !== null &&
+      previous.id === focusedSessionId &&
+      previous.status === "running" &&
+      status !== "running"
+    ) {
+      const why = current?.landedReason ?? current?.retiredReason;
+      const word = status === "landed" ? "landed" : status === "gone" ? "ended" : "retired";
+      setHandoff(`${current?.label ?? previous.id} ${word}${why ? ` — ${why}` : ""} · focus handed off`);
+      sessionCockpitStore.getState().setFocusedSession(smartDefaultFocus(sessions));
+    } else if (focusedSessionId === null) {
+      const next = smartDefaultFocus(sessions);
+      if (next !== null) sessionCockpitStore.getState().setFocusedSession(next);
+    }
+    lastFocusRef.current = { id: sessionCockpitStore.getState().focusedSessionId, status };
+  }, [sessions, focusedSessionId]);
+
+  // Mirror the view-owned layout/palette facts into the cockpit store (design §4.3 skeleton).
+  useEffect(() => {
+    sessionCockpitStore.getState().setLayout({ railCollapsed, inspectorCollapsed });
+  }, [railCollapsed, inspectorCollapsed]);
+  useEffect(() => {
+    sessionCockpitStore.getState().setPaletteOpen(palette.open);
+  }, [palette.open]);
+
+  // L2 palette commands (dynamic titles carry the HONEST preview counts + names): the tree
+  // toggle, jump-to-attention, bulk end at sprint + master level, and question triage (R16).
+  useEffect(() => {
+    const disposers = [
+      registry.register({
+        id: "rail.treeToggle",
+        title: treeView ? "Rail: show role hierarchy" : "Rail: show orchestration tree",
+        keywords: ["tree", "spawn", "provenance", "hierarchy", "rail"],
+        run: () => sessionCockpitStore.getState().setOrchestrationTreeView(!treeView),
+      }),
+      registry.register({
+        id: "attention.jump",
+        title: "Jump to attention",
+        keywords: ["attention", "next", "triage"],
+        when: () => jumpToAttentionTarget(rollup, sessions) !== null,
+        run: () => {
+          const target = jumpToAttentionTarget(rollup, sessions);
+          if (target) focusSession(target);
+        },
+      }),
+    ];
+    const allLanded = [
+      ...model.masters.flatMap((master) => master.completed),
+      ...model.completedUnattached,
+    ];
+    if (allLanded.length > 0) {
+      disposers.push(
+        registry.register({
+          id: "sessions.endCompleted",
+          title: `End ${allLanded.length} completed — sprint: ${allLanded.map((s) => s.label).join(", ")}`,
+          keywords: ["end", "completed", "bulk", "cleanup"],
+          run: () => void endLanded(allLanded),
+        }),
+      );
+    }
+    for (const master of model.masters) {
+      if (master.completed.length === 0) continue;
+      disposers.push(
+        registry.register({
+          id: `sessions.endDone.${master.key}`,
+          title: `End ${master.completed.length} done — ${master.label}: ${master.completed.map((s) => s.label).join(", ")}`,
+          keywords: ["end", "done", "bulk", master.label],
+          run: () => void endLanded(master.completed),
+        }),
+      );
+    }
+    for (const seat of waitingSeats(sessions)) {
+      const preview = interactionPromptPreview(seat.controlPendingInteraction, 60);
+      disposers.push(
+        registry.register({
+          id: `triage.${seat.id}`,
+          title: `Answer pending question — ${seat.label}${preview ? `: “${preview}”` : ""}`,
+          keywords: ["answer", "question", "pending", "input"],
+          run: () => focusSession(seat.id),
+        }),
+      );
+    }
+    return () => {
+      for (const dispose of disposers) dispose();
+    };
+  }, [registry, model, rollup, sessions, treeView, focusSession]);
 
   const focusSelector = useCallback((selector: string) => {
     const target = rootRef.current?.querySelector<HTMLElement>(selector);
@@ -266,9 +400,20 @@ export function SessionsView({ active }: { active: boolean }) {
         cycleRegion,
         focusStageHeader: () => focusSelector(STAGE_HEADER_SELECTOR),
         focusTerminal: () => focusSelector(PTY_HOST_SELECTOR),
-        // Honest stubs — L2 (session switch), L4 (effort), L5 (submit) replace the ACTION,
-        // the command ids and chords are already final.
-        switchSession: () => {},
+        // L2: alt+↑/↓ cycles the rail order (spine → clusters → unattached, live rows only).
+        switchSession: (direction) => {
+          const order = railCycleOrder(model);
+          if (order.length === 0) return;
+          const index = focusedSessionId ? order.indexOf(focusedSessionId) : -1;
+          const next =
+            index === -1
+              ? direction === 1
+                ? order[0]
+                : order[order.length - 1]
+              : order[(index + direction + order.length) % order.length];
+          focusSession(next);
+        },
+        // Honest stubs — L4 (effort), L5 (submit) replace the ACTION; ids/chords are final.
         cycleEffort: () => {},
         submitComposer: () => {},
       },
@@ -278,7 +423,10 @@ export function SessionsView({ active }: { active: boolean }) {
       cycleRegion,
       focusRegion,
       focusSelector,
+      focusSession,
+      focusedSessionId,
       inspectorCollapsed,
+      model,
       openPalette,
       palette.open,
       railCollapsed,
@@ -386,9 +534,12 @@ export function SessionsView({ active }: { active: boolean }) {
             aria-label="Session rail"
           >
             <h2 className={paneHeading}>Sessions</h2>
-            <div className={placeholder} data-focus-target tabIndex={-1}>
-              session rows land here (L2) — dot · role · title · status · End
-            </div>
+            <SessionRail
+              onFocusSession={focusSession}
+              focusedSessionId={focusedSessionId}
+              model={model}
+              rollup={rollup}
+            />
           </aside>
         </Panel>
         <PanelResizeHandle className={resizeHandle} data-testid="sessions-handle-rail" />
@@ -402,40 +553,42 @@ export function SessionsView({ active }: { active: boolean }) {
             data-testid="sessions-stage"
             aria-label="Session stage"
           >
-            <header className={stageHeader} data-stage-header tabIndex={-1}>
-              <span>stage</span>
-              <span className={css({ color: "muted", fontSize: "0.72rem" })}>
-                HeaderStrip lands in L2/L4
-              </span>
-              {stageNarrow ? (
-                <span
-                  className={floorChip}
-                  data-testid="sessions-pty-floor-chip"
-                  title={`The stage is narrower than ~${PTY_MIN_COLS} columns — a squeezed hosted TUI is a layout fact, not harness misbehavior.`}
-                >
-                  pane narrower than ~{PTY_MIN_COLS} cols
-                </span>
-              ) : null}
-            </header>
-            <div
-              className={ptyPlaceholder}
-              data-kbzone="pty"
-              data-testid="sessions-pty-placeholder"
-              tabIndex={-1}
-              aria-label="Terminal placeholder"
+            <SessionStage
+              focused={focused}
+              cockpit={focused ? perSession[focused.id] : undefined}
+              handoff={handoff}
+              headerExtra={
+                stageNarrow ? (
+                  <span
+                    className={floorChip}
+                    data-testid="sessions-pty-floor-chip"
+                    title={`The stage is narrower than ~${PTY_MIN_COLS} columns — a squeezed hosted TUI is a layout fact, not harness misbehavior.`}
+                  >
+                    pane narrower than ~{PTY_MIN_COLS} cols
+                  </span>
+                ) : null
+              }
             >
-              PTY surface lands here (L6) — every key passes to the harness except the reserved
-              set (? lists it); F6 exits to chrome
-            </div>
-            <textarea
-              className={composerBox}
-              data-kbzone="composer"
-              data-focus-target
-              data-testid="sessions-composer-placeholder"
-              aria-label="Composer placeholder"
-              rows={2}
-              placeholder="composer lands here (L5) — ctrl+↵ send (stub) · esc → stage header · / at line start opens the palette"
-            />
+              <div
+                className={ptyPlaceholder}
+                data-kbzone="pty"
+                data-testid="sessions-pty-placeholder"
+                tabIndex={-1}
+                aria-label="Terminal placeholder"
+              >
+                PTY surface lands here (L6) — every key passes to the harness except the reserved
+                set (? lists it); F6 exits to chrome
+              </div>
+              <textarea
+                className={composerBox}
+                data-kbzone="composer"
+                data-focus-target
+                data-testid="sessions-composer-placeholder"
+                aria-label="Composer placeholder"
+                rows={2}
+                placeholder="composer lands here (L5) — ctrl+↵ send (stub) · esc → stage header · / at line start opens the palette"
+              />
+            </SessionStage>
           </section>
         </Panel>
         <PanelResizeHandle className={resizeHandle} data-testid="sessions-handle-inspector" />
@@ -457,8 +610,13 @@ export function SessionsView({ active }: { active: boolean }) {
             aria-label="Inspector"
           >
             <h2 className={paneHeading}>Inspector</h2>
-            <div className={placeholder} data-focus-target tabIndex={-1}>
-              Evidence · Capabilities · Bus tabs land here (L7)
+            {/* The focused seat's provenance/outcome card (R7/R17) — the L7 tabbed inspector
+                (Evidence · Capabilities · Bus) replaces this pane. */}
+            <div className={inspectorScroll} data-focus-target tabIndex={-1}>
+              <SeatInspector
+                session={focused}
+                cockpit={focused ? perSession[focused.id] : undefined}
+              />
             </div>
           </aside>
         </Panel>

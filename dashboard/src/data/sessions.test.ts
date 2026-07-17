@@ -281,6 +281,7 @@ describe("sessionStore (6e hardening)", () => {
       kind: "terminal",
       leafKey: leaf,
       seatRole: "terminal",
+      createdAt: "2026-06-26T00:00:00Z",
       status: "running",
     });
 
@@ -319,6 +320,7 @@ describe("sessionStore (6e hardening)", () => {
       kind: "harness",
       harness: "claude",
       lifecycleId: "LC1",
+      createdAt: "2026-06-26T00:00:00Z",
       status: "running",
     });
   });
@@ -357,6 +359,7 @@ describe("sessionStore (6e hardening)", () => {
       leafKey: "repo/master/leaf-1",
       spawnRole: "worker",
       seatRole: "reviewer",
+      createdAt: "2026-06-26T00:00:00Z",
       status: "landed",
       landedAt: "2026-07-09T00:00:00Z",
       landedReason: "leaf integrated",

@@ -35,12 +35,25 @@ export interface OpenSession {
   /** The role occupying the leaf binding; authoritative for grouping and seat identity. */
   seatRole?: string;
   status?: TerminalSessionStatus;
+  createdAt?: string;
   landedAt?: string;
   landedReason?: string;
   landedEdge?: string;
+  // Retirement provenance (260715-FEUI-L2 R4): surfaced on tooltips + the seat inspector.
+  retiredAt?: string;
+  retiredBySession?: string;
+  retiredReason?: string;
+  retiredEdge?: string;
   spawnedBySession?: string;
   spawnedByLifecycle?: string;
   spawnedLabel?: string;
+  /** The RESOLVED dispatch level (leaf|master|portfolio) + explicit-vs-default provenance. */
+  spawnLevel?: string;
+  spawnLevelSource?: string;
+  // The settings-resolved model/effort pinned at launch — REQUESTED provenance, never proof of
+  // the effective pair (evidence tiers live in sessionCockpitStore).
+  resolvedModel?: string;
+  resolvedEffort?: string;
   turnState?: string;
   turnStateChangedAt?: string;
   controlState?: HarnessControlState;
@@ -51,6 +64,12 @@ export interface OpenSession {
   controlPendingInteraction?: Record<string, unknown>;
   controlLastEventSequence?: number;
   controlRaw?: Record<string, unknown>;
+  // Liveness probe evidence, mirrored for the freshness surfaces (R15).
+  livenessFailures?: number;
+  livenessFirstFailedAt?: string;
+  livenessLastFailedAt?: string;
+  livenessEvidence?: string;
+  exitEvidence?: string;
 }
 
 type SessionCatalogChangeReason = "create" | "terminate" | "leaf";
@@ -122,6 +141,11 @@ interface SessionState {
   /** Drop a local row; clear `activeId` if it was the one removed. */
   close: (id: string) => void;
   setStatus: (id: string, status: TerminalSessionStatus) => void;
+  /**
+   * Merge server-observed fields into one row (the seat-event reconciler, L2 S2). The poll stays
+   * authoritative: anything patched here is confirmed or replaced by the next catalog hydrate.
+   */
+  patch: (id: string, partial: Partial<OpenSession>) => void;
   setActive: (id: string) => void;
   /** Attach a hosted session to one lifecycle; latest attachment owns that lifecycle route. */
   setLifecycle: (id: string, lifecycleId: string | null) => void;
@@ -294,6 +318,12 @@ export const sessionStore = createStore<SessionState>((set) => ({
             : state.activeId,
       };
     }),
+  patch: (id, partial) =>
+    set((state) => ({
+      sessions: state.sessions.map((session) =>
+        session.id === id ? { ...session, ...partial } : session,
+      ),
+    })),
   setActive: (id) => set({ activeId: id }),
   setLifecycle: (id, lifecycleId) =>
     set((state) => ({
@@ -388,12 +418,21 @@ export function fromTerminalSessionInfo(info: TerminalSessionInfo): OpenSession 
     ...(info.leafKey ? { leafKey: info.leafKey } : {}),
     ...(info.spawnRole ? { spawnRole: info.spawnRole } : {}),
     ...(info.seatRole ? { seatRole: info.seatRole } : {}),
+    ...(info.createdAt ? { createdAt: info.createdAt } : {}),
     ...(info.landedAt ? { landedAt: info.landedAt } : {}),
     ...(info.landedReason ? { landedReason: info.landedReason } : {}),
     ...(info.landedEdge ? { landedEdge: info.landedEdge } : {}),
+    ...(info.retiredAt ? { retiredAt: info.retiredAt } : {}),
+    ...(info.retiredBySession ? { retiredBySession: info.retiredBySession } : {}),
+    ...(info.retiredReason ? { retiredReason: info.retiredReason } : {}),
+    ...(info.retiredEdge ? { retiredEdge: info.retiredEdge } : {}),
     ...(info.spawnedBySession ? { spawnedBySession: info.spawnedBySession } : {}),
     ...(info.spawnedByLifecycle ? { spawnedByLifecycle: info.spawnedByLifecycle } : {}),
     ...(info.spawnedLabel ? { spawnedLabel: info.spawnedLabel } : {}),
+    ...(info.spawnLevel ? { spawnLevel: info.spawnLevel } : {}),
+    ...(info.spawnLevelSource ? { spawnLevelSource: info.spawnLevelSource } : {}),
+    ...(info.resolvedModel ? { resolvedModel: info.resolvedModel } : {}),
+    ...(info.resolvedEffort ? { resolvedEffort: info.resolvedEffort } : {}),
     ...(info.turnState ? { turnState: info.turnState } : {}),
     ...(info.turnStateChangedAt ? { turnStateChangedAt: info.turnStateChangedAt } : {}),
     ...(info.controlState ? { controlState: info.controlState } : {}),
@@ -408,6 +447,11 @@ export function fromTerminalSessionInfo(info: TerminalSessionInfo): OpenSession 
       ? { controlLastEventSequence: info.controlLastEventSequence }
       : {}),
     ...(info.controlRaw ? { controlRaw: info.controlRaw } : {}),
+    ...(info.livenessFailures !== undefined ? { livenessFailures: info.livenessFailures } : {}),
+    ...(info.livenessFirstFailedAt ? { livenessFirstFailedAt: info.livenessFirstFailedAt } : {}),
+    ...(info.livenessLastFailedAt ? { livenessLastFailedAt: info.livenessLastFailedAt } : {}),
+    ...(info.livenessEvidence ? { livenessEvidence: info.livenessEvidence } : {}),
+    ...(info.exitEvidence ? { exitEvidence: info.exitEvidence } : {}),
     status: info.status,
   };
 }

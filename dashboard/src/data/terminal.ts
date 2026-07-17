@@ -260,9 +260,6 @@ export function connectTerminal(
   };
 }
 
-/** The launch kinds the opener understands: a plain shell, or a named harness (slice 6e-2b). */
-export type TerminalOpenKind = "terminal" | "harness";
-
 /** One supported harness as `GET /api/harnesses` reports it — `detected` ⇒ a launch button appears. */
 export interface HarnessInfo {
   id: string;
@@ -270,47 +267,23 @@ export interface HarnessInfo {
   detected: boolean;
 }
 
-export type TerminalSessionStatus = "running" | "exited" | "landed" | "terminated";
-export type HarnessControlState = "starting" | "ready" | "disconnected" | "failed" | "unsupported";
-export type HarnessActivityState = "idle" | "running" | "blocked" | "settling" | "unknown";
-export type HarnessAcceptanceState = "immediate" | "queued" | "rejected" | "unknown" | "unsupported";
-
-export interface TerminalSessionInfo {
-  id: string;
-  label: string;
-  kind: TerminalOpenKind;
-  harness?: string;
-  lifecycleId?: string;
-  /** The durable leaf-identity key (qualified leaf id `repo/master/leaf-id`) this chat claims. */
-  leafKey?: string;
-  /** The AR_SPAWN_ROLE recorded at spawn (L14): the l-01 role this session was dispatched AS
-   *  (architect/orchestrator/strategist/manager/worker/curator/reviewer/designer). Absent on hand-opened sessions. */
-  spawnRole?: string;
-  /** The role occupying the leaf binding. Hand-opened sessions gain this at attach time. */
-  seatRole?: string;
-  cwd: string;
-  tmuxName: string;
-  createdAt: string;
-  lastAttachedAt: string;
-  status: TerminalSessionStatus;
-  terminatedAt?: string;
-  landedAt?: string;
-  landedReason?: string;
-  landedEdge?: string;
-  spawnedBySession?: string;
-  spawnedByLifecycle?: string;
-  spawnedLabel?: string;
-  turnState?: string;
-  turnStateChangedAt?: string;
-  controlState?: HarnessControlState;
-  controlProtocol?: string;
-  controlActivity?: HarnessActivityState;
-  controlAcceptance?: HarnessAcceptanceState;
-  controlVendorSessionId?: string;
-  controlPendingInteraction?: Record<string, unknown>;
-  controlLastEventSequence?: number;
-  controlRaw?: Record<string, unknown>;
-}
+// The catalog-row wire shape moved to types/terminalCatalog.ts (260715-FEUI-L2 R4: the cockpit
+// consumes the FULL `TerminalCatalogEntry.to_json()` shape). Re-exported here so existing
+// consumers keep their import site; `TerminalSessionInfo` is that full row.
+export type {
+  HarnessAcceptanceState,
+  HarnessActivityState,
+  HarnessControlState,
+  SeatTurnState,
+  TerminalCatalogRow as TerminalSessionInfo,
+  TerminalLivenessEvidence,
+  TerminalOpenKind,
+  TerminalSessionStatus,
+} from "../types/terminalCatalog";
+import type {
+  TerminalCatalogRow,
+  TerminalOpenKind as CatalogOpenKind,
+} from "../types/terminalCatalog";
 
 interface OpenTerminalOptions {
   label?: string;
@@ -333,18 +306,18 @@ export async function fetchHarnesses(base = ""): Promise<HarnessInfo[]> {
   }
 }
 
-export async function fetchTerminalSessionsOrNull(base = ""): Promise<TerminalSessionInfo[] | null> {
+export async function fetchTerminalSessionsOrNull(base = ""): Promise<TerminalCatalogRow[] | null> {
   try {
     const response = await fetch(`${base}/api/terminal/sessions`);
     if (!response.ok) return null;
-    const body = (await response.json()) as { sessions?: TerminalSessionInfo[] };
+    const body = (await response.json()) as { sessions?: TerminalCatalogRow[] };
     return Array.isArray(body.sessions) ? body.sessions : [];
   } catch {
     return null;
   }
 }
 
-export async function fetchTerminalSessions(base = ""): Promise<TerminalSessionInfo[]> {
+export async function fetchTerminalSessions(base = ""): Promise<TerminalCatalogRow[]> {
   const sessions = await fetchTerminalSessionsOrNull(base);
   if (sessions === null) {
     return [];
@@ -360,7 +333,7 @@ export async function fetchTerminalSessions(base = ""): Promise<TerminalSessionI
  */
 export async function openTerminalSession(
   sessionId: string,
-  kind: TerminalOpenKind = "terminal",
+  kind: CatalogOpenKind = "terminal",
   base = "",
   harness?: string,
   options: OpenTerminalOptions = {},

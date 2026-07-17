@@ -1,14 +1,19 @@
 // The sessions view shell (260715-FEUI-L1 S2–S5): scaffold structure + the keyboard/palette
 // foundation wired end-to-end under jsdom — zones resolved from real DOM markers, tinykeys at the
 // window, cmdk palette pages, and the F6 focus cycle (design §5.3).
-import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
+import { sessionCockpitStore } from "../../data/sessionCockpitStore";
+import { fromTerminalSessionInfo, sessionStore } from "../../data/sessions";
+import { FLEET } from "../../test/fixtures/catalogRows";
 import { SessionsView } from "./SessionsView";
 
 afterEach(() => {
   cleanup();
   window.localStorage.clear(); // react-resizable-panels persists layout under autoSaveId
+  sessionStore.getState().hydrate([]);
+  sessionCockpitStore.setState({ focusedSessionId: null });
 });
 
 describe("scaffold structure (S2)", () => {
@@ -242,5 +247,50 @@ describe("focus model (S4, design §5.3)", () => {
     fireEvent.keyDown(composer, { key: "Escape", code: "Escape" });
     const header = getByTestId("sessions-stage").querySelector("[data-stage-header]");
     expect(document.activeElement).toBe(header);
+  });
+});
+
+describe("smart-default focus + handoff + session cycling (L2: R9, F17)", () => {
+  beforeEach(() => {
+    sessionStore.getState().hydrate(FLEET.map(fromTerminalSessionInfo));
+    sessionCockpitStore.setState({ focusedSessionId: null });
+  });
+
+  it("view entry focuses the awaiting-input seat first — never an empty landing (R9)", async () => {
+    const { getByTestId } = render(<SessionsView active />);
+    await waitFor(() =>
+      expect(getByTestId("rail-row-worker-tui").getAttribute("data-selected")).toBe("true"),
+    );
+    // The stage shows the focused seat's HeaderStrip.
+    expect(getByTestId("header-strip").textContent).toContain("worker-tui-shell");
+  });
+
+  it("hands focus off with a note when the FOCUSED seat lands under us (F17)", async () => {
+    const { getByTestId, queryByTestId } = render(<SessionsView active />);
+    await waitFor(() => expect(sessionCockpitStore.getState().focusedSessionId).toBe("worker-tui"));
+    fireEvent.click(getByTestId("rail-row-worker-l4"));
+    await waitFor(() =>
+      expect(getByTestId("rail-row-worker-l4").getAttribute("data-selected")).toBe("true"),
+    );
+    expect(queryByTestId("stage-handoff-note")).toBeNull();
+
+    act(() => {
+      sessionStore
+        .getState()
+        .patch("worker-l4", { status: "landed", landedReason: "leaf integrated" });
+    });
+    await waitFor(() => expect(queryByTestId("stage-handoff-note")).not.toBeNull());
+    expect(queryByTestId("stage-handoff-note")?.textContent).toContain("leaf integrated");
+    // Focus moved by the smart-default priority (awaiting-input first).
+    expect(sessionCockpitStore.getState().focusedSessionId).toBe("worker-tui");
+  });
+
+  it("alt+↓ / alt+↑ cycle the rail order from the chrome zone", async () => {
+    render(<SessionsView active />);
+    await waitFor(() => expect(sessionCockpitStore.getState().focusedSessionId).toBe("worker-tui"));
+    fireEvent.keyDown(document.body, { key: "ArrowDown", code: "ArrowDown", altKey: true });
+    expect(sessionCockpitStore.getState().focusedSessionId).toBe("scout");
+    fireEvent.keyDown(document.body, { key: "ArrowUp", code: "ArrowUp", altKey: true });
+    expect(sessionCockpitStore.getState().focusedSessionId).toBe("worker-tui");
   });
 });

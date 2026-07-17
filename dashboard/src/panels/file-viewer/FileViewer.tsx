@@ -162,8 +162,12 @@ export function FileViewer() {
     fetchRepos()
       .then((cat) => {
         if (!alive) return;
-        setRepos(cat.repos);
-        const first = cat.repos[0];
+        // Defensive: a catalog response without `repos` (unexpected server shape, generic test
+        // stubs) must degrade to the empty list — `undefined` here put every later render's
+        // `repos.find` into a crash loop.
+        const list = cat.repos ?? [];
+        setRepos(list);
+        const first = list[0];
         if (first) setRepo((r) => r || first.repo);
       })
       .catch((e) => {

@@ -9,9 +9,13 @@ import {
 
 import { css } from "../../styled-system/css";
 import {
+  hydrateTerminalSessionsFromCatalog,
+  startCatalogPollDriver,
+  writeLastActiveSessionId,
+} from "../data/catalogPoll";
+import {
   attachSeatRole,
   createSession,
-  fromTerminalSessionInfo,
   notifySessionCatalogChanged,
   registerConnection,
   sendToSession,
@@ -24,7 +28,6 @@ import {
   bracketedPaste,
   cleanupLandedTerminalSessions,
   fetchHarnesses,
-  fetchTerminalSessionsOrNull,
   sanitizeForInjection,
   terminateTerminalSession,
   type HarnessInfo,
@@ -180,8 +183,6 @@ const statusPanel = css({
   background: "bg",
 });
 
-const LAST_ACTIVE_SESSION_KEY = "ar-dashboard:last-active-chat-session";
-const CATALOG_REFRESH_INTERVAL_MS = 2500;
 const SIDEBAR_WIDTH_KEY = "chats.sidebar-width";
 const SIDEBAR_DEFAULT_WIDTH = 256;
 const SIDEBAR_MIN_WIDTH = 220;
@@ -239,35 +240,6 @@ function SidebarResizeHandle({
 
 function isInspectableSession(status: string | undefined): boolean {
   return (status ?? "running") === "running" || status === "landed";
-}
-
-function readLastActiveSessionId(): string | null {
-  try {
-    return window.localStorage.getItem(LAST_ACTIVE_SESSION_KEY);
-  } catch {
-    return null;
-  }
-}
-
-function writeLastActiveSessionId(id: string | null): void {
-  try {
-    if (id) window.localStorage.setItem(LAST_ACTIVE_SESSION_KEY, id);
-    else window.localStorage.removeItem(LAST_ACTIVE_SESSION_KEY);
-  } catch {
-    // localStorage can be unavailable in private contexts; it is only a UI preference.
-  }
-}
-
-async function hydrateTerminalSessionsFromCatalog(
-  allowEmpty: boolean,
-  excludeSessionIds: ReadonlySet<string> = new Set(),
-): Promise<void> {
-  const list = await fetchTerminalSessionsOrNull();
-  if (list === null || (list.length === 0 && !allowEmpty)) return;
-  const sessions = list
-    .filter((session) => !excludeSessionIds.has(session.id))
-    .map(fromTerminalSessionInfo);
-  sessionStore.getState().hydrate(sessions, readLastActiveSessionId());
 }
 
 /** Placeholder harness glyph: a rounded box with a monogram, `currentColor` so it tracks the button. */
@@ -334,15 +306,11 @@ export function Chats({
     };
   }, []);
 
+  // The initial mount hydrate goes through the shared helper too, so this read records a
+  // poll-health beat like every other catalog read (L2 review finding 6). Same semantics as
+  // before: an empty/failed read never clobbers the store (allowEmpty=false).
   useEffect(() => {
-    let active = true;
-    void fetchTerminalSessionsOrNull().then((list) => {
-      if (!active || list === null || list.length === 0) return;
-      sessionStore.getState().hydrate(list.map(fromTerminalSessionInfo), readLastActiveSessionId());
-    });
-    return () => {
-      active = false;
-    };
+    void hydrateTerminalSessionsFromCatalog(false);
   }, []);
 
   useEffect(
@@ -359,12 +327,10 @@ export function Chats({
     [],
   );
 
-  useEffect(() => {
-    const interval = window.setInterval(() => {
-      void hydrateTerminalSessionsFromCatalog(false);
-    }, CATALOG_REFRESH_INTERVAL_MS);
-    return () => window.clearInterval(interval);
-  }, []);
+  // The 2500 ms catalog poll now lives in the SHARED data layer (data/catalogPoll.ts, hoisted by
+  // 260715-FEUI-L2 R1); Chats consumes the refcounted driver unchanged. The L8 Chats-cutover
+  // decision depends on this hoist having landed.
+  useEffect(() => startCatalogPollDriver(), []);
 
   useEffect(() => {
     writeLastActiveSessionId(activeId);

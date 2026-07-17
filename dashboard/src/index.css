@@ -88,6 +88,15 @@
   }
 }
 
+/* The cockpit state pulse (260715-FEUI-L2, stateGrammar.ts — developer ruling 2026-07-16):
+   SLOW ease-in-out opacity pulse, NEVER steps()/on-off blinking. Driven at 2.4s by the grammar's
+   PULSE_ANIMATION; frozen by effects=off below and by _motionReduce at the consumer. */
+@keyframes pulseSlow {
+  50% {
+    opacity: 0.45;
+  }
+}
+
 /* Engine Room pod-stage CANVAS motion is GSAP (useEngineTimeline) + Motion (EnclosureCanvas), never CSS
    (05f §8) — the former canvas @keyframes (chargeSweep, conduitDraw, pktRun, attnBreath, stopFlash,
    closeoutSweep, warpSurgeUp/Down, landingIn) are removed. The indexing→nominal engine "powerup" is a

@@ -145,13 +145,13 @@ export function registerDefaultCommands(registry: CommandRegistry): CommandRegis
     },
     {
       id: "session.prev",
-      title: "Previous session (stub — L2)",
+      title: "Previous session",
       chord: "alt+↑",
       run: (ctx) => ctx.actions.switchSession(-1),
     },
     {
       id: "session.next",
-      title: "Next session (stub — L2)",
+      title: "Next session",
       chord: "alt+↓",
       run: (ctx) => ctx.actions.switchSession(1),
     },

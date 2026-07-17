@@ -7,6 +7,8 @@ import {
 import { motion } from "motion/react";
 
 import { css, cva, cx } from "../../styled-system/css";
+import { startCatalogPollDriver } from "../data/catalogPoll";
+import { createGatedSeatEventApplier } from "../data/seatEvents";
 import { selectQueue } from "../data/selectors";
 import type { ConnState } from "../data/store";
 import { dashboardStore, useDashboard } from "../data/store";
@@ -326,15 +328,30 @@ const sessionsLayer = chatsLayer;
 // out so the dev gallery (/dev/bench) renders the exact same surface against fixture state.
 export function Cockpit() {
   useEffect(() => connectState(), []);
-  useEffect(
-    () =>
-      connectEvents(
-        (line) => dashboardStore.getState().pushEvent(line),
-        "",
-        () => dashboardStore.getState().markEventsHydrated(),
-      ),
-    [],
-  );
+  useEffect(() => {
+    // The seat-event reconciler (260715-FEUI-L2 S2) rides the SAME /api/events connection as the
+    // Event River — one EventSource, two consumers. The catalog poll stays the authoritative
+    // session-row source; push only pre-applies retire/land/rename. Every connection replays a
+    // backlog before its `ready` marker — incl. reconnects whose cursor the server cannot decode
+    // — and replayed history must never touch live rows (a stale rename would flicker until the
+    // next poll beat), so application runs through the per-connection backlog gate.
+    const gate = createGatedSeatEventApplier();
+    return connectEvents(
+      (line) => {
+        dashboardStore.getState().pushEvent(line);
+        gate.onLine(line);
+      },
+      "",
+      () => {
+        gate.onReady();
+        dashboardStore.getState().markEventsHydrated();
+      },
+      gate.onInterrupt,
+    );
+  }, []);
+  // The 2500 ms catalog poll driver (hoisted by 260715-FEUI-L2 R1): started here so the session
+  // feed stays alive with ANY view — or none — in front; Chats/Sessions share it by refcount.
+  useEffect(() => startCatalogPollDriver(), []);
   return <CockpitShell />;
 }
 

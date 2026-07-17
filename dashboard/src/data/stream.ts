@@ -38,14 +38,19 @@ export function connectState(base = ""): () => void {
  * Subscribe to `GET /api/events` (the raw `ar-observer-event/v1` channel). Verbatim JSONL
  * lines for the Event River; the browser carries the opaque byte-offset `Last-Event-ID`
  * cursor across reconnects. A separate connection from the state channel by design.
+ * `onInterrupt` fires on a connection error/reconnect: the NEXT connection replays a backlog
+ * before its own `ready` marker, so a consumer gating on ready must re-close its gate here
+ * (an undecodable cursor makes the server fall back to the full initial window).
  */
 export function connectEvents(
   onLine: (line: string) => void,
   base = "",
   onReady?: () => void,
+  onInterrupt?: () => void,
 ): () => void {
   const source = new EventSource(`${base}/api/events`);
   source.addEventListener("event", (event) => onLine((event as MessageEvent).data));
   source.addEventListener("ready", () => onReady?.());
+  source.addEventListener("error", () => onInterrupt?.());
   return () => source.close();
 }
