@@ -540,14 +540,14 @@ export function SessionRail({ onFocusSession, focusedSessionId, model, rollup }:
               gate
             </span>
           ) : null}
-          {/* L4 R6: unacknowledged set outcomes (unsupported/clamp/unknown, pair failures) —
-              cleared by viewing the ledger or dismissing the toast (mark seen). */}
+          {/* L7 F22: unacknowledged set outcomes (unsupported/clamp/unknown, pair failures) clear
+              only through the explicit `mark seen` action in the ledger or attention overlay. */}
           {hasUnackedSetAttention(perSessionCockpit[session.id]) ? (
             <span
               className={markerChip({ tone: "warn" })}
               role="img"
-              aria-label="unacknowledged set outcome — view the set ledger to acknowledge"
-              title="unacknowledged set outcome (unsupported / clamp / unknown) — view the set ledger in the inspector to acknowledge"
+              aria-label="unacknowledged set outcome — use mark seen in the set ledger to acknowledge"
+              title="unacknowledged set outcome (unsupported / clamp / unknown) — use mark seen in the inspector ledger or attention overlay"
               data-testid={`rail-set-unacked-${session.id}`}
             >
               set!

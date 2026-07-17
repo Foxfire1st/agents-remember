@@ -72,6 +72,7 @@ import { endLanded, SessionRail } from "./SessionRail";
 import { SessionStage } from "./SessionStage";
 import { SetOutcomeToasts } from "./SetOutcomeToasts";
 import { StopResidualNotes } from "./StopResidualNotes";
+import { StatusLine } from "./StatusLine";
 import { useKeyboardZones } from "./useKeyboardZones";
 import { WorkingLine } from "./WorkingLine";
 import { SessionComposer, type SessionComposerHandle } from "../SessionComposer";
@@ -132,22 +133,6 @@ const ptyPlaceholder = css({
   borderStyle: "solid",
   borderColor: "grid",
   borderRadius: "2px",
-  _focusVisible: { outlineWidth: "1px", outlineStyle: "solid", outlineColor: "amber", outlineOffset: "1px" },
-});
-const statusLine = css({
-  display: "flex",
-  flexShrink: 0,
-  alignItems: "baseline",
-  gap: "0.8rem",
-  flexWrap: "wrap",
-  borderTopWidth: "1px",
-  borderTopStyle: "solid",
-  borderTopColor: "grid",
-  paddingTop: "0.35rem",
-  fontSize: "0.72rem",
-  color: "muted",
-});
-const statusFocus = css({
   _focusVisible: { outlineWidth: "1px", outlineStyle: "solid", outlineColor: "amber", outlineOffset: "1px" },
 });
 const reopenButton = css({
@@ -215,8 +200,10 @@ export function SessionsView({ active }: { active: boolean }) {
   const focusedSessionId = useSessionCockpit((state) => state.focusedSessionId);
   const treeView = useSessionCockpit((state) => state.orchestrationTreeView);
   const perSession = useSessionCockpit((state) => state.perSession);
+  const pollHealth = useSessionCockpit((state) => state.pollHealth);
   const taskDocuments = useDashboard((state) => state.analytics?.taskDocuments ?? EMPTY_DOCS);
   const pickups = useDashboard((state) => state.analytics?.agentPickups ?? EMPTY_PICKUPS);
+  const supervisorHeartbeat = useDashboard((state) => state.supervisorHeartbeat);
   const [handoff, setHandoff] = useState<string | null>(null);
   // L3: the LaunchFlow dialog — opened from the palette, or pre-filled by the failed-launch
   // banner's 'Launch corrected…' (the refused pair, re-gated against the live catalog).
@@ -748,41 +735,44 @@ export function SessionsView({ active }: { active: boolean }) {
               <SeatInspector
                 session={focused}
                 cockpit={focused ? perSession[focused.id] : undefined}
+                pickups={pickups}
+                heartbeat={supervisorHeartbeat}
               />
             </div>
           </aside>
         </Panel>
       </PanelGroup>
-      <footer
-        className={cx(statusLine, "sessions__statusline")}
-        data-region="statusline"
-        data-testid="sessions-statusline"
-      >
-        <span className={statusFocus} data-focus-target tabIndex={-1}>
-          sessions scaffold — StatusLine lands in L7
-        </span>
-        {railCollapsed ? (
-          <button
-            type="button"
-            className={reopenButton}
-            onClick={() => railRef.current?.expand()}
-            data-testid="sessions-reopen-rail"
-          >
-            ☰ rail
-          </button>
-        ) : null}
-        {inspectorCollapsed ? (
-          <button
-            type="button"
-            className={reopenButton}
-            onClick={() => inspectorRef.current?.expand()}
-            data-testid="sessions-reopen-inspector"
-          >
-            ◫ inspector
-          </button>
-        ) : null}
-        <span className={css({ marginLeft: "auto" })}>ctrl+k palette · ? keys · F6 regions</span>
-      </footer>
+      <StatusLine
+        session={focused}
+        cockpit={focused ? perSession[focused.id] : undefined}
+        pollHealth={pollHealth}
+        actions={
+          railCollapsed || inspectorCollapsed ? (
+            <>
+              {railCollapsed ? (
+                <button
+                  type="button"
+                  className={reopenButton}
+                  onClick={() => railRef.current?.expand()}
+                  data-testid="sessions-reopen-rail"
+                >
+                  ☰ rail
+                </button>
+              ) : null}
+              {inspectorCollapsed ? (
+                <button
+                  type="button"
+                  className={reopenButton}
+                  onClick={() => inspectorRef.current?.expand()}
+                  data-testid="sessions-reopen-inspector"
+                >
+                  ◫ inspector
+                </button>
+              ) : null}
+            </>
+          ) : undefined
+        }
+      />
       <CommandPalette
         open={palette.open}
         page={palette.page}
@@ -799,7 +789,7 @@ export function SessionsView({ active }: { active: boolean }) {
         onClose={() => setLaunch({ open: false })}
         onFocusSession={focusSession}
       />
-      {/* L4 R6: unfocused set outcomes persist until dismissed; R8: the two live regions. */}
+      {/* L7 F22: unfocused set outcomes persist until explicitly marked seen; R8: live regions. */}
       <SetOutcomeToasts
         sessions={sessions}
         focusedSessionId={focusedSessionId}

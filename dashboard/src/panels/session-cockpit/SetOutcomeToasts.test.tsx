@@ -1,6 +1,6 @@
-// Unfocused set-outcome toasts (260715-FEUI-L4 R6, design §9.8): persistent until dismissed,
+// Unfocused set-outcome toasts (260715-FEUI-L7 F22, design §9.8): persistent until marked seen,
 // never for the focused seat, collapsed into ONE stack when several sessions have outcomes;
-// dismissing is the explicit mark-seen act.
+// `mark seen` is the explicit acknowledgment act.
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -43,7 +43,7 @@ describe("SetOutcomeToasts", () => {
     expect(queryByTestId(`set-toast-a`)).not.toBeNull();
   });
 
-  it("persists until dismissed; dismissing acknowledges (mark seen), view focuses the seat", async () => {
+  it("persists until explicitly marked seen; view alone only focuses the seat", async () => {
     const sessions = [seat("a"), seat("b")];
     seedUnsupported("a");
     const onFocus = vi.fn();
@@ -55,7 +55,9 @@ describe("SetOutcomeToasts", () => {
     expect(getByTestId("set-toast-a").textContent).toContain("unsupported");
     fireEvent.click(getByTestId("set-toast-view-a"));
     expect(onFocus).toHaveBeenCalledWith("a");
-    fireEvent.click(getByTestId("set-toast-dismiss-a"));
+    expect(store.getState().perSession["a"].setLedger[0].acknowledged).toBe(false);
+    expect(getByTestId("set-toast-mark-seen-a").textContent).toBe("mark seen");
+    fireEvent.click(getByTestId("set-toast-mark-seen-a"));
     await waitFor(() => expect(queryByTestId("set-outcome-toasts")).toBeNull());
     expect(store.getState().perSession["a"].setLedger[0].acknowledged).toBe(true);
   });

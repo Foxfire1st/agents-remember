@@ -8,11 +8,11 @@ import { deriveSetChips, hasUnackedSetAttention } from "../../data/setChips";
 import { AcceptanceChip } from "./AcceptanceChip";
 
 // Unfocused set-outcome toasts (260715-FEUI-L4 R6, design §9.8 toast discipline): an async
-// outcome on a session the operator is NOT looking at persists until dismissed — never a
+// outcome on a session the operator is NOT looking at persists until marked seen — never a
 // timed toast, never silent. Background outcomes never pile: ONE session with attention shows
 // its chips; several collapse into one stack ("N sessions with unacknowledged set outcomes")
-// whose rows jump to the seat. Dismissing is the explicit mark-seen act (F22); focusing the
-// seat and viewing its ledger acknowledges too (SeatInspector).
+// whose rows jump to the seat. `mark seen` is the explicit acknowledgment act (F22); focusing or
+// opening the inspector never acknowledges on the operator's behalf.
 
 const stack = css({
   position: "absolute",
@@ -90,10 +90,10 @@ export function SetOutcomeToasts({
               <Button
                 className={toastButton}
                 onPress={() => acknowledgeSetAttention(session.id)}
-                aria-label={`dismiss set outcomes for ${session.label} (mark seen)`}
-                data-testid={`set-toast-dismiss-${session.id}`}
+                aria-label={`mark set outcomes seen for ${session.label}`}
+                data-testid={`set-toast-mark-seen-${session.id}`}
               >
-                dismiss
+                mark seen
               </Button>
             </div>
             <div className={chipsColumn}>
@@ -127,10 +127,10 @@ export function SetOutcomeToasts({
                 <Button
                   className={toastButton}
                   onPress={() => acknowledgeSetAttention(session.id)}
-                  aria-label={`dismiss set outcomes for ${session.label} (mark seen)`}
-                  data-testid={`set-toast-dismiss-${session.id}`}
+                  aria-label={`mark set outcomes seen for ${session.label}`}
+                  data-testid={`set-toast-mark-seen-${session.id}`}
                 >
-                  dismiss
+                  mark seen
                 </Button>
               </div>
             ))}

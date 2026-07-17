@@ -290,11 +290,20 @@ export interface AgentPickupNode {
   senderAgentId?: string;
   senderRole?: string;
   recipientRole?: string;
+  /** Routed owner facts were added after the original pickup projection; optional for old rows. */
+  ownerRole?: string;
+  ownerAgentId?: string;
+  ownerLifecycleId?: string;
   gateId?: string;
   messageKind: string;
   artifactPath?: string;
   deliveryState: "queued" | "no-hosted-session" | "delivered" | "unconfirmed" | string;
   deliveredToSession?: string;
+  /** Redelivery/escalation facts are omitted by persisted projections predating HFX2-L1/L4. */
+  attemptCount?: number;
+  lastAttemptAt?: string;
+  nextAttemptAt?: string;
+  escalatedAt?: string;
   state: "waiting-for-agent" | "check-chat" | string;
   ageSeconds?: number;
   ttlSeconds: number;
