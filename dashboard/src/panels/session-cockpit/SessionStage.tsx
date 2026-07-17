@@ -71,7 +71,8 @@ export function SessionStage({
           </span>
         ) : (
           <span className={emptyIdentity} data-testid="stage-empty-identity">
-            no focused session — pick one on the rail, or launch from Chats (cockpit launcher: L5)
+            no focused session — pick one on the rail, or run “Launch session…” from the palette
+            (ctrl+k)
           </span>
         )}
         {headerExtra}

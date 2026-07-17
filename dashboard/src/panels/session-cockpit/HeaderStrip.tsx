@@ -1,8 +1,10 @@
 import { css } from "../../../styled-system/css";
+import { launchTier } from "../../data/launchEvidence";
 import type { OpenSession } from "../../data/sessions";
 import type { PerSessionCockpit } from "../../data/sessionCockpitStore";
 import { seatVisualState } from "../../data/stateGrammar";
 import { leafIdFromKey } from "../../data/taskIdentity";
+import { EvidenceBadge } from "../../grammar/EvidenceBadge";
 import { StateDot } from "./StateDot";
 
 // The HeaderStrip (260715-FEUI-L2 S5, spec §1.2 — R10): identity → controls → state →
@@ -88,7 +90,9 @@ export function HeaderStrip({
   const visual = seatVisualState(session);
   const freshness = cockpit?.freshness ?? { ptyWs: "none" as const, lastOutputAt: null };
   const quiet = quietFor(freshness.lastOutputAt, now);
-  const evidenceTier = cockpit?.launchEvidence.tier ?? "pending";
+  // 260715-FEUI-L3 R7: the launch tier derives from CONTROL-STATE truth on the row (the pure
+  // tier machine), never from the open response — the same derivation every surface uses.
+  const evidenceTier = launchTier(session);
   const seatRole = session.spawnRole ?? session.seatRole;
 
   return (
@@ -123,12 +127,14 @@ export function HeaderStrip({
       >
         {WS_WORDS[freshness.ptyWs]}
         {quiet ? ` · ${quiet}` : ""}
-        {/* Provenance badges (R7): read-only moat-1 facts at their honest tier. */}
+        {/* Provenance badges (R7): read-only moat-1 facts at their honest tier — the
+            EvidenceBadge glyph plus the tier word (pending renders as "requested"). */}
         {session.resolvedModel ? (
           <span className={provenanceChip} data-testid="header-provenance-model">
             {" "}
             model {session.resolvedModel}
-            {session.resolvedEffort ? ` · ${session.resolvedEffort}` : ""} (
+            {session.resolvedEffort ? ` · ${session.resolvedEffort}` : ""}{" "}
+            <EvidenceBadge tier={evidenceTier} size="sm" /> (
             {evidenceTier === "pending" ? "requested" : evidenceTier})
           </span>
         ) : null}

@@ -1,4 +1,5 @@
 import { css } from "../../../styled-system/css";
+import { launchTier } from "../../data/launchEvidence";
 import type { OpenSession } from "../../data/sessions";
 import type { PerSessionCockpit } from "../../data/sessionCockpitStore";
 import { seatVisualState } from "../../data/stateGrammar";
@@ -58,7 +59,8 @@ export function SeatInspector({
     );
   }
   const visual = seatVisualState(session);
-  const tier = cockpit?.launchEvidence.tier ?? "pending";
+  void cockpit; // set-evidence rendering joins in L4; launch tier derives from row truth (L3 R7)
+  const tier = launchTier(session);
   const rawRetireStop = session.controlRaw?.retireControlStopError;
   const retireStopNote = typeof rawRetireStop === "string" ? rawRetireStop : undefined;
   return (
@@ -87,7 +89,9 @@ export function SeatInspector({
         value={
           session.resolvedModel
             ? `${session.resolvedModel}${session.resolvedEffort ? ` · ${session.resolvedEffort}` : ""} (${tier === "pending" ? "requested" : tier})`
-            : undefined
+            : session.kind === "harness" && session.controlState
+              ? "vendor defaults — no selection sent (defaults)"
+              : undefined
         }
         testId="inspector-model"
       />

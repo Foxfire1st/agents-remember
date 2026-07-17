@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { sessionCockpitStore } from "../../data/sessionCockpitStore";
 import { lifecycleNoticeStore } from "../../data/sessionLifecycle";
 import { fromTerminalSessionInfo, sessionStore } from "../../data/sessions";
+import { capabilityEnvelope } from "../../test/fixtures/capabilityEnvelopes";
 import { FLEET } from "../../test/fixtures/catalogRows";
 import { SessionsView } from "./SessionsView";
 
@@ -418,5 +419,54 @@ describe("L6: stage surface, WorkingLine, InteractionBar, stop residuals", () =>
     // No handoff fired — focus never touched this seat.
     expect(sessionCockpitStore.getState().focusedSessionId).toBe("worker-tui");
     expect(queryByTestId("stage-handoff-note")).toBeNull();
+  });
+});
+
+describe("launch flow + failed-launch banner integration (L3: R5, R6)", () => {
+  beforeEach(() => {
+    sessionStore.getState().hydrate(FLEET.map(fromTerminalSessionInfo));
+    sessionCockpitStore.setState({ focusedSessionId: null });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        const body =
+          url === "/api/harnesses"
+            ? { harnesses: [{ id: "claude", name: "Claude Code", detected: true }] }
+            : url.startsWith("/api/harnesses/claude/capabilities")
+              ? capabilityEnvelope("claude", "hit")
+              : { sessions: [] };
+        return { ok: true, status: 200, json: async () => body } as Response;
+      }),
+    );
+  });
+
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("the palette lists 'Launch session…' and running it opens the flow", async () => {
+    const { getByTestId, findByTestId } = render(<SessionsView active />);
+    fireEvent.keyDown(document.body, { key: "k", code: "KeyK", ctrlKey: true });
+    const input = getByTestId("sessions-palette-input");
+    fireEvent.change(input, { target: { value: "launch session" } });
+    fireEvent.keyDown(input, { key: "Enter", code: "Enter" });
+    expect(await findByTestId("launch-flow")).not.toBeNull();
+  });
+
+  it("a focused FAILED seat renders the refusal banner; 'Launch corrected…' opens the flow pre-filled", async () => {
+    const { getByTestId, findByTestId, queryByTestId } = render(<SessionsView active />);
+    await waitFor(() => expect(sessionCockpitStore.getState().focusedSessionId).toBe("worker-tui"));
+    expect(queryByTestId("failed-launch-banner")).toBeNull(); // never on a healthy seat
+    fireEvent.click(getByTestId("rail-row-scout"));
+    const banner = await findByTestId("failed-launch-banner");
+    expect(banner.textContent).toContain(
+      'requested model "ar-unknown-model" is absent from the dynamic catalog',
+    ); // the FLEET scout bridgeError, verbatim
+    fireEvent.click(getByTestId("failed-launch-correct"));
+    const flow = await findByTestId("launch-flow");
+    // the failed seat's harness is pre-selected; the catalog is fetched live
+    await waitFor(() =>
+      expect(
+        flow.querySelector("[data-testid='launch-harness-claude']")?.getAttribute("aria-pressed"),
+      ).toBe("true"),
+    );
   });
 });

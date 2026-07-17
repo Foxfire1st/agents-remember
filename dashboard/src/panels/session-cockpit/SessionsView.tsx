@@ -58,7 +58,9 @@ import { useSessions } from "../../data/sessions";
 import { useDashboard } from "../../data/store";
 import type { AgentPickupNode, TaskDocNode } from "../../types/projection";
 import { CommandPalette } from "./CommandPalette";
+import { FailedLaunchBanner } from "./FailedLaunchBanner";
 import { InteractionBar } from "./InteractionBar";
+import { LaunchFlow, type LaunchPrefill } from "./LaunchFlow";
 import { STOP_TURN_DISABLED_REASON } from "./lifecycleCopy";
 import { PtySurface } from "./PtySurface";
 import { SeatInspector } from "./SeatInspector";
@@ -219,6 +221,11 @@ export function SessionsView({ active }: { active: boolean }) {
   const taskDocuments = useDashboard((state) => state.analytics?.taskDocuments ?? EMPTY_DOCS);
   const pickups = useDashboard((state) => state.analytics?.agentPickups ?? EMPTY_PICKUPS);
   const [handoff, setHandoff] = useState<string | null>(null);
+  // L3: the LaunchFlow dialog — opened from the palette, or pre-filled by the failed-launch
+  // banner's 'Launch corrected…' (the refused pair, re-gated against the live catalog).
+  const [launch, setLaunch] = useState<{ open: boolean; prefill?: LaunchPrefill }>({
+    open: false,
+  });
 
   // The feed must outlive view switches (the layer is keep-alive) — refcounted, shared with
   // Cockpit's own subscription, so this never double-polls.
@@ -292,6 +299,16 @@ export function SessionsView({ active }: { active: boolean }) {
   useEffect(() => {
     sessionCockpitStore.getState().setPaletteOpen(palette.open);
   }, [palette.open]);
+
+  // L3: the launch command — the palette is the flow's entry point (design §7.1).
+  useEffect(() => {
+    return registry.register({
+      id: "session.launch",
+      title: "Launch session…",
+      keywords: ["launch", "new", "open", "harness", "model", "effort"],
+      run: () => setLaunch({ open: true }),
+    });
+  }, [registry]);
 
   // L2 palette commands (dynamic titles carry the HONEST preview counts + names): the tree
   // toggle, jump-to-attention, bulk end at sprint + master level, and question triage (R16).
@@ -626,6 +643,15 @@ export function SessionsView({ active }: { active: boolean }) {
               }
             >
               <StopResidualNotes />
+              {/* L3 R6: a focused FAILED launch renders its refusal verbatim — ABOVE the pty
+                  surface (ruled merge resolution); never hidden, never auto-retried;
+                  Retire / 'Launch corrected…' are the only actions. */}
+              {focused?.controlState === "failed" ? (
+                <FailedLaunchBanner
+                  session={focused}
+                  onLaunchCorrected={(prefill) => setLaunch({ open: true, prefill })}
+                />
+              ) : null}
               {focused ? (
                 <PtySurface focused={focused} onVisibleCols={setPtyCols} />
               ) : (
@@ -722,6 +748,13 @@ export function SessionsView({ active }: { active: boolean }) {
         getContext={getContext}
         onClose={closePalette}
         onPage={(page) => setPalette({ open: true, page })}
+      />
+      <LaunchFlow
+        open={launch.open}
+        prefill={launch.prefill}
+        sessions={sessions}
+        onClose={() => setLaunch({ open: false })}
+        onFocusSession={focusSession}
       />
     </div>
   );

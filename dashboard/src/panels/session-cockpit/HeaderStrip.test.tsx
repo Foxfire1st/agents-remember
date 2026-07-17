@@ -65,11 +65,45 @@ describe("HeaderStrip (R10)", () => {
     expect(live.getByTestId("header-diagnostics").textContent).toContain("quiet 3s");
   });
 
-  it("provenance badges (R7): requested model/effort at the honest tier + spawn level/source", () => {
-    const { getByTestId } = render(<HeaderStrip session={worker} cockpit={undefined} />);
-    expect(getByTestId("header-provenance-model").textContent).toContain("gpt-5.6-sol · xhigh");
-    expect(getByTestId("header-provenance-model").textContent).toContain("(requested)"); // tier 'pending'
+  it("provenance badges (R7): the pair renders at the tier DERIVED from control state", () => {
+    // A purpose-built row (review finding 7 — not FLEET's worker-l4, whose harness/key pairing
+    // is an L2 fixture quirk): controlState 'ready' on the claude harness, where stream-json
+    // emits no launch-effort echo, so the pair's honest ceiling is 'model-validated'.
+    const readyClaude = fromTerminalSessionInfo(
+      catalogRow({
+        id: "ready-claude",
+        harness: "claude",
+        resolvedModel: "claude-fable-5[1m]",
+        resolvedEffort: "max",
+        controlState: "ready",
+        spawnLevel: "leaf",
+        spawnLevelSource: "default",
+      }),
+    );
+    const { getByTestId } = render(<HeaderStrip session={readyClaude} cockpit={undefined} />);
+    expect(getByTestId("header-provenance-model").textContent).toContain(
+      "claude-fable-5[1m] · max",
+    );
+    expect(getByTestId("header-provenance-model").textContent).toContain("(model-validated)");
+    const badge = getByTestId("header-provenance-model").querySelector("[data-evidence-tier]");
+    expect(badge?.getAttribute("data-evidence-tier")).toBe("model-validated");
     expect(getByTestId("header-provenance-level").textContent).toContain("leaf (default)");
+  });
+
+  it("provenance badges (R7): a STARTING row renders the retained pair as requested/pending", () => {
+    const starting = fromTerminalSessionInfo(
+      catalogRow({
+        id: "starting-1",
+        harness: "claude",
+        resolvedModel: "sonnet",
+        resolvedEffort: "high",
+        controlState: "starting",
+      }),
+    );
+    const { getByTestId } = render(<HeaderStrip session={starting} cockpit={undefined} />);
+    expect(getByTestId("header-provenance-model").textContent).toContain("(requested)");
+    const badge = getByTestId("header-provenance-model").querySelector("[data-evidence-tier]");
+    expect(badge?.getAttribute("data-evidence-tier")).toBe("pending");
   });
 
   it("renders no provenance chips for a hand-opened session — absent, never invented", () => {

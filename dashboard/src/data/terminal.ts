@@ -271,6 +271,8 @@ export interface HarnessInfo {
   id: string;
   name: string;
   detected: boolean;
+  /** Native protocol-adapter status (`protocol_adapter_status`) — absent on older servers. */
+  control?: string;
 }
 
 // The catalog-row wire shape moved to types/terminalCatalog.ts (260715-FEUI-L2 R4: the cockpit
@@ -295,6 +297,11 @@ interface OpenTerminalOptions {
   label?: string;
   lifecycleId?: string;
   leafKey?: string;
+  // 260715-FEUI-L3 R5: the launch pair. COMPLETE pair or neither — a partial pair is refused
+  // synchronously (400 launch-selection-invalid); catalog validity is NOT checked at open time
+  // (a bad pair opens 200/'starting' and fails asynchronously on every native harness).
+  model?: string;
+  effort?: string;
 }
 
 /**
@@ -302,13 +309,21 @@ interface OpenTerminalOptions {
  * `[]` on any failure — the dev bench has no backend, so the Chats strip just shows ＋ Terminal.
  */
 export async function fetchHarnesses(base = ""): Promise<HarnessInfo[]> {
+  return (await fetchHarnessesOrNull(base)) ?? [];
+}
+
+/**
+ * Same read, failure-distinguishing (260715-FEUI-L3): the launch flow must render a fetch
+ * failure loudly rather than an empty (and therefore lying) harness list — `null` = failed.
+ */
+export async function fetchHarnessesOrNull(base = ""): Promise<HarnessInfo[] | null> {
   try {
     const response = await fetch(`${base}/api/harnesses`);
-    if (!response.ok) return [];
+    if (!response.ok) return null;
     const body = (await response.json()) as { harnesses?: HarnessInfo[] };
     return body.harnesses ?? [];
   } catch {
-    return [];
+    return null;
   }
 }
 
@@ -351,6 +366,10 @@ export async function openTerminalSession(
       ...(options.label ? { label: options.label } : {}),
       ...(options.lifecycleId ? { lifecycleId: options.lifecycleId } : {}),
       ...(options.leafKey ? { leafKey: options.leafKey } : {}),
+      // L3: both knobs or neither ride the wire; the launch flow itself uses the classifying
+      // client (data/launchFlow.openHostedSession) — this boolean path stays for legacy callers.
+      ...(options.model ? { model: options.model } : {}),
+      ...(options.effort ? { effort: options.effort } : {}),
     };
     const response = await fetch(`${base}/api/terminal/${encodeURIComponent(sessionId)}`, {
       method: "POST",
