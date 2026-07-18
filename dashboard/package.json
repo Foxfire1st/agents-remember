@@ -14,6 +14,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "e2e": "playwright test",
+    "e2e:production": "playwright test --config playwright.production.config.ts",
     "perf:cockpit": "vitest run src/panels/session-cockpit/SessionRail.test.tsx src/panels/session-cockpit/VirtualizedInspectorList.test.tsx && playwright test --config playwright.perf.config.ts"
   },
   "dependencies": {

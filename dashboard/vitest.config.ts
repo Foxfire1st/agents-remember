@@ -6,6 +6,9 @@ import { defineConfig } from "vitest/config";
 // plugin types. 5a unit tests are logic-only (store / stream / contract), so no React plugin
 // is needed here; rendered-UI checks run under Playwright (e2e/).
 export default defineConfig({
+  define: {
+    __AR_DASHBOARD_BUILD__: JSON.stringify("test-dashboard-build"),
+  },
   resolve: {
     alias: {
       // Under vitest, the package's `node` export condition resolves to an "edge-light" build

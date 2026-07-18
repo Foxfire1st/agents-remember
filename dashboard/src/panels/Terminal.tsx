@@ -4,6 +4,7 @@ import { Terminal as XtermTerminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
 
 import { css } from "../../styled-system/css";
+import { useDashboard } from "../data/store";
 import { connectTerminal, TerminalSocketContext, type TerminalConnection } from "../data/terminal";
 
 // The imperative xterm.js terminal (slice 6e): a render-not-scrape view of the 6d PTY stream.
@@ -124,12 +125,13 @@ export function Terminal({
   hooks?: TerminalStreamHooks;
   /** Fires on every PTY output chunk (freshness `lastOutputAt`; caller throttles). */
   onOutput?: () => void;
-  onSocketState?: (state: "connected" | "dropped") => void;
+  onSocketState?: (state: "connected" | "reconnecting" | "dropped") => void;
   /** The pane's REAL column count after every fit — the ~80-col floor truth (R8). */
   onResizeCols?: (cols: number) => void;
 }) {
   const hostRef = useRef<HTMLDivElement>(null);
   const socketFactory = useContext(TerminalSocketContext);
+  const servingBootIdentity = useDashboard((state) => state.servingBuild?.bootedAt ?? null);
   // Hand the live connection to its owning keep-alive surface. Held in a ref so a changing callback
   // identity never re-runs the effect
   // (which would tear down + reconnect the terminal).
@@ -146,6 +148,8 @@ export function Terminal({
   const keyEventFilterRef = useRef(keyEventFilter);
   keyEventFilterRef.current = keyEventFilter;
   const termRef = useRef<XtermTerminal | null>(null);
+  const connectionRef = useRef<TerminalConnection | null>(null);
+  const observedServingBootRef = useRef<string | null>(null);
   const screenReaderModeRef = useRef(screenReaderMode);
   screenReaderModeRef.current = screenReaderMode;
 
@@ -153,6 +157,22 @@ export function Terminal({
   useEffect(() => {
     if (termRef.current) termRef.current.options.screenReaderMode = screenReaderMode;
   }, [screenReaderMode]);
+
+  // EventSource owns daemon-replacement discovery. Each newly observed non-null serving boot gets
+  // exactly one chance to reattach a dropped socket to the same durable tmux session; there is no
+  // timer, retry loop, xterm remount, or scrollback reset. A changed boot supersedes the old socket;
+  // the first observed identity leaves an already-open initial socket in place.
+  useEffect(() => {
+    if (!servingBootIdentity || observedServingBootRef.current === servingBootIdentity) return;
+    const previousBootIdentity = observedServingBootRef.current;
+    observedServingBootRef.current = servingBootIdentity;
+    connectionRef.current?.reattach(servingBootIdentity, {
+      // A changed process identity proves even an apparently-OPEN socket belongs to the old daemon;
+      // its close callback may simply be queued behind the new state snapshot. The first identity
+      // observation leaves an already-open initial connection alone, but still replaces CONNECTING.
+      supersedeOpen: previousBootIdentity !== null,
+    });
+  }, [servingBootIdentity]);
 
   useEffect(() => {
     const node = hostRef.current;
@@ -224,6 +244,7 @@ export function Terminal({
         onSocketState: (state) => onSocketStateRef.current?.(state),
       },
     );
+    connectionRef.current = conn;
     onConnRef.current?.(conn);
 
     let wheelPixelRemainder = 0;
@@ -283,6 +304,7 @@ export function Terminal({
       alive = false;
       disposed = true;
       cancelAnimationFrame(raf);
+      if (connectionRef.current === conn) connectionRef.current = null;
       onConnRef.current?.(null);
       node.removeEventListener("wheel", handleWheel, { capture: true });
       observer.disconnect();

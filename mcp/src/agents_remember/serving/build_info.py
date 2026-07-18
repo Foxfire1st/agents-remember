@@ -17,6 +17,7 @@ from __future__ import annotations
 import contextlib
 import subprocess
 from dataclasses import dataclass
+from importlib import resources
 from pathlib import Path
 from typing import Any
 
@@ -32,12 +33,15 @@ class ServingBuild:
     version: str
     commit: str | None
     booted_at: str
+    dashboard_build: str | None = None
 
     def payload(self) -> dict[str, Any]:
         """The camelCase wire form carried on the state payload (``None`` commit omitted)."""
         body: dict[str, Any] = {"version": self.version, "bootedAt": self.booted_at}
         if self.commit is not None:
             body["commit"] = self.commit
+        if self.dashboard_build is not None:
+            body["dashboardBuild"] = self.dashboard_build
         return body
 
 
@@ -59,7 +63,24 @@ def _git_short_head(anchor: Path) -> str | None:
     return None
 
 
+def _dashboard_build_fingerprint() -> str | None:
+    """Fingerprint of the shipped browser inputs, or ``None`` for a legacy bundle."""
+    fingerprint = resources.files("agents_remember").joinpath(
+        "package_data", "dashboard.fingerprint"
+    )
+    try:
+        value = fingerprint.read_text(encoding="utf-8").strip()
+    except (OSError, UnicodeError):
+        return None
+    return value or None
+
+
 def resolve_serving_build(*, anchor: Path | None = None) -> ServingBuild:
     """Resolve the stamp once at boot: package version + best-effort commit + boot time."""
     root = anchor if anchor is not None else Path(agents_remember.__file__).resolve().parent
-    return ServingBuild(version=SERVER_VERSION, commit=_git_short_head(root), booted_at=now_iso())
+    return ServingBuild(
+        version=SERVER_VERSION,
+        commit=_git_short_head(root),
+        booted_at=now_iso(),
+        dashboard_build=_dashboard_build_fingerprint(),
+    )

@@ -227,6 +227,20 @@ async function openLaunchFlow(page: import("@playwright/test").Page) {
   await expect(page.getByTestId("launch-flow")).toBeVisible();
 }
 
+for (const width of [400, 480]) {
+  test(`Chats -> + Chat keeps every harness choice in the ${width}px viewport`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 760 });
+    await page.goto(scenarioUrl("sessions-launch-happy"));
+    await page.getByTestId("chats-new-chat").click();
+    for (const id of ["claude", "codex", "pi"]) {
+      const box = await page.getByTestId(`launch-harness-${id}`).boundingBox();
+      expect(box).not.toBeNull();
+      expect(box?.x ?? -1).toBeGreaterThanOrEqual(0);
+      expect((box?.x ?? width) + (box?.width ?? 1)).toBeLessThanOrEqual(width);
+    }
+  });
+}
+
 async function chooseClaudePair(page: import("@playwright/test").Page) {
   await page.getByTestId("launch-harness-claude").click();
   await page.getByTestId("launch-model-claude-fable-5[1m]").click();

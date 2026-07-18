@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import contextlib
 import fcntl
-import importlib
 import os
 import select
 import shutil
@@ -36,8 +35,15 @@ sys.path.insert(0, str(MCP_SRC))
 from agents_remember.serving.terminal import (
     PtyProcess,
     TerminalHost,
+    TerminalSession,
     _build_tmux_command,
     _spawn_pty,
+    _tmux_cancel_copy_mode,
+    _tmux_client_environment,
+    _tmux_create_detached,
+    _tmux_enable_mouse,
+    _tmux_kill_session,
+    _tmux_probe_session,
     _tmux_session_name,
     ensure_terminal_input_ready,
     pane_in_mode,
@@ -46,25 +52,6 @@ from agents_remember.serving.terminal import (
 _HAS_TMUX = shutil.which("tmux") is not None
 _HAS_CAT = shutil.which("cat") is not None
 _HAS_TRUE = shutil.which("true") is not None
-
-
-def _term_supports_clear() -> bool:
-    """Whether tmux can initialize against the current terminal database."""
-    term = os.environ.get("TERM")
-    if not term:
-        return False
-    try:
-        curses = importlib.import_module("curses")
-    except ImportError:
-        return False
-    try:
-        curses.setupterm()
-    except curses.error:
-        return False
-    return curses.tigetstr("clear") is not None
-
-
-_HAS_TMUX_TERMINAL = _HAS_TMUX and _term_supports_clear()
 
 
 class _FakeChild:
@@ -118,13 +105,20 @@ def _read_until(host: TerminalHost, sid: str, marker: bytes, timeout: float = 10
     """Accumulate PTY output until ``marker`` appears or ``timeout`` elapses."""
     session = host.get(sid)
     assert session is not None
+    return _read_until_session(host, session, marker, timeout)
+
+
+def _read_until_session(
+    host: TerminalHost, session: TerminalSession, marker: bytes, timeout: float = 10.0
+) -> bytes:
+    """Accumulate output from one concrete (possibly unregistered) PTY client."""
     fd = session.master_fd
     buf = bytearray()
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline and marker not in buf:
         readable, _, _ = select.select([fd], [], [], 0.2)
         if readable:
-            buf.extend(host.read_nonblocking(sid))
+            buf.extend(host.read_session(session))
     return bytes(buf)
 
 
@@ -137,6 +131,55 @@ def _wait_dead(host: TerminalHost, sid: str, timeout: float = 5.0) -> None:
 
 
 class BuildCommandTests(unittest.TestCase):
+    def test_tmux_client_environment_owns_terminal_identity(self) -> None:
+        child = _tmux_client_environment(
+            {
+                "TMUX": "/tmp/tmux/default,12,3",
+                "TMUX_PANE": "%9",
+                "TERM": "dumb",
+                "AR_KEEP": "required",
+            }
+        )
+        self.assertNotIn("TMUX", child)
+        self.assertNotIn("TMUX_PANE", child)
+        self.assertEqual(child["TERM"], "xterm-256color")
+        self.assertEqual(child["AR_KEEP"], "required")
+
+    def test_every_terminal_host_tmux_client_uses_owned_identity(self) -> None:
+        calls: list[dict[str, object]] = []
+
+        def run(argv: Sequence[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+            calls.append(kwargs)
+            stdout = "0\n" if "display-message" in argv else ""
+            return subprocess.CompletedProcess(argv, 0, stdout=stdout, stderr="")
+
+        contaminated = {
+            "TMUX": "/tmp/tmux/default,12,3",
+            "TMUX_PANE": "%9",
+            "TERM": "dumb",
+            "AR_KEEP": "required",
+        }
+        with (
+            mock.patch.dict(os.environ, contaminated, clear=False),
+            mock.patch("agents_remember.serving.terminal.subprocess.run", side_effect=run),
+        ):
+            self.assertTrue(_tmux_probe_session("ar-worker").exists)
+            _tmux_kill_session("ar-worker")
+            _tmux_create_detached("ar-worker", Path("/work/tree"), ["cat"])
+            _tmux_enable_mouse("ar-worker")
+            _tmux_cancel_copy_mode("ar-worker")
+            self.assertFalse(pane_in_mode("ar-worker"))
+
+        self.assertEqual(len(calls), 6)
+        for call in calls:
+            child = call["env"]
+            self.assertIsInstance(child, dict)
+            assert isinstance(child, dict)
+            self.assertNotIn("TMUX", child)
+            self.assertNotIn("TMUX_PANE", child)
+            self.assertEqual(child["TERM"], "xterm-256color")
+            self.assertEqual(child["AR_KEEP"], "required")
+
     def test_build_tmux_command_wraps_harness(self) -> None:
         argv = _build_tmux_command("ar-lc1", Path("/work/tree"), ["claude", "--resume"])
         self.assertEqual(
@@ -504,8 +547,8 @@ class TerminalInputReadinessTests(unittest.TestCase):
 
 
 @unittest.skipUnless(
-    _HAS_TMUX_TERMINAL,
-    "needs tmux and a TERM entry with clear capability for the end-to-end persistence path",
+    _HAS_TMUX,
+    "needs tmux for the end-to-end persistence path",
 )
 class TerminalHostTmuxIntegrationTests(unittest.TestCase):
     """The full default spawner: a real tmux-wrapped PTY running a marker-printing child."""
@@ -524,18 +567,37 @@ class TerminalHostTmuxIntegrationTests(unittest.TestCase):
                     check=False,
                     capture_output=True,
                     timeout=5,
+                    env=_tmux_client_environment(os.environ),
                 )
 
-    def test_real_tmux_session_renders_child_output(self) -> None:
-        session = self.host.open(
-            "tmux-it",
-            cwd=self.tmp,
-            command=["sh", "-c", "printf AR_READY_MARKER; sleep 2"],
-            lifecycle_id="LC-tmux",
-        )
-        self.tmux_name = session.tmux_name
-        self.assertIn(b"AR_READY_MARKER", _read_until(self.host, "tmux-it", b"AR_READY_MARKER"))
-        self.assertEqual(self.host.for_lifecycle("LC-tmux"), [session])
+    def test_real_tmux_ensure_and_attach_ignore_launcher_identity(self) -> None:
+        contaminated = {
+            "TMUX": "/tmp/tmux-1000/default,295199,20",
+            "TMUX_PANE": "%21",
+            "TERM": "dumb",
+        }
+        with mock.patch.dict(os.environ, contaminated, clear=False):
+            binding = self.host.ensure(
+                "tmux-it",
+                cwd=self.tmp,
+                command=["sh", "-c", "printf AR_READY_MARKER; sleep 10"],
+                lifecycle_id="LC-tmux",
+            )
+            session = self.host.attach(
+                "tmux-it",
+                cwd=self.tmp,
+                command=["sh", "-c", "printf AR_READY_MARKER; sleep 10"],
+                lifecycle_id="LC-tmux",
+                name=binding.tmux_name,
+            )
+        self.tmux_name = binding.tmux_name
+        try:
+            self.assertIn(
+                b"AR_READY_MARKER",
+                _read_until_session(self.host, session, b"AR_READY_MARKER"),
+            )
+        finally:
+            self.host.close_session(session)
 
 
 def fcntl_ioctl_getwinsize(fd: int) -> bytes:

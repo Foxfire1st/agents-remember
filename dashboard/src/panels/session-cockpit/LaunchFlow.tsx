@@ -28,7 +28,8 @@ import {
 } from "../../data/launchFlow";
 import { sessionCockpitStore } from "../../data/sessionCockpitStore";
 import { notifySessionCatalogChanged, type OpenSession } from "../../data/sessions";
-import { fetchHarnessesOrNull, type HarnessInfo } from "../../data/terminal";
+import { useDashboard } from "../../data/store";
+import { useHarnessCatalogRead } from "./useHarnessCatalogRead";
 
 // The LaunchFlow (260715-FEUI-L3 S2/S3, design §7.1): harness → model → effort → open, with
 // every picker populated EXCLUSIVELY from the daemon (GET /api/harnesses + the pre-session
@@ -46,18 +47,19 @@ export interface LaunchPrefill {
 }
 
 const overlay = css({
-  position: "absolute",
+  position: "fixed",
   inset: "0",
   zIndex: "20",
   background: "oklch(0 0 0 / 0.35)",
+  overflow: "hidden",
 });
 const box = css({
-  position: "absolute",
-  top: "6%",
+  position: "fixed",
+  top: "max(0.5rem, 6dvh)",
   left: "50%",
   transform: "translateX(-50%)",
-  width: "min(620px, 94%)",
-  maxHeight: "84%",
+  width: "min(620px, calc(100vw - 1rem))",
+  maxHeight: "calc(100dvh - 1rem)",
   display: "flex",
   flexDirection: "column",
   gap: "0.55rem",
@@ -97,9 +99,6 @@ const optionButton = css({
   _focusVisible: { outlineWidth: "1px", outlineStyle: "solid", outlineColor: "amber", outlineOffset: "1px" },
 });
 const noteLine = css({ fontSize: "0.7rem", color: "muted" });
-// The adapter-status word rides VISIBLY on the harness button (review finding 6 — a hover-only
-// title is invisible to keyboard/touch); the word is the server's own, rendered verbatim.
-const adapterWord = css({ fontSize: "0.62rem", color: "muted", marginLeft: "0.3em" });
 const errorLine = css({ fontSize: "0.72rem", color: "alarm", whiteSpace: "pre-wrap" });
 const smallInput = css({
   font: "inherit",
@@ -174,6 +173,7 @@ export function LaunchFlow({
   onClose,
   onFocusSession,
   mintSessionId = defaultMint,
+  harnessReadTimeoutMs,
 }: {
   open: boolean;
   prefill?: LaunchPrefill;
@@ -185,8 +185,9 @@ export function LaunchFlow({
   onFocusSession: (id: string) => void;
   /** Test seam — the caller-minted session id. */
   mintSessionId?: () => string;
+  /** Test seam for the bounded daemon-read window. */
+  harnessReadTimeoutMs?: number;
 }) {
-  const [harnesses, setHarnesses] = useState<HarnessInfo[] | "failed" | null>(null);
   const [harnessId, setHarnessId] = useState<string | null>(null);
   const [selection, setSelection] = useState<LaunchSelectionState>(EMPTY_SELECTION);
   const [label, setLabel] = useState("");
@@ -195,16 +196,21 @@ export function LaunchFlow({
   const [outcome, setOutcome] = useState<OpenOutcome | null>(null);
   const [unknownId, setUnknownId] = useState<string | null>(null);
   const prefillPairRef = useRef<{ modelKey: string; effort?: string } | null>(null);
+  const servingBootedAt = useDashboard((state) => state.servingBuild?.bootedAt ?? null);
+  const { catalog, retry: retryHarnessCatalog } = useHarnessCatalogRead({
+    open,
+    servingBootedAt,
+    ...(harnessReadTimeoutMs === undefined ? {} : { timeoutMs: harnessReadTimeoutMs }),
+  });
 
   const entry = useCapabilityCatalog((state) =>
     harnessId ? state.perHarness[harnessId] : undefined,
   );
   const snapshot = entry?.envelope?.capabilities;
 
-  // Reset + load the harness list on every open (live data, never a kept snapshot).
+  // Reset the launch form on every open. The catalog hook owns the one live request separately.
   useEffect(() => {
     if (!open) return undefined;
-    setHarnesses(null);
     setHarnessId(prefill?.harness ?? null);
     setSelection(EMPTY_SELECTION);
     setLabel("");
@@ -215,13 +221,7 @@ export function LaunchFlow({
     prefillPairRef.current = prefill?.modelKey
       ? { modelKey: prefill.modelKey, effort: prefill.effort }
       : null;
-    let cancelled = false;
-    void fetchHarnessesOrNull().then((list) => {
-      if (!cancelled) setHarnesses(list ?? "failed");
-    });
-    return () => {
-      cancelled = true;
-    };
+    return undefined;
   }, [open, prefill]);
 
   // Selecting a harness reads its live envelope (single-flighted; a daemon cache hit is cheap).
@@ -259,8 +259,15 @@ export function LaunchFlow({
 
   const selectedModel = snapshot ? modelByKey(snapshot, selection.modelKey) : undefined;
   const efforts = selectedModel ? launchableEfforts(selectedModel) : [];
+  const selectedHarness =
+    catalog.status === "ready"
+      ? catalog.harnesses.find((harness) => harness.id === harnessId)
+      : undefined;
   const readyToLaunch =
-    harnessId !== null && selectionComplete(selection) && !posting && unknownId === null;
+    selectedHarness?.detected === true &&
+    selectionComplete(selection) &&
+    !posting &&
+    unknownId === null;
 
   // An explicit dismiss also ENDS the unknown-outcome watch IMMEDIATELY (delta-verify residual):
   // a stale unknownId surviving dismissal would fire one late focus steal on the next open's
@@ -341,15 +348,13 @@ export function LaunchFlow({
         <span className={heading}>Launch session</span>
 
         <span className={heading}>Harness</span>
-        {harnesses === null ? (
-          <p className={noteLine}>loading harnesses…</p>
-        ) : harnesses === "failed" ? (
-          <p className={errorLine} role="alert" data-testid="launch-harness-error">
-            could not read /api/harnesses — the daemon did not answer
+        {catalog.status === "idle" || catalog.status === "loading" ? (
+          <p className={noteLine} role="status" data-testid="launch-harness-loading">
+            loading harnesses…
           </p>
-        ) : (
+        ) : catalog.status === "ready" ? (
           <div className={optionRow} data-testid="launch-harness-list">
-            {harnesses.map((harness) => (
+            {catalog.harnesses.map((harness) => (
               <button
                 key={harness.id}
                 type="button"
@@ -365,11 +370,52 @@ export function LaunchFlow({
               >
                 {harness.name}
                 {harness.detected ? "" : " — not installed"}
-                {harness.control ? (
-                  <span className={adapterWord}>adapter {harness.control}</span>
-                ) : null}
               </button>
             ))}
+          </div>
+        ) : catalog.status === "empty" || catalog.status === "timeout" ? (
+          <div className={outcomeBox}>
+            <p
+              className={catalog.status === "empty" ? noteLine : errorLine}
+              role={catalog.status === "empty" ? "status" : "alert"}
+              data-testid={
+                catalog.status === "empty"
+                  ? "launch-harness-empty"
+                  : catalog.status === "timeout"
+                    ? "launch-harness-timeout"
+                    : "launch-harness-error"
+              }
+            >
+              {catalog.status === "empty"
+                ? "no harnesses advertised by this daemon"
+                : "harness list timed out — the request belonged to an unavailable serving process"}
+            </p>
+            <div className={optionRow}>
+              <button
+                type="button"
+                className={quietButton}
+                data-testid="launch-harness-retry"
+                onClick={retryHarnessCatalog}
+              >
+                Retry harness list
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className={outcomeBox}>
+            <p className={errorLine} role="alert" data-testid="launch-harness-error">
+              {catalog.kind} error reading /api/harnesses — {catalog.detail}
+            </p>
+            <div className={optionRow}>
+              <button
+                type="button"
+                className={quietButton}
+                data-testid="launch-harness-retry"
+                onClick={retryHarnessCatalog}
+              >
+                Retry harness list
+              </button>
+            </div>
           </div>
         )}
 

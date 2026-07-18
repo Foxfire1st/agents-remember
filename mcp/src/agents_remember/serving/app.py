@@ -97,7 +97,6 @@ from agents_remember.serving.changeset import register_changeset_routes
 from agents_remember.serving.events import stream_raw_events
 from agents_remember.serving.files import register_files_routes
 from agents_remember.serving.harness_capability_catalog import HarnessCapabilityCatalog
-from agents_remember.serving.harness_control_adapter import protocol_adapter_status
 from agents_remember.serving.harness_control_api import (
     register_harness_control_routes,
     resolve_terminal_open_selection,
@@ -896,7 +895,6 @@ def create_app(
                     "id": h.id,
                     "name": h.name,
                     "detected": h.detected,
-                    "control": protocol_adapter_status(h.id),
                 }
                 for h in detect_harnesses(registry=registry)
             ]

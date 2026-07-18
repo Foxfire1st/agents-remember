@@ -874,7 +874,11 @@ export function SessionsView({
         width,
         RAIL_AUTO_COLLAPSE_PX,
       );
-      if (railMove === "collapse") railRef.current?.collapse();
+      // The rail owns the only chat-creation entrance. An empty narrow cockpit must keep it
+      // directly actionable; once a chat exists, the normal responsive collapse policy applies.
+      if (sessions.length === 0) {
+        if (railCollapsed) railRef.current?.expand();
+      } else if (railMove === "collapse") railRef.current?.collapse();
       else if (railMove === "expand") railRef.current?.expand();
       const inspectorMove = autoCollapseTransition(
         previous,
@@ -905,6 +909,8 @@ export function SessionsView({
     expandInspector,
     inspectorIntentOpen,
     measureStage,
+    railCollapsed,
+    sessions.length,
   ]);
 
   return (
@@ -934,6 +940,8 @@ export function SessionsView({
         >
           <aside
             className={cx(pane, "sessions__rail")}
+            style={railCollapsed ? { visibility: "hidden" } : undefined}
+            aria-hidden={railCollapsed}
             data-region="rail"
             data-testid="sessions-rail"
             aria-label="Chat rail"

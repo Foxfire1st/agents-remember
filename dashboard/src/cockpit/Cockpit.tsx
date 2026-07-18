@@ -12,6 +12,7 @@ import {
   startCatalogPollDriver,
   startCatalogReconciler,
 } from "../data/catalogPoll";
+import { clientMatchesServingBuild } from "../data/buildIdentity";
 import { createGatedSeatEventApplier } from "../data/seatEvents";
 import { sessionCockpitStore } from "../data/sessionCockpitStore";
 import { selectQueue } from "../data/selectors";
@@ -112,6 +113,19 @@ const statusRow = css({
   fontSize: "0.78rem",
 });
 const dim = css({ color: "muted" });
+const reloadClient = css({
+  font: "inherit",
+  fontSize: "0.7rem",
+  color: "alarm",
+  background: "transparent",
+  borderWidth: "1px",
+  borderStyle: "solid",
+  borderColor: "alarm",
+  borderRadius: "2px",
+  paddingInline: "0.35rem",
+  cursor: "pointer",
+  _focusVisible: { outline: "1px solid token(colors.amber)", outlineOffset: "1px" },
+});
 const effectsToggle = cva({
   base: {
     font: "inherit",
@@ -608,6 +622,7 @@ function ViewBody({ view, onOpen }: { view: CockpitView; onOpen: (id: string) =>
 function ServingBuildStamp() {
   const build = useDashboard((s) => s.servingBuild);
   if (!build) return null;
+  const clientCurrent = clientMatchesServingBuild(build);
   const booted = new Date(build.bootedAt);
   const bootLabel = Number.isNaN(booted.getTime())
     ? build.bootedAt
@@ -618,13 +633,27 @@ function ServingBuildStamp() {
         minute: "2-digit",
       });
   return (
-    <span
-      className={dim}
-      data-testid="serving-build"
-      title={`Serving build v${build.version}${build.commit ? ` @ ${build.commit}` : ""} · process up since ${build.bootedAt}`}
-    >
-      {build.commit ?? `v${build.version}`} · up {bootLabel}
-    </span>
+    <>
+      <span
+        className={dim}
+        data-testid="serving-build"
+        data-client-build-current={clientCurrent === null ? "unknown" : String(clientCurrent)}
+        title={`Serving build v${build.version}${build.commit ? ` @ ${build.commit}` : ""} · process up since ${build.bootedAt}`}
+      >
+        {build.commit ?? `v${build.version}`} · up {bootLabel}
+      </span>
+      {clientCurrent === false ? (
+        <button
+          type="button"
+          className={reloadClient}
+          data-testid="reload-dashboard-client"
+          title="The running daemon serves a different dashboard build. Reload when your draft and terminal interaction are safe."
+          onClick={() => window.location.reload()}
+        >
+          reload client
+        </button>
+      ) : null}
+    </>
   );
 }
 

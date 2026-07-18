@@ -114,7 +114,13 @@ export function ChatContextBar({
 
   return (
     <div className={bar} data-testid="chats-context-bar" aria-label="Chat launch and routing">
-      <button type="button" className={action} onClick={onLaunchChat} data-testid="chats-new-chat">
+      <button
+        type="button"
+        className={action}
+        onClick={onLaunchChat}
+        data-testid="chats-new-chat"
+        aria-label="New chat — choose Claude, Codex, or Pi"
+      >
         ＋ Chat
       </button>
       <button

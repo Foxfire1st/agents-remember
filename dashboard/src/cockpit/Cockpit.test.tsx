@@ -463,6 +463,36 @@ describe("serving-build stamp (260703-L15 — the July-4 ghost-process lesson)",
     const second = render(<CockpitShell />);
     expect(second.queryByTestId("serving-build")).toBeNull(); // absent stamp: nothing, never faked
   });
+
+  it("distinguishes the executing client bundle and offers an explicit reload on mismatch", () => {
+    const fixture = GALLERY.find((entry) => entry.name === "engine-fleet");
+    if (!fixture) throw new Error("fixture not found: engine-fleet");
+    dashboardStore.getState().applySnapshot({
+      ...fixture.projection,
+      servingBuild: {
+        version: "9.9.9",
+        bootedAt: "2026-07-07T05:00:00Z",
+        dashboardBuild: "different-dashboard-build",
+      },
+    });
+    const stale = render(<CockpitShell />);
+    expect(stale.getByTestId("serving-build").dataset.clientBuildCurrent).toBe("false");
+    expect(stale.getByTestId("reload-dashboard-client")).toBeTruthy();
+    stale.unmount();
+
+    dashboardStore.getState().reset();
+    dashboardStore.getState().applySnapshot({
+      ...fixture.projection,
+      servingBuild: {
+        version: "9.9.9",
+        bootedAt: "2026-07-07T05:01:00Z",
+        dashboardBuild: "test-dashboard-build",
+      },
+    });
+    const current = render(<CockpitShell />);
+    expect(current.getByTestId("serving-build").dataset.clientBuildCurrent).toBe("true");
+    expect(current.queryByTestId("reload-dashboard-client")).toBeNull();
+  });
 });
 
 describe("CockpitShell full-bleed machine-map views (5f S1)", () => {

@@ -120,6 +120,22 @@ TmuxPaneModeProbe = Callable[[str], bool | None]
 """Return whether the target pane is in a tmux mode, or ``None`` when it cannot be queried."""
 
 
+def _tmux_client_environment(parent: Mapping[str, str]) -> dict[str, str]:
+    """Construct the environment for a dashboard-owned tmux client process.
+
+    The dashboard daemon may itself have been launched from inside tmux, but that outer client is
+    not the terminal identity of any child tmux command the dashboard runs. Remove the launcher's
+    tmux identity and declare the terminal grammar the browser PTY implements while retaining
+    unrelated credentials and process settings. This applies equally to the attached PTY client and
+    the administrative clients that must find/configure its server-side session before attachment.
+    """
+    child = dict(parent)
+    child.pop("TMUX", None)
+    child.pop("TMUX_PANE", None)
+    child["TERM"] = "xterm-256color"
+    return child
+
+
 def _tmux_has_session(name: str) -> bool:
     """Whether tmux currently knows ``name``.
 
@@ -140,6 +156,7 @@ def _tmux_probe_session(name: str) -> TmuxProbeResult:
             stderr=subprocess.PIPE,
             text=True,
             timeout=_TERMINATE_TIMEOUT,
+            env=_tmux_client_environment(os.environ),
         )
     except (OSError, subprocess.SubprocessError):
         return TmuxProbeResult(exists=False, evidence="tmux-command-failed")
@@ -170,6 +187,7 @@ def _tmux_kill_session(name: str) -> None:
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             timeout=_TERMINATE_TIMEOUT,
+            env=_tmux_client_environment(os.environ),
         )
 
 
@@ -207,6 +225,7 @@ def _tmux_create_detached(
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
         timeout=_TERMINATE_TIMEOUT,
+        env=_tmux_client_environment(os.environ),
     )
 
 
@@ -228,6 +247,7 @@ def _tmux_enable_mouse(name: str) -> None:
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             timeout=_TERMINATE_TIMEOUT,
+            env=_tmux_client_environment(os.environ),
         )
 
 
@@ -248,6 +268,7 @@ def _tmux_cancel_copy_mode(name: str) -> None:
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             timeout=_TERMINATE_TIMEOUT,
+            env=_tmux_client_environment(os.environ),
         )
 
 
@@ -262,6 +283,7 @@ def pane_in_mode(name: str) -> bool | None:
             stderr=subprocess.DEVNULL,
             timeout=_TERMINATE_TIMEOUT,
             text=True,
+            env=_tmux_client_environment(os.environ),
         )
     except (OSError, subprocess.SubprocessError):
         return None
@@ -404,6 +426,7 @@ def _spawn_pty(argv: Sequence[str], cwd: Path) -> PtyProcess:
             pass_fds=(slave_fd,),
             cwd=str(cwd),
             close_fds=True,
+            env=_tmux_client_environment(os.environ),
         )
     except BaseException:
         os.close(master_fd)

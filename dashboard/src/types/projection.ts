@@ -444,6 +444,8 @@ export interface ServingBuild {
   version: string;
   bootedAt: string;
   commit?: string;
+  /** Fingerprint of the shipped dashboard build inputs; compared with the running JS bundle. */
+  dashboardBuild?: string;
 }
 
 // The supervisor sweep's self-liveness tick (260707-HFX2-L2 R5, serving/supervisor_heartbeat.py):

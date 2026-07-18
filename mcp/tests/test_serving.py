@@ -433,6 +433,7 @@ class AppTests(unittest.TestCase):
         # mount point and the app title are stable across rebuilds; hashed asset names are not.
         self.assertIn('<div id="root">', response.text)
         self.assertIn("Agents Remember", response.text)
+        self.assertEqual(response.headers["cache-control"], "no-cache")
 
     def test_terminal_host_shutdown_survives_dead_landing_refresher(self) -> None:
         failed = threading.Event()
@@ -547,6 +548,7 @@ class BuildInfoTests(unittest.TestCase):
         payload = build.payload()
         self.assertEqual(payload["commit"], build.commit)
         self.assertEqual(payload["bootedAt"], build.booted_at)
+        self.assertEqual(payload["dashboardBuild"], build.dashboard_build)
 
     def test_off_checkout_serves_version_only(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -555,10 +557,20 @@ class BuildInfoTests(unittest.TestCase):
         self.assertNotIn("commit", build.payload())  # never a faked hash
 
     def test_payload_shape_is_camel_case(self) -> None:
-        build = ServingBuild(version="9.9.9", commit="abc1234", booted_at="2026-07-07T05:00:00Z")
+        build = ServingBuild(
+            version="9.9.9",
+            commit="abc1234",
+            booted_at="2026-07-07T05:00:00Z",
+            dashboard_build="dashboard-123",
+        )
         self.assertEqual(
             build.payload(),
-            {"version": "9.9.9", "bootedAt": "2026-07-07T05:00:00Z", "commit": "abc1234"},
+            {
+                "version": "9.9.9",
+                "bootedAt": "2026-07-07T05:00:00Z",
+                "commit": "abc1234",
+                "dashboardBuild": "dashboard-123",
+            },
         )
 
 
@@ -1134,6 +1146,62 @@ class RawEventTests(unittest.TestCase):
         resumed, _ = read_new_events(self.root, decode_cursor(events[0].cursor))
         self.assertEqual([e.data for e in resumed], ['{"a":2}'])
 
+    def test_mid_record_lifecycle_cursor_realigns_to_successor(self) -> None:
+        path = self._append("L1", '{"id":"first"}', '{"id":"second"}')
+        events, offsets = read_new_events(self.root, {"L1": 2})
+        self.assertEqual([json.loads(event.data)["id"] for event in events], ["second"])
+        self.assertEqual(offsets["L1"], path.stat().st_size)
+
+    def test_mid_record_workspace_cursor_realigns_after_base_translation(self) -> None:
+        workspace = self.root / "workspace" / "events.jsonl"
+        workspace.parent.mkdir(parents=True)
+        workspace.write_bytes(b'{"id":"first"}\n{"id":"second"}\n')
+        base = 700
+        (workspace.parent / "events.cursor.json").write_text(
+            json.dumps({"baseOffset": base}) + "\n", encoding="utf-8"
+        )
+        events, offsets = read_new_events(self.root, {"workspace": base + 2})
+        self.assertEqual([json.loads(event.data)["id"] for event in events], ["second"])
+        self.assertEqual(offsets["workspace"], base + workspace.stat().st_size)
+
+    def test_malformed_json_and_invalid_utf8_advance_without_retry(self) -> None:
+        path = self.root / "lifecycles" / "L1" / "events.jsonl"
+        path.parent.mkdir(parents=True)
+        path.write_bytes(b'{"id":"one"}\nnot-json\n\xff\xfe\n{"id":"two"}\n')
+        events, offsets = read_new_events(self.root, {})
+        self.assertEqual([json.loads(event.data)["id"] for event in events], ["one", "two"])
+        self.assertEqual(offsets["L1"], path.stat().st_size)
+        again, same_offsets = read_new_events(self.root, offsets)
+        self.assertEqual(again, [])
+        self.assertEqual(same_offsets, offsets)
+
+    def test_valid_non_object_json_advances_without_emission(self) -> None:
+        path = self._append(
+            "L1",
+            '{"id":"one"}',
+            "null",
+            "[]",
+            "42",
+            "true",
+            '"scalar"',
+            '{"id":"two"}',
+        )
+        events, offsets = read_new_events(self.root, {})
+        self.assertEqual([event.payload["id"] for event in events], ["one", "two"])
+        self.assertEqual(offsets["L1"], path.stat().st_size)
+        again, same_offsets = read_new_events(self.root, offsets)
+        self.assertEqual(again, [])
+        self.assertEqual(same_offsets, offsets)
+
+    def test_cursor_beyond_eof_settles_at_current_eof(self) -> None:
+        path = self._append("L1", '{"id":"one"}')
+        events, offsets = read_new_events(self.root, {"L1": path.stat().st_size + 10_000})
+        self.assertEqual(events, [])
+        self.assertEqual(offsets["L1"], path.stat().st_size)
+        self._append("L1", '{"id":"two"}')
+        more, _ = read_new_events(self.root, offsets)
+        self.assertEqual([json.loads(event.data)["id"] for event in more], ["two"])
+
     def test_partial_trailing_line_waits_for_newline(self) -> None:
         path = self.root / "lifecycles" / "L1" / "events.jsonl"
         path.parent.mkdir(parents=True)
@@ -1386,6 +1454,41 @@ class StreamRawEventsTests(unittest.IsolatedAsyncioTestCase):
         ready = await asyncio.wait_for(gen.__anext__(), timeout=1)
         self.assertEqual(ready.event, "ready")
         self.assertEqual(ready.data, {"ready": True})
+        await gen.aclose()
+
+    async def test_mid_record_cursor_streams_successor_then_ready(self) -> None:
+        log = self.tmp / "logs" / "observer" / "lifecycles" / "L1" / "events.jsonl"
+        log.parent.mkdir(parents=True)
+        log.write_text('{"id":"first"}\n{"id":"second"}\n', encoding="utf-8")
+        gen = stream_raw_events(
+            _config(self.tmp),
+            interval=0.01,
+            last_event_id=encode_cursor({"L1": 2}),
+        )
+        successor = await asyncio.wait_for(gen.__anext__(), timeout=1)
+        self.assertEqual(successor.data, {"id": "second"})
+        ready = await asyncio.wait_for(gen.__anext__(), timeout=1)
+        self.assertEqual(ready.event, "ready")
+        await gen.aclose()
+
+    async def test_stream_skips_non_object_json_then_emits_object_and_ready(self) -> None:
+        log = self.tmp / "logs" / "observer" / "lifecycles" / "L1" / "events.jsonl"
+        log.parent.mkdir(parents=True)
+        log.write_text(
+            'null\n[]\n42\ntrue\n"scalar"\n{"id":"valid"}\n',
+            encoding="utf-8",
+        )
+        gen = stream_raw_events(
+            _config(self.tmp),
+            interval=0.01,
+            last_event_id=encode_cursor({"L1": 0}),
+        )
+        event = await asyncio.wait_for(gen.__anext__(), timeout=1)
+        self.assertEqual(event.event, "event")
+        self.assertEqual(event.data, {"id": "valid"})
+        ready = await asyncio.wait_for(gen.__anext__(), timeout=1)
+        self.assertEqual(ready.event, "ready")
+        self.assertEqual(decode_cursor(ready.id)["L1"], log.stat().st_size)
         await gen.aclose()
 
     async def test_stream_does_not_emit_heartbeats(self) -> None:

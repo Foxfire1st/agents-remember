@@ -13,6 +13,20 @@ from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
+from starlette.responses import Response
+from starlette.types import Scope
+
+
+class DashboardStaticFiles(StaticFiles):
+    """Serve entry HTML as revalidated identity while retaining hashed-asset caching semantics."""
+
+    async def get_response(self, path: str, scope: Scope) -> Response:
+        response = await super().get_response(path, scope)
+        if response.status_code == 200 and response.headers.get("content-type", "").startswith(
+            "text/html"
+        ):
+            response.headers["Cache-Control"] = "no-cache"
+        return response
 
 
 def dashboard_static_dir() -> Path | None:
@@ -32,4 +46,4 @@ def mount_static(app: FastAPI) -> None:
     static_dir = dashboard_static_dir()
     if static_dir is None:
         return
-    app.mount("/", StaticFiles(directory=static_dir, html=True), name="dashboard")
+    app.mount("/", DashboardStaticFiles(directory=static_dir, html=True), name="dashboard")

@@ -1,13 +1,14 @@
 // The LaunchFlow jsdom matrix (260715-FEUI-L3 S2/S3/S6): dynamic-only pickers, miss/refresh
 // cost-naming parity, complete-pair gating with default re-gating, advertised-order rendering,
 // all four open-response paths, and the F9 unknown-outcome catalog reconciliation.
-import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { capabilityCatalogStore, capabilityCostNote } from "../../data/capabilityCatalog";
 import { resetCatalogPollForDev } from "../../data/catalogPoll";
 import { sessionCockpitStore } from "../../data/sessionCockpitStore";
 import { fromTerminalSessionInfo, sessionStore, type OpenSession } from "../../data/sessions";
+import { dashboardStore } from "../../data/store";
 import { capabilityEnvelope } from "../../test/fixtures/capabilityEnvelopes";
 import { catalogRow } from "../../test/fixtures/catalogRows";
 import {
@@ -105,6 +106,7 @@ beforeEach(() => {
     perSession: {},
     pollHealth: { lastBeatAt: null, missedBeats: 0, healthy: true },
   });
+  dashboardStore.getState().reset();
 });
 
 afterEach(() => {
@@ -146,14 +148,15 @@ describe("LaunchFlow — dynamic-only pickers (R1/R4)", () => {
     ]);
   });
 
-  it("an undetected harness is disabled; the adapter status renders VISIBLY (review finding 6)", async () => {
+  it("an undetected harness is disabled; no not-yet-created adapter process is projected", async () => {
     stubFetch(defaultRouter({ status: 200, body: OPENED_STARTING }));
     const { findByTestId } = renderFlow();
     const pi = await findByTestId("launch-harness-pi");
     expect(pi.hasAttribute("disabled")).toBe(true);
-    // R4 "detected + adapter status": the server's control word is visible text, not hover-only.
-    expect(pi.textContent).toContain("adapter starting");
-    expect((await findByTestId("launch-harness-claude")).textContent).toContain(
+    // Even a stale older response carrying the retired field cannot make the chooser claim a
+    // process exists. Real opened catalog rows keep their separate starting -> ready/failed state.
+    expect(pi.textContent).not.toContain("adapter starting");
+    expect((await findByTestId("launch-harness-claude")).textContent).not.toContain(
       "adapter starting",
     );
   });
@@ -191,6 +194,178 @@ describe("LaunchFlow — dynamic-only pickers (R1/R4)", () => {
     );
     fireEvent.click(await findByTestId("launch-cap-retry"));
     await findByTestId("launch-model-list");
+  });
+});
+
+describe("LaunchFlow — owned harness-catalog recovery (L9R R3/R4)", () => {
+  it("first-read failure retries in place and renders all choices without closing", async () => {
+    let reads = 0;
+    stubFetch(async (url) => {
+      if (url !== "/api/harnesses") throw new Error(`unrouted ${url}`);
+      reads += 1;
+      if (reads === 1) throw new Error("daemon restarting");
+      return { status: 200, body: HARNESSES };
+    });
+    const view = renderFlow();
+    expect((await view.findByTestId("launch-harness-error")).textContent).toContain(
+      "network error",
+    );
+    fireEvent.click(view.getByTestId("launch-harness-retry"));
+    expect(await view.findByTestId("launch-harness-claude")).toBeTruthy();
+    expect(view.getByTestId("launch-harness-codex")).toBeTruthy();
+    expect(view.getByTestId("launch-harness-pi")).toBeTruthy();
+    expect(view.onClose).not.toHaveBeenCalled();
+  });
+
+  it("a held read becomes a distinct timeout and then retries successfully", async () => {
+    const held = deferred<{ status: number; body: unknown }>();
+    let reads = 0;
+    let firstSignal: AbortSignal | undefined;
+    stubFetch(async (url, init) => {
+      if (url !== "/api/harnesses") throw new Error(`unrouted ${url}`);
+      reads += 1;
+      if (reads === 1) firstSignal = init?.signal ?? undefined;
+      return reads === 1 ? held.promise : { status: 200, body: HARNESSES };
+    });
+    const view = renderFlow({ harnessReadTimeoutMs: 10 });
+    expect((await view.findByTestId("launch-harness-timeout")).textContent).toContain(
+      "timed out",
+    );
+    expect(firstSignal?.aborted).toBe(true);
+    fireEvent.click(view.getByTestId("launch-harness-retry"));
+    expect(await view.findByTestId("launch-harness-claude")).toBeTruthy();
+    expect(reads).toBe(2);
+  });
+
+  it.each([
+    { body: {} },
+    { body: { harnesses: "not-an-array" } },
+    { body: { harnesses: [{ id: "claude", name: "Claude Code" }] } },
+  ])(
+    "a malformed HTTP 200 is a protocol error, never a blank row ($body)",
+    async ({ body }) => {
+      stubFetch(async () => ({ status: 200, body }));
+      const view = renderFlow();
+      expect((await view.findByTestId("launch-harness-error")).textContent).toContain(
+        "protocol error",
+      );
+      expect(view.queryByTestId("launch-harness-list")).toBeNull();
+      expect(view.getByTestId("launch-harness-retry")).toBeTruthy();
+    },
+  );
+
+  it("an honest empty catalog has explicit zero-state copy and Retry", async () => {
+    stubFetch(async () => ({ status: 200, body: { harnesses: [] } }));
+    const view = renderFlow();
+    expect((await view.findByTestId("launch-harness-empty")).textContent).toContain(
+      "no harnesses advertised",
+    );
+    expect(view.getByTestId("launch-harness-retry")).toBeTruthy();
+    expect(view.queryByTestId("launch-harness-list")).toBeNull();
+  });
+
+  it("one new serving boot identity causes exactly one replacement read", async () => {
+    dashboardStore.setState({
+      servingBuild: { version: "1", bootedAt: "2026-07-18T08:00:00Z" },
+    });
+    const fetchMock = stubFetch(async () => ({ status: 200, body: HARNESSES }));
+    const view = renderFlow();
+    await view.findByTestId("launch-harness-claude");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    act(() => {
+      dashboardStore.setState({
+        servingBuild: { version: "1", bootedAt: "2026-07-18T08:01:00Z" },
+      });
+    });
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    act(() => {
+      dashboardStore.setState({
+        servingBuild: { version: "1", bootedAt: "2026-07-18T08:01:00Z" },
+      });
+      dashboardStore.getState().setConn("signal-lost");
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("the first serving identity observed after an SSE-less open causes one reread", async () => {
+    const fetchMock = stubFetch(async () => ({ status: 200, body: HARNESSES }));
+    const view = renderFlow();
+    await view.findByTestId("launch-harness-claude");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    act(() => {
+      dashboardStore.setState({
+        servingBuild: { version: "1", bootedAt: "2026-07-18T08:01:00Z" },
+      });
+    });
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    act(() => dashboardStore.getState().setConn("signal-lost"));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("a boot replacement aborts the old read and ignores its late completion", async () => {
+    dashboardStore.setState({
+      servingBuild: { version: "1", bootedAt: "2026-07-18T08:00:00Z" },
+    });
+    const first = deferred<{ status: number; body: unknown }>();
+    let reads = 0;
+    let firstSignal: AbortSignal | undefined;
+    stubFetch(async (url, init) => {
+      if (url !== "/api/harnesses") throw new Error(`unrouted ${url}`);
+      reads += 1;
+      if (reads === 1) {
+        firstSignal = init?.signal ?? undefined;
+        return first.promise;
+      }
+      return { status: 200, body: HARNESSES };
+    });
+    const view = renderFlow();
+    await waitFor(() => expect(reads).toBe(1));
+
+    act(() => {
+      dashboardStore.setState({
+        servingBuild: { version: "1", bootedAt: "2026-07-18T08:01:00Z" },
+      });
+    });
+    expect(await view.findByTestId("launch-harness-claude")).toBeTruthy();
+    expect(firstSignal?.aborted).toBe(true);
+    expect(reads).toBe(2);
+
+    // Deliberately resolve the aborted mock: request identity, not mock abort compliance, owns state.
+    first.resolve({ status: 200, body: { harnesses: [] } });
+    await act(async () => Promise.resolve());
+    expect(view.getByTestId("launch-harness-claude")).toBeTruthy();
+    expect(view.queryByTestId("launch-harness-empty")).toBeNull();
+  });
+
+  it("closing the chooser aborts its in-flight catalog read", async () => {
+    const held = deferred<{ status: number; body: unknown }>();
+    let signal: AbortSignal | undefined;
+    stubFetch(async (url, init) => {
+      if (url !== "/api/harnesses") throw new Error(`unrouted ${url}`);
+      signal = init?.signal ?? undefined;
+      return held.promise;
+    });
+    const props = {
+      sessions: [] as OpenSession[],
+      onClose: vi.fn(),
+      onFocusSession: vi.fn(),
+      mintSessionId: () => "launch-1",
+    };
+    const view = render(<LaunchFlow open {...props} />);
+    await waitFor(() => expect(signal).toBeDefined());
+    view.rerender(<LaunchFlow open={false} {...props} />);
+    expect(signal?.aborted).toBe(true);
+  });
+
+  it("SSE loss is independent from harness discovery", async () => {
+    dashboardStore.getState().setConn("signal-lost");
+    stubFetch(async () => ({ status: 200, body: HARNESSES }));
+    const view = renderFlow();
+    expect(await view.findByTestId("launch-harness-claude")).toBeTruthy();
   });
 });
 

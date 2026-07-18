@@ -25,6 +25,9 @@ function fakeConn(): TerminalConnection & { inputs: string[]; outputAt: number }
       this.inputs.push(data);
     },
     sendResize() {},
+    reattach() {
+      return false;
+    },
     whenReady() {
       return Promise.resolve();
     },
