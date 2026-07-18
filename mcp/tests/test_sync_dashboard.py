@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import importlib.util
+import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -9,6 +11,7 @@ from types import ModuleType
 from unittest.mock import patch
 
 SCRIPT_PATH = Path(__file__).resolve().parents[2] / "scripts" / "sync-dashboard.py"
+GIT_ATTRIBUTES_PATH = SCRIPT_PATH.parents[1] / ".gitattributes"
 
 
 def load_sync_dashboard() -> ModuleType:
@@ -208,6 +211,40 @@ class SourceFingerprintTests(unittest.TestCase):
                 self.assertEqual(sync.sync(), 0)
                 self.assertTrue(fingerprint.is_file())
                 self.assertEqual(len(fingerprint.read_text(encoding="utf-8").strip()), 64)
+
+
+class GeneratedDashboardWhitespacePolicyTests(unittest.TestCase):
+    def test_generated_js_allows_literal_whitespace_without_relaxing_authored_source(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            subprocess.run(["git", "init", "--quiet"], cwd=root, check=True)
+            shutil.copy2(GIT_ATTRIBUTES_PATH, root / ".gitattributes")
+
+            generated = (
+                root
+                / "mcp/src/agents_remember/package_data/dashboard/assets/index-generated.js"
+            )
+            generated.parent.mkdir(parents=True)
+            generated.write_bytes(b"const snippet = `if ${}:\n\t\n`;\n")
+
+            authored = root / "dashboard/src/main.tsx"
+            authored.parent.mkdir(parents=True)
+            authored.write_bytes(b"export const app = true;  \n")
+
+            subprocess.run(["git", "add", "."], cwd=root, check=True)
+            result = subprocess.run(
+                ["git", "diff", "--cached", "--check"],
+                cwd=root,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertNotIn(generated.relative_to(root).as_posix(), result.stdout)
+            self.assertIn(
+                "dashboard/src/main.tsx:1: trailing whitespace.", result.stdout
+            )
 
 
 if __name__ == "__main__":

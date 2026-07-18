@@ -1,0 +1,3 @@
+# Generated Vite chunks can contain significant whitespace-only lines inside JavaScript
+# template literals (for example, indentation in CodeMirror completion snippets).
+mcp/src/agents_remember/package_data/dashboard/assets/*.js whitespace=-blank-at-eol
