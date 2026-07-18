@@ -70,7 +70,7 @@ import {
   railDefaultPercent,
   stageBelowPtyFloor,
 } from "../../data/sessionLayout";
-import { createSession, useSessions } from "../../data/sessions";
+import { useSessions } from "../../data/sessions";
 import { useDashboard } from "../../data/store";
 import type { AgentPickupNode, TaskDocNode } from "../../types/projection";
 import { CockpitLiveRegions } from "./CockpitLiveRegions";
@@ -404,16 +404,6 @@ export function SessionsView({
     sessions,
     focusedSessionId,
   ]);
-
-  const launchTerminal = useCallback(async () => {
-    const id = await createSession(
-      "Terminal",
-      "terminal",
-      undefined,
-      selectedLifecycleId,
-    );
-    focusSession(id);
-  }, [focusSession, selectedLifecycleId]);
 
   // Mirror the view-owned layout/palette facts into the cockpit store (design §4.3 skeleton).
   useEffect(() => {
@@ -954,7 +944,7 @@ export function SessionsView({
               taskDocuments={taskDocuments}
               contextMaster={contextMaster}
               onLaunchChat={() => setLaunch({ open: true })}
-              onLaunchTerminal={() => void launchTerminal()}
+              onSessionOpened={focusSession}
             />
             <SessionRail
               onFocusSession={focusSession}

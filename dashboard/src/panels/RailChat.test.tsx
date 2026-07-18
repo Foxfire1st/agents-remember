@@ -117,6 +117,22 @@ class FakeBroadcastChannel {
   }
 }
 
+function openedHarnessResponse(id: string, leafKey?: string): Response {
+  return new Response(
+    JSON.stringify({
+      session: id,
+      label: "Claude Code 1",
+      kind: "harness",
+      harness: "claude",
+      lifecycleId: null,
+      leafKey: leafKey ?? null,
+      status: "running",
+      controlState: "starting",
+    }),
+    { status: 200 },
+  );
+}
+
 beforeEach(() => {
   vi.mocked(waitForSubmissionReady).mockResolvedValue({ ready: true, editable: true });
   vi.mocked(submitSessionText).mockImplementation(async (_sessionId, text) => ({
@@ -176,7 +192,7 @@ describe("RailChat start affordances (L5 fix 2)", () => {
             json: () => Promise.resolve({ harnesses: [{ id: "claude", name: "Claude Code", detected: true }] }),
           });
         }
-        return Promise.resolve({ ok: true }); // the opener POST
+        return Promise.resolve(openedHarnessResponse("chat-id", LEAF_KEY));
       }),
     );
 
@@ -202,7 +218,7 @@ describe("RailChat start affordances (L5 fix 2)", () => {
             json: () => Promise.resolve({ harnesses: [{ id: "claude", name: "Claude Code", detected: true }] }),
           });
         }
-        return Promise.resolve({ ok: true });
+        return Promise.resolve(openedHarnessResponse("chat-id", LEAF_KEY));
       }),
     );
 
@@ -223,6 +239,43 @@ describe("RailChat start affordances (L5 fix 2)", () => {
     expect(packet).toContain("Lifecycle: lc-l5");
     expect(packet).toContain("Code worktree: /worktrees/sidebar-chat-ar/sidebar-chat");
     expect(packet).toContain("- [done] S1 -- Wire the leaf registry");
+  });
+
+  it("surfaces a rejected harness open without a ghost row or context delivery", async () => {
+    vi.stubGlobal("crypto", { randomUUID: () => "rejected-chat" });
+    const fetchMock = vi.fn((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith("/api/harnesses")) {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              harnesses: [{ id: "claude", name: "Claude Code", detected: true }],
+            }),
+            { status: 200 },
+          ),
+        );
+      }
+      return Promise.resolve(
+        new Response(JSON.stringify({ status: "bad-kind", detail: "claude not installed" }), {
+          status: 400,
+        }),
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { findByTestId } = render(
+      <RailChat leafKey={LEAF_KEY} taskDocuments={[leafDoc()]} engineProcesses={[engineProcess()]} />,
+    );
+    fireEvent.click(await findByTestId("rail-start-chat-claude"));
+
+    expect((await findByTestId("rail-session-open-error")).textContent).toContain(
+      "session open harness",
+    );
+    expect(sessionStore.getState().sessions).toEqual([]);
+    expect(submitSessionText).not.toHaveBeenCalled();
+    expect(
+      fetchMock.mock.calls.filter(([input]) => String(input).includes("/api/terminal/rejected-chat")),
+    ).toHaveLength(1);
   });
 });
 
@@ -256,7 +309,7 @@ describe("RailChat create from anywhere (L5)", () => {
             json: () => Promise.resolve({ harnesses: [{ id: "claude", name: "Claude Code", detected: true }] }),
           });
         }
-        return Promise.resolve({ ok: true }); // the opener POST
+        return Promise.resolve(openedHarnessResponse("free-chat"));
       }),
     );
 

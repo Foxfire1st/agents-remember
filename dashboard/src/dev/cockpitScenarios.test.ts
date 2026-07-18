@@ -20,8 +20,15 @@ import {
 } from "../data/submissionLifecycleClient";
 import { startSubmitRecord } from "../data/submitMachine";
 import { catalogRow } from "../test/fixtures/catalogRows";
-import type { TerminalConnection } from "../data/terminal";
-import { COCKPIT_SCENARIOS, resetCockpitScenario } from "./cockpitScenarios";
+import {
+  openTerminalSession,
+  type TerminalConnection,
+} from "../data/terminal";
+import {
+  COCKPIT_SCENARIOS,
+  installCockpitScenarioFetch,
+  resetCockpitScenario,
+} from "./cockpitScenarios";
 
 const fleet = COCKPIT_SCENARIOS.find(
   (scenario) => scenario.kind === "fleet-12",
@@ -96,6 +103,74 @@ afterEach(() => {
 });
 
 describe("cockpit scenario authority boundary", () => {
+  it("models raw and harness opens as explicit accepted HTTP authority", async () => {
+    const restore = installCockpitScenarioFetch(fleet);
+    try {
+      const raw = await openTerminalSession(
+        "bench-raw",
+        "terminal",
+        "",
+        undefined,
+        { label: "Terminal" },
+      );
+      expect(raw).toMatchObject({
+        outcome: "opened",
+        session: {
+          id: "bench-raw",
+          label: "Terminal",
+          kind: "terminal",
+          status: "running",
+        },
+      });
+      if (raw.outcome !== "opened") throw new Error(raw.detail);
+      expect(raw.session.harness).toBeUndefined();
+      expect(raw.session.controlState).toBeUndefined();
+
+      const harness = await openTerminalSession(
+        "bench-harness",
+        "harness",
+        "",
+        "codex",
+        { label: "Codex", model: "gpt-5.6-sol", effort: "xhigh" },
+      );
+      expect(harness).toMatchObject({
+        outcome: "opened",
+        session: {
+          id: "bench-harness",
+          label: "Codex",
+          kind: "harness",
+          harness: "codex",
+          controlState: "starting",
+          resolvedModel: "gpt-5.6-sol",
+          resolvedEffort: "xhigh",
+        },
+      });
+
+      const catalog = await window.fetch("/api/terminal/sessions");
+      const body = (await catalog.json()) as {
+        sessions: Array<Record<string, unknown>>;
+      };
+      expect(body.sessions).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            id: "bench-raw",
+            kind: "terminal",
+          }),
+          expect.objectContaining({
+            id: "bench-harness",
+            kind: "harness",
+            harness: "codex",
+          }),
+        ]),
+      );
+      expect(body.sessions.find((row) => row.id === "bench-raw")).not.toHaveProperty(
+        "harness",
+      );
+    } finally {
+      restore();
+    }
+  });
+
   it("clears every transient Sessions store while preserving only declared user preferences", async () => {
     sessionStore
       .getState()

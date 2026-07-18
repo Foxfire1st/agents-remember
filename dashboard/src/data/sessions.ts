@@ -8,6 +8,7 @@ import {
   sanitizeForInjection,
   submitAndConfirm,
   type TerminalConnection,
+  type TerminalOpenResult,
   type TerminalOpenKind,
   type TerminalSessionInfo,
   type TerminalSessionStatus,
@@ -15,6 +16,8 @@ import {
   type HarnessActivityState,
   type HarnessControlState,
 } from "./terminal";
+
+export { terminalOpenFailureMessage } from "./terminal";
 
 // The open terminal/chat sessions (slice 6e hardening): the session registry as a module-level store
 // — shared, testable client state, the same pattern as the observer projection store (`data/store.ts`)
@@ -592,30 +595,28 @@ export async function deliverToSession(id: string, packageText: string): Promise
   return (await submitAndConfirm(conn)) ? "delivered" : "unconfirmed";
 }
 
-/** Spawn + own a dashboard session (a shell or a detected harness) and register it in the store. */
+export type CreateSessionResult = TerminalOpenResult;
+
+/**
+ * Spawn + own a dashboard session. The server response is the mutation authority: no local row,
+ * active id, focus candidate, or catalog broadcast exists until the exact open identity is accepted.
+ */
 export async function createSession(
   prefix: string,
   kind: "terminal" | "harness" = "terminal",
   harness?: string,
   lifecycleId?: string,
   leafKey?: string,
-): Promise<string> {
+): Promise<CreateSessionResult> {
   const id = crypto.randomUUID();
   const label = nextSessionLabel(prefix, sessionStore.getState().sessions);
-  // Best-effort: the dev bench has no backend, but its mock socket renders the terminal anyway.
-  const persisted = await openTerminalSession(id, kind, "", harness, { label, lifecycleId, leafKey });
-  sessionStore.getState().upsert(
-    {
-      id,
-      label,
-      kind,
-      ...(harness ? { harness } : {}),
-      ...(lifecycleId ? { lifecycleId } : {}),
-      ...(leafKey ? { leafKey } : {}),
-      status: "running",
-    },
-    true,
-  );
-  if (persisted) notifySessionCatalogChanged("create", id);
-  return id;
+  const result = await openTerminalSession(id, kind, "", harness, {
+    label,
+    lifecycleId,
+    leafKey,
+  });
+  if (result.outcome === "failed") return result;
+  sessionStore.getState().upsert(result.session, true);
+  notifySessionCatalogChanged("create", result.session.id);
+  return result;
 }

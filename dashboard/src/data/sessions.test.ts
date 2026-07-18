@@ -73,6 +73,26 @@ class FakeBroadcastChannel {
   }
 }
 
+function openedResponse(
+  overrides: Record<string, unknown> = {},
+): Response {
+  return new Response(
+    JSON.stringify({
+      session: "generated-id",
+      label: "Claude Code 1",
+      kind: "harness",
+      harness: "claude",
+      lifecycleId: null,
+      leafKey: null,
+      seatRole: "chat",
+      status: "running",
+      controlState: "starting",
+      ...overrides,
+    }),
+    { status: 200 },
+  );
+}
+
 // The session registry store (slice 6e hardening) — the state that now survives a cockpit view
 // switch. Reset it between cases since the store is module-level (the whole point).
 beforeEach(() => {
@@ -377,9 +397,12 @@ describe("sessionStore (6e hardening)", () => {
 
   it("passes the generated label and lifecycle to the opener before registering the session", async () => {
     vi.stubGlobal("crypto", { randomUUID: () => "generated-id" });
-    const fetchMock = vi.fn().mockResolvedValue({ ok: true });
+    const fetchMock = vi.fn().mockResolvedValue(openedResponse({ lifecycleId: "LC1" }));
     vi.stubGlobal("fetch", fetchMock);
-    expect(await createSession("Claude Code", "harness", "claude", "LC1")).toBe("generated-id");
+    expect(await createSession("Claude Code", "harness", "claude", "LC1")).toMatchObject({
+      outcome: "opened",
+      session: { id: "generated-id", lifecycleId: "LC1" },
+    });
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/terminal/generated-id",
       expect.objectContaining({
@@ -398,8 +421,88 @@ describe("sessionStore (6e hardening)", () => {
       kind: "harness",
       harness: "claude",
       lifecycleId: "LC1",
+      seatRole: "chat",
       status: "running",
+      controlState: "starting",
     });
+  });
+
+  it.each([
+    {
+      name: "network",
+      failure: "network",
+      fetchResult: () => Promise.reject(new Error("offline")),
+    },
+    {
+      name: "HTTP",
+      failure: "http",
+      fetchResult: () =>
+        Promise.resolve(
+          new Response(JSON.stringify({ status: "leaf-ref-not-found", detail: "missing leaf" }), {
+            status: 400,
+          }),
+        ),
+    },
+    {
+      name: "harness refusal",
+      failure: "harness",
+      fetchResult: () =>
+        Promise.resolve(
+          new Response(JSON.stringify({ status: "bad-kind", detail: "not installed" }), {
+            status: 400,
+          }),
+        ),
+    },
+    {
+      name: "missing response",
+      failure: "missing-response",
+      fetchResult: () => Promise.resolve(new Response("", { status: 200 })),
+    },
+    {
+      name: "malformed response",
+      failure: "protocol",
+      fetchResult: () => Promise.resolve(new Response("not-json", { status: 200 })),
+    },
+  ])("$name cannot materialize, activate, or advertise a ghost row", async ({ failure, fetchResult }) => {
+    vi.stubGlobal("BroadcastChannel", FakeBroadcastChannel);
+    vi.stubGlobal("crypto", { randomUUID: () => "ghost-id" });
+    vi.stubGlobal("fetch", vi.fn(fetchResult));
+
+    const result = await createSession("Claude Code", "harness", "claude");
+
+    expect(result).toMatchObject({ outcome: "failed", failure });
+    expect(sessionStore.getState().sessions).toEqual([]);
+    expect(sessionStore.getState().activeId).toBeNull();
+    expect(FakeBroadcastChannel.messages).toEqual([]);
+  });
+
+  it("a raw response claiming harness authority cannot materialize, activate, or advertise", async () => {
+    vi.stubGlobal("BroadcastChannel", FakeBroadcastChannel);
+    vi.stubGlobal("crypto", { randomUUID: () => "ghost-raw" });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            session: "ghost-raw",
+            label: "Terminal 1",
+            kind: "terminal",
+            harness: "claude",
+            status: "running",
+            controlState: "ready",
+          }),
+          { status: 200 },
+        ),
+      ),
+    );
+
+    expect(await createSession("Terminal", "terminal")).toMatchObject({
+      outcome: "failed",
+      failure: "protocol",
+    });
+    expect(sessionStore.getState().sessions).toEqual([]);
+    expect(sessionStore.getState().activeId).toBeNull();
+    expect(FakeBroadcastChannel.messages).toEqual([]);
   });
 });
 
@@ -433,7 +536,7 @@ describe("session catalog cross-tab sync", () => {
   it("broadcasts create only after the backend opener persists the catalog row", async () => {
     vi.stubGlobal("BroadcastChannel", FakeBroadcastChannel);
     vi.stubGlobal("crypto", { randomUUID: () => "generated-id" });
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true }));
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(openedResponse()));
 
     await createSession("Claude Code", "harness", "claude");
     expect(FakeBroadcastChannel.messages).toEqual([
@@ -446,7 +549,14 @@ describe("session catalog cross-tab sync", () => {
 
     FakeBroadcastChannel.reset();
     sessionStore.setState({ sessions: [], activeId: null, count: 0 });
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false }));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ status: "bad-kind", detail: "not installed" }), {
+          status: 400,
+        }),
+      ),
+    );
     await createSession("Claude Code", "harness", "claude");
     expect(FakeBroadcastChannel.messages).toEqual([]);
   });

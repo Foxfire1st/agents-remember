@@ -41,7 +41,7 @@ describe("canonical Chats duty bar", () => {
         selectedLifecycleId="LC-1"
         taskDocuments={[]}
         onLaunchChat={() => {}}
-        onLaunchTerminal={() => {}}
+        onSessionOpened={() => {}}
       />,
     );
 
@@ -71,7 +71,7 @@ describe("canonical Chats duty bar", () => {
         focused={focused}
         taskDocuments={[leafDoc()]}
         onLaunchChat={() => {}}
-        onLaunchTerminal={() => {}}
+        onSessionOpened={() => {}}
       />,
     );
 
@@ -100,7 +100,7 @@ describe("canonical Chats duty bar", () => {
         focused={focused}
         taskDocuments={[leafDoc()]}
         onLaunchChat={() => {}}
-        onLaunchTerminal={() => {}}
+        onSessionOpened={() => {}}
       />,
     );
 
@@ -109,5 +109,98 @@ describe("canonical Chats duty bar", () => {
 
     expect((await findByRole("alert")).textContent).toContain("leaf already has a terminal seat");
     expect(sessionStore.getState().sessions[0]?.leafKey).toBeUndefined();
+  });
+
+  it("focuses an exact accepted raw session once", async () => {
+    vi.stubGlobal("crypto", { randomUUID: () => "raw-1" });
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          session: "raw-1",
+          label: "Terminal 1",
+          kind: "terminal",
+          lifecycleId: "LC-1",
+          leafKey: null,
+          seatRole: "terminal",
+          status: "running",
+        }),
+        { status: 200 },
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const onSessionOpened = vi.fn();
+    const { getByTestId } = render(
+      <ChatContextBar
+        selectedLifecycleId="LC-1"
+        taskDocuments={[]}
+        onLaunchChat={() => {}}
+        onSessionOpened={onSessionOpened}
+      />,
+    );
+
+    fireEvent.click(getByTestId("chats-new-terminal"));
+
+    await waitFor(() => expect(onSessionOpened).toHaveBeenCalledWith("raw-1"));
+    expect(sessionStore.getState().sessions).toEqual([
+      expect.objectContaining({ id: "raw-1", kind: "terminal", status: "running" }),
+    ]);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("projects a raw open failure without a row or focus callback", async () => {
+    vi.stubGlobal("crypto", { randomUUID: () => "ghost-raw" });
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("offline")));
+    const onSessionOpened = vi.fn();
+    const { getByTestId, findByTestId } = render(
+      <ChatContextBar
+        taskDocuments={[]}
+        onLaunchChat={() => {}}
+        onSessionOpened={onSessionOpened}
+      />,
+    );
+
+    fireEvent.click(getByTestId("chats-new-terminal"));
+
+    expect((await findByTestId("chats-session-open-error")).textContent).toContain(
+      "session open network",
+    );
+    expect(sessionStore.getState().sessions).toEqual([]);
+    expect(onSessionOpened).not.toHaveBeenCalled();
+  });
+
+  it("projects a contradictory raw harness response as protocol failure without focus", async () => {
+    vi.stubGlobal("crypto", { randomUUID: () => "ghost-raw" });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            session: "ghost-raw",
+            label: "Terminal 1",
+            kind: "terminal",
+            harness: "claude",
+            status: "running",
+            controlState: "ready",
+          }),
+          { status: 200 },
+        ),
+      ),
+    );
+    const onSessionOpened = vi.fn();
+    const { getByTestId, findByTestId } = render(
+      <ChatContextBar
+        taskDocuments={[]}
+        onLaunchChat={() => {}}
+        onSessionOpened={onSessionOpened}
+      />,
+    );
+
+    fireEvent.click(getByTestId("chats-new-terminal"));
+
+    expect((await findByTestId("chats-session-open-error")).textContent).toContain(
+      "session open protocol",
+    );
+    expect(sessionStore.getState().sessions).toEqual([]);
+    expect(onSessionOpened).not.toHaveBeenCalled();
   });
 });

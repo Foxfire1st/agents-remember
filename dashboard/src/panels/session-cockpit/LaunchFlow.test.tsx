@@ -40,11 +40,10 @@ function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
 function stubFetch(router: Router) {
   const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
     const { status, body } = await router(url, init);
-    return {
-      ok: status >= 200 && status < 300,
+    return new Response(JSON.stringify(body), {
       status,
-      json: async () => body,
-    } as Response;
+      headers: { "Content-Type": "application/json" },
+    });
   });
   vi.stubGlobal("fetch", fetchMock);
   return fetchMock;

@@ -9,6 +9,7 @@ import {
   sessionRole,
   sessionSeatRole,
   sessionStore,
+  terminalOpenFailureMessage,
   useSessions,
   type OpenSession,
   type SessionRole,
@@ -259,6 +260,7 @@ export function RailChat({
   // A transient note for a refused leaf attach (the server's 409 leaf-taken).
   const [leafAttachError, setLeafAttachError] = useState<string | null>(null);
   const [leafContextNote, setLeafContextNote] = useState<string | null>(null);
+  const [sessionOpenError, setSessionOpenError] = useState<string | null>(null);
 
   // Detection-driven: the server reports which supported harnesses are installed; "start chat" offers
   // one button per detected harness (Claude Code / Codex / Pi.dev). `[]` (no backend) leaves only the
@@ -334,12 +336,35 @@ export function RailChat({
   // Start is NEVER gated on a leaf: pass the viewed leaf (may be undefined → an unattached/free chat).
   const startChat = (harness: HarnessInfo) => {
     void (async () => {
-      const sessionId = await createSession(harness.name, "harness", harness.id, selectedLifecycleId, leafKey);
-      if (leafKey) await deliverLeafContext(sessionId, leafKey);
+      setSessionOpenError(null);
+      const result = await createSession(
+        harness.name,
+        "harness",
+        harness.id,
+        selectedLifecycleId,
+        leafKey,
+      );
+      if (result.outcome === "failed") {
+        setSessionOpenError(terminalOpenFailureMessage(result));
+        return;
+      }
+      if (leafKey) await deliverLeafContext(result.session.id, leafKey);
     })();
   };
   const openTerminal = () => {
-    void createSession("Terminal", "terminal", undefined, selectedLifecycleId, leafKey);
+    void (async () => {
+      setSessionOpenError(null);
+      const result = await createSession(
+        "Terminal",
+        "terminal",
+        undefined,
+        selectedLifecycleId,
+        leafKey,
+      );
+      if (result.outcome === "failed") {
+        setSessionOpenError(terminalOpenFailureMessage(result));
+      }
+    })();
   };
   const terminate = async (id: string) => {
     if (await terminateTerminalSession(id)) {
@@ -412,6 +437,11 @@ export function RailChat({
       {leafContextNote ? (
         <span className={contextNote} data-testid="rail-leaf-context-note" role="status">
           {leafContextNote}
+        </span>
+      ) : null}
+      {sessionOpenError ? (
+        <span className={attachError} data-testid="rail-session-open-error" role="alert">
+          {sessionOpenError}
         </span>
       ) : null}
       <div className={terminalArea}>

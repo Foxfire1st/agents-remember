@@ -325,19 +325,17 @@ export type {
 } from "../types/terminalCatalog";
 import type {
   TerminalCatalogRow,
-  TerminalOpenKind as CatalogOpenKind,
 } from "../types/terminalCatalog";
 
-interface OpenTerminalOptions {
-  label?: string;
-  lifecycleId?: string;
-  leafKey?: string;
-  // 260715-FEUI-L3 R5: the launch pair. COMPLETE pair or neither — a partial pair is refused
-  // synchronously (400 launch-selection-invalid); catalog validity is NOT checked at open time
-  // (a bad pair opens 200/'starting' and fails asynchronously on every native harness).
-  model?: string;
-  effort?: string;
-}
+export {
+  openTerminalSession,
+  terminalOpenFailureMessage,
+  type OpenedTerminalSession,
+  type OpenTerminalOptions,
+  type TerminalOpenFailure,
+  type TerminalOpenFailureKind,
+  type TerminalOpenResult,
+} from "./terminalOpen";
 
 /**
  * Ask the server which supported harnesses are installed (slice 6e-2b `GET /api/harnesses`). Returns
@@ -375,42 +373,6 @@ export async function fetchTerminalSessions(base = ""): Promise<TerminalCatalogR
     return [];
   }
   return sessions;
-}
-
-/**
- * Ask the server to **spawn + own** a session (slice 6e-2a opener): `POST /api/terminal/{id}` →
- * `TerminalHost.open` (the command is server-resolved from `kind` + `harness`, never sent). Returns
- * `true` on success. Best-effort — the dev bench has no backend, so the caller still opens the (mock)
- * socket. For `kind="harness"`, pass the harness id (slice 6e-2b).
- */
-export async function openTerminalSession(
-  sessionId: string,
-  kind: CatalogOpenKind = "terminal",
-  base = "",
-  harness?: string,
-  options: OpenTerminalOptions = {},
-): Promise<boolean> {
-  try {
-    const body = {
-      kind,
-      ...(harness ? { harness } : {}),
-      ...(options.label ? { label: options.label } : {}),
-      ...(options.lifecycleId ? { lifecycleId: options.lifecycleId } : {}),
-      ...(options.leafKey ? { leafKey: options.leafKey } : {}),
-      // L3: both knobs or neither ride the wire; the launch flow itself uses the classifying
-      // client (data/launchFlow.openHostedSession) — this boolean path stays for legacy callers.
-      ...(options.model ? { model: options.model } : {}),
-      ...(options.effort ? { effort: options.effort } : {}),
-    };
-    const response = await fetch(`${base}/api/terminal/${encodeURIComponent(sessionId)}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    return response.ok;
-  } catch {
-    return false;
-  }
 }
 
 export async function terminateTerminalSession(sessionId: string, base = ""): Promise<boolean> {

@@ -3,8 +3,10 @@ import { useMemo, useState } from "react";
 import { css } from "../../../styled-system/css";
 import {
   attachSeatRole,
+  createSession,
   notifySessionCatalogChanged,
   sessionStore,
+  terminalOpenFailureMessage,
   type OpenSession,
 } from "../../data/sessions";
 import { buildTaskTree, leafIdFromKey, leafTitleForKey } from "../../data/taskIdentity";
@@ -63,7 +65,7 @@ export interface ChatContextBarProps {
   taskDocuments: TaskDocNode[];
   contextMaster?: string;
   onLaunchChat: () => void;
-  onLaunchTerminal: () => void;
+  onSessionOpened: (sessionId: string) => void;
 }
 
 /**
@@ -79,9 +81,10 @@ export function ChatContextBar({
   taskDocuments,
   contextMaster,
   onLaunchChat,
-  onLaunchTerminal,
+  onSessionOpened,
 }: ChatContextBarProps) {
   const [leafAttachError, setLeafAttachError] = useState<string | null>(null);
+  const [sessionOpenError, setSessionOpenError] = useState<string | null>(null);
   const leafTree = useMemo(() => buildTaskTree(taskDocuments), [taskDocuments]);
   const pickerContextMaster =
     contextMaster ?? (selectedLeafKey ? selectedLeafKey.split("/").filter(Boolean)[1] : undefined);
@@ -90,6 +93,16 @@ export function ChatContextBar({
   const attachLifecycleLocally = () => {
     if (!focused || !running || focused.lifecycleId || !selectedLifecycleId) return;
     sessionStore.getState().setLifecycle(focused.id, selectedLifecycleId);
+  };
+
+  const launchTerminal = async () => {
+    setSessionOpenError(null);
+    const result = await createSession("Terminal", "terminal", undefined, selectedLifecycleId);
+    if (result.outcome === "failed") {
+      setSessionOpenError(terminalOpenFailureMessage(result));
+      return;
+    }
+    onSessionOpened(result.session.id);
   };
 
   const attachLeaf = async (leafKey: string, seatRole: string) => {
@@ -126,11 +139,16 @@ export function ChatContextBar({
       <button
         type="button"
         className={action}
-        onClick={onLaunchTerminal}
+        onClick={() => void launchTerminal()}
         data-testid="chats-new-terminal"
       >
         ＋ Terminal
       </button>
+      {sessionOpenError ? (
+        <span className={refusal} role="alert" data-testid="chats-session-open-error">
+          {sessionOpenError}
+        </span>
+      ) : null}
       {selectedLifecycleId && focused?.lifecycleId === selectedLifecycleId ? (
         <span className={badge}>task {selectedLifecycleId}</span>
       ) : selectedLifecycleId && focused && running && !focused.lifecycleId ? (

@@ -583,7 +583,20 @@ describe("S5 legacy duty parity", () => {
   it("launches a raw terminal with selected-lifecycle inheritance, then focuses and persists it", async () => {
     const id = "00000000-0000-4000-8000-000000000005";
     vi.spyOn(globalThis.crypto, "randomUUID").mockReturnValue(id);
-    const fetchMock = vi.fn().mockResolvedValue({ ok: true });
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          session: id,
+          label: "Terminal 1",
+          kind: "terminal",
+          lifecycleId: "LC-S5",
+          leafKey: null,
+          seatRole: "terminal",
+          status: "running",
+        }),
+        { status: 200 },
+      ),
+    );
     vi.stubGlobal("fetch", fetchMock);
     const { getByTestId } = render(
       <SessionsView active selectedLifecycleId="LC-S5" />,

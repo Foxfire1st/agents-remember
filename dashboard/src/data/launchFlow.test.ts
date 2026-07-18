@@ -198,10 +198,9 @@ describe("classifyOpenResponse", () => {
 
 describe("openHostedSession", () => {
   it("POSTs the complete pair and classifies the answer", async () => {
-    const fetchMock = vi.fn().mockResolvedValue({
-      status: 200,
-      json: async () => OPENED_STARTING,
-    } as Response);
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify(OPENED_STARTING), { status: 200 }),
+    );
     vi.stubGlobal("fetch", fetchMock);
     const outcome = await openHostedSession("launch-1", {
       harness: "claude",
@@ -221,10 +220,9 @@ describe("openHostedSession", () => {
   });
 
   it("a vendor-defaults launch sends NEITHER knob", async () => {
-    const fetchMock = vi.fn().mockResolvedValue({
-      status: 200,
-      json: async () => OPENED_VENDOR_DEFAULTS,
-    } as Response);
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify(OPENED_VENDOR_DEFAULTS), { status: 200 }),
+    );
     vi.stubGlobal("fetch", fetchMock);
     await openHostedSession("launch-defaults-1", {
       harness: "claude",

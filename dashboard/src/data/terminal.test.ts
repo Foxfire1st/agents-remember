@@ -341,14 +341,35 @@ describe("connectTerminal", () => {
 });
 
 describe("openTerminalSession", () => {
-  it("POSTs the kind and catalog metadata to the session route and returns true on ok", async () => {
-    const fetchMock = vi.fn().mockResolvedValue({ ok: true });
+  it("POSTs raw metadata and accepts the exact server-owned row", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          session: "t 1",
+          label: "Terminal 1",
+          kind: "terminal",
+          lifecycleId: "LC1",
+          leafKey: null,
+          status: "running",
+        }),
+        { status: 200 },
+      ),
+    );
     vi.stubGlobal("fetch", fetchMock);
-    const ok = await openTerminalSession("t 1", "terminal", "", undefined, {
+    const result = await openTerminalSession("t 1", "terminal", "", undefined, {
       label: "Terminal 1",
       lifecycleId: "LC1",
     });
-    expect(ok).toBe(true);
+    expect(result).toMatchObject({
+      outcome: "opened",
+      session: {
+        id: "t 1",
+        label: "Terminal 1",
+        kind: "terminal",
+        lifecycleId: "LC1",
+        status: "running",
+      },
+    });
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/terminal/t%201",
       expect.objectContaining({
@@ -356,27 +377,157 @@ describe("openTerminalSession", () => {
         body: JSON.stringify({ kind: "terminal", label: "Terminal 1", lifecycleId: "LC1" }),
       }),
     );
-    vi.unstubAllGlobals();
   });
 
-  it("returns false on a non-ok response or a network error", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false }));
-    expect(await openTerminalSession("t1")).toBe(false);
+  it("classifies a network failure without inventing an HTTP response", async () => {
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("offline")));
-    expect(await openTerminalSession("t1")).toBe(false);
-    vi.unstubAllGlobals();
+    expect(await openTerminalSession("t1")).toMatchObject({
+      outcome: "failed",
+      failure: "network",
+      httpStatus: null,
+    });
   });
 
-  it("includes the harness id in the body for kind=harness", async () => {
-    const fetchMock = vi.fn().mockResolvedValue({ ok: true });
+  it("classifies non-OK HTTP and harness refusals separately", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ status: "leaf-ref-not-found", detail: "missing leaf" }), {
+          status: 400,
+        }),
+      ),
+    );
+    expect(await openTerminalSession("t1")).toMatchObject({
+      outcome: "failed",
+      failure: "http",
+      httpStatus: 400,
+      responseStatus: "leaf-ref-not-found",
+    });
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ status: "bad-kind", detail: "harness not installed" }), {
+          status: 400,
+        }),
+      ),
+    );
+    expect(await openTerminalSession("h1", "harness", "", "claude")).toMatchObject({
+      outcome: "failed",
+      failure: "harness",
+      httpStatus: 400,
+      responseStatus: "bad-kind",
+    });
+  });
+
+  it("classifies empty, malformed, and identity-mismatched success responses", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("", { status: 200 })));
+    expect(await openTerminalSession("t1")).toMatchObject({
+      outcome: "failed",
+      failure: "missing-response",
+    });
+
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("not-json", { status: 200 })));
+    expect(await openTerminalSession("t1")).toMatchObject({
+      outcome: "failed",
+      failure: "protocol",
+    });
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            session: "another-id",
+            label: "Terminal 1",
+            kind: "terminal",
+            status: "running",
+          }),
+          { status: 200 },
+        ),
+      ),
+    );
+    expect(await openTerminalSession("t1")).toMatchObject({
+      outcome: "failed",
+      failure: "protocol",
+    });
+  });
+
+  it.each([
+    ["a harness identity", { harness: "claude" }],
+    ["an empty harness identity", { harness: "" }],
+    ["a harness control state", { harness: null, controlState: "ready" }],
+  ])("rejects a raw response carrying %s", async (_name, contradiction) => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            session: "raw-1",
+            label: "Terminal 1",
+            kind: "terminal",
+            status: "running",
+            ...contradiction,
+          }),
+          { status: 200 },
+        ),
+      ),
+    );
+
+    expect(await openTerminalSession("raw-1", "terminal")).toMatchObject({
+      outcome: "failed",
+      failure: "protocol",
+    });
+  });
+
+  it("accepts an explicit null harness and control state for a raw response", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            session: "raw-1",
+            label: "Terminal 1",
+            kind: "terminal",
+            harness: null,
+            status: "running",
+            controlState: null,
+          }),
+          { status: 200 },
+        ),
+      ),
+    );
+
+    expect(await openTerminalSession("raw-1", "terminal")).toMatchObject({
+      outcome: "opened",
+      session: { id: "raw-1", kind: "terminal" },
+    });
+  });
+
+  it("includes the harness id and accepts only the matching server harness identity", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          session: "s1",
+          label: "Claude Code 1",
+          kind: "harness",
+          harness: "claude",
+          status: "running",
+          controlState: "starting",
+        }),
+        { status: 200 },
+      ),
+    );
     vi.stubGlobal("fetch", fetchMock);
-    const ok = await openTerminalSession("s1", "harness", "", "claude");
-    expect(ok).toBe(true);
+    const result = await openTerminalSession("s1", "harness", "", "claude");
+    expect(result).toMatchObject({
+      outcome: "opened",
+      session: { id: "s1", kind: "harness", harness: "claude", controlState: "starting" },
+    });
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/terminal/s1",
       expect.objectContaining({ body: JSON.stringify({ kind: "harness", harness: "claude" }) }),
     );
-    vi.unstubAllGlobals();
   });
 });
 

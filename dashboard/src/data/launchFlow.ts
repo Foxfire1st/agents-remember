@@ -4,6 +4,7 @@ import type {
   ModelCapabilityWire,
 } from "../types/harnessCapabilities";
 import type { HarnessControlState, TerminalOpenKind } from "../types/terminalCatalog";
+import { openTerminalSession } from "./terminal";
 
 // The launch-flow state machines (260715-FEUI-L3 R4/R5), pure so vitest tables can be
 // exhaustive. LAUNCH RULES encoded here:
@@ -194,29 +195,32 @@ export async function openHostedSession(
   request: OpenHostedSessionRequest,
   base = "",
 ): Promise<OpenOutcome> {
-  const body = {
-    kind: "harness" as const,
-    harness: request.harness,
-    ...launchSelectionBody(request.selection),
+  const selection = launchSelectionBody(request.selection);
+  const result = await openTerminalSession(sessionId, "harness", base, request.harness, {
+    ...selection,
     ...(request.label ? { label: request.label } : {}),
     ...(request.leafKey ? { leafKey: request.leafKey } : {}),
     ...(request.lifecycleId ? { lifecycleId: request.lifecycleId } : {}),
-  };
-  let response: Response;
-  try {
-    response = await fetch(`${base}/api/terminal/${encodeURIComponent(sessionId)}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-  } catch {
-    return classifyOpenResponse(null, undefined);
+  });
+  if (result.outcome === "opened") {
+    const session = result.session;
+    return {
+      path: "opened",
+      session: session.id,
+      label: session.label,
+      kind: session.kind,
+      harness: session.harness ?? null,
+      leafKey: session.leafKey ?? null,
+      controlState: session.controlState ?? null,
+      resolvedModel: session.resolvedModel ?? null,
+      resolvedEffort: session.resolvedEffort ?? null,
+    };
   }
-  let parsed: unknown;
-  try {
-    parsed = await response.json();
-  } catch {
-    parsed = undefined;
+  if (
+    (result.failure === "http" || result.failure === "harness") &&
+    result.httpStatus !== null
+  ) {
+    return classifyOpenResponse(result.httpStatus, result.responseBody);
   }
-  return classifyOpenResponse(response.status, parsed);
+  return { path: "outcome-unknown", detail: result.detail };
 }

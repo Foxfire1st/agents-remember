@@ -15,6 +15,7 @@ import {
   createSession,
   findSessionForLeaf,
   sessionStore,
+  terminalOpenFailureMessage,
   useSessions,
 } from "../data/sessions";
 import {
@@ -448,7 +449,7 @@ export function HighlightComposer({
         if (selected.kind === "session") {
           id = selected.id;
         } else {
-          id = selectedLifecycleId
+          const result = selectedLifecycleId
             ? await createSession(
                 selected.prefix,
                 "harness",
@@ -460,6 +461,14 @@ export function HighlightComposer({
                 "harness",
                 selected.harnessId,
               );
+          if (result.outcome === "failed") {
+            setStatus({
+              phase: "error",
+              detail: terminalOpenFailureMessage(result),
+            });
+            return;
+          }
+          id = result.session.id;
           const gate = await waitForSubmissionReady(id);
           if (!gate.ready) {
             setStatus({

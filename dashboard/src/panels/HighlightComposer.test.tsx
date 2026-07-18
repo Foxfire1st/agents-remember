@@ -82,7 +82,18 @@ beforeEach(() => {
     selection: SELECTION,
     clear,
   });
-  vi.mocked(createSession).mockResolvedValue("created-id");
+  vi.mocked(createSession).mockResolvedValue({
+    outcome: "opened",
+    httpStatus: 200,
+    responseBody: {},
+    session: {
+      id: "created-id",
+      label: "Claude Code 1",
+      kind: "harness",
+      harness: "claude",
+      status: "running",
+    },
+  });
   vi.mocked(fetchHarnesses).mockResolvedValue(HARNESSES);
   vi.mocked(waitForSubmissionReady).mockResolvedValue({
     ready: true,
@@ -181,6 +192,25 @@ describe("HighlightComposer reliable-submit disposition (FEUI-L5)", () => {
         "LC1",
       ),
     );
+  });
+
+  it("surfaces a failed create without waiting for readiness or submitting", async () => {
+    vi.mocked(createSession).mockResolvedValueOnce({
+      outcome: "failed",
+      failure: "network",
+      detail: "network failure — the open POST did not answer",
+      httpStatus: null,
+      responseStatus: null,
+    });
+    const { findByTestId, getByRole } = render(<HighlightComposer />);
+    fireEvent.click(await findByTestId("highlight-add-to-chat"));
+    fireEvent.keyDown(getByRole("textbox"), { key: "Enter", ctrlKey: true });
+
+    expect((await findByTestId("highlight-status")).textContent).toContain(
+      "session open network",
+    );
+    expect(waitForSubmissionReady).not.toHaveBeenCalled();
+    expect(submitSessionText).not.toHaveBeenCalled();
   });
 
   it("uses the explicitly selected detected harness", async () => {

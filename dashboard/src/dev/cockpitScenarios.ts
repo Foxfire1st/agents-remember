@@ -32,6 +32,7 @@ import {
   L5_READY_SESSION,
 } from "../test/fixtures/submitScenarios";
 import type { TerminalCatalogRow } from "../types/terminalCatalog";
+import type { TerminalOpenSuccessBody } from "../types/terminalOpen";
 
 // Dedicated Chats-cockpit scenarios. They are catalogued by scenarios.ts, but their server
 // facts stay here so the already-large Engine Room timeline file does not become a second API
@@ -554,15 +555,37 @@ export function installCockpitScenarioFetch(
       const body = init?.body
         ? (JSON.parse(String(init.body)) as Record<string, unknown>)
         : {};
-      const opened = {
+      const kind = body.kind === "terminal" ? "terminal" : "harness";
+      const harness =
+        kind === "harness" && typeof body.harness === "string"
+          ? body.harness
+          : null;
+      const opened: TerminalOpenSuccessBody = {
         ...OPENED_STARTING,
         session: id,
         label: typeof body.label === "string" ? body.label : "claude",
-        harness: typeof body.harness === "string" ? body.harness : "claude",
-        resolvedModel: typeof body.model === "string" ? body.model : null,
-        resolvedEffort: typeof body.effort === "string" ? body.effort : null,
+        kind,
+        harness,
+        lifecycleId:
+          typeof body.lifecycleId === "string" ? body.lifecycleId : null,
+        leafKey: typeof body.leafKey === "string" ? body.leafKey : null,
+        seatRole: kind === "harness" ? "chat" : null,
+        controlState: kind === "harness" ? "starting" : null,
+        resolvedModel:
+          kind === "harness" && typeof body.model === "string"
+            ? body.model
+            : null,
+        resolvedEffort:
+          kind === "harness" && typeof body.effort === "string"
+            ? body.effort
+            : null,
         tmuxName: `ar-${id}`,
-        controlEndpoint: `/workspace/.agents-remember-control/${id}.sock`,
+        controlEndpoint:
+          kind === "harness"
+            ? `/workspace/.agents-remember-control/${id}.sock`
+            : null,
+        controlProtocol:
+          kind === "harness" ? OPENED_STARTING.controlProtocol : null,
       };
       probe.launchedSessionIds.push(id);
       rows = [
@@ -570,8 +593,16 @@ export function installCockpitScenarioFetch(
         catalogRow({
           id,
           label: String(opened.label),
-          harness: String(opened.harness),
-          controlState: "starting",
+          kind: opened.kind,
+          harness: opened.harness ?? undefined,
+          lifecycleId: opened.lifecycleId ?? undefined,
+          leafKey: opened.leafKey ?? undefined,
+          seatRole: opened.seatRole ?? undefined,
+          command:
+            opened.kind === "harness"
+              ? [opened.harness ?? "claude"]
+              : ["/bin/sh"],
+          controlState: opened.controlState ?? undefined,
           resolvedModel: opened.resolvedModel ?? undefined,
           resolvedEffort: opened.resolvedEffort ?? undefined,
         }),
