@@ -47,7 +47,11 @@ const dialog = css({
   boxShadow: "0 6px 24px rgba(0,0,0,0.5)",
   outline: "none",
 });
-const dialogPill = css({ padding: "0.2rem", borderRadius: "999px", borderColor: "grid" });
+const dialogPill = css({
+  padding: "0.2rem",
+  borderRadius: "999px",
+  borderColor: "grid",
+});
 const dialogComposer = css({ width: "min(27rem, 92vw)" });
 const addButton = css({
   display: "inline-flex",
@@ -65,7 +69,10 @@ const addButton = css({
   cursor: "pointer",
   _hover: { color: "amber" },
   _active: { transform: "scale(0.97)" },
-  _focusVisible: { outline: "1px solid token(colors.amber)", outlineOffset: "1px" },
+  _focusVisible: {
+    outline: "1px solid token(colors.amber)",
+    outlineOffset: "1px",
+  },
   _disabled: { opacity: 0.55, cursor: "default", transform: "none" },
 });
 const chatIcon = css({ flexShrink: 0, display: "block" });
@@ -85,8 +92,18 @@ const preview = css({
   borderLeftStyle: "solid",
   borderLeftColor: "amber",
 });
-const targetRow = css({ display: "flex", alignItems: "baseline", gap: "0.4rem", flexWrap: "wrap" });
-const targetLabel = css({ fontSize: "0.68rem", letterSpacing: "0.04em", color: "muted", flexShrink: 0 });
+const targetRow = css({
+  display: "flex",
+  alignItems: "baseline",
+  gap: "0.4rem",
+  flexWrap: "wrap",
+});
+const targetLabel = css({
+  fontSize: "0.68rem",
+  letterSpacing: "0.04em",
+  color: "muted",
+  flexShrink: 0,
+});
 const toggleGroup = css({ display: "flex", gap: "0.25rem", flexWrap: "wrap" });
 const toggle = css({
   font: "inherit",
@@ -101,7 +118,10 @@ const toggle = css({
   background: "transparent",
   cursor: "pointer",
   _selected: { borderColor: "amber", color: "amber" },
-  _focusVisible: { outline: "1px solid token(colors.amber)", outlineOffset: "1px" },
+  _focusVisible: {
+    outline: "1px solid token(colors.amber)",
+    outlineOffset: "1px",
+  },
 });
 const field = css({ display: "flex" });
 const area = css({
@@ -120,7 +140,10 @@ const area = css({
   borderStyle: "solid",
   borderColor: "grid",
   borderRadius: "2px",
-  _focusVisible: { outline: "1px solid token(colors.amber)", outlineOffset: "1px" },
+  _focusVisible: {
+    outline: "1px solid token(colors.amber)",
+    outlineOffset: "1px",
+  },
 });
 const sendButton = css({
   font: "inherit",
@@ -138,11 +161,24 @@ const sendButton = css({
   cursor: "pointer",
   _hover: { background: "rgba(232, 193, 112, 0.1)" },
   _active: { transform: "scale(0.97)" },
-  _focusVisible: { outline: "1px solid token(colors.amber)", outlineOffset: "1px" },
+  _focusVisible: {
+    outline: "1px solid token(colors.amber)",
+    outlineOffset: "1px",
+  },
   _disabled: { opacity: 0.6, cursor: "default", transform: "none" },
 });
-const statusNote = css({ fontSize: "0.68rem", color: "amber", alignSelf: "flex-end", overflowWrap: "anywhere" });
-const statusActions = css({ display: "flex", justifyContent: "flex-end", gap: "0.3rem", flexWrap: "wrap" });
+const statusNote = css({
+  fontSize: "0.68rem",
+  color: "amber",
+  alignSelf: "flex-end",
+  overflowWrap: "anywhere",
+});
+const statusActions = css({
+  display: "flex",
+  justifyContent: "flex-end",
+  gap: "0.3rem",
+  flexWrap: "wrap",
+});
 const secondaryButton = css({
   font: "inherit",
   fontSize: "0.66rem",
@@ -160,7 +196,13 @@ const scopeNote = css({ fontSize: "0.66rem", color: "muted" });
 
 function ChatIcon() {
   return (
-    <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true" className={chatIcon}>
+    <svg
+      viewBox="0 0 16 16"
+      width="13"
+      height="13"
+      aria-hidden="true"
+      className={chatIcon}
+    >
       <path
         d="M2 3.2h12v7.2H6.4L3.6 13V10.4H2z"
         fill="none"
@@ -174,7 +216,13 @@ function ChatIcon() {
 
 type Target =
   | { key: string; kind: "session"; id: string; label: string }
-  | { key: string; kind: "create"; harnessId: string; prefix: string; label: string };
+  | {
+      key: string;
+      kind: "create";
+      harnessId: string;
+      prefix: string;
+      label: string;
+    };
 
 type HighlightStatus =
   | { phase: "sending"; detail: string }
@@ -201,7 +249,7 @@ export function HighlightComposer({
   selectedLifecycleId?: string;
   viewedLeafKey?: string;
   leafChatActive?: boolean;
-  onSent?: () => void;
+  onSent?: (sessionId: string) => void;
 }) {
   const { selection, clear } = useSelectionCapture();
   const sessions = useSessions((state) => state.sessions);
@@ -250,11 +298,15 @@ export function HighlightComposer({
 
   if (!selection) return null;
 
-  const routedSessions = (selectedLifecycleId
-    ? sessions.filter((session) => session.lifecycleId === selectedLifecycleId)
-    : sessions
+  const routedSessions = (
+    selectedLifecycleId
+      ? sessions.filter(
+          (session) => session.lifecycleId === selectedLifecycleId,
+        )
+      : sessions
   ).filter(
-    (session) => session.kind === "harness" && (session.status ?? "running") === "running",
+    (session) =>
+      session.kind === "harness" && (session.status ?? "running") === "running",
   );
   const targets: Target[] = [
     ...routedSessions.map(
@@ -278,11 +330,15 @@ export function HighlightComposer({
       ),
   ];
   const defaultKey =
-    (activeId && routedSessions.some((session) => session.id === activeId) && `s:${activeId}`) ||
+    (activeId &&
+      routedSessions.some((session) => session.id === activeId) &&
+      `s:${activeId}`) ||
     (routedSessions[0] && `s:${routedSessions[0].id}`) ||
     targets.find((target) => target.kind === "create")?.key ||
     null;
-  const selectedKey = targets.find((target) => target.key === targetKey) ? targetKey : defaultKey;
+  const selectedKey = targets.find((target) => target.key === targetKey)
+    ? targetKey
+    : defaultKey;
   const selected = targets.find((target) => target.key === selectedKey) ?? null;
 
   const dismiss = () => {
@@ -291,18 +347,28 @@ export function HighlightComposer({
   };
 
   const finish = () => {
+    const sessionId = deliveryRef.current?.id;
     deliveryRef.current = null;
     lastRecordRef.current = null;
     sendingRef.current = false;
     dismiss();
-    onSent?.();
+    if (sessionId) {
+      // Route ownership moves only at the accepted/queued commit point. Selecting an existing
+      // target is provisional; rejected, blocked, route-error, and unresolved endgame attempts
+      // must leave the operator's current active chat untouched.
+      sessionStore.getState().setActive(sessionId);
+      onSent?.(sessionId);
+    }
   };
 
   const showRecord = (record: SubmitRecord, notice?: string): boolean => {
     lastRecordRef.current = record;
     if (successful(record)) {
       if (notice) {
-        setStatus({ phase: "error", detail: `${notice} · the original message was accepted` });
+        setStatus({
+          phase: "error",
+          detail: `${notice} · the original message was accepted`,
+        });
         return true;
       }
       finish();
@@ -330,7 +396,10 @@ export function HighlightComposer({
     if (prior?.phase === "route-error" && prior.requestId) {
       const retried = await retryRouteFailure(id, prior.requestId, payload);
       if (retried.record) return showRecord(retried.record, retried.notice);
-      setStatus({ phase: "error", detail: "the same-id retry is no longer available" });
+      setStatus({
+        phase: "error",
+        detail: "the same-id retry is no longer available",
+      });
       return false;
     }
     const outcome = await submitSessionText(id, payload, {
@@ -353,14 +422,20 @@ export function HighlightComposer({
     sendingRef.current = true;
     deliveryRef.current = { id: targetId };
     setStatus({ phase: "sending", detail: "Sending…" });
-    void submitTo(targetId, buildContextPackage(selection.text)).then((sent) => {
-      sendingRef.current = false;
-      if (!sent) setMode("composer");
-    });
+    void submitTo(targetId, buildContextPackage(selection.text)).then(
+      (sent) => {
+        sendingRef.current = false;
+        if (!sent) setMode("composer");
+      },
+    );
   };
 
   const send = async () => {
-    if ((!selected && !deliveryRef.current) || sendingRef.current || status?.phase === "endgame") {
+    if (
+      (!selected && !deliveryRef.current) ||
+      sendingRef.current ||
+      status?.phase === "endgame"
+    ) {
       return;
     }
     sendingRef.current = true;
@@ -371,7 +446,6 @@ export function HighlightComposer({
         let id: string;
         if (!selected) return;
         if (selected.kind === "session") {
-          sessionStore.getState().setActive(selected.id);
           id = selected.id;
         } else {
           id = selectedLifecycleId
@@ -381,10 +455,17 @@ export function HighlightComposer({
                 selected.harnessId,
                 selectedLifecycleId,
               )
-            : await createSession(selected.prefix, "harness", selected.harnessId);
+            : await createSession(
+                selected.prefix,
+                "harness",
+                selected.harnessId,
+              );
           const gate = await waitForSubmissionReady(id);
           if (!gate.ready) {
-            setStatus({ phase: "error", detail: gate.reason ?? "native control did not become ready" });
+            setStatus({
+              phase: "error",
+              detail: gate.reason ?? "native control did not become ready",
+            });
             deliveryRef.current = { id };
             return;
           }
@@ -401,13 +482,18 @@ export function HighlightComposer({
   const keepWaiting = async () => {
     const record = lastRecordRef.current;
     const context = deliveryRef.current;
-    if (!record || record.phase !== "endgame" || !context || sendingRef.current) return;
+    if (!record || record.phase !== "endgame" || !context || sendingRef.current)
+      return;
     sendingRef.current = true;
     setStatus({ phase: "sending", detail: "Reconciling the same requestId…" });
     try {
       const final = await keepWaitingForSubmit(context.id, record.requestId);
       if (final) showRecord(final);
-      else setStatus({ phase: "error", detail: "this request is no longer waiting" });
+      else
+        setStatus({
+          phase: "error",
+          detail: "this request is no longer waiting",
+        });
     } finally {
       sendingRef.current = false;
     }
@@ -448,7 +534,9 @@ export function HighlightComposer({
               className={addButton}
               isDisabled={status?.phase === "sending"}
               onPress={() =>
-                directLeafChat ? directSubmit(directLeafChat.id) : setMode("composer")
+                directLeafChat
+                  ? directSubmit(directLeafChat.id)
+                  : setMode("composer")
               }
               data-testid="highlight-add-to-chat"
             >
@@ -488,7 +576,8 @@ export function HighlightComposer({
               </div>
               {targets.length === 0 ? (
                 <span className={statusNote} role="alert">
-                  no native-control chat is available; raw terminals accept typing only
+                  no native-control chat is available; raw terminals accept
+                  typing only
                 </span>
               ) : null}
               <TextField
@@ -502,18 +591,28 @@ export function HighlightComposer({
                   className={area}
                   placeholder="Add a message…  (Ctrl+Enter sends · Enter = newline)"
                   onKeyDown={(event) => {
-                    if (event.key === "Enter" && event.ctrlKey && !event.nativeEvent.isComposing) {
+                    if (
+                      event.key === "Enter" &&
+                      event.ctrlKey &&
+                      !event.nativeEvent.isComposing
+                    ) {
                       event.preventDefault();
                       void send();
                     }
                   }}
                 />
               </TextField>
-              <span className={scopeNote}>text only · attachments unavailable</span>
+              <span className={scopeNote}>
+                text only · attachments unavailable
+              </span>
               {status ? (
                 <span
                   className={statusNote}
-                  role={status.phase === "error" || status.phase === "endgame" ? "alert" : "status"}
+                  role={
+                    status.phase === "error" || status.phase === "endgame"
+                      ? "alert"
+                      : "status"
+                  }
                   data-testid="highlight-status"
                 >
                   {status.detail}
@@ -521,16 +620,25 @@ export function HighlightComposer({
               ) : null}
               {status?.phase === "endgame" ? (
                 <div className={statusActions}>
-                  <button type="button" className={secondaryButton} onClick={() => void keepWaiting()}>
+                  <button
+                    type="button"
+                    className={secondaryButton}
+                    onClick={() => void keepWaiting()}
+                  >
                     keep waiting
                   </button>
                   <button
                     type="button"
                     className={secondaryButton}
                     onClick={() => {
-                      void navigator.clipboard.writeText(status.requestId).catch(() =>
-                        setStatus({ ...status, detail: "could not copy requestId" }),
-                      );
+                      void navigator.clipboard
+                        .writeText(status.requestId)
+                        .catch(() =>
+                          setStatus({
+                            ...status,
+                            detail: "could not copy requestId",
+                          }),
+                        );
                     }}
                   >
                     copy requestId
@@ -545,7 +653,8 @@ export function HighlightComposer({
                       lastRecordRef.current = null;
                       setStatus({
                         phase: "error",
-                        detail: "unresolved request released; a new Send will use a new requestId",
+                        detail:
+                          "unresolved request released; a new Send will use a new requestId",
                       });
                     }}
                   >

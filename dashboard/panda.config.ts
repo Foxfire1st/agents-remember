@@ -35,9 +35,9 @@ export default defineConfig({
           muted: { value: "oklch(0.7 0.02 250)" }, // muted control text (idle mode buttons)
           amber: { value: "oklch(0.82 0.16 75)" }, // nominal wireframe
           cyan: { value: "oklch(0.85 0.13 200)" }, // progress / running
-          alarm: { value: "oklch(0.63 0.24 25)" }, // whole-silhouette alarm
+          alarm: { value: "oklch(0.67 0.22 25)" }, // AA status text + whole-silhouette alarm
           mint: { value: "oklch(0.88 0.16 165)" }, // fresh-online / live
-          dormant: { value: "oklch(0.45 0.06 25)" }, // skeletal dark-red dormant
+          dormant: { value: "oklch(0.67 0.06 25)" }, // AA status text + skeletal red dormant
           // Rank-insignia tiers (L14, V4 spec): gold = orchestration seat, purple = management.
           gold: { value: "oklch(0.87 0.15 95)" }, // orchestration tier (chevrons, corner)
           goldDim: { value: "oklch(0.55 0.09 95)" }, // orchestration hairline

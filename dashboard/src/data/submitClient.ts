@@ -1,4 +1,5 @@
 import type { OpenSession } from "./sessions";
+import { announcePolite } from "./announcer";
 import { sessionStore } from "./sessions";
 import { sessionCockpitStore } from "./sessionCockpitStore";
 import {
@@ -543,12 +544,31 @@ function preview(text: string): string {
   return twoLines.length > 140 ? `${twoLines.slice(0, 137)}…` : twoLines;
 }
 
+export function submissionReceiptAnnouncement(record: SubmitRecord): string | null {
+  switch (record.phase) {
+    case "accepted":
+      return "message accepted — delivered";
+    case "queued":
+      return "message queued — withdrawable";
+    case "rejected":
+      return `message rejected${record.detail ? `: ${record.detail}` : ""}`;
+    case "unsupported":
+      return `message unsupported${record.detail ? `: ${record.detail}` : ""}`;
+    default:
+      return null;
+  }
+}
+
 function settleStoredSubmission(
   sessionId: string,
   record: SubmitRecord,
   lifecycleTransport?: SubmissionLifecycleTransport,
 ): void {
   const cockpit = sessionCockpitStore.getState();
+  const receiptAnnouncement = submissionReceiptAnnouncement(record);
+  if (cockpit.focusedSessionId === sessionId && receiptAnnouncement) {
+    announcePolite(receiptAnnouncement);
+  }
   if (record.source === "composer" && record.phase === "queued") {
     const exists = cockpit.perSession[sessionId]?.queue.some(
       (item) => item.requestId === record.requestId,

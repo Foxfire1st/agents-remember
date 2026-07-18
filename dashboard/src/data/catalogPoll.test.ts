@@ -5,6 +5,7 @@ import {
   CATALOG_REFRESH_INTERVAL_MS,
   hydrateTerminalSessionsFromCatalog,
   startCatalogPollDriver,
+  startCatalogReconciler,
 } from "./catalogPoll";
 import { sessionCockpitStore } from "./sessionCockpitStore";
 import { sessionStore } from "./sessions";
@@ -15,6 +16,32 @@ import { sessionStore } from "./sessions";
 const okResponse = (sessions: unknown[]) =>
   ({ ok: true, json: async () => ({ sessions }) }) as Response;
 
+class FakeBroadcastChannel {
+  static instances: FakeBroadcastChannel[] = [];
+  onmessage: ((event: MessageEvent) => void) | null = null;
+  closed = false;
+
+  constructor(public name: string) {
+    FakeBroadcastChannel.instances.push(this);
+  }
+
+  postMessage(): void {}
+
+  close(): void {
+    this.closed = true;
+  }
+
+  static dispatch(data: unknown): void {
+    for (const instance of FakeBroadcastChannel.instances) {
+      if (!instance.closed) instance.onmessage?.({ data } as MessageEvent);
+    }
+  }
+
+  static reset(): void {
+    FakeBroadcastChannel.instances = [];
+  }
+}
+
 beforeEach(() => {
   sessionStore.getState().hydrate([]);
   // reset poll health
@@ -24,6 +51,7 @@ beforeEach(() => {
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.useRealTimers();
+  FakeBroadcastChannel.reset();
 });
 
 describe("hydrateTerminalSessionsFromCatalog", () => {
@@ -85,5 +113,63 @@ describe("startCatalogPollDriver (refcounted)", () => {
     releaseB();
     await vi.advanceTimersByTimeAsync(CATALOG_REFRESH_INTERVAL_MS * 3);
     expect(fetchMock).toHaveBeenCalledTimes(2); // stopped with the last release
+  });
+});
+
+describe("startCatalogReconciler (eager + cross-tab)", () => {
+  it("hydrates once for any subscriber count and immediately removes a remotely terminated row", async () => {
+    vi.stubGlobal("BroadcastChannel", FakeBroadcastChannel);
+    let rows = [catalogRow({ id: "remote-row" })];
+    const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(okResponse(rows)));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const releaseA = startCatalogReconciler();
+    const releaseB = startCatalogReconciler();
+    try {
+      await vi.waitFor(() =>
+        expect(sessionStore.getState().sessions.map((session) => session.id)).toEqual(["remote-row"]),
+      );
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(FakeBroadcastChannel.instances).toHaveLength(1);
+
+      // Releasing one subscriber twice is inert; the remaining owner still receives immediate
+      // create/leaf invalidations, including an authoritative empty catalog.
+      releaseA();
+      releaseA();
+      expect(FakeBroadcastChannel.instances[0]?.closed).toBe(false);
+      rows = [];
+      FakeBroadcastChannel.dispatch({
+        type: "terminal-catalog-changed",
+        source: "other-tab",
+        reason: "leaf",
+        sessionId: "remote-row",
+      });
+      await vi.waitFor(() => expect(sessionStore.getState().sessions).toEqual([]));
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+
+      // Even if the confirming catalog read is stale, the excluded id cannot be resurrected.
+      rows = [catalogRow({ id: "remote-row" })];
+      FakeBroadcastChannel.dispatch({
+        type: "terminal-catalog-changed",
+        source: "other-tab",
+        reason: "terminate",
+        sessionId: "remote-row",
+      });
+      await vi.waitFor(() => expect(sessionStore.getState().sessions).toEqual([]));
+      expect(fetchMock).toHaveBeenCalledTimes(3);
+
+      releaseB();
+      expect(FakeBroadcastChannel.instances[0]?.closed).toBe(true);
+      FakeBroadcastChannel.dispatch({
+        type: "terminal-catalog-changed",
+        source: "other-tab",
+        reason: "create",
+      });
+      await Promise.resolve();
+      expect(fetchMock).toHaveBeenCalledTimes(3);
+    } finally {
+      releaseA();
+      releaseB();
+    }
   });
 });

@@ -4,6 +4,7 @@ import { catalogRow } from "../test/fixtures/catalogRows";
 import { SET_RESULT_CLAMP, SET_RESULTS } from "../test/fixtures/capabilityEnvelopes";
 import {
   announceAssertive,
+  announceAssertiveBatch,
   announcePolite,
   announcerStore,
   startSeatStateAnnouncer,
@@ -67,6 +68,14 @@ describe("announcerStore", () => {
     announceAssertive("loud");
     expect(announcerStore.getState().assertive).toEqual({ text: "loud", seq: 1 });
   });
+
+  it("commits a same-hydration alert batch without overwriting an earlier seat", () => {
+    announceAssertiveBatch(["alpha failed", "beta awaiting input"]);
+    expect(announcerStore.getState().assertive).toEqual({
+      text: "alpha failed · beta awaiting input",
+      seq: 1,
+    });
+  });
 });
 
 describe("stateEntryAnnouncements (pure transition detector)", () => {
@@ -120,6 +129,20 @@ describe("startSeatStateAnnouncer (the wired watcher)", () => {
     const release = startSeatStateAnnouncer();
     sessionStore.getState().hydrate([seat("w", { controlState: "failed" })]);
     expect(announcerStore.getState().assertive.text).toBe(sessionFailedAnnouncement("w"));
+    release();
+  });
+
+  it("announces every urgent transition from one catalog hydration", () => {
+    sessionStore.getState().hydrate([
+      seat("a", { turnState: "working", controlState: "ready" }),
+      seat("b", { turnState: "working", controlState: "ready" }),
+    ]);
+    const release = startSeatStateAnnouncer();
+    sessionStore.getState().hydrate([
+      seat("a", { controlState: "failed" }),
+      seat("b", { turnState: "awaiting-input" }),
+    ]);
+    expect(announcerStore.getState().assertive.text).toBe("a failed · b awaiting input");
     release();
   });
 });

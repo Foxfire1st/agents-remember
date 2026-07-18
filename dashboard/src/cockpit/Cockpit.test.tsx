@@ -607,58 +607,32 @@ describe("Operations drill survives a view switch (DetailPanel mount preservatio
   });
 });
 
-describe("Sessions view: full-bleed keep-alive layer (260715-FEUI-L1 R1)", () => {
-  it("registers Sessions in the mode bar, goes full-bleed, and hides-not-unmounts on leave", () => {
+describe("canonical Chats route: full-bleed keep-alive cockpit (S5)", () => {
+  it("defaults to Operations, exposes no Sessions route, and keeps one Chats cockpit mounted", () => {
     seed("engine-fleet");
-    const { container, getByRole } = render(<CockpitShell />);
+    const { container, getByRole, queryByRole } = render(<CockpitShell />);
 
-    // Mounted from the start as a persistent hidden layer (like Chats): the future xterm
-    // buffers + WebSockets survive view switches because the layer is never unmounted.
-    const sessions = container.querySelector('[data-testid="sessions-view"]');
-    expect(sessions).not.toBeNull();
-    const layer = sessions?.parentElement as HTMLElement;
+    expect(getByRole("radio", { name: "Operations" }).getAttribute("aria-checked")).toBe("true");
+    expect(queryByRole("radio", { name: "Sessions" })).toBeNull();
+
+    // The internal sessions-* markers remain the WebTUI/keyboard implementation scope, but there is
+    // only one product route and one mounted PTY owner.
+    const chats = container.querySelector('[data-testid="sessions-view"]');
+    expect(chats).not.toBeNull();
+    const layer = chats?.parentElement as HTMLElement;
     expect(layer.style.display).toBe("none");
     expect(layer.getAttribute("aria-hidden")).toBe("true");
-    // The scope root carries the WebTUI marker even while hidden (S1).
-    expect(sessions?.getAttribute("data-view")).toBe("sessions");
 
-    // Switching to Sessions reveals the SAME node (never remounted), full-bleed (no shell rails).
-    fireEvent.click(getByRole("radio", { name: "Sessions" }));
+    fireEvent.click(getByRole("radio", { name: "Chats" }));
     expect(container.querySelector(".shell__body")?.getAttribute("data-fullbleed")).toBe("true");
     expect(container.querySelector(".rail--left")).toBeNull();
-    expect(container.querySelector('[data-testid="sessions-view"]')).toBe(sessions);
+    expect(container.querySelector('[data-testid="sessions-view"]')).toBe(chats);
     expect(layer.style.display).toBe("flex");
-    // React renders aria-* booleans literally: visible = aria-hidden="false" (the house pattern
-    // used by the Chats/Files layers too).
     expect(layer.getAttribute("aria-hidden")).toBe("false");
 
-    // Leaving hides it again without unmounting (still the same node).
     fireEvent.click(getByRole("radio", { name: "Operations" }));
-    expect(container.querySelector('[data-testid="sessions-view"]')).toBe(sessions);
+    expect(container.querySelector('[data-testid="sessions-view"]')).toBe(chats);
     expect(layer.style.display).toBe("none");
     expect(layer.getAttribute("aria-hidden")).toBe("true");
-  });
-});
-
-describe("Chats persistence across view switches (6e hardening)", () => {
-  it("keeps <Chats> mounted (hidden) on other views and shows the same node on Chats", () => {
-    seed("engine-fleet");
-    const { container, getByRole } = render(<CockpitShell />);
-
-    // Default Operations view: Chats is already mounted but hidden — the live terminal it owns is
-    // never torn down, so a view switch can't throw the session's visuals away.
-    const chats = container.querySelector('[data-testid="chats"]');
-    expect(chats).not.toBeNull();
-    expect((chats?.parentElement as HTMLElement).style.display).toBe("none");
-
-    // Switching to Chats reveals the *same* element (it was never remounted).
-    fireEvent.click(getByRole("radio", { name: "Chats" }));
-    expect(container.querySelector('[data-testid="chats"]')).toBe(chats);
-    expect((chats?.parentElement as HTMLElement).style.display).toBe("flex");
-
-    // Leaving Chats hides it again without unmounting (still the same node).
-    fireEvent.click(getByRole("radio", { name: "Operations" }));
-    expect(container.querySelector('[data-testid="chats"]')).toBe(chats);
-    expect((chats?.parentElement as HTMLElement).style.display).toBe("none");
   });
 });

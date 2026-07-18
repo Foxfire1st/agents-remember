@@ -3,6 +3,7 @@ import { createRef } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { sessionCockpitStore } from "../data/sessionCockpitStore";
+import { writeKeymapPreferences } from "../data/keymap/preferences";
 import { fromTerminalSessionInfo, sessionStore } from "../data/sessions";
 import { dashboardStore } from "../data/store";
 import { startSubmitRecord } from "../data/submitMachine";
@@ -40,6 +41,8 @@ function receipt(requestId: string, acceptance: "immediate" | "queued" = "immedi
 }
 
 beforeEach(() => {
+  window.localStorage.clear();
+  writeKeymapPreferences({});
   sessionCockpitStore.setState({ perSession: {} });
   sessionStore.getState().hydrate([]);
   dashboardStore.setState({ lifecycles: {} });
@@ -52,6 +55,37 @@ afterEach(() => {
 });
 
 describe("SessionComposer (FEUI-L5)", () => {
+  it("reconfigures same-tab profile/binding writes without rebuilding or revising the draft", async () => {
+    const session = readySession("live-keymap-write");
+    sessionStore.getState().hydrate([session]);
+    const ref = createRef<SessionComposerHandle>();
+    const { getByTestId } = render(<SessionComposer ref={ref} session={session} />);
+    act(() => sessionCockpitStore.getState().setComposerDraft(session.id, "draft survives rebind"));
+    await waitFor(() => expect(ref.current?.getDraft()).toBe("draft survives rebind"));
+    const editorNode = getByTestId("session-composer-editor").querySelector(".cm-content");
+    const revision =
+      sessionCockpitStore.getState().perSession[session.id]?.composer.draftRevision;
+
+    act(() => {
+      writeKeymapPreferences({
+        composerProfile: "vim",
+        bindings: { "focus.nextRegion": "K", "focus.prevRegion": "L" },
+      });
+    });
+
+    await waitFor(() =>
+      expect(getByTestId("session-composer-editor").getAttribute("data-composer-profile")).toBe(
+        "vim",
+      ),
+    );
+    expect(getByTestId("session-composer-editor").querySelector(".cm-content")).toBe(editorNode);
+    expect(ref.current?.getDraft()).toBe("draft survives rebind");
+    expect(sessionCockpitStore.getState().perSession[session.id]?.composer).toEqual({
+      draft: "draft survives rebind",
+      draftRevision: revision,
+    });
+  });
+
   it("submits the exact multiline/non-ASCII draft through /submit and clears only on acceptance", async () => {
     const session = readySession();
     sessionStore.getState().hydrate([session]);

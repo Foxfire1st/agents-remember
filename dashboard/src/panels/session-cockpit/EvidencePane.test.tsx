@@ -15,7 +15,12 @@ import { StopResidualNotes } from "./StopResidualNotes";
 
 beforeEach(() => {
   sessionCockpitStore.setState({ focusedSessionId: null, perSession: {} });
-  lifecycleNoticeStore.setState({ residuals: [], cleanupOutcome: null, sweptRetire: {} });
+  lifecycleNoticeStore.setState({
+    residuals: [],
+    cleanupOutcome: null,
+    cleanupFailure: null,
+    sweptRetire: {},
+  });
   sessionStore.getState().hydrate([]);
 });
 afterEach(() => {

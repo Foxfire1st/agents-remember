@@ -35,8 +35,8 @@ import { SessionComposer } from "./SessionComposer";
 // it can be moved onto ANY projected leaf afterwards (the chat then "moves to that leaf"). The focused
 // agent seat and optional plain terminal render their current binding roles; the full multi-role fleet
 // remains available in the session rail. Each pane reuses the same `Terminal` +
-// `SessionComposer` + the shared connection registry as the Chats page (one xterm/WebSocket per session);
-// the Chats-page row and this rail surface the same session because the registry is shared.
+// `SessionComposer` + the shared connection registry as the Chats cockpit (one xterm/WebSocket per
+// session); both surfaces resolve the same catalog identity.
 
 const Terminal = lazy(() => import("./Terminal").then((module) => ({ default: module.Terminal })));
 
@@ -262,7 +262,7 @@ export function RailChat({
 
   // Detection-driven: the server reports which supported harnesses are installed; "start chat" offers
   // one button per detected harness (Claude Code / Codex / Pi.dev). `[]` (no backend) leaves only the
-  // "open terminal" affordance — the same posture as the Chats page.
+  // "open terminal" affordance — the same posture as the Chats cockpit.
   useEffect(() => {
     let active = true;
     void fetchHarnesses().then((list) => {
@@ -288,7 +288,7 @@ export function RailChat({
   // A free chat (no leaf) is the one that can be moved onto a leaf via the picker.
   const freeChat = chatSession && !chatSession.leafKey ? chatSession : undefined;
 
-  // Mounted-but-hidden keep-alive (mirror the Chats page): once a chat/terminal has been surfaced here,
+  // Mounted-but-hidden keep-alive (mirror the Chats cockpit): once a chat/terminal has been surfaced here,
   // keep it mounted while hidden so switching leaves — or attaching a free chat onto a leaf — does not
   // tear down its xterm buffer / live WebSocket.
   const [mountedSessionIds, setMountedSessionIds] = useState<Set<string>>(() => new Set());

@@ -2,8 +2,15 @@ import { useStore } from "zustand";
 import { createStore } from "zustand/vanilla";
 
 import { hydrateTerminalSessionsFromCatalog } from "./catalogPoll";
-import { notifySessionCatalogChanged, sessionStore, type OpenSession } from "./sessions";
-import { cleanupLandedTerminalSessions, type LandedCleanupResult } from "./terminal";
+import {
+  notifySessionCatalogChanged,
+  sessionStore,
+  type OpenSession,
+} from "./sessions";
+import {
+  cleanupLandedTerminalSessions,
+  type LandedCleanupResult,
+} from "./terminal";
 
 // Session lifecycle actions for the cockpit (260715-FEUI-L6 R5). Terminate keeps the server's
 // WHOLE answer: the `/terminate` response may carry `controlStopDetail` (the graceful control
@@ -27,11 +34,23 @@ export interface StopResidual {
   at: number;
 }
 
+export interface CleanupTarget {
+  id: string;
+  label: string;
+}
+
+export interface CleanupFailure {
+  /** Snapshot at the action boundary: later catalog/label drift cannot obscure intended rows. */
+  targets: CleanupTarget[];
+}
+
 interface LifecycleNoticeState {
   /** Newest-first informational residuals — kept until explicitly dismissed, never dropped. */
   residuals: StopResidual[];
   /** The last bulk-cleanup outcome (closed/skipped honesty), null when none/dismissed. */
   cleanupOutcome: LandedCleanupResult | null;
+  /** The authority result was unavailable; exact attempted rows remain visible and retryable. */
+  cleanupFailure: CleanupFailure | null;
   /** sessionIds whose retire residual was already swept — a dismissal must stay dismissed
    *  across poll beats (the catalog row keeps carrying the fact forever). */
   sweptRetire: Record<string, true>;
@@ -41,52 +60,68 @@ interface LifecycleNoticeState {
   sweepRetireResiduals: (sessions: readonly OpenSession[]) => void;
   recordCleanupOutcome: (outcome: LandedCleanupResult) => void;
   dismissCleanupOutcome: () => void;
+  recordCleanupFailure: (failure: CleanupFailure) => void;
+  dismissCleanupFailure: () => void;
 }
 
-export const lifecycleNoticeStore = createStore<LifecycleNoticeState>((set) => ({
-  residuals: [],
-  cleanupOutcome: null,
-  sweptRetire: {},
-  recordResidual: (residual) => set((state) => ({ residuals: [residual, ...state.residuals] })),
-  dismissResidual: (sessionId, at) =>
-    set((state) => ({
-      residuals: state.residuals.filter(
-        (entry) => !(entry.sessionId === sessionId && entry.at === at),
-      ),
-    })),
-  sweepRetireResiduals: (sessions) =>
-    set((state) => {
-      let residuals = state.residuals;
-      let sweptRetire = state.sweptRetire;
-      let changed = false;
-      for (const session of sessions) {
-        const detail = session.controlRaw?.retireControlStopError;
-        if (typeof detail !== "string" || !detail || state.sweptRetire[session.id]) continue;
-        if (!changed) {
-          residuals = [...residuals];
-          sweptRetire = { ...sweptRetire };
-          changed = true;
+export const lifecycleNoticeStore = createStore<LifecycleNoticeState>(
+  (set) => ({
+    residuals: [],
+    cleanupOutcome: null,
+    cleanupFailure: null,
+    sweptRetire: {},
+    recordResidual: (residual) =>
+      set((state) => ({ residuals: [residual, ...state.residuals] })),
+    dismissResidual: (sessionId, at) =>
+      set((state) => ({
+        residuals: state.residuals.filter(
+          (entry) => !(entry.sessionId === sessionId && entry.at === at),
+        ),
+      })),
+    sweepRetireResiduals: (sessions) =>
+      set((state) => {
+        let residuals = state.residuals;
+        let sweptRetire = state.sweptRetire;
+        let changed = false;
+        for (const session of sessions) {
+          const detail = session.controlRaw?.retireControlStopError;
+          if (
+            typeof detail !== "string" ||
+            !detail ||
+            state.sweptRetire[session.id]
+          )
+            continue;
+          if (!changed) {
+            residuals = [...residuals];
+            sweptRetire = { ...sweptRetire };
+            changed = true;
+          }
+          residuals = [
+            {
+              sessionId: session.id,
+              label: session.label,
+              kind: "retire",
+              detail,
+              at: Date.now(),
+            },
+            ...residuals,
+          ];
+          sweptRetire[session.id] = true;
         }
-        residuals = [
-          {
-            sessionId: session.id,
-            label: session.label,
-            kind: "retire",
-            detail,
-            at: Date.now(),
-          },
-          ...residuals,
-        ];
-        sweptRetire[session.id] = true;
-      }
-      return changed ? { residuals, sweptRetire } : state;
-    }),
-  recordCleanupOutcome: (cleanupOutcome) => set({ cleanupOutcome }),
-  dismissCleanupOutcome: () => set({ cleanupOutcome: null }),
-}));
+        return changed ? { residuals, sweptRetire } : state;
+      }),
+    recordCleanupOutcome: (cleanupOutcome) =>
+      set({ cleanupOutcome, cleanupFailure: null }),
+    dismissCleanupOutcome: () => set({ cleanupOutcome: null }),
+    recordCleanupFailure: (cleanupFailure) =>
+      set({ cleanupFailure, cleanupOutcome: null }),
+    dismissCleanupFailure: () => set({ cleanupFailure: null }),
+  }),
+);
 
-export const useLifecycleNotices = <T>(selector: (state: LifecycleNoticeState) => T): T =>
-  useStore(lifecycleNoticeStore, selector);
+export const useLifecycleNotices = <T>(
+  selector: (state: LifecycleNoticeState) => T,
+): T => useStore(lifecycleNoticeStore, selector);
 
 // ── The retire-residual sweep (review F1, sev-3) ────────────────────────────────────────────
 // The catalog serves retired rows forever and every hydrate lands them in the sessionStore, but
@@ -130,11 +165,16 @@ export interface TerminateOutcome {
  * body (the boolean-only helper in data/terminal.ts predates the residual requirement). A
  * failed POST keeps the server's words so the caller can render them verbatim + retry.
  */
-export async function terminateSessionDetailed(sessionId: string): Promise<TerminateOutcome> {
+export async function terminateSessionDetailed(
+  sessionId: string,
+): Promise<TerminateOutcome> {
   try {
-    const response = await fetch(`/api/terminal/${encodeURIComponent(sessionId)}/terminate`, {
-      method: "POST",
-    });
+    const response = await fetch(
+      `/api/terminal/${encodeURIComponent(sessionId)}/terminate`,
+      {
+        method: "POST",
+      },
+    );
     if (!response.ok) {
       const body = await response.text().catch(() => "");
       return { ok: false, error: body || `HTTP ${response.status}` };
@@ -142,10 +182,16 @@ export async function terminateSessionDetailed(sessionId: string): Promise<Termi
     const body = (await response.json().catch(() => null)) as {
       controlStopDetail?: unknown;
     } | null;
-    const detail = body && typeof body.controlStopDetail === "string" ? body.controlStopDetail : undefined;
+    const detail =
+      body && typeof body.controlStopDetail === "string"
+        ? body.controlStopDetail
+        : undefined;
     return { ok: true, controlStopDetail: detail };
   } catch (error) {
-    return { ok: false, error: error instanceof Error ? error.message : String(error) };
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : String(error),
+    };
   }
 }
 
@@ -153,7 +199,9 @@ export async function terminateSessionDetailed(sessionId: string): Promise<Termi
  * The cockpit's terminate flow: POST, mirror the store (tombstone + close), and record any stop
  * residual for the informational surfaces. Returns the outcome so callers can announce it.
  */
-export async function endSessionDetailed(session: OpenSession): Promise<TerminateOutcome> {
+export async function endSessionDetailed(
+  session: OpenSession,
+): Promise<TerminateOutcome> {
   const outcome = await terminateSessionDetailed(session.id);
   if (!outcome.ok) return outcome;
   sessionStore.getState().setStatus(session.id, "terminated");
@@ -176,10 +224,17 @@ export async function endSessionDetailed(session: OpenSession): Promise<Terminat
  * skipped with reasons) for the honest post-execution note instead of dropping the skips.
  */
 export async function endLandedDetailed(
-  sessions: OpenSession[],
+  sessions: readonly CleanupTarget[],
 ): Promise<LandedCleanupResult | null> {
-  const result = await cleanupLandedTerminalSessions(sessions.map((session) => session.id));
-  if (!result) return null;
+  const result = await cleanupLandedTerminalSessions(
+    sessions.map((session) => session.id),
+  );
+  if (!result) {
+    lifecycleNoticeStore.getState().recordCleanupFailure({
+      targets: sessions.map(({ id, label }) => ({ id, label })),
+    });
+    return null;
+  }
   for (const id of result.closedSessions) {
     sessionStore.getState().setStatus(id, "terminated");
     sessionStore.getState().close(id);

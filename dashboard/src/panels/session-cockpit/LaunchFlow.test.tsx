@@ -5,8 +5,9 @@ import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { capabilityCatalogStore, capabilityCostNote } from "../../data/capabilityCatalog";
+import { resetCatalogPollForDev } from "../../data/catalogPoll";
 import { sessionCockpitStore } from "../../data/sessionCockpitStore";
-import { fromTerminalSessionInfo, type OpenSession } from "../../data/sessions";
+import { fromTerminalSessionInfo, sessionStore, type OpenSession } from "../../data/sessions";
 import { capabilityEnvelope } from "../../test/fixtures/capabilityEnvelopes";
 import { catalogRow } from "../../test/fixtures/catalogRows";
 import {
@@ -27,6 +28,14 @@ const HARNESSES = {
 
 type Router = (url: string, init?: RequestInit) => Promise<{ status: number; body: unknown }>;
 
+function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
+  let resolve: (value: T) => void = () => {};
+  const promise = new Promise<T>((accept) => {
+    resolve = accept;
+  });
+  return { promise, resolve };
+}
+
 function stubFetch(router: Router) {
   const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
     const { status, body } = await router(url, init);
@@ -38,6 +47,21 @@ function stubFetch(router: Router) {
   });
   vi.stubGlobal("fetch", fetchMock);
   return fetchMock;
+}
+
+function stubBroadcastMessages(): unknown[] {
+  const messages: unknown[] = [];
+  vi.stubGlobal(
+    "BroadcastChannel",
+    class {
+      onmessage = null;
+      postMessage(message: unknown) {
+        messages.push(message);
+      }
+      close() {}
+    },
+  );
+  return messages;
 }
 
 /** Default happy router: harness list, claude/codex envelopes, empty catalog, opened POST. */
@@ -73,8 +97,14 @@ function renderFlow(overrides: Partial<Parameters<typeof LaunchFlow>[0]> = {}) {
 }
 
 beforeEach(() => {
+  resetCatalogPollForDev();
   capabilityCatalogStore.setState({ perHarness: {} });
-  sessionCockpitStore.setState({ perSession: {} });
+  sessionStore.setState({ sessions: [], activeId: null, count: 0 });
+  sessionCockpitStore.setState({
+    focusedSessionId: null,
+    perSession: {},
+    pollHealth: { lastBeatAt: null, missedBeats: 0, healthy: true },
+  });
 });
 
 afterEach(() => {
@@ -257,9 +287,20 @@ describe("LaunchFlow — response paths (R5)", () => {
     fireEvent.click(view.getByTestId("launch-submit"));
   }
 
-  it("200 → retained pair recorded at tier 'pending', new session focused, flow closed", async () => {
-    stubFetch(defaultRouter({ status: 200, body: OPENED_STARTING }));
-    const view = renderFlow();
+  it("200 → inherits lifecycle, broadcasts create, records pending evidence, focuses, and closes", async () => {
+    const messages: unknown[] = [];
+    vi.stubGlobal(
+      "BroadcastChannel",
+      class {
+        onmessage = null;
+        postMessage(message: unknown) {
+          messages.push(message);
+        }
+        close() {}
+      },
+    );
+    const fetchMock = stubFetch(defaultRouter({ status: 200, body: OPENED_STARTING }));
+    const view = renderFlow({ lifecycleId: "LC-S5" });
     await launchClaudePair(view);
     await waitFor(() => expect(view.onFocusSession).toHaveBeenCalledWith("launch-1"));
     expect(view.onClose).toHaveBeenCalled();
@@ -268,6 +309,85 @@ describe("LaunchFlow — response paths (R5)", () => {
       retainedEffort: "max",
       tier: "pending",
     });
+    const openCall = fetchMock.mock.calls.find(
+      ([url, init]) => url === "/api/terminal/launch-1" && init?.method === "POST",
+    );
+    expect(JSON.parse(String(openCall?.[1]?.body))).toEqual({
+      kind: "harness",
+      harness: "claude",
+      model: "claude-fable-5[1m]",
+      effort: "max",
+      lifecycleId: "LC-S5",
+    });
+    expect(messages).toContainEqual(
+      expect.objectContaining({
+        type: "terminal-catalog-changed",
+        reason: "create",
+        sessionId: "launch-1",
+      }),
+    );
+  });
+
+  it("revokes an open POST that settles after the dev scenario authority changes", async () => {
+    const messages = stubBroadcastMessages();
+    const pendingOpen = deferred<{ status: number; body: unknown }>();
+    const fetchMock = stubFetch(async (url, init) => {
+      if (url === "/api/harnesses") return { status: 200, body: HARNESSES };
+      if (url.startsWith("/api/harnesses/claude/capabilities")) {
+        return { status: 200, body: capabilityEnvelope("claude", "hit") };
+      }
+      if (url === "/api/terminal/launch-1" && init?.method === "POST") {
+        return pendingOpen.promise;
+      }
+      if (url === "/api/terminal/sessions") return { status: 200, body: { sessions: [] } };
+      throw new Error(`unrouted ${url}`);
+    });
+    const view = renderFlow();
+    await launchClaudePair(view);
+    await waitFor(() =>
+      expect(
+        fetchMock.mock.calls.some(
+          ([url, init]) => url === "/api/terminal/launch-1" && init?.method === "POST",
+        ),
+      ).toBe(true),
+    );
+
+    view.unmount();
+    resetCatalogPollForDev();
+    sessionStore.setState({ sessions: [], activeId: null, count: 0 });
+    sessionStore
+      .getState()
+      .hydrate([fromTerminalSessionInfo(catalogRow({ id: "architect" }))], "architect");
+    const successorPollHealth = { lastBeatAt: 123, missedBeats: 2, healthy: true };
+    sessionCockpitStore.setState({
+      focusedSessionId: "architect",
+      perSession: {},
+      pollHealth: successorPollHealth,
+    });
+
+    pendingOpen.resolve({ status: 200, body: OPENED_STARTING });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(sessionStore.getState().sessions.map((session) => session.id)).toEqual(["architect"]);
+    expect(sessionCockpitStore.getState().perSession["launch-1"]).toBeUndefined();
+    expect(sessionCockpitStore.getState().focusedSessionId).toBe("architect");
+    expect(sessionCockpitStore.getState().pollHealth).toEqual(successorPollHealth);
+    expect(
+      fetchMock.mock.calls.filter(([url]) => url === "/api/terminal/sessions"),
+    ).toHaveLength(0);
+    const openCalls = fetchMock.mock.calls.filter(
+      ([url, init]) => url === "/api/terminal/launch-1" && init?.method === "POST",
+    );
+    expect(openCalls).toHaveLength(1);
+    expect(JSON.parse(String(openCalls[0]?.[1]?.body))).toEqual({
+      kind: "harness",
+      harness: "claude",
+      model: "claude-fable-5[1m]",
+      effort: "max",
+    });
+    expect(view.onFocusSession).not.toHaveBeenCalled();
+    expect(view.onClose).not.toHaveBeenCalled();
+    expect(messages).toEqual([]);
   });
 
   it("400 launch-selection-invalid → the verbatim detail, nothing retried", async () => {
@@ -306,6 +426,7 @@ describe("LaunchFlow — response paths (R5)", () => {
   });
 
   it("transport loss → 'open outcome unknown — checking the catalog', resolved by row appearance (F9)", async () => {
+    const messages = stubBroadcastMessages();
     stubFetch(async (url) => {
       if (url === "/api/harnesses") return { status: 200, body: HARNESSES };
       if (url.startsWith("/api/harnesses/claude/capabilities")) {
@@ -334,6 +455,9 @@ describe("LaunchFlow — response paths (R5)", () => {
     );
     await waitFor(() => expect(view.onFocusSession).toHaveBeenCalledWith("launch-1"));
     expect(view.onClose).toHaveBeenCalled();
+    expect(messages).toContainEqual(
+      expect.objectContaining({ reason: "create", sessionId: "launch-1" }),
+    );
   });
 
   it("an explicit dismiss ENDS the unknown-outcome watch — a late row never steals focus (review finding 1)", async () => {

@@ -13,7 +13,8 @@
     "typecheck": "tsc -b",
     "test": "vitest run",
     "test:watch": "vitest",
-    "e2e": "playwright test"
+    "e2e": "playwright test",
+    "perf:cockpit": "vitest run src/panels/session-cockpit/SessionRail.test.tsx src/panels/session-cockpit/VirtualizedInspectorList.test.tsx && playwright test --config playwright.perf.config.ts"
   },
   "dependencies": {
     "@codemirror/lang-css": "^6.3.1",
@@ -30,6 +31,7 @@
     "@headless-tree/react": "^1.7.0",
     "@lezer/highlight": "^1.2.3",
     "@react-three/fiber": "^9.6.1",
+    "@replit/codemirror-vim": "^6.3.0",
     "@tanstack/react-virtual": "^3.14.4",
     "@testing-library/react": "^16.3.2",
     "@types/three": "^0.184.1",

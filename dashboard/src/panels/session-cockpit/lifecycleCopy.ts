@@ -13,7 +13,9 @@ import { leafIdFromKey } from "../../data/taskIdentity";
 /** Honest terminate confirm: names the session, its leaf, and its current state. */
 export function terminateConfirmCopy(session: OpenSession): string {
   const state = seatVisualState(session).word;
-  const leaf = session.leafKey ? ` · leaf ${leafIdFromKey(session.leafKey)}` : "";
+  const leaf = session.leafKey
+    ? ` · leaf ${leafIdFromKey(session.leafKey)}`
+    : "";
   return `end ${session.label}${leaf} · state ${state} — kills the tmux session; transcripts are kept`;
 }
 
@@ -46,10 +48,20 @@ export function cleanupOutcomeCopy(result: {
   return `ended ${result.closed}${skipped}`;
 }
 
+/** A lost/non-OK cleanup response cannot prove whether the server mutated anything. */
+export function cleanupFailureCopy(failure: {
+  targets: Array<{ id: string; label: string }>;
+}): string {
+  return `cleanup result unavailable — intended rows: ${failure.targets
+    .map((target) => `${target.label} (${target.id})`)
+    .join(", ")}`;
+}
+
 // ── The WorkingLine + Stop-turn (R6, spec §1.2-2 / design §9.7) ─────────────────────────────
 
 /** UA-7 gate: the cockpit has NO interrupt route yet — the control names the gap, honestly. */
-export const STOP_TURN_DISABLED_REASON = "interrupt requires UA-7 — no cancel-turn route exists on the control bridge yet";
+export const STOP_TURN_DISABLED_REASON =
+  "interrupt requires UA-7 — no cancel-turn route exists on the control bridge yet";
 
 // ── The InteractionBar (R4, design §7.3) ────────────────────────────────────────────────────
 
@@ -73,11 +85,17 @@ export const INTERACTION_NO_PROMPT_TEXT =
 // ── PTY archetypes (R1, design §1.4) ────────────────────────────────────────────────────────
 
 /** True ⇒ a controlled session: the PTY renders the runner's line-log; no vendor TUI exists. */
-export function isControlledSession(session: Pick<OpenSession, "controlState">): boolean {
-  return session.controlState !== undefined && session.controlState !== "unsupported";
+export function isControlledSession(
+  session: Pick<OpenSession, "controlState">,
+): boolean {
+  return (
+    session.controlState !== undefined && session.controlState !== "unsupported"
+  );
 }
 
-export function paneArchetypeCopy(session: Pick<OpenSession, "controlState">): string {
+export function paneArchetypeCopy(
+  session: Pick<OpenSession, "controlState">,
+): string {
   return isControlledSession(session)
     ? "controlled — the pane shows the runner line-log; typed lines queue as messages"
     : "legacy raw — the vendor TUI runs in this pane";

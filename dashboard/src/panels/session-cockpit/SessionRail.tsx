@@ -22,13 +22,12 @@ import { hasUnackedSetAttention } from "../../data/setChips";
 import {
   endLandedDetailed,
   endSessionDetailed,
-  useLifecycleNotices,
 } from "../../data/sessionLifecycle";
 import { seatVisualState } from "../../data/stateGrammar";
 import { useDashboard } from "../../data/store";
 import { leafIdFromKey } from "../../data/taskIdentity";
 import type { AgentPickupNode, TaskDocNode } from "../../types/projection";
-import { cleanupOutcomeCopy, terminateConfirmCopy } from "./lifecycleCopy";
+import { terminateConfirmCopy } from "./lifecycleCopy";
 import { StateDot } from "./StateDot";
 
 // The session rail (260715-FEUI-L2 S4): the ruled role-driven hierarchy (spec §1.6b) — flat
@@ -57,7 +56,12 @@ const staleBanner = css({
   paddingInline: "0.4rem",
   paddingBlock: "0.15rem",
 });
-const attnStrip = css({ display: "flex", gap: "0.3rem", flexWrap: "wrap", flexShrink: 0 });
+const attnStrip = css({
+  display: "flex",
+  gap: "0.3rem",
+  flexWrap: "wrap",
+  flexShrink: 0,
+});
 const attnButton = cva({
   base: {
     font: "inherit",
@@ -72,12 +76,23 @@ const attnButton = cva({
     color: "muted",
     cursor: "pointer",
     fontVariantNumeric: "tabular-nums",
-    _focusVisible: { outline: "1px solid token(colors.amber)", outlineOffset: "1px" },
+    _focusVisible: {
+      outline: "1px solid token(colors.amber)",
+      outlineOffset: "1px",
+    },
   },
   variants: {
     tone: {
-      warn: { color: "amber", borderColor: "color-mix(in oklch, token(colors.amber) 45%, transparent)" },
-      alarm: { color: "alarm", borderColor: "color-mix(in oklch, token(colors.alarm) 45%, transparent)" },
+      warn: {
+        color: "amber",
+        borderColor:
+          "color-mix(in oklch, token(colors.amber) 45%, transparent)",
+      },
+      alarm: {
+        color: "alarm",
+        borderColor:
+          "color-mix(in oklch, token(colors.alarm) 45%, transparent)",
+      },
       info: { color: "cyan" },
       muted: {},
     },
@@ -103,7 +118,10 @@ const bulkButton = css({
   borderRadius: "2px",
   paddingInline: "0.35rem",
   cursor: "pointer",
-  _focusVisible: { outline: "1px solid token(colors.amber)", outlineOffset: "1px" },
+  _focusVisible: {
+    outline: "1px solid token(colors.amber)",
+    outlineOffset: "1px",
+  },
 });
 const confirmRow = css({
   display: "flex",
@@ -112,7 +130,11 @@ const confirmRow = css({
   fontSize: "0.64rem",
   color: "amber",
   minWidth: "0",
-  "& > span": { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
+  "& > span": {
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+  },
 });
 const masterBox = css({
   borderWidth: "1px",
@@ -134,7 +156,13 @@ const masterHead = css({
   borderBottomColor: "grid",
   minWidth: "0",
 });
-const masterName = css({ flex: "1", minWidth: "0", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" });
+const masterName = css({
+  flex: "1",
+  minWidth: "0",
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
+});
 const masterBody = css({ padding: "0.3rem", display: "grid", gap: "0.25rem" });
 // Leaf clusters: indented, separated by FINE hairlines + margins — never heavy boxes (RULED).
 const leafGroup = css({
@@ -147,7 +175,11 @@ const leafGroup = css({
   display: "grid",
   gap: "0.25rem",
 });
-const leafCaption = css({ fontSize: "0.62rem", color: "muted", letterSpacing: "0.04em" });
+const leafCaption = css({
+  fontSize: "0.62rem",
+  color: "muted",
+  letterSpacing: "0.04em",
+});
 const doneFold = css({
   display: "flex",
   alignItems: "center",
@@ -170,7 +202,10 @@ const doneToggle = css({
   border: "none",
   cursor: "pointer",
   padding: "0",
-  _focusVisible: { outline: "1px solid token(colors.amber)", outlineOffset: "1px" },
+  _focusVisible: {
+    outline: "1px solid token(colors.amber)",
+    outlineOffset: "1px",
+  },
 });
 const groupBox = css({
   borderWidth: "1px",
@@ -201,7 +236,10 @@ const rowShell = css({
   cursor: "pointer",
   "&[data-selected='true']": { color: "amber", borderColor: "amber" },
   "&[data-attention-highlight='true']": { borderColor: "cyan" },
-  _focusVisible: { outline: "1px solid token(colors.amber)", outlineOffset: "1px" },
+  _focusVisible: {
+    outline: "1px solid token(colors.amber)",
+    outlineOffset: "1px",
+  },
 });
 const roleChip = cva({
   base: {
@@ -218,11 +256,21 @@ const roleChip = cva({
   },
   variants: {
     role: {
-      ARC: { color: "gold", borderColor: "color-mix(in oklch, token(colors.gold) 45%, transparent)" },
-      ORC: { color: "gold", borderColor: "color-mix(in oklch, token(colors.gold) 45%, transparent)" },
+      ARC: {
+        color: "gold",
+        borderColor: "color-mix(in oklch, token(colors.gold) 45%, transparent)",
+      },
+      ORC: {
+        color: "gold",
+        borderColor: "color-mix(in oklch, token(colors.gold) 45%, transparent)",
+      },
       STR: { color: "gold" },
       DSG: { color: "gold" },
-      MGR: { color: "purple", borderColor: "color-mix(in oklch, token(colors.purple) 45%, transparent)" },
+      MGR: {
+        color: "purple",
+        borderColor:
+          "color-mix(in oklch, token(colors.purple) 45%, transparent)",
+      },
       WKR: { color: "cyan" },
       CUR: { color: "cyan" },
       SYS: { color: "cyan" },
@@ -239,7 +287,12 @@ const rowTitle = css({
   fontSize: "0.74rem",
   paddingBlock: "0.25rem",
 });
-const attentionSlot = css({ display: "inline-flex", alignItems: "center", gap: "0.2rem", flex: "none" });
+const attentionSlot = css({
+  display: "inline-flex",
+  alignItems: "center",
+  gap: "0.2rem",
+  flex: "none",
+});
 const markerChip = cva({
   base: {
     fontSize: "0.6rem",
@@ -252,7 +305,11 @@ const markerChip = cva({
   },
   variants: {
     tone: {
-      warn: { color: "amber", borderColor: "color-mix(in oklch, token(colors.amber) 45%, transparent)" },
+      warn: {
+        color: "amber",
+        borderColor:
+          "color-mix(in oklch, token(colors.amber) 45%, transparent)",
+      },
     },
   },
 });
@@ -293,10 +350,18 @@ const endButton = css({
   alignSelf: "stretch",
   cursor: "pointer",
   flex: "none",
-  _focusVisible: { outline: "1px solid token(colors.amber)", outlineOffset: "-1px" },
+  _focusVisible: {
+    outline: "1px solid token(colors.amber)",
+    outlineOffset: "-1px",
+  },
 });
 const treeIndent = css({ display: "grid", gap: "0.25rem" });
-const railTop = css({ display: "flex", alignItems: "center", gap: "0.4rem", flexShrink: 0 });
+const railTop = css({
+  display: "flex",
+  alignItems: "center",
+  gap: "0.4rem",
+  flexShrink: 0,
+});
 const treeToggleButton = css({
   font: "inherit",
   fontSize: "0.62rem",
@@ -310,7 +375,10 @@ const treeToggleButton = css({
   paddingInline: "0.35rem",
   cursor: "pointer",
   "&[data-on='true']": { color: "amber", borderColor: "amber" },
-  _focusVisible: { outline: "1px solid token(colors.amber)", outlineOffset: "1px" },
+  _focusVisible: {
+    outline: "1px solid token(colors.amber)",
+    outlineOffset: "1px",
+  },
 });
 const zeroState = css({
   flex: "1",
@@ -352,7 +420,9 @@ export async function endSession(session: OpenSession): Promise<void> {
 
 /** Bulk-end landed seats (master/sprint bulk affordances + their palette mirrors). The detailed
  *  flow records the route's honest outcome (closed + skipped with reasons) for the rail note. */
-export async function endLanded(sessions: OpenSession[]): Promise<void> {
+export async function endLanded(
+  sessions: readonly Pick<OpenSession, "id" | "label">[],
+): Promise<void> {
   await endLandedDetailed(sessions);
 }
 
@@ -366,47 +436,92 @@ export interface SessionRailProps {
   rollup: AttentionRollup;
 }
 
-export function SessionRail({ onFocusSession, focusedSessionId, model, rollup }: SessionRailProps) {
+/** Browser-render virtualization starts only beyond the measured 50-row fleet envelope. */
+export const RAIL_VIRTUALIZE_THRESHOLD = 50;
+
+export function SessionRail({
+  onFocusSession,
+  focusedSessionId,
+  model,
+  rollup,
+}: SessionRailProps) {
   const sessions = useSessions((state) => state.sessions);
   const treeView = useSessionCockpit((state) => state.orchestrationTreeView);
-  const setTreeView = useSessionCockpit((state) => state.setOrchestrationTreeView);
+  const setTreeView = useSessionCockpit(
+    (state) => state.setOrchestrationTreeView,
+  );
   const pollHealth = useSessionCockpit((state) => state.pollHealth);
   // L4 R6: unacknowledged set outcomes drive a per-row attention marker (the L2 slot).
   const perSessionCockpit = useSessionCockpit((state) => state.perSession);
-  const taskDocuments = useDashboard((state) => state.analytics?.taskDocuments ?? EMPTY_DOCS);
+  const taskDocuments = useDashboard(
+    (state) => state.analytics?.taskDocuments ?? EMPTY_DOCS,
+  );
   const lifecycles = useDashboard((state) => state.lifecycles);
-  const pickups = useDashboard((state) => state.analytics?.agentPickups ?? EMPTY_PICKUPS);
+  const pickups = useDashboard(
+    (state) => state.analytics?.agentPickups ?? EMPTY_PICKUPS,
+  );
   const heartbeat = useDashboard((state) => state.supervisorHeartbeat);
 
-  const [openDoneFolders, setOpenDoneFolders] = useState<Record<string, boolean>>({});
+  const [openDoneFolders, setOpenDoneFolders] = useState<
+    Record<string, boolean>
+  >({});
   const [armedBulk, setArmedBulk] = useState<BulkTarget | null>(null);
   // L6 R5: single-End arms an inline honest confirm naming session · leaf · state.
   const [armedEnd, setArmedEnd] = useState<string | null>(null);
   // A FAILED terminate POST (review finding 4): the confirm implied execution, so the failure
   // renders verbatim with a retry — never a silent disarm. Distinct from stop residuals, which
   // are informational facts about SUCCESSFUL terminations.
-  const [endFailure, setEndFailure] = useState<{ sessionId: string; error: string } | null>(null);
-  const cleanupOutcome = useLifecycleNotices((state) => state.cleanupOutcome);
-  const dismissCleanupOutcome = useLifecycleNotices((state) => state.dismissCleanupOutcome);
+  const [endFailure, setEndFailure] = useState<{
+    sessionId: string;
+    error: string;
+  } | null>(null);
   // L6 R7: legacy-raw harvest (bell markers + title/turn hints) — raw panes only ever write it.
   const harvestBySession = usePtyHarvest((state) => state.bySession);
   // The clicked attention CLASS, not a snapshot of ids: the highlighted set derives from the
   // LIVE rollup each render, so a ring expires the moment the seat's state resolves (a stale
   // snapshot kept suggesting attention after it was gone — review finding 3).
-  const [highlightKind, setHighlightKind] = useState<keyof AttentionRollup | null>(null);
+  const [highlightKind, setHighlightKind] = useState<
+    keyof AttentionRollup | null
+  >(null);
   const highlight = highlightKind ? new Set(rollup[highlightKind]) : null;
 
   const heldGates = useMemo(
     () => heldGatesByLeafKey(taskDocuments, lifecycles),
     [taskDocuments, lifecycles],
   );
-  const briefPending = useMemo(() => briefPendingSessionIds(pickups, sessions), [pickups, sessions]);
+  const briefPending = useMemo(
+    () => briefPendingSessionIds(pickups, sessions),
+    [pickups, sessions],
+  );
 
-  const landedByMaster = new Map(model.masters.map((master) => [master.key, master.completed]));
+  const landedByMaster = new Map(
+    model.masters.map((master) => [master.key, master.completed]),
+  );
   const allLanded = [
     ...model.masters.flatMap((master) => master.completed),
     ...model.completedUnattached,
   ];
+  const treeRows = useMemo(() => buildSpawnTree(sessions), [sessions]);
+  // The threshold is a rendered-surface contract. Count the row shells the active view actually
+  // emits, not a live-seat subtotal: completed-unattached is always visible, master-completed is
+  // visible only while its folder is expanded, and tree mode has its own flattened population.
+  const rolesRenderedRowCount =
+    model.spine.length +
+    model.masters.reduce(
+      (sum, master) =>
+        sum +
+        master.managers.length +
+        master.clusters.reduce(
+          (clusterSum, cluster) => clusterSum + cluster.seats.length,
+          0,
+        ) +
+        (openDoneFolders[master.key] ?? false ? master.completed.length : 0),
+      0,
+    ) +
+    model.unattached.length +
+    model.completedUnattached.length;
+  const renderedRowCount = treeView ? treeRows.length : rolesRenderedRowCount;
+  const virtualized = renderedRowCount > RAIL_VIRTUALIZE_THRESHOLD;
 
   const focusSet = (kind: keyof AttentionRollup, first: string | null) => {
     setHighlightKind(kind);
@@ -428,41 +543,71 @@ export function SessionRail({ onFocusSession, focusedSessionId, model, rollup }:
     setArmedEnd(null);
     const outcome = await endSessionDetailed(session);
     if (!outcome.ok) {
-      setEndFailure({ sessionId: session.id, error: outcome.error ?? "terminate POST failed" });
+      setEndFailure({
+        sessionId: session.id,
+        error: outcome.error ?? "terminate POST failed",
+      });
     } else {
-      setEndFailure((current) => (current?.sessionId === session.id ? null : current));
+      setEndFailure((current) =>
+        current?.sessionId === session.id ? null : current,
+      );
     }
   };
 
   const executeBulk = (target: BulkTarget) => {
-    const doomed = target.scope === "sprint" ? allLanded : (landedByMaster.get(target.key) ?? []);
+    const doomed =
+      target.scope === "sprint"
+        ? allLanded
+        : landedByMaster.get(target.key) ?? [];
     setArmedBulk(null);
     void endLanded(doomed);
   };
 
-  const bulkConfirm = (target: BulkTarget, doomed: OpenSession[]): ReactNode => (
-    <span className={confirmRow} data-testid={`rail-bulk-confirm-${target.scope === "sprint" ? "sprint" : target.key}`}>
+  const bulkConfirm = (
+    target: BulkTarget,
+    doomed: OpenSession[],
+  ): ReactNode => (
+    <span
+      className={confirmRow}
+      data-testid={`rail-bulk-confirm-${target.scope === "sprint" ? "sprint" : target.key}`}
+    >
       {/* Honest preview: the count AND the names of what is removed. */}
       <span title={doomed.map((session) => session.label).join(", ")}>
         end {doomed.length}: {doomed.map((session) => session.label).join(", ")}
       </span>
-      <button type="button" className={bulkButton} onClick={() => executeBulk(target)} data-testid="rail-bulk-execute">
+      <button
+        type="button"
+        className={bulkButton}
+        onClick={() => executeBulk(target)}
+        data-testid="rail-bulk-execute"
+      >
         confirm
       </button>
-      <button type="button" className={doneToggle} onClick={() => setArmedBulk(null)}>
+      <button
+        type="button"
+        className={doneToggle}
+        onClick={() => setArmedBulk(null)}
+      >
         cancel
       </button>
     </span>
   );
 
-  const renderRow = (session: OpenSession, options: { dormant?: boolean } = {}): ReactNode => {
+  const renderRow = (
+    session: OpenSession,
+    options: { dormant?: boolean } = {},
+  ): ReactNode => {
     const visual = seatVisualState(session);
     const code = roleCode(session);
     const gate = session.leafKey ? heldGates.get(session.leafKey) : undefined;
     const prompt = interactionPromptPreview(session.controlPendingInteraction);
     const selected = session.id === focusedSessionId;
     const chipTone =
-      visual.key === "failed" ? "alarm" : visual.key === "awaiting-input" || visual.key === "waiting" ? "warn" : "muted";
+      visual.key === "failed"
+        ? "alarm"
+        : visual.key === "awaiting-input" || visual.key === "waiting"
+          ? "warn"
+          : "muted";
     // Harvested hints (R7) join the row TOOLTIP as clearly-labeled hints — never the grammar.
     const harvest = harvestBySession[session.id];
     const hintParts = [
@@ -470,16 +615,26 @@ export function SessionRail({ onFocusSession, focusedSessionId, model, rollup }:
       harvest?.turnHint ? `pty hint: ${turnHintWord(harvest.turnHint)}` : null,
     ].filter((part): part is string => part !== null);
     const tooltip =
-      railRowTooltip(session, session.leafKey ? leafIdFromKey(session.leafKey) : undefined) +
-      (hintParts.length > 0 ? ` · ${hintParts.join(" · ")}` : "");
+      railRowTooltip(
+        session,
+        session.leafKey ? leafIdFromKey(session.leafKey) : undefined,
+      ) + (hintParts.length > 0 ? ` · ${hintParts.join(" · ")}` : "");
     return (
       <div
         key={session.id}
         role="button"
         tabIndex={selected ? 0 : -1}
         className={rowShell}
+        style={
+          virtualized
+            ? { contentVisibility: "auto", containIntrinsicSize: "auto 2rem" }
+            : undefined
+        }
         data-selected={selected ? "true" : undefined}
-        data-attention-highlight={highlight?.has(session.id) ? "true" : undefined}
+        data-focus-target={selected ? "true" : undefined}
+        data-attention-highlight={
+          highlight?.has(session.id) ? "true" : undefined
+        }
         data-attention-gate={gate ? "true" : undefined}
         data-testid={`rail-row-${session.id}`}
         title={tooltip}
@@ -500,7 +655,12 @@ export function SessionRail({ onFocusSession, focusedSessionId, model, rollup }:
         />
         {code ? (
           <span
-            className={roleChip({ role: code in ROLE_CHIP_TONES ? (code as keyof typeof ROLE_CHIP_TONES) : undefined })}
+            className={roleChip({
+              role:
+                code in ROLE_CHIP_TONES
+                  ? (code as keyof typeof ROLE_CHIP_TONES)
+                  : undefined,
+            })}
             data-testid={`rail-role-${session.id}`}
           >
             {code}
@@ -528,7 +688,7 @@ export function SessionRail({ onFocusSession, focusedSessionId, model, rollup }:
               title="brief pending — dispatch brief awaiting acknowledgment"
               data-testid={`rail-brief-${session.id}`}
             >
-              ✉
+              <span aria-hidden="true">✉</span> brief
             </span>
           ) : null}
           {gate ? (
@@ -558,7 +718,9 @@ export function SessionRail({ onFocusSession, focusedSessionId, model, rollup }:
           <span
             className={statusChip({ tone: chipTone })}
             // Question triage (R16): the input? chip's tooltip carries the prompt preview.
-            title={visual.key === "awaiting-input" && prompt ? prompt : visual.word}
+            title={
+              visual.key === "awaiting-input" && prompt ? prompt : visual.word
+            }
             data-testid={`rail-status-${session.id}`}
           >
             {visual.chip}
@@ -568,7 +730,11 @@ export function SessionRail({ onFocusSession, focusedSessionId, model, rollup }:
             (landed) rows carry the mockup's compact ✕. Arming shows the honest confirm naming
             session · leaf · state (L6 R5) before anything is killed. */}
         {endFailure?.sessionId === session.id ? (
-          <span className={confirmRow} role="alert" data-testid={`rail-end-error-${session.id}`}>
+          <span
+            className={confirmRow}
+            role="alert"
+            data-testid={`rail-end-error-${session.id}`}
+          >
             <span title={endFailure.error}>end failed: {endFailure.error}</span>
             <button
               type="button"
@@ -594,8 +760,13 @@ export function SessionRail({ onFocusSession, focusedSessionId, model, rollup }:
             </button>
           </span>
         ) : armedEnd === session.id ? (
-          <span className={confirmRow} data-testid={`rail-end-confirm-${session.id}`}>
-            <span title={terminateConfirmCopy(session)}>{terminateConfirmCopy(session)}</span>
+          <span
+            className={confirmRow}
+            data-testid={`rail-end-confirm-${session.id}`}
+          >
+            <span title={terminateConfirmCopy(session)}>
+              {terminateConfirmCopy(session)}
+            </span>
             <button
               type="button"
               className={bulkButton}
@@ -643,29 +814,42 @@ export function SessionRail({ onFocusSession, focusedSessionId, model, rollup }:
     const doneOpen = openDoneFolders[master.key] ?? false; // collapsed by default (RULED)
     const armed = armedBulk?.scope === "master" && armedBulk.key === master.key;
     return (
-      <section key={master.key} className={masterBox} data-testid={`rail-master-${master.key}`}>
+      <section
+        key={master.key}
+        className={masterBox}
+        data-testid={`rail-master-${master.key}`}
+      >
         <div className={masterHead}>
           <span className={masterName} title={master.label}>
             {master.label}
           </span>
           {badge ? (
             <span
-              className={attnButton({ tone: badge.kind === "failed" ? "alarm" : "warn" })}
+              className={attnButton({
+                tone: badge.kind === "failed" ? "alarm" : "warn",
+              })}
               data-testid={`rail-master-attention-${master.key}`}
             >
-              {badge.glyph}
-              {badge.count}
+              <span aria-hidden="true">{badge.glyph}</span>
+              {badge.count} {badge.kind === "failed" ? "failed" : "need input"}
             </span>
           ) : null}
           {master.completed.length > 0 ? (
             armed ? (
-              bulkConfirm({ scope: "master", key: master.key }, master.completed)
+              bulkConfirm(
+                { scope: "master", key: master.key },
+                master.completed,
+              )
             ) : (
               <button
                 type="button"
                 className={bulkButton}
-                onClick={() => setArmedBulk({ scope: "master", key: master.key })}
-                title={master.completed.map((session) => session.label).join(", ")}
+                onClick={() =>
+                  setArmedBulk({ scope: "master", key: master.key })
+                }
+                title={master.completed
+                  .map((session) => session.label)
+                  .join(", ")}
                 data-testid={`rail-bulk-master-${master.key}`}
               >
                 ✕ end {master.completed.length} done
@@ -676,8 +860,14 @@ export function SessionRail({ onFocusSession, focusedSessionId, model, rollup }:
         <div className={masterBody}>
           {master.managers.map((manager) => renderRow(manager))}
           {master.clusters.map((cluster) => (
-            <div key={cluster.key} className={leafGroup} data-testid={`rail-cluster-${cluster.key}`}>
-              <span className={leafCaption}>└ {cluster.label}</span>
+            <div
+              key={cluster.key}
+              className={leafGroup}
+              data-testid={`rail-cluster-${cluster.key}`}
+            >
+              <span className={leafCaption}>
+                <span aria-hidden="true">└</span> {cluster.label}
+              </span>
               {cluster.seats.map((seat) => renderRow(seat))}
             </div>
           ))}
@@ -688,7 +878,10 @@ export function SessionRail({ onFocusSession, focusedSessionId, model, rollup }:
                 className={doneToggle}
                 aria-expanded={doneOpen}
                 onClick={() =>
-                  setOpenDoneFolders((current) => ({ ...current, [master.key]: !doneOpen }))
+                  setOpenDoneFolders((current) => ({
+                    ...current,
+                    [master.key]: !doneOpen,
+                  }))
                 }
                 data-testid={`rail-done-toggle-${master.key}`}
               >
@@ -696,7 +889,11 @@ export function SessionRail({ onFocusSession, focusedSessionId, model, rollup }:
               </button>
             </div>
           ) : null}
-          {doneOpen ? master.completed.map((session) => renderRow(session, { dormant: true })) : null}
+          {doneOpen
+            ? master.completed.map((session) =>
+                renderRow(session, { dormant: true }),
+              )
+            : null}
         </div>
       </section>
     );
@@ -708,7 +905,9 @@ export function SessionRail({ onFocusSession, focusedSessionId, model, rollup }:
         <button
           type="button"
           className={attnButton({ tone: "warn" })}
-          onClick={() => focusSet("needsInput", jumpClass({ needsInput: rollup.needsInput }))}
+          onClick={() =>
+            focusSet("needsInput", jumpClass({ needsInput: rollup.needsInput }))
+          }
           data-testid="rail-attention-input"
         >
           ❗ {rollup.needsInput.length} need input
@@ -718,7 +917,9 @@ export function SessionRail({ onFocusSession, focusedSessionId, model, rollup }:
         <button
           type="button"
           className={attnButton({ tone: "alarm" })}
-          onClick={() => focusSet("failed", jumpClass({ failed: rollup.failed }))}
+          onClick={() =>
+            focusSet("failed", jumpClass({ failed: rollup.failed }))
+          }
           data-testid="rail-attention-failed"
         >
           ✖ {rollup.failed.length} failed
@@ -728,7 +929,9 @@ export function SessionRail({ onFocusSession, focusedSessionId, model, rollup }:
         <button
           type="button"
           className={attnButton({ tone: "warn" })}
-          onClick={() => focusSet("unacked", jumpClass({ unacked: rollup.unacked }))}
+          onClick={() =>
+            focusSet("unacked", jumpClass({ unacked: rollup.unacked }))
+          }
           data-testid="rail-attention-unacked"
         >
           {rollup.unacked.length} unacked
@@ -738,7 +941,12 @@ export function SessionRail({ onFocusSession, focusedSessionId, model, rollup }:
         <button
           type="button"
           className={attnButton({ tone: "warn" })}
-          onClick={() => focusSet("criticalBus", jumpClass({ criticalBus: rollup.criticalBus }))}
+          onClick={() =>
+            focusSet(
+              "criticalBus",
+              jumpClass({ criticalBus: rollup.criticalBus }),
+            )
+          }
           data-testid="rail-attention-bus"
         >
           {rollup.criticalBus.length} bus
@@ -748,7 +956,9 @@ export function SessionRail({ onFocusSession, focusedSessionId, model, rollup }:
         <button
           type="button"
           className={attnButton({ tone: "info" })}
-          onClick={() => focusSet("working", jumpClass({ working: rollup.working }))}
+          onClick={() =>
+            focusSet("working", jumpClass({ working: rollup.working }))
+          }
           data-testid="rail-attention-working"
         >
           {rollup.working.length} working
@@ -757,44 +967,32 @@ export function SessionRail({ onFocusSession, focusedSessionId, model, rollup }:
     </div>
   );
 
-  const visibleCount =
-    model.spine.length +
-    model.masters.reduce(
-      (sum, master) =>
-        sum + master.managers.length + master.clusters.reduce((s, c) => s + c.seats.length, 0),
-      0,
-    ) +
-    model.unattached.length;
-
   return (
     // The rail region's primary focus target (design §5.3) — always present, even empty.
-    <div className={railBody} data-testid="session-rail" data-focus-target tabIndex={-1}>
+    <div
+      className={railBody}
+      data-testid="session-rail"
+      data-focus-target
+      data-rendered-row-count={renderedRowCount}
+      data-virtualized={virtualized ? "true" : "false"}
+      tabIndex={-1}
+    >
       {!pollHealth.healthy ? (
-        <div className={staleBanner} data-testid="rail-poll-stale" role="status">
-          catalog poll stale — {pollHealth.missedBeats} beats missed; rows may be frozen
-        </div>
-      ) : null}
-      {cleanupOutcome ? (
-        // L6 R5: the landed-cleanup route's OWN outcome — closed AND skipped (with reasons) —
-        // rendered after a bulk end instead of silently dropping the skips.
-        <div className={sprintRow} role="status" data-testid="rail-cleanup-outcome">
-          <span title={cleanupOutcomeCopy(cleanupOutcome)}>{cleanupOutcomeCopy(cleanupOutcome)}</span>
-          <button
-            type="button"
-            className={doneToggle}
-            onClick={dismissCleanupOutcome}
-            aria-label="Dismiss cleanup outcome"
-            data-testid="rail-cleanup-outcome-dismiss"
-          >
-            ✕
-          </button>
+        <div
+          className={staleBanner}
+          data-testid="rail-poll-stale"
+          role="status"
+        >
+          catalog poll stale — {pollHealth.missedBeats} beats missed; rows may
+          be frozen
         </div>
       ) : null}
       {strip}
       <div className={railTop}>
         {model.masters.length > 0 ? (
           <span className={sprintRow} data-testid="rail-sprint-row">
-            sprint · {model.masters.length} master{model.masters.length === 1 ? "" : "s"}
+            sprint · {model.masters.length} master
+            {model.masters.length === 1 ? "" : "s"}
           </span>
         ) : null}
         {model.completedTotal > 0 ? (
@@ -823,13 +1021,13 @@ export function SessionRail({ onFocusSession, focusedSessionId, model, rollup }:
           {treeView ? "roles" : "tree"}
         </button>
       </div>
-      {visibleCount === 0 && allLanded.length === 0 ? (
+      {treeRows.length === 0 ? (
         <div className={zeroState} data-testid="rail-zero-state">
-          no sessions — launch one from Chats (the cockpit launcher lands in L5)
+          no chats — launch a hosted chat or raw terminal above
         </div>
       ) : treeView ? (
         <div className={treeIndent} data-testid="rail-spawn-tree">
-          {buildSpawnTree(sessions).map(({ session, depth }) => (
+          {treeRows.map(({ session, depth }) => (
             <div key={session.id} style={{ marginLeft: `${depth * 0.9}rem` }}>
               {renderRow(session, { dormant: session.status === "landed" })}
             </div>
@@ -839,7 +1037,8 @@ export function SessionRail({ onFocusSession, focusedSessionId, model, rollup }:
         <>
           {model.spine.map((session) => renderRow(session))}
           {model.masters.map(renderMaster)}
-          {model.unattached.length > 0 || model.completedUnattached.length > 0 ? (
+          {model.unattached.length > 0 ||
+          model.completedUnattached.length > 0 ? (
             <section className={groupBox} data-testid="rail-unattached">
               <div className={masterHead}>
                 <span className={masterName}>unattached</span>
@@ -849,7 +1048,9 @@ export function SessionRail({ onFocusSession, focusedSessionId, model, rollup }:
               </div>
               <div className={groupRows}>
                 {model.unattached.map((session) => renderRow(session))}
-                {model.completedUnattached.map((session) => renderRow(session, { dormant: true }))}
+                {model.completedUnattached.map((session) =>
+                  renderRow(session, { dormant: true }),
+                )}
               </div>
             </section>
           ) : null}
@@ -860,11 +1061,12 @@ export function SessionRail({ onFocusSession, focusedSessionId, model, rollup }:
         {heartbeat && heartbeat.lastTickAt !== null ? (
           <>
             <span>
-              inbox <b>{heartbeat.pendingInboxCount} pending</b> / {heartbeat.redeliverableInboxCount}{" "}
-              redeliverable
+              inbox <b>{heartbeat.pendingInboxCount} pending</b> /{" "}
+              {heartbeat.redeliverableInboxCount} redeliverable
             </span>
             <span title="Turn-state freshness is bounded by the 10 s liveness sweep; the supervisor heartbeat is the bus liveness anchor.">
-              heartbeat {heartbeat.ageSeconds ?? "—"}s / stale {heartbeat.staleCutoffSeconds}s
+              heartbeat {heartbeat.ageSeconds ?? "—"}s / stale{" "}
+              {heartbeat.staleCutoffSeconds}s
             </span>
           </>
         ) : (

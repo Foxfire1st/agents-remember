@@ -160,6 +160,19 @@ interface InflightRead {
   refresh: boolean;
 }
 const inflight = new Map<string, InflightRead>();
+let catalogGeneration = 0;
+
+/**
+ * Dev-bench scenario boundary: discard both rendered catalog state and single-flight ownership.
+ * The generation guard is required because a fetch started by the scenario being unmounted may
+ * settle after the selector has installed the next authority; that stale result must not repopulate
+ * the new scenario's otherwise-empty dynamic catalog.
+ */
+export function resetCapabilityCatalogForDev(): void {
+  catalogGeneration += 1;
+  inflight.clear();
+  capabilityCatalogStore.setState({ perHarness: {} });
+}
 
 /**
  * Fetch one harness's pre-session catalog. `refresh=true` forces daemon-side invalidation (the
@@ -171,6 +184,7 @@ export function fetchHarnessCapabilities(
   harness: string,
   options: { refresh?: boolean; base?: string } = {},
 ): Promise<PerHarnessCapabilities> {
+  const generation = catalogGeneration;
   const refresh = options.refresh ?? false;
   const base = options.base ?? "";
   const pending = inflight.get(harness);
@@ -181,6 +195,7 @@ export function fetchHarnessCapabilities(
     const chained: InflightRead = { refresh: true, promise: pending.promise };
     chained.promise = pending.promise.then(() => {
       if (inflight.get(harness) === chained) inflight.delete(harness);
+      if (generation !== catalogGeneration) return harnessCapabilities(harness);
       return fetchHarnessCapabilities(harness, options);
     });
     inflight.set(harness, chained);
@@ -228,7 +243,7 @@ export function fetchHarnessCapabilities(
         },
       };
     }
-    patchHarness(harness, entry);
+    if (generation === catalogGeneration) patchHarness(harness, entry);
     return entry;
   })();
 

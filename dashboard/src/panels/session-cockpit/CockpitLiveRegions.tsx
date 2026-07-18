@@ -28,7 +28,8 @@ export function CockpitLiveRegions() {
         data-testid="cockpit-live-polite"
         data-announce-seq={polite.seq}
       >
-        {polite.text}
+        {/* Keyed replacement makes an identical repeat a real accessibility-tree mutation. */}
+        <span key={polite.seq}>{polite.text}</span>
       </div>
       <div
         className={srOnly}
@@ -37,7 +38,7 @@ export function CockpitLiveRegions() {
         data-testid="cockpit-live-assertive"
         data-announce-seq={assertive.seq}
       >
-        {assertive.text}
+        <span key={assertive.seq}>{assertive.text}</span>
       </div>
     </>
   );

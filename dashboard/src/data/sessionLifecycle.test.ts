@@ -3,6 +3,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
+  cleanupFailureCopy,
   cleanupOutcomeCopy,
   retireResidualCopy,
   terminateConfirmCopy,
@@ -23,7 +24,12 @@ import {
 } from "../test/fixtures/catalogRows";
 
 beforeEach(() => {
-  lifecycleNoticeStore.setState({ residuals: [], cleanupOutcome: null, sweptRetire: {} });
+  lifecycleNoticeStore.setState({
+    residuals: [],
+    cleanupOutcome: null,
+    cleanupFailure: null,
+    sweptRetire: {},
+  });
   sessionStore.getState().hydrate([]);
 });
 
@@ -41,7 +47,10 @@ describe("terminateSessionDetailed", () => {
       })) as unknown as typeof fetch,
     );
     const outcome = await terminateSessionDetailed("l6-controlled");
-    expect(outcome).toEqual({ ok: true, controlStopDetail: "control command queue is stopped" });
+    expect(outcome).toEqual({
+      ok: true,
+      controlStopDetail: "control command queue is stopped",
+    });
   });
 
   it("a clean terminate carries no residual", async () => {
@@ -52,7 +61,10 @@ describe("terminateSessionDetailed", () => {
         json: async () => ({ session: "x", status: "terminated" }),
       })) as unknown as typeof fetch,
     );
-    expect(await terminateSessionDetailed("x")).toEqual({ ok: true, controlStopDetail: undefined });
+    expect(await terminateSessionDetailed("x")).toEqual({
+      ok: true,
+      controlStopDetail: undefined,
+    });
   });
 
   it("a FAILED terminate POST keeps the server's words verbatim (review finding 4)", async () => {
@@ -96,7 +108,9 @@ describe("retire-residual sweep (review F1, sev-3 — focus-independent capture)
   });
 
   it("rows already in the store when the sweep starts are captured too (reload path)", () => {
-    sessionStore.getState().hydrate([fromTerminalSessionInfo(L6_RETIRED_WITH_STOP_ERROR)]);
+    sessionStore
+      .getState()
+      .hydrate([fromTerminalSessionInfo(L6_RETIRED_WITH_STOP_ERROR)]);
     const release = startRetireResidualSweep();
     expect(lifecycleNoticeStore.getState().residuals).toHaveLength(1);
     release();
@@ -116,7 +130,9 @@ describe("endSessionDetailed (the cockpit terminate flow)", () => {
     sessionStore.getState().hydrate([session]);
     const outcome = await endSessionDetailed(session);
     expect(outcome.ok).toBe(true);
-    expect(sessionStore.getState().sessions.find((s) => s.id === session.id)).toBeUndefined();
+    expect(
+      sessionStore.getState().sessions.find((s) => s.id === session.id),
+    ).toBeUndefined();
     const residuals = lifecycleNoticeStore.getState().residuals;
     expect(residuals).toHaveLength(1);
     expect(residuals[0]).toMatchObject({
@@ -128,6 +144,29 @@ describe("endSessionDetailed (the cockpit terminate flow)", () => {
 });
 
 describe("endLandedDetailed (bulk cleanup honesty)", () => {
+  it("snapshots exact intended rows when the authority result is unavailable", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        throw new Error("network disconnected");
+      }),
+    );
+    const result = await endLandedDetailed([
+      { id: "landed-a", label: "reviewer done" },
+      { id: "landed-b", label: "worker done" },
+    ]);
+    expect(result).toBeNull();
+    const failure = lifecycleNoticeStore.getState().cleanupFailure;
+    expect(failure?.targets).toEqual([
+      { id: "landed-a", label: "reviewer done" },
+      { id: "landed-b", label: "worker done" },
+    ]);
+    expect(lifecycleNoticeStore.getState().cleanupOutcome).toBeNull();
+    expect(cleanupFailureCopy(failure!)).toBe(
+      "cleanup result unavailable — intended rows: reviewer done (landed-a), worker done (landed-b)",
+    );
+  });
+
   it("records the route's own closed + skipped outcome — skips never vanish", async () => {
     vi.stubGlobal(
       "fetch",
@@ -139,7 +178,9 @@ describe("endLandedDetailed (bulk cleanup honesty)", () => {
               closed: 1,
               skipped: 1,
               closedSessions: ["landed-a"],
-              skippedSessions: [{ session: "landed-b", reason: "status:running" }],
+              skippedSessions: [
+                { session: "landed-b", reason: "status:running" },
+              ],
             }),
           } as Response;
         }
@@ -147,8 +188,16 @@ describe("endLandedDetailed (bulk cleanup honesty)", () => {
       }),
     );
     const rows = [
-      fromTerminalSessionInfo({ ...L6_CONTROLLED_WORKING, id: "landed-a", status: "landed" }),
-      fromTerminalSessionInfo({ ...L6_CONTROLLED_WORKING, id: "landed-b", status: "landed" }),
+      fromTerminalSessionInfo({
+        ...L6_CONTROLLED_WORKING,
+        id: "landed-a",
+        status: "landed",
+      }),
+      fromTerminalSessionInfo({
+        ...L6_CONTROLLED_WORKING,
+        id: "landed-b",
+        status: "landed",
+      }),
     ];
     sessionStore.getState().hydrate(rows);
     const result = await endLandedDetailed(rows);
@@ -157,9 +206,9 @@ describe("endLandedDetailed (bulk cleanup honesty)", () => {
       closed: 1,
       skipped: 1,
     });
-    expect(cleanupOutcomeCopy(lifecycleNoticeStore.getState().cleanupOutcome!)).toBe(
-      "ended 1 · skipped 1 (landed-b: status:running)",
-    );
+    expect(
+      cleanupOutcomeCopy(lifecycleNoticeStore.getState().cleanupOutcome!),
+    ).toBe("ended 1 · skipped 1 (landed-b: status:running)");
   });
 });
 

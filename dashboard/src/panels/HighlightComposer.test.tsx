@@ -2,6 +2,7 @@ import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useSelectionCapture } from "../data/selection";
+import { sessionCockpitStore } from "../data/sessionCockpitStore";
 import { createSession, sessionStore } from "../data/sessions";
 import {
   keepWaitingForSubmit,
@@ -9,7 +10,11 @@ import {
   submitSessionText,
   waitForSubmissionReady,
 } from "../data/submitClient";
-import { startSubmitRecord, type SubmitPhase, type SubmitRecord } from "../data/submitMachine";
+import {
+  startSubmitRecord,
+  type SubmitPhase,
+  type SubmitRecord,
+} from "../data/submitMachine";
 import { fetchHarnesses } from "../data/terminal";
 import { HighlightComposer } from "./HighlightComposer";
 
@@ -73,27 +78,37 @@ function record(
 }
 
 beforeEach(() => {
-  vi.mocked(useSelectionCapture).mockReturnValue({ selection: SELECTION, clear });
+  vi.mocked(useSelectionCapture).mockReturnValue({
+    selection: SELECTION,
+    clear,
+  });
   vi.mocked(createSession).mockResolvedValue("created-id");
   vi.mocked(fetchHarnesses).mockResolvedValue(HARNESSES);
-  vi.mocked(waitForSubmissionReady).mockResolvedValue({ ready: true, editable: true });
+  vi.mocked(waitForSubmissionReady).mockResolvedValue({
+    ready: true,
+    editable: true,
+  });
   vi.mocked(submitSessionText).mockImplementation(async (_id, text) => ({
     status: "started",
     record: record(text),
   }));
-  vi.mocked(retryRouteFailure).mockImplementation(async (_id, _requestId, text) => ({
-    record: record(text),
-  }));
+  vi.mocked(retryRouteFailure).mockImplementation(
+    async (_id, _requestId, text) => ({
+      record: record(text),
+    }),
+  );
   vi.mocked(keepWaitingForSubmit).mockImplementation(async (_id, requestId) =>
     record("retained", "accepted", requestId),
   );
   sessionStore.setState({ sessions: [], activeId: null, count: 0 });
+  sessionCockpitStore.setState({ focusedSessionId: null });
 });
 
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
   sessionStore.setState({ sessions: [], activeId: null, count: 0 });
+  sessionCockpitStore.setState({ focusedSessionId: null });
 });
 
 describe("HighlightComposer reliable-submit disposition (FEUI-L5)", () => {
@@ -113,7 +128,9 @@ describe("HighlightComposer reliable-submit disposition (FEUI-L5)", () => {
   });
 
   it("offers detected harnesses only — never a terminal target — and states text-only scope", async () => {
-    const { findByTestId, getByText, queryByTestId } = render(<HighlightComposer />);
+    const { findByTestId, getByText, queryByTestId } = render(
+      <HighlightComposer />,
+    );
     fireEvent.click(await findByTestId("highlight-add-to-chat"));
     expect(await findByTestId("highlight-target-c:claude")).not.toBeNull();
     expect(await findByTestId("highlight-target-c:codex")).not.toBeNull();
@@ -123,13 +140,20 @@ describe("HighlightComposer reliable-submit disposition (FEUI-L5)", () => {
   });
 
   it("Ctrl+Enter creates the default harness, waits for ready, and submits one exact package", async () => {
-    const { findByTestId, getByRole } = render(<HighlightComposer />);
+    const onSent = vi.fn();
+    const { findByTestId, getByRole } = render(
+      <HighlightComposer onSent={onSent} />,
+    );
     fireEvent.click(await findByTestId("highlight-add-to-chat"));
     await findByTestId("highlight-target-c:claude");
     fireEvent.change(getByRole("textbox"), { target: { value: "  note α  " } });
     fireEvent.keyDown(getByRole("textbox"), { key: "Enter", ctrlKey: true });
     await waitFor(() =>
-      expect(createSession).toHaveBeenCalledWith("Claude Code", "harness", "claude"),
+      expect(createSession).toHaveBeenCalledWith(
+        "Claude Code",
+        "harness",
+        "claude",
+      ),
     );
     expect(waitForSubmissionReady).toHaveBeenCalledWith("created-id");
     await waitFor(() =>
@@ -140,6 +164,7 @@ describe("HighlightComposer reliable-submit disposition (FEUI-L5)", () => {
       ),
     );
     expect(clear).toHaveBeenCalled();
+    expect(onSent).toHaveBeenCalledWith("created-id");
   });
 
   it("passes the selected lifecycle when creating a native-control chat", async () => {
@@ -163,7 +188,9 @@ describe("HighlightComposer reliable-submit disposition (FEUI-L5)", () => {
     fireEvent.click(await findByTestId("highlight-add-to-chat"));
     fireEvent.click(await findByTestId("highlight-target-c:codex"));
     fireEvent.keyDown(getByRole("textbox"), { key: "Enter", ctrlKey: true });
-    await waitFor(() => expect(createSession).toHaveBeenCalledWith("Codex", "harness", "codex"));
+    await waitFor(() =>
+      expect(createSession).toHaveBeenCalledWith("Codex", "harness", "codex"),
+    );
   });
 
   it("submits to an open harness and filters targets by lifecycle", async () => {
@@ -186,8 +213,9 @@ describe("HighlightComposer reliable-submit disposition (FEUI-L5)", () => {
       },
       { id: "t1", label: "Terminal", kind: "terminal", status: "running" },
     ]);
+    const onSent = vi.fn();
     const { findByTestId, getByRole, queryByTestId } = render(
-      <HighlightComposer selectedLifecycleId="LC1" />,
+      <HighlightComposer selectedLifecycleId="LC1" onSent={onSent} />,
     );
     fireEvent.click(await findByTestId("highlight-add-to-chat"));
     expect(await findByTestId("highlight-target-s:s1")).not.toBeNull();
@@ -202,7 +230,122 @@ describe("HighlightComposer reliable-submit disposition (FEUI-L5)", () => {
     );
     expect(sessionStore.getState().activeId).toBe("s1");
     expect(clear).toHaveBeenCalled();
+    expect(onSent).toHaveBeenCalledWith("s1");
   });
+
+  it("commits an existing queued target to the active route only after acceptance", async () => {
+    sessionStore.getState().hydrate(
+      [
+        {
+          id: "previous",
+          label: "Current chat",
+          kind: "harness",
+          status: "running",
+          controlState: "ready",
+        },
+        {
+          id: "target",
+          label: "Target chat",
+          kind: "harness",
+          status: "running",
+          controlState: "ready",
+        },
+      ],
+      "previous",
+    );
+    sessionCockpitStore.setState({ focusedSessionId: "previous" });
+    vi.mocked(submitSessionText).mockImplementationOnce(async (_id, text) => ({
+      status: "started",
+      record: record(text, "queued", "queued-existing"),
+    }));
+    const onSent = vi.fn();
+    const { findByTestId } = render(<HighlightComposer onSent={onSent} />);
+    fireEvent.click(await findByTestId("highlight-add-to-chat"));
+    fireEvent.click(await findByTestId("highlight-target-s:target"));
+    fireEvent.click(await findByTestId("highlight-send"));
+
+    await waitFor(() => expect(onSent).toHaveBeenCalledWith("target"));
+    expect(sessionStore.getState().activeId).toBe("target");
+    expect(clear).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    {
+      name: "rejected",
+      result: (text: string) => ({
+        status: "started" as const,
+        record: record(text, "rejected", "existing-rejected", "queue full"),
+      }),
+    },
+    {
+      name: "blocked",
+      result: () => ({
+        status: "blocked" as const,
+        reason: "control route unavailable",
+      }),
+    },
+    {
+      name: "route-error",
+      result: (text: string) => ({
+        status: "started" as const,
+        record: record(
+          text,
+          "route-error",
+          "existing-route-error",
+          "bridge restarting",
+        ),
+      }),
+    },
+    {
+      name: "unresolved endgame",
+      result: (text: string) => ({
+        status: "started" as const,
+        record: record(text, "endgame", "existing-endgame", "still unresolved"),
+      }),
+    },
+  ])(
+    "a $name existing-target outcome preserves the prior route, focus, view, and callback",
+    async ({ result }) => {
+      sessionStore.getState().hydrate(
+        [
+          {
+            id: "previous",
+            label: "Current chat",
+            kind: "harness",
+            status: "running",
+            controlState: "ready",
+          },
+          {
+            id: "target",
+            label: "Target chat",
+            kind: "harness",
+            status: "running",
+            controlState: "ready",
+          },
+        ],
+        "previous",
+      );
+      sessionCockpitStore.setState({ focusedSessionId: "previous" });
+      vi.mocked(submitSessionText).mockImplementationOnce(async (_id, text) =>
+        result(text),
+      );
+      let view = "files";
+      const onSent = vi.fn(() => {
+        view = "chats";
+      });
+      const { findByTestId } = render(<HighlightComposer onSent={onSent} />);
+      fireEvent.click(await findByTestId("highlight-add-to-chat"));
+      fireEvent.click(await findByTestId("highlight-target-s:target"));
+      fireEvent.click(await findByTestId("highlight-send"));
+
+      await findByTestId("highlight-status");
+      expect(sessionStore.getState().activeId).toBe("previous");
+      expect(sessionCockpitStore.getState().focusedSessionId).toBe("previous");
+      expect(view).toBe("files");
+      expect(onSent).not.toHaveBeenCalled();
+      expect(clear).not.toHaveBeenCalled();
+    },
+  );
 
   it("direct leaf pill click submits through /submit; selection alone never acts", async () => {
     const leafKey = "repo/master/L8";
@@ -220,20 +363,30 @@ describe("HighlightComposer reliable-submit disposition (FEUI-L5)", () => {
         controlState: "ready",
       },
     ]);
+    const onSent = vi.fn();
     const { findByTestId, queryByTestId } = render(
-      <HighlightComposer viewedLeafKey={leafKey} leafChatActive />,
+      <HighlightComposer
+        viewedLeafKey={leafKey}
+        leafChatActive
+        onSent={onSent}
+      />,
     );
     const pill = await findByTestId("highlight-add-to-chat");
     expect(submitSessionText).not.toHaveBeenCalled();
     fireEvent.click(pill);
     await waitFor(() =>
-      expect(submitSessionText).toHaveBeenCalledWith("leaf-chat", expect.any(String), {
-        source: "highlight",
-        clearDraftOnAccept: false,
-      }),
+      expect(submitSessionText).toHaveBeenCalledWith(
+        "leaf-chat",
+        expect.any(String),
+        {
+          source: "highlight",
+          clearDraftOnAccept: false,
+        },
+      ),
     );
     expect(queryByTestId("highlight-send")).toBeNull();
     expect(clear).toHaveBeenCalled();
+    expect(onSent).toHaveBeenCalledWith("leaf-chat");
   });
 
   it("keeps a rejected direct submit visible with the verbatim detail", async () => {
@@ -256,23 +409,38 @@ describe("HighlightComposer reliable-submit disposition (FEUI-L5)", () => {
       status: "started",
       record: record(text, "rejected", "direct-rejected", "queue full: 8/8"),
     }));
+    const onSent = vi.fn();
     const { findByTestId } = render(
-      <HighlightComposer viewedLeafKey={leafKey} leafChatActive />,
+      <HighlightComposer
+        viewedLeafKey={leafKey}
+        leafChatActive
+        onSent={onSent}
+      />,
     );
     fireEvent.click(await findByTestId("highlight-add-to-chat"));
-    expect((await findByTestId("highlight-status")).textContent).toContain("queue full: 8/8");
+    expect((await findByTestId("highlight-status")).textContent).toContain(
+      "queue full: 8/8",
+    );
     expect(await findByTestId("highlight-send")).not.toBeNull();
     expect(clear).not.toHaveBeenCalled();
+    expect(onSent).not.toHaveBeenCalled();
   });
 
   it("retries a route failure with the same requestId and reuses the created session", async () => {
     vi.mocked(submitSessionText).mockImplementationOnce(async (_id, text) => ({
       status: "started",
-      record: record(text, "route-error", "occupied-request", "bridge restarting"),
+      record: record(
+        text,
+        "route-error",
+        "occupied-request",
+        "bridge restarting",
+      ),
     }));
-    vi.mocked(retryRouteFailure).mockImplementationOnce(async (_id, requestId, text) => ({
-      record: record(text, "accepted", requestId),
-    }));
+    vi.mocked(retryRouteFailure).mockImplementationOnce(
+      async (_id, requestId, text) => ({
+        record: record(text, "accepted", requestId),
+      }),
+    );
     const { findByTestId } = render(<HighlightComposer />);
     fireEvent.click(await findByTestId("highlight-add-to-chat"));
     fireEvent.click(await findByTestId("highlight-send"));
@@ -301,7 +469,10 @@ describe("HighlightComposer reliable-submit disposition (FEUI-L5)", () => {
     const keep = await findByText("keep waiting");
     fireEvent.click(keep);
     await waitFor(() =>
-      expect(keepWaitingForSubmit).toHaveBeenCalledWith("created-id", "unresolved-request"),
+      expect(keepWaitingForSubmit).toHaveBeenCalledWith(
+        "created-id",
+        "unresolved-request",
+      ),
     );
     expect(clear).toHaveBeenCalled();
   });
@@ -309,9 +480,10 @@ describe("HighlightComposer reliable-submit disposition (FEUI-L5)", () => {
   it("guards duplicate Ctrl+Enter in one tick and never creates two sessions", async () => {
     let release: (() => void) | undefined;
     vi.mocked(waitForSubmissionReady).mockImplementationOnce(
-      () => new Promise((resolve) => {
-        release = () => resolve({ ready: true, editable: true });
-      }),
+      () =>
+        new Promise((resolve) => {
+          release = () => resolve({ ready: true, editable: true });
+        }),
     );
     const { findByTestId, getByRole } = render(<HighlightComposer />);
     fireEvent.click(await findByTestId("highlight-add-to-chat"));
@@ -324,9 +496,13 @@ describe("HighlightComposer reliable-submit disposition (FEUI-L5)", () => {
   });
 
   it("does not intercept pasted images and exposes no image/terminal delivery path", async () => {
-    const { findByTestId, getByRole, queryByTestId } = render(<HighlightComposer />);
+    const { findByTestId, getByRole, queryByTestId } = render(
+      <HighlightComposer />,
+    );
     fireEvent.click(await findByTestId("highlight-add-to-chat"));
-    const file = new File([new Uint8Array([1])], "shot.png", { type: "image/png" });
+    const file = new File([new Uint8Array([1])], "shot.png", {
+      type: "image/png",
+    });
     fireEvent.paste(getByRole("textbox"), { clipboardData: { files: [file] } });
     expect(queryByTestId("highlight-image")).toBeNull();
     expect(queryByTestId("highlight-target-c:terminal")).toBeNull();

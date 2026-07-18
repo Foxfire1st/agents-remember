@@ -276,7 +276,7 @@ function withPerSession(
 
 export const sessionCockpitStore = createStore<SessionCockpitState>((set) => ({
   focusedSessionId: null,
-  layout: { railCollapsed: false, inspectorCollapsed: false },
+  layout: { railCollapsed: false, inspectorCollapsed: true },
   paletteOpen: false,
   orchestrationTreeView: typeof window === "undefined" ? false : readPersistedTreeView(),
   pollHealth: { lastBeatAt: null, missedBeats: 0, healthy: true },

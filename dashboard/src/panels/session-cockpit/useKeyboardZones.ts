@@ -6,7 +6,10 @@
 import { useEffect, useRef } from "react";
 import { tinykeys, type KeybindingsMap } from "tinykeys";
 
-import { CHROME_CHORDS, COMPOSER_CHORDS } from "../../data/keymap/chords";
+import {
+  keymapCommandIsActive,
+  useEffectiveKeymap,
+} from "../../data/keymap/preferences";
 import { PTY_RESERVED } from "../../data/keymap/reserved";
 import { routeKey, slashOpensPalette, zoneForTarget } from "../../data/keymap/zones";
 
@@ -23,6 +26,7 @@ export function useKeyboardZones({
 }) {
   const dispatchRef = useRef(dispatch);
   dispatchRef.current = dispatch;
+  const keymap = useEffectiveKeymap();
 
   useEffect(() => {
     if (!active) return undefined;
@@ -36,7 +40,10 @@ export function useKeyboardZones({
       handlers.set(chord, list);
     };
 
-    for (const entry of [...CHROME_CHORDS, ...COMPOSER_CHORDS]) {
+    for (const entry of keymap.bindings) {
+      // In Vim profile, Escape belongs to Vim's insert→normal transition. F6 remains the
+      // invariant cockpit escape, including from normal mode, so the editor cannot trap focus.
+      if (!keymapCommandIsActive(keymap, entry.commandId)) continue;
       add(entry.chord, (event) => {
         const target = event.target as Element | null;
         const zone = zoneForTarget(target);
@@ -86,5 +93,5 @@ export function useKeyboardZones({
       };
     }
     return tinykeys(window, map, { ignore: () => false, capture: true });
-  }, [active]);
+  }, [active, keymap.signature]);
 }

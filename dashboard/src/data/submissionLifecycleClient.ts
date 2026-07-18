@@ -291,6 +291,11 @@ export function createFetchSubmissionLifecycleTransport(
 
 const authorityCache = new Map<string, SubmissionAuthorityWire>();
 const withdrawalsInFlight = new Map<string, Promise<string>>();
+let scenarioGeneration = 0;
+
+function scenarioGenerationIsCurrent(generation: number): boolean {
+  return generation === scenarioGeneration;
+}
 
 export async function readSubmissionAuthority(
   sessionId: string,
@@ -299,8 +304,9 @@ export async function readSubmissionAuthority(
 ): Promise<SubmissionAuthorityWire> {
   const cached = authorityCache.get(sessionId);
   if (cached && !options.refresh) return cached;
+  const generation = scenarioGeneration;
   const descriptor = await transport.authority(sessionId);
-  authorityCache.set(sessionId, descriptor);
+  if (scenarioGenerationIsCurrent(generation)) authorityCache.set(sessionId, descriptor);
   return descriptor;
 }
 
@@ -614,6 +620,7 @@ export async function pollSubmissionLifecycleOnce(
   transport: SubmissionLifecycleTransport = createFetchSubmissionLifecycleTransport(),
   at = Date.now(),
 ): Promise<number> {
+  const generation = scenarioGeneration;
   const cockpit = sessionCockpitStore.getState().perSession[sessionId];
   const targets: Array<{ requestId: string; expectedBridgeEpoch: string }> = (
     cockpit?.queue ?? []
@@ -646,6 +653,7 @@ export async function pollSubmissionLifecycleOnce(
           epoch,
           page.map((entry) => entry.requestId),
         );
+        if (!scenarioGenerationIsCurrent(generation)) return 0;
         for (const lookup of batch.submissions) {
           if (lookup.outcome === "found") {
             applySubmissionLifecycle(
@@ -667,6 +675,7 @@ export async function pollSubmissionLifecycleOnce(
           }
         }
       } catch (error) {
+        if (!scenarioGenerationIsCurrent(generation)) return 0;
         if (!(error instanceof BridgeEpochMismatchError)) throw error;
         clearSubmissionAuthorityCache(sessionId);
         for (const entry of page) {
@@ -695,6 +704,7 @@ interface PollState {
   timer: number | null;
   failures: number;
   transport: SubmissionLifecycleTransport;
+  generation: number;
 }
 
 const pollers = new Map<string, PollState>();
@@ -707,19 +717,34 @@ function visiblePollDelay(): number {
 
 function schedulePoll(sessionId: string, delay: number): void {
   const poller = pollers.get(sessionId);
-  if (!poller || poller.timer !== null) return;
+  if (!poller || poller.timer !== null || !scenarioGenerationIsCurrent(poller.generation)) return;
   const activePoller = poller;
   activePoller.timer = window.setTimeout(async () => {
     activePoller.timer = null;
+    if (
+      pollers.get(sessionId) !== activePoller ||
+      !scenarioGenerationIsCurrent(activePoller.generation)
+    )
+      return;
     try {
       const remaining = await pollSubmissionLifecycleOnce(sessionId, activePoller.transport);
+      if (
+        pollers.get(sessionId) !== activePoller ||
+        !scenarioGenerationIsCurrent(activePoller.generation)
+      )
+        return;
       activePoller.failures = 0;
       if (remaining === 0) {
-        pollers.delete(sessionId);
+        if (pollers.get(sessionId) === activePoller) pollers.delete(sessionId);
         return;
       }
       schedulePoll(sessionId, visiblePollDelay());
     } catch {
+      if (
+        pollers.get(sessionId) !== activePoller ||
+        !scenarioGenerationIsCurrent(activePoller.generation)
+      )
+        return;
       const backoff =
         STATUS_FAILURE_BACKOFF_MS[
           Math.min(activePoller.failures, STATUS_FAILURE_BACKOFF_MS.length - 1)
@@ -734,14 +759,33 @@ export function ensureSubmissionLifecyclePolling(
   sessionId: string,
   transport: SubmissionLifecycleTransport = createFetchSubmissionLifecycleTransport(),
 ): void {
-  if (!pollers.has(sessionId)) pollers.set(sessionId, { timer: null, failures: 0, transport });
+  if (!pollers.has(sessionId))
+    pollers.set(sessionId, {
+      timer: null,
+      failures: 0,
+      transport,
+      generation: scenarioGeneration,
+    });
   schedulePoll(sessionId, 0);
 }
 
 export function stopSubmissionLifecyclePolling(sessionId: string): void {
   const poller = pollers.get(sessionId);
   if (poller && poller.timer !== null) window.clearTimeout(poller.timer);
-  pollers.delete(sessionId);
+  if (poller && pollers.get(sessionId) === poller) pollers.delete(sessionId);
+}
+
+/** Clear module-level lifecycle state when the dev bench changes its fake HTTP authority. */
+export function resetSubmissionLifecycleClientForDev(): void {
+  // Reset revokes old selector authority before clearing ownership. Pending promises cannot be
+  // synchronously cancelled, so every post-await mutation also validates this generation.
+  scenarioGeneration += 1;
+  clearSubmissionAuthorityCache();
+  for (const poller of pollers.values()) {
+    if (poller.timer !== null) window.clearTimeout(poller.timer);
+  }
+  pollers.clear();
+  withdrawalsInFlight.clear();
 }
 
 function noticeForState(state: SubmissionLifecycleState | null): string {
@@ -760,6 +804,8 @@ async function withdrawLastQueued(
   sessionId: string,
   options: WithdrawQueuedOptions,
 ): Promise<string> {
+  const generation = scenarioGeneration;
+  const revokedNotice = "withdrawal result ignored because the dev scenario authority changed";
   const transport = options.transport ?? createFetchSubmissionLifecycleTransport();
   const now = options.now ?? Date.now;
   const store = sessionCockpitStore.getState();
@@ -843,15 +889,15 @@ async function withdrawLastQueued(
     submissionRecord(sessionId, withdrawalTarget.requestId),
   );
   try {
-    return applyResult(
-      await transport.withdraw(
-        sessionId,
-        withdrawalTarget.expectedBridgeEpoch,
-        withdrawalTarget.requestId,
-      ),
-      activeObservedVersion,
+    const result = await transport.withdraw(
+      sessionId,
+      withdrawalTarget.expectedBridgeEpoch,
+      withdrawalTarget.requestId,
     );
+    if (!scenarioGenerationIsCurrent(generation)) return revokedNotice;
+    return applyResult(result, activeObservedVersion);
   } catch (error) {
+    if (!scenarioGenerationIsCurrent(generation)) return revokedNotice;
     if (error instanceof BridgeEpochMismatchError) {
       const marked = markGenerationLost(
         sessionId,
@@ -877,6 +923,7 @@ async function withdrawLastQueued(
       const status = await transport.status(sessionId, withdrawalTarget.expectedBridgeEpoch, [
         withdrawalTarget.requestId,
       ]);
+      if (!scenarioGenerationIsCurrent(generation)) return revokedNotice;
       const lookup = status.submissions[0];
       if (matchingWithdrawalRecovery(sessionId, withdrawalTarget.requestId)) {
         return preservedObservationNotice(sessionId, withdrawalTarget.requestId, null);
@@ -913,14 +960,13 @@ async function withdrawLastQueued(
         activeObservedVersion = observationVersion(
           submissionRecord(sessionId, withdrawalTarget.requestId),
         );
-        return applyResult(
-          await transport.withdraw(
-            sessionId,
-            withdrawalTarget.expectedBridgeEpoch,
-            withdrawalTarget.requestId,
-          ),
-          activeObservedVersion,
+        const retryResult = await transport.withdraw(
+          sessionId,
+          withdrawalTarget.expectedBridgeEpoch,
+          withdrawalTarget.requestId,
         );
+        if (!scenarioGenerationIsCurrent(generation)) return revokedNotice;
+        return applyResult(retryResult, activeObservedVersion);
       }
       const applied = applyLifecycleObservation(
         sessionId,
@@ -937,6 +983,7 @@ async function withdrawLastQueued(
           ? noticeForState(applied.observation.state)
           : "the queued message is no longer withdrawable";
     } catch (convergenceError) {
+      if (!scenarioGenerationIsCurrent(generation)) return revokedNotice;
       if (convergenceError instanceof BridgeEpochMismatchError) {
         const marked = markGenerationLost(
           sessionId,
@@ -1023,8 +1070,9 @@ export function withdrawLastQueuedSubmission(
 ): Promise<string> {
   const existing = withdrawalsInFlight.get(sessionId);
   if (existing) return existing;
-  const running = withdrawLastQueued(sessionId, options).finally(() => {
-    withdrawalsInFlight.delete(sessionId);
+  const operation = withdrawLastQueued(sessionId, options);
+  const running = operation.finally(() => {
+    if (withdrawalsInFlight.get(sessionId) === running) withdrawalsInFlight.delete(sessionId);
   });
   withdrawalsInFlight.set(sessionId, running);
   return running;

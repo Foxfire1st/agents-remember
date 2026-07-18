@@ -8,7 +8,7 @@ with no rendering, is a **missing view**.
 **Living document.** Stage 1 of the review refreshes this from the running system
 (`provider_status` / `worktree_status` / `server_info` + the dashboard's `observer/` + `data/` +
 `types/projection` code) on each run. Seeded 2026-06-23 from a paired source+onboarding grounding of
-the `260610` dashboard + Task-6 worktrees (the dashboard does not yet exist on `main`).
+the `260610` dashboard + Task-6 worktrees; refreshed 2026-07-18 for the FEUI Chats-cockpit cutover.
 
 **Design thesis** (the two fixed points the cockpit is judged against): *"it should never be just a
 pretty toy"* and *"a cockpit is useless if all you can do is watch."* Value = (a) visibility into the
@@ -29,12 +29,13 @@ Persistent shell (never hides the alarms): top status bar (master-caution `⚠ N
 | **Memory** (`MemoryMirror`) | onboarding-vs-code health; coverage/drift/ledger/stalest-sidecar | drift auditor | built |
 | **Topology** | full-bleed radial constellation; at-a-glance workspace overview; click node → Operations | overview | built — ⚠ rendered an **empty canvas** in the 2026-06-23 dogfood (0 painted pixels, no nodes, no empty-state) — verify |
 | **Hangar** | persistent (never-reaped) worktree debt; review/closeout/integration/cleanup badges | cleanup | built |
-| **Chats** (the **Task-6 control plane**) | interactive agent/shell terminals; session switcher; xterm; context composer | operator | built — **Task-6 integrated into the main dashboard** (verified live 2026-06-23; harness buttons: Claude Code, Codex) |
+| **Chats** | sole product-facing full-bleed fleet cockpit: native hosted-chat and raw-terminal launch, focus/PTY, reliable text submit/pop-back, interactions, lifecycle/leaf routing, requested/effective controls, and Evidence/Capabilities/Bus inspection | operator | built — keep-alive cockpit; Operations remains the application default |
 
 Persistent side panels: **AttentionQueue** (server-ranked "what needs the human"; `Open` jumps to the
 lifecycle), **LifecycleList** (all lifecycles; BY REPO / BY PHASE pivot), **EventRiver** (raw event
-feed; trust-keyed left border). Task-6 adds cockpit-wide overlays **HighlightComposer**
-(selection → context package) and **SessionComposer** (docked under the terminal).
+feed; trust-keyed left border). The cockpit also retains **HighlightComposer** (selection → reliable
+text submit) and the shared **SessionComposer** used by session surfaces. Attachments/images remain an
+upstream contract gap; there is no image-by-path composer claim.
 
 **Not user views** (developer-only, dropped from prod bundle): `/dev/bench`, `/dev/reference` — the
 review must NOT treat these as user views.
@@ -126,7 +127,7 @@ what's stale."
 **Known gap:** the clearest missing view — only aggregate numbers exist; the side-by-side inspection is
 the planned Onboarding Inspector (task 260621).
 
-## W6 — Operate an agent session via the control plane (Task 6)
+## W6 — Operate an agent session via the control plane
 
 **Persona:** operator
 **Job story:** "When I want to steer an agent, I want to drive it from inside the cockpit, so I don't
@@ -134,15 +135,27 @@ have to leave for the harness."
 
 **Steps → serving view → stuck risk**
 
-1. Spawn a session                      → Chats → ＋Terminal / per-harness button    → ⚠ harness buttons only for *detected* harnesses
-2. Drive it                             → xterm terminal                            → ok
-3. Switch sessions                      → SessionList (sessions stay mounted)        → ok
-4. Inject context                       → SessionComposer / HighlightComposer (selection + message + image-by-path; "no silent action") → ok
-5. Confirm delivery                     → Sending… → delivered / Retry              → ⚠ no in-dashboard transcript/history of what was injected
+1. Launch a native hosted chat          → Chats → dynamic harness/model/effort flow → ok; options come only from authoritative capability envelopes
+2. Launch a raw terminal                → Chats `＋ Terminal`                        → ok; the selected lifecycle is inherited on the open request
+3. Focus and operate the fleet          → Chats rail + keep-alive PTY stage          → ok; controlled and legacy-raw panes keep distinct truth
+4. Send reliable text                   → Chats `SessionComposer`                    → ok; receipt/reconcile evidence and the operator's bounded queue are visible
+5. Withdraw the last queued submit      → Chats `Alt+Up` authoritative pop-back     → ok; restore is revision-safe and server-authorized
+6. Answer a structured interaction      → Chats `InteractionBar`                    → ok; pending/answered/error states remain visible
+7. Inspect or change model/effort        → Chats exact-session control + Inspector   → ok; requested and effective values remain separate through queued/readback promotion
+8. Attach or move a projected leaf      → Chats routing bar                          → ok; the server accepts or refuses the leaf-role pair before local state changes
 
-**Forced states:** idle · busy · awaiting-input · disconnected · content · overflow (long output)
-**Known gaps:** no injected-context transcript; harness buttons appear only for detected harnesses (an
-undetected-harness user sees only ＋Terminal).
+**Forced states:** empty fleet · starting · ready · working · turn-ended · awaiting-input · failed ·
+landed read-only · restored exited · restored retired · cleanup-result unavailable/partial/success ·
+stale catalog · dropped PTY · long output · queued/unknown/reconciled submit.
+
+**Known gaps/boundaries:** controlled chats still lack an entry-granular structured transcript,
+attachments, whole-queue authority, usage/cost telemetry and interrupt; the xterm runner line-log is
+not a replacement conversation UI. Existing-row lifecycle routing remains explicitly local and may
+be replaced by the next catalog hydrate because no attach-lifecycle endpoint exists. New launches
+inherit lifecycle context on the server, and leaf attach/move is server-authoritative. The contextual
+Operations `RailChat` remains separate. Detailed candidate evidence and serving-contract boundaries live in
+[`session-cockpit-closeout-evidence.md`](session-cockpit-closeout-evidence.md) and
+[`session-cockpit-upstream-register.md`](session-cockpit-upstream-register.md), respectively.
 
 ---
 

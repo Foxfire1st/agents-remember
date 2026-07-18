@@ -38,6 +38,13 @@ export function announceAssertive(text: string): void {
   announcerStore.setState((state) => ({ assertive: { text, seq: state.assertive.seq + 1 } }));
 }
 
+/** One catalog hydration may contain several urgent transitions. Commit them as one accessible
+ * mutation so synchronous alerts cannot overwrite one another before assistive tech observes. */
+export function announceAssertiveBatch(texts: readonly string[]): void {
+  if (texts.length === 0) return;
+  announceAssertive(texts.join(" · "));
+}
+
 // ── The seat-state assertive watcher ────────────────────────────────────────────────────────────
 
 /** Pure transition detector: previous state-keys → announcements + the updated map. A session's
@@ -86,7 +93,7 @@ export function startSeatStateAnnouncer(): () => void {
         sessionCockpitStore.getState().focusedSessionId,
       );
       previous = next;
-      for (const text of announcements) announceAssertive(text);
+      announceAssertiveBatch(announcements);
     });
   }
   let released = false;

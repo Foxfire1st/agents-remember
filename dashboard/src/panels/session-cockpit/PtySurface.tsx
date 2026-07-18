@@ -2,7 +2,11 @@ import { lazy, Suspense, useEffect, useRef, useState } from "react";
 
 import { css } from "../../../styled-system/css";
 import { matchReservedChord } from "../../data/keymap/reserved";
-import { parseOsc133, parseOsc94, ptyHarvestStore } from "../../data/ptyHarvest";
+import {
+  parseOsc133,
+  parseOsc94,
+  ptyHarvestStore,
+} from "../../data/ptyHarvest";
 import { sessionCockpitStore } from "../../data/sessionCockpitStore";
 import { useSessions, type OpenSession } from "../../data/sessions";
 import { usePersistedFlag } from "../file-viewer/usePersistedFlag";
@@ -12,6 +16,7 @@ import {
   paneArchetypeCopy,
   SCREEN_READER_MODE_NOTE,
 } from "./lifecycleCopy";
+import { EndedSessionState } from "./EndedSessionState";
 
 // The PtySurface (260715-FEUI-L6 R1–R3, S1/S2): the session stage's terminal half. Wraps the
 // EXISTING lazy Terminal.tsx — keep-alive (previously focused panes stay mounted, hidden with
@@ -80,9 +85,17 @@ const srToggle = css({
   paddingInline: "0.4rem",
   cursor: "pointer",
   "&[data-on='true']": { color: "amber", borderColor: "amber" },
-  _focusVisible: { outline: "1px solid token(colors.amber)", outlineOffset: "1px" },
+  _focusVisible: {
+    outline: "1px solid token(colors.amber)",
+    outlineOffset: "1px",
+  },
 });
-const layers = css({ flex: "1", minHeight: "0", minWidth: "0", position: "relative" });
+const layers = css({
+  flex: "1",
+  minHeight: "0",
+  minWidth: "0",
+  position: "relative",
+});
 const layer = css({
   position: "absolute",
   inset: "0",
@@ -96,6 +109,28 @@ const loading = css({
   placeItems: "center",
   color: "muted",
   fontSize: "0.72rem",
+});
+const noFocusedSession = css({
+  position: "absolute",
+  inset: "0",
+  display: "grid",
+  placeItems: "center",
+  padding: "0.8rem",
+  color: "muted",
+  fontSize: "0.74rem",
+  lineHeight: "1.5",
+  textAlign: "center",
+  background: "bg",
+  borderWidth: "1px",
+  borderStyle: "solid",
+  borderColor: "grid",
+  borderRadius: "2px",
+  _focusVisible: {
+    outlineWidth: "1px",
+    outlineStyle: "solid",
+    outlineColor: "amber",
+    outlineOffset: "1px",
+  },
 });
 
 /** The reserved-chord passthrough guard (defence-in-depth under the window-capture layer). */
@@ -111,21 +146,35 @@ export function PtySurface({
   focused,
   onVisibleCols,
 }: {
-  focused: OpenSession;
+  focused?: OpenSession;
   /** The visible pane's REAL column count (R8: the ~80-col floor verified against real panes). */
   onVisibleCols?: (cols: number | null) => void;
 }) {
   const sessions = useSessions((state) => state.sessions);
-  const [screenReaderMode, setScreenReaderMode] = usePersistedFlag(SCREEN_READER_MODE_KEY, false);
+  const [screenReaderMode, setScreenReaderMode] = usePersistedFlag(
+    SCREEN_READER_MODE_KEY,
+    false,
+  );
+  const focusedId = focused?.id;
+  const focusedStatus = focused?.status;
+  const focusedInspectable = focused ? isInspectable(focusedStatus) : false;
+  const focusedLanded = focusedStatus === "landed";
 
   // Keep-alive: every session focused in this cockpit stays mounted (hidden) while it remains
-  // inspectable — switching back must not lose scrollback (Chats' mountedSessionIds pattern).
+  // inspectable — switching back must not lose scrollback (Chats' mountedSessionIds pattern). The
+  // owner itself stays mounted while a removed focused row is awaiting smart handoff; otherwise
+  // that one transient no-focus render would dispose every unrelated visited terminal and socket.
   const [mountedIds, setMountedIds] = useState<readonly string[]>([]);
   useEffect(() => {
-    setMountedIds((current) => (current.includes(focused.id) ? current : [...current, focused.id]));
-  }, [focused.id]);
+    if (!focusedId) return;
+    setMountedIds((current) =>
+      current.includes(focusedId) ? current : [...current, focusedId],
+    );
+  }, [focusedId]);
   const inspectableIds = new Set(
-    sessions.filter((session) => isInspectable(session.status)).map((session) => session.id),
+    sessions
+      .filter((session) => isInspectable(session.status))
+      .map((session) => session.id),
   );
   const mounted = mountedIds.filter((id) => inspectableIds.has(id));
   useEffect(() => {
@@ -138,20 +187,20 @@ export function PtySurface({
 
   // Focusing a seat acknowledges its bell marker (the marker exists to pull attention here).
   useEffect(() => {
-    ptyHarvestStore.getState().acknowledgeBell(focused.id);
-  }, [focused.id]);
+    if (focusedId) ptyHarvestStore.getState().acknowledgeBell(focusedId);
+  }, [focusedId]);
 
   // The visible pane's column truth resets when the focused pane changes (a fresh fit reports).
   const onVisibleColsRef = useRef(onVisibleCols);
   onVisibleColsRef.current = onVisibleCols;
   useEffect(() => {
     onVisibleColsRef.current?.(null);
-  }, [focused.id]); // reset on focus switch only
+  }, [focusedId, focusedStatus]);
 
   const lastStampRef = useRef<Record<string, number>>({});
 
   const paneFor = (session: OpenSession) => {
-    const visible = session.id === focused.id;
+    const visible = session.id === focusedId;
     const controlled = isControlledSession(session);
     const cockpit = sessionCockpitStore.getState();
     const harvest = ptyHarvestStore.getState();
@@ -176,13 +225,15 @@ export function PtySurface({
             onSocketState={(state) => cockpit.setPtyWs(session.id, state)}
             onOutput={() => {
               const now = Date.now();
-              if (now - (lastStampRef.current[session.id] ?? 0) < OUTPUT_STAMP_INTERVAL_MS) return;
+              if (
+                now - (lastStampRef.current[session.id] ?? 0) <
+                OUTPUT_STAMP_INTERVAL_MS
+              )
+                return;
               lastStampRef.current[session.id] = now;
               sessionCockpitStore.getState().recordPtyOutput(session.id, now);
             }}
-            onResizeCols={
-              visible ? (cols) => onVisibleCols?.(cols) : undefined
-            }
+            onResizeCols={visible ? (cols) => onVisibleCols?.(cols) : undefined}
             // Byte-stream harvesting (R7): LEGACY RAW panes only — the vendor TUI is the only
             // signal source those panes have. Controlled panes get none of this.
             hooks={
@@ -212,40 +263,73 @@ export function PtySurface({
   return (
     <div
       className={surface}
-      data-kbzone="pty"
+      data-kbzone={focusedInspectable ? "pty" : undefined}
+      data-focus-target={
+        focusedLanded || !focusedInspectable ? "true" : undefined
+      }
       data-testid="pty-surface"
       tabIndex={-1}
       // The focus-terminal command targets `[data-kbzone="pty"]`; hand focus to the VISIBLE
       // pane's terminal host (which delegates into xterm's textarea).
       onFocus={(event) => {
-        if (event.target !== event.currentTarget) return;
+        if (!focusedInspectable || event.target !== event.currentTarget) return;
         event.currentTarget
-          .querySelector<HTMLElement>('[data-pty-visible="true"] [data-testid="terminal-host"]')
+          .querySelector<HTMLElement>(
+            '[data-pty-visible="true"] [data-testid="terminal-host"]',
+          )
           ?.focus();
       }}
     >
-      <div className={paneChrome} data-testid="pty-pane-chrome">
-        <span className={archetypeNote} data-testid="pty-archetype-note" title={paneArchetypeCopy(focused)}>
-          {paneArchetypeCopy(focused)}
-        </span>
-        <span className={badgeSlot} data-slot="scrollback-paused-badge" data-testid="pty-scrollback-badge-slot">
-          {/* Reserved: "scrollback — paused" renders here when the pane-freeze fields land
+      {focused && focusedInspectable ? (
+        <div className={paneChrome} data-testid="pty-pane-chrome">
+          <span
+            className={archetypeNote}
+            data-testid="pty-archetype-note"
+            title={paneArchetypeCopy(focused)}
+          >
+            {paneArchetypeCopy(focused)}
+          </span>
+          <span
+            className={badgeSlot}
+            data-slot="scrollback-paused-badge"
+            data-testid="pty-scrollback-badge-slot"
+          >
+            {/* Reserved: "scrollback — paused" renders here when the pane-freeze fields land
               server-side (260710 deferred spec, fix 2). Empty until then — never faked. */}
-        </span>
-        <button
-          type="button"
-          className={srToggle}
-          data-on={screenReaderMode ? "true" : "false"}
-          aria-pressed={screenReaderMode}
-          title={SCREEN_READER_MODE_NOTE}
-          onClick={() => setScreenReaderMode(!screenReaderMode)}
-          data-testid="pty-screen-reader-toggle"
-        >
-          screen reader: {screenReaderMode ? "on" : "off"}
-        </button>
-      </div>
+          </span>
+          <button
+            type="button"
+            className={srToggle}
+            data-on={screenReaderMode ? "true" : "false"}
+            aria-pressed={screenReaderMode}
+            title={SCREEN_READER_MODE_NOTE}
+            onClick={() => setScreenReaderMode(!screenReaderMode)}
+            data-testid="pty-screen-reader-toggle"
+          >
+            screen reader: {screenReaderMode ? "on" : "off"}
+          </button>
+        </div>
+      ) : null}
       <div className={layers}>
-        {sessions.filter((session) => mounted.includes(session.id)).map(paneFor)}
+        {sessions
+          .filter((session) => mounted.includes(session.id))
+          .map(paneFor)}
+        {focused && !focusedInspectable ? (
+          <EndedSessionState session={focused} />
+        ) : null}
+        {!focused ? (
+          <div
+            className={noFocusedSession}
+            data-kbzone="pty"
+            data-testid="sessions-pty-placeholder"
+            tabIndex={-1}
+            aria-label="Terminal placeholder"
+          >
+            no focused chat — the terminal renders here once a seat is focused;
+            every key passes to the harness except the reserved set (? lists
+            it); F6 exits to chrome
+          </div>
+        ) : null}
       </div>
     </div>
   );

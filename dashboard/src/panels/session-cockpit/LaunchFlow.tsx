@@ -8,7 +8,11 @@ import {
   fetchHarnessCapabilities,
   useCapabilityCatalog,
 } from "../../data/capabilityCatalog";
-import { hydrateTerminalSessionsFromCatalog } from "../../data/catalogPoll";
+import {
+  captureCatalogAuthority,
+  catalogAuthorityIsCurrent,
+  hydrateTerminalSessionsFromCatalog,
+} from "../../data/catalogPoll";
 import { launchTier } from "../../data/launchEvidence";
 import {
   chooseEffort,
@@ -23,7 +27,7 @@ import {
   type OpenOutcome,
 } from "../../data/launchFlow";
 import { sessionCockpitStore } from "../../data/sessionCockpitStore";
-import type { OpenSession } from "../../data/sessions";
+import { notifySessionCatalogChanged, type OpenSession } from "../../data/sessions";
 import { fetchHarnessesOrNull, type HarnessInfo } from "../../data/terminal";
 
 // The LaunchFlow (260715-FEUI-L3 S2/S3, design §7.1): harness → model → effort → open, with
@@ -166,6 +170,7 @@ export function LaunchFlow({
   open,
   prefill,
   sessions,
+  lifecycleId,
   onClose,
   onFocusSession,
   mintSessionId = defaultMint,
@@ -174,6 +179,8 @@ export function LaunchFlow({
   prefill?: LaunchPrefill;
   /** The live session list — the F9 unknown-outcome reconciler watches it for the minted id. */
   sessions: OpenSession[];
+  /** The selected task route inherited by a newly opened hosted chat. */
+  lifecycleId?: string;
   onClose: () => void;
   onFocusSession: (id: string) => void;
   /** Test seam — the caller-minted session id. */
@@ -242,6 +249,7 @@ export function LaunchFlow({
   useEffect(() => {
     if (!open || !unknownId) return;
     if (sessions.some((session) => session.id === unknownId)) {
+      notifySessionCatalogChanged("create", unknownId);
       onFocusSession(unknownId);
       onClose();
     }
@@ -264,6 +272,9 @@ export function LaunchFlow({
 
   const launch = async () => {
     if (!readyToLaunch || !harnessId) return;
+    // A dev-scenario reset cannot cancel an open POST already in flight. Carry its original catalog
+    // authority through every follow-on edge so settlement cannot adopt the successor fixture.
+    const launchAuthority = captureCatalogAuthority();
     const sessionId = mintSessionId();
     setPosting(true);
     setOutcome(null);
@@ -272,9 +283,12 @@ export function LaunchFlow({
       selection,
       ...(label.trim() ? { label: label.trim() } : {}),
       ...(leafKey.trim() ? { leafKey: leafKey.trim() } : {}),
+      ...(lifecycleId ? { lifecycleId } : {}),
     });
+    if (!catalogAuthorityIsCurrent(launchAuthority)) return;
     setPosting(false);
     if (result.path === "opened") {
+      notifySessionCatalogChanged("create", result.session);
       // R5: the retained pair renders at tier 'pending' (launchTier gates on controlState —
       // 'starting' ⇒ pending; both-null ⇒ defaults). Never promoted by the open response itself.
       sessionCockpitStore.getState().setLaunchEvidence(result.session, {
@@ -287,8 +301,14 @@ export function LaunchFlow({
           controlState: result.controlState,
         }),
       });
-      await hydrateTerminalSessionsFromCatalog(false);
+      const catalogAuthoritySurvived = await hydrateTerminalSessionsFromCatalog(
+        false,
+        new Set(),
+        launchAuthority,
+      );
+      if (!catalogAuthoritySurvived || !catalogAuthorityIsCurrent(launchAuthority)) return;
       onFocusSession(result.session);
+      if (!catalogAuthorityIsCurrent(launchAuthority)) return;
       onClose();
       return;
     }

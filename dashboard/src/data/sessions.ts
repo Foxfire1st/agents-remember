@@ -20,8 +20,8 @@ import {
 // — shared, testable client state, the same pattern as the observer projection store (`data/store.ts`)
 // but deliberately kept separate from it (ephemeral UI state, not projected truth). Terminal
 // *persistence* across cockpit refresh/view/session switches is owned by the backend catalog + tmux.
-// The store only has to hold which sessions exist and which one is active; <Chats> attaches the active
-// session's visible terminal and lets inactive rows reattach when selected.
+// The store only has to hold which sessions exist and which live one owns the shared action route;
+// the canonical Chats cockpit keeps PTYs mounted and controls its richer inspection focus separately.
 export interface OpenSession {
   id: string;
   label: string;
@@ -457,7 +457,7 @@ export function fromTerminalSessionInfo(info: TerminalSessionInfo): OpenSession 
 }
 
 // --- Live connections (slice 6f): the per-session `TerminalConnection` registry, exposed cockpit-wide
-// so a surface outside <Chats> (the highlight composer) can inject into a session's stdin. Non-reactive
+// so a surface outside the canonical Chats stage (the highlight composer) can reach a session. Non-reactive
 // (module-level maps, not store state) so a registration never re-renders. `pending` queues an injection
 // for a session whose <Terminal> has not mounted/registered yet (the create-then-send race); the live
 // connection itself buffers anything sent before its WebSocket opens (see `data/terminal.ts`).
@@ -465,9 +465,23 @@ const connections = new Map<string, TerminalConnection>();
 const pending = new Map<string, string[]>();
 // A surface that just created a session (the highlight composer) waits here for its terminal to
 // register before injecting; resolved in `registerConnection`.
-const connectionWaiters = new Map<string, ((conn: TerminalConnection) => void)[]>();
+const connectionWaiters = new Map<string, ((conn: TerminalConnection | null) => void)[]>();
 
-/** <Chats> registers each live connection here (and `null` on teardown); flushes any queued sends. */
+/**
+ * Clear non-reactive connection registries at a dev-bench scenario boundary. Descendant terminals
+ * are unmounted first; resolving parked waiters with null prevents promises from the old authority
+ * lingering until their 12-second timeout, while queued input must never cross into the next fixture.
+ */
+export function resetSessionConnectionRegistriesForDev(): void {
+  connections.clear();
+  pending.clear();
+  for (const waiters of connectionWaiters.values()) {
+    for (const resolve of waiters) resolve(null);
+  }
+  connectionWaiters.clear();
+}
+
+/** Each keep-alive PTY registers its live connection here (and `null` on teardown). */
 export function registerConnection(id: string, conn: TerminalConnection | null): void {
   if (!conn) {
     connections.delete(id);

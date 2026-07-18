@@ -1,6 +1,7 @@
 import { markdown } from "@codemirror/lang-markdown";
-import { Compartment, EditorState } from "@codemirror/state";
+import { Compartment, EditorState, Prec } from "@codemirror/state";
 import { EditorView, keymap } from "@codemirror/view";
+import { vim } from "@replit/codemirror-vim";
 import {
   forwardRef,
   useCallback,
@@ -32,6 +33,12 @@ import {
   restoreWithdrawnRecovery,
   withdrawLastQueuedSubmission,
 } from "../data/submissionLifecycleClient";
+import {
+  bindingFor,
+  codeMirrorBinding,
+  keymapCommandIsActive,
+  useEffectiveKeymap,
+} from "../data/keymap/preferences";
 import type { OpenSession } from "../data/sessions";
 import { QueuePreview } from "./session-cockpit/QueuePreview";
 import {
@@ -184,6 +191,9 @@ export const SessionComposer = forwardRef<SessionComposerHandle, SessionComposer
     const syncingDraftRef = useRef(false);
     const composingRef = useRef(false);
     const editable = useMemo(() => new Compartment(), [session.id]);
+    const profileCompartment = useMemo(() => new Compartment(), [session.id]);
+    const keymapCompartment = useMemo(() => new Compartment(), [session.id]);
+    const effectiveKeymap = useEffectiveKeymap();
     const callbackRef = useRef({ onSlashAtLineStart, onEscape });
     callbackRef.current = { onSlashAtLineStart, onEscape };
     const [notice, setNotice] = useState<string | null>(null);
@@ -247,6 +257,25 @@ export const SessionComposer = forwardRef<SessionComposerHandle, SessionComposer
     const popBackRef = useRef(popBack);
     popBackRef.current = popBack;
 
+    const composerKeymap = useMemo(
+      () =>
+        effectiveKeymap.bindings
+          .filter((entry) => entry.zones.includes("composer"))
+          .flatMap((entry) => {
+            if (!keymapCommandIsActive(effectiveKeymap, entry.commandId)) return [];
+            const run = (currentView: EditorView) => {
+              if (currentView.composing || composingRef.current) return false;
+              if (entry.commandId === "composer.submit") submitRef.current();
+              else if (entry.commandId === "composer.popBack") popBackRef.current();
+              else if (entry.commandId === "focus.stageHeader") callbackRef.current.onEscape?.();
+              else return false;
+              return entry.commandId !== "focus.stageHeader" || callbackRef.current.onEscape !== undefined;
+            };
+            return [{ key: codeMirrorBinding(entry.chord), run }];
+          }),
+      [effectiveKeymap.signature],
+    );
+
     useImperativeHandle(
       forwardedRef,
       () => ({
@@ -281,31 +310,12 @@ export const SessionComposer = forwardRef<SessionComposerHandle, SessionComposer
                 .getState()
                 .setComposerDraft(session.id, update.state.doc.toString());
             }),
-            keymap.of([
-              {
-                key: "Ctrl-Enter",
-                run: (currentView) => {
-                  if (currentView.composing || composingRef.current) return false;
-                  submitRef.current();
-                  return true;
-                },
-              },
-              {
-                key: "Alt-ArrowUp",
-                run: (currentView) => {
-                  if (currentView.composing || composingRef.current) return false;
-                  popBackRef.current();
-                  return true;
-                },
-              },
-              {
-                key: "Escape",
-                run: () => {
-                  callbackRef.current.onEscape?.();
-                  return callbackRef.current.onEscape !== undefined;
-                },
-              },
-            ]),
+            profileCompartment.of(
+              effectiveKeymap.composerProfile === "vim" ? vim() : [],
+            ),
+            // House commands stay above editor-profile keys. Escape is deliberately absent in
+            // Vim mode so the plugin owns insert→normal; F6 remains the global focus escape.
+            keymapCompartment.of(Prec.highest(keymap.of(composerKeymap))),
             EditorView.domEventHandlers({
               compositionstart() {
                 composingRef.current = true;
@@ -335,7 +345,7 @@ export const SessionComposer = forwardRef<SessionComposerHandle, SessionComposer
         view.destroy();
       };
       // Recreate only when the session identity changes; draft/control updates use compartments.
-    }, [session.id, editable]);
+    }, [session.id, editable, profileCompartment, keymapCompartment]);
 
     useEffect(() => {
       const view = editorRef.current;
@@ -358,8 +368,21 @@ export const SessionComposer = forwardRef<SessionComposerHandle, SessionComposer
       });
     }, [editable, gate.editable]);
 
+    useEffect(() => {
+      editorRef.current?.dispatch({
+        effects: [
+          profileCompartment.reconfigure(
+            effectiveKeymap.composerProfile === "vim" ? vim() : [],
+          ),
+          // Reconfiguration also applies live user overrides without recreating the editor/draft.
+          keymapCompartment.reconfigure(Prec.highest(keymap.of(composerKeymap))),
+        ],
+      });
+    }, [composerKeymap, effectiveKeymap.composerProfile, keymapCompartment, profileCompartment]);
+
     const footerHint = [
       "markdown",
+      `${effectiveKeymap.composerProfile} keys`,
       "draft saved",
       queuedSetHint,
       queue.some((entry) => entry.state === "queued")
@@ -407,6 +430,7 @@ export const SessionComposer = forwardRef<SessionComposerHandle, SessionComposer
           data-kbzone="composer"
           data-answer-mode={answerMode ? "true" : undefined}
           data-disabled={!gate.editable ? "true" : undefined}
+          data-composer-profile={effectiveKeymap.composerProfile}
           data-testid="session-composer-editor"
         />
         {answerMode ? (
@@ -437,7 +461,7 @@ export const SessionComposer = forwardRef<SessionComposerHandle, SessionComposer
                 latest?.phase ?? "",
               )
                 ? "alert"
-                : "status"
+                : undefined
             }
             data-testid="session-composer-status"
           >
@@ -557,7 +581,9 @@ export const SessionComposer = forwardRef<SessionComposerHandle, SessionComposer
             onPress={submit}
             data-testid="session-composer-send"
           >
-            {answerMode ? "send answer" : "ctrl+enter send"}
+            {answerMode
+              ? "send answer"
+              : `${bindingFor(effectiveKeymap, "composer.submit")?.label ?? "ctrl+↵"} send`}
           </Button>
         </div>
       </div>

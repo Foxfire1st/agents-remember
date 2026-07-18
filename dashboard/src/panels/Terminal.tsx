@@ -130,8 +130,8 @@ export function Terminal({
 }) {
   const hostRef = useRef<HTMLDivElement>(null);
   const socketFactory = useContext(TerminalSocketContext);
-  // Hand the live connection up to the parent (Chats) so the context composer (6e-3) can inject into
-  // this session's stdin. Held in a ref so a changing callback identity never re-runs the effect
+  // Hand the live connection to its owning keep-alive surface. Held in a ref so a changing callback
+  // identity never re-runs the effect
   // (which would tear down + reconnect the terminal).
   const onConnRef = useRef(onConnection);
   onConnRef.current = onConnection;
@@ -294,8 +294,12 @@ export function Terminal({
       webglAddon?.dispose();
       webglAddon = null;
       conn.dispose();
-      term.dispose();
       if (termRef.current === term) termRef.current = null;
+      // xterm 5.5's Viewport constructor owns a setTimeout that its disposer does not cancel.
+      // React StrictMode tears down the probe mount in the same task, so synchronous disposal
+      // makes that timer read an already-disposed RenderService (`dimensions`). Let xterm's own
+      // queued sync run first; all application listeners and the socket are already detached.
+      window.setTimeout(() => term.dispose(), 0);
     };
   }, [readOnly, renderer, sessionId, socketFactory]);
 

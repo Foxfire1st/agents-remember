@@ -4,12 +4,12 @@ import { sessionCockpitStore } from "./sessionCockpitStore";
 import {
   applySubmissionLifecycle,
   BridgeEpochMismatchError,
-  clearSubmissionAuthorityCache,
   createFetchSubmissionLifecycleTransport,
   dismissWithdrawnRecovery,
   ensureSubmissionLifecyclePolling,
   HIDDEN_STATUS_POLL_MS,
   pollSubmissionLifecycleOnce,
+  resetSubmissionLifecycleClientForDev,
   restoreWithdrawnRecovery,
   STATUS_FAILURE_BACKOFF_MS,
   stopSubmissionLifecyclePolling,
@@ -130,7 +130,7 @@ function transport(
 
 beforeEach(() => {
   sessionCockpitStore.setState({ perSession: {} });
-  clearSubmissionAuthorityCache();
+  resetSubmissionLifecycleClientForDev();
 });
 
 afterEach(() => {
@@ -209,6 +209,42 @@ describe("submission lifecycle transport", () => {
     expect(sessionCockpitStore.getState().perSession[SESSION].queue).toEqual([]);
     expect(HIDDEN_STATUS_POLL_MS).toBe(2_500);
     expect(STATUS_FAILURE_BACKOFF_MS).toEqual([1_000, 2_000, 5_000]);
+  });
+
+  it("keeps an old poll completion from applying to or deleting a new same-id poller", async () => {
+    vi.useFakeTimers();
+    seedQueued();
+    const oldStatusResult = deferred<SubmissionStatusBatchWire>();
+    const oldStatus = vi.fn(() => oldStatusResult.promise);
+    ensureSubmissionLifecyclePolling(SESSION, transport({ status: oldStatus }));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(oldStatus).toHaveBeenCalledTimes(1);
+
+    resetSubmissionLifecycleClientForDev();
+    sessionCockpitStore.setState({ perSession: {} });
+    seedQueued();
+    const newStatus = vi
+      .fn()
+      .mockResolvedValueOnce(found("queued"))
+      .mockResolvedValueOnce(found("dispatching"));
+    ensureSubmissionLifecyclePolling(SESSION, transport({ status: newStatus }));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(newStatus).toHaveBeenCalledTimes(1);
+
+    oldStatusResult.resolve(found("dispatching"));
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(sessionCockpitStore.getState().perSession[SESSION]).toMatchObject({
+      queue: [{ requestId: REQUEST }],
+      submitHistory: [{ requestId: REQUEST, phase: "queued" }],
+    });
+
+    await vi.advanceTimersByTimeAsync(VISIBLE_STATUS_POLL_MS);
+    expect(newStatus).toHaveBeenCalledTimes(2);
+    expect(sessionCockpitStore.getState().perSession[SESSION]).toMatchObject({
+      queue: [],
+      submitHistory: [{ requestId: REQUEST, phase: "delivering" }],
+    });
   });
 
   it("uses the hidden cadence and 1s then 2s transport backoff without changing queue truth", async () => {

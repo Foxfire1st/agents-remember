@@ -17,11 +17,13 @@ import {
   PreDispatchTransportError,
   releaseSubmitDraft,
   retryRouteFailure,
+  submissionReceiptAnnouncement,
   submissionGate,
   submitSessionText,
   SubmitRouteError,
   type ReliableSubmitTransport,
 } from "./submitClient";
+import { announcerStore } from "./announcer";
 import { sessionCockpitStore } from "./sessionCockpitStore";
 import { fromTerminalSessionInfo, sessionStore } from "./sessions";
 import { stopSubmissionLifecyclePolling } from "./submissionLifecycleClient";
@@ -37,7 +39,8 @@ const start = () =>
   });
 
 beforeEach(() => {
-  sessionCockpitStore.setState({ perSession: {} });
+  sessionCockpitStore.setState({ focusedSessionId: null, perSession: {} });
+  announcerStore.setState({ polite: { text: "", seq: 0 }, assertive: { text: "", seq: 0 } });
   sessionStore.getState().hydrate([fromTerminalSessionInfo(L5_READY_SESSION)]);
 });
 
@@ -437,6 +440,38 @@ describe("store driver + gates", () => {
       editable: false,
       reason: expect.stringContaining("raw terminal typing"),
     });
+  });
+
+  it("announces receipt truth politely for the focused session only", async () => {
+    expect(submissionReceiptAnnouncement({ ...start(), phase: "accepted" })).toBe(
+      "message accepted — delivered",
+    );
+    expect(
+      submissionReceiptAnnouncement({ ...start(), phase: "rejected", detail: "policy refused" }),
+    ).toBe("message rejected: policy refused");
+
+    sessionCockpitStore.setState({ focusedSessionId: "l5-ready" });
+    await submitSessionText("l5-ready", L5_EXACT_TEXT, {
+      requestId: L5_REQUEST_ID,
+      expectedBridgeEpoch: "bridge-epoch-l5",
+      transport: {
+        submit: async () => submitReceipt("immediate"),
+        reconcile: vi.fn(),
+      },
+    });
+    expect(announcerStore.getState().polite.text).toBe("message accepted — delivered");
+
+    announcerStore.setState({ polite: { text: "", seq: 0 } });
+    sessionCockpitStore.setState({ focusedSessionId: "another-seat" });
+    await submitSessionText("l5-ready", L5_EXACT_TEXT, {
+      requestId: `${L5_REQUEST_ID}-unfocused`,
+      expectedBridgeEpoch: "bridge-epoch-l5",
+      transport: {
+        submit: async () => submitReceipt("queued"),
+        reconcile: vi.fn(),
+      },
+    });
+    expect(announcerStore.getState().polite.text).toBe("");
   });
 
   it.each(["rejected", "unsupported"] as const)(

@@ -49,6 +49,16 @@ function isFocused(sessionId: string): boolean {
 // ── The exact-session snapshot (single-flight per session) ─────────────────────────────────────
 
 const inflightSnapshots = new Map<string, Promise<SessionSnapshotOutcome>>();
+let snapshotGeneration = 0;
+
+/**
+ * Dev-bench scenario boundary for exact-session reads. A prior scenario's unresolved snapshot
+ * must neither satisfy nor write into a later scenario that happens to reuse the same session id.
+ */
+export function resetSetClientForDev(): void {
+  snapshotGeneration += 1;
+  inflightSnapshots.clear();
+}
 
 /**
  * GET the exact live session's snapshot, mirror the outcome into the store, and resolve pending
@@ -62,8 +72,10 @@ export function refreshSessionSnapshot(
   const pending = inflightSnapshots.get(sessionId);
   if (pending) return pending;
   store.getState().setSnapshotLoading(sessionId, true);
+  const generation = snapshotGeneration;
   const run = (async (): Promise<SessionSnapshotOutcome> => {
     const outcome = await fetchSessionCapabilities(sessionId, base);
+    if (generation !== snapshotGeneration) return outcome;
     if (outcome.kind === "snapshot") {
       store.getState().setLiveSnapshot(sessionId, {
         sessionId,
@@ -96,7 +108,7 @@ export function refreshSessionSnapshot(
     }
     return outcome;
   })().finally(() => {
-    inflightSnapshots.delete(sessionId);
+    if (inflightSnapshots.get(sessionId) === run) inflightSnapshots.delete(sessionId);
   });
   inflightSnapshots.set(sessionId, run);
   return run;
