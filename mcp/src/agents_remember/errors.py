@@ -23,6 +23,10 @@ class AuthorityError(AgentsRememberError):
     """
 
 
+class RouteIndexCensusError(AgentsRememberError):
+    """A validated repository could not provide one authoritative source census."""
+
+
 class HarnessControlError(AgentsRememberError):
     """The hosted harness control contract or exact-session identity was violated."""
 

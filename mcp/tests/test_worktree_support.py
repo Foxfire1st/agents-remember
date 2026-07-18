@@ -228,7 +228,26 @@ def initialized_memory_repo(
     write_ledger(
         memory_repo / "memory.md", create_initial_ledger(repo_name, code_commit, memory_content)
     )
-    git(memory_repo, "add", "memory.md")
+    settings_path = memory_repo / "system" / "settings.json"
+    settings_path.parent.mkdir(parents=True, exist_ok=True)
+    settings_path.write_text(
+        json.dumps(
+            {
+                "version": 2,
+                "onboarding": {
+                    "storage": {"mode": "memory-repo"},
+                    "pathRules": {
+                        "include": {"paths": ["*"], "fileTypes": [".md", ".py"]},
+                        "exclude": {"paths": []},
+                    },
+                },
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    git(memory_repo, "add", "memory.md", "system/settings.json")
     git(memory_repo, "commit", "-m", "Add memory ledger")
     return git(memory_repo, "rev-parse", "HEAD")
 

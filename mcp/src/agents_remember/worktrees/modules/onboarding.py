@@ -346,6 +346,7 @@ def refresh_route_indexes_for_context(context) -> dict[str, Any]:
         code_root=context.code_repository_root,
         onboarding_root=context.onboarding_root,
         repository=context.code_repository_name,
+        storage=context.storage,
         dry_run=False,
     )
     return result.to_dict()
@@ -356,6 +357,7 @@ def route_index_refresh_plan_for_context(context) -> dict[str, Any]:
         code_root=context.code_repository_root,
         onboarding_root=context.onboarding_root,
         repository=context.code_repository_name,
+        storage=context.storage,
         dry_run=True,
     )
     return result.to_dict()

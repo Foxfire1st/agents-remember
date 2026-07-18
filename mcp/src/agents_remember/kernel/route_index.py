@@ -9,6 +9,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from agents_remember.kernel.coordination_context.models import StorageSettings
+from agents_remember.kernel.route_index_census import route_index_source_snapshot
+
 SCHEMA_VERSION = 1
 INDEX_FILE_NAME = "overview.index.json"
 ROUTE_OVERVIEW_NAME = "overview.md"
@@ -17,26 +20,6 @@ HOT_PATH_SUMMARY_HEADING = "Hot Path Summary"
 HOT_PATH_SUMMARY_LIMIT = 600
 CANDIDATE_HINT_LIMIT = 24
 ANCHOR_HINT_LIMIT = 48
-
-IGNORED_SOURCE_DIRS = {
-    ".codex",
-    ".git",
-    ".hg",
-    ".idea",
-    ".mypy_cache",
-    ".pytest_cache",
-    ".ruff_cache",
-    ".svn",
-    ".venv",
-    ".vscode",
-    "__pycache__",
-    "build",
-    "dist",
-    "node_modules",
-    "target",
-    "venv",
-    "vendor",
-}
 
 TOKEN_PATTERN = re.compile(r"[A-Za-z][A-Za-z0-9_]{2,}")
 CODE_SPAN_PATTERN = re.compile(r"`([^`\n]{2,120})`")
@@ -119,10 +102,16 @@ def build_route_indexes(
     *,
     code_root: Path,
     onboarding_root: Path,
-    repository: str | None = None,
+    repository: str,
+    storage: StorageSettings,
     dry_run: bool = False,
 ) -> RouteIndexBuildResult:
-    """Build route indexes for every route-local onboarding overview."""
+    """Build route indexes using explicit Git and onboarding-storage authority.
+
+    ``sourceFilesInScope`` counts existing Git-tracked and nonignored candidate
+    files whose configured storage is not disabled. ``code_root`` must be the
+    repository root; the generator never falls back to a filesystem walk.
+    """
 
     code_root = code_root.resolve()
     onboarding_root = onboarding_root.resolve()
@@ -132,9 +121,21 @@ def build_route_indexes(
         raise FileNotFoundError(f"onboarding root does not exist: {onboarding_root}")
 
     route_overviews = _discover_route_overviews(onboarding_root)
-    covered_by_route = _discover_covered_files(code_root, onboarding_root, route_overviews.keys())
+    source_snapshot = route_index_source_snapshot(
+        code_root=code_root,
+        storage=storage,
+        scoped_repo_path=repository,
+    )
+    covered_by_route = _discover_covered_files(
+        onboarding_root,
+        route_overviews.keys(),
+        repository_files=frozenset(source_snapshot.repository_paths),
+    )
     child_routes = _discover_child_routes(route_overviews.keys())
-    source_counts = _count_source_files_by_route(code_root, route_overviews.keys())
+    source_counts = _count_source_files_by_route(
+        route_overviews.keys(),
+        source_files=source_snapshot.eligible_paths,
+    )
 
     written = 0
     unchanged = 0
@@ -226,9 +227,10 @@ def _discover_route_overviews(onboarding_root: Path) -> dict[str, str]:
 
 
 def _discover_covered_files(
-    code_root: Path,
     onboarding_root: Path,
     routes: Iterable[str],
+    *,
+    repository_files: frozenset[str],
 ) -> dict[str, list[str]]:
     route_set = set(routes)
     covered: dict[str, list[str]] = {route: [] for route in route_set}
@@ -237,7 +239,7 @@ def _discover_covered_files(
         if not sidecar.is_file() or not _is_file_sidecar(sidecar, onboarding_root):
             continue
         source_rel = _source_path_from_sidecar(sidecar, onboarding_root)
-        if not (code_root / Path(source_rel)).is_file():
+        if source_rel not in repository_files:
             continue
         route = _nearest_route(source_rel, route_set)
         covered.setdefault(route, []).append(source_rel)
@@ -260,25 +262,15 @@ def _discover_child_routes(routes: Iterable[str]) -> dict[str, list[str]]:
     return children
 
 
-def _count_source_files_by_route(code_root: Path, routes: Iterable[str]) -> dict[str, int]:
+def _count_source_files_by_route(
+    routes: Iterable[str],
+    *,
+    source_files: Iterable[str],
+) -> dict[str, int]:
     counts = {route: 0 for route in routes}
-    source_files = sorted(_iter_source_files(code_root))
     for route in counts:
         counts[route] = sum(1 for source_path in source_files if _route_covers(route, source_path))
     return counts
-
-
-def _iter_source_files(code_root: Path) -> Iterable[str]:
-    stack = [code_root]
-    while stack:
-        current = stack.pop()
-        for child in current.iterdir():
-            if child.is_dir():
-                if child.name not in IGNORED_SOURCE_DIRS:
-                    stack.append(child)
-                continue
-            if child.is_file():
-                yield _relative_posix(child, code_root)
 
 
 def _routing_terms(

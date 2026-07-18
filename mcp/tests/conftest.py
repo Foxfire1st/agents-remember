@@ -31,20 +31,11 @@ from pathlib import Path
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
+from agents_remember.kernel.git_command import GIT_REPOSITORY_SELECTOR_ENV
+
 # git's repo-pointer / object-store environment. Any of these, if inherited,
 # redirects a `git` subprocess away from its `cwd` and onto another repository.
-_GIT_LOCATION_VARS = (
-    "GIT_DIR",
-    "GIT_WORK_TREE",
-    "GIT_INDEX_FILE",
-    "GIT_OBJECT_DIRECTORY",
-    "GIT_ALTERNATE_OBJECT_DIRECTORIES",
-    "GIT_COMMON_DIR",
-    "GIT_NAMESPACE",
-    "GIT_PREFIX",
-)
-
-for _var in _GIT_LOCATION_VARS:
+for _var in GIT_REPOSITORY_SELECTOR_ENV:
     os.environ.pop(_var, None)
 
 # Self-contained identity for the throwaway fixture commits; defers to a real

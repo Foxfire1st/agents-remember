@@ -86,10 +86,20 @@ def route_index_refresh_tool(
     repo = require_repo(config, repo_id)
     if repo.memory_root is None:
         raise ValueError(f"repo_id {repo_id!r} does not have a memory root")
+    onboarding_root = repo.memory_root / "onboarding"
+    context = resolve_coordination_context(
+        code_repository_name=repo.repo_id,
+        workspace_root=config.workspace_root,
+        coordination_root=config.coordination_root,
+        code_repository_root=repo.path,
+        onboarding_root=onboarding_root,
+        contract_path=repo.contract_path,
+    )
     result = build_route_indexes(
         code_root=repo.path,
-        onboarding_root=repo.memory_root / "onboarding",
-        repository=repo.repo_id,
+        onboarding_root=onboarding_root,
+        repository=context.code_repository_name,
+        storage=context.storage,
         dry_run=dry_run,
     )
     return {

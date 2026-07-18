@@ -13,6 +13,8 @@ import subprocess
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
+from agents_remember.kernel.coordination_context.models import StorageSettings
+from agents_remember.kernel.git_command import git_environment
 from agents_remember.kernel.memory_ledger import (
     LedgerError,
     MemoryLedger,
@@ -26,6 +28,7 @@ from agents_remember.kernel.onboarding_doc import (
     route_contains_changed_path,
 )
 from agents_remember.kernel.route_index import build_route_indexes
+from agents_remember.memory.carryover_authority import required_official_storage
 from agents_remember.memory_quality.integrity.onboarding_drift_check.entities import (
     parse_entity_fingerprint_rows,
 )
@@ -102,6 +105,7 @@ def run_git(
         text=True,
         capture_output=True,
         check=False,
+        env=git_environment(),
         **stdin_kwargs,  # type: ignore[arg-type]
     )
 
@@ -656,15 +660,17 @@ def selected_candidates(
 
 
 def _refresh_official_route_indexes(
-    request: CarryoverRequest, official_head: str
+    request: CarryoverRequest,
+    official_head: str,
+    storage: StorageSettings,
 ) -> dict[str, object]:
     """Regenerate official-side route indexes after carrying onboarding.
 
     ``overview.index.json`` files are derived artifacts: they are regenerated on
     the official side, never copied from the branch. ``build_route_indexes``
-    scans the code working tree, so regeneration only runs when the code
-    repository is a clean checkout of the official ref; otherwise the skip is
-    reported instead of silently baking wrong coverage into official memory.
+    uses Git and configured path-rule authority. Regeneration only runs when
+    the code repository is a clean checkout of the official ref; otherwise the
+    skip is reported instead of indexing a different code state.
     """
     code_root = request.code_repository_root.resolve()
     if head_commit(code_root, "HEAD") != official_head or has_changes(code_root):
@@ -684,6 +690,7 @@ def _refresh_official_route_indexes(
         code_root=code_root,
         onboarding_root=onboarding_root,
         repository=request.code_repository_name,
+        storage=storage,
         dry_run=False,
     )
     return {"state": "refreshed", **result.to_dict()}
@@ -777,6 +784,7 @@ def apply_carryover_for_request(
     plan = build_plan_for_request(request)
     official_memory = request.official_memory.resolve()
     ensure_clean(official_memory, "official memory")
+    official_storage = required_official_storage(official_memory)
     ledger_path = official_memory / "memory.md"
     ledger = load_ledger(ledger_path)
     official_head = str(plan["official_code_head"])
@@ -812,7 +820,11 @@ def apply_carryover_for_request(
         "reason": "no onboarding was carried over",
     }
     if carried:
-        route_index_refresh = _refresh_official_route_indexes(request, official_head)
+        route_index_refresh = _refresh_official_route_indexes(
+            request,
+            official_head,
+            official_storage,
+        )
     if not carried or not has_changes(official_memory):
         return {
             **_nothing_to_carry_result(
