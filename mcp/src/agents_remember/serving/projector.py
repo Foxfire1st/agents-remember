@@ -175,18 +175,7 @@ class Projector:
                     logger.exception("projection tick failed; retrying next interval")
                     continue
                 self.projection_count += 1
-                current_stable = stable_projection_state(current)
-                seq, previous = self._published
-                for delta in diff_projection(
-                    previous,
-                    current,
-                    previous_state=self._latest_stable,
-                    current_state=current_stable,
-                ):
-                    seq += 1
-                    self._broadcast((seq, delta))
-                self._latest_stable = current_stable
-                self._published = (seq, current)
+                self._publish_projection(current)
         finally:
             await _shutdown_task(watch_task, "change watcher")
             await _shutdown_task(landing_task, "landing refresher")
@@ -215,6 +204,35 @@ class Projector:
             landing_state=self._landing_refresher,
         )
 
+    def _publish_projection(self, current: WorkspaceProjection) -> None:
+        """Atomically publish one successful tick and notify current subscribers.
+
+        A first tick after a failed :meth:`prime` has no previous projection to diff. Existing
+        subscribers still need that recovered authority, so it is broadcast once as a full
+        ``snapshot`` event. The published tuple is committed before queue notification; this
+        method contains no await, so subscription capture cannot interleave with the transition.
+        """
+        current_stable = stable_projection_state(current)
+        seq, previous = self._published
+        events = (
+            [DeltaEvent("snapshot", current)]
+            if previous is None
+            else diff_projection(
+                previous,
+                current,
+                previous_state=self._latest_stable,
+                current_state=current_stable,
+            )
+        )
+        items: list[_Item] = []
+        for event in events:
+            seq += 1
+            items.append((seq, event))
+        self._latest_stable = current_stable
+        self._published = (seq, current)
+        for item in items:
+            self._broadcast(item)
+
     def current(self) -> tuple[int, WorkspaceProjection | None]:
         """The latest (sequence, projection) for a new connection's snapshot."""
         return self._published
@@ -233,10 +251,18 @@ class Projector:
             queue.put_nowait(item)
 
     async def subscribe(self) -> AsyncGenerator[_Item]:
-        """Yield ``(sequence, delta)`` items until the consumer stops iterating."""
+        """Yield the current snapshot, then deltas, from one atomic subscription boundary.
+
+        Queue registration and ``_published`` capture happen in the same event-loop turn with
+        no await between them. A projection transition therefore lands either in the captured
+        snapshot or in this queue, never in the former handoff gap.
+        """
         queue: asyncio.Queue[_Item] = asyncio.Queue()
         self._subscribers.add(queue)
         try:
+            seq, snapshot = self._published
+            if snapshot is not None:
+                yield seq, DeltaEvent("snapshot", snapshot)
             while True:
                 yield await queue.get()
         finally:

@@ -392,6 +392,70 @@ class StreamEventsTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(second.event, "lifecycle")
         await gen.aclose()
 
+    async def test_snapshot_subscription_cannot_lose_an_interleaved_projection(self) -> None:
+        projector = Projector(_config(self.tmp), interval=100)
+        await projector.prime()
+        gen = stream_events(projector)
+
+        first = await asyncio.wait_for(gen.__anext__(), timeout=1)
+        self.assertEqual(first.event, "snapshot")
+        self.assertEqual(len(projector._subscribers), 1)
+        _, initial = projector.current()
+        assert initial is not None
+        projector._publish_projection(
+            initial.model_copy(update={"lifecycles": [_lifecycle("handoff")]})
+        )
+
+        second = await asyncio.wait_for(gen.__anext__(), timeout=1)
+        self.assertEqual(second.event, "lifecycle")
+        self.assertEqual(
+            second.data, _lifecycle("handoff").model_dump(by_alias=True, exclude_none=True)
+        )
+        await gen.aclose()
+        self.assertEqual(len(projector._subscribers), 0)
+
+    async def test_failed_prime_recovery_emits_one_snapshot_then_normal_deltas(self) -> None:
+        projector = Projector(_config(self.tmp), interval=100)
+        with mock.patch.object(projector, "_tick_sync", side_effect=RuntimeError("forced failure")):
+            await projector.prime()
+        self.assertIsNone(projector.current()[1])
+
+        build = ServingBuild(version="9.9.9", commit="abc1234", booted_at="2026-07-18T08:00:00Z")
+        gen = stream_events(projector, build=build)
+        pending = asyncio.create_task(gen.__anext__())
+        await asyncio.sleep(0)
+        self.assertEqual(len(projector._subscribers), 1)
+
+        recovered = _projection(lifecycles=(_lifecycle("recovered"),))
+        projector._publish_projection(recovered)
+        first = await asyncio.wait_for(pending, timeout=1)
+        self.assertEqual(first.event, "snapshot")
+        self.assertEqual(first.id, "1")
+        assert isinstance(first.data, dict)
+        self.assertEqual(first.data["servingBuild"], build.payload())
+        self.assertEqual(first.data["lifecycles"][0]["id"], "recovered")
+
+        projector._publish_projection(recovered)
+        projector._publish_projection(_projection(lifecycles=(_lifecycle("recovered", tokens=9),)))
+        second = await asyncio.wait_for(gen.__anext__(), timeout=1)
+        self.assertEqual(second.event, "lifecycle")
+        self.assertEqual(second.id, "2")
+        self.assertEqual(second.data["tokens"], 9)
+        await gen.aclose()
+        self.assertEqual(len(projector._subscribers), 0)
+
+    async def test_cancelled_waiting_stream_releases_its_subscription(self) -> None:
+        projector = Projector(_config(self.tmp), interval=100)
+        gen = stream_events(projector)
+        pending = asyncio.create_task(gen.__anext__())
+        await asyncio.sleep(0)
+        self.assertEqual(len(projector._subscribers), 1)
+
+        pending.cancel()
+        with self.assertRaises(asyncio.CancelledError):
+            await pending
+        self.assertEqual(len(projector._subscribers), 0)
+
     async def test_snapshot_carries_the_serving_build_stamp(self) -> None:
         projector = Projector(_config(self.tmp), interval=100)
         await projector.prime()

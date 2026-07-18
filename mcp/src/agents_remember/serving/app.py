@@ -184,7 +184,7 @@ async def stream_events(
     build: ServingBuild | None = None,
     supervisor_heartbeat: dict[str, Any] | None = None,
 ) -> AsyncGenerator[ServerSentEvent]:
-    """The SSE event sequence for one connection: snapshot, then per-entity deltas.
+    """The SSE event sequence for one atomic projector subscription.
 
     Module-level (not a route closure) so it is unit-testable without an HTTP client.
     ``build`` (the boot-time serving stamp, 260703-L15) rides the snapshot as
@@ -192,16 +192,15 @@ async def stream_events(
     ``supervisor_heartbeat`` (260707-HFX2-L2 R5) rides as ``supervisorHeartbeat`` -- the tick age
     at connect time, so a stale supervisor is visible in the dashboard header at a glance.
     """
-    seq, snapshot = projector.current()
-    if snapshot is not None:
-        payload = _encode(snapshot)
-        if build is not None:
-            payload["servingBuild"] = build.payload()
-        if supervisor_heartbeat is not None:
-            payload["supervisorHeartbeat"] = supervisor_heartbeat
-        yield ServerSentEvent(data=payload, event="snapshot", id=str(seq), retry=2000)
-    async for seq, delta in projector.subscribe():
-        yield ServerSentEvent(data=_encode(delta.data), event=delta.event, id=str(seq), retry=2000)
+    async with contextlib.aclosing(projector.subscribe()) as subscription:
+        async for seq, delta in subscription:
+            payload = _encode(delta.data)
+            if delta.event == "snapshot":
+                if build is not None:
+                    payload["servingBuild"] = build.payload()
+                if supervisor_heartbeat is not None:
+                    payload["supervisorHeartbeat"] = supervisor_heartbeat
+            yield ServerSentEvent(data=payload, event=delta.event, id=str(seq), retry=2000)
 
 
 _TERMINAL_EXIT_FRAME = json.dumps({"type": "exit"})
