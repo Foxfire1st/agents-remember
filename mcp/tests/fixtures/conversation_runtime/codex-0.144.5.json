@@ -1,0 +1,35 @@
+{
+  "schema": "ar-conversation-runtime-fixture/v1",
+  "fixtureId": "codex-0.144.5-installed-20260718",
+  "harnessId": "codex",
+  "runtimeVersion": "0.144.5",
+  "capturedAt": "2026-07-18T09:50:17+02:00",
+  "productionSeam": "CodexAppServerAdapter.discover",
+  "redactionPolicy": "allowlist-v1",
+  "enablesCapabilities": false,
+  "observations": [
+    {
+      "operation": "adapter/discover",
+      "shape": [
+        "CapabilitySnapshot.models[8]",
+        "ModelCapability.effortOptions[observed:8]",
+        "CapabilitySnapshot.selectedModelKey[absent]",
+        "CapabilitySnapshot.selectedEffort[absent]"
+      ],
+      "result": "observed",
+      "reason": "Installed app-server completed the production adapter discovery seam without a thread or prompt; only allow-listed counts and field presence were retained."
+    },
+    {
+      "operation": "native-history/list-read-resume",
+      "shape": [],
+      "result": "not-exercised",
+      "reason": "The later native-library leaf must exercise registered list/read/resume and exact identity before advertising history support."
+    },
+    {
+      "operation": "active-projector/items-events",
+      "shape": [],
+      "result": "not-exercised",
+      "reason": "The later active-projector leaf must exercise installed message, reasoning, tool, approval, usage, cursor, and rehydrate frames."
+    }
+  ]
+}

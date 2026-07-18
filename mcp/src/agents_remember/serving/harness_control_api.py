@@ -16,6 +16,7 @@ from agents_remember.errors import (
     HarnessControlError,
     HarnessRequestConflictError,
 )
+from agents_remember.serving.conversation import register_conversation_routes
 from agents_remember.serving.harness_capabilities import (
     capability_snapshot_json,
     set_result_json,
@@ -133,6 +134,7 @@ def register_harness_control_routes(
     """Register request/response control routes; async output remains on existing streams."""
 
     pre_session = capability_catalog or HarnessCapabilityCatalog(workspace_root)
+    register_conversation_routes(app)
 
     @app.get("/api/harnesses/{harness}/capabilities")
     async def api_harness_capabilities(harness: str, refresh: bool = False) -> JSONResponse:

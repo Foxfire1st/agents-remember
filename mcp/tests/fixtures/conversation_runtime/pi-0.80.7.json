@@ -1,0 +1,37 @@
+{
+  "schema": "ar-conversation-runtime-fixture/v1",
+  "fixtureId": "pi-0.80.7-installed-20260718",
+  "harnessId": "pi",
+  "runtimeVersion": "0.80.7",
+  "helperVersion": "0.80.7",
+  "capturedAt": "2026-07-18T09:50:17+02:00",
+  "productionSeam": "PiRpcAdapter.discover",
+  "redactionPolicy": "allowlist-v1",
+  "enablesCapabilities": false,
+  "observations": [
+    {
+      "operation": "adapter/discover",
+      "shape": [
+        "CapabilitySnapshot.models[16]",
+        "CapabilitySnapshot.selectedModelKey[present]",
+        "CapabilitySnapshot.selectedEffort[present]"
+      ],
+      "result": "observed",
+      "reason": "Installed Pi completed get_state and get_available_models through the production RPC adapter; names, identifiers, paths, and raw frames were discarded."
+    },
+    {
+      "operation": "locked-helper/list-listAll-resolve",
+      "shape": [
+        "selected:@earendil-works/pi-coding-agent@0.80.7"
+      ],
+      "result": "not-exercised",
+      "reason": "The helper is exactly locked, but dormant session discovery and exact session-file resolution remain the native-library leaf gate."
+    },
+    {
+      "operation": "rpc/messages-entries-events-controls",
+      "shape": [],
+      "result": "not-exercised",
+      "reason": "Messages, entries, durable cursor, tool lifecycle, images, abort, stats, compaction, retry, steer, and follow-up remain independent production gates."
+    }
+  ]
+}

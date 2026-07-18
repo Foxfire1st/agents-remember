@@ -1,0 +1,37 @@
+{
+  "schema": "ar-conversation-runtime-fixture/v1",
+  "fixtureId": "claude-2.1.211-installed-20260718",
+  "harnessId": "claude",
+  "runtimeVersion": "2.1.211",
+  "helperVersion": "0.3.207",
+  "capturedAt": "2026-07-18T09:50:17+02:00",
+  "productionSeam": "ClaudeStreamJsonAdapter.discover",
+  "redactionPolicy": "allowlist-v1",
+  "enablesCapabilities": false,
+  "observations": [
+    {
+      "operation": "adapter/discover",
+      "shape": [
+        "CapabilitySnapshot.models[5]",
+        "CapabilitySnapshot.selectedModelKey[present]",
+        "CapabilitySnapshot.selectedEffort[absent]"
+      ],
+      "result": "observed",
+      "reason": "Installed Claude completed control initialize, synthetic system init, and list_models through the production stream-json adapter; names, identifiers, paths, and raw frames were discarded."
+    },
+    {
+      "operation": "locked-helper/handshake-list-read-resume",
+      "shape": [
+        "selected:@anthropic-ai/claude-agent-sdk@0.3.207"
+      ],
+      "result": "not-exercised",
+      "reason": "The helper is exactly locked, but installed Claude 2.1.211 history interoperability and exact resume replay have not passed; history capabilities remain unverified."
+    },
+    {
+      "operation": "stream-json/partial-tools-usage-controls-attachments",
+      "shape": [],
+      "result": "not-exercised",
+      "reason": "Partial frames, headless interrupt, queue control, and each attachment type remain independent later-leaf production gates."
+    }
+  ]
+}
