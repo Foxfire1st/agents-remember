@@ -1339,6 +1339,7 @@ def create_app(
     register_harness_control_routes(
         app,
         workspace_root=config.workspace_root,
+        coordination_root=config.coordination_root,
         harness_registry=lambda: load_agentic_settings(config.coordination_root).harnesses,
         catalog=catalog,
         host=host,

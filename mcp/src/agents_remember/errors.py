@@ -27,6 +27,16 @@ class RouteIndexCensusError(AgentsRememberError):
     """A validated repository could not provide one authoritative source census."""
 
 
+class ConversationCompositionError(AgentsRememberError):
+    """The app-scoped conversation runtime composition contract was violated.
+
+    Raised when the one immutable runtime authority is retrieved before
+    installation, installed a second time, replaced by a foreign object, or
+    constructed without a required authority. These are composition bugs that
+    must fail at startup or request entry, never silently at first use.
+    """
+
+
 class HarnessControlError(AgentsRememberError):
     """The hosted harness control contract or exact-session identity was violated."""
 

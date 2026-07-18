@@ -1381,6 +1381,7 @@ class HarnessControlIpcTests(unittest.IsolatedAsyncioTestCase):
             register_harness_control_routes(
                 app,
                 workspace_root=root,
+                coordination_root=root,
                 harness_registry=lambda: (),
                 catalog=catalog,
                 host=TerminalHost(tmux_probe=lambda _name: True),

@@ -17,6 +17,13 @@ from agents_remember.errors import (
     HarnessRequestConflictError,
 )
 from agents_remember.serving.conversation import register_conversation_routes
+from agents_remember.serving.conversation.authorization import (
+    LocalOperatorAuthorizationResolver,
+)
+from agents_remember.serving.conversation.runtime import (
+    ConversationRuntime,
+    ConversationScope,
+)
 from agents_remember.serving.harness_capabilities import (
     capability_snapshot_json,
     set_result_json,
@@ -124,6 +131,7 @@ def register_harness_control_routes(
     app: FastAPI,
     *,
     workspace_root: Path,
+    coordination_root: Path,
     harness_registry: HarnessRegistry,
     catalog: TerminalCatalog,
     host: TerminalLivenessHost,
@@ -134,7 +142,24 @@ def register_harness_control_routes(
     """Register request/response control routes; async output remains on existing streams."""
 
     pre_session = capability_catalog or HarnessCapabilityCatalog(workspace_root)
-    register_conversation_routes(app)
+    # L0 one-time composition binding: the immutable app-scoped conversation
+    # runtime is installed exactly once, here, while every existing authority is
+    # already in hand. Child leaves consume it through the request dependencies
+    # and never edit this registration again.
+    conversation_runtime = ConversationRuntime(
+        scope=ConversationScope(
+            workspace_root=workspace_root,
+            coordination_root=coordination_root,
+        ),
+        catalog=catalog,
+        host=host,
+        harness_registry=harness_registry,
+        liveness_clock=liveness_clock,
+        liveness_config=liveness_config,
+        capability_catalog=pre_session,
+        authorization=LocalOperatorAuthorizationResolver.for_workspace(workspace_root),
+    )
+    register_conversation_routes(app, conversation_runtime)
 
     @app.get("/api/harnesses/{harness}/capabilities")
     async def api_harness_capabilities(harness: str, refresh: bool = False) -> JSONResponse:

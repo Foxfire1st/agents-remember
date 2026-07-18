@@ -90,6 +90,7 @@ class HarnessControlApiTests(unittest.TestCase):
         register_harness_control_routes(
             app,
             workspace_root=self.tmp,
+            coordination_root=self.tmp,
             harness_registry=lambda: HARNESSES,
             catalog=self.catalog,
             host=mock.Mock(),
