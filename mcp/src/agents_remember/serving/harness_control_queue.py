@@ -13,11 +13,14 @@ from agents_remember.errors import HarnessControlError
 from agents_remember.serving.harness_capabilities import SetResult
 from agents_remember.serving.harness_control_adapter import HarnessProtocolAdapter
 from agents_remember.serving.harness_control_models import (
+    EVIDENCE_PAGE_BYTE_BUDGET,
+    MAX_OPERATION_TIMELINE_PAGE,
     AdapterEvent,
     AdapterSnapshot,
     ControlOperationKind,
     ControlOperationRef,
     InteractionResponse,
+    OperationTimeline,
     PromptRequest,
     ReconciliationResult,
     ReconciliationState,
@@ -156,6 +159,23 @@ class HarnessControlQueue:
         """Read-only provenance batch for every source; the sole bridge->authority path."""
 
         return await self._authority.provenance(expected_bridge_epoch, request_ids)
+
+    async def operation_timeline(
+        self,
+        expected_bridge_epoch: str,
+        *,
+        after_sequence: int = 0,
+        limit: int = MAX_OPERATION_TIMELINE_PAGE,
+        byte_budget: int = EVIDENCE_PAGE_BYTE_BUDGET,
+    ) -> OperationTimeline:
+        """Read-only paged never-bodies ledger enumeration; the sole bridge->authority path."""
+
+        return await self._authority.operation_timeline(
+            expected_bridge_epoch,
+            after_sequence=after_sequence,
+            limit=limit,
+            byte_budget=byte_budget,
+        )
 
     async def withdraw(
         self,

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 from collections import OrderedDict
 from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass, replace
@@ -26,8 +27,10 @@ from agents_remember.serving.harness_control_models import (
     AdapterEvent,
     AdapterHandshake,
     AdapterSnapshot,
+    AssetReference,
     ControlOperationRef,
     InteractionResponse,
+    InterruptResult,
     LaunchSpec,
     NativeEvidenceFrame,
     NativeEvidencePage,
@@ -35,6 +38,7 @@ from agents_remember.serving.harness_control_models import (
     ReconciliationResult,
     ShutdownMode,
     SubmissionReceipt,
+    read_asset_bytes,
     window_native_evidence_page,
 )
 from agents_remember.serving.harness_launch import ResolvedLaunch, verify_effective_launch
@@ -108,6 +112,7 @@ class PiRpcAdapter:
         self._active_operation: ControlOperationRef | None = None
         self._transport_changed = asyncio.Event()
         self._stopped = False
+        self._last_abort: tuple[tuple[str, str], InterruptResult] | None = None
         self._configuration = PiRpcConfiguration(
             transport=self._require_transport,
             read_state=self._read_configuration_state,
@@ -325,6 +330,8 @@ class PiRpcAdapter:
             "type": "prompt",
             "message": request.text,
         }
+        if request.assets:
+            command["images"] = [self._image_content(asset) for asset in request.assets]
         guard = self._claim_prepared_operation(operation)
         try:
             frame = await self._require_transport().request(command, before_write=guard)
@@ -363,13 +370,16 @@ class PiRpcAdapter:
             self._submissions[request.request_id], state="accepted"
         )
         self._require_event_mapper().mark_prompt_accepted()
+        raw: dict[str, object] = dict(response)
+        if request.assets:
+            raw["assetIds"] = [asset.asset_id for asset in request.assets]
         return SubmissionReceipt(
             request_id=request.request_id,
             acceptance="immediate",
             submitted_at=request.submitted_at,
             vendor_correlation_id=request.request_id,
             accepted_at=self._clock(),
-            raw=dict(response),
+            raw=raw,
         )
 
     async def respond(self, response: InteractionResponse) -> None:
@@ -379,6 +389,93 @@ class PiRpcAdapter:
         payload = mapper.response_payload(response)
         await self._require_transport().send(payload)
         mapper.complete_response(response.interaction_id)
+
+    async def submit_with_assets(self, request: PromptRequest) -> SubmissionReceipt:
+        """Asset-capable submit: pre-verify staged bytes before any native write."""
+
+        try:
+            for asset in request.assets:
+                self._verified_asset_bytes(asset)
+        except HarnessControlError as exc:
+            return SubmissionReceipt(
+                request_id=request.request_id,
+                acceptance="rejected",
+                submitted_at=request.submitted_at,
+                detail=str(exc),
+            )
+        return await self.submit(request)
+
+    async def interrupt(
+        self,
+        *,
+        turn_id: str | None,
+        expected_operation_id: str | None,
+    ) -> InterruptResult:
+        """One native RPC ``abort`` guarded pre-write by AR operation identity.
+
+        Pi has no turn identity: the caller's expected active-operation id must match the
+        current active operation before any native bytes are written, so a stale reconcile
+        can never abort a successor. A repeat naming the same (expected, active) pair
+        replays the first acknowledgement with no second write.
+        """
+
+        if turn_id is not None:
+            raise HarnessControlError(
+                "Pi interrupt does not accept turn identity; use expectedOperationId"
+            )
+        active = self._active_operation
+        if active is None:
+            raise HarnessControlError("no active Pi operation to interrupt")
+        if expected_operation_id is not None and expected_operation_id != active.operation_id:
+            raise HarnessControlError(
+                "interrupt operation id does not match the active Pi operation"
+            )
+        pair = (expected_operation_id or active.operation_id, active.operation_id)
+        if self._last_abort is not None and self._last_abort[0] == pair:
+            return self._last_abort[1]
+        request_id = self._internal_id("abort")
+        frame = await self._require_transport().request({"id": request_id, "type": "abort"})
+        response = parse_pi_response(frame, request_id=request_id, command="abort")
+        if response["success"] is False:
+            result = InterruptResult(
+                acknowledgement="rejected",
+                bridge_epoch="",
+                operation=active,
+                vendor_correlation_id=request_id,
+                detail=pi_response_error(response),
+                raw={"piEvent": dict(frame)},
+            )
+        else:
+            result = InterruptResult(
+                acknowledgement="accepted",
+                bridge_epoch="",
+                operation=active,
+                vendor_correlation_id=request_id,
+                detail="native abort acknowledged for the exact active Pi operation",
+                raw={"piEvent": dict(frame)},
+            )
+        self._last_abort = (pair, result)
+        return result
+
+    def _image_content(self, asset: AssetReference) -> dict[str, object]:
+        _digest, _size, data = self._verified_asset_bytes(asset)
+        return {
+            "type": "image",
+            "mimeType": asset.mime_type,
+            "data": base64.b64encode(data).decode("ascii"),
+        }
+
+    def _verified_asset_bytes(self, asset: AssetReference) -> tuple[str, int, bytes]:
+        """Re-verify the staged file at construction before its bytes cross natively."""
+
+        if asset.spool_path is None:
+            raise HarnessControlError("Pi asset submission requires a verified spool path")
+        digest, size, data = read_asset_bytes(asset.spool_path)
+        if size != asset.byte_size or digest != asset.sha256:
+            raise HarnessControlError(
+                f"Pi asset {asset.asset_id!r} failed verification at construction"
+            )
+        return digest, size, data
 
     async def reconcile(self, request_id: str) -> ReconciliationResult:
         evidence = self._submissions.get(request_id)

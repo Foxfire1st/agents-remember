@@ -67,6 +67,38 @@
       ],
       "result": "observed",
       "reason": "A live cockpit submission's source crossed the provenance batch with exact epoch scoping."
+    },
+    {
+      "operation": "control-plane/abort-write-ack",
+      "shape": [
+        "RPC abort command[observed]",
+        "InterruptResult.acknowledgement[accepted][observed]",
+        "InterruptResult.operation[active operation][observed]",
+        "stale expectedOperationId[refused-typed]"
+      ],
+      "result": "observed",
+      "reason": "Installed 0.80.7 RPC accepted one native abort guarded by the expected active-operation identity through the production seam; a stale identity after settlement failed typed with no write."
+    },
+    {
+      "operation": "control-plane/operation-timeline",
+      "shape": [
+        "OperationTimelineItem.kind[prompt][observed]",
+        "OperationTimelineItem.source[cockpit][observed]",
+        "OperationTimelineItem.sequence[observed]",
+        "OperationTimeline.bridgeEpoch[observed]"
+      ],
+      "result": "observed",
+      "reason": "A live cockpit submission enumerated through the paged never-bodies timeline with exact kind/source/sequence on the production seam."
+    },
+    {
+      "operation": "control-plane/asset-image-submit",
+      "shape": [
+        "prompt images[{type,mimeType,data}][observed]",
+        "SubmissionReceipt.raw.assetIds[observed]",
+        "spool sha256 verification[observed]"
+      ],
+      "result": "observed",
+      "reason": "A digest-verified staged PNG reached native acceptance as base64 image content on a live 0.80.7 RPC prompt; only allow-listed field presence was retained."
     }
   ]
 }

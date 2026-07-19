@@ -25,6 +25,11 @@ from agents_remember.serving.harness_control_bridge import HarnessControlBridge
 from agents_remember.serving.harness_control_models import (
     CONTROL_PROTOCOL_VERSION,
     MAX_NATIVE_EVIDENCE_PAGE,
+    MAX_OPERATION_TIMELINE_PAGE,
+    MAX_SUBMIT_ASSET_BYTES,
+    MAX_SUBMIT_ASSETS,
+    SUBMIT_ASSET_MIME_TYPES,
+    AssetReference,
     ControlIdentity,
     ControlOperationKind,
     InteractionResponse,
@@ -33,7 +38,10 @@ from agents_remember.serving.harness_control_models import (
     ShutdownMode,
     SubmissionSource,
     evidence_page_json,
+    interrupt_result_json,
     native_evidence_page_json,
+    operation_timeline_json,
+    read_asset_bytes,
     receipt_json,
     reconciliation_json,
     snapshot_json,
@@ -201,6 +209,10 @@ class HarnessControlServer:
             return await self._evidence_native_page(payload)
         if action == "submission-provenance":
             return await self._submission_provenance(payload)
+        if action == "interrupt":
+            return await self._interrupt(payload)
+        if action == "operation-timeline":
+            return await self._operation_timeline(payload)
         if action == "stop":
             return await self._stop(payload)
         raise HarnessControlError(f"unknown control action: {action}")
@@ -223,16 +235,91 @@ class HarnessControlServer:
         expected_bridge_epoch = _optional_text(payload, "expectedBridgeEpoch")
         if source == "cockpit" and expected_bridge_epoch is None:
             raise HarnessControlError("cockpit submission requires expectedBridgeEpoch")
+        request_id = _required_text(payload, "requestId")
+        assets = await self._submit_assets(payload, request_id)
         receipt = await self.bridge.submit(
             PromptRequest(
-                request_id=_required_text(payload, "requestId"),
+                request_id=request_id,
                 source=cast(SubmissionSource, source),
                 text=_required_text(payload, "text"),
                 submitted_at=_required_text(payload, "submittedAt"),
                 expected_bridge_epoch=expected_bridge_epoch,
+                assets=assets,
             )
         )
         return receipt_json(receipt)
+
+    async def _submit_assets(
+        self, payload: Mapping[str, object], request_id: str
+    ) -> tuple[AssetReference, ...]:
+        """Validate, confine, and verify staged assets; the wire carries references only."""
+
+        raw_assets = payload.get("assets")
+        if raw_assets is None:
+            return ()
+        if not isinstance(raw_assets, list) or not 1 <= len(raw_assets) <= MAX_SUBMIT_ASSETS:
+            raise HarnessControlError(
+                f"submit assets requires 1..{MAX_SUBMIT_ASSETS} references when present"
+            )
+        assets_root = (self.endpoint.path.parent / "assets").resolve()
+        refs: list[AssetReference] = []
+        seen: set[str] = set()
+        for raw in raw_assets:
+            asset_id, mime_type, byte_size, sha256 = _submit_asset_schema(raw)
+            if asset_id in seen:
+                raise HarnessControlError("submit asset ids must be unique")
+            seen.add(asset_id)
+            refs.append(
+                await self._verify_staged_asset(
+                    assets_root, request_id, asset_id, mime_type, byte_size, sha256
+                )
+            )
+        return tuple(refs)
+
+    async def _verify_staged_asset(
+        self,
+        assets_root: Path,
+        request_id: str,
+        asset_id: str,
+        mime_type: str,
+        byte_size: int,
+        sha256: str,
+    ) -> AssetReference:
+        candidate = _confined_asset_path(assets_root, request_id, asset_id)
+        digest, size, _data = await asyncio.to_thread(read_asset_bytes, candidate)
+        if size != byte_size:
+            raise HarnessControlError("submit asset byte size does not match the staged file")
+        if digest != sha256:
+            raise HarnessControlError("submit asset digest does not match the staged file")
+        return AssetReference(
+            asset_id=asset_id,
+            mime_type=mime_type,
+            byte_size=byte_size,
+            sha256=sha256,
+            spool_path=candidate,
+        )
+
+    async def _interrupt(self, payload: Mapping[str, object]) -> dict[str, object]:
+        return interrupt_result_json(
+            await self.bridge.interrupt(
+                _required_text(payload, "expectedBridgeEpoch"),
+                turn_id=_optional_text(payload, "turnId"),
+                expected_operation_id=_optional_text(payload, "expectedOperationId"),
+            )
+        )
+
+    async def _operation_timeline(self, payload: Mapping[str, object]) -> dict[str, object]:
+        limit = min(
+            MAX_OPERATION_TIMELINE_PAGE,
+            _optional_non_negative_int(payload, "limit", default=MAX_OPERATION_TIMELINE_PAGE),
+        )
+        return operation_timeline_json(
+            await self.bridge.operation_timeline(
+                _required_text(payload, "expectedBridgeEpoch"),
+                after_sequence=_optional_non_negative_int(payload, "afterSequence", default=0),
+                limit=max(1, limit),
+            )
+        )
 
     async def _respond(self, payload: Mapping[str, object]) -> dict[str, object]:
         snapshot = await self.bridge.respond(
@@ -357,6 +444,51 @@ def _required_text(raw: Mapping[str, object], key: str) -> str:
     if not isinstance(value, str) or not value:
         raise HarnessControlError(f"control payload requires non-empty {key}")
     return value
+
+
+def _submit_asset_schema(raw: object) -> tuple[str, str, int, str]:
+    """Validate one wire asset reference's shape; confinement/verification happen later."""
+
+    if not isinstance(raw, dict):
+        raise HarnessControlError("submit asset must be an object")
+    asset_id = _required_text(raw, "assetId")
+    mime_type = _required_text(raw, "mimeType")
+    if mime_type not in SUBMIT_ASSET_MIME_TYPES:
+        raise HarnessControlError(
+            "submit asset MIME type must be one of " + ", ".join(sorted(SUBMIT_ASSET_MIME_TYPES))
+        )
+    byte_size = raw.get("byteSize")
+    if (
+        not isinstance(byte_size, int)
+        or isinstance(byte_size, bool)
+        or not 1 <= byte_size <= MAX_SUBMIT_ASSET_BYTES
+    ):
+        raise HarnessControlError(f"submit asset byteSize must be 1..{MAX_SUBMIT_ASSET_BYTES}")
+    sha256 = _required_text(raw, "sha256")
+    if len(sha256) != 64 or any(character not in "0123456789abcdef" for character in sha256):
+        raise HarnessControlError("submit asset sha256 must be 64 lowercase hex characters")
+    return asset_id, mime_type, byte_size, sha256
+
+
+def _confined_asset_path(assets_root: Path, request_id: str, asset_id: str) -> Path:
+    """Resolve the convention path and verify containment before any filesystem touch."""
+
+    for component, label in ((request_id, "requestId"), (asset_id, "assetId")):
+        if not component or len(component.encode("utf-8")) > 255:
+            raise HarnessControlError(
+                f"submit asset {label} must be non-empty and at most 255 bytes"
+            )
+        if component in {".", ".."} or "/" in component or "\\" in component:
+            raise HarnessControlError(
+                f"submit asset {label} must not contain path separators or dot segments"
+            )
+    try:
+        candidate = (assets_root / request_id / asset_id).resolve()
+    except ValueError as exc:
+        raise HarnessControlError(f"submit asset path is invalid: {exc}") from exc
+    if not candidate.is_relative_to(assets_root):
+        raise HarnessControlError("submit asset path escapes the session asset spool")
+    return candidate
 
 
 def _optional_text(raw: Mapping[str, object], key: str) -> str | None:

@@ -56,8 +56,10 @@ from agents_remember.serving.harness_control_models import (
     AdapterEvent,
     AdapterHandshake,
     AdapterSnapshot,
+    AssetReference,
     ControlOperationRef,
     InteractionResponse,
+    InterruptResult,
     LaunchSpec,
     NativeEvidencePage,
     PromptRequest,
@@ -65,6 +67,7 @@ from agents_remember.serving.harness_control_models import (
     ShutdownMode,
     SubmissionReceipt,
     TranscriptEntry,
+    read_asset_bytes,
     window_native_evidence_page,
 )
 
@@ -100,6 +103,7 @@ class CodexAppServerAdapter:
         self._completed_turn_limit = settings.submission_limit
         self._event_sequence = 0
         self._transcript_sequence = 0
+        self._last_interrupt: tuple[tuple[str, str], InterruptResult] | None = None
 
     async def start(self, launch: LaunchSpec) -> AdapterHandshake:
         if self._session.transport is not None:
@@ -241,9 +245,7 @@ class CodexAppServerAdapter:
             or self._pending_operation is not None
             or self._pending_interaction is not None
         ):
-            raise HarnessAdapterBusyError(
-                f"Codex is not idle at {operation.kind} preflight"
-            )
+            raise HarnessAdapterBusyError(f"Codex is not idle at {operation.kind} preflight")
 
     async def submit(self, request: PromptRequest) -> SubmissionReceipt:
         self._require_ready()
@@ -270,6 +272,70 @@ class CodexAppServerAdapter:
         finally:
             if self._pending_operation == operation:
                 self._pending_operation = None
+
+    async def submit_with_assets(self, request: PromptRequest) -> SubmissionReceipt:
+        """Asset-capable submit: pre-verify staged bytes before any native write."""
+
+        try:
+            for asset in request.assets:
+                self._verified_asset_path(asset)
+        except CodexAppServerError as exc:
+            return SubmissionReceipt(
+                request_id=request.request_id,
+                acceptance="rejected",
+                submitted_at=request.submitted_at,
+                detail=str(exc),
+            )
+        return await self.submit(request)
+
+    async def interrupt(
+        self,
+        *,
+        turn_id: str | None,
+        expected_operation_id: str | None,
+    ) -> InterruptResult:
+        """One native ``turn/interrupt`` against the exact active turn, replaying once.
+
+        ``expected_operation_id`` is evidence on the result, never a guard input: the codex
+        guard is the native turn identity. A repeat naming the same active turn replays the
+        first acknowledgement with no second native write.
+        """
+
+        del expected_operation_id
+        active = self._active_turn_id
+        if active is None:
+            raise CodexAppServerError("no active Codex turn to interrupt")
+        if turn_id is not None and turn_id != active:
+            raise CodexAppServerError("interrupt turn id does not match the active Codex turn")
+        pair = (turn_id or active, active)
+        if self._last_interrupt is not None and self._last_interrupt[0] == pair:
+            return self._last_interrupt[1]
+        operation = self._active_operation
+        try:
+            await self._require_transport().request(
+                "turn/interrupt",
+                {"threadId": self._require_thread_id(), "turnId": active},
+            )
+        except CodexAppServerRpcError as exc:
+            result = InterruptResult(
+                acknowledgement="rejected",
+                bridge_epoch="",
+                operation=operation,
+                vendor_correlation_id=active,
+                detail=str(exc),
+                raw={"codexMethod": "turn/interrupt", "turnId": active},
+            )
+        else:
+            result = InterruptResult(
+                acknowledgement="accepted",
+                bridge_epoch="",
+                operation=operation,
+                vendor_correlation_id=active,
+                detail="native interrupt acknowledged for the exact active Codex turn",
+                raw={"codexMethod": "turn/interrupt", "turnId": active},
+            )
+        self._last_interrupt = (pair, result)
+        return result
 
     async def respond(self, response: InteractionResponse) -> None:
         pending = self._pending_interaction
@@ -381,7 +447,7 @@ class CodexAppServerAdapter:
         assert launch is not None
         params: JsonObject = {
             "threadId": self._require_thread_id(),
-            "input": [{"type": "text", "text": evidence.request.text}],
+            "input": self._turn_input(evidence.request),
             "clientUserMessageId": evidence.request.request_id,
             "model": model.model,
             "cwd": str(launch.cwd),
@@ -463,17 +529,20 @@ class CodexAppServerAdapter:
         terminal_completion = status != "inProgress" and not completion_emitted
         if terminal_completion:
             self._remember_completed_turn(turn_id, operation)
+        raw: JsonObject = {
+            "method": "turn/start",
+            "clientUserMessageId": evidence.request.request_id,
+            "terminalCompletion": terminal_completion,
+        }
+        if evidence.request.assets:
+            raw["assetIds"] = [asset.asset_id for asset in evidence.request.assets]
         return SubmissionReceipt(
             request_id=evidence.request.request_id,
             acceptance="immediate",
             submitted_at=evidence.request.submitted_at,
             vendor_correlation_id=turn_id,
             accepted_at=self._clock(),
-            raw={
-                "method": "turn/start",
-                "clientUserMessageId": evidence.request.request_id,
-                "terminalCompletion": terminal_completion,
-            },
+            raw=raw,
         )
 
     async def _run_messages(self, transport: CodexAppServerTransport) -> None:
@@ -524,9 +593,7 @@ class CodexAppServerAdapter:
             self._handle_settings_updated(params)
             await self._emit("state", raw={"codexMethod": method, AR_EVIDENCE_KEY: params})
             return
-        await self._emit(
-            "codex-notification", raw={"codexMethod": method, AR_EVIDENCE_KEY: params}
-        )
+        await self._emit("codex-notification", raw={"codexMethod": method, AR_EVIDENCE_KEY: params})
 
     async def _handle_turn_completed(self, params: JsonObject) -> None:
         self._validate_thread(params)
@@ -726,6 +793,26 @@ class CodexAppServerAdapter:
             raise CodexAppServerError("Codex adapter event queue is full")
         self._events.put_nowait(event)
 
+    def _turn_input(self, request: PromptRequest) -> list[JsonObject]:
+        """Build the turn input blocks; verified local images ride as native paths."""
+
+        blocks: list[JsonObject] = [{"type": "text", "text": request.text}]
+        for asset in request.assets:
+            blocks.append({"type": "localImage", "path": self._verified_asset_path(asset)})
+        return blocks
+
+    def _verified_asset_path(self, asset: AssetReference) -> str:
+        """Re-verify the staged file at construction before the native process sees its path."""
+
+        if asset.spool_path is None:
+            raise CodexAppServerError("Codex asset submission requires a verified spool path")
+        digest, size, _data = read_asset_bytes(asset.spool_path)
+        if size != asset.byte_size or digest != asset.sha256:
+            raise CodexAppServerError(
+                f"Codex asset {asset.asset_id!r} failed verification at construction"
+            )
+        return str(asset.spool_path)
+
     def _busy_acceptance(self, activity: str, fallback: str) -> str:
         if activity == "running":
             return "immediate"
@@ -740,13 +827,9 @@ class CodexAppServerAdapter:
             or self._active_operation is not None
             or self._pending_interaction is not None
         ):
-            raise HarnessAdapterBusyError(
-                "Codex became busy before the guarded turn/start write"
-            )
+            raise HarnessAdapterBusyError("Codex became busy before the guarded turn/start write")
 
-    def _remember_completed_turn(
-        self, turn_id: str, operation: ControlOperationRef
-    ) -> None:
+    def _remember_completed_turn(self, turn_id: str, operation: ControlOperationRef) -> None:
         """Release live correlation and retain only the bounded terminal duplicate window."""
 
         self._turn_operations.pop(turn_id, None)

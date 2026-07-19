@@ -9,10 +9,15 @@ from dataclasses import replace
 from datetime import UTC, datetime
 from uuid import uuid4
 
-from agents_remember.errors import HarnessAdapterDisconnectedError, HarnessControlError
+from agents_remember.errors import (
+    HarnessAdapterDisconnectedError,
+    HarnessBridgeEpochMismatchError,
+    HarnessControlError,
+)
 from agents_remember.serving.harness_capabilities import CapabilitySnapshot, SetResult
 from agents_remember.serving.harness_control_adapter import (
     HarnessProtocolAdapter,
+    InterruptCapableAdapter,
     reduce_adapter_event,
 )
 from agents_remember.serving.harness_control_models import (
@@ -20,6 +25,7 @@ from agents_remember.serving.harness_control_models import (
     CONTROL_PROTOCOL_VERSION,
     EVIDENCE_PAGE_BYTE_BUDGET,
     MAX_NATIVE_EVIDENCE_PAGE,
+    MAX_OPERATION_TIMELINE_PAGE,
     REQUIRED_ADAPTER_CAPABILITIES,
     AdapterEvent,
     AdapterHandshake,
@@ -29,9 +35,11 @@ from agents_remember.serving.harness_control_models import (
     EvidenceFrame,
     EvidencePage,
     InteractionResponse,
+    InterruptResult,
     LaunchSpec,
     NativeEvidencePage,
     NativePageReader,
+    OperationTimeline,
     PromptRequest,
     ReconciliationResult,
     ReconciliationState,
@@ -229,6 +237,56 @@ class HarnessControlBridge:
     ) -> SubmissionProvenanceBatch:
         self._require_running()
         return await self._command_queue.provenance(expected_bridge_epoch, request_ids)
+
+    async def interrupt(
+        self,
+        expected_bridge_epoch: str,
+        *,
+        turn_id: str | None = None,
+        expected_operation_id: str | None = None,
+    ) -> InterruptResult:
+        """One native interrupt write, epoch-guarded and bridge-stamped.
+
+        Settlement is deliberately untouched: the interrupted operation still settles
+        through the landed completion path, never through this acknowledgement.
+        """
+
+        self._require_epoch(expected_bridge_epoch)
+        self._require_running()
+        adapter = self._adapter
+        if not isinstance(adapter, InterruptCapableAdapter):
+            raise HarnessControlError(
+                f"{type(adapter).__name__} does not support native interrupt; "
+                "the interrupt capability is unverified for this harness"
+            )
+        result = await adapter.interrupt(
+            turn_id=turn_id,
+            expected_operation_id=expected_operation_id,
+        )
+        if result.bridge_epoch:
+            raise HarnessControlError("interrupt adapter must not mint the bridge epoch")
+        return replace(result, bridge_epoch=self._command_queue.bridge_epoch)
+
+    async def operation_timeline(
+        self,
+        expected_bridge_epoch: str,
+        *,
+        after_sequence: int = 0,
+        limit: int = MAX_OPERATION_TIMELINE_PAGE,
+        byte_budget: int = EVIDENCE_PAGE_BYTE_BUDGET,
+    ) -> OperationTimeline:
+        self._require_running()
+        return await self._command_queue.operation_timeline(
+            expected_bridge_epoch,
+            after_sequence=after_sequence,
+            limit=limit,
+            byte_budget=byte_budget,
+        )
+
+    def _require_epoch(self, expected_bridge_epoch: str) -> None:
+        actual = self._command_queue.bridge_epoch
+        if expected_bridge_epoch != actual:
+            raise HarnessBridgeEpochMismatchError(expected_bridge_epoch, actual)
 
     def prompt(
         self,

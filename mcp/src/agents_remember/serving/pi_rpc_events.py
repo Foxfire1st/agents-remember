@@ -226,8 +226,18 @@ class PiRpcEventMapper:
         message = frame.get("message")
         if not isinstance(message, dict):
             raise HarnessControlError("Pi RPC message_end requires a message object")
-        role, text = pi_message_text(cast(Mapping[str, object], message))
-        entry = self._transcript_entry(role=role, text=text, raw=frame)
+        role = message.get("role")
+        if role not in {"user", "assistant"}:
+            raise HarnessControlError("Pi RPC message_end requires a user or assistant role")
+        try:
+            _, text = pi_message_text(cast(Mapping[str, object], message))
+        except HarnessControlError:
+            # An interrupted turn can end a message before any text/thinking block exists.
+            # The frame crosses as evidence only — never a bridge failure, never a fake entry.
+            return self._next_event("pi:message_end", frame, evidence=frame)
+        entry = self._transcript_entry(
+            role=cast(Literal["user", "assistant"], role), text=text, raw=frame
+        )
         return self._next_event("transcript", frame, transcript=(entry,), evidence=frame)
 
     def _queue_event(self, frame: Mapping[str, object]) -> AdapterEvent:

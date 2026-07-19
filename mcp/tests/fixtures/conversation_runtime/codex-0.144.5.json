@@ -89,7 +89,51 @@
         "submission-authority/bridgeEpoch"
       ],
       "result": "observed",
-      "reason": "L2 held-open fix round: a real end-to-end codex open passed through the landed L0E resume channel \u2014 list, exact resume-target resolve, tracked opener spawn with resumeThreadId, thread/resume at adapter start, exact vendor identity + bridge epoch catalog proof (201 opened), idempotent replay, retirement with no leaks."
+      "reason": "L2 held-open fix round: a real end-to-end codex open passed through the landed L0E resume channel — list, exact resume-target resolve, tracked opener spawn with resumeThreadId, thread/resume at adapter start, exact vendor identity + bridge epoch catalog proof (201 opened), idempotent replay, retirement with no leaks."
+    },
+    {
+      "operation": "control-plane/interrupt-write-ack",
+      "shape": [
+        "turn/interrupt(threadId,turnId)[observed]",
+        "InterruptResult.acknowledgement[accepted][observed]",
+        "InterruptResult.vendorCorrelationId[turn][observed]",
+        "turn/completed status[interrupted][observed]",
+        "settled re-interrupt[refused-typed]"
+      ],
+      "result": "observed",
+      "reason": "Installed 0.144.5 app-server accepted one native interrupt on a live thread through the production adapter-bridge-IPC-client seam; the interrupted settlement crossed the existing completion path and a post-settlement interrupt failed typed."
+    },
+    {
+      "operation": "control-plane/operation-timeline",
+      "shape": [
+        "OperationTimelineItem.kind[prompt][observed]",
+        "OperationTimelineItem.source[cockpit][observed]",
+        "OperationTimelineItem.sequence[observed]",
+        "OperationTimelineItem.payloadDigestPresent[observed]",
+        "OperationTimeline.bridgeEpoch[observed]"
+      ],
+      "result": "observed",
+      "reason": "A live cockpit submission enumerated through the paged never-bodies timeline with exact kind/source/sequence on the production seam."
+    },
+    {
+      "operation": "control-plane/asset-local-image-submit",
+      "shape": [
+        "turn/start input localImage[path][observed]",
+        "SubmissionReceipt.raw.assetIds[observed]",
+        "spool sha256 verification[observed]"
+      ],
+      "result": "observed",
+      "reason": "A digest-verified staged PNG reached native acceptance as a localImage input block on a live 0.144.5 thread; only allow-listed field presence was retained."
+    },
+    {
+      "operation": "control-plane/withdrawal-recovery",
+      "shape": [
+        "WithdrawalResult.recovery.text[exact][observed]",
+        "replay recovery[absent][observed]",
+        "tombstone timing[byte-preserved]"
+      ],
+      "result": "observed",
+      "reason": "A queued cockpit withdrawal returned the exact body exactly once inside the already cockpit_only response; the idempotent replay carried none."
     }
   ]
 }

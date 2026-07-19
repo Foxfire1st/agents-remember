@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
@@ -70,6 +71,20 @@ MAX_NATIVE_EVIDENCE_PAGE = 200
 
 EVIDENCE_PAGE_BYTE_BUDGET = 48 * 1024
 """Default serialized-byte budget for one evidence page (bounded below the IPC wire cap)."""
+
+MAX_OPERATION_TIMELINE_PAGE = 256
+"""Server-side item cap for one operation-timeline page (the retained ledger's own bound)."""
+
+MAX_SUBMIT_ASSETS = 4
+"""Maximum asset references riding one submit payload."""
+
+MAX_SUBMIT_ASSET_BYTES = 5 * 1024 * 1024
+"""Maximum declared byte size for one staged asset."""
+
+SUBMIT_ASSET_MIME_TYPES = frozenset({"image/png", "image/jpeg", "image/webp", "image/gif"})
+"""MIME allow-list for the asset channel; anything else fails closed at admission."""
+
+InterruptAcknowledgement = Literal["accepted", "rejected", "unsupported", "unknown"]
 
 
 @dataclass(frozen=True)
@@ -166,6 +181,17 @@ class AdapterHandshake:
 
 
 @dataclass(frozen=True)
+class AssetReference:
+    """One staged asset's verified identity; ``spool_path`` is runner-local and never serialized."""
+
+    asset_id: str
+    mime_type: str
+    byte_size: int
+    sha256: str
+    spool_path: Path | None = None
+
+
+@dataclass(frozen=True)
 class PromptRequest:
     """One immutable whole message; adapters must never merge it at keystroke level."""
 
@@ -175,6 +201,7 @@ class PromptRequest:
     submitted_at: str
     operation: ControlOperationRef | None = None
     expected_bridge_epoch: str | None = None
+    assets: tuple[AssetReference, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -284,12 +311,60 @@ class SubmissionStatusBatch:
 
 
 @dataclass(frozen=True)
+class WithdrawalRecovery:
+    """The exact body the tombstone consumed at one true withdrawal; crosses only then."""
+
+    text: str | None
+    assets: tuple[AssetReference, ...] = ()
+
+
+@dataclass(frozen=True)
 class WithdrawalResult:
     request_id: str
     outcome: WithdrawalOutcome
     state: SubmissionLifecycleState | None
     withdrawn_at: str | None = None
     detail: str | None = None
+    recovery: WithdrawalRecovery | None = None
+
+
+@dataclass(frozen=True)
+class InterruptResult:
+    """One native interrupt acknowledgement; settlement stays with the completion path."""
+
+    acknowledgement: InterruptAcknowledgement
+    bridge_epoch: str
+    operation: ControlOperationRef | None = None
+    vendor_correlation_id: str | None = None
+    detail: str | None = None
+    raw: Mapping[str, object] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class OperationTimelineItem:
+    """One retained ledger row's identity/source/kind/sequence/state — never its body."""
+
+    operation_id: str
+    kind: ControlOperationKind
+    source: SubmissionSource | None
+    state: SubmissionLifecycleState
+    sequence: int
+    submitted_at: str
+    updated_at: str
+    accepted_at: str | None
+    payload_digest_present: bool
+    vendor_correlation_id: str | None = None
+
+
+@dataclass(frozen=True)
+class OperationTimeline:
+    """One paged never-bodies enumeration of the retained ledger; union is completeness."""
+
+    bridge_epoch: str
+    latest_sequence: int
+    evicted_before_sequence: int
+    truncated: bool
+    items: tuple[OperationTimelineItem, ...]
 
 
 @dataclass(frozen=True)
@@ -677,13 +752,85 @@ def submission_status_batch_json(value: SubmissionStatusBatch) -> dict[str, obje
 
 
 def withdrawal_result_json(value: WithdrawalResult) -> dict[str, object]:
-    return {
+    result: dict[str, object] = {
         "requestId": value.request_id,
         "outcome": value.outcome,
         "state": value.state,
         "withdrawnAt": value.withdrawn_at,
         "detail": value.detail,
     }
+    if value.recovery is not None:
+        # Additive optional key: present only at the one true withdrawal transition.
+        result["recovery"] = withdrawal_recovery_json(value.recovery)
+    return result
+
+
+def asset_reference_json(value: AssetReference) -> dict[str, object]:
+    """Serialize the wire identity; the runner-local spool path never crosses."""
+
+    return {
+        "assetId": value.asset_id,
+        "mimeType": value.mime_type,
+        "byteSize": value.byte_size,
+        "sha256": value.sha256,
+    }
+
+
+def withdrawal_recovery_json(value: WithdrawalRecovery) -> dict[str, object]:
+    return {
+        "text": value.text,
+        "assets": [asset_reference_json(asset) for asset in value.assets],
+    }
+
+
+def interrupt_result_json(value: InterruptResult) -> dict[str, object]:
+    return {
+        "acknowledgement": value.acknowledgement,
+        "bridgeEpoch": value.bridge_epoch,
+        "operation": value.operation.to_json() if value.operation is not None else None,
+        "vendorCorrelationId": value.vendor_correlation_id,
+        "detail": value.detail,
+        "raw": dict(value.raw),
+    }
+
+
+def operation_timeline_item_json(value: OperationTimelineItem) -> dict[str, object]:
+    return {
+        "operationId": value.operation_id,
+        "kind": value.kind,
+        "source": value.source,
+        "state": value.state,
+        "sequence": value.sequence,
+        "submittedAt": value.submitted_at,
+        "updatedAt": value.updated_at,
+        "acceptedAt": value.accepted_at,
+        "payloadDigestPresent": value.payload_digest_present,
+        "vendorCorrelationId": value.vendor_correlation_id,
+    }
+
+
+def operation_timeline_json(value: OperationTimeline) -> dict[str, object]:
+    return {
+        "bridgeEpoch": value.bridge_epoch,
+        "latestSequence": value.latest_sequence,
+        "evictedBeforeSequence": value.evicted_before_sequence,
+        "truncated": value.truncated,
+        "items": [operation_timeline_item_json(item) for item in value.items],
+    }
+
+
+def operation_timeline_item_wire_bytes(value: OperationTimelineItem) -> int:
+    return _serialized_size(operation_timeline_item_json(value))
+
+
+def read_asset_bytes(path: Path) -> tuple[str, int, bytes]:
+    """Read one confined spool file; return (sha256 hex, size, bytes), typed on any failure."""
+
+    try:
+        data = path.read_bytes()
+    except (OSError, ValueError) as exc:
+        raise HarnessControlError("asset is not readable inside the session asset spool") from exc
+    return hashlib.sha256(data).hexdigest(), len(data), data
 
 
 def _required_text(raw: Mapping[str, object], key: str) -> str:

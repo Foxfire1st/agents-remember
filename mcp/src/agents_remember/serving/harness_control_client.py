@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import json
 import socket
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Protocol, cast
@@ -30,15 +30,23 @@ from agents_remember.serving.harness_capabilities import (
 from agents_remember.serving.harness_control_ipc import MAX_CONTROL_MESSAGE_BYTES
 from agents_remember.serving.harness_control_models import (
     CONTROL_PROTOCOL_VERSION,
+    MAX_OPERATION_TIMELINE_PAGE,
     AcceptanceState,
     ActivityState,
     AdapterSnapshot,
+    AssetReference,
     ControlIdentity,
+    ControlOperationKind,
+    ControlOperationRef,
     ControlState,
     EvidenceFrame,
     EvidencePage,
+    InterruptAcknowledgement,
+    InterruptResult,
     NativeEvidenceFrame,
     NativeEvidencePage,
+    OperationTimeline,
+    OperationTimelineItem,
     PendingInteraction,
     ReconciliationResult,
     ReconciliationState,
@@ -51,6 +59,7 @@ from agents_remember.serving.harness_control_models import (
     SubmissionSource,
     SubmissionStatus,
     SubmissionStatusBatch,
+    WithdrawalRecovery,
     WithdrawalResult,
 )
 
@@ -81,6 +90,12 @@ def control_identity(entry: ControlledSession) -> ControlIdentity:
         tmux_name=entry.tmux_name,
         created_at=entry.created_at,
     )
+
+
+def _wire_asset(asset: object) -> dict[str, object]:
+    if not isinstance(asset, Mapping):
+        raise HarnessControlError("submit asset must be an object")
+    return dict(asset)
 
 
 def read_control_snapshot(entry: ControlledSession) -> AdapterSnapshot:
@@ -169,16 +184,17 @@ def submit_control_prompt(
     request_id: str,
     submitted_at: str | None = None,
     expected_bridge_epoch: str | None = None,
+    assets: Sequence[Mapping[str, object]] | None = None,
 ) -> SubmissionReceipt:
     stamp = submitted_at or datetime.now(UTC).isoformat()
-    payload: dict[str, object] = {
-        "requestId": request_id,
-        "source": source,
-        "text": text,
-        "submittedAt": stamp,
-    }
-    if expected_bridge_epoch is not None:
-        payload["expectedBridgeEpoch"] = expected_bridge_epoch
+    payload = _submit_payload(
+        text,
+        source=source,
+        request_id=request_id,
+        submitted_at=stamp,
+        expected_bridge_epoch=expected_bridge_epoch,
+        assets=assets,
+    )
     try:
         result = request_control(
             entry,
@@ -208,6 +224,30 @@ def submit_control_prompt(
             detail=f"control submission returned incoherent post-dispatch evidence: {exc}",
             bridge_epoch=expected_bridge_epoch,
         )
+
+
+def _submit_payload(
+    text: str,
+    *,
+    source: SubmissionSource,
+    request_id: str,
+    submitted_at: str,
+    expected_bridge_epoch: str | None,
+    assets: Sequence[Mapping[str, object]] | None,
+) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "requestId": request_id,
+        "source": source,
+        "text": text,
+        "submittedAt": submitted_at,
+    }
+    if assets is not None:
+        if isinstance(assets, (str, bytes)) or not isinstance(assets, Sequence):
+            raise HarnessControlError("submit assets must be a sequence of asset objects")
+        payload["assets"] = [_wire_asset(asset) for asset in assets]
+    if expected_bridge_epoch is not None:
+        payload["expectedBridgeEpoch"] = expected_bridge_epoch
+    return payload
 
 
 def reconcile_control_prompt(
@@ -353,6 +393,56 @@ def read_submission_provenance(
         expected_bridge_epoch=expected_bridge_epoch,
         request_ids=request_ids,
     )
+
+
+def interrupt_control(
+    entry: ControlledSession,
+    *,
+    expected_bridge_epoch: str,
+    turn_id: str | None = None,
+    expected_operation_id: str | None = None,
+) -> InterruptResult:
+    """One epoch-guarded native interrupt write; acknowledgement, never settlement."""
+
+    payload: dict[str, object] = {"expectedBridgeEpoch": expected_bridge_epoch}
+    if turn_id is not None:
+        payload["turnId"] = turn_id
+    if expected_operation_id is not None:
+        payload["expectedOperationId"] = expected_operation_id
+    result = request_control(
+        entry,
+        "interrupt",
+        payload,
+        timeout_seconds=SET_CONTROL_TIMEOUT_SECONDS,
+    )
+    return _interrupt_result(result, expected_bridge_epoch=expected_bridge_epoch)
+
+
+def read_operation_timeline(
+    entry: ControlledSession,
+    *,
+    expected_bridge_epoch: str,
+    after_sequence: int = 0,
+    limit: int = MAX_OPERATION_TIMELINE_PAGE,
+) -> OperationTimeline:
+    """Page the retained ledger; completeness is the union through latestSequence."""
+
+    if isinstance(after_sequence, str):
+        raise HarnessControlError(
+            "opaque cursor coordinates are invalid in the operation timeline domain"
+        )
+    _require_coordinate(after_sequence, "operation timeline after_sequence")
+    _require_page_limit(limit)
+    result = request_control(
+        entry,
+        "operation-timeline",
+        {
+            "expectedBridgeEpoch": expected_bridge_epoch,
+            "afterSequence": after_sequence,
+            "limit": limit,
+        },
+    )
+    return _operation_timeline(result, expected_bridge_epoch=expected_bridge_epoch)
 
 
 def stop_control_session(entry: ControlledSession, *, forced: bool = False) -> None:
@@ -570,6 +660,133 @@ def _withdrawal_result(result: object, *, request_id: str) -> WithdrawalResult:
         state=_submission_state(result.get("state"), optional=True),
         withdrawn_at=_optional_text(result, "withdrawnAt"),
         detail=_optional_text(result, "detail"),
+        recovery=_withdrawal_recovery(result.get("recovery")),
+    )
+
+
+def _withdrawal_recovery(raw_recovery: object) -> WithdrawalRecovery | None:
+    if raw_recovery is None:
+        return None
+    if not isinstance(raw_recovery, Mapping):
+        raise HarnessControlError("withdrawal recovery must be an object when present")
+    text = raw_recovery.get("text")
+    if text is not None and not isinstance(text, str):
+        raise HarnessControlError("withdrawal recovery text must be text or null")
+    raw_assets = raw_recovery.get("assets")
+    if not isinstance(raw_assets, list):
+        raise HarnessControlError("withdrawal recovery requires an assets list")
+    return WithdrawalRecovery(
+        text=text,
+        assets=tuple(_asset_reference(item) for item in raw_assets),
+    )
+
+
+def _asset_reference(raw: object) -> AssetReference:
+    if not isinstance(raw, Mapping):
+        raise HarnessControlError("asset reference must be an object")
+    byte_size = raw.get("byteSize")
+    if not isinstance(byte_size, int) or isinstance(byte_size, bool) or byte_size < 1:
+        raise HarnessControlError("asset reference byteSize must be a positive integer")
+    return AssetReference(
+        asset_id=_required_text(raw, "assetId"),
+        mime_type=_required_text(raw, "mimeType"),
+        byte_size=byte_size,
+        sha256=_required_text(raw, "sha256"),
+    )
+
+
+def _interrupt_result(result: object, *, expected_bridge_epoch: str) -> InterruptResult:
+    if not isinstance(result, Mapping):
+        raise HarnessControlError("control interrupt response must be an object")
+    acknowledgement = result.get("acknowledgement")
+    if acknowledgement not in {"accepted", "rejected", "unsupported", "unknown"}:
+        raise HarnessControlError("control interrupt response has invalid acknowledgement")
+    operation = result.get("operation")
+    parsed_operation: ControlOperationRef | None = None
+    if operation is not None:
+        if not isinstance(operation, Mapping):
+            raise HarnessControlError("control interrupt operation must be an object or null")
+        parsed_operation = ControlOperationRef.from_json(operation)
+    return InterruptResult(
+        acknowledgement=cast(InterruptAcknowledgement, acknowledgement),
+        bridge_epoch=_evidence_bridge_epoch(result, expected_bridge_epoch=expected_bridge_epoch),
+        operation=parsed_operation,
+        vendor_correlation_id=_optional_text(result, "vendorCorrelationId"),
+        detail=_optional_text(result, "detail"),
+        raw=_object(result.get("raw")),
+    )
+
+
+def _operation_timeline(result: object, *, expected_bridge_epoch: str) -> OperationTimeline:
+    if not isinstance(result, Mapping):
+        raise HarnessControlError("operation timeline response must be an object")
+    bridge_epoch = _evidence_bridge_epoch(result, expected_bridge_epoch=expected_bridge_epoch)
+    latest = _required_non_negative_int(result, "latestSequence")
+    evicted = _required_non_negative_int(result, "evictedBeforeSequence")
+    if evicted > latest:
+        raise HarnessControlError("operation timeline eviction floor exceeds its high-water mark")
+    truncated = result.get("truncated")
+    if not isinstance(truncated, bool):
+        raise HarnessControlError("operation timeline truncated must be boolean")
+    items = _operation_timeline_items(result.get("items"), truncated=truncated)
+    if items and latest < items[-1].sequence:
+        raise HarnessControlError("operation timeline latestSequence precedes its last item")
+    return OperationTimeline(
+        bridge_epoch=bridge_epoch,
+        latest_sequence=latest,
+        evicted_before_sequence=evicted,
+        truncated=truncated,
+        items=items,
+    )
+
+
+def _operation_timeline_items(
+    raw_items: object, *, truncated: bool
+) -> tuple[OperationTimelineItem, ...]:
+    if not isinstance(raw_items, list):
+        raise HarnessControlError("operation timeline response requires items")
+    if truncated and not raw_items:
+        raise HarnessControlError("operation timeline empty page cannot be truncated")
+    items: list[OperationTimelineItem] = []
+    previous = 0
+    for raw_item in raw_items:
+        item = _operation_timeline_item(raw_item)
+        if item.sequence <= previous:
+            raise HarnessControlError("operation timeline items must increase monotonically")
+        previous = item.sequence
+        items.append(item)
+    return tuple(items)
+
+
+def _operation_timeline_item(raw_item: object) -> OperationTimelineItem:
+    if not isinstance(raw_item, Mapping):
+        raise HarnessControlError("operation timeline item must be an object")
+    kind = raw_item.get("kind")
+    if kind not in {"prompt", "set-model", "set-effort"}:
+        raise HarnessControlError("operation timeline item has invalid kind")
+    source = raw_item.get("source")
+    if source is not None and source not in {"cockpit", "terminal", "durable"}:
+        raise HarnessControlError("operation timeline item has invalid source")
+    sequence = raw_item.get("sequence")
+    if not isinstance(sequence, int) or isinstance(sequence, bool) or sequence < 1:
+        raise HarnessControlError("operation timeline item requires a positive sequence")
+    state = _submission_state(raw_item.get("state"))
+    if state is None:
+        raise HarnessControlError("operation timeline item requires lifecycle state")
+    digest_present = raw_item.get("payloadDigestPresent")
+    if not isinstance(digest_present, bool):
+        raise HarnessControlError("operation timeline payloadDigestPresent must be boolean")
+    return OperationTimelineItem(
+        operation_id=_required_text(raw_item, "operationId"),
+        kind=cast(ControlOperationKind, kind),
+        source=cast(SubmissionSource | None, source),
+        state=state,
+        sequence=sequence,
+        submitted_at=_required_text(raw_item, "submittedAt"),
+        updated_at=_required_text(raw_item, "updatedAt"),
+        accepted_at=_optional_text(raw_item, "acceptedAt"),
+        payload_digest_present=digest_present,
+        vendor_correlation_id=_optional_text(raw_item, "vendorCorrelationId"),
     )
 
 

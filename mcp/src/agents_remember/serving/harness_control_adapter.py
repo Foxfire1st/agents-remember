@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import AsyncIterator, Callable, Mapping
 from dataclasses import replace
 from datetime import UTC, datetime
-from typing import Protocol
+from typing import Protocol, runtime_checkable
 
 from agents_remember.errors import HarnessControlError
 from agents_remember.serving.harness_capabilities import (
@@ -21,6 +21,7 @@ from agents_remember.serving.harness_control_models import (
     ControlOperationRef,
     ControlState,
     InteractionResponse,
+    InterruptResult,
     LaunchSpec,
     PromptRequest,
     ReconciliationResult,
@@ -85,6 +86,31 @@ class LaunchableHarnessProtocolAdapter(
     """Native runtime plus token-free discovery, launch knobs, and live capability setters."""
 
     def launch_knobs(self, *, model_key: str, effort: str | None) -> LaunchKnobs: ...
+
+
+@runtime_checkable
+class InterruptCapableAdapter(Protocol):
+    """Structural native interrupt write; adapters opt in without a base-contract member.
+
+    The caller's identity guards travel with the write: ``turn_id`` is the codex native
+    active-turn identity, ``expected_operation_id`` is the AR active-operation identity a
+    turn-less harness (Pi) must match before any native bytes are written. A repeat naming
+    the same (expected, active) pair replays the first acknowledgement with no second write.
+    """
+
+    async def interrupt(
+        self,
+        *,
+        turn_id: str | None,
+        expected_operation_id: str | None,
+    ) -> InterruptResult: ...
+
+
+@runtime_checkable
+class AssetSubmitCapable(Protocol):
+    """Structural asset-carrying submit; the authority dispatches here only when assets ride."""
+
+    async def submit_with_assets(self, request: PromptRequest) -> SubmissionReceipt: ...
 
 
 class HarnessProtocolRegistry:

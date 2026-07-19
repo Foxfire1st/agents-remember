@@ -9,6 +9,7 @@ prompt queue.
 from __future__ import annotations
 
 import asyncio
+import json
 from collections import OrderedDict, deque
 from collections.abc import Callable
 from dataclasses import dataclass, replace
@@ -24,14 +25,22 @@ from agents_remember.errors import (
     HarnessRequestConflictError,
 )
 from agents_remember.serving.harness_capabilities import SET_ACCEPTANCE_VALUES, SetResult
-from agents_remember.serving.harness_control_adapter import HarnessProtocolAdapter
+from agents_remember.serving.harness_control_adapter import (
+    AssetSubmitCapable,
+    HarnessProtocolAdapter,
+)
 from agents_remember.serving.harness_control_models import (
+    EVIDENCE_PAGE_BYTE_BUDGET,
+    MAX_OPERATION_TIMELINE_PAGE,
     AcceptanceState,
     AdapterEvent,
     AdapterSnapshot,
+    AssetReference,
     ControlOperationKind,
     ControlOperationRef,
     InteractionResponse,
+    OperationTimeline,
+    OperationTimelineItem,
     PromptRequest,
     ReconciliationResult,
     ReconciliationState,
@@ -44,7 +53,9 @@ from agents_remember.serving.harness_control_models import (
     SubmissionSource,
     SubmissionStatus,
     SubmissionStatusBatch,
+    WithdrawalRecovery,
     WithdrawalResult,
+    operation_timeline_item_wire_bytes,
 )
 
 Clock = Callable[[], str]
@@ -70,6 +81,7 @@ class _OperationRecord:
     detail: str | None = None
     buffered_completion_sequence: int | None = None
     result_future: asyncio.Future[object] | None = None
+    assets: tuple[AssetReference, ...] = ()
 
     @property
     def key(self) -> _OperationKey:
@@ -124,6 +136,7 @@ class HarnessSubmissionAuthority:
         self._dispatcher: asyncio.Task[None] | None = None
         self._accepting = False
         self._last_adapter_sequence = 0
+        self._evicted_before_sequence = 0
         self._consumed_completions: deque[ControlOperationRef] = deque(maxlen=ledger_limit)
 
     @property
@@ -151,7 +164,7 @@ class HarnessSubmissionAuthority:
     async def submit(self, request: PromptRequest) -> SubmissionReceipt:
         self._require_accepting()
         self._require_epoch(request.expected_bridge_epoch)
-        digest = self._payload_digest(request.text)
+        digest = self._payload_digest(request.text, request.assets)
         wait_for_dispatch = False
         future: asyncio.Future[object] | None = None
         async with self._lock:
@@ -182,6 +195,7 @@ class HarnessSubmissionAuthority:
                 payload_digest=digest,
                 text=request.text,
                 detail="queued inside the authoritative control bridge",
+                assets=request.assets,
             )
             self._records[record.key] = record
             self._prompt_ids[request.request_id] = record.key
@@ -190,6 +204,14 @@ class HarnessSubmissionAuthority:
                     record,
                     "unsupported",
                     "hosted harness does not support native prompt control",
+                    request.submitted_at,
+                )
+                return self._receipt(record, "unsupported")
+            if request.assets and not isinstance(self._adapter, AssetSubmitCapable):
+                self._mark_terminal(
+                    record,
+                    "unsupported",
+                    "hosted harness does not support asset submissions",
                     request.submitted_at,
                 )
                 return self._receipt(record, "unsupported")
@@ -411,6 +433,53 @@ class HarnessSubmissionAuthority:
                 provenance=tuple(provenance),
             )
 
+    async def operation_timeline(
+        self,
+        expected_bridge_epoch: str,
+        *,
+        after_sequence: int = 0,
+        limit: int = MAX_OPERATION_TIMELINE_PAGE,
+        byte_budget: int = EVIDENCE_PAGE_BYTE_BUDGET,
+    ) -> OperationTimeline:
+        """Page the retained ledger, never bodies; completeness is the union of pages."""
+
+        self._require_epoch(expected_bridge_epoch)
+        if limit < 1 or byte_budget < 1:
+            raise HarnessControlError("operation timeline requires positive limit and byte budget")
+        bounded = min(MAX_OPERATION_TIMELINE_PAGE, limit)
+        async with self._lock:
+            items: list[OperationTimelineItem] = []
+            used = 0
+            truncated = False
+            for record in sorted(self._records.values(), key=lambda item: item.ref.sequence):
+                if record.ref.sequence <= after_sequence:
+                    continue
+                item = OperationTimelineItem(
+                    operation_id=record.ref.operation_id,
+                    kind=record.ref.kind,
+                    source=cast(SubmissionSource | None, record.source),
+                    state=record.state,
+                    sequence=record.ref.sequence,
+                    submitted_at=record.submitted_at,
+                    updated_at=record.updated_at,
+                    accepted_at=record.accepted_at,
+                    payload_digest_present=record.payload_digest is not None,
+                    vendor_correlation_id=record.vendor_correlation_id,
+                )
+                size = operation_timeline_item_wire_bytes(item)
+                if len(items) >= bounded or (items and used + size > byte_budget):
+                    truncated = True
+                    break
+                items.append(item)
+                used += size
+            return OperationTimeline(
+                bridge_epoch=self._bridge_epoch,
+                latest_sequence=self._sequence,
+                evicted_before_sequence=self._evicted_before_sequence,
+                truncated=truncated,
+                items=tuple(items),
+            )
+
     async def withdraw(
         self,
         expected_bridge_epoch: str,
@@ -446,6 +515,8 @@ class HarnessSubmissionAuthority:
                 )
             at = self._clock()
             self._timeline.remove(record.key)
+            # The exact body crosses once, inside this response, before the tombstone fires.
+            recovery = WithdrawalRecovery(text=record.text, assets=record.assets)
             self._mark_terminal(record, "withdrawn", "queued submission was withdrawn", at)
             if record.result_future is not None and not record.result_future.done():
                 record.result_future.set_result(self._receipt(record, "rejected"))
@@ -456,6 +527,7 @@ class HarnessSubmissionAuthority:
                 state="withdrawn",
                 withdrawn_at=at,
                 detail=record.detail,
+                recovery=recovery,
             )
 
     async def observe_event(self, event: AdapterEvent) -> None:
@@ -622,15 +694,23 @@ class HarnessSubmissionAuthority:
             try:
                 if record.ref.kind == "prompt":
                     assert record.text is not None and record.source is not None
-                    result: object = await self._adapter.submit(
-                        PromptRequest(
-                            request_id=record.ref.operation_id,
-                            source=cast(SubmissionSource, record.source),
-                            text=record.text,
-                            submitted_at=record.submitted_at,
-                            operation=record.ref,
-                        )
+                    request = PromptRequest(
+                        request_id=record.ref.operation_id,
+                        source=cast(SubmissionSource, record.source),
+                        text=record.text,
+                        submitted_at=record.submitted_at,
+                        operation=record.ref,
+                        assets=record.assets,
                     )
+                    if record.assets:
+                        capable = self._adapter
+                        if not isinstance(capable, AssetSubmitCapable):
+                            raise HarnessControlError(
+                                "asset submission dispatch reached a non-capable adapter"
+                            )
+                        result: object = await capable.submit_with_assets(request)
+                    else:
+                        result = await self._adapter.submit(request)
                 elif record.ref.kind == "set-model":
                     assert record.requested_value is not None
                     result = await self._adapter_setter("set-model", record)
@@ -860,6 +940,10 @@ class HarnessSubmissionAuthority:
         *,
         detail: str | None = None,
     ) -> SubmissionReceipt:
+        raw: dict[str, object] = {}
+        if record.assets:
+            # Additive native-acceptance evidence; asset-free receipts keep raw={} byte-identical.
+            raw["assetIds"] = [asset.asset_id for asset in record.assets]
         return SubmissionReceipt(
             request_id=record.ref.operation_id,
             acceptance=cast(AcceptanceState, acceptance),
@@ -867,6 +951,7 @@ class HarnessSubmissionAuthority:
             vendor_correlation_id=record.vendor_correlation_id,
             accepted_at=record.accepted_at,
             detail=record.detail if detail is None else detail,
+            raw=raw,
             bridge_epoch=self._bridge_epoch,
         )
 
@@ -895,6 +980,7 @@ class HarnessSubmissionAuthority:
             record.accepted_at = at
         # Terminal tombstones retain the digest and lifecycle metadata, never full prompt text.
         record.text = None
+        record.assets = ()
 
     def _release_head(self, record: _OperationRecord, *, consume_completion: bool) -> None:
         if self._active == record.key:
@@ -950,6 +1036,7 @@ class HarnessSubmissionAuthority:
             if evictable is None:
                 return False
             record = self._records.pop(evictable)
+            self._evicted_before_sequence = max(self._evicted_before_sequence, record.ref.sequence)
             if record.ref.kind == "prompt":
                 self._prompt_ids.pop(record.ref.operation_id, None)
         return True
@@ -963,8 +1050,27 @@ class HarnessSubmissionAuthority:
             raise HarnessControlError("submission authority is stopped")
 
     @staticmethod
-    def _payload_digest(text: str) -> str:
-        return sha256(text.encode("utf-8")).hexdigest()
+    def _payload_digest(text: str, assets: tuple[AssetReference, ...] = ()) -> str:
+        """Idempotence identity: text only when no assets ride (byte-identical to before)."""
+
+        if not assets:
+            return sha256(text.encode("utf-8")).hexdigest()
+        canonical = json.dumps(
+            {
+                "text": text,
+                "assets": [
+                    {
+                        "assetId": asset.asset_id,
+                        "mimeType": asset.mime_type,
+                        "byteSize": asset.byte_size,
+                        "sha256": asset.sha256,
+                    }
+                    for asset in sorted(assets, key=lambda item: item.asset_id)
+                ],
+            },
+            separators=(",", ":"),
+        )
+        return sha256(canonical.encode("utf-8")).hexdigest()
 
     @staticmethod
     def _resolve_record_future(record: _OperationRecord, value: object) -> None:

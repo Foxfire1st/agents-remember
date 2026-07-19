@@ -41,6 +41,12 @@
       "shape": [],
       "result": "not-exercised",
       "reason": "Installed 2.1.214 mismatches the locked 2.1.211 gate; live stream frame and usage/cost forwarding remain unverified until a locked 2.1.211 install exercises the production evidence seam."
+    },
+    {
+      "operation": "control-plane/interrupt-and-assets",
+      "shape": [],
+      "result": "not-exercised",
+      "reason": "Installed 2.1.214 mismatches the locked 2.1.211 gate and the bundle's interrupt/image contracts remain unproven headless (CL-3); the bridge-side typed refusal is the honest posture until a locked 2.1.211 install exercises the control-plane seam."
     }
   ]
 }
