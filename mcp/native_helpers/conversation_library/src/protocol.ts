@@ -1,5 +1,15 @@
 /** Versioned JSON-lines contract shared by the Python host and locked native helpers. */
 
+import { execFile } from "node:child_process";
+import { createHash } from "node:crypto";
+import { existsSync, readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { createInterface } from "node:readline";
+import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
+
+const execFileAsync = promisify(execFile);
+
 export const PROTOCOL_VERSION = "ar-conversation-library-helper/v1" as const;
 export const CLAUDE_SDK_VERSION = "0.3.207" as const;
 export const PI_CODING_AGENT_VERSION = "0.80.7" as const;
@@ -87,6 +97,204 @@ export function redactHelperError(_detail: string): string {
   // Raw helper stderr is never a public detail authority. Returning only fixed copy is the
   // allow-list boundary; no future secret syntax or local path can bypass a regex vocabulary.
   return SAFE_HELPER_FAILURE_DETAIL.slice(0, MAX_SAFE_ERROR_CHARS);
+}
+
+/** A handler maps one validated helper request to its operation result payload. */
+export type HelperHandler = (request: HelperRequest) => Promise<unknown>;
+
+/**
+ * One JSON-lines request/response loop over stdin/stdout for a locked helper entry.
+ *
+ * Parse failures answer `invalid-request`; handler failures answer `helper-failed` with the
+ * allow-list redacted detail. Every line gets exactly one correlated response so the Python
+ * host's request/response pairing can never drift.
+ */
+export async function serveJsonLines(handler: HelperHandler): Promise<void> {
+  const rl = createInterface({ input: process.stdin, crlfDelay: Infinity });
+  for await (const line of rl) {
+    if (!line.trim()) {
+      continue;
+    }
+    let response: HelperResponse<unknown>;
+    let requestId = "unknown";
+    try {
+      const request = parseHelperRequest(line);
+      requestId = request.requestId;
+      try {
+        const result = await handler(request);
+        response = {
+          protocolVersion: PROTOCOL_VERSION,
+          requestId,
+          status: "ok",
+          result,
+        };
+      } catch (error) {
+        response = failureFor(requestId, error);
+      }
+    } catch {
+      response = {
+        protocolVersion: PROTOCOL_VERSION,
+        requestId,
+        status: "error",
+        error: "invalid-request",
+        detail: "request failed the locked helper protocol contract",
+      };
+    }
+    process.stdout.write(`${JSON.stringify(response)}\n`);
+  }
+}
+
+/** Map one handler failure to the protocol's typed error vocabulary, redacted. */
+export function failureFor(requestId: string, error: unknown): HelperFailure {
+  const tagged = error as { helperError?: unknown; detail?: unknown };
+  if (
+    tagged &&
+    typeof tagged.helperError === "string" &&
+    ["invalid-request", "unsupported", "stale-identity", "helper-failed"].includes(
+      tagged.helperError,
+    )
+  ) {
+    return {
+      protocolVersion: PROTOCOL_VERSION,
+      requestId,
+      status: "error",
+      error: tagged.helperError as HelperFailure["error"],
+      // Operation-level failures may carry allow-listed copy supplied by the helper itself.
+      detail:
+        typeof tagged.detail === "string" && tagged.detail.length > 0
+          ? tagged.detail.slice(0, MAX_SAFE_ERROR_CHARS)
+          : redactHelperError(""),
+    };
+  }
+  return {
+    protocolVersion: PROTOCOL_VERSION,
+    requestId,
+    status: "error",
+    error: "helper-failed",
+    detail: redactHelperError(""),
+  };
+}
+
+/** Raise a typed helper error the serve loop maps onto the protocol vocabulary. */
+export function raiseHelperError(
+  error: "invalid-request" | "unsupported" | "stale-identity" | "helper-failed",
+  detail: string,
+): never {
+  const failure = new Error(detail) as Error & { helperError: string };
+  failure.helperError = error;
+  throw failure;
+}
+
+/** Observe one installed runtime's `--version` output; first semver token wins. */
+export async function probeRuntimeVersion(command: string): Promise<string> {
+  const { stdout } = await execFileAsync(command, ["--version"], {
+    timeout: 5000,
+    maxBuffer: 64 * 1024,
+  });
+  const match = /(\d+\.\d+\.\d+)/.exec(stdout);
+  if (match === null || match[1] === undefined) {
+    throw new Error(`could not observe a semver version from ${command} --version`);
+  }
+  return match[1];
+}
+
+/**
+ * Observe the installed version of the helper's OWN locked dependency. Resolution goes through
+ * the standard ESM resolver from inside this package, so only the declared lockfile dependency
+ * can ever be found — never an npm cache, checkout, or global install.
+ */
+export function observedDependencyVersion(specifier: string, packageName: string): string {
+  let resolved: string;
+  try {
+    resolved = import.meta.resolve(specifier);
+  } catch {
+    throw new Error(`locked dependency ${packageName} is not installed`);
+  }
+  let directory = dirname(fileURLToPath(resolved));
+  for (let depth = 0; depth < 4; depth += 1) {
+    const candidate = join(directory, "package.json");
+    if (existsSync(candidate)) {
+      const parsed: unknown = JSON.parse(readFileSync(candidate, "utf8"));
+      if (
+        typeof parsed === "object" &&
+        parsed !== null &&
+        (parsed as { name?: unknown }).name === packageName &&
+        typeof (parsed as { version?: unknown }).version === "string"
+      ) {
+        return (parsed as { version: string }).version;
+      }
+    }
+    const parent = dirname(directory);
+    if (parent === directory) {
+      break;
+    }
+    directory = parent;
+  }
+  throw new Error(`locked dependency ${packageName} has no readable package version`);
+}
+
+/** Deterministic native-store signature: one SHA-256 over the canonical observable parts. */
+export function signatureOf(parts: readonly unknown[]): string {
+  return createHash("sha256").update(JSON.stringify(parts)).digest("hex");
+}
+
+/** Offset paging over one freshly listed native set; the cursor is the decimal next offset. */
+export function pageByOffset<T>(
+  all: readonly T[],
+  cursor: string | null,
+  limit: number,
+): { rows: T[]; nextCursor: string | null } {
+  const offset = parseCursorInt(cursor, 0, "list");
+  const rows = all.slice(offset, offset + limit);
+  const next = offset + limit;
+  return { rows, nextCursor: next < all.length ? String(next) : null };
+}
+
+export interface OrdinalWindow<T> {
+  items: T[];
+  /** 1-based ordinal of the first returned item within the full chronological list. */
+  firstOrdinal: number;
+  hasOlder: boolean;
+  /** Present only when older items exist: the ordinal the next read passes as `before`. */
+  olderOrdinal: number | null;
+}
+
+/**
+ * Newest-window paging over one freshly read native conversation. Every item's stable global
+ * ordinal is its 1-based index in the full native order; the cursor names the ordinal the next
+ * older page must stop below.
+ */
+export function windowByOrdinal<T>(
+  all: readonly T[],
+  cursor: string | null,
+  limit: number,
+): OrdinalWindow<T> {
+  const bound = cursor === null ? null : parseCursorInt(cursor, 2, "read");
+  const upper = Math.min(bound === null ? all.length : bound - 1, all.length);
+  const lower = Math.max(0, upper - limit);
+  const items = all.slice(lower, upper);
+  const firstOrdinal = lower + 1;
+  const hasOlder = lower > 0;
+  return {
+    items,
+    firstOrdinal,
+    hasOlder,
+    olderOrdinal: hasOlder ? firstOrdinal : null,
+  };
+}
+
+function parseCursorInt(cursor: string | null, minimum: number, label: string): number {
+  if (cursor === null) {
+    return label === "list" ? 0 : minimum;
+  }
+  if (!/^\d+$/.test(cursor)) {
+    return raiseHelperError("invalid-request", `${label} cursor must be a decimal integer`);
+  }
+  const value = Number.parseInt(cursor, 10);
+  if (!Number.isSafeInteger(value) || value < minimum) {
+    return raiseHelperError("invalid-request", `${label} cursor is out of range`);
+  }
+  return value;
 }
 
 export function pinnedHelperVersion(harnessId: HarnessId): string {

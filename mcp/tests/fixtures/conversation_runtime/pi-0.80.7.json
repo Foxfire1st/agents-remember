@@ -22,10 +22,13 @@
     {
       "operation": "locked-helper/list-listAll-resolve",
       "shape": [
-        "selected:@earendil-works/pi-coding-agent@0.80.7"
+        "handshake/ready",
+        "SessionManager.list",
+        "SessionManager.open+getBranch",
+        "resolve/sessionFile"
       ],
-      "result": "not-exercised",
-      "reason": "The helper is exactly locked, but dormant session discovery and exact session-file resolution remain the native-library leaf gate."
+      "result": "observed",
+      "reason": "L2 production gate: locked helper 0.80.7 handshakes ready against installed 0.80.7 and SessionManager list/branch-read/resolve pass through the production helper seam; exact --session resume rides the tracked opener and a real end-to-end open proved catalog identity."
     },
     {
       "operation": "rpc/messages-entries-events-controls",

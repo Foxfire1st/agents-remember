@@ -21,9 +21,14 @@
     },
     {
       "operation": "native-history/list-read-resume",
-      "shape": [],
-      "result": "not-exercised",
-      "reason": "The later native-library leaf must exercise registered list/read/resume and exact identity before advertising history support."
+      "shape": [
+        "thread/list",
+        "thread/read",
+        "initialize/cliVersion",
+        "thread/resume-target"
+      ],
+      "result": "observed",
+      "reason": "L2 production gate: installed 0.144.5 app-server initialize reports the exact locked CLI version and thread/list + thread/read (full turns) + resume-target resolution pass through the production direct seam; historical tool/command completeness stays honestly partial. Exact open rides the landed L0E resume channel (see native-history/open-exact-resume)."
     },
     {
       "operation": "active-projector/items-events",
@@ -74,6 +79,17 @@
       ],
       "result": "observed",
       "reason": "A live cockpit submission's source crossed the provenance batch with exact epoch scoping."
+    },
+    {
+      "operation": "native-history/open-exact-resume",
+      "shape": [
+        "open_terminal_session/resumeThreadId",
+        "thread/resume",
+        "catalog/vendorSessionId",
+        "submission-authority/bridgeEpoch"
+      ],
+      "result": "observed",
+      "reason": "L2 held-open fix round: a real end-to-end codex open passed through the landed L0E resume channel \u2014 list, exact resume-target resolve, tracked opener spawn with resumeThreadId, thread/resume at adapter start, exact vendor identity + bridge epoch catalog proof (201 opened), idempotent replay, retirement with no leaks."
     }
   ]
 }

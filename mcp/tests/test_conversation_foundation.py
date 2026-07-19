@@ -12,6 +12,7 @@ from agents_remember.serving.conversation.control.api import router as control_r
 from agents_remember.serving.conversation.library.api import router as library_router
 from agents_remember.serving.conversation.models import RuntimeFixtureEvidence
 from agents_remember.serving.conversation.router import CONVERSATION_CHILD_ROUTERS, router
+from fastapi.routing import APIRoute
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 HELPER_ROOT = REPO_ROOT / "mcp" / "native_helpers" / "conversation_library"
@@ -28,7 +29,7 @@ def test_exactly_two_conversation_ports_exist() -> None:
     assert not hasattr(ports, "NativeControlPort")
 
 
-def test_root_composes_three_behavior_empty_owned_child_routers() -> None:
+def test_root_composes_three_owned_child_routers() -> None:
     assert (
         active_router,
         library_router,
@@ -37,9 +38,25 @@ def test_root_composes_three_behavior_empty_owned_child_routers() -> None:
     assert active_router.prefix == "/api/terminal/{ar_session_id}/conversation"
     assert library_router.prefix == "/api/harnesses/{harness_id}/conversations"
     assert control_router.prefix == "/api/terminal/{ar_session_id}"
+    # L2 landed the library behavior routes inside its owned child; active and control remain
+    # behavior-empty shells for their own leaves.
     assert active_router.routes == []
-    assert library_router.routes == []
     assert control_router.routes == []
+    library_paths = {
+        (tuple(sorted(route.methods or ())), route.path)
+        for route in library_router.routes
+        if isinstance(route, APIRoute)
+    }
+    assert library_paths == {
+        (("GET",), "/api/harnesses/{harness_id}/conversations"),
+        (("GET",), "/api/harnesses/{harness_id}/conversations/{conversation_key}"),
+        (("POST",), "/api/harnesses/{harness_id}/conversations/{conversation_key}/open"),
+        (("POST",), "/api/harnesses/{harness_id}/conversations/{conversation_key}/open-status"),
+        (
+            ("POST",),
+            "/api/harnesses/{harness_id}/conversations/{conversation_key}/open-reconcile",
+        ),
+    }
     assert tuple(getattr(route, "original_router", None) for route in router.routes) == (
         active_router,
         library_router,
@@ -96,6 +113,8 @@ def test_helper_runtime_source_has_no_incidental_module_resolution() -> None:
     )
     assert all(token not in source for token in forbidden)
     assert sorted(path.name for path in (HELPER_ROOT / "src").glob("*.ts")) == [
+        "claude.ts",
+        "pi.ts",
         "protocol.test.ts",
         "protocol.ts",
     ]
