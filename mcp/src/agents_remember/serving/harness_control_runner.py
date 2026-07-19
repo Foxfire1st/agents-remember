@@ -43,6 +43,7 @@ class RunnerConfig:
     endpoint_root: Path
     session_commands: tuple[str, ...] = ()
     resolved_launch: ResolvedLaunch | None = None
+    resume_thread_id: str | None = None
 
 
 def control_runner_command(config: RunnerConfig) -> tuple[str, ...]:
@@ -56,6 +57,7 @@ def control_runner_command(config: RunnerConfig) -> tuple[str, ...]:
         "resolvedLaunch": (
             config.resolved_launch.to_json() if config.resolved_launch is not None else None
         ),
+        "resumeThreadId": config.resume_thread_id,
     }
     encoded = base64.urlsafe_b64encode(
         json.dumps(payload, separators=(",", ":")).encode("utf-8")
@@ -83,6 +85,15 @@ def parse_runner_config(encoded: str) -> RunnerConfig:
         raise HarnessControlError("hosted control runner requires identity and argv")
     resolved_raw = raw.get("resolvedLaunch")
     resolved_launch = ResolvedLaunch.from_json(resolved_raw) if resolved_raw is not None else None
+    resume_thread_id = raw.get("resumeThreadId")
+    if resume_thread_id is not None and (
+        not isinstance(resume_thread_id, str)
+        or not resume_thread_id
+        or resume_thread_id != resume_thread_id.strip()
+    ):
+        raise HarnessControlError(
+            "hosted control runner resumeThreadId must be non-empty trimmed text or null"
+        )
     config = RunnerConfig(
         identity=ControlIdentity.from_json(identity),
         harness_id=_required_text(raw, "harnessId"),
@@ -91,6 +102,7 @@ def parse_runner_config(encoded: str) -> RunnerConfig:
         endpoint_root=Path(_required_text(raw, "endpointRoot")),
         session_commands=tuple(session_commands),
         resolved_launch=resolved_launch,
+        resume_thread_id=resume_thread_id,
     )
     if resolved_launch is not None:
         if resolved_launch.harness_id != config.harness_id:
@@ -165,7 +177,14 @@ async def _prepare_controlled_launch(
     )
     selection = config.resolved_launch
     if selection is None:
-        return create_harness_protocol_adapter(config.harness_id, env=env), base
+        return (
+            create_harness_protocol_adapter(
+                config.harness_id,
+                env=env,
+                resume_thread_id=config.resume_thread_id,
+            ),
+            base,
+        )
 
     discovery_env = {
         **env,
@@ -187,6 +206,7 @@ async def _prepare_controlled_launch(
         env=env,
         resolved_launch=selection,
         launch_knobs=knobs,
+        resume_thread_id=config.resume_thread_id,
     )
     return adapter, launch
 

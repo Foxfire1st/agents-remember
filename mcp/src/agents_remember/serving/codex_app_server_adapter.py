@@ -36,6 +36,7 @@ from agents_remember.serving.codex_app_server_state import (
     interaction_result,
     iso_from_epoch,
     iso_from_millis,
+    native_evidence_frames_from_thread,
     parse_server_interaction,
     parse_turn,
     required_object,
@@ -49,6 +50,7 @@ from agents_remember.serving.harness_capabilities import (
     SetResult,
 )
 from agents_remember.serving.harness_control_models import (
+    AR_EVIDENCE_KEY,
     CONTROL_PROTOCOL_VERSION,
     REQUIRED_ADAPTER_CAPABILITIES,
     AdapterEvent,
@@ -57,11 +59,13 @@ from agents_remember.serving.harness_control_models import (
     ControlOperationRef,
     InteractionResponse,
     LaunchSpec,
+    NativeEvidencePage,
     PromptRequest,
     ReconciliationResult,
     ShutdownMode,
     SubmissionReceipt,
     TranscriptEntry,
+    window_native_evidence_page,
 )
 
 Clock = Callable[[], str]
@@ -327,6 +331,37 @@ class CodexAppServerAdapter:
             raw={"threadId": thread_id, "resend": False},
         )
 
+    async def read_native_page(
+        self,
+        *,
+        cursor: str | None,
+        limit: int,
+        byte_budget: int,
+    ) -> NativeEvidencePage:
+        """Page the live thread through ``thread/read``; the native read stays the authority."""
+
+        if (await self.snapshot()).control == "disconnected":
+            await self._reconnect()
+        transport = self._require_transport()
+        result = await transport.request(
+            "thread/read",
+            {"threadId": self._require_thread_id(), "includeTurns": True},
+        )
+        thread = required_object(result.get("thread"), context="thread/read response.thread")
+        thread_id = required_text(thread, "id", context="thread/read response.thread")
+        if thread_id != self._require_thread_id():
+            raise CodexAppServerError("thread/read returned a different Codex thread id")
+        frames = native_evidence_frames_from_thread(thread)
+        try:
+            return window_native_evidence_page(
+                frames,
+                cursor=cursor,
+                limit=limit,
+                byte_budget=byte_budget,
+            )
+        except HarnessControlError as exc:
+            raise CodexAppServerError(f"Codex native evidence page failed: {exc}") from exc
+
     async def stop(self, mode: ShutdownMode) -> None:
         if self._stopped:
             return
@@ -468,7 +503,7 @@ class CodexAppServerAdapter:
                 activity=activity,
                 acceptance=self._busy_acceptance(activity, acceptance),
             )
-            await self._emit("state", raw={"codexMethod": method})
+            await self._emit("state", raw={"codexMethod": method, AR_EVIDENCE_KEY: params})
             return
         if method == "turn/started":
             self._validate_thread(params)
@@ -487,9 +522,11 @@ class CodexAppServerAdapter:
             return
         if method == "thread/settings/updated":
             self._handle_settings_updated(params)
-            await self._emit("state", raw={"codexMethod": method})
+            await self._emit("state", raw={"codexMethod": method, AR_EVIDENCE_KEY: params})
             return
-        await self._emit("codex-notification", raw={"codexMethod": method})
+        await self._emit(
+            "codex-notification", raw={"codexMethod": method, AR_EVIDENCE_KEY: params}
+        )
 
     async def _handle_turn_completed(self, params: JsonObject) -> None:
         self._validate_thread(params)
@@ -534,7 +571,7 @@ class CodexAppServerAdapter:
         await self._emit(
             "completed",
             transcript=(transcript,),
-            raw={"codexMethod": "turn/completed", "turnId": turn_id},
+            raw={"codexMethod": "turn/completed", "turnId": turn_id, AR_EVIDENCE_KEY: params},
             operation=operation,
         )
 
@@ -551,12 +588,15 @@ class CodexAppServerAdapter:
         )
         if transcript is None:
             self._transcript_sequence -= 1
-            await self._emit("codex-notification", raw={"codexMethod": "item/completed"})
+            await self._emit(
+                "codex-notification",
+                raw={"codexMethod": "item/completed", AR_EVIDENCE_KEY: params},
+            )
             return
         await self._emit(
             "transcript",
             transcript=(transcript,),
-            raw={"codexMethod": "item/completed", "turnId": turn_id},
+            raw={"codexMethod": "item/completed", "turnId": turn_id, AR_EVIDENCE_KEY: params},
         )
 
     async def _handle_server_request(self, message: JsonObject) -> None:

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections import deque
-from collections.abc import AsyncGenerator, Callable
+from collections.abc import AsyncGenerator, Callable, Mapping
 from dataclasses import replace
 from datetime import UTC, datetime
 from uuid import uuid4
@@ -16,24 +16,35 @@ from agents_remember.serving.harness_control_adapter import (
     reduce_adapter_event,
 )
 from agents_remember.serving.harness_control_models import (
+    AR_EVIDENCE_KEY,
     CONTROL_PROTOCOL_VERSION,
+    EVIDENCE_PAGE_BYTE_BUDGET,
+    MAX_NATIVE_EVIDENCE_PAGE,
     REQUIRED_ADAPTER_CAPABILITIES,
+    AdapterEvent,
     AdapterHandshake,
     AdapterSnapshot,
     ControlIdentity,
     ControlOperationKind,
+    EvidenceFrame,
+    EvidencePage,
     InteractionResponse,
     LaunchSpec,
+    NativeEvidencePage,
+    NativePageReader,
     PromptRequest,
     ReconciliationResult,
     ReconciliationState,
     ShutdownMode,
     SubmissionAuthorityDescriptor,
+    SubmissionProvenanceBatch,
     SubmissionReceipt,
     SubmissionSource,
     SubmissionStatusBatch,
     TranscriptEntry,
     WithdrawalResult,
+    clip_evidence_payload,
+    evidence_frame_wire_bytes,
 )
 from agents_remember.serving.harness_control_queue import HarnessControlQueue
 from agents_remember.serving.harness_submission_authority import OperationResolution
@@ -53,6 +64,8 @@ class HarnessControlBridge:
         transcript_limit: int = 1000,
         submission_limit: int = 256,
         subscriber_queue_limit: int = 16,
+        evidence_limit: int = 2000,
+        evidence_frame_bytes: int = 32 * 1024,
         clock: Clock = lambda: datetime.now(UTC).isoformat(),
     ) -> None:
         for name, value in (
@@ -60,6 +73,8 @@ class HarnessControlBridge:
             ("transcript_limit", transcript_limit),
             ("submission_limit", submission_limit),
             ("subscriber_queue_limit", subscriber_queue_limit),
+            ("evidence_limit", evidence_limit),
+            ("evidence_frame_bytes", evidence_frame_bytes),
         ):
             if value < 1:
                 raise HarnessControlError(f"{name} must be positive")
@@ -67,6 +82,10 @@ class HarnessControlBridge:
         self._adapter = adapter
         self._clock = clock
         self._transcript: deque[TranscriptEntry] = deque(maxlen=transcript_limit)
+        self._evidence: deque[EvidenceFrame] = deque(maxlen=evidence_limit)
+        self._evidence_limit = evidence_limit
+        self._evidence_frame_bytes = evidence_frame_bytes
+        self._evicted_before_sequence = 0
         self._subscriber_queue_limit = subscriber_queue_limit
         self._subscribers: set[asyncio.Queue[AdapterSnapshot]] = set()
         self._snapshot = AdapterSnapshot(
@@ -145,6 +164,71 @@ class HarnessControlBridge:
         return tuple(entry for entry in self._transcript if entry.sequence > after_sequence)[
             :bounded
         ]
+
+    def evidence(
+        self,
+        *,
+        after_sequence: int = 0,
+        limit: int = 500,
+        byte_budget: int = EVIDENCE_PAGE_BYTE_BUDGET,
+    ) -> EvidencePage:
+        """Page the bounded evidence buffer (a hot window, never history authority)."""
+
+        if byte_budget < 1:
+            raise HarnessControlError("evidence page byte budget must be positive")
+        bounded = min(500, max(1, limit))
+        frames: list[EvidenceFrame] = []
+        used = 0
+        truncated = False
+        for frame in self._evidence:
+            if frame.sequence <= after_sequence:
+                continue
+            size = evidence_frame_wire_bytes(frame)
+            if len(frames) >= bounded or (frames and used + size > byte_budget):
+                truncated = True
+                break
+            frames.append(frame)
+            used += size
+        return EvidencePage(
+            frames=tuple(frames),
+            latest_sequence=self._evidence[-1].sequence if self._evidence else 0,
+            evicted_before_sequence=self._evicted_before_sequence,
+            truncated=truncated,
+            bridge_epoch=self._command_queue.bridge_epoch,
+        )
+
+    async def native_page(
+        self,
+        *,
+        cursor: str | None,
+        limit: int,
+        byte_budget: int = EVIDENCE_PAGE_BYTE_BUDGET,
+    ) -> NativeEvidencePage:
+        """Page harness-native history through the adapter's own read seam; bridge-stamped epoch."""
+
+        self._require_running()
+        adapter = self._adapter
+        if not isinstance(adapter, NativePageReader):
+            raise HarnessControlError(
+                f"{type(adapter).__name__} does not support native evidence pages; "
+                "only the live stream/replay evidence buffer is available for this session"
+            )
+        page = await adapter.read_native_page(
+            cursor=cursor,
+            limit=max(1, min(MAX_NATIVE_EVIDENCE_PAGE, limit)),
+            byte_budget=byte_budget,
+        )
+        if page.bridge_epoch:
+            raise HarnessControlError("native evidence adapter must not mint the bridge epoch")
+        return replace(page, bridge_epoch=self._command_queue.bridge_epoch)
+
+    async def submission_provenance(
+        self,
+        expected_bridge_epoch: str,
+        request_ids: tuple[str, ...],
+    ) -> SubmissionProvenanceBatch:
+        self._require_running()
+        return await self._command_queue.provenance(expected_bridge_epoch, request_ids)
 
     def prompt(
         self,
@@ -304,12 +388,16 @@ class HarnessControlBridge:
         try:
             async for event in self._adapter.subscribe():
                 try:
-                    updated = reduce_adapter_event(self._snapshot, event)
+                    payload = event.raw.get(AR_EVIDENCE_KEY)
+                    reduced_event = (
+                        self._divert_evidence(event, payload) if payload is not None else event
+                    )
+                    updated = reduce_adapter_event(self._snapshot, reduced_event)
                     # The authority consumes the direct event before public subscribers see the
                     # coalesced snapshot. Draining from subscribe() would lose intermediate
                     # completion identity under subscriber backpressure.
-                    await self._command_queue.observe_event(event)
-                    self._append_transcript(event.transcript)
+                    await self._command_queue.observe_event(reduced_event)
+                    self._append_transcript(reduced_event.transcript)
                 except HarnessControlError as exc:
                     self._snapshot = replace(
                         self._snapshot,
@@ -348,6 +436,38 @@ class HarnessControlBridge:
                 raise HarnessControlError("transcript sequence must increase monotonically")
             self._transcript.append(entry)
             previous = entry.sequence
+
+    def _divert_evidence(self, event: AdapterEvent, payload: object) -> AdapterEvent:
+        """Append one reserved-key payload to the bounded buffer; return the redacted event.
+
+        The redacted event is what reduction, the command authority, the transcript, and every
+        subscriber see, so ``snapshot.raw`` and all of its projections stay byte-identical.
+        """
+
+        if not isinstance(payload, Mapping):
+            raise HarnessControlError("adapter evidence payload must be an object")
+        self._append_evidence(event.sequence, event.kind, event.created_at, payload)
+        return replace(
+            event,
+            raw={key: value for key, value in event.raw.items() if key != AR_EVIDENCE_KEY},
+        )
+
+    def _append_evidence(
+        self, sequence: int, kind: str, created_at: str, payload: Mapping[str, object]
+    ) -> None:
+        previous = self._evidence[-1].sequence if self._evidence else 0
+        if sequence <= previous:
+            raise HarnessControlError("evidence sequence must increase monotonically")
+        if len(self._evidence) == self._evidence_limit:
+            self._evicted_before_sequence = self._evidence[0].sequence
+        self._evidence.append(
+            EvidenceFrame(
+                sequence=sequence,
+                kind=kind,
+                created_at=created_at,
+                raw=clip_evidence_payload(payload, max_bytes=self._evidence_frame_bytes),
+            )
+        )
 
     def _publish(self) -> None:
         for queue in self._subscribers:

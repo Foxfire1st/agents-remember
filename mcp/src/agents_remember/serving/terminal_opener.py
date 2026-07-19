@@ -292,6 +292,7 @@ def _session_command(
     control_root: Path | None,
     session_commands: Sequence[str] | None,
     resolved_launch: ResolvedLaunch | None,
+    resume_thread_id: str | None,
     created_at: str,
     tmux_name: str,
 ) -> tuple[list[str], Path | None, bool]:
@@ -322,6 +323,7 @@ def _session_command(
             endpoint_root=endpoint_root,
             session_commands=tuple(session_commands or ()),
             resolved_launch=resolved_launch,
+            resume_thread_id=resume_thread_id,
         )
     )
     return list(command), endpoint, False
@@ -443,6 +445,7 @@ def _open_terminal_transaction(
     spawn_level: str | None,
     spawn_level_source: str | None,
     resolved_launch: ResolvedLaunch | None,
+    resume_thread_id: str | None,
     spawned_by_session: str | None,
     spawned_by_lifecycle: str | None,
     control_endpoint: Path | None,
@@ -480,6 +483,7 @@ def _open_terminal_transaction(
         control_root=control_root,
         session_commands=session_commands,
         resolved_launch=resolved_launch,
+        resume_thread_id=resume_thread_id,
         created_at=created_at,
         tmux_name=tmux_name,
     )
@@ -572,6 +576,7 @@ def open_terminal_session(
     spawn_level: str | None = None,
     spawn_level_source: str | None = None,
     resolved_launch: ResolvedLaunch | None = None,
+    resume_thread_id: str | None = None,
     legacy_model: str | None = None,
     legacy_effort: str | None = None,
     spawned_by_session: str | None = None,
@@ -598,9 +603,23 @@ def open_terminal_session(
     The free-form escape hatch is recorded on the durable row as spawn provenance:
     ``launch_args`` (appended verbatim to the argv), ``prompt_keywords`` (the caller prepends them
     to the brief paste), and ``session_commands`` (the caller pastes them post-launch, before the
-    brief) -- all three are never validated, only recorded.
+    brief) -- all three are never validated, only recorded. ``resume_thread_id`` is a codex-only
+    native-identity selector in the same authority class: it rides the runner payload to the
+    adapter factory, and the opener never validates or authorizes the target.
     """
     spawn_env = dict(env or {})
+    if resume_thread_id is not None and (kind != "harness" or harness != "codex"):
+        return OpenTerminalResult(
+            status="bad-kind",
+            detail="resume_thread_id is only supported for the codex harness",
+        )
+    if resume_thread_id is not None and (
+        not resume_thread_id or resume_thread_id != resume_thread_id.strip()
+    ):
+        return OpenTerminalResult(
+            status="bad-kind",
+            detail="resume_thread_id must be non-empty with no outer whitespace",
+        )
     try:
         cwd, vendor_command = resolve_terminal_launch(
             kind,
@@ -641,6 +660,7 @@ def open_terminal_session(
             spawn_level=spawn_level,
             spawn_level_source=spawn_level_source,
             resolved_launch=resolved_launch,
+            resume_thread_id=resume_thread_id,
             spawned_by_session=spawned_by_session,
             spawned_by_lifecycle=spawned_by_lifecycle,
             control_endpoint=control_endpoint,

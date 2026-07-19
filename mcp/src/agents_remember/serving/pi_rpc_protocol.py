@@ -261,6 +261,33 @@ def pi_entry_user_text(entry: Mapping[str, object]) -> str | None:
     return _content_text(message.get("content"), accepted_types={"text"})
 
 
+def pi_entry_identity(entry: Mapping[str, object]) -> tuple[str, str | None, str]:
+    """Return the durable (id, parentId, type) coordinates of one session entry.
+
+    Entry identity is the only honest Pi paging coordinate; an entry without one fails closed
+    instead of being skipped, which would silently gap the native page.
+    """
+
+    return (
+        _required_text(entry, "id"),
+        _optional_text(entry, "parentId"),
+        _required_text(entry, "type"),
+    )
+
+
+def pi_entry_created_at(entry: Mapping[str, object]) -> str | None:
+    """Return the entry's own timestamp when the schema carries one; never invented."""
+
+    timestamp = entry.get("timestamp")
+    if timestamp is None:
+        return None
+    if not isinstance(timestamp, str) or not timestamp:
+        raise HarnessControlError(
+            "Pi RPC session entry timestamp must be non-empty text when present"
+        )
+    return timestamp
+
+
 def pi_message_text(message: Mapping[str, object]) -> tuple[Literal["user", "assistant"], str]:
     role = message.get("role")
     if role not in {"user", "assistant"}:

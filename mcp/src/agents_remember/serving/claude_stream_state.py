@@ -35,6 +35,7 @@ from agents_remember.serving.claude_stream_submission import (
 )
 from agents_remember.serving.claude_stream_transport import ClaudeStreamTransport
 from agents_remember.serving.harness_control_models import (
+    AR_EVIDENCE_KEY,
     AcceptanceState,
     AdapterEvent,
     AdapterSnapshot,
@@ -402,7 +403,11 @@ class ClaudeStreamState:
             return
         await self._emit(
             "state",
-            raw={"claudeEventType": str(frame_type), "claudeEventSubtype": str(subtype)},
+            raw={
+                "claudeEventType": str(frame_type),
+                "claudeEventSubtype": str(subtype),
+                AR_EVIDENCE_KEY: dict(frame),
+            },
         )
 
     def _frame_handler(self, frame_type: object, subtype: object, frame: Mapping[str, object]):
@@ -525,7 +530,11 @@ class ClaudeStreamState:
                     created_at=self._created_at(frame),
                 ),
             )
-        await self._emit("state", transcript=transcript, raw={"claudeEventType": "assistant"})
+        await self._emit(
+            "state",
+            transcript=transcript,
+            raw={"claudeEventType": "assistant", AR_EVIDENCE_KEY: dict(frame)},
+        )
 
     async def _handle_retry(self, frame: Mapping[str, object]) -> None:
         self._snapshot = replace(self._snapshot, activity="settling")
@@ -592,7 +601,7 @@ class ClaudeStreamState:
         await self._emit(
             "completed",
             transcript=(transcript,),
-            raw={"terminalOutcome": outcome},
+            raw={"terminalOutcome": outcome, AR_EVIDENCE_KEY: dict(frame)},
             operation=record.operation,
         )
         if record is not None and not record.terminal_future.done():
@@ -650,10 +659,14 @@ class ClaudeStreamState:
     ) -> None:
         self._event_sequence += 1
         event_raw = dict(raw or {})
+        # The reserved evidence key rides the event only; the adapter's own snapshot merge must
+        # stay byte-identical for every pre-existing key so bridge-side redaction has the final
+        # say over what any projection can see.
+        snapshot_raw = {key: value for key, value in event_raw.items() if key != AR_EVIDENCE_KEY}
         self._snapshot = replace(
             self._snapshot,
             last_event_sequence=self._event_sequence,
-            raw={**self._snapshot.raw, **event_raw},
+            raw={**self._snapshot.raw, **snapshot_raw},
         )
         await self._events.put(
             AdapterEvent(

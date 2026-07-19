@@ -38,6 +38,8 @@ from agents_remember.serving.harness_control_models import (
     SubmissionAuthorityDescriptor,
     SubmissionLifecycleState,
     SubmissionLookup,
+    SubmissionProvenance,
+    SubmissionProvenanceBatch,
     SubmissionReceipt,
     SubmissionSource,
     SubmissionStatus,
@@ -368,6 +370,45 @@ class HarnessSubmissionAuthority:
             return SubmissionStatusBatch(
                 bridge_epoch=self._bridge_epoch,
                 submissions=tuple(lookups),
+            )
+
+    async def provenance(
+        self,
+        expected_bridge_epoch: str,
+        request_ids: tuple[str, ...],
+    ) -> SubmissionProvenanceBatch:
+        """Read-only provenance batch across every source; never origin-filtered."""
+
+        self._require_epoch(expected_bridge_epoch)
+        if not 1 <= len(request_ids) <= 64:
+            raise HarnessControlError("submission provenance requires 1..64 request ids")
+        if len(set(request_ids)) != len(request_ids):
+            raise HarnessControlError("submission provenance request ids must be unique")
+        async with self._lock:
+            provenance: list[SubmissionProvenance] = []
+            for request_id in request_ids:
+                key = self._prompt_ids.get(request_id)
+                record = self._records.get(key) if key is not None else None
+                if record is None:
+                    provenance.append(
+                        SubmissionProvenance(request_id=request_id, outcome="not-found")
+                    )
+                    continue
+                provenance.append(
+                    SubmissionProvenance(
+                        request_id=request_id,
+                        outcome="found",
+                        source=cast(SubmissionSource | None, record.source),
+                        state=record.state,
+                        submitted_at=record.submitted_at,
+                        updated_at=record.updated_at,
+                        accepted_at=record.accepted_at,
+                        vendor_correlation_id=record.vendor_correlation_id,
+                    )
+                )
+            return SubmissionProvenanceBatch(
+                bridge_epoch=self._bridge_epoch,
+                provenance=tuple(provenance),
             )
 
     async def withdraw(

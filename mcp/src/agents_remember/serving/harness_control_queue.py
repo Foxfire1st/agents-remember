@@ -22,6 +22,7 @@ from agents_remember.serving.harness_control_models import (
     ReconciliationResult,
     ReconciliationState,
     SubmissionAuthorityDescriptor,
+    SubmissionProvenanceBatch,
     SubmissionReceipt,
     SubmissionStatusBatch,
     WithdrawalResult,
@@ -146,6 +147,15 @@ class HarnessControlQueue:
             request_ids,
             cockpit_only=cockpit_only,
         )
+
+    async def provenance(
+        self,
+        expected_bridge_epoch: str,
+        request_ids: tuple[str, ...],
+    ) -> SubmissionProvenanceBatch:
+        """Read-only provenance batch for every source; the sole bridge->authority path."""
+
+        return await self._authority.provenance(expected_bridge_epoch, request_ids)
 
     async def withdraw(
         self,

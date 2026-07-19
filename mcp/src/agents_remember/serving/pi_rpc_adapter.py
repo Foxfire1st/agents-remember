@@ -29,10 +29,13 @@ from agents_remember.serving.harness_control_models import (
     ControlOperationRef,
     InteractionResponse,
     LaunchSpec,
+    NativeEvidenceFrame,
+    NativeEvidencePage,
     PromptRequest,
     ReconciliationResult,
     ShutdownMode,
     SubmissionReceipt,
+    window_native_evidence_page,
 )
 from agents_remember.serving.harness_launch import ResolvedLaunch, verify_effective_launch
 from agents_remember.serving.pi_rpc_configuration import (
@@ -50,6 +53,8 @@ from agents_remember.serving.pi_rpc_protocol import (
     parse_pi_models,
     parse_pi_response,
     parse_pi_state,
+    pi_entry_created_at,
+    pi_entry_identity,
     pi_entry_user_text,
     pi_response_error,
     pi_rpc_launch,
@@ -474,6 +479,43 @@ class PiRpcAdapter:
         response = parse_pi_response(frame, request_id=request_id, command="get_entries")
         require_pi_success(response, "get_entries")
         return parse_pi_entries(response)
+
+    async def read_native_page(
+        self,
+        *,
+        cursor: str | None,
+        limit: int,
+        byte_budget: int,
+    ) -> NativeEvidencePage:
+        """Page durable entries through ``get_entries``; the native branch stays the authority."""
+
+        self._require_started()
+        entries = await self._read_entries(since=cursor)
+        frames: list[NativeEvidenceFrame] = []
+        seen: set[str] = set()
+        for entry in entries.entries:
+            entry_id, parent_id, entry_type = pi_entry_identity(entry)
+            if entry_id in seen:
+                raise HarnessControlError(
+                    f"Pi RPC get_entries repeated entry id {entry_id!r}; "
+                    "native paging cannot continue without exact identity"
+                )
+            seen.add(entry_id)
+            frames.append(
+                NativeEvidenceFrame(
+                    native_id=entry_id,
+                    native_parent_id=parent_id,
+                    native_type=entry_type,
+                    created_at=pi_entry_created_at(entry),
+                    raw=entry,
+                )
+            )
+        return window_native_evidence_page(
+            tuple(frames),
+            cursor=None,
+            limit=limit,
+            byte_budget=byte_budget,
+        )
 
     async def _read_available_models(self, state: PiSessionState) -> CapabilitySnapshot:
         return await self._request_available_models(self._require_transport(), state)

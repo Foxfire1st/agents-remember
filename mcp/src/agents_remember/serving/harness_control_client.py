@@ -35,12 +35,18 @@ from agents_remember.serving.harness_control_models import (
     AdapterSnapshot,
     ControlIdentity,
     ControlState,
+    EvidenceFrame,
+    EvidencePage,
+    NativeEvidenceFrame,
+    NativeEvidencePage,
     PendingInteraction,
     ReconciliationResult,
     ReconciliationState,
     SubmissionAuthorityDescriptor,
     SubmissionLifecycleState,
     SubmissionLookup,
+    SubmissionProvenance,
+    SubmissionProvenanceBatch,
     SubmissionReceipt,
     SubmissionSource,
     SubmissionStatus,
@@ -50,6 +56,9 @@ from agents_remember.serving.harness_control_models import (
 
 SET_CONTROL_TIMEOUT_SECONDS = 35.0
 """Bound a native setter above Claude's 30-second correlated acceptance window."""
+
+EVIDENCE_PAGE_TIMEOUT_SECONDS = 35.0
+"""Bound a native history page (e.g. Codex thread/read) above the 2-second control default."""
 
 
 class ControlledSession(Protocol):
@@ -274,6 +283,78 @@ def read_control_transcript(
     return tuple(cast(Mapping[str, object], item) for item in entries)
 
 
+def read_control_evidence(
+    entry: ControlledSession,
+    *,
+    after_sequence: int = 0,
+    limit: int = 500,
+    expected_bridge_epoch: str | None = None,
+) -> EvidencePage:
+    """Page the deque-domain evidence buffer; rejects native-cursor coordinates typed."""
+
+    if isinstance(after_sequence, str):
+        raise HarnessControlError(
+            "native-cursor coordinates are invalid in the deque evidence domain"
+        )
+    _require_coordinate(after_sequence, "evidence after_sequence")
+    _require_page_limit(limit)
+    result = request_control(
+        entry,
+        "evidence",
+        {"afterSequence": after_sequence, "limit": limit},
+    )
+    return _evidence_page(result, expected_bridge_epoch=expected_bridge_epoch)
+
+
+def read_control_native_page(
+    entry: ControlledSession,
+    *,
+    cursor: str | None = None,
+    limit: int = 200,
+    expected_bridge_epoch: str | None = None,
+) -> NativeEvidencePage:
+    """Page harness-native history; rejects adapter-sequence coordinates typed."""
+
+    if isinstance(cursor, int) and not isinstance(cursor, bool):
+        raise HarnessControlError(
+            "adapter-sequence coordinates are invalid in the native evidence domain"
+        )
+    if cursor is not None and not isinstance(cursor, str):
+        raise HarnessControlError("native evidence cursor must be opaque text or null")
+    _require_page_limit(limit)
+    payload: dict[str, object] = {"limit": limit}
+    if cursor is not None:
+        payload["cursor"] = cursor
+    result = request_control(
+        entry,
+        "evidence-native-page",
+        payload,
+        timeout_seconds=EVIDENCE_PAGE_TIMEOUT_SECONDS,
+    )
+    return _native_evidence_page(result, expected_bridge_epoch=expected_bridge_epoch)
+
+
+def read_submission_provenance(
+    entry: ControlledSession,
+    *,
+    expected_bridge_epoch: str,
+    request_ids: tuple[str, ...],
+) -> SubmissionProvenanceBatch:
+    result = request_control(
+        entry,
+        "submission-provenance",
+        {
+            "expectedBridgeEpoch": expected_bridge_epoch,
+            "requestIds": list(request_ids),
+        },
+    )
+    return _submission_provenance_batch(
+        result,
+        expected_bridge_epoch=expected_bridge_epoch,
+        request_ids=request_ids,
+    )
+
+
 def stop_control_session(entry: ControlledSession, *, forced: bool = False) -> None:
     request_control(entry, "stop", {"mode": "forced" if forced else "graceful"})
 
@@ -490,6 +571,178 @@ def _withdrawal_result(result: object, *, request_id: str) -> WithdrawalResult:
         withdrawn_at=_optional_text(result, "withdrawnAt"),
         detail=_optional_text(result, "detail"),
     )
+
+
+def _evidence_page(result: object, *, expected_bridge_epoch: str | None) -> EvidencePage:
+    if not isinstance(result, Mapping):
+        raise HarnessControlError("control evidence response must be an object")
+    bridge_epoch = _evidence_bridge_epoch(result, expected_bridge_epoch=expected_bridge_epoch)
+    latest = _required_non_negative_int(result, "latestSequence")
+    evicted = _required_non_negative_int(result, "evictedBeforeSequence")
+    truncated = result.get("truncated")
+    if not isinstance(truncated, bool):
+        raise HarnessControlError("control evidence response truncated must be boolean")
+    raw_frames = result.get("frames")
+    if not isinstance(raw_frames, list):
+        raise HarnessControlError("control evidence response requires frames")
+    frames: list[EvidenceFrame] = []
+    previous = 0
+    for raw_frame in raw_frames:
+        if not isinstance(raw_frame, Mapping):
+            raise HarnessControlError("control evidence frame must be an object")
+        sequence = _required_non_negative_int(raw_frame, "sequence")
+        if sequence <= previous:
+            raise HarnessControlError("control evidence frames must increase monotonically")
+        previous = sequence
+        frames.append(
+            EvidenceFrame(
+                sequence=sequence,
+                kind=_required_text(raw_frame, "kind"),
+                created_at=_required_text(raw_frame, "createdAt"),
+                raw=_object(raw_frame.get("raw")),
+            )
+        )
+    if frames and latest < frames[-1].sequence:
+        raise HarnessControlError("control evidence latestSequence precedes its last frame")
+    return EvidencePage(
+        frames=tuple(frames),
+        latest_sequence=latest,
+        evicted_before_sequence=evicted,
+        truncated=truncated,
+        bridge_epoch=bridge_epoch,
+    )
+
+
+def _native_evidence_page(
+    result: object, *, expected_bridge_epoch: str | None
+) -> NativeEvidencePage:
+    if not isinstance(result, Mapping):
+        raise HarnessControlError("control native evidence response must be an object")
+    bridge_epoch = _evidence_bridge_epoch(result, expected_bridge_epoch=expected_bridge_epoch)
+    truncated = result.get("truncated")
+    if not isinstance(truncated, bool):
+        raise HarnessControlError("control native evidence response truncated must be boolean")
+    next_cursor = result.get("nextCursor")
+    if next_cursor is not None and not isinstance(next_cursor, str):
+        raise HarnessControlError("control native evidence nextCursor must be text or null")
+    frames = _native_evidence_frames(result.get("frames"), next_cursor)
+    return NativeEvidencePage(
+        frames=frames,
+        next_cursor=next_cursor,
+        truncated=truncated,
+        bridge_epoch=bridge_epoch,
+    )
+
+
+def _native_evidence_frames(
+    raw_frames: object, next_cursor: str | None
+) -> tuple[NativeEvidenceFrame, ...]:
+    if not isinstance(raw_frames, list):
+        raise HarnessControlError("control native evidence response requires frames")
+    frames: list[NativeEvidenceFrame] = []
+    seen: set[str] = set()
+    for raw_frame in raw_frames:
+        frame = _native_evidence_frame(raw_frame)
+        if frame.native_id in seen:
+            raise HarnessControlError("control native evidence repeated a native id")
+        seen.add(frame.native_id)
+        frames.append(frame)
+    if next_cursor is not None and not frames:
+        raise HarnessControlError("control native evidence empty page cannot carry a continuation")
+    if next_cursor is not None and next_cursor != frames[-1].native_id:
+        raise HarnessControlError(
+            "control native evidence nextCursor does not continue its last frame"
+        )
+    return tuple(frames)
+
+
+def _native_evidence_frame(raw_frame: object) -> NativeEvidenceFrame:
+    if not isinstance(raw_frame, Mapping):
+        raise HarnessControlError("control native evidence frame must be an object")
+    parent = raw_frame.get("nativeParentId")
+    if parent is not None and not isinstance(parent, str):
+        raise HarnessControlError("control native evidence nativeParentId must be text or null")
+    created_at = raw_frame.get("createdAt")
+    if created_at is not None and not isinstance(created_at, str):
+        raise HarnessControlError("control native evidence createdAt must be text or null")
+    return NativeEvidenceFrame(
+        native_id=_required_text(raw_frame, "nativeId"),
+        native_parent_id=parent,
+        native_type=_required_text(raw_frame, "nativeType"),
+        created_at=created_at,
+        raw=_object(raw_frame.get("raw")),
+    )
+
+
+def _submission_provenance_batch(
+    result: object,
+    *,
+    expected_bridge_epoch: str,
+    request_ids: tuple[str, ...],
+) -> SubmissionProvenanceBatch:
+    if not isinstance(result, Mapping):
+        raise HarnessControlError("submission provenance response must be an object")
+    bridge_epoch = _required_text(result, "bridgeEpoch")
+    if bridge_epoch != expected_bridge_epoch:
+        raise HarnessControlError("submission provenance response bridge epoch mismatch")
+    raw_provenance = result.get("provenance")
+    if not isinstance(raw_provenance, list) or len(raw_provenance) != len(request_ids):
+        raise HarnessControlError("submission provenance response has the wrong result count")
+    provenance: list[SubmissionProvenance] = []
+    for expected_id, raw_item in zip(request_ids, raw_provenance, strict=True):
+        item = _submission_provenance_item(raw_item)
+        if item.request_id != expected_id:
+            raise HarnessControlError("submission provenance request id or order mismatch")
+        provenance.append(item)
+    return SubmissionProvenanceBatch(bridge_epoch=bridge_epoch, provenance=tuple(provenance))
+
+
+def _submission_provenance_item(raw_item: object) -> SubmissionProvenance:
+    if not isinstance(raw_item, Mapping):
+        raise HarnessControlError("submission provenance item must be an object")
+    request_id = _required_text(raw_item, "requestId")
+    outcome = raw_item.get("outcome")
+    if outcome == "not-found":
+        return SubmissionProvenance(request_id=request_id, outcome="not-found")
+    if outcome != "found":
+        raise HarnessControlError("submission provenance has invalid outcome")
+    source = raw_item.get("source")
+    if source not in {"cockpit", "terminal", "durable"}:
+        raise HarnessControlError("submission provenance has invalid source")
+    return SubmissionProvenance(
+        request_id=request_id,
+        outcome="found",
+        source=cast(SubmissionSource, source),
+        state=_submission_state(raw_item.get("state")),
+        submitted_at=_optional_text(raw_item, "submittedAt"),
+        updated_at=_optional_text(raw_item, "updatedAt"),
+        accepted_at=_optional_text(raw_item, "acceptedAt"),
+        vendor_correlation_id=_optional_text(raw_item, "vendorCorrelationId"),
+    )
+
+
+def _evidence_bridge_epoch(raw: Mapping[str, object], *, expected_bridge_epoch: str | None) -> str:
+    bridge_epoch = _required_text(raw, "bridgeEpoch")
+    if expected_bridge_epoch is not None and bridge_epoch != expected_bridge_epoch:
+        raise HarnessBridgeEpochMismatchError(expected_bridge_epoch, bridge_epoch)
+    return bridge_epoch
+
+
+def _require_coordinate(value: object, label: str) -> None:
+    if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+        raise HarnessControlError(f"{label} must be a non-negative integer coordinate")
+
+
+def _require_page_limit(limit: int) -> None:
+    if not isinstance(limit, int) or isinstance(limit, bool) or limit < 1:
+        raise HarnessControlError("evidence page limit must be a positive integer")
+
+
+def _required_non_negative_int(raw: Mapping[str, object], key: str) -> int:
+    value = raw.get(key)
+    if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+        raise HarnessControlError(f"control response {key} must be a non-negative integer")
+    return value
 
 
 def _submission_state(

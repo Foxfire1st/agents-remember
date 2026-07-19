@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Literal, cast
+from typing import Literal, Protocol, cast, runtime_checkable
 
 from agents_remember.errors import HarnessControlError
 
@@ -52,6 +53,23 @@ REQUIRED_ADAPTER_CAPABILITIES: frozenset[AdapterCapability] = frozenset(
         "graceful-shutdown",
     }
 )
+
+AR_EVIDENCE_KEY = "arEvidence"
+"""Reserved ``AdapterEvent.raw`` key carrying one full native payload for the evidence buffer.
+
+Mappers place full native frames under this key only; every pre-existing raw key keeps its exact
+shape. The control bridge diverts the payload into the bounded evidence deque and republishes the
+event without this key, so ``snapshot.raw`` and every projection of it stay byte-identical.
+"""
+
+EVIDENCE_TRUNCATION_MARKER = "…[truncated]"
+"""Visible marker appended to every clipped evidence payload preview."""
+
+MAX_NATIVE_EVIDENCE_PAGE = 200
+"""Server-side frame cap for one native-domain evidence page."""
+
+EVIDENCE_PAGE_BYTE_BUDGET = 48 * 1024
+"""Default serialized-byte budget for one evidence page (bounded below the IPC wire cap)."""
 
 
 @dataclass(frozen=True)
@@ -288,6 +306,81 @@ class AdapterEvent:
     operation: ControlOperationRef | None = None
 
 
+@dataclass(frozen=True)
+class EvidenceFrame:
+    """One diverted native payload in the deque coordinate domain (adapter event sequence)."""
+
+    sequence: int
+    kind: str
+    created_at: str
+    raw: Mapping[str, object] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class EvidencePage:
+    """One bounded deque-domain page; every coordinate is an adapter event sequence."""
+
+    frames: tuple[EvidenceFrame, ...]
+    latest_sequence: int
+    evicted_before_sequence: int
+    truncated: bool
+    bridge_epoch: str
+
+
+@dataclass(frozen=True)
+class NativeEvidenceFrame:
+    """One native-history frame with typed harness identity, never buried in ``raw``."""
+
+    native_id: str
+    native_parent_id: str | None
+    native_type: str
+    created_at: str | None
+    raw: Mapping[str, object] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class NativeEvidencePage:
+    """One bounded native-domain page continued only by the opaque ``next_cursor``."""
+
+    frames: tuple[NativeEvidenceFrame, ...]
+    next_cursor: str | None
+    truncated: bool
+    bridge_epoch: str
+
+
+@dataclass(frozen=True)
+class SubmissionProvenance:
+    """Source/lifecycle evidence for one exact request id across every submission source."""
+
+    request_id: str
+    outcome: SubmissionLookupOutcome
+    source: SubmissionSource | None = None
+    state: SubmissionLifecycleState | None = None
+    submitted_at: str | None = None
+    updated_at: str | None = None
+    accepted_at: str | None = None
+    vendor_correlation_id: str | None = None
+
+
+@dataclass(frozen=True)
+class SubmissionProvenanceBatch:
+    bridge_epoch: str
+    provenance: tuple[SubmissionProvenance, ...]
+
+
+@runtime_checkable
+class NativePageReader(Protocol):
+    """Structural native-history read; concrete adapters opt in without a protocol edit."""
+
+    async def read_native_page(
+        self,
+        *,
+        cursor: str | None,
+        limit: int,
+        byte_budget: int,
+    ) -> NativeEvidencePage: ...
+
+
 def pending_interaction_json(value: PendingInteraction | None) -> dict[str, object] | None:
     if value is None:
         return None
@@ -336,6 +429,161 @@ def snapshot_json(value: AdapterSnapshot) -> dict[str, object]:
         "lastEventSequence": value.last_event_sequence,
         "raw": dict(value.raw),
     }
+
+
+def evidence_frame_json(value: EvidenceFrame) -> dict[str, object]:
+    return {
+        "sequence": value.sequence,
+        "kind": value.kind,
+        "createdAt": value.created_at,
+        "raw": dict(value.raw),
+    }
+
+
+def evidence_page_json(value: EvidencePage) -> dict[str, object]:
+    return {
+        "frames": [evidence_frame_json(frame) for frame in value.frames],
+        "latestSequence": value.latest_sequence,
+        "evictedBeforeSequence": value.evicted_before_sequence,
+        "truncated": value.truncated,
+        "bridgeEpoch": value.bridge_epoch,
+    }
+
+
+def native_evidence_frame_json(value: NativeEvidenceFrame) -> dict[str, object]:
+    return {
+        "nativeId": value.native_id,
+        "nativeParentId": value.native_parent_id,
+        "nativeType": value.native_type,
+        "createdAt": value.created_at,
+        "raw": dict(value.raw),
+    }
+
+
+def native_evidence_page_json(value: NativeEvidencePage) -> dict[str, object]:
+    return {
+        "frames": [native_evidence_frame_json(frame) for frame in value.frames],
+        "nextCursor": value.next_cursor,
+        "truncated": value.truncated,
+        "bridgeEpoch": value.bridge_epoch,
+    }
+
+
+def submission_provenance_json(value: SubmissionProvenance) -> dict[str, object]:
+    if value.outcome == "not-found":
+        return {"requestId": value.request_id, "outcome": "not-found"}
+    return {
+        "requestId": value.request_id,
+        "outcome": "found",
+        "source": value.source,
+        "state": value.state,
+        "submittedAt": value.submitted_at,
+        "updatedAt": value.updated_at,
+        "acceptedAt": value.accepted_at,
+        "vendorCorrelationId": value.vendor_correlation_id,
+    }
+
+
+def submission_provenance_batch_json(value: SubmissionProvenanceBatch) -> dict[str, object]:
+    return {
+        "bridgeEpoch": value.bridge_epoch,
+        "provenance": [submission_provenance_json(item) for item in value.provenance],
+    }
+
+
+def clip_evidence_payload(payload: Mapping[str, object], *, max_bytes: int) -> Mapping[str, object]:
+    """Bound one JSON evidence payload to ``max_bytes`` serialized, with any clip visible.
+
+    Unclipped payloads are returned as a plain copy. Clipped payloads become an envelope whose
+    own serialized size never exceeds ``max_bytes`` and whose preview ends with the truncation
+    marker, so consumers never mistake a partial payload for a complete native frame.
+    """
+
+    if max_bytes < 1:
+        raise HarnessControlError("evidence payload clip requires a positive byte budget")
+    try:
+        encoded = json.dumps(dict(payload), ensure_ascii=False, separators=(",", ":"))
+    except (TypeError, ValueError) as exc:
+        raise HarnessControlError("adapter evidence payload must be JSON-serializable") from exc
+    if len(encoded.encode("utf-8")) <= max_bytes:
+        return dict(payload)
+    original_bytes = len(encoded.encode("utf-8"))
+    preview = encoded
+    for _ in range(64):
+        clipped: dict[str, object] = {
+            "arEvidenceTruncated": True,
+            "originalBytes": original_bytes,
+            "preview": preview + EVIDENCE_TRUNCATION_MARKER,
+        }
+        if len(json.dumps(clipped, ensure_ascii=False, separators=(",", ":")).encode("utf-8")) <= (
+            max_bytes
+        ):
+            return clipped
+        preview = preview[: len(preview) // 2]
+    raise HarnessControlError("evidence payload clip budget is below the truncation envelope")
+
+
+def evidence_frame_wire_bytes(frame: EvidenceFrame) -> int:
+    return _serialized_size(evidence_frame_json(frame))
+
+
+def native_evidence_frame_wire_bytes(frame: NativeEvidenceFrame) -> int:
+    return _serialized_size(native_evidence_frame_json(frame))
+
+
+def window_native_evidence_page(
+    frames: tuple[NativeEvidenceFrame, ...],
+    *,
+    cursor: str | None,
+    limit: int,
+    byte_budget: int,
+) -> NativeEvidencePage:
+    """Window one full native read into a bounded page with an opaque native continuation.
+
+    The cursor names the last native id of the previous page; the next page starts strictly
+    after it and is minted only from the fresh native read. A single oversized frame is clipped
+    so every page makes progress; the bridge stamps ``bridge_epoch`` on the result.
+    """
+
+    if limit < 1:
+        raise HarnessControlError("native evidence page limit must be positive")
+    if byte_budget < 1:
+        raise HarnessControlError("native evidence page byte budget must be positive")
+    start = _native_window_start(frames, cursor)
+    selected: list[NativeEvidenceFrame] = []
+    used = 0
+    end = start
+    while end < len(frames) and len(selected) < limit:
+        frame = frames[end]
+        if native_evidence_frame_wire_bytes(frame) > byte_budget:
+            frame = replace(frame, raw=clip_evidence_payload(frame.raw, max_bytes=byte_budget // 2))
+        size = native_evidence_frame_wire_bytes(frame)
+        if selected and used + size > byte_budget:
+            break
+        selected.append(frame)
+        used += size
+        end += 1
+    truncated = end < len(frames)
+    next_cursor = selected[-1].native_id if truncated and selected else None
+    return NativeEvidencePage(
+        frames=tuple(selected),
+        next_cursor=next_cursor,
+        truncated=truncated,
+        bridge_epoch="",
+    )
+
+
+def _native_window_start(frames: tuple[NativeEvidenceFrame, ...], cursor: str | None) -> int:
+    if cursor is None:
+        return 0
+    for index, frame in enumerate(frames):
+        if frame.native_id == cursor:
+            return index + 1
+    raise HarnessControlError("native evidence page cursor is absent from the current native read")
+
+
+def _serialized_size(value: Mapping[str, object]) -> int:
+    return len(json.dumps(value, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
 
 
 def receipt_json(value: SubmissionReceipt) -> dict[str, object]:

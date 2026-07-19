@@ -9,6 +9,7 @@ from typing import Literal, cast
 
 from agents_remember.errors import HarnessAdapterDisconnectedError, HarnessControlError
 from agents_remember.serving.harness_control_models import (
+    AR_EVIDENCE_KEY,
     AdapterEvent,
     AdapterSnapshot,
     ControlIdentity,
@@ -146,7 +147,7 @@ class PiRpcEventMapper:
             return self._state_event(frame, activity=transition[0], acceptance=transition[1])
         if event_type == "queue_update":
             return self._queue_event(frame)
-        return self._next_event(f"pi:{event_type}", frame)
+        return self._next_event(f"pi:{event_type}", frame, evidence=frame)
 
     def disconnected(self, error: HarnessAdapterDisconnectedError) -> AdapterEvent:
         self._snapshot = replace(
@@ -227,7 +228,7 @@ class PiRpcEventMapper:
             raise HarnessControlError("Pi RPC message_end requires a message object")
         role, text = pi_message_text(cast(Mapping[str, object], message))
         entry = self._transcript_entry(role=role, text=text, raw=frame)
-        return self._next_event("transcript", frame, transcript=(entry,))
+        return self._next_event("transcript", frame, transcript=(entry,), evidence=frame)
 
     def _queue_event(self, frame: Mapping[str, object]) -> AdapterEvent:
         pending = pi_queue_update_count(frame)
@@ -268,11 +269,17 @@ class PiRpcEventMapper:
         snapshot: AdapterSnapshot | None = None,
         transcript: tuple[TranscriptEntry, ...] = (),
         operation: ControlOperationRef | None = None,
+        evidence: Mapping[str, object] | None = None,
     ) -> AdapterEvent:
         self._event_sequence += 1
         if snapshot is not None:
             snapshot = replace(snapshot, last_event_sequence=self._event_sequence)
             self._snapshot = snapshot
+        event_raw: dict[str, object] = {"piEvent": dict(raw)}
+        if evidence is not None:
+            # The full frame rides the reserved key into the evidence buffer; the status-quo
+            # piEvent key keeps its exact current shape for snapshot consumers.
+            event_raw[AR_EVIDENCE_KEY] = dict(evidence)
         return AdapterEvent(
             sequence=self._event_sequence,
             kind=kind,
@@ -280,7 +287,7 @@ class PiRpcEventMapper:
             created_at=self._clock(),
             snapshot=snapshot,
             transcript=transcript,
-            raw={"piEvent": dict(raw)},
+            raw=event_raw,
             operation=operation,
         )
 

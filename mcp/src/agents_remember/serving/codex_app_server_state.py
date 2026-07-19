@@ -16,6 +16,7 @@ from agents_remember.serving.harness_capabilities import EffortOption
 from agents_remember.serving.harness_control_models import (
     AcceptanceState,
     ActivityState,
+    NativeEvidenceFrame,
     PendingInteraction,
     PromptRequest,
     TerminalOutcome,
@@ -372,6 +373,44 @@ def transcript_from_item(
         vendor_correlation_id=turn_id,
         raw={"codexItemId": item_id, "codexItemType": item_type},
     )
+
+
+def native_evidence_frames_from_thread(
+    thread: Mapping[str, object],
+) -> tuple[NativeEvidenceFrame, ...]:
+    """Flatten one ``thread/read`` thread into typed native evidence frames, in stored order.
+
+    Every item must carry a unique id and a type; duplicates or missing identity fail closed
+    instead of manufacturing a cursor that could overlap or skip items across pages.
+    """
+
+    frames: list[NativeEvidenceFrame] = []
+    seen: set[str] = set()
+    turns = required_list(thread, "turns", context="thread/read response.thread")
+    for raw_turn in turns:
+        turn = required_object(raw_turn, context="thread/read turn")
+        turn_id = required_text(turn, "id", context="thread/read turn")
+        items = required_list(turn, "items", context="thread/read turn")
+        for raw_item in items:
+            item = required_object(raw_item, context="thread/read item")
+            item_id = required_text(item, "id", context="Codex thread item")
+            item_type = required_text(item, "type", context="Codex thread item")
+            if item_id in seen:
+                raise CodexAppServerError(
+                    f"Codex thread/read repeated item id {item_id!r}; "
+                    "native paging cannot continue without exact identity"
+                )
+            seen.add(item_id)
+            frames.append(
+                NativeEvidenceFrame(
+                    native_id=item_id,
+                    native_parent_id=turn_id,
+                    native_type=item_type,
+                    created_at=None,
+                    raw=item,
+                )
+            )
+    return tuple(frames)
 
 
 def find_request_turn(

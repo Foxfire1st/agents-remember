@@ -24,6 +24,7 @@ from agents_remember.serving.harness_capabilities import (
 from agents_remember.serving.harness_control_bridge import HarnessControlBridge
 from agents_remember.serving.harness_control_models import (
     CONTROL_PROTOCOL_VERSION,
+    MAX_NATIVE_EVIDENCE_PAGE,
     ControlIdentity,
     ControlOperationKind,
     InteractionResponse,
@@ -31,10 +32,13 @@ from agents_remember.serving.harness_control_models import (
     ReconciliationState,
     ShutdownMode,
     SubmissionSource,
+    evidence_page_json,
+    native_evidence_page_json,
     receipt_json,
     reconciliation_json,
     snapshot_json,
     submission_authority_json,
+    submission_provenance_batch_json,
     submission_status_batch_json,
     transcript_entry_json,
     withdrawal_result_json,
@@ -43,6 +47,7 @@ from agents_remember.serving.harness_submission_authority import OperationResolu
 
 MAX_CONTROL_MESSAGE_BYTES = 64 * 1024
 MAX_TRANSCRIPT_PAGE = 500
+MAX_EVIDENCE_PAGE = 500
 
 
 @dataclass(frozen=True)
@@ -190,6 +195,12 @@ class HarnessControlServer:
             return await self._resolve_operation(payload)
         if action == "transcript":
             return self._transcript(payload)
+        if action == "evidence":
+            return self._evidence(payload)
+        if action == "evidence-native-page":
+            return await self._evidence_native_page(payload)
+        if action == "submission-provenance":
+            return await self._submission_provenance(payload)
         if action == "stop":
             return await self._stop(payload)
         raise HarnessControlError(f"unknown control action: {action}")
@@ -271,6 +282,34 @@ class HarnessControlServer:
                 for entry in self.bridge.transcript(after_sequence=after, limit=max(1, limit))
             ]
         }
+
+    def _evidence(self, payload: Mapping[str, object]) -> dict[str, object]:
+        after = _optional_non_negative_int(payload, "afterSequence", default=0)
+        limit = min(
+            MAX_EVIDENCE_PAGE,
+            _optional_non_negative_int(payload, "limit", default=MAX_EVIDENCE_PAGE),
+        )
+        return evidence_page_json(self.bridge.evidence(after_sequence=after, limit=max(1, limit)))
+
+    async def _evidence_native_page(self, payload: Mapping[str, object]) -> dict[str, object]:
+        limit = min(
+            MAX_NATIVE_EVIDENCE_PAGE,
+            _optional_non_negative_int(payload, "limit", default=MAX_NATIVE_EVIDENCE_PAGE),
+        )
+        return native_evidence_page_json(
+            await self.bridge.native_page(
+                cursor=_optional_text(payload, "cursor"),
+                limit=max(1, limit),
+            )
+        )
+
+    async def _submission_provenance(self, payload: Mapping[str, object]) -> dict[str, object]:
+        return submission_provenance_batch_json(
+            await self.bridge.submission_provenance(
+                _required_text(payload, "expectedBridgeEpoch"),
+                _required_text_list(payload, "requestIds", minimum=1, maximum=64),
+            )
+        )
 
     async def _stop(self, payload: Mapping[str, object]) -> dict[str, object]:
         mode = payload.get("mode", "graceful")

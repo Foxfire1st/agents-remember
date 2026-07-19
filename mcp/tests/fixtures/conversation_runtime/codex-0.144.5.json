@@ -30,6 +30,50 @@
       "shape": [],
       "result": "not-exercised",
       "reason": "The later active-projector leaf must exercise installed message, reasoning, tool, approval, usage, cursor, and rehydrate frames."
+    },
+    {
+      "operation": "substrate-evidence/live-frames-page",
+      "shape": [
+        "EvidencePage.frames[observed:>=4]",
+        "EvidenceFrame.kind[item/completed,thread/tokenUsage/updated,turn/completed][observed]",
+        "EvidenceFrame.payload.item.id[observed]",
+        "EvidenceFrame.payload.item.type[userMessage,agentMessage][observed]",
+        "EvidencePage.bridgeEpoch[observed]",
+        "snapshot.raw.arEvidence[absent]"
+      ],
+      "result": "observed",
+      "reason": "Installed 0.144.5 app-server drove one ephemeral thread through the production adapter-bridge-IPC-client evidence seam; only allow-listed counts, kinds, and field presence were retained."
+    },
+    {
+      "operation": "substrate-evidence/native-page-thread-read",
+      "shape": [
+        "NativeEvidenceFrame.nativeId[observed]",
+        "NativeEvidenceFrame.nativeParentId[observed]",
+        "NativeEvidenceFrame.nativeType[userMessage,agentMessage][observed]",
+        "NativeEvidencePage.bridgeEpoch[observed]",
+        "ephemeral thread/read includeTurns[refused-typed]"
+      ],
+      "result": "observed",
+      "reason": "A persisted 0.144.5 thread paged through thread/read with typed identity; ephemeral threads refuse includeTurns and the refusal crosses typed with the native reason."
+    },
+    {
+      "operation": "substrate-evidence/resume-thread-channel",
+      "shape": [
+        "resumeThreadId[opener->runner->factory->settings][observed]",
+        "thread/resume exact thread id[observed]",
+        "resumed native page userMessage[observed]"
+      ],
+      "result": "observed",
+      "reason": "A second factory-built 0.144.5 adapter resumed the exact persisted thread through the L0E channel and paged its items."
+    },
+    {
+      "operation": "substrate-evidence/submission-provenance",
+      "shape": [
+        "SubmissionProvenance.source[cockpit][observed]",
+        "SubmissionProvenanceBatch.bridgeEpoch[observed]"
+      ],
+      "result": "observed",
+      "reason": "A live cockpit submission's source crossed the provenance batch with exact epoch scoping."
     }
   ]
 }

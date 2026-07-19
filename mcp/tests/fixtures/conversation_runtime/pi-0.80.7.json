@@ -32,6 +32,38 @@
       "shape": [],
       "result": "not-exercised",
       "reason": "Messages, entries, durable cursor, tool lifecycle, images, abort, stats, compaction, retry, steer, and follow-up remain independent production gates."
+    },
+    {
+      "operation": "substrate-evidence/live-frames-page",
+      "shape": [
+        "EvidencePage.frames[observed:>=2]",
+        "EvidenceFrame.kind[transcript,pi:message_update][observed]",
+        "message_end full frame[observed]",
+        "EvidencePage.bridgeEpoch[observed]",
+        "snapshot.raw.arEvidence[absent]"
+      ],
+      "result": "observed",
+      "reason": "Installed 0.80.7 RPC drove one prompt through the production adapter-bridge-IPC-client evidence seam; only allow-listed counts, kinds, and field presence were retained."
+    },
+    {
+      "operation": "substrate-evidence/native-page-get-entries",
+      "shape": [
+        "NativeEvidenceFrame.nativeId[observed]",
+        "NativeEvidenceFrame.nativeType[observed]",
+        "NativeEvidencePage.frames[observed:>=1]",
+        "NativeEvidencePage.bridgeEpoch[observed]"
+      ],
+      "result": "observed",
+      "reason": "Durable 0.80.7 entries paged with typed native identity through the production seam."
+    },
+    {
+      "operation": "substrate-evidence/submission-provenance",
+      "shape": [
+        "SubmissionProvenance.source[cockpit][observed]",
+        "SubmissionProvenanceBatch.bridgeEpoch[observed]"
+      ],
+      "result": "observed",
+      "reason": "A live cockpit submission's source crossed the provenance batch with exact epoch scoping."
     }
   ]
 }

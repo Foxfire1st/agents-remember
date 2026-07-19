@@ -25,6 +25,7 @@ def create_harness_protocol_adapter(
     env: Mapping[str, str],
     resolved_launch: ResolvedLaunch | None = None,
     launch_knobs: LaunchKnobs | None = None,
+    resume_thread_id: str | None = None,
 ) -> LaunchableHarnessProtocolAdapter:
     """Create a protocol-negotiating built-in adapter; custom ids stay explicitly unsupported."""
 
@@ -37,6 +38,11 @@ def create_harness_protocol_adapter(
         )
     if resolved_launch is not None and launch_knobs is None:
         raise HarnessControlError("resolved launch requires adapter-produced launch knobs")
+    if resume_thread_id is not None:
+        if harness_id != "codex":
+            raise HarnessControlError("resume_thread_id is only supported for the codex harness")
+        if not resume_thread_id or resume_thread_id != resume_thread_id.strip():
+            raise HarnessControlError("resume_thread_id must be non-empty with no outer whitespace")
 
     if harness_id == "claude":
         return ClaudeStreamJsonAdapter(expected_launch=resolved_launch)
@@ -49,6 +55,7 @@ def create_harness_protocol_adapter(
             CodexAppServerSettings(
                 model=model,
                 reasoning_effort=effort,
+                resume_thread_id=resume_thread_id,
                 config=dict(launch_knobs.session_config) if launch_knobs is not None else {},
             )
         )
