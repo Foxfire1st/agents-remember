@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from typing import TYPE_CHECKING
 
 from agents_remember.serving.harness_control_models import (
     AdapterSnapshot,
@@ -13,6 +14,9 @@ from agents_remember.serving.terminal_catalog import (
     TerminalCatalog,
     TerminalCatalogEntry,
 )
+
+if TYPE_CHECKING:
+    from agents_remember.serving.conversation.models import HarnessId
 
 
 def project_control_snapshot(
@@ -63,11 +67,24 @@ def mark_legacy_control_unsupported(
     return projected
 
 
-def snapshot_turn_state(snapshot: AdapterSnapshot) -> SeatTurnState:
-    if snapshot.activity in {"running", "settling"}:
-        return "working"
-    if snapshot.activity == "blocked":
-        return "awaiting-input"
-    if snapshot.activity == "idle" and snapshot.control == "ready":
-        return "turn-ended"
-    return "stale"
+def snapshot_turn_state(
+    snapshot: AdapterSnapshot,
+    harness_id: HarnessId | None = None,
+) -> SeatTurnState:
+    """Project adapter evidence onto the seat vocabulary through the canonical
+    conversation status authority (260718-CHATS-L1, R3).
+
+    Orchestration no longer maps adapter fields on its own: the same canonical
+    classification the Chats serving consumes produces the turn state, and the
+    single seat projection rule translates it. Parity with the pre-canonical
+    mapping is exact and pinned by tests.
+    """
+
+    # Deferred import: terminal_liveness imports this module, and the
+    # conversation package __init__ imports the runtime that imports
+    # terminal_liveness — a module-level import here closes that cycle.
+    from agents_remember.serving.conversation.active.status import (  # noqa: PLC0415
+        snapshot_seat_turn_state,
+    )
+
+    return snapshot_seat_turn_state(snapshot, harness_id)

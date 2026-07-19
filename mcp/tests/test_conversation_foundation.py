@@ -38,9 +38,18 @@ def test_root_composes_three_owned_child_routers() -> None:
     assert active_router.prefix == "/api/terminal/{ar_session_id}/conversation"
     assert library_router.prefix == "/api/harnesses/{harness_id}/conversations"
     assert control_router.prefix == "/api/terminal/{ar_session_id}"
-    # L2 landed the library behavior routes inside its owned child; active and control remain
-    # behavior-empty shells for their own leaves.
-    assert active_router.routes == []
+    # 260718-CHATS-L1 filled the active shell with exactly its two owned
+    # production routes and L2 filled the library shell with its five owned
+    # routes (pinned below); the control shell stays behavior-empty.
+    active_paths = {
+        (route.path, tuple(sorted(route.methods or ())))
+        for route in active_router.routes
+        if isinstance(route, APIRoute)
+    }
+    assert active_paths == {
+        ("/api/terminal/{ar_session_id}/conversation", ("GET",)),
+        ("/api/terminal/{ar_session_id}/conversation/events", ("GET",)),
+    }
     assert control_router.routes == []
     library_paths = {
         (tuple(sorted(route.methods or ())), route.path)

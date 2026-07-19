@@ -1,0 +1,461 @@
+"""Canonical conversation status authority (260718-CHATS-L1, R3).
+
+One revisioned mapping from adapter evidence to the canonical
+:class:`ConversationStatus` vocabulary, consumed identically by the Chats
+serving routes (through the active projector) and by orchestration (through
+``hosted_control_projection.snapshot_turn_state``). Neither consumer maps
+:class:`AdapterSnapshot` on its own, and neither derives state from rendered
+events, PTY output, or the last timeline mutation.
+
+The classification is evidence-first: an ``AdapterSnapshot`` plus its harness
+produces a process state and, when the evidence supports one, a canonical turn
+evidence value from the fixed ``CANONICAL_TURN_STATE_BY_EVIDENCE`` vocabulary.
+Unknown evidence never becomes ``ready`` (enforced by the contract model) and a
+session without usable turn evidence keeps its last known turn state while its
+process/freshness evidence continues to advance honestly.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Callable
+from dataclasses import dataclass
+from datetime import UTC, datetime
+from typing import Literal
+
+from agents_remember.serving.conversation.models import (
+    CANONICAL_TURN_STATE_BY_EVIDENCE,
+    ActiveConversationRef,
+    CanonicalStatusEvidence,
+    ConversationProcessState,
+    ConversationProcessStatus,
+    ConversationStatus,
+    ConversationStatusEvidence,
+    ConversationTurnOutcome,
+    ConversationTurnState,
+    ConversationTurnStatus,
+    ConversationTurnWaiting,
+    HarnessId,
+    ProvenanceStrength,
+    StatusFreshness,
+)
+from agents_remember.serving.harness_control_models import AdapterSnapshot
+from agents_remember.serving.terminal_catalog import SeatTurnState
+
+Clock = Callable[[], str]
+
+STALE_AFTER_MS = 15_000
+"""One liveness-sweep cadence plus slack; the projector polls far faster."""
+
+OBSERVATION_BOUND = "poll"
+"""The daemon observes the bridge through bounded IPC polls, never PTY output."""
+
+
+@dataclass(frozen=True)
+class TurnEvidence:
+    """One canonical turn classification plus its provenance."""
+
+    evidence: CanonicalStatusEvidence
+    strength: ProvenanceStrength
+    turn_id: str | None = None
+    waiting_reason: str | None = None
+    interaction_id: str | None = None
+    reason: str | None = None
+
+
+@dataclass(frozen=True)
+class ProcessEvidence:
+    """One canonical process classification."""
+
+    state: ConversationProcessState
+    terminal_outcome: Literal["clean-exit", "failed-exit", "signal", "unknown"] | None = None
+    detail: str | None = None
+
+
+@dataclass(frozen=True)
+class StatusClassification:
+    """The complete canonical reading of one adapter snapshot."""
+
+    process: ProcessEvidence
+    turn: TurnEvidence | None
+
+
+@dataclass(frozen=True)
+class TurnTerminalEvidence:
+    """A native turn settlement observed by a projector on the evidence stream."""
+
+    outcome: Literal["completed", "interrupted", "failed", "unknown"]
+    turn_id: str | None = None
+    stop_reason: str | None = None
+
+
+def classify_process(snapshot: AdapterSnapshot) -> ProcessEvidence:
+    """Map the adapter control state to the canonical process vocabulary."""
+
+    if snapshot.control == "ready":
+        return ProcessEvidence(state="connected")
+    if snapshot.control == "starting":
+        return ProcessEvidence(state="starting")
+    if snapshot.control == "disconnected":
+        return ProcessEvidence(state="disconnected", terminal_outcome="unknown")
+    return ProcessEvidence(state="failed", terminal_outcome="unknown")
+
+
+def classify_turn(
+    snapshot: AdapterSnapshot,
+    harness_id: HarnessId | None,
+) -> TurnEvidence | None:
+    """Map adapter activity/raw evidence to one canonical turn evidence value.
+
+    Returns ``None`` when the snapshot carries no usable turn evidence (booting
+    or lost authority); callers retain their last known turn state in that case.
+    ``harness_id`` selects the vendor-specific raw keys for retry/compaction;
+    a ``None`` harness classifies settling generically, which is sufficient for
+    the orchestration seat projection.
+    """
+
+    if snapshot.pending_interaction is not None:
+        return TurnEvidence(
+            evidence="pending-interaction",
+            strength="exact",
+            interaction_id=snapshot.pending_interaction.interaction_id,
+            reason="native interaction is pending",
+        )
+    if snapshot.activity == "blocked":
+        return TurnEvidence(
+            evidence="declared-external-wait",
+            strength="native-only",
+            waiting_reason="session is blocked without an answerable interaction",
+            reason="adapter reports blocked activity",
+        )
+    if snapshot.activity == "running":
+        return TurnEvidence(
+            evidence="active-native-turn",
+            strength="native-only",
+            turn_id=_active_turn_id(snapshot, harness_id),
+        )
+    if snapshot.activity == "settling":
+        return _classify_settling(snapshot, harness_id)
+    if snapshot.activity == "idle" and snapshot.control == "ready":
+        return TurnEvidence(evidence="settled-dispatchable", strength="native-only")
+    return None
+
+
+def classify_snapshot(
+    snapshot: AdapterSnapshot,
+    harness_id: HarnessId | None,
+) -> StatusClassification:
+    """The one canonical read both Chats and orchestration consume."""
+
+    return StatusClassification(
+        process=classify_process(snapshot),
+        turn=classify_turn(snapshot, harness_id),
+    )
+
+
+def seat_turn_state_for(
+    process: ProcessEvidence,
+    turn_state: ConversationTurnState | None,
+) -> SeatTurnState:
+    """Project canonical status onto the orchestration seat vocabulary.
+
+    This is the single projection rule; orchestration never re-derives seat
+    state from adapter fields. Parity with the pre-canonical mapping is exact
+    and pinned by tests: live turn states are ``working`` and wait states are
+    ``awaiting-input`` regardless of process transitions (activity led the
+    legacy mapping), a settled session is ``turn-ended`` only with connected
+    evidence, and anything else is ``stale``.
+    """
+
+    if turn_state in {"working", "settling", "retrying", "compacting"}:
+        return "working"
+    if turn_state in {"waiting", "needs-input"}:
+        return "awaiting-input"
+    if process.state == "connected" and turn_state in {"ready", "interrupted", "failed"}:
+        return "turn-ended"
+    return "stale"
+
+
+def snapshot_seat_turn_state(
+    snapshot: AdapterSnapshot,
+    harness_id: HarnessId | None = None,
+) -> SeatTurnState:
+    """Canonical status -> seat state for the catalog projection consumer."""
+
+    classification = classify_snapshot(snapshot, harness_id)
+    turn_state = (
+        CANONICAL_TURN_STATE_BY_EVIDENCE[classification.turn.evidence]
+        if classification.turn is not None
+        else None
+    )
+    return seat_turn_state_for(classification.process, turn_state)
+
+
+def _active_turn_id(
+    snapshot: AdapterSnapshot,
+    harness_id: HarnessId | None,
+) -> str | None:
+    if harness_id != "codex":
+        return None
+    value = snapshot.raw.get("activeTurnId")
+    return value if isinstance(value, str) and value else None
+
+
+def _classify_settling(
+    snapshot: AdapterSnapshot,
+    harness_id: HarnessId | None,
+) -> TurnEvidence:
+    if harness_id == "claude":
+        if snapshot.raw.get("claudeStatus") == "compacting":
+            return TurnEvidence(
+                evidence="native-compaction",
+                strength="native-only",
+                reason="claude stream status is compacting",
+            )
+        if snapshot.raw.get("retryAttempt") is not None:
+            return TurnEvidence(
+                evidence="native-retry",
+                strength="native-only",
+                reason="claude api retry is in progress",
+            )
+    if harness_id == "pi":
+        if snapshot.raw.get("isCompacting") is True:
+            return TurnEvidence(
+                evidence="native-compaction",
+                strength="native-only",
+                reason="pi session reports compacting",
+            )
+        pi_event = snapshot.raw.get("piEvent")
+        if isinstance(pi_event, dict) and pi_event.get("type") == "auto_retry_start":
+            return TurnEvidence(
+                evidence="native-retry",
+                strength="native-only",
+                reason="pi auto retry is in progress",
+            )
+    return TurnEvidence(evidence="native-end-reconciling", strength="native-only")
+
+
+def _age_ms(last_evidence_at: str | None, now: str) -> int | None:
+    if last_evidence_at is None:
+        return None
+    try:
+        then = datetime.fromisoformat(last_evidence_at)
+        current = datetime.fromisoformat(now)
+    except ValueError:
+        return None
+    if then.tzinfo is None:
+        then = then.replace(tzinfo=UTC)
+    if current.tzinfo is None:
+        current = current.replace(tzinfo=UTC)
+    return max(0, int((current - then).total_seconds() * 1000))
+
+
+class ConversationStatusService:
+    """The revisioned canonical status authority for one exact active identity.
+
+    Both the Chats page/SSE path (via the active projector) and ad-hoc status
+    reads consume envelopes from this service. ``revision`` advances only on
+    semantic change (turn/process/evidence/stale transitions); freshness
+    timestamps are derived metadata recomputed per observation under the same
+    revision, never a semantic mutation trigger.
+    """
+
+    def __init__(self, identity: ActiveConversationRef, *, clock: Clock) -> None:
+        self._identity = identity
+        self._clock = clock
+        self._revision = 1
+        self._turn = ConversationTurnStatus(
+            state="waiting",
+            turn_id=None,
+            state_since=None,
+            waiting=ConversationTurnWaiting(reason="native session state unavailable"),
+        )
+        self._turn_strength: ProvenanceStrength = "unknown"
+        self._turn_reason = "no native turn evidence observed yet"
+        self._process = ProcessEvidence(state="starting")
+        self._last_evidence_at: str | None = None
+        self._last_event_sequence: int | None = None
+        self._stale = False
+
+    @property
+    def revision(self) -> int:
+        return self._revision
+
+    def observe(
+        self,
+        snapshot: AdapterSnapshot,
+        harness_id: HarnessId,
+        *,
+        terminal: TurnTerminalEvidence | None = None,
+    ) -> ConversationStatus:
+        """Fold one adapter observation into the canonical envelope."""
+
+        now = self._clock()
+        classification = classify_snapshot(snapshot, harness_id)
+        changed = self._apply(classification, terminal, now=now)
+        self._track_evidence(snapshot, now)
+        stale = self._compute_stale(now)
+        if changed or stale != self._stale:
+            self._revision += 1
+        self._stale = stale
+        return self._envelope(now)
+
+    def current(self) -> ConversationStatus:
+        """Return the current envelope without a new observation."""
+
+        return self._envelope(self._clock())
+
+    def _apply(
+        self,
+        classification: StatusClassification,
+        terminal: TurnTerminalEvidence | None,
+        *,
+        now: str,
+    ) -> bool:
+        changed = classification.process != self._process
+        self._process = classification.process
+        if terminal is not None:
+            state = self._terminal_turn_state(terminal)
+            return self._set_turn(
+                state,
+                turn_id=terminal.turn_id or self._turn.turn_id,
+                strength="exact",
+                reason="native turn settlement observed on the evidence stream",
+                now=now,
+                terminal_outcome=ConversationTurnOutcome(
+                    state=terminal.outcome,
+                    stop_reason=terminal.stop_reason,
+                ),
+            ) or changed
+        if classification.turn is not None:
+            mapped = CANONICAL_TURN_STATE_BY_EVIDENCE[classification.turn.evidence]
+            prior_outcome = self._turn.terminal_outcome
+            outcome = (
+                prior_outcome
+                if mapped == "ready"
+                and prior_outcome is not None
+                and prior_outcome.state == "completed"
+                else None
+            )
+            return self._set_turn(
+                mapped,
+                turn_id=classification.turn.turn_id,
+                strength=classification.turn.strength,
+                reason=classification.turn.reason,
+                now=now,
+                waiting=self._waiting_for(classification.turn),
+                terminal_outcome=outcome,
+            ) or changed
+        return changed
+
+    def _set_turn(
+        self,
+        state: ConversationTurnState,
+        *,
+        turn_id: str | None,
+        strength: ProvenanceStrength,
+        reason: str | None,
+        now: str,
+        waiting: ConversationTurnWaiting | None = None,
+        terminal_outcome: ConversationTurnOutcome | None = None,
+    ) -> bool:
+        candidate = ConversationTurnStatus(
+            state=state,
+            turn_id=turn_id,
+            state_since=self._turn.state_since,
+            waiting=waiting,
+            terminal_outcome=terminal_outcome,
+        )
+        if (
+            candidate.state == self._turn.state
+            and candidate.turn_id == self._turn.turn_id
+            and candidate.waiting == self._turn.waiting
+            and candidate.terminal_outcome == self._turn.terminal_outcome
+            and strength == self._turn_strength
+        ):
+            return False
+        self._turn = candidate.model_copy(update={"state_since": now})
+        self._turn_strength = strength
+        self._turn_reason = reason
+        return True
+
+    @staticmethod
+    def _terminal_turn_state(
+        terminal: TurnTerminalEvidence,
+    ) -> ConversationTurnState:
+        if terminal.outcome == "interrupted":
+            return "interrupted"
+        if terminal.outcome == "failed":
+            return "failed"
+        return "settling"
+
+    @staticmethod
+    def _waiting_for(turn: TurnEvidence) -> ConversationTurnWaiting | None:
+        if turn.evidence == "pending-interaction":
+            assert turn.interaction_id is not None
+            return ConversationTurnWaiting(
+                reason="native interaction requires an answer",
+                interaction_id=turn.interaction_id,
+            )
+        if turn.evidence == "declared-external-wait":
+            assert turn.waiting_reason is not None
+            return ConversationTurnWaiting(reason=turn.waiting_reason)
+        return None
+
+    def _track_evidence(self, snapshot: AdapterSnapshot, now: str) -> bool:
+        if self._last_event_sequence is None:
+            self._last_event_sequence = snapshot.last_event_sequence
+            self._last_evidence_at = now
+            return True
+        if snapshot.last_event_sequence != self._last_event_sequence:
+            self._last_event_sequence = snapshot.last_event_sequence
+            self._last_evidence_at = now
+            return True
+        return False
+
+    def _compute_stale(self, now: str) -> bool:
+        age = _age_ms(self._last_evidence_at, now)
+        return age is not None and age > STALE_AFTER_MS
+
+    def _envelope(self, now: str) -> ConversationStatus:
+        return ConversationStatus(
+            identity=self._identity,
+            revision=self._revision,
+            observed_at=now,
+            freshness=StatusFreshness(
+                state=(
+                    "stale"
+                    if self._stale
+                    else ("fresh" if self._last_evidence_at is not None else "unknown")
+                ),
+                last_evidence_at=self._last_evidence_at,
+                age_ms=_age_ms(self._last_evidence_at, now),
+                stale_after_ms=STALE_AFTER_MS,
+                observation_bound=OBSERVATION_BOUND,
+            ),
+            process=ConversationProcessStatus(
+                state=self._process.state,
+                generation=self._identity.bridge_epoch,
+                terminal_outcome=self._process.terminal_outcome,
+                detail=self._process.detail,
+            ),
+            turn=self._turn,
+            evidence=ConversationStatusEvidence(
+                strength=self._turn_strength,
+                origin="adapter-snapshot",
+                reason=self._turn_reason,
+            ),
+        )
+
+
+__all__ = [
+    "OBSERVATION_BOUND",
+    "STALE_AFTER_MS",
+    "ConversationStatusService",
+    "ProcessEvidence",
+    "StatusClassification",
+    "TurnEvidence",
+    "TurnTerminalEvidence",
+    "classify_snapshot",
+    "seat_turn_state_for",
+    "snapshot_seat_turn_state",
+]
