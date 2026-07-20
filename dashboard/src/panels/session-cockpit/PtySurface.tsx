@@ -145,10 +145,17 @@ function isInspectable(status: string | undefined): boolean {
 export function PtySurface({
   focused,
   onVisibleCols,
+  readOnly = false,
 }: {
   focused?: OpenSession;
   /** The visible pane's REAL column count (R8: the ~80-col floor verified against real panes). */
   onVisibleCols?: (cols: number | null) => void;
+  /**
+   * L4: force read-only regardless of status. The structured Chats terminal-diagnostics drawer hosts
+   * the controlled runner log with xterm input disabled — it is a diagnostic stream, never a
+   * conversation input path (design §12.6).
+   */
+  readOnly?: boolean;
 }) {
   const sessions = useSessions((state) => state.sessions);
   const [screenReaderMode, setScreenReaderMode] = usePersistedFlag(
@@ -217,7 +224,7 @@ export function PtySurface({
         <Suspense fallback={<div className={loading}>opening terminal…</div>}>
           <Terminal
             sessionId={session.id}
-            readOnly={session.status === "landed"}
+            readOnly={readOnly || session.status === "landed"}
             renderer={PTY_RENDERER}
             screenReaderMode={screenReaderMode}
             ariaLabel={paneAccessibleName(session)}

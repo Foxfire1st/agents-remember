@@ -4,6 +4,7 @@ import { css } from "../../../styled-system/css";
 import type { OpenSession } from "../../data/sessions";
 import type { PerSessionCockpit } from "../../data/sessionCockpitStore";
 import { seatVisualState } from "../../data/stateGrammar";
+import type { ConversationInterrupt } from "./conversation/useConversationControls";
 import { STOP_TURN_DISABLED_REASON } from "./lifecycleCopy";
 
 // The WorkingLine (260715-FEUI-L6 R6, spec §1.2-2): the SINGLE home of turn theater. Renders
@@ -53,6 +54,24 @@ const stopButton = css({
   opacity: 0.7,
   _focusVisible: { outline: "1px solid token(colors.amber)", outlineOffset: "1px" },
 });
+// The enabled interrupt (L4): demoted weight (muted border) until hover/focus, where it takes the
+// amber accent — red is reserved for the moment of consequence, not the resting state (finding A6).
+const stopButtonEnabled = css({
+  font: "inherit",
+  fontSize: "0.66rem",
+  marginLeft: "auto",
+  flex: "none",
+  color: "muted",
+  background: "transparent",
+  borderWidth: "1px",
+  borderStyle: "solid",
+  borderColor: "grid",
+  borderRadius: "2px",
+  paddingInline: "0.4rem",
+  cursor: "pointer",
+  _hover: { color: "amber", borderColor: "amber" },
+  _focusVisible: { outline: "1px solid token(colors.amber)", outlineOffset: "1px" },
+});
 
 /** `~`-labeled elapsed: seconds under 2 min, then `XmYYs`, then `XhYYm`. Pure, tested. */
 export function formatApproxElapsed(elapsedMs: number): string {
@@ -77,11 +96,18 @@ export function WorkingLine({
   session,
   cockpit,
   now,
+  interrupt,
 }: {
   session: OpenSession;
   cockpit: PerSessionCockpit | undefined;
   /** Test seam: freezes the clock; production ticks itself. */
   now?: number;
+  /**
+   * L4 exact-turn interrupt integration. When absent the stop control stays a disabled placeholder
+   * (the pre-L4 behavior). When present and available, the stop button becomes actionable and gated
+   * by real turn + capability evidence.
+   */
+  interrupt?: ConversationInterrupt;
 }) {
   const working = seatVisualState(session).key === "working";
   const [tick, setTick] = useState(() => Date.now());
@@ -113,17 +139,34 @@ export function WorkingLine({
           {formatApproxElapsed(at - since)}
         </span>
       ) : null}
-      <button
-        type="button"
-        className={stopButton}
-        disabled
-        title={STOP_TURN_DISABLED_REASON}
-        aria-label={`Stop turn — ${STOP_TURN_DISABLED_REASON}`}
-        data-disabled-reason={STOP_TURN_DISABLED_REASON}
-        data-testid="working-line-stop"
-      >
-        ⏹ stop
-      </button>
+      {interrupt?.available && interrupt.onStop !== undefined ? (
+        <button
+          type="button"
+          className={stopButtonEnabled}
+          onClick={interrupt.onStop}
+          disabled={interrupt.pending}
+          // Honest ACTION tooltip on the enabled control (F24): the command action + its effective
+          // chord — never the known-stale L1 capability reason (which the hook no longer emits here).
+          title={interrupt.pending ? "interrupt requested…" : `Stop the current turn · ${interrupt.keyshortcut}`}
+          aria-label="Stop turn"
+          aria-keyshortcuts={interrupt.keyshortcut}
+          data-testid="working-line-stop"
+        >
+          ⏹ stop
+        </button>
+      ) : (
+        <button
+          type="button"
+          className={stopButton}
+          disabled
+          title={interrupt?.reason ?? STOP_TURN_DISABLED_REASON}
+          aria-label={`Stop turn — ${interrupt?.reason ?? STOP_TURN_DISABLED_REASON}`}
+          data-disabled-reason={interrupt?.reason ?? STOP_TURN_DISABLED_REASON}
+          data-testid="working-line-stop"
+        >
+          ⏹ stop
+        </button>
+      )}
     </div>
   );
 }

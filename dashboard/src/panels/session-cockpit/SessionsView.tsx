@@ -59,7 +59,6 @@ import {
   hasUnackedSetAttention,
   queuedComposerHint,
 } from "../../data/setChips";
-import { seatVisualState } from "../../data/stateGrammar";
 import {
   autoCollapseTransition,
   hasPersistedPanelLayout,
@@ -80,8 +79,8 @@ import { FailedLaunchBanner } from "./FailedLaunchBanner";
 import { InteractionBar } from "./InteractionBar";
 import { LaunchFlow, type LaunchPrefill } from "./LaunchFlow";
 import { LandedCleanupNotice } from "./LandedCleanupNotice";
-import { STOP_TURN_DISABLED_REASON } from "./lifecycleCopy";
-import { PtySurface } from "./PtySurface";
+import { ChatsStageBody } from "./ChatsStageBody";
+import { useConversationInterrupt } from "./conversation/useConversationControls";
 import { SeatInspector } from "./SeatInspector";
 import { endLanded, SessionRail } from "./SessionRail";
 import { SessionStage } from "./SessionStage";
@@ -272,6 +271,17 @@ export function SessionsView({
   // L4: the ModelEffortControl popover state lives here so the palette commands open the SAME
   // popover the header trigger opens (one control, two surfaces — design FQ2).
   const [controlPopoverOpen, setControlPopoverOpen] = useState(false);
+  // 260718-CHATS-L4: the structured Chats stage-mode toggles (in-stage history browser and the
+  // default-off terminal-diagnostics drawer). Both live here + in the palette (design §12.6) and
+  // reset on focus change. A focus-return token restores the invoker when the library closes (§14.1).
+  const [chatsLibraryOpen, setChatsLibraryOpen] = useState(false);
+  const [chatsDiagnosticsOpen, setChatsDiagnosticsOpen] = useState(false);
+  const chatsLibraryReturnRef = useRef<HTMLElement | null>(null);
+  const chatsDiagnosticsReturnRef = useRef<HTMLElement | null>(null);
+  const chatsLibraryOpenRef = useRef(chatsLibraryOpen);
+  chatsLibraryOpenRef.current = chatsLibraryOpen;
+  const chatsDiagnosticsOpenRef = useRef(chatsDiagnosticsOpen);
+  chatsDiagnosticsOpenRef.current = chatsDiagnosticsOpen;
 
   useEffect(() => startCockpitMirror(), []);
   // Review F1 (sev-3): retire residuals are captured for EVERY row — focus-independent — so an
@@ -285,6 +295,12 @@ export function SessionsView({
   const focused = sessions.find((session) => session.id === focusedSessionId);
   const focusedLive =
     focused !== undefined && (focused.status ?? "running") === "running";
+  // L4 exact-turn interrupt for the focused session (drives WorkingLine's stop control). A ref lets
+  // the registered `conversation.stop` command + chord always read the latest availability/onStop
+  // without re-registering on every projection tick.
+  const chatsInterrupt = useConversationInterrupt(focusedSessionId ?? undefined);
+  const chatsInterruptRef = useRef(chatsInterrupt);
+  chatsInterruptRef.current = chatsInterrupt;
 
   const labels = useMemo(() => masterLabels(taskDocuments), [taskDocuments]);
   const model = useMemo(
@@ -320,13 +336,45 @@ export function SessionsView({
   const focusSession = useCallback(
     (id: string | null) => {
       setHandoff(null);
-      // A focus switch never carries the previous seat's open control popover along.
+      // A focus switch never carries the previous seat's open control popover / stage mode along.
       setControlPopoverOpen(false);
+      setChatsLibraryOpen(false);
+      setChatsDiagnosticsOpen(false);
       rememberLiveSession(id);
       sessionCockpitStore.getState().setFocusedSession(id);
     },
     [rememberLiveSession],
   );
+
+  // Open the in-stage history browser, capturing a stable focus-return token first (§14.1).
+  const openChatsLibrary = useCallback(() => {
+    const activeElement = document.activeElement;
+    chatsLibraryReturnRef.current =
+      activeElement instanceof HTMLElement ? activeElement : null;
+    setChatsLibraryOpen(true);
+  }, []);
+  const closeChatsLibrary = useCallback(() => {
+    setChatsLibraryOpen(false);
+    const invoker = chatsLibraryReturnRef.current;
+    if (invoker?.isConnected) invoker.focus();
+    chatsLibraryReturnRef.current = null;
+  }, []);
+
+  // Diagnostics drawer focus-return token (§12.6/§14.1, F9): capture on open from any invoker
+  // (toolbar button, reconnect action, palette), restore on close so focus never drops to <body>.
+  const toggleChatsDiagnostics = useCallback((open: boolean) => {
+    if (open) {
+      const activeElement = document.activeElement;
+      chatsDiagnosticsReturnRef.current =
+        activeElement instanceof HTMLElement ? activeElement : null;
+      setChatsDiagnosticsOpen(true);
+    } else {
+      setChatsDiagnosticsOpen(false);
+      const invoker = chatsDiagnosticsReturnRef.current;
+      if (invoker?.isConnected) invoker.focus();
+      chatsDiagnosticsReturnRef.current = null;
+    }
+  }, []);
 
   // The catalog hydrator restores its preferred active row from localStorage. Mirror that exact
   // row into cockpit focus so reloads and cross-tab creates return to the operator's last chat.
@@ -452,6 +500,53 @@ export function SessionsView({
     };
   }, [registry, focused]);
 
+  // 260718-CHATS-L4: the structured-Chats stage toggles are discoverable palette commands (design
+  // §12.6) — browse native history in-stage, and the default-off terminal-diagnostics drawer. Both
+  // gate on a focused controlled session.
+  useEffect(() => {
+    const controlled = () =>
+      focused !== undefined &&
+      focused.harness !== undefined &&
+      (focused.status ?? "running") === "running";
+    const disposers = [
+      registry.register({
+        id: "conversation.browseHistory",
+        title: "Browse conversation history…",
+        keywords: ["history", "browse", "prior", "resume", "open", "library"],
+        when: controlled,
+        run: () => openChatsLibrary(),
+      }),
+      registry.register({
+        id: "conversation.terminalDiagnostics",
+        title: "Toggle terminal diagnostics",
+        keywords: ["terminal", "diagnostics", "runner", "log", "pty"],
+        when: controlled,
+        run: () => toggleChatsDiagnostics(!chatsDiagnosticsOpenRef.current),
+      }),
+      // §4.4 return path (F16): a palette return command consuming the same library focus token.
+      registry.register({
+        id: "conversation.backToChat",
+        title: "Back to current chat",
+        keywords: ["back", "return", "close history", "current chat"],
+        when: () => chatsLibraryOpenRef.current,
+        run: () => closeChatsLibrary(),
+      }),
+      // R6/§9.5: the exact-turn interrupt — palette command + the Control+Shift+. chord both dispatch
+      // this. `when` gates it to an interruptible working turn, so it never offers a dead stop.
+      registry.register({
+        id: "conversation.stop",
+        title: "Stop turn",
+        keywords: ["stop", "interrupt", "cancel", "turn", "abort"],
+        chord: "ctrl+shift+.",
+        when: () => chatsInterruptRef.current.available,
+        run: () => chatsInterruptRef.current.onStop?.(),
+      }),
+    ];
+    return () => {
+      for (const dispose of disposers) dispose();
+    };
+  }, [registry, focused, openChatsLibrary]);
+
   // L2 palette commands (dynamic titles carry the HONEST preview counts + names): the tree
   // toggle, jump-to-attention, bulk end at sprint + master level, and question triage (R16).
   useEffect(() => {
@@ -473,25 +568,6 @@ export function SessionsView({
         run: () => {
           const target = jumpToAttentionTarget(rollup, sessions);
           if (target) focusSession(target);
-        },
-      }),
-      // L6 R6 (design §9.7): Stop turn exists, UA-7-gated — the palette names the gap instead
-      // of hiding the command; running it reveals the welded (disabled) control + its reason.
-      registry.register({
-        id: "turn.stop",
-        title: `Stop turn — unavailable: ${STOP_TURN_DISABLED_REASON}`,
-        keywords: ["stop", "interrupt", "cancel", "turn"],
-        // The gate matches the WorkingLine's OWN render condition (review finding 3): the
-        // grammar yields working to awaiting-input/failed, and the command must never offer a
-        // stop control that is not on screen.
-        when: () =>
-          focused !== undefined && seatVisualState(focused).key === "working",
-        run: () => {
-          window.requestAnimationFrame(() =>
-            rootRef.current
-              ?.querySelector<HTMLElement>('[data-testid="working-line-stop"]')
-              ?.focus(),
-          );
         },
       }),
     ];
@@ -945,6 +1021,7 @@ export function SessionsView({
               contextMaster={contextMaster}
               onLaunchChat={() => setLaunch({ open: true })}
               onSessionOpened={focusSession}
+              onBrowseHistory={openChatsLibrary}
             />
             <SessionRail
               onFocusSession={focusSession}
@@ -1005,6 +1082,7 @@ export function SessionsView({
                   <WorkingLine
                     session={focused}
                     cockpit={perSession[focused.id]}
+                    interrupt={chatsInterrupt}
                   />
                 ) : undefined
               }
@@ -1021,10 +1099,19 @@ export function SessionsView({
                   }
                 />
               ) : null}
-              {/* The PTY owner is unconditional. A catalog removal can make `focused` undefined
-                  for one render before smart handoff; unmounting here would dispose every other
-                  visited xterm/socket/scrollback even though the next focus is already known. */}
-              <PtySurface focused={focused} onVisibleCols={setPtyCols} />
+              {/* 260718-CHATS-L4: the structured one-roof body replaces the unconditional PTY. It
+                  hosts the default ConversationSurface, the in-stage history library, and the
+                  default-off read-only terminal-diagnostics drawer; a legacy-raw session keeps its
+                  interactive PTY as the primary body inside it. */}
+              <ChatsStageBody
+                focused={focused}
+                onVisibleCols={setPtyCols}
+                libraryOpen={chatsLibraryOpen}
+                onCloseLibrary={closeChatsLibrary}
+                diagnosticsOpen={chatsDiagnosticsOpen}
+                onToggleDiagnostics={toggleChatsDiagnostics}
+                onSessionOpened={focusSession}
+              />
               {focusedLive ? (
                 <InteractionBar session={focused} composerRef={composerRef} />
               ) : null}

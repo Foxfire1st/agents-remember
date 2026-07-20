@@ -257,6 +257,28 @@ export function bindingLabel(chord: string): string {
     .join("+");
 }
 
+/**
+ * Render a validated tinykeys chord as a WAI-ARIA `aria-keyshortcuts` token (e.g.
+ * `Control+Shift+Period` -> `Control+Shift+.`). The modifier tokens (Control/Alt/Shift/Meta) already
+ * match the ARIA modifier names; only the named punctuation keys map to their `KeyboardEvent.key`
+ * character, and the optional-shift marker is dropped. Derived (not hardcoded) so a rebind stays
+ * truthful to assistive tech (F25).
+ */
+export function ariaKeyshortcuts(chord: string): string {
+  const keyValues: Record<string, string> = {
+    Comma: ",",
+    Period: ".",
+    Semicolon: ";",
+    Slash: "/",
+    Space: " ",
+  };
+  return chord
+    .split("+")
+    .filter((token) => token !== "[Shift]")
+    .map((token) => keyValues[token] ?? token)
+    .join("+");
+}
+
 /** Convert the validated tinykeys subset into CodeMirror's key notation. */
 export function codeMirrorBinding(chord: string): string {
   const keys: Record<string, string> = {

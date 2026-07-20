@@ -14,4 +14,9 @@ export default tseslint.config(
     files: ["*.config.ts", "*.config.cjs", "e2e/**/*.ts"],
     languageOptions: { ecmaVersion: 2022, globals: globals.node },
   },
+  {
+    // e2e benchmark scripts run node-side but drive page.evaluate bodies that reference `window`.
+    files: ["e2e/**/*.mjs"],
+    languageOptions: { ecmaVersion: 2022, globals: { ...globals.node, ...globals.browser } },
+  },
 );

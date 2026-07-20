@@ -380,6 +380,9 @@ export const SessionComposer = forwardRef<SessionComposerHandle, SessionComposer
       });
     }, [composerKeymap, effectiveKeymap.composerProfile, keymapCompartment, profileCompartment]);
 
+    // 260718-CHATS-L4 finding A3: group the hint by concern with ONE separator convention (interpunct)
+    // and move the honest-boundary capability wall into a tooltip (progressive disclosure). The
+    // boundary copy stays present — structured, not a mixed-separator wall.
     const footerHint = [
       "markdown",
       `${effectiveKeymap.composerProfile} keys`,
@@ -388,11 +391,11 @@ export const SessionComposer = forwardRef<SessionComposerHandle, SessionComposer
       queue.some((entry) => entry.state === "queued")
         ? `${queue.filter((entry) => entry.state === "queued").length} queued · yours`
         : null,
-      "reliable path: receipts + reconcile; terminal lines join the same queue without receipts",
-      "text only · attachments unavailable",
     ]
       .filter(Boolean)
       .join(" · ");
+    const RELIABLE_SUBMIT_DETAIL =
+      "reliable path: receipts + reconcile · terminal lines join the same queue without receipts";
 
     const retry = () => {
       if (latest?.phase !== "route-error") return;
@@ -571,7 +574,14 @@ export const SessionComposer = forwardRef<SessionComposerHandle, SessionComposer
           </div>
         ) : null}
         <div className={footer}>
-          <span className={footerLeft}>{footerHint}</span>
+          <span className={footerLeft}>
+            {footerHint}
+            {" · "}
+            <span title={RELIABLE_SUBMIT_DETAIL} data-testid="composer-reliability-note">
+              reliable submit
+            </span>
+            {" · text only"}
+          </span>
           <Button
             className={sendButton}
             isDisabled={

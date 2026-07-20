@@ -66,6 +66,8 @@ export interface ChatContextBarProps {
   contextMaster?: string;
   onLaunchChat: () => void;
   onSessionOpened: (sessionId: string) => void;
+  /** 260718-CHATS-L4: open the in-stage native history browser for the focused controlled session. */
+  onBrowseHistory?: () => void;
 }
 
 /**
@@ -82,6 +84,7 @@ export function ChatContextBar({
   contextMaster,
   onLaunchChat,
   onSessionOpened,
+  onBrowseHistory,
 }: ChatContextBarProps) {
   const [leafAttachError, setLeafAttachError] = useState<string | null>(null);
   const [sessionOpenError, setSessionOpenError] = useState<string | null>(null);
@@ -144,6 +147,17 @@ export function ChatContextBar({
       >
         ＋ Terminal
       </button>
+      {onBrowseHistory && focused && running && focused.harness ? (
+        <button
+          type="button"
+          className={action}
+          onClick={onBrowseHistory}
+          data-testid="chats-browse-history"
+          title="Browse this harness's prior conversations and open one as a new chat"
+        >
+          Browse history
+        </button>
+      ) : null}
       {sessionOpenError ? (
         <span className={refusal} role="alert" data-testid="chats-session-open-error">
           {sessionOpenError}

@@ -68,6 +68,16 @@ export const CHROME_CHORDS: ZoneChord[] = [
     // Printable — never fires in editable targets. That suppression is GENERIC: routeKey's
     // isPrintable/isEditableTarget contract covers every printable chord; no per-chord flag.
   },
+  {
+    // 260718-CHATS-L4 R6 (design §9.5): the exact-turn interrupt — the one rebindable non-Escape
+    // stop chord. Control-based on every platform (matching the app's Control+K convention), fires in
+    // chrome + composer, and is excluded from the raw-PTY zone (which only handles PTY_RESERVED). The
+    // `conversation.stop` command's `when` gate keeps it inert unless a working turn is interruptible.
+    chord: "Control+Shift+Period",
+    label: "ctrl+shift+.",
+    commandId: "conversation.stop",
+    zones: ["chrome", "composer"],
+  },
 ];
 
 export const COMPOSER_CHORDS: ZoneChord[] = [

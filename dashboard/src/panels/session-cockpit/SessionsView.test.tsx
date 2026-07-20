@@ -29,6 +29,26 @@ function seedReadyComposerSession() {
   sessionCockpitStore.setState({ focusedSessionId: null });
 }
 
+// 260718-CHATS-L4: a legacy-raw terminal (no controlState) keeps its interactive PTY as the primary
+// stage body — the remaining home of the `pty` keyboard zone. The zone-contract tests target it.
+function seedLegacyRawSession() {
+  sessionStore
+    .getState()
+    .hydrate([
+      fromTerminalSessionInfo(
+        catalogRow({
+          id: "legacy-raw",
+          label: "legacy raw terminal",
+          kind: "terminal",
+          harness: undefined,
+          seatRole: "terminal",
+          status: "running",
+        }),
+      ),
+    ]);
+  sessionCockpitStore.setState({ focusedSessionId: "legacy-raw" });
+}
+
 // xterm cannot mount under jsdom (L6 rule: xterm stays OUT of jsdom) — the PtySurface's lazy
 // Terminal resolves to this inert stand-in; the real terminal rules live in Terminal.tsx.
 vi.mock("../Terminal", () => ({
@@ -98,10 +118,10 @@ describe("scaffold structure (S2)", () => {
       inspectorHandle.getAttribute("data-panel-resize-handle-enabled"),
     ).toBe("false");
 
-    // The keyboard-zone markers the zone contract resolves against.
-    expect(
-      getByTestId("sessions-pty-placeholder").getAttribute("data-kbzone"),
-    ).toBe("pty");
+    // 260718-CHATS-L4: the empty stage no longer hosts a PTY placeholder (the structured body only
+    // mounts for a focused session); it invites the operator to pick/launch a chat.
+    expect(queryByTestId("sessions-pty-placeholder")).toBeNull();
+    expect(getByTestId("stage-empty-identity")).not.toBeNull();
     expect(queryByTestId("session-composer")).toBeNull();
   });
 
@@ -283,17 +303,19 @@ describe("command palette (S3)", () => {
   });
 });
 
-describe("keyboard zones over the PTY placeholder (S4)", () => {
-  it("ctrl+; (reserved) opens the palette from the pty zone", () => {
-    const { getByTestId } = render(<SessionsView active />);
-    const pty = getByTestId("sessions-pty-placeholder");
+describe("keyboard zones over the legacy-raw PTY (S4)", () => {
+  it("ctrl+; (reserved) opens the palette from the pty zone", async () => {
+    seedLegacyRawSession();
+    const { getByTestId, findByTestId } = render(<SessionsView active />);
+    const pty = await findByTestId("pty-surface");
     fireEvent.keyDown(pty, { key: ";", code: "Semicolon", ctrlKey: true });
     expect(getByTestId("sessions-palette")).not.toBeNull();
   });
 
-  it("F6 from the pty zone exits to chrome (the stage header)", () => {
-    const { getByTestId } = render(<SessionsView active />);
-    const pty = getByTestId("sessions-pty-placeholder");
+  it("F6 from the pty zone exits to chrome (the stage header)", async () => {
+    seedLegacyRawSession();
+    const { getByTestId, findByTestId } = render(<SessionsView active />);
+    const pty = await findByTestId("pty-surface");
     pty.focus();
     fireEvent.keyDown(pty, { key: "F6", code: "F6" });
     const header = getByTestId("sessions-stage").querySelector(
@@ -302,9 +324,10 @@ describe("keyboard zones over the PTY placeholder (S4)", () => {
     expect(document.activeElement).toBe(header);
   });
 
-  it("unreserved keys over the pty zone are never intercepted (Esc, ctrl+k, plain keys)", () => {
-    const { getByTestId, queryByTestId } = render(<SessionsView active />);
-    const pty = getByTestId("sessions-pty-placeholder");
+  it("unreserved keys over the pty zone are never intercepted (Esc, ctrl+k, plain keys)", async () => {
+    seedLegacyRawSession();
+    const { findByTestId, queryByTestId } = render(<SessionsView active />);
+    const pty = await findByTestId("pty-surface");
     for (const init of [
       { key: "Escape", code: "Escape" },
       { key: "k", code: "KeyK", ctrlKey: true },
@@ -886,13 +909,9 @@ describe("authoritative landed cleanup through rail and palette callers (F5-S5-2
         "cleanup-smart-live",
       ),
     );
-    const originalLiveTerminal = await findByTestId(
-      "mock-terminal-cleanup-smart-live",
-    );
-    originalLiveTerminal.setAttribute(
-      "data-scrollback-sentinel",
-      "kept-through-focused-landed-cleanup",
-    );
+    // 260718-CHATS-L4: a controlled seat's live body is now the structured ConversationSurface, not
+    // the PTY, so this test asserts the focus-handoff subject only; conversation keep-alive across
+    // focus is the LRU'd active-conversation store (covered by its own store tests).
     fireEvent.click(getByTestId(`rail-done-toggle-${master}`));
     fireEvent.click(getByTestId("rail-row-cleanup-focused-landed"));
     await waitFor(() =>
@@ -927,13 +946,6 @@ describe("authoritative landed cleanup through rail and palette callers (F5-S5-2
     expect(
       window.localStorage.getItem("ar-dashboard:last-active-chat-session"),
     ).toBe("cleanup-smart-live");
-    const restoredLiveTerminal = getByTestId(
-      "mock-terminal-cleanup-smart-live",
-    );
-    expect(restoredLiveTerminal).toBe(originalLiveTerminal);
-    expect(restoredLiveTerminal.getAttribute("data-scrollback-sentinel")).toBe(
-      "kept-through-focused-landed-cleanup",
-    );
     expect(getByTestId("stage-handoff-note").textContent).toContain(
       "focus handed off",
     );
@@ -946,17 +958,28 @@ describe("L6: stage surface, WorkingLine, InteractionBar, stop residuals", () =>
     sessionCockpitStore.setState({ focusedSessionId: null });
   });
 
-  it("mounts the real PTY surface for the focused seat (the placeholder covers only the empty stage)", async () => {
-    const { findByTestId, queryByTestId } = render(<SessionsView active />);
+  it("defaults a controlled seat to the structured surface; the PTY is a default-off read-only diagnostic (R2/R7)", async () => {
+    // No conversation backend in this unit test: connect fails cleanly and the structured body still
+    // composes. We assert the composition contract, not live conversation content.
+    vi.stubGlobal("fetch", vi.fn(async () => ({ ok: false, status: 503, json: async () => ({}) }) as Response));
+    const { findByTestId, getByTestId, queryByTestId } = render(<SessionsView active />);
     await waitFor(() =>
-      expect(sessionCockpitStore.getState().focusedSessionId).toBe(
-        "worker-tui",
-      ),
+      expect(sessionCockpitStore.getState().focusedSessionId).toBe("worker-tui"),
     );
-    expect(queryByTestId("sessions-pty-placeholder")).toBeNull();
-    const surface = await findByTestId("pty-surface");
-    expect(surface.getAttribute("data-kbzone")).toBe("pty"); // the zone contract survives L6
-    await findByTestId("mock-terminal-worker-tui");
+    // The controlled default is the structured body, NOT the PTY, and no diagnostic is open.
+    const stageBody = await findByTestId("chats-stage-body");
+    expect(stageBody.getAttribute("data-mode")).toBe("active-conversation");
+    expect(queryByTestId("pty-surface")).toBeNull();
+    expect(getByTestId("terminal-diagnostics-drawer").getAttribute("data-open")).toBe("false");
+    expect(queryByTestId("mock-terminal-worker-tui")).toBeNull();
+
+    // Opening the diagnostics drawer surfaces the controlled runner log read-only (§12.6).
+    fireEvent.keyDown(document.body, { key: "k", code: "KeyK", ctrlKey: true });
+    const input = getByTestId("sessions-palette-input");
+    fireEvent.change(input, { target: { value: "terminal diagnostics" } });
+    fireEvent.keyDown(input, { key: "Enter", code: "Enter" });
+    const terminal = await findByTestId("mock-terminal-worker-tui");
+    expect(terminal.getAttribute("data-read-only")).toBe("true");
   });
 
   it("distinguishes exited/retired ended chats from landed read-only terminal inspection", async () => {
@@ -1168,20 +1191,19 @@ describe("L6: stage surface, WorkingLine, InteractionBar, stop residuals", () =>
     expect(note.textContent?.toLowerCase()).not.toContain("fail");
   });
 
-  it("offers the UA-7-gated Stop-turn palette command that names the gap", async () => {
-    const { getByTestId, getByText } = render(<SessionsView active />);
+  it("hides the conversation.stop palette command when no turn is interruptible — no phantom 'unavailable' entry (L4 F2)", async () => {
+    // Without a live conversation projection there is no resolvable working turn, so the real
+    // `conversation.stop` command is simply absent (never a stale disabled/unavailable placeholder).
+    const { getByTestId, queryByTestId, queryByText } = render(<SessionsView active />);
     await waitFor(() =>
-      expect(sessionCockpitStore.getState().focusedSessionId).toBe(
-        "worker-tui",
-      ),
+      expect(sessionCockpitStore.getState().focusedSessionId).toBe("worker-tui"),
     );
-    fireEvent.click(getByTestId("rail-row-worker-l4")); // a WORKING seat — the command applies
+    fireEvent.click(getByTestId("rail-row-worker-l4"));
     fireEvent.keyDown(document.body, { key: "k", code: "KeyK", ctrlKey: true });
     const input = getByTestId("sessions-palette-input");
     fireEvent.change(input, { target: { value: "stop turn" } });
-    expect(
-      getByText(/Stop turn — unavailable: interrupt requires UA-7/),
-    ).not.toBeNull();
+    expect(queryByTestId("palette-cmd-conversation.stop")).toBeNull();
+    expect(queryByText(/Stop turn — unavailable/)).toBeNull();
   });
 
   it("Stop-turn gates on the WorkingLine's OWN grammar state — never offered when the line is absent (review finding 3)", async () => {
@@ -1206,11 +1228,12 @@ describe("L6: stage surface, WorkingLine, InteractionBar, stop residuals", () =>
       });
     });
     await waitFor(() => expect(queryByTestId("working-line")).toBeNull());
-    // ...so the palette must not offer a stop control that is not on screen.
+    // ...so the palette must not offer a stop control that is not interruptible.
     fireEvent.keyDown(document.body, { key: "k", code: "KeyK", ctrlKey: true });
     const input = getByTestId("sessions-palette-input");
     fireEvent.change(input, { target: { value: "stop turn" } });
     expect(queryByText(/Stop turn — unavailable/)).toBeNull();
+    expect(queryByTestId("palette-cmd-conversation.stop")).toBeNull();
   });
 
   it("captures an UNFOCUSED seat's retire residual — never silently discarded (review F1, sev-3)", async () => {
