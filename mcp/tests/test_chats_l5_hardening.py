@@ -12,6 +12,7 @@ H2 -- L1 unknown-input provenance validator (see test_chats_l5_provenance_harden
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from pathlib import Path
 from unittest import mock
@@ -79,7 +80,8 @@ class _AliveHost:
     def get(self, _sid: str) -> None:
         return None
 
-    def has_session(self, _tmux_name: str) -> bool:
+    def has_session(self, tmux_name: str) -> bool:
+        del tmux_name
         return True
 
 
@@ -160,8 +162,9 @@ def test_h1_poisoned_row_is_quarantined_and_never_breaks_the_catalog_sweep(
 
     rows = {entry.id: entry for entry in catalog.list()}
     # The poisoned row is fail-loud on its OWN row/state, never silently swallowed.
-    assert (rows["poison-1"].control_raw or {}).get("interactionSyncError")
-    assert "does not match an accepted inbox row" in rows["poison-1"].control_raw["interactionSyncError"]
+    poison_sync_error = (rows["poison-1"].control_raw or {}).get("interactionSyncError")
+    assert isinstance(poison_sync_error, str)
+    assert "does not match an accepted inbox row" in poison_sync_error
     # The healthy row is untouched by its neighbour's poison.
     assert "interactionSyncError" not in (rows["healthy-1"].control_raw or {})
 
@@ -180,7 +183,7 @@ def test_f2_quarantine_logs_on_state_change_and_heals(
     catalog = TerminalCatalog(tmp_path / "terminal-sessions.json")
     catalog.upsert(_harness_entry(tmp_path, "poison-1"))
     synchronizer = HostedInteractionSynchronizer(tmp_path)
-    state = {"transcript": _POISON_TRANSCRIPT}
+    state: dict[str, tuple[Mapping[str, object], ...]] = {"transcript": _POISON_TRANSCRIPT}
 
     def _make_sweeper() -> TerminalCatalogLivenessSweeper:
         # A fresh sweeper per sweep sidesteps the intra-process rate limiter with a fixed clock.
