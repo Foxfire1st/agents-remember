@@ -129,6 +129,89 @@ describe("TerminalDiagnosticsDrawer — default off (R2/R7, §12.6)", () => {
   });
 });
 
+// 260718-CHATS-L5 R5.2 / R5.10 / L4.4: the checked-in DOM + interaction baseline at 10,000 tool-heavy
+// items. L4 recorded no dedicated conversation-timeline baseline (L4.4: "the measured DOM/interaction
+// baseline is an L5 artifact"); this is that artifact and a standing regression tripwire. The invariant
+// under proof: the mounted DOM is virtualized by stable item and stays BOUNDED regardless of history
+// depth, so the feed cannot degrade into a 10k-node tree. Recorded baseline numbers are in
+// notes/reports/260718-CHATS-L5-worker-report.md.
+describe("ConversationTimeline — 10k tool-heavy DOM/interaction baseline (R5.2/R5.10, L4.4)", () => {
+  const TOOL_HEAVY_KINDS = ["message", "thinking", "tool-call", "tool-result", "message"] as const;
+
+  function bigHistory(count: number): ConversationItem[] {
+    const items: ConversationItem[] = [];
+    for (let index = 0; index < count; index += 1) {
+      const ordinal = index + 1;
+      const kind = TOOL_HEAVY_KINDS[index % TOOL_HEAVY_KINDS.length];
+      items.push(
+        msg({
+          itemId: `item-${ordinal}`,
+          globalOrdinal: ordinal, // 1-based server ordinal, stable across paging
+          kind,
+          role: kind === "message" ? "assistant" : kind === "tool-result" ? "tool" : "assistant",
+          blocks:
+            kind === "tool-call"
+              ? [{ blockId: `item-${ordinal}-t`, type: "tool-input", summary: `tool call ${ordinal}` }]
+              : kind === "tool-result"
+                ? [{ blockId: `item-${ordinal}-o`, type: "tool-output", text: `output ${ordinal}` }]
+                : kind === "thinking"
+                  ? [{ blockId: `item-${ordinal}-k`, type: "thinking", markdown: `reasoning ${ordinal}` }]
+                  : [{ blockId: `item-${ordinal}-b`, type: "markdown", markdown: `message ${ordinal}` }],
+        }),
+      );
+    }
+    return items;
+  }
+
+  it("keeps the mounted DOM bounded and the ordinals honest at 10,000 items", () => {
+    const items = bigHistory(10_000);
+    const startedAt = performance.now();
+    const { container } = render(
+      <ConversationTimeline
+        items={items}
+        totalItems={items.length}
+        hasOlder
+        busy={false}
+        onLoadOlder={() => {}}
+      />,
+    );
+    const mountMs = performance.now() - startedAt;
+
+    const mountedArticles = container.querySelectorAll("[data-conversation-item]");
+    // The DOM baseline: the virtualized window is a small constant, never the 10k history depth.
+    // Recorded 260718-CHATS-L5: 10 mounted articles / ~42-55 ms initial mount at 10,000 tool-heavy items.
+    expect(mountedArticles.length).toBeGreaterThan(0);
+    expect(mountedArticles.length).toBeLessThan(80);
+    expect(mountedArticles.length).toBeLessThan(items.length / 100);
+    // Interaction baseline tripwire: an initial mount of 10k items must not stall the main thread.
+    // Generous ceiling for shared-runner jitter; the observed value is recorded in the report.
+    expect(mountMs).toBeLessThan(3000);
+
+    // aria-posinset rides the server globalOrdinal (never the array index); aria-setsize is the honest total.
+    const feed = screen.getByRole("feed");
+    const first = within(feed).getAllByRole("article")[0];
+    expect(Number(first.getAttribute("aria-posinset"))).toBeGreaterThanOrEqual(1);
+    expect(first.getAttribute("aria-setsize")).toBe("10000");
+    expect(first.getAttribute("aria-live")).toBe("off");
+  });
+
+  it("passes axe on the 10k feed (feed/article/posinset semantics stay clean at depth)", async () => {
+    const { container } = render(
+      <ConversationTimeline
+        items={bigHistory(10_000)}
+        totalItems={10_000}
+        hasOlder
+        busy={false}
+        onLoadOlder={() => {}}
+      />,
+    );
+    const results = await axe.run(container, {
+      rules: { "color-contrast": { enabled: false }, region: { enabled: false } },
+    });
+    expect(results.violations).toEqual([]);
+  });
+});
+
 describe("axe — no structural accessibility violations on the rendered grammar", () => {
   it("passes axe on a small feed + a closed diagnostics drawer", async () => {
     const { container } = render(

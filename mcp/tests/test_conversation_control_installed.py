@@ -356,6 +356,105 @@ class CodexInstalledControlApiTests(unittest.IsolatedAsyncioTestCase):
             finally:
                 await harness.stop()
 
+    async def test_settled_live_turn_projects_once_on_the_conversation_page(self) -> None:
+        """260718-CHATS-L5 F1 (L4 verdict blocker): a settled live codex turn projects EXACTLY once.
+
+        On a hosted (persisted) codex thread the live notification channel and ``thread/read`` use
+        DISJOINT id namespaces for the same settled turn (live ``msg_*``/UUID item ids vs positional
+        ``item-N``), so the store's id-keyed dedupe cannot converge them and the post-turn native
+        re-walk minted a duplicate ``native-history`` twin of every settled turn — developer-visible
+        duplicate rows on the flagship ``+ Chat`` topology. This drives a persisted thread through the
+        real production wire: open the page (clean hydration), settle a turn, re-read the page, and
+        assert the turn's user message projects once — not twice. An isolated ``CODEX_HOME`` keeps the
+        persisted thread contained to the temp root.
+        """
+        marker = "ar-f1-marker-7c3e91"
+        with tempfile.TemporaryDirectory(prefix="ar-l5-codex-f1-") as tmp:
+            root = Path(tmp)
+            codex_home = root / "codex-home"
+            codex_home.mkdir()
+            identity = _identity("codex-l5-f1")
+            adapter = CodexAppServerAdapter(CodexAppServerSettings(ephemeral=False))
+            harness = _LiveHarness(root, identity, adapter, "codex")
+            env = dict(os.environ)
+            env["CODEX_HOME"] = str(codex_home)
+            await harness.start(
+                LaunchSpec(
+                    identity=identity,
+                    harness_id="codex",
+                    cwd=root,
+                    argv=(self.executable, "app-server"),
+                    env=env,
+                )
+            )
+            session = identity.ar_session_id
+
+            def _carries(item: dict, needle: str) -> bool:
+                return item.get("role") == "user" and needle in json.dumps(item)
+
+            async def _user_twins(needle: str) -> list[dict]:
+                # Re-read a few times: the projector's background poll consumes the live frames and
+                # each page() re-walks thread/read — the exact surface F1's twin would appear on.
+                items: list[dict] = []
+                for _ in range(8):
+                    await asyncio.sleep(1.0)
+                    page = await harness.client.get(
+                        f"/api/terminal/{session}/conversation", params=harness.params()
+                    )
+                    self.assertEqual(page.status_code, 200, page.text)
+                    items = page.json().get("items", [])
+                    if any(_carries(item, needle) for item in items):
+                        break
+                return [item for item in items if _carries(item, needle)]
+
+            try:
+                # Open the page BEFORE chatting: the projector hydrates clean (empty thread/read),
+                # exactly as a developer opening a fresh + Chat.
+                opened = await harness.client.get(
+                    f"/api/terminal/{session}/conversation", params=harness.params()
+                )
+                self.assertEqual(opened.status_code, 200, opened.text)
+
+                submit = await harness.typed_submit(
+                    "l5-f1-turn-1", f"Say hello briefly. Reference token: {marker}."
+                )
+                self.assertEqual(submit.status_code, 200, submit.text)
+                await harness.wait_evidence(
+                    lambda frame: frame.kind == "completed",
+                    timeout=180.0,
+                    description="codex turn-1 settlement",
+                )
+                first = await _user_twins(marker)
+                self.assertEqual(
+                    len(first), 1, f"turn 1 user message must project once, got {len(first)}: {first}"
+                )
+
+                # 2/2: a second settled turn must also project its user message exactly once, and the
+                # first turn must not have grown a twin on the intervening refreshes.
+                marker2 = "ar-f1-marker-b40d5f"
+                submit2 = await harness.typed_submit(
+                    "l5-f1-turn-2", f"Say goodbye briefly. Reference token: {marker2}."
+                )
+                self.assertEqual(submit2.status_code, 200, submit2.text)
+                await harness.wait_evidence(
+                    lambda frame: frame.kind == "completed",
+                    timeout=180.0,
+                    description="codex turn-2 settlement",
+                )
+                second = await _user_twins(marker2)
+                self.assertEqual(
+                    len(second), 1, f"turn 2 user message must project once, got {len(second)}: {second}"
+                )
+                page = await harness.client.get(
+                    f"/api/terminal/{session}/conversation", params=harness.params()
+                )
+                still_first = [item for item in page.json().get("items", []) if _carries(item, marker)]
+                self.assertEqual(
+                    len(still_first), 1, "the first settled turn must stay single across later refreshes"
+                )
+            finally:
+                await harness.stop()
+
 
 @unittest.skipUnless(
     os.environ.get(LIVE_OPT_IN) == "1",

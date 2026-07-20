@@ -187,6 +187,10 @@ class ActiveSessionProjector:
         self._pending_frames: list[EvidenceFrame] = []
         self._echo_turn_open = False
         self._known_eviction_floor = 0
+        # 260718-CHATS-L5 F1: turns/requests already carried by the live window, so the lazy
+        # native-tip re-walk never re-projects them as disjoint-id native-history twins.
+        self._live_turn_ids: set[str] = set()
+        self._live_request_ids: set[str] = set()
 
     @property
     def generation(self) -> str:
@@ -303,6 +307,11 @@ class ActiveSessionProjector:
         self._retention_floor = 0
         self._pending_frames.clear()
         self._echo_turn_open = False
+        # The rebuild re-derives from native authority first, then the live window; the live-turn
+        # sets must start empty so the hydration walk projects prior-session native history in full
+        # (F1 suppression only ever applies to turns this run has already observed live).
+        self._live_turn_ids.clear()
+        self._live_request_ids.clear()
         if self._mapper.uses_native_pages:
             await self._walk_native_pages(preserve_cursor_on_failure=False)
         await self._poll_evidence()
@@ -317,6 +326,7 @@ class ActiveSessionProjector:
     async def _walk_native_pages(self, *, preserve_cursor_on_failure: bool) -> None:
         prior = self._native_cursor
         self._native_cursor = None
+        live_native_turns: set[str] = set()
         try:
             while True:
                 page: NativeEvidencePage = await asyncio.to_thread(
@@ -327,12 +337,12 @@ class ActiveSessionProjector:
                     expected_bridge_epoch=self._identity.bridge_epoch,
                 )
                 for frame in page.frames:
-                    self._apply_outputs(
-                        self._mapper.map_native_frame(
-                            frame, evidence_ref=self._native_ref(frame.native_id)
-                        ),
-                        self._native_ref(frame.native_id),
+                    ref = self._native_ref(frame.native_id)
+                    outputs = self._drop_live_settled_natives(
+                        self._mapper.map_native_frame(frame, evidence_ref=ref),
+                        live_native_turns,
                     )
+                    self._apply_outputs(outputs, ref)
                     self._native_cursor = frame.native_id
                 if (page.next_cursor is None and not page.truncated) or not page.frames:
                     break
@@ -391,9 +401,77 @@ class ActiveSessionProjector:
             self._pending_frames.append(frame)
             return
         ref = self._evidence_ref(frame.sequence)
-        self._apply_outputs(self._map_evidence_frame(frame, ref), ref)
+        outputs = self._map_evidence_frame(frame, ref)
         if self._mapper.uses_native_pages and not self._mapper.eager_native_continuation:
+            # Lazy-native harness (codex): the live frame settles this turn under its live-id
+            # namespace; remember it so the native-tip re-walk cannot mint a disjoint-id twin (F1).
+            self._record_live_turn(outputs)
             self._native_dirty = True
+        self._apply_outputs(outputs, ref)
+
+    def _record_live_turn(self, outputs: list[MapperOutput]) -> None:
+        """Record the live turns/requests a native re-walk must not re-project as twins (F1)."""
+
+        for output in outputs:
+            if isinstance(output, MappedItem):
+                if output.item.turn_id:
+                    self._live_turn_ids.add(output.item.turn_id)
+                if (
+                    output.item.role == "user"
+                    and output.item.correlation is not None
+                    and output.item.correlation.request_id
+                ):
+                    self._live_request_ids.add(output.item.correlation.request_id)
+            elif isinstance(output, MappedTurnOutcome | MappedUnknownVendor):
+                if output.turn_id:
+                    self._live_turn_ids.add(output.turn_id)
+
+    def _drop_live_settled_natives(
+        self, outputs: list[MapperOutput], live_native_turns: set[str]
+    ) -> list[MapperOutput]:
+        """Drop native-page outputs for turns already carried by the live window (F1).
+
+        On a hosted codex thread the live notification channel and ``thread/read`` use DISJOINT id
+        namespaces for the same settled turn (live ``msg_*``/UUID item ids vs positional ``item-N``),
+        so the store's id-keyed dedupe can never converge them and ``_refresh_native_tip``'s post-turn
+        re-walk mints a second, native-history twin of every settled turn (L4 verdict F1, deterministic
+        2/2 turns on the wire). The live window already carries each settled turn's full item payloads
+        (see ``_CodexProjector``), so a native frame whose turn is already live is a pure duplicate.
+
+        A native turn is "already live" when its parent turn id was observed on the live channel
+        (``_live_turn_ids``) OR when its native user frame carries a ``clientId`` we submitted live
+        (``_live_request_ids``); the latter holds even if the hosted thread renumbers turn ids, because
+        ``clientId`` is our own request id and survives verbatim into ``thread/read``
+        (``find_request_turn``). Once any frame identifies a native turn as live, its siblings are
+        dropped through ``live_native_turns`` -- codex stores a turn's items user-first, so the user
+        frame anchors the turn before its harness siblings. Genuine prior-session native history (never
+        seen live) is untouched, and at hydration both live sets are empty (the native walk runs before
+        the first evidence poll), so a resumed thread hydrates its full native history.
+        """
+
+        kept: list[MapperOutput] = []
+        for output in outputs:
+            turn_id: str | None = None
+            request_id: str | None = None
+            is_user_input = False
+            if isinstance(output, MappedItem):
+                turn_id = output.item.turn_id
+                if output.item.role == "user" and output.item.correlation is not None:
+                    request_id = output.item.correlation.request_id
+                    is_user_input = True
+            elif isinstance(output, MappedUnknownVendor):
+                turn_id = output.turn_id
+            live_by_turn = turn_id is not None and turn_id in self._live_turn_ids
+            live_by_client = (
+                is_user_input and request_id is not None and request_id in self._live_request_ids
+            )
+            live_by_sibling = turn_id is not None and turn_id in live_native_turns
+            if live_by_turn or live_by_client or live_by_sibling:
+                if turn_id is not None:
+                    live_native_turns.add(turn_id)
+                continue
+            kept.append(output)
+        return kept
 
     async def _poll_transcript_echo(self) -> None:
         if not self._mapper.uses_transcript_echo:

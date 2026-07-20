@@ -269,6 +269,189 @@ class CodexEngineTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(unknown.lane, "unknown-input")
         self.assertEqual(unknown.provenance.strength, "native-only")
 
+    async def test_native_remap_after_resolution_stays_model_valid(self) -> None:
+        """260718-CHATS-L5 H2 (L4 verdict E2): the L1 projector must never emit an item that
+
+        violates its own ``preserve_input_authority`` under real codex traffic. A user message
+        resolves to ``cockpit`` (operator/exact); codex then re-maps the SAME native user item
+        (which re-emits the ``unknown-input`` default). Before the fix the store's upsert adopted the
+        candidate's ``unknown-input`` lane while preserving the resolved ``exact`` provenance --
+        silently stored (``model_copy`` skips validation) and 500-ing the active-page route only at
+        response re-validation. Every emitted item must survive a full model re-validation.
+        """
+        from agents_remember.serving.conversation.models import ConversationItem  # noqa: PLC0415
+
+        bridge = _ScriptedBridge()
+        bridge.provenance["req-turn-1"] = "cockpit"
+        _codex_turn(bridge, "turn-1")
+        projector = _projector(bridge)
+        first = await projector.page(before_ordinal=None, limit=50)
+        resolved = {item.item_id: item for item in first.items}["turn-1-user"]
+        self.assertEqual(resolved.lane, "operator")
+        self.assertEqual(resolved.provenance.strength, "exact")
+
+        # Codex re-maps the same native user item on a later observation cycle.
+        bridge.push_evidence(
+            "codex-notification",
+            {
+                "threadId": "vendor-1",
+                "turnId": "turn-1",
+                "startedAtMs": 9,
+                "item": {
+                    "id": "turn-1-user",
+                    "type": "userMessage",
+                    "clientId": "req-turn-1",
+                    "content": [{"type": "text", "text": "go"}],
+                },
+            },
+        )
+        await projector.poll_once()
+        result = await projector.page(before_ordinal=None, limit=50)
+
+        # Every item the L1 projector serves must re-validate as the route response would.
+        for item in result.items:
+            ConversationItem.model_validate(item.model_dump(by_alias=True))
+        remapped = {item.item_id: item for item in result.items}["turn-1-user"]
+        self.assertEqual(remapped.lane, "operator", "a re-map must not revert the resolved lane")
+        self.assertEqual(remapped.source, "cockpit-composer")
+        self.assertEqual(remapped.provenance.strength, "exact")
+
+    async def test_settled_live_turns_project_once_when_native_ids_disjoint(self) -> None:
+        """260718-CHATS-L5 F1 (L4 verdict blocker): a settled codex turn must project EXACTLY once.
+
+        On a hosted codex ``+ Chat`` thread the live notification channel and ``thread/read`` use
+        DISJOINT id namespaces for the same settled turn (live ``msg_*``/UUID item ids vs positional
+        ``item-N``), so the store's id-keyed dedupe can never converge them and
+        ``_refresh_native_tip``'s post-turn native re-walk mints a second, ``native-history`` twin of
+        every settled turn (developer-visible duplicate rows, deterministic 2/2 turns on the wire).
+        Here the native page groups the twins under the SAME turn ids the live channel used.
+        """
+        bridge = _ScriptedBridge()
+        _codex_turn(bridge, "turn-1")
+        projector = _projector(bridge)
+        await projector.page(before_ordinal=None, limit=50)
+        _codex_turn(bridge, "turn-2")
+        await projector.poll_once()  # both turns now settled live under their live-id namespace
+        live = await projector.page(before_ordinal=None, limit=50)
+        live_ids = [item.item_id for item in live.items]
+        self.assertEqual(
+            live_ids,
+            [
+                "turn-1-user", "turn-1-agent", "turn-result:turn-1",
+                "turn-2-user", "turn-2-agent", "turn-result:turn-2",
+            ],
+        )
+        # The hosted thread now persists the SAME settled turns through thread/read under DISJOINT
+        # positional item ids, grouped under the live turn ids.
+        bridge.native_frames.extend(
+            [
+                NativeEvidenceFrame(
+                    native_id="item-1", native_parent_id="turn-1", native_type="userMessage",
+                    created_at=NOW,
+                    raw={
+                        "id": "item-1", "type": "userMessage", "clientId": "req-turn-1",
+                        "content": [{"type": "text", "text": "go"}],
+                    },
+                ),
+                NativeEvidenceFrame(
+                    native_id="item-2", native_parent_id="turn-1", native_type="agentMessage",
+                    created_at=NOW,
+                    raw={"id": "item-2", "type": "agentMessage", "text": "working more"},
+                ),
+                NativeEvidenceFrame(
+                    native_id="item-3", native_parent_id="turn-2", native_type="userMessage",
+                    created_at=NOW,
+                    raw={
+                        "id": "item-3", "type": "userMessage", "clientId": "req-turn-2",
+                        "content": [{"type": "text", "text": "go"}],
+                    },
+                ),
+                NativeEvidenceFrame(
+                    native_id="item-4", native_parent_id="turn-2", native_type="agentMessage",
+                    created_at=NOW,
+                    raw={"id": "item-4", "type": "agentMessage", "text": "working more"},
+                ),
+            ]
+        )
+        # Any further live evidence marks the native tip dirty; the next page re-walks thread/read.
+        bridge.push_evidence(
+            "codex-notification",
+            {"threadId": "vendor-1", "turnId": "turn-2", "tokenUsage": {"totalTokens": 1}},
+        )
+        await projector.poll_once()
+        settled = await projector.page(before_ordinal=None, limit=50)
+        settled_ids = [item.item_id for item in settled.items]
+        self.assertEqual(
+            settled_ids, live_ids, "settled turns must project once, never as native-history twins"
+        )
+        self.assertNotIn("item-1", settled_ids)
+        self.assertEqual(settled.total_items, len(live_ids))
+
+    async def test_settled_live_turns_project_once_when_hosted_renumbers_turn_ids(self) -> None:
+        """260718-CHATS-L5 F1: single projection holds even if the hosted thread RENUMBERS turn ids.
+
+        Correlation must not depend on the native turn id equalling the live turn id: ``clientId`` is
+        our own submitted request id and survives verbatim into ``thread/read``, so a native user
+        frame whose ``clientId`` we submitted live anchors its whole native turn as a live duplicate.
+        """
+        bridge = _ScriptedBridge()
+        _codex_turn(bridge, "turn-1")
+        projector = _projector(bridge)
+        live = await projector.page(before_ordinal=None, limit=50)
+        live_ids = [item.item_id for item in live.items]
+        self.assertEqual(live_ids, ["turn-1-user", "turn-1-agent", "turn-result:turn-1"])
+        # thread/read persists the settled turn under a RENUMBERED native turn id + positional items,
+        # but the userMessage still carries our submitted clientId.
+        bridge.native_frames.extend(
+            [
+                NativeEvidenceFrame(
+                    native_id="item-1", native_parent_id="hist-turn-a", native_type="userMessage",
+                    created_at=NOW,
+                    raw={
+                        "id": "item-1", "type": "userMessage", "clientId": "req-turn-1",
+                        "content": [{"type": "text", "text": "go"}],
+                    },
+                ),
+                NativeEvidenceFrame(
+                    native_id="item-2", native_parent_id="hist-turn-a", native_type="agentMessage",
+                    created_at=NOW,
+                    raw={"id": "item-2", "type": "agentMessage", "text": "working more"},
+                ),
+            ]
+        )
+        bridge.push_evidence(
+            "codex-notification",
+            {"threadId": "vendor-1", "turnId": "turn-1", "tokenUsage": {"totalTokens": 1}},
+        )
+        await projector.poll_once()
+        settled = await projector.page(before_ordinal=None, limit=50)
+        settled_ids = [item.item_id for item in settled.items]
+        self.assertEqual(settled_ids, live_ids, "clientId must anchor the whole renumbered native turn")
+        self.assertNotIn("item-1", settled_ids)
+        self.assertNotIn("item-2", settled_ids)
+
+    async def test_prior_session_native_history_survives_live_turns(self) -> None:
+        """260718-CHATS-L5 F1 guard: the suppression must never drop GENUINE prior-session history.
+
+        A resumed thread's earlier turns (never observed live in this projector) must hydrate in full;
+        only turns this run settled live are suppressed from the native re-walk.
+        """
+        bridge = _ScriptedBridge()
+        bridge.native_frames.append(
+            NativeEvidenceFrame(
+                native_id="hist-1", native_parent_id="turn-0", native_type="agentMessage",
+                created_at=NOW,
+                raw={"id": "hist-1", "type": "agentMessage", "text": "earlier session"},
+            )
+        )
+        _codex_turn(bridge, "turn-1")
+        projector = _projector(bridge)
+        result = await projector.page(before_ordinal=None, limit=50)
+        ids = [item.item_id for item in result.items]
+        self.assertEqual(
+            ids, ["hist-1", "turn-1-user", "turn-1-agent", "turn-result:turn-1"]
+        )
+
     async def test_rehydration_reproduces_identical_projection(self) -> None:
         bridge = _ScriptedBridge()
         bridge.provenance["req-turn-1"] = "cockpit"

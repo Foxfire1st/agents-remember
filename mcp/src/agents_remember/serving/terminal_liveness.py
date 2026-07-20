@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import threading
 from collections.abc import Callable
 from dataclasses import dataclass, replace
@@ -25,6 +26,8 @@ from agents_remember.serving.terminal_catalog import (
 )
 from agents_remember.serving.terminal_paste import capture_pane as _default_capture_pane
 from agents_remember.serving.turn_state import classify_turn_state
+
+logger = logging.getLogger(__name__)
 
 PaneCapturer = Callable[[str], str]
 SnapshotReader = Callable[[TerminalCatalogEntry], AdapterSnapshot]
@@ -256,12 +259,74 @@ def _observe_alive(
         projected,
         control_raw={**(projected.control_raw or {}), "paneDiagnostic": pane_diagnostic.state},
     )
+    previous_sync_error = (entry.control_raw or {}).get("interactionSyncError")
     catalog.upsert(projected)
     if on_control_snapshot is not None:
-        on_control_snapshot(projected, snapshot)
+        projected = _observe_control_snapshot(
+            catalog,
+            projected,
+            snapshot,
+            on_control_snapshot,
+            previous_sync_error=previous_sync_error
+            if isinstance(previous_sync_error, str)
+            else None,
+        )
     return _record_adapter_turn_state(
         catalog, projected, snapshot_turn_state(snapshot), checked_at
     )
+
+
+def _observe_control_snapshot(
+    catalog: TerminalCatalog,
+    entry: TerminalCatalogEntry,
+    snapshot: AdapterSnapshot,
+    observer: ControlSnapshotObserver,
+    *,
+    previous_sync_error: str | None,
+) -> TerminalCatalogEntry:
+    """Run the hosted-interaction synchronizer as a quarantined per-entry side effect.
+
+    260718-CHATS-L5 H1. The synchronizer is a downstream durable projection (agent-question gates
+    plus operator-inbox completion rows), NOT part of computing this row's liveness/control state --
+    which is already committed by the ``catalog.upsert(projected)`` above. A single poisoned
+    completion (e.g. an adapter terminal result whose ``vendorCorrelationId`` matches no accepted
+    inbox row) raises ``HarnessControlError`` inside ``observe``; before this guard that exception
+    propagated straight out of the sweep's per-entry list comprehension, aborting the whole
+    ``TerminalCatalog.batch()`` and 500-ing ``/api/terminal/sessions`` for EVERY row. Contain the
+    failure to this one row: record it loudly on the row's own ``control_raw`` and log it, and never
+    let one row's side-effect failure break the catalog projection. This is availability hardening of
+    a proven failure; it does not touch the completion-correlation contract that raised.
+
+    260718-CHATS-L5 F2: an orphan completion is the NORMAL steady state of every cockpit-driven
+    hosted chat (a cockpit turn's terminal result carries a ``vendorCorrelationId`` that matches no
+    operator-inbox row because it never was an inbox delivery), so the failure re-fires on EVERY
+    ~10 s sweep, indefinitely. Log only on STATE CHANGE -- first occurrence / a changed error / heal
+    -- while still refreshing the per-sweep marker so the wire stays honestly degraded every sweep.
+    """
+    try:
+        observer(entry, snapshot)
+    except Exception as exc:  # one row's downstream side effect must never fail the whole sweep
+        message = str(exc)
+        if message != previous_sync_error:
+            logger.warning(
+                "hosted interaction synchronizer failed for terminal row %s; "
+                "quarantining on its row: %s",
+                entry.id,
+                message,
+            )
+        quarantined = replace(
+            entry,
+            control_raw={**(entry.control_raw or {}), "interactionSyncError": message},
+        )
+        catalog.upsert(quarantined)
+        return quarantined
+    if previous_sync_error is not None:
+        logger.info(
+            "hosted interaction synchronizer recovered for terminal row %s; "
+            "cleared the quarantine marker",
+            entry.id,
+        )
+    return entry
 
 
 def _record_adapter_turn_state(

@@ -49,6 +49,29 @@ _SOURCE_AUTHORITY: dict[
 _NORMALIZED_FIELDS = ("revision", "global_ordinal", "created_at", "updated_at", "provenance")
 
 
+def _preserved_input_authority(existing: ConversationItem) -> dict[str, object]:
+    """Fields a native re-map must inherit from the existing item rather than overwrite.
+
+    Provenance is always preserved so a re-map cannot downgrade an already-resolved producer. For
+    user-role input items the whole authority triple (lane, source, provenance) is ONE resolved
+    unit: input authority is resolved exactly once, via ``apply_provenance``, never by a native
+    re-map. A native re-map re-emits the default ``unknown-input``/``native-history`` authority;
+    before 260718-CHATS-L5 H2 the upsert adopted the candidate's ``unknown-input`` lane/source while
+    preserving the existing (resolved) provenance -- splitting the triple into a
+    ``lane="unknown-input"`` item that carries ``strength="exact"`` and an operator producer. That
+    item violates ``ConversationItem.preserve_input_authority`` but is stored silently (``model_copy``
+    skips validation) and only 500s the active-page route later, at response re-validation (L4 verdict
+    E2, intermittent under real codex traffic). Keep the triple together so a re-map never reverts or
+    splits a resolved input authority. Non-user (harness) items retain their legitimate
+    ``harness-live`` <-> ``native-history`` source transition.
+    """
+    preserved: dict[str, object] = {"provenance": existing.provenance}
+    if existing.role == "user":
+        preserved["lane"] = existing.lane
+        preserved["source"] = existing.source
+    return preserved
+
+
 @dataclass(frozen=True)
 class StoreMutation:
     """One applied projection change the projector wraps into an envelope."""
@@ -127,8 +150,16 @@ class ProjectionStore:
         comparable_existing = existing.model_copy(
             update={field: None for field in _NORMALIZED_FIELDS}
         )
+        # 260718-CHATS-L5 F4: the candidate inherits the same input-authority the real upsert below
+        # preserves BEFORE the comparison, so a re-map that differs only in the fields a re-map must
+        # never own (an ``unknown-input``/``native-history`` re-map of an already-resolved user item)
+        # compares equal and stays a true no-op, honoring the store's idempotence docstring rather
+        # than emitting a redundant revision-bumping ``upsert-item`` per identical re-map.
         comparable_candidate = candidate.model_copy(
-            update={field: None for field in _NORMALIZED_FIELDS}
+            update={
+                **_preserved_input_authority(existing),
+                **{field: None for field in _NORMALIZED_FIELDS},
+            }
         )
         if comparable_candidate == comparable_existing:
             return self._flush_pending_deltas(existing)
@@ -137,7 +168,7 @@ class ProjectionStore:
                 "revision": existing.revision + 1,
                 "global_ordinal": existing.global_ordinal,
                 "created_at": existing.created_at or candidate.created_at,
-                "provenance": existing.provenance,
+                **_preserved_input_authority(existing),
             }
         )
         self._items[item.item_id] = item
