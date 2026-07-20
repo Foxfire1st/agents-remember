@@ -66,6 +66,18 @@ event without this key, so ``snapshot.raw`` and every projection of it stay byte
 EVIDENCE_TRUNCATION_MARKER = "…[truncated]"
 """Visible marker appended to every clipped evidence payload preview."""
 
+MAX_PRESERVED_EVIDENCE_SCALAR_CHARS = 256
+"""Length ceiling for a terminal-identity scalar re-carried by the truncation envelope.
+
+Every preserved field is a protocol enum (pi ``stopReason``, codex turn ``status``), a frame
+type name, or a vendor turn id — a handful of characters in every real shape, so 256 is orders
+of magnitude above any legitimate value while staying tiny against the evidence budget. A scalar
+longer than this is a malformed-frame signal, not trustworthy terminal identity: it is dropped
+WHOLE (never truncated — a partial id/status could mis-correlate at settlement), degrading the
+envelope to the pre-identity total clip for that one field. This keeps an oversized scalar from
+ever making the truncation envelope exceed its own byte budget (which would raise instead of
+clip, and in the bridge event loop that raise is session-fatal)."""
+
 MAX_NATIVE_EVIDENCE_PAGE = 200
 """Server-side frame cap for one native-domain evidence page."""
 
@@ -566,12 +578,67 @@ def submission_provenance_batch_json(value: SubmissionProvenanceBatch) -> dict[s
     }
 
 
+def _bounded_identity_scalar(value: object) -> str | None:
+    """One preserved scalar if it is a string within the identity length ceiling, else ``None``.
+
+    A non-string or an over-length string is dropped whole (never truncated), so a malformed
+    giant scalar can neither cross nor collapse the truncation envelope's own byte budget.
+    """
+
+    if isinstance(value, str) and len(value) <= MAX_PRESERVED_EVIDENCE_SCALAR_CHARS:
+        return value
+    return None
+
+
+def _preserved_evidence_identity(payload: Mapping[str, object]) -> dict[str, object]:
+    """The terminal-identity fields that survive a clip, each at its original payload path.
+
+    Only tiny scalar identity/status enums cross — never text, content blocks, items, or any
+    other body. Each scalar is bounded by ``MAX_PRESERVED_EVIDENCE_SCALAR_CHARS`` and dropped
+    whole when absent, non-string, or over-length (never invented, never truncated); a value is
+    copied only when it is present as the exact bounded scalar the settlement consumers read:
+
+    * top-level ``type`` — the frame kind every clipped frame keeps (pi ``message_end``); the
+      pi settlement read is ``frame.raw.get("type") == "message_end"``.
+    * ``message.stopReason`` — the pi terminal enum; the read is ``frame.raw["message"]
+      ["stopReason"]``. Only ``stopReason`` crosses; the message role and content never do.
+    * ``turn.id`` + ``turn.status`` — the codex terminal-turn identity and status enum; the
+      read correlates ``frame.raw["turn"]["id"] == turn_id`` before taking ``turn["status"]``,
+      so both must survive or the frame is skipped. The turn's items/error never cross.
+    """
+
+    preserved: dict[str, object] = {}
+    frame_type = _bounded_identity_scalar(payload.get("type"))
+    if frame_type is not None:
+        preserved["type"] = frame_type
+    message = payload.get("message")
+    if isinstance(message, Mapping):
+        stop_reason = _bounded_identity_scalar(message.get("stopReason"))
+        if stop_reason is not None:
+            preserved["message"] = {"stopReason": stop_reason}
+    turn = payload.get("turn")
+    if isinstance(turn, Mapping):
+        turn_identity: dict[str, object] = {}
+        turn_id = _bounded_identity_scalar(turn.get("id"))
+        if turn_id is not None:
+            turn_identity["id"] = turn_id
+        turn_status = _bounded_identity_scalar(turn.get("status"))
+        if turn_status is not None:
+            turn_identity["status"] = turn_status
+        if turn_identity:
+            preserved["turn"] = turn_identity
+    return preserved
+
+
 def clip_evidence_payload(payload: Mapping[str, object], *, max_bytes: int) -> Mapping[str, object]:
     """Bound one JSON evidence payload to ``max_bytes`` serialized, with any clip visible.
 
     Unclipped payloads are returned as a plain copy. Clipped payloads become an envelope whose
     own serialized size never exceeds ``max_bytes`` and whose preview ends with the truncation
-    marker, so consumers never mistake a partial payload for a complete native frame.
+    marker, so consumers never mistake a partial payload for a complete native frame. The
+    envelope additionally re-carries the frame's terminal-identity enums at their original
+    payload paths (``_preserved_evidence_identity``) so exact-turn interrupt settlement stays
+    honest for oversized frames; no other content from the original frame crosses.
     """
 
     if max_bytes < 1:
@@ -583,12 +650,14 @@ def clip_evidence_payload(payload: Mapping[str, object], *, max_bytes: int) -> M
     if len(encoded.encode("utf-8")) <= max_bytes:
         return dict(payload)
     original_bytes = len(encoded.encode("utf-8"))
+    preserved = _preserved_evidence_identity(payload)
     preview = encoded
     for _ in range(64):
         clipped: dict[str, object] = {
             "arEvidenceTruncated": True,
             "originalBytes": original_bytes,
             "preview": preview + EVIDENCE_TRUNCATION_MARKER,
+            **preserved,
         }
         if len(json.dumps(clipped, ensure_ascii=False, separators=(",", ":")).encode("utf-8")) <= (
             max_bytes

@@ -47,6 +47,7 @@ from agents_remember.serving.harness_control_models import (
     AdapterSnapshot,
     ControlIdentity,
     ControlOperationRef,
+    EvidenceFrame,
     InteractionResponse,
     LaunchSpec,
     NativeEvidenceFrame,
@@ -55,6 +56,7 @@ from agents_remember.serving.harness_control_models import (
     ReconciliationResult,
     ShutdownMode,
     SubmissionReceipt,
+    TranscriptEntry,
     clip_evidence_payload,
 )
 from agents_remember.serving.harness_control_runner import (
@@ -217,6 +219,39 @@ class _EvidenceAdapter:
             )
         )
 
+    def complete_with_codex_turn(self, request_id: str, params: Mapping[str, object]) -> None:
+        """Complete the ordinary lane as the codex adapter's ``turn/completed`` does.
+
+        Mirrors ``codex_app_server_adapter._handle_turn_completed``: a ``completed`` event bound
+        to the exact operation ref, carrying the native turn params (``turn.id``/``turn.status`` +
+        the large items body) under the reserved evidence key so the buffer clip is exercised.
+        """
+
+        request = next(item for item in self.submissions if item.request_id == request_id)
+        assert request.operation is not None
+        assert self.current is not None
+        turn = params.get("turn")
+        assert isinstance(turn, Mapping)
+        turn_id = turn.get("id")
+        assert isinstance(turn_id, str)
+        self.event_sequence += 1
+        completed = replace(self.current, activity="idle", acceptance="immediate")
+        self.events.put_nowait(
+            AdapterEvent(
+                sequence=self.event_sequence,
+                kind="completed",
+                identity=completed.identity,
+                created_at=NOW,
+                snapshot=completed,
+                operation=request.operation,
+                raw={
+                    "codexMethod": "turn/completed",
+                    "turnId": turn_id,
+                    AR_EVIDENCE_KEY: dict(params),
+                },
+            )
+        )
+
     def emit(self, kind: str, raw: Mapping[str, object], *, sequence: int | None = None) -> None:
         assert self.current is not None
         self.event_sequence += 1
@@ -234,6 +269,43 @@ class _EvidenceAdapter:
                     else None
                 ),
                 raw=dict(raw),
+            )
+        )
+
+    def emit_pi_content_ful_message_end(self, stop_reason: str, *, filler_chars: int) -> None:
+        """Emit a content-ful pi ``message_end`` exactly as ``pi_rpc_events._message_event`` does.
+
+        A content-ful message_end crosses as event kind ``transcript`` with a minted transcript
+        entry; the full native frame (``type``/``message``/``stopReason`` + content) rides the
+        reserved evidence key. ``filler_chars`` inflates the message content so the serialized
+        frame crosses the bridge's per-frame evidence clip budget when large.
+        """
+
+        assert self.current is not None
+        self.event_sequence += 1
+        frame: dict[str, object] = {
+            "type": "message_end",
+            "message": {
+                "role": "assistant",
+                "content": [{"type": "text", "text": "z" * filler_chars}],
+                "stopReason": stop_reason,
+            },
+        }
+        entry = TranscriptEntry(
+            sequence=self.event_sequence,
+            role="assistant",
+            text="final answer",
+            created_at=NOW,
+            raw={"piMessageEnd": stop_reason},
+        )
+        self.events.put_nowait(
+            AdapterEvent(
+                sequence=self.event_sequence,
+                kind="transcript",
+                identity=self.current.identity,
+                created_at=NOW,
+                transcript=(entry,),
+                raw={"piEvent": dict(frame), AR_EVIDENCE_KEY: dict(frame)},
             )
         )
 
@@ -1468,3 +1540,313 @@ class ClipHelperTests(unittest.TestCase):
     def test_clip_rejects_non_serializable_payloads(self) -> None:
         with self.assertRaises(HarnessControlError):
             clip_evidence_payload({"bad": object()}, max_bytes=128)
+
+    def test_clip_preserves_pi_message_end_stop_reason_without_content(self) -> None:
+        # 260718-CHATS-L3E R1/R2/R4: a clipped pi message_end keeps its type and stopReason enum
+        # at their original paths, and nothing else (no role, no content blocks, no message text).
+        frame = {
+            "type": "message_end",
+            "message": {
+                "role": "assistant",
+                "content": [{"type": "text", "text": "A" * 40000 + "LEAK_TAIL"}],
+                "stopReason": "aborted",
+            },
+        }
+        clipped = _obj(clip_evidence_payload(frame, max_bytes=512))
+        self.assertEqual(
+            set(clipped),
+            {"arEvidenceTruncated", "originalBytes", "preview", "type", "message"},
+        )
+        self.assertEqual(clipped["type"], "message_end")
+        self.assertEqual(clipped["message"], {"stopReason": "aborted"})
+        self.assertEqual(set(_obj(clipped["message"])), {"stopReason"})
+        serialized = json.dumps(clipped, ensure_ascii=False, separators=(",", ":"))
+        # The body never crosses: the tail sentinel is gone and only a bounded preview prefix
+        # of the content survives (the truncation-notice field), never the whole message text.
+        self.assertNotIn("LEAK_TAIL", serialized)
+        self.assertLess(serialized.count("A"), 512)
+        original_bytes = clipped["originalBytes"]
+        assert isinstance(original_bytes, int)
+        self.assertGreater(original_bytes, 40000)
+        self.assertLessEqual(len(serialized.encode("utf-8")), 512)
+
+    def test_clip_preserves_codex_turn_identity_and_status_without_content(self) -> None:
+        # 260718-CHATS-L3E R1/R3/R4: a clipped codex turn/completed keeps turn.id + turn.status
+        # (both are read by _codex_terminal_outcome) and drops the large items body.
+        params = {
+            "turn": {
+                "id": "turn-oversized-1",
+                "status": "interrupted",
+                "items": [
+                    {"id": f"item-{index}", "type": "agentMessage", "text": "B" * 400 + "LEAK_TAIL"}
+                    for index in range(200)
+                ],
+            }
+        }
+        clipped = _obj(clip_evidence_payload(params, max_bytes=512))
+        self.assertEqual(
+            set(clipped), {"arEvidenceTruncated", "originalBytes", "preview", "turn"}
+        )
+        self.assertEqual(clipped["turn"], {"id": "turn-oversized-1", "status": "interrupted"})
+        self.assertEqual(set(_obj(clipped["turn"])), {"id", "status"})
+        serialized = json.dumps(clipped, ensure_ascii=False, separators=(",", ":"))
+        self.assertNotIn("LEAK_TAIL", serialized)
+        self.assertLess(serialized.count("B"), 512)
+        self.assertLessEqual(len(serialized.encode("utf-8")), 512)
+
+    def test_clip_never_invents_absent_terminal_identity(self) -> None:
+        # A large frame with no terminal-identity fields keeps only the truncation-notice fields.
+        blob = _obj(clip_evidence_payload({"blob": "q" * 40000}, max_bytes=256))
+        self.assertEqual(set(blob), {"arEvidenceTruncated", "originalBytes", "preview"})
+        # A message_end with content but no stopReason keeps the type only: absent stays absent,
+        # the stopReason is never invented.
+        no_reason = _obj(
+            clip_evidence_payload(
+                {
+                    "type": "message_end",
+                    "message": {
+                        "role": "assistant",
+                        "content": [{"type": "text", "text": "C" * 40000}],
+                    },
+                },
+                max_bytes=256,
+            )
+        )
+        self.assertEqual(set(no_reason), {"arEvidenceTruncated", "originalBytes", "preview", "type"})
+        self.assertEqual(no_reason["type"], "message_end")
+        self.assertNotIn("message", no_reason)
+
+    def test_clip_drops_giant_identity_scalar_without_raising_or_leaking(self) -> None:
+        # 260718-CHATS-L3E Finding 1: a wire-reachable valid frame with an over-length string in a
+        # preserved path must DROP that field whole (never truncate-and-keep, which could
+        # mis-correlate at settlement) and still clip totally at the production 32 KiB budget —
+        # never raise (a raise in the bridge event loop is session-fatal), never cross the value.
+        budget = 32 * 1024
+        giant = "z" * 40000 + "GIANT_TAIL"
+        notice = {"arEvidenceTruncated", "originalBytes", "preview"}
+        cases = (
+            (
+                {
+                    "type": giant,
+                    "message": {
+                        "role": "assistant",
+                        "content": [{"type": "text", "text": "hi"}],
+                        "stopReason": "aborted",
+                    },
+                },
+                {"message": {"stopReason": "aborted"}},
+            ),
+            (
+                {
+                    "type": "message_end",
+                    "message": {
+                        "role": "assistant",
+                        "content": [{"type": "text", "text": "hi"}],
+                        "stopReason": giant,
+                    },
+                },
+                {"type": "message_end"},
+            ),
+            (
+                {"turn": {"id": giant, "status": "interrupted", "items": [{"text": "hi"}]}},
+                {"turn": {"status": "interrupted"}},
+            ),
+            (
+                {"turn": {"id": "turn-x", "status": giant, "items": [{"text": "hi"}]}},
+                {"turn": {"id": "turn-x"}},
+            ),
+        )
+        for index, (payload, expected_preserved) in enumerate(cases):
+            with self.subTest(case=index):
+                clipped = _obj(clip_evidence_payload(payload, max_bytes=budget))  # must not raise
+                self.assertEqual(clipped["arEvidenceTruncated"], True)
+                serialized = json.dumps(clipped, ensure_ascii=False, separators=(",", ":"))
+                self.assertLessEqual(len(serialized.encode("utf-8")), budget)
+                # The oversized scalar's full value never crosses (its tail sentinel is dropped).
+                self.assertNotIn("GIANT_TAIL", serialized)
+                preserved_view = {key: value for key, value in clipped.items() if key not in notice}
+                self.assertEqual(preserved_view, expected_preserved)
+        # Boundary: exactly 256 chars is preserved; 257 is dropped whole.
+        padding = {"pad": "x" * 40000}
+        kept_256 = _obj(clip_evidence_payload({"type": "t" * 256, **padding}, max_bytes=budget))
+        self.assertEqual(kept_256.get("type"), "t" * 256)
+        dropped_257 = _obj(clip_evidence_payload({"type": "t" * 257, **padding}, max_bytes=budget))
+        self.assertNotIn("type", dropped_257)
+
+
+class EvidenceTruncationSettlementIpcTests(unittest.IsolatedAsyncioTestCase):
+    """260718-CHATS-L3E R6/R8: oversized (>32 KiB) production terminal frames driven through the
+    REAL evidence path (real bridge clip at the production budget + the real ``read_control_evidence``
+    IPC surface that interrupt settlement consumes) keep the tiny identity/status enums the L3
+    settlement consumers read. The scan helpers mirror ``control.operations`` verbatim so a green
+    run here is the acceptance link for L3's ``_pi_stop_reason`` / ``_codex_terminal_outcome``.
+    """
+
+    async def _serve(
+        self, adapter: _EvidenceAdapter, identity: ControlIdentity, tmp: str
+    ) -> tuple[HarnessControlBridge, HarnessControlServer, _ControlledEntry]:
+        bridge = HarnessControlBridge(identity, adapter, clock=lambda: NOW)
+        await bridge.start(_launch(identity))
+        endpoint = LocalControlEndpoint.for_session(Path(tmp), identity)
+        server = HarnessControlServer(endpoint, bridge)
+        await server.start()
+        return bridge, server, _ControlledEntry(identity, endpoint.path)
+
+    async def _read_all_evidence(self, entry: _ControlledEntry) -> list[EvidenceFrame]:
+        descriptor = await asyncio.to_thread(read_submission_authority, entry)
+        frames: list[EvidenceFrame] = []
+        after = 0
+        for _ in range(64):
+            page = await asyncio.to_thread(
+                read_control_evidence,
+                entry,
+                after_sequence=after,
+                expected_bridge_epoch=descriptor.bridge_epoch,
+            )
+            frames.extend(page.frames)
+            if not page.truncated:
+                return frames
+            after = page.frames[-1].sequence
+        raise AssertionError("evidence paging never terminated")
+
+    async def _dispatch_operation(
+        self, entry: _ControlledEntry, adapter: _EvidenceAdapter, epoch: str, request_id: str
+    ) -> None:
+        """Submit and land one cockpit prompt so a bound operation ref exists for the completion."""
+
+        await asyncio.to_thread(
+            submit_control_prompt,
+            entry,
+            "drive one turn",
+            source="cockpit",
+            request_id=request_id,
+            expected_bridge_epoch=epoch,
+        )
+        for _ in range(400):
+            if any(item.request_id == request_id for item in adapter.submissions):
+                return
+            await asyncio.sleep(0)
+        raise AssertionError("submission never reached the adapter")
+
+    @staticmethod
+    def _pi_latest_stop_reason(frames: list[EvidenceFrame]) -> str | None:
+        """Mirror ``control.operations._pi_stop_reason``'s latest-wins scan verbatim."""
+
+        stop_reason: str | None = None
+        for frame in frames:
+            if frame.raw.get("type") != "message_end":
+                continue
+            message = frame.raw.get("message")
+            if not isinstance(message, dict):
+                continue
+            candidate = message.get("stopReason")
+            if isinstance(candidate, str) and candidate:
+                stop_reason = candidate
+        return stop_reason
+
+    @staticmethod
+    def _codex_terminal_status(frames: list[EvidenceFrame], turn_id: str) -> str | None:
+        """Mirror ``control.operations._codex_terminal_outcome``'s frame scan verbatim."""
+
+        for frame in frames:
+            if frame.kind != "completed":
+                continue
+            turn = frame.raw.get("turn")
+            if not isinstance(turn, dict) or turn.get("id") != turn_id:
+                continue
+            status = turn.get("status")
+            if status in {"interrupted", "completed", "failed"}:
+                return status
+        return None
+
+    async def test_oversized_pi_message_end_stop_survives_to_settlement_read(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            identity = _identity("l3e-pi-stop")
+            adapter = _EvidenceAdapter()
+            bridge, server, entry = await self._serve(adapter, identity, tmp)
+            try:
+                adapter.emit_pi_content_ful_message_end("stop", filler_chars=40000)
+                await _wait_for_evidence(bridge, 1)
+                frames = await self._read_all_evidence(entry)
+                self.assertEqual(len(frames), 1)
+                # The frame really did exceed the 32 KiB budget and was clipped ...
+                self.assertEqual(frames[0].raw.get("arEvidenceTruncated"), True)
+                # ... yet its stopReason survives to the exact read L3 settles "already-settled" on.
+                self.assertEqual(self._pi_latest_stop_reason(frames), "stop")
+            finally:
+                await server.close()
+                await bridge.stop("forced")
+
+    async def test_oversized_pi_message_end_aborted_survives_to_settlement_read(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            identity = _identity("l3e-pi-aborted")
+            adapter = _EvidenceAdapter()
+            bridge, server, entry = await self._serve(adapter, identity, tmp)
+            try:
+                adapter.emit_pi_content_ful_message_end("aborted", filler_chars=40000)
+                await _wait_for_evidence(bridge, 1)
+                frames = await self._read_all_evidence(entry)
+                self.assertEqual(len(frames), 1)
+                self.assertEqual(frames[0].raw.get("arEvidenceTruncated"), True)
+                # The clipped abort settles "interrupted" instead of stalling pending forever.
+                self.assertEqual(self._pi_latest_stop_reason(frames), "aborted")
+            finally:
+                await server.close()
+                await bridge.stop("forced")
+
+    async def test_clipped_final_abort_after_small_tool_use_frame_wins_at_settlement_read(
+        self,
+    ) -> None:
+        # Finding 2 facet (b): a small mid-turn frame precedes the oversized final abort. The
+        # latest-wins scan must decide on the clipped abort, never mis-settle "already-settled".
+        with tempfile.TemporaryDirectory() as tmp:
+            identity = _identity("l3e-pi-mixed")
+            adapter = _EvidenceAdapter()
+            bridge, server, entry = await self._serve(adapter, identity, tmp)
+            try:
+                adapter.emit_pi_content_ful_message_end("toolUse", filler_chars=50)
+                adapter.emit_pi_content_ful_message_end("aborted", filler_chars=40000)
+                await _wait_for_evidence(bridge, 2)
+                frames = await self._read_all_evidence(entry)
+                self.assertEqual(len(frames), 2)
+                # The small mid-turn frame crossed whole; only the final abort was clipped.
+                self.assertNotIn("arEvidenceTruncated", frames[0].raw)
+                self.assertEqual(frames[1].raw.get("arEvidenceTruncated"), True)
+                self.assertEqual(self._pi_latest_stop_reason(frames), "aborted")
+            finally:
+                await server.close()
+                await bridge.stop("forced")
+
+    async def test_oversized_codex_turn_completed_identity_survives_to_settlement_read(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            identity = _identity("l3e-codex")
+            adapter = _EvidenceAdapter()
+            bridge, server, entry = await self._serve(adapter, identity, tmp)
+            try:
+                descriptor = await asyncio.to_thread(read_submission_authority, entry)
+                await self._dispatch_operation(
+                    entry, adapter, descriptor.bridge_epoch, "l3e-codex-turn"
+                )
+                turn_id = "turn-oversized-7"
+                params = {
+                    "turn": {
+                        "id": turn_id,
+                        "status": "interrupted",
+                        "items": [
+                            {"id": f"item-{index}", "type": "agentMessage", "text": "y" * 400}
+                            for index in range(200)
+                        ],
+                    }
+                }
+                adapter.complete_with_codex_turn("l3e-codex-turn", params)
+                await _wait_for_evidence(bridge, 1)
+                frames = await self._read_all_evidence(entry)
+                completed = [frame for frame in frames if frame.kind == "completed"]
+                self.assertEqual(len(completed), 1)
+                # The turn's large items body pushed it over the budget and was clipped ...
+                self.assertEqual(completed[0].raw.get("arEvidenceTruncated"), True)
+                # ... yet turn.id (the correlation key) and turn.status both survive the read.
+                self.assertEqual(self._codex_terminal_status(frames, turn_id), "interrupted")
+            finally:
+                await server.close()
+                await bridge.stop("forced")
