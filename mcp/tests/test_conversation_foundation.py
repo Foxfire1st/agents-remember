@@ -39,8 +39,9 @@ def test_root_composes_three_owned_child_routers() -> None:
     assert library_router.prefix == "/api/harnesses/{harness_id}/conversations"
     assert control_router.prefix == "/api/terminal/{ar_session_id}"
     # 260718-CHATS-L1 filled the active shell with exactly its two owned
-    # production routes and L2 filled the library shell with its five owned
-    # routes (pinned below); the control shell stays behavior-empty.
+    # production routes, L2 filled the library shell with its five owned
+    # routes (pinned below), and L3 filled the control shell with its
+    # seventeen owned routes (pinned below).
     active_paths = {
         (route.path, tuple(sorted(route.methods or ())))
         for route in active_router.routes
@@ -50,7 +51,36 @@ def test_root_composes_three_owned_child_routers() -> None:
         ("/api/terminal/{ar_session_id}/conversation", ("GET",)),
         ("/api/terminal/{ar_session_id}/conversation/events", ("GET",)),
     }
-    assert control_router.routes == []
+    control_paths = {
+        (tuple(sorted(route.methods or ())), route.path)
+        for route in control_router.routes
+        if isinstance(route, APIRoute)
+    }
+    assert control_paths == {
+        (("POST",), "/api/terminal/{ar_session_id}/conversation/interrupt"),
+        (("POST",), "/api/terminal/{ar_session_id}/conversation/interrupt-status"),
+        (("POST",), "/api/terminal/{ar_session_id}/conversation/interrupt-reconcile"),
+        (("GET",), "/api/terminal/{ar_session_id}/operation-queue"),
+        (("POST",), "/api/terminal/{ar_session_id}/operation-queue/withdraw"),
+        (("POST",), "/api/terminal/{ar_session_id}/operation-queue/withdraw-status"),
+        (("POST",), "/api/terminal/{ar_session_id}/operation-queue/withdraw-reconcile"),
+        (
+            ("GET",),
+            "/api/terminal/{ar_session_id}/operation-queue/pending-withdrawal-recoveries",
+        ),
+        (("POST",), "/api/terminal/{ar_session_id}/operation-queue/withdraw-recovery"),
+        (("POST",), "/api/terminal/{ar_session_id}/operation-queue/withdraw-recovery-ack"),
+        (("POST",), "/api/terminal/{ar_session_id}/conversation/attachments"),
+        (("POST",), "/api/terminal/{ar_session_id}/conversation/attachments/rebind"),
+        (("GET",), "/api/terminal/{ar_session_id}/conversation/attachments/{request_id}/status"),
+        (
+            ("POST",),
+            "/api/terminal/{ar_session_id}/conversation/attachments/{request_id}/reconcile",
+        ),
+        (("POST",), "/api/terminal/{ar_session_id}/conversation/submit"),
+        (("GET",), "/api/terminal/{ar_session_id}/conversation/policy"),
+        (("GET",), "/api/terminal/{ar_session_id}/conversation/telemetry"),
+    }
     library_paths = {
         (tuple(sorted(route.methods or ())), route.path)
         for route in library_router.routes

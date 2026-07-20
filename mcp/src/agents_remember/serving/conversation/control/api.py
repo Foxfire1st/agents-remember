@@ -1,8 +1,652 @@
-"""Behavior-empty conversation control child router owned by FEUI SC4."""
+"""Registered conversation control routes (260718-CHATS-L3).
 
-from fastapi import APIRouter
+The authoritative human control surface for structured Chats: exact-turn
+interrupt, the source-aware operation queue with cockpit-only withdrawal and
+bounded recovery, typed attachment staging/rebind/submit, read-only effective
+policy, and evidence-bound telemetry. Every wire resolves the caller through
+the L0 authorization dependency, compares ``expectedBridgeEpoch`` against the
+live submission authority, and maps every typed refusal to the serving status
+idiom — raw 500s are never a routine refusal path (L0 reviewer obligation O4).
+"""
+
+from __future__ import annotations
+
+import json
+from typing import Annotated, Literal, cast
+
+from fastapi import APIRouter, File, Form, Query, Request, UploadFile
+from fastapi.responses import JSONResponse
+
+from agents_remember.errors import (
+    AuthorityError,
+    ConversationCompositionError,
+    HarnessBridgeEpochMismatchError,
+    HarnessControlError,
+)
+from agents_remember.serving.conversation.active.factories import SessionResolutionError
+from agents_remember.serving.conversation.control import (
+    attachments,
+    operations,
+    policy,
+    queue_projection,
+    telemetry,
+    withdrawals,
+)
+from agents_remember.serving.conversation.control.capabilities import (
+    control_capabilities_for,
+)
+from agents_remember.serving.conversation.control.refs import ControlRefError
+from agents_remember.serving.conversation.control.service import (
+    ControlOperationError,
+    OperationRejectedError,
+    conversation_control_service,
+)
+from agents_remember.serving.conversation.dependencies import (
+    get_conversation_runtime,
+    resolve_conversation_authorization,
+)
+from agents_remember.serving.conversation.models import (
+    ConversationSubmitRequest,
+    NonEmptyText,
+    WireModel,
+    WithdrawQueueRequest,
+)
+from agents_remember.serving.harness_control_models import MAX_SUBMIT_ASSET_BYTES
 
 router = APIRouter(
     prefix="/api/terminal/{ar_session_id}",
     tags=["structured-conversation-control"],
 )
+
+_TYPED_ERRORS = (
+    AuthorityError,
+    ConversationCompositionError,
+    HarnessBridgeEpochMismatchError,
+    HarnessControlError,
+    ControlRefError,
+    ControlOperationError,
+    SessionResolutionError,
+)
+
+EpochQuery = Annotated[str, Query(alias="expectedBridgeEpoch", min_length=1)]
+
+
+class InterruptBody(WireModel):
+    turn_id: NonEmptyText
+    request_id: NonEmptyText
+
+
+class WithdrawStatusBody(WireModel):
+    operation_ref: NonEmptyText
+    withdraw_request_id: NonEmptyText
+
+
+class RecoveryFetchBody(WireModel):
+    recovery_ref: NonEmptyText
+
+
+class RecoveryAckBody(WireModel):
+    recovery_ref: NonEmptyText
+    disposition: Literal["replace-current-draft", "keep-current-draft"]
+
+
+class RebindBody(WireModel):
+    recovery_asset_ref: NonEmptyText
+    request_id: NonEmptyText
+
+
+def _error(status_code: int, slug: str, detail: str, **extra: object) -> JSONResponse:
+    return JSONResponse(
+        content={"status": slug, "detail": detail, **extra},
+        status_code=status_code,
+    )
+
+
+def _map_typed_error(error: Exception) -> JSONResponse:
+    if isinstance(error, HarnessBridgeEpochMismatchError):
+        return _error(
+            409,
+            "bridge-epoch-mismatch",
+            str(error),
+            expectedBridgeEpoch=error.expected,
+            actualBridgeEpoch=error.actual,
+        )
+    if isinstance(error, AuthorityError):
+        return _error(403, "authorization-failed", str(error))
+    if isinstance(error, ConversationCompositionError):
+        return _error(503, "composition-unavailable", str(error))
+    if isinstance(error, (ControlRefError, ControlOperationError, SessionResolutionError)):
+        return _error(error.http_status, error.status_slug, str(error))
+    if isinstance(error, HarnessControlError):
+        return _error(503, "control-unavailable", str(error))
+    raise error
+
+
+def _dump(model: WireModel) -> dict[str, object]:
+    return model.model_dump(mode="json", by_alias=True, exclude_none=True)
+
+
+@router.post("/conversation/interrupt")
+async def conversation_interrupt(
+    ar_session_id: str,
+    expected_bridge_epoch: EpochQuery,
+    body: InterruptBody,
+    request: Request,
+) -> JSONResponse:
+    """Request one exact-turn interrupt; acknowledgement, never settlement."""
+
+    try:
+        runtime = get_conversation_runtime(request)
+        authorization = resolve_conversation_authorization(request)
+        operation = await operations.interrupt(
+            conversation_control_service(runtime),
+            authorization,
+            ar_session_id,
+            expected_bridge_epoch=expected_bridge_epoch,
+            turn_id=body.turn_id,
+            request_id=body.request_id,
+        )
+    except _TYPED_ERRORS as exc:
+        return _map_typed_error(exc)
+    return JSONResponse(
+        content=_dump(operation), status_code=operations.interrupt_http_status(operation)
+    )
+
+
+@router.post("/conversation/interrupt-status")
+async def conversation_interrupt_status(
+    ar_session_id: str,
+    expected_bridge_epoch: EpochQuery,
+    body: InterruptBody,
+    request: Request,
+) -> JSONResponse:
+    """Read one interrupt operation's current acknowledgement/settlement."""
+
+    try:
+        runtime = get_conversation_runtime(request)
+        authorization = resolve_conversation_authorization(request)
+        operation = await operations.interrupt_status(
+            conversation_control_service(runtime),
+            authorization,
+            ar_session_id,
+            expected_bridge_epoch=expected_bridge_epoch,
+            turn_id=body.turn_id,
+            request_id=body.request_id,
+            reconcile=False,
+        )
+    except _TYPED_ERRORS as exc:
+        return _map_typed_error(exc)
+    return JSONResponse(
+        content=_dump(operation), status_code=operations.interrupt_http_status(operation)
+    )
+
+
+@router.post("/conversation/interrupt-reconcile")
+async def conversation_interrupt_reconcile(
+    ar_session_id: str,
+    expected_bridge_epoch: EpochQuery,
+    body: InterruptBody,
+    request: Request,
+) -> JSONResponse:
+    """Actively re-drive a lost interrupt acknowledgement and settle."""
+
+    try:
+        runtime = get_conversation_runtime(request)
+        authorization = resolve_conversation_authorization(request)
+        operation = await operations.interrupt_status(
+            conversation_control_service(runtime),
+            authorization,
+            ar_session_id,
+            expected_bridge_epoch=expected_bridge_epoch,
+            turn_id=body.turn_id,
+            request_id=body.request_id,
+            reconcile=True,
+        )
+    except _TYPED_ERRORS as exc:
+        return _map_typed_error(exc)
+    return JSONResponse(
+        content=_dump(operation), status_code=operations.interrupt_http_status(operation)
+    )
+
+
+@router.get("/operation-queue")
+async def conversation_operation_queue(
+    ar_session_id: str,
+    expected_bridge_epoch: EpochQuery,
+    request: Request,
+) -> JSONResponse:
+    """The complete retained live queue; bodies never cross this wire."""
+
+    try:
+        runtime = get_conversation_runtime(request)
+        authorization = resolve_conversation_authorization(request)
+        projection = await queue_projection.operation_queue(
+            conversation_control_service(runtime),
+            authorization,
+            ar_session_id,
+            expected_bridge_epoch=expected_bridge_epoch,
+        )
+    except _TYPED_ERRORS as exc:
+        return _map_typed_error(exc)
+    return JSONResponse(content=_dump(projection))
+
+
+@router.post("/operation-queue/withdraw")
+async def conversation_withdraw(
+    ar_session_id: str,
+    expected_bridge_epoch: EpochQuery,
+    body: WithdrawQueueRequest,
+    request: Request,
+) -> JSONResponse:
+    """One authorized atomic cockpit-only withdrawal with bounded recovery."""
+
+    try:
+        runtime = get_conversation_runtime(request)
+        authorization = resolve_conversation_authorization(request)
+        response = await withdrawals.withdraw(
+            conversation_control_service(runtime),
+            authorization,
+            ar_session_id,
+            expected_bridge_epoch=expected_bridge_epoch,
+            operation_ref=body.operation_ref,
+            withdrawal_ref=body.withdrawal_ref,
+            withdraw_request_id=body.withdraw_request_id,
+        )
+    except _TYPED_ERRORS as exc:
+        return _map_typed_error(exc)
+    return JSONResponse(
+        content=_dump(response), status_code=withdrawals.withdraw_http_status(response)
+    )
+
+
+@router.post("/operation-queue/withdraw-status")
+async def conversation_withdraw_status(
+    ar_session_id: str,
+    expected_bridge_epoch: EpochQuery,
+    body: WithdrawStatusBody,
+    request: Request,
+) -> JSONResponse:
+    """Read one withdrawal operation; recovery bodies never cross this wire."""
+
+    try:
+        runtime = get_conversation_runtime(request)
+        authorization = resolve_conversation_authorization(request)
+        projection = await withdrawals.withdraw_status(
+            conversation_control_service(runtime),
+            authorization,
+            ar_session_id,
+            expected_bridge_epoch=expected_bridge_epoch,
+            operation_ref=body.operation_ref,
+            withdraw_request_id=body.withdraw_request_id,
+            reconcile=False,
+        )
+    except _TYPED_ERRORS as exc:
+        return _map_typed_error(exc)
+    return JSONResponse(content=_dump(projection))
+
+
+@router.post("/operation-queue/withdraw-reconcile")
+async def conversation_withdraw_reconcile(
+    ar_session_id: str,
+    expected_bridge_epoch: EpochQuery,
+    body: WithdrawStatusBody,
+    request: Request,
+) -> JSONResponse:
+    """Actively re-drive a lost withdrawal response with the same request id."""
+
+    try:
+        runtime = get_conversation_runtime(request)
+        authorization = resolve_conversation_authorization(request)
+        projection = await withdrawals.withdraw_status(
+            conversation_control_service(runtime),
+            authorization,
+            ar_session_id,
+            expected_bridge_epoch=expected_bridge_epoch,
+            operation_ref=body.operation_ref,
+            withdraw_request_id=body.withdraw_request_id,
+            reconcile=True,
+        )
+    except _TYPED_ERRORS as exc:
+        return _map_typed_error(exc)
+    return JSONResponse(content=_dump(projection))
+
+
+@router.get("/operation-queue/pending-withdrawal-recoveries")
+async def conversation_pending_recoveries(
+    ar_session_id: str,
+    expected_bridge_epoch: EpochQuery,
+    request: Request,
+) -> JSONResponse:
+    """The opaque pending-recovery discovery list; content never crosses."""
+
+    try:
+        runtime = get_conversation_runtime(request)
+        authorization = resolve_conversation_authorization(request)
+        projection = await withdrawals.pending_recoveries(
+            conversation_control_service(runtime),
+            authorization,
+            ar_session_id,
+            expected_bridge_epoch=expected_bridge_epoch,
+        )
+    except _TYPED_ERRORS as exc:
+        return _map_typed_error(exc)
+    return JSONResponse(content=_dump(projection))
+
+
+@router.post("/operation-queue/withdraw-recovery")
+async def conversation_fetch_recovery(
+    ar_session_id: str,
+    expected_bridge_epoch: EpochQuery,
+    body: RecoveryFetchBody,
+    request: Request,
+) -> JSONResponse:
+    """The authenticated exact recovery fetch; only while unacknowledged."""
+
+    try:
+        runtime = get_conversation_runtime(request)
+        authorization = resolve_conversation_authorization(request)
+        recovery = await withdrawals.fetch_recovery(
+            conversation_control_service(runtime),
+            authorization,
+            ar_session_id,
+            expected_bridge_epoch=expected_bridge_epoch,
+            recovery_ref=body.recovery_ref,
+        )
+    except _TYPED_ERRORS as exc:
+        return _map_typed_error(exc)
+    return JSONResponse(content=_dump(recovery))
+
+
+@router.post("/operation-queue/withdraw-recovery-ack")
+async def conversation_ack_recovery(
+    ar_session_id: str,
+    expected_bridge_epoch: EpochQuery,
+    body: RecoveryAckBody,
+    request: Request,
+) -> JSONResponse:
+    """Record the draft disposition and permit raw-content disposal."""
+
+    try:
+        runtime = get_conversation_runtime(request)
+        authorization = resolve_conversation_authorization(request)
+        projection = await withdrawals.acknowledge_recovery(
+            conversation_control_service(runtime),
+            authorization,
+            ar_session_id,
+            expected_bridge_epoch=expected_bridge_epoch,
+            recovery_ref=body.recovery_ref,
+            disposition=body.disposition,
+        )
+    except _TYPED_ERRORS as exc:
+        return _map_typed_error(exc)
+    return JSONResponse(content=_dump(projection))
+
+
+@router.post("/conversation/attachments")
+async def conversation_stage_attachments(
+    ar_session_id: str,
+    expected_bridge_epoch: EpochQuery,
+    request: Request,
+    request_id: Annotated[str, Form(alias="requestId")],
+    metadata: Annotated[str | None, Form()] = None,
+    assets: Annotated[list[UploadFile] | None, File()] = None,
+) -> JSONResponse:
+    """Stage and bind typed caller uploads; idempotent under the same content."""
+
+    try:
+        runtime = get_conversation_runtime(request)
+        authorization = resolve_conversation_authorization(request)
+        service = conversation_control_service(runtime)
+        entry = service.resolve_entry(ar_session_id)
+        epoch = await service.verify_epoch(entry, expected_bridge_epoch)
+        snapshot = await service.live_snapshot(entry)
+        identity = service.build_identity(entry, bridge_epoch=epoch, snapshot=snapshot)
+        capabilities = control_capabilities_for(identity.harness_id, snapshot).attachments
+        uploads = await _parse_uploads(assets or [], metadata)
+        answer = await attachments.stage(
+            service,
+            authorization,
+            ar_session_id,
+            expected_bridge_epoch=expected_bridge_epoch,
+            request_id=request_id,
+            kind_capabilities={
+                "image": capabilities.image,
+                "file": capabilities.file,
+                "resource": capabilities.resource,
+            },
+            uploads=uploads,
+        )
+    except _TYPED_ERRORS as exc:
+        return _map_typed_error(exc)
+    return JSONResponse(
+        content={
+            "operation": _dump(answer.operation),
+            "receipts": [_dump(receipt) for receipt in answer.receipts],
+        }
+    )
+
+
+@router.post("/conversation/attachments/rebind")
+async def conversation_rebind_attachment(
+    ar_session_id: str,
+    expected_bridge_epoch: EpochQuery,
+    body: RebindBody,
+    request: Request,
+) -> JSONResponse:
+    """Exchange one authorized recovery asset for a new one-use staged asset."""
+
+    try:
+        runtime = get_conversation_runtime(request)
+        authorization = resolve_conversation_authorization(request)
+        answer = await attachments.rebind(
+            conversation_control_service(runtime),
+            authorization,
+            ar_session_id,
+            expected_bridge_epoch=expected_bridge_epoch,
+            recovery_asset_ref=body.recovery_asset_ref,
+            request_id=body.request_id,
+        )
+    except _TYPED_ERRORS as exc:
+        return _map_typed_error(exc)
+    return JSONResponse(
+        content={
+            "operation": _dump(answer.operation),
+            "receipts": [_dump(receipt) for receipt in answer.receipts],
+        }
+    )
+
+
+@router.get("/conversation/attachments/{request_id}/status")
+async def conversation_attachment_status(
+    ar_session_id: str,
+    request_id: str,
+    expected_bridge_epoch: EpochQuery,
+    request: Request,
+) -> JSONResponse:
+    """Read one attachment operation's semantic lifecycle projection."""
+
+    try:
+        runtime = get_conversation_runtime(request)
+        authorization = resolve_conversation_authorization(request)
+        projection = await attachments.attachment_status(
+            conversation_control_service(runtime),
+            authorization,
+            ar_session_id,
+            expected_bridge_epoch=expected_bridge_epoch,
+            request_id=request_id,
+            reconcile=False,
+        )
+    except _TYPED_ERRORS as exc:
+        return _map_typed_error(exc)
+    return JSONResponse(content=_dump(projection))
+
+
+@router.post("/conversation/attachments/{request_id}/reconcile")
+async def conversation_attachment_reconcile(
+    ar_session_id: str,
+    request_id: str,
+    expected_bridge_epoch: EpochQuery,
+    request: Request,
+) -> JSONResponse:
+    """Advance one attachment operation from the retained timeline."""
+
+    try:
+        runtime = get_conversation_runtime(request)
+        authorization = resolve_conversation_authorization(request)
+        projection = await attachments.attachment_status(
+            conversation_control_service(runtime),
+            authorization,
+            ar_session_id,
+            expected_bridge_epoch=expected_bridge_epoch,
+            request_id=request_id,
+            reconcile=True,
+        )
+    except _TYPED_ERRORS as exc:
+        return _map_typed_error(exc)
+    return JSONResponse(content=_dump(projection))
+
+
+@router.post("/conversation/submit")
+async def conversation_submit(
+    ar_session_id: str,
+    body: ConversationSubmitRequest,
+    request: Request,
+) -> JSONResponse:
+    """The typed composer submit; disposition ``next`` over the AR FIFO."""
+
+    try:
+        runtime = get_conversation_runtime(request)
+        authorization = resolve_conversation_authorization(request)
+        answer = await attachments.submit(
+            conversation_control_service(runtime),
+            authorization,
+            ar_session_id,
+            body=body,
+        )
+    except _TYPED_ERRORS as exc:
+        return _map_typed_error(exc)
+    status_code = 200
+    if answer.acceptance == "unknown":
+        status_code = 202
+    elif answer.acceptance in {"rejected", "unsupported"}:
+        status_code = 422
+    content: dict[str, object] = {
+        "requestId": answer.request_id,
+        "acceptance": answer.acceptance,
+        "submittedAt": answer.submitted_at,
+        "bridgeEpoch": answer.bridge_epoch,
+    }
+    if answer.operation_ref is not None:
+        content["operationRef"] = answer.operation_ref
+    if answer.attachment is not None:
+        content["attachment"] = _dump(answer.attachment)
+    if answer.detail is not None:
+        content["detail"] = answer.detail
+    return JSONResponse(content=content, status_code=status_code)
+
+
+@router.get("/conversation/policy")
+async def conversation_policy(
+    ar_session_id: str,
+    expected_bridge_epoch: EpochQuery,
+    request: Request,
+) -> JSONResponse:
+    """The read-only effective policy evidence; no mutation surface exists."""
+
+    try:
+        runtime = get_conversation_runtime(request)
+        authorization = resolve_conversation_authorization(request)
+        projection = await policy.conversation_policy(
+            conversation_control_service(runtime),
+            authorization,
+            ar_session_id,
+            expected_bridge_epoch=expected_bridge_epoch,
+        )
+    except _TYPED_ERRORS as exc:
+        return _map_typed_error(exc)
+    return JSONResponse(content=_dump(projection))
+
+
+@router.get("/conversation/telemetry")
+async def conversation_telemetry(
+    ar_session_id: str,
+    expected_bridge_epoch: EpochQuery,
+    request: Request,
+) -> JSONResponse:
+    """The evidence-bound telemetry projection; missing data stays absent."""
+
+    try:
+        runtime = get_conversation_runtime(request)
+        authorization = resolve_conversation_authorization(request)
+        projection = await telemetry.conversation_telemetry(
+            conversation_control_service(runtime),
+            authorization,
+            ar_session_id,
+            expected_bridge_epoch=expected_bridge_epoch,
+        )
+    except _TYPED_ERRORS as exc:
+        return _map_typed_error(exc)
+    return JSONResponse(content=_dump(projection))
+
+
+async def _parse_uploads(
+    assets: list[UploadFile],
+    metadata: str | None,
+) -> list[attachments.StagedUpload]:
+    metas = _parse_metadata_array(metadata)
+    if len(metas) not in {0, len(assets)}:
+        raise OperationRejectedError(
+            "attachment metadata must describe every uploaded file"
+        )
+    uploads: list[attachments.StagedUpload] = []
+    for position, upload in enumerate(assets):
+        meta = metas[position] if metas else {}
+        uploads.append(await _upload_for(upload, meta, position=position))
+    return uploads
+
+
+def _parse_metadata_array(metadata: str | None) -> list[dict[str, object]]:
+    """The optional parallel metadata array; every entry must be an object."""
+
+    if metadata is None:
+        return []
+    try:
+        parsed = json.loads(metadata)
+    except json.JSONDecodeError as exc:
+        raise OperationRejectedError(
+            "attachment metadata must be a JSON array"
+        ) from exc
+    if not isinstance(parsed, list) or not all(isinstance(item, dict) for item in parsed):
+        raise OperationRejectedError(
+            "attachment metadata must be a JSON array of objects"
+        )
+    return parsed
+
+
+async def _upload_for(
+    upload: UploadFile, meta: dict[str, object], *, position: int
+) -> attachments.StagedUpload:
+    """One byte-bounded upload with its declared kind, name, and alt."""
+
+    kind = meta.get("kind")
+    if kind not in {"image", "file", "resource"}:
+        raise OperationRejectedError(
+            "each staged asset requires its attachment kind"
+        )
+    name = meta.get("name")
+    if not isinstance(name, str) or not name:
+        name = upload.filename or f"asset-{position + 1}"
+    alt = meta.get("alt")
+    if alt is not None and (not isinstance(alt, str) or not alt):
+        raise OperationRejectedError("asset alt text must be non-empty text")
+    data = await upload.read(MAX_SUBMIT_ASSET_BYTES + 1)
+    return attachments.StagedUpload(
+        kind=cast(Literal["image", "file", "resource"], kind),
+        name=name,
+        mime_type=upload.content_type or "",
+        alt=alt,
+        data=data,
+    )
+
+
+__all__ = ["router"]

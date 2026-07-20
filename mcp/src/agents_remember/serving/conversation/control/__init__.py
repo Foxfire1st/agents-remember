@@ -1,1 +1,1 @@
-"""Authoritative structured-conversation control route."""
+"""Authoritative structured-conversation control surface (260718-CHATS-L3)."""
