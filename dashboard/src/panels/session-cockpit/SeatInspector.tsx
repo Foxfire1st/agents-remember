@@ -47,8 +47,10 @@ const tab = css({
   borderColor: "grid",
   borderRadius: "2px",
   cursor: "pointer",
+  // V2 — the label truncates with an ellipsis instead of wrapping mid-word (`Capabil/ities`).
   overflow: "hidden",
   textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
   _hover: { color: "amber", borderColor: "amber" },
   _focusVisible: { outline: "1px solid token(colors.amber)", outlineOffset: "1px" },
   "&[aria-selected='true']": { color: "ink", borderColor: "cyan", background: "bg" },
@@ -100,6 +102,7 @@ export function SeatInspector({
             onClick={() => setActive(item.id)}
             onKeyDown={(event) => moveTab(event, index)}
             data-testid={`inspector-tab-${item.id}`}
+            title={item.label}
           >
             {item.label}
           </button>

@@ -13,6 +13,7 @@ import {
   startCatalogReconciler,
 } from "../data/catalogPoll";
 import { clientMatchesServingBuild } from "../data/buildIdentity";
+import { humanizeDuration } from "../data/conversation/format";
 import { createGatedSeatEventApplier } from "../data/seatEvents";
 import { sessionCockpitStore } from "../data/sessionCockpitStore";
 import { selectQueue } from "../data/selectors";
@@ -104,15 +105,22 @@ const title = css({
   fontSize: "0.9rem",
   letterSpacing: "0.18em",
   color: "amber",
+  // V6 — the brand is one lockup, never `AGENTS REMEMBER ·/MISSION/CONTROL` broken across lines.
+  whiteSpace: "nowrap",
   textShadow: "0 0 calc(6px * var(--glow-strength)) oklch(0.82 0.16 75 / 0.5)",
 });
 const statusRow = css({
   display: "flex",
   alignItems: "center",
+  // V6 — the top bar wraps BETWEEN fact-chips (each of which is nowrap), never mid-phrase; the
+  // cluster reflows onto a second line as a whole instead of shattering into red fragments.
+  flexWrap: "wrap",
+  justifyContent: "flex-end",
   gap: "0.9rem",
+  rowGap: "0.3rem",
   fontSize: "0.78rem",
 });
-const dim = css({ color: "muted" });
+const dim = css({ color: "muted", whiteSpace: "nowrap" });
 const reloadClient = css({
   font: "inherit",
   fontSize: "0.7rem",
@@ -181,7 +189,7 @@ const railToggleButton = cva({
   },
 });
 const caution = cva({
-  base: { letterSpacing: "0.06em", color: "muted" },
+  base: { letterSpacing: "0.06em", color: "muted", whiteSpace: "nowrap" },
   variants: {
     sev: {
       clear: { color: "mint" },
@@ -192,7 +200,7 @@ const caution = cva({
   },
 });
 const connBadge = cva({
-  base: { fontWeight: "600", letterSpacing: "0.1em" },
+  base: { fontWeight: "600", letterSpacing: "0.1em", whiteSpace: "nowrap" },
   variants: {
     state: {
       connecting: { color: "amber" },
@@ -624,14 +632,11 @@ function ServingBuildStamp() {
   if (!build) return null;
   const clientCurrent = clientMatchesServingBuild(build);
   const booted = new Date(build.bootedAt);
+  // V15 — "up" reads as an uptime, so show a humanized duration (one time format in the bar); the
+  // absolute start stamp stays in the tooltip below. Removes the bar's second, 12h clock format.
   const bootLabel = Number.isNaN(booted.getTime())
     ? build.bootedAt
-    : booted.toLocaleString(undefined, {
-        month: "short",
-        day: "numeric",
-        hour: "2-digit",
-        minute: "2-digit",
-      });
+    : humanizeDuration(Date.now() - booted.getTime());
   return (
     <>
       <span
@@ -664,10 +669,12 @@ function ServingBuildStamp() {
 function SupervisorHeartbeatBadge() {
   const heartbeat = useDashboard((s) => s.supervisorHeartbeat);
   if (!heartbeat || heartbeat.lastTickAt === null) return null;
-  const ageMinutes = heartbeat.ageSeconds !== null ? heartbeat.ageSeconds / 60 : null;
+  // R5/A4 — humanize the age (no raw `9512.1m`): the two most-significant units read as human time.
+  const age =
+    heartbeat.ageSeconds !== null ? humanizeDuration(heartbeat.ageSeconds * 1000) : null;
   const label =
-    ageMinutes !== null
-      ? `supervisor ${heartbeat.stale ? "stale" : "ok"} ${ageMinutes.toFixed(1)}m`
+    age !== null
+      ? `supervisor ${heartbeat.stale ? "stale" : "ok"} ${age}`
       : "supervisor stale";
   const duration =
     heartbeat.lastSweepDurationSeconds !== null
@@ -676,7 +683,9 @@ function SupervisorHeartbeatBadge() {
   const backlog = `${heartbeat.redeliverableInboxCount}/${heartbeat.pendingInboxCount}`;
   return (
     <span
-      className={heartbeat.stale ? caution({ sev: "alarm" }) : dim}
+      // R5/B9 — a long-stale supervisor degrades to a QUIET-distinct amber (warn), never the pulsing
+      // cried-wolf red: six-day staleness is expected for an idle workspace, not a fault to alarm on.
+      className={heartbeat.stale ? caution({ sev: "warn" }) : dim}
       data-testid="supervisor-heartbeat"
       title={`Supervisor last ticked ${heartbeat.lastTickAt}; staleness cutoff ${heartbeat.staleCutoffSeconds}s; redeliverable/pending inbox ${backlog}; last sweep ${duration}`}
     >
@@ -697,12 +706,21 @@ function TopBar() {
     <header className={topbar}>
       <h1 className={title}>AGENTS REMEMBER · MISSION CONTROL</h1>
       <div className={statusRow}>
-        <span className={caution({ sev: topSeverity })} data-testid="caution">
-          ⚠ {queue.length} waiting
-        </span>
+        {/* RV-4/R4 — a reassurance zero wearing an alarm glyph is a lie: render the waiting chip only
+            when something actually waits. An empty queue simply shows nothing (absence = clear). */}
+        {queue.length > 0 ? (
+          <span className={caution({ sev: topSeverity })} data-testid="caution">
+            ⚠ {queue.length} waiting
+          </span>
+        ) : null}
         {metrics ? (
-          <span className={dim}>
-            {metrics.runningCount} running · {metrics.blockedCount} blocked · {metrics.totalTokens}{" "}
+          // R7 — explicit scope: these are LIFECYCLE/task counts, a different authority from the Chats
+          // rail's chat-seat states. Labeling the scope keeps one fact in one home (no backend change).
+          <span
+            className={dim}
+            title="Lifecycle task counts (not Chats seats) — chat-seat working/waiting/failed states live in the Chats rail's attention strip."
+          >
+            tasks {metrics.runningCount} running · {metrics.blockedCount} blocked · {metrics.totalTokens}{" "}
             tok
           </span>
         ) : null}

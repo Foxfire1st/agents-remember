@@ -7,6 +7,7 @@
 
   --bg: oklch(0.16 0.02 250);
   --bg-panel: oklch(0.2 0.02 250);
+  --well: #070b0f; /* terminal well — the xterm pty inset, shared by the structured chat stage (FB7.1) */
   --ink: oklch(0.92 0.03 90);
   --grid: oklch(0.3 0.02 250);
   --muted: oklch(0.7 0.02 250); /* muted control text — mirrors panda.config's `muted` token */

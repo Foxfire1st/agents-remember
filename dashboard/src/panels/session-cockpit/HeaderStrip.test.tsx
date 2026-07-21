@@ -37,9 +37,11 @@ describe("HeaderStrip (R10)", () => {
     expect(getByTestId("header-dot").getAttribute("data-state")).toBe("working");
   });
 
-  it("freshness honesty (R15): 'ws —' with no pane, real state + quiet age when known, sweep bound in the tooltip", () => {
+  it("freshness honesty (R15/RV-R3): the ws marker collapses when no pane reports a state, real state + quiet age when known, sweep bound in the tooltip", () => {
     const bare = render(<HeaderStrip session={worker} cockpit={undefined} />);
-    expect(bare.getByTestId("header-diagnostics").textContent).toContain("ws —");
+    // RV/R3 — `ws —` on a seat with no pane is an em-dash placeholder; it collapses (is omitted)
+    // rather than rendering a bare dash on every seat. The sweep-bound tooltip still explains freshness.
+    expect(bare.getByTestId("header-diagnostics").textContent).not.toContain("ws —");
     expect(bare.getByTestId("header-diagnostics").textContent).not.toContain("quiet");
     expect(bare.getByTestId("header-diagnostics").getAttribute("title")).toContain("10 s");
     bare.unmount();

@@ -34,7 +34,7 @@ const fact = css({
   "& > dd": {
     margin: "0",
     minWidth: "0",
-    overflowWrap: "anywhere",
+    overflowWrap: "break-word",
     color: "ink",
   },
 });

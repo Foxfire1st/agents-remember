@@ -75,6 +75,16 @@ export function truncateMiddle(value: string, max = 48): string {
   return `${value.slice(0, head)}…${value.slice(value.length - tail)}`;
 }
 
+/**
+ * A short display id (R6/B10): a long ULID/UUID collapses to its distinguishing suffix (`…ZKCZEP`)
+ * so the rail/chrome never leaks a 26-char raw id; short ids pass through unchanged. The caller
+ * attaches the full value as a `title`/tooltip so it stays reachable (and copyable).
+ */
+export function shortId(id: string, tail = 6): string {
+  if (id.length <= 12) return id;
+  return `…${id.slice(id.length - tail)}`;
+}
+
 /** A terse, lowercase, humanized harness label for chips (A8). */
 export function harnessLabel(harnessId: string): string {
   switch (harnessId) {

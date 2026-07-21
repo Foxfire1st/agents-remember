@@ -159,8 +159,12 @@ test("Chats owns responsive inspector intent, inert separators, keyboard resize,
   );
   await expect(page.getByTestId("sessions-inspector")).toBeVisible();
 
-  // A deliberate close cancels recovery. The collapsed handle cannot reopen via keyboard.
-  await toggle.click();
+  // A deliberate close cancels recovery. Activate the toggle via keyboard (as above at the first
+  // toggle): the dev-only ScenarioPlayer caption is a fixed overlay across the bottom StatusLine, so a
+  // raw pointer click on the toggle is intercepted by that dev harness element (never present in the
+  // real app). focus+Enter exercises the identical collapse path and is what this test already uses.
+  await toggle.focus();
+  await page.keyboard.press("Enter");
   await expect(toggle).toHaveAttribute("aria-expanded", "false");
   await expect
     .poll(() =>
@@ -509,9 +513,10 @@ test("sessions scenario: queued set promotes only after turn-ended readback", as
     "queued effort change applied — now max",
     { timeout: 7_000 },
   );
-  await expect(page.getByTestId("status-pending-sets")).toContainText(
-    "pending sets 0/2",
-  );
+  // L5P R4 — a healthy zero is a reassurance zero: once the queued set applies and nothing is
+  // pending, the `pending sets` chip collapses entirely (it renders only while pending > 0). The
+  // promotion itself is proven by the polite announcement above and the trigger/ledger below.
+  await expect(page.getByTestId("status-pending-sets")).toHaveCount(0);
   await expect(page.getByTestId("model-effort-trigger-effort")).toHaveText(
     "max",
   );
@@ -982,4 +987,95 @@ test("sessions scenario: loaded status-text tokens meet WCAG AA on both cockpit 
   await expect(page.getByTestId("rail-status-scout")).toHaveText("failed");
   await expect(page.getByTestId("rail-status-worker-tui")).toHaveText("input?");
   await expect(page.getByTestId("rail-status-worker-l4")).toHaveText("working");
+});
+
+// 260718-CHATS-L5P R1/R2 + RV-2 geometry regression. The original crush (`co/nf/ir/m` letter columns,
+// `tu…` chips) was fixed at 1440, but the fix's rigidity (chip flexShrink:0 + buttons flex:none)
+// regressed the SAME row at ≤1100 into AMPUTATION: End laid out past the `overflow:hidden` aside
+// (unreachable at 1100), armed confirm/cancel invisible hundreds of px off the 900 overlay rail
+// (the destructive flow could not complete), cancel clipped ~20px even at 1440. The row is now a
+// wrap-capable label-group / action-group layout: the action group wraps whole BELOW the label at
+// narrow rails, the elidable title/copy yield, and the status chip is dropped while armed. This pins
+// the acceptance the leaf actually promised — "never crush at ANY rail width" — at four widths:
+// the confirm/cancel are ALWAYS single-line AND fully inside the aside (reachable), never clipped,
+// letter-wrapped, or overflowing.
+async function reopenRailIfCollapsed(page: import("@playwright/test").Page) {
+  const reopen = page.getByTestId("sessions-reopen-rail");
+  if ((await reopen.count()) > 0) {
+    await reopen.focus();
+    await page.keyboard.press("Enter");
+    await page.waitForTimeout(250);
+  }
+}
+
+async function assertArmedRowContained(
+  page: import("@playwright/test").Page,
+  label: string,
+) {
+  const rail = await page.getByTestId("session-rail").boundingBox();
+  expect(rail, `${label}: rail visible`).not.toBeNull();
+  const railRight = rail!.x + rail!.width;
+
+  // Before arming: the chip shows its whole word, never a two-letter remnant (R2).
+  await expect(page.getByTestId("rail-status-architect")).toHaveText("turn-ended");
+
+  // Arm the inline confirm (injects the long `end … — kills …` copy that used to win the flex fight).
+  await page.getByTestId("rail-end-architect").click();
+  const confirm = page.getByTestId("rail-end-execute-architect");
+  const cancel = page.getByTestId("rail-end-cancel-architect");
+  await expect(confirm).toBeVisible();
+  await expect(cancel).toBeVisible();
+  const confirmBox = (await confirm.boundingBox())!;
+  const cancelBox = (await cancel.boundingBox())!;
+  expect(confirmBox, `${label}: confirm box`).not.toBeNull();
+  expect(cancelBox, `${label}: cancel box`).not.toBeNull();
+
+  // Single mono line (the crush blew these to 44-54px tall).
+  expect(confirmBox.height, `${label}: confirm single-line`).toBeLessThanOrEqual(24);
+  expect(cancelBox.height, `${label}: cancel single-line`).toBeLessThanOrEqual(24);
+  // Whole controls, never the ~28/14px letter columns.
+  expect(confirmBox.width, `${label}: confirm whole`).toBeGreaterThanOrEqual(40);
+  expect(cancelBox.width, `${label}: cancel whole`).toBeGreaterThanOrEqual(34);
+  // REACHABLE: fully inside the aside — never amputated past the overflow:hidden edge (RV-2).
+  expect(confirmBox.x, `${label}: confirm left in rail`).toBeGreaterThanOrEqual(rail!.x - 1);
+  expect(confirmBox.x + confirmBox.width, `${label}: confirm right in rail`).toBeLessThanOrEqual(railRight + 1);
+  expect(cancelBox.x, `${label}: cancel left in rail`).toBeGreaterThanOrEqual(rail!.x - 1);
+  expect(cancelBox.x + cancelBox.width, `${label}: cancel right in rail`).toBeLessThanOrEqual(railRight + 1);
+  // RV-2 — the status chip is dropped while armed (the confirm copy carries the state), so the two
+  // controls always fit inside the rail.
+  await expect(page.getByTestId("rail-status-architect")).toHaveCount(0);
+
+  // Restore for any following assertion on this page.
+  await cancel.click();
+}
+
+for (const width of [1440, 1100, 900]) {
+  test(`R1/R2/RV-2 — End-confirm controls stay single-line and reachable at ${width}px`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width, height: 900 });
+    await page.goto(scenarioUrl("sessions-fleet-12"));
+    await expect(page.getByTestId("session-rail")).toBeVisible();
+    await reopenRailIfCollapsed(page);
+    await assertArmedRowContained(page, `${width}px`);
+  });
+}
+
+test("R1/R2/RV-2 — End-confirm controls stay reachable at the rail's minimum width (collapse threshold)", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto(scenarioUrl("sessions-fleet-12"));
+  await expect(page.getByTestId("session-rail")).toBeVisible();
+  // Drag the rail separator to the far left → it snaps to the 12% minimum (~169px @1440), the
+  // narrowest a visible rail ever gets before it snaps fully collapsed. This is the tightest regime.
+  const handle = page.getByTestId("sessions-handle-rail");
+  const hb = (await handle.boundingBox())!;
+  await page.mouse.move(hb.x + hb.width / 2, hb.y + hb.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(2, hb.y + hb.height / 2, { steps: 20 });
+  await page.mouse.up();
+  await page.waitForTimeout(300);
+  await reopenRailIfCollapsed(page); // if the drag tipped it into full collapse, reopen to the min
+  await assertArmedRowContained(page, "min-rail");
 });

@@ -13,7 +13,9 @@ import { css } from "../../../../styled-system/css";
 const prose = css({
   minInlineSize: "0",
   maxInlineSize: "100%",
-  overflowWrap: "anywhere",
+  // V10 — break-word (not anywhere): only break a token when it would otherwise overflow, so
+  // ordinary prose keeps whole-word wrapping instead of splitting mid-word (`Be bri/ef.`).
+  overflowWrap: "break-word",
   fontSize: "0.8rem",
   lineHeight: "1.5",
   color: "ink",
@@ -26,10 +28,13 @@ const prose = css({
     marginBlock: "0.4rem 0.2rem",
     color: "ink",
   },
-  "& a": { color: "cyan", textDecoration: "underline", overflowWrap: "anywhere" },
+  "& a": { color: "cyan", textDecoration: "underline", overflowWrap: "break-word" },
   "& code": {
     fontFamily: "mono",
     fontSize: "0.76rem",
+    // V10 — inline code is one unbreakable token: never split it across lines (`using l/s`).
+    // A pathologically long inline token is clipped by the surface scroller, not wrapped mid-word.
+    whiteSpace: "nowrap",
     background: "color-mix(in oklch, token(colors.grid) 40%, transparent)",
     paddingInline: "0.2rem",
     borderRadius: "2px",

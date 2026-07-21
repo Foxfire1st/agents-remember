@@ -111,6 +111,24 @@
 
 
 
+/* RV-1 — @webtui/css base sets `body,html { word-break: break-all }` (it lands in the `webtui`
+   layer). `word-break: break-all` permits a break between ANY two characters regardless of
+   `overflow-wrap`, so every component-level overflow-wrap patch was inert in render (Inspector
+   headers/values, the rail footer, the keyboard-overlay footer, and prose all still broke mid-word:
+   `CAPABILI/TIES`, `thi/s`, `termi/nal`, `Be bri/ef`). Neutralize it once at the app root — this
+   unlayered rule wins over webtui's layered one — with break-word as the intended overflow policy.
+   Raw-id / hash spans that WANT character breaking carry their own explicit `word-break: break-all`
+   (a direct rule on the span overrides this inherited default, so they are unaffected).
+   `[data-view="sessions"]` is included because postcss-prefix-selector rewrites webtui's `body,html`
+   rule onto the cockpit scope root at build time, so the sessions view carries its OWN break-all that
+   an html/body override alone does not reach; descendants inherit `normal` from here. */
+html,
+body,
+[data-view="sessions"] {
+  word-break: normal;
+  overflow-wrap: break-word;
+}
+
 /* Determinism (D5, note 15): freeze every animation + transition so screenshots and visual
    assertions are stable. Set via ?effects=off or the calm-cockpit toggle (main.tsx). Unlayered +
    !important so it always wins over the effects layer. */

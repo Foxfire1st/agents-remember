@@ -70,6 +70,7 @@ import {
   stageBelowPtyFloor,
 } from "../../data/sessionLayout";
 import { useSessions } from "../../data/sessions";
+import { shortId } from "../../data/conversation/format";
 import { useDashboard } from "../../data/store";
 import type { AgentPickupNode, TaskDocNode } from "../../types/projection";
 import { CockpitLiveRegions } from "./CockpitLiveRegions";
@@ -393,9 +394,13 @@ export function SessionsView({
   // R9 smart-default focus (never an empty landing) + F17 focus handoff. An extant landed row
   // remains deliberately inspectable; once the focused row is actually removed (for example by
   // landed cleanup), focus must move to the smart live default instead of pointing at nothing.
-  const lastFocusRef = useRef<{ id: string | null; status: string }>({
+  // R6 — remember the last-known human LABEL of the focused seat too, so the focus-handoff banner
+  // names the seat the operator knows (`l5p-reverify`) instead of leading with its raw UUID once the
+  // row is gone (its label is no longer in `sessions` at handoff time).
+  const lastFocusRef = useRef<{ id: string | null; status: string; label: string | null }>({
     id: null,
     status: "none",
+    label: null,
   });
   useEffect(() => {
     const previous = lastFocusRef.current;
@@ -423,7 +428,7 @@ export function SessionsView({
             ? "ended"
             : "retired";
       setHandoff(
-        `${current?.label ?? previous.id} ${word}${why ? ` — ${why}` : ""} · focus handed off`,
+        `${current?.label ?? previous.label ?? shortId(previous.id)} ${word}${why ? ` — ${why}` : ""} · focus handed off`,
       );
       // Retire residuals are NOT captured here: the focus-independent sweep
       // (startRetireResidualSweep) owns that for every row, focused or not (review F1).
@@ -441,9 +446,14 @@ export function SessionsView({
       const next = smartDefaultFocus(sessions);
       if (next !== null) focusSession(next);
     }
+    const nextFocusedId = sessionCockpitStore.getState().focusedSessionId;
     lastFocusRef.current = {
-      id: sessionCockpitStore.getState().focusedSessionId,
+      id: nextFocusedId,
       status,
+      label: nextFocusedId
+        ? (sessions.find((session) => session.id === nextFocusedId)?.label ??
+          (nextFocusedId === previous.id ? previous.label : null))
+        : null,
     };
   }, [
     activeSessionId,
@@ -1006,7 +1016,11 @@ export function SessionsView({
         >
           <aside
             className={cx(pane, "sessions__rail")}
-            style={railCollapsed ? { visibility: "hidden" } : undefined}
+            // V11 — a collapsed rail leaves NO residual sliver: display:none removes the aside's own
+            // padding/border box (~21px) entirely, so the 0px panel is truly empty, not a dead strip.
+            // The drag min stays at RAIL_MIN_PERCENT (12%); below it the panel snaps fully collapsed and
+            // the ☰ rail chip (StatusLine) plus the in-place resize handle are the reopen affordances.
+            style={railCollapsed ? { display: "none" } : undefined}
             aria-hidden={railCollapsed}
             data-region="rail"
             data-testid="sessions-rail"

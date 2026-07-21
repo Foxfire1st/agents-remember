@@ -16,7 +16,7 @@ const host = css({
   minHeight: "0",
   minWidth: "0",
   padding: "0.35rem 0.5rem",
-  background: "#070b0f",
+  background: "well",
   borderWidth: "1px",
   borderStyle: "solid",
   borderColor: "grid",

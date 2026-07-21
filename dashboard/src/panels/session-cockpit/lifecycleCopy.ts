@@ -16,7 +16,10 @@ export function terminateConfirmCopy(session: OpenSession): string {
   const leaf = session.leafKey
     ? ` · leaf ${leafIdFromKey(session.leafKey)}`
     : "";
-  return `end ${session.label}${leaf} · state ${state} — kills the tmux session; transcripts are kept`;
+  // R1 — an unclassified seat's state word is itself an em-dash; joining it before the "— kills"
+  // consequence dash printed "state — —". Drop the empty state clause so the dashes never collide.
+  const stateClause = state === "—" ? "" : ` · state ${state}`;
+  return `end ${session.label}${leaf}${stateClause} — kills the tmux session; transcripts are kept`;
 }
 
 /**

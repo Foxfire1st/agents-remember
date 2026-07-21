@@ -9,15 +9,11 @@ import { MarkdownBlock } from "./MarkdownBlock";
 
 const wrap = css({ display: "grid", gap: "0.15rem", minWidth: "0", fontSize: "0.72rem" });
 const line = css({ display: "flex", gap: "0.4rem", alignItems: "baseline", minWidth: "0" });
+// FB7.4/A8 — a turn boundary is a dim lowercase flow line (`· turn complete`), not a boxed uppercase
+// web chip. Color still carries meaning but the word is always present (tone class sets the color).
 const tagBase = css({
   flex: "none",
-  fontSize: "0.6rem",
-  letterSpacing: "0.05em",
-  textTransform: "uppercase",
-  borderWidth: "1px",
-  borderStyle: "solid",
-  borderRadius: "2px",
-  paddingInline: "0.25rem",
+  fontSize: "0.68rem",
 });
 const tone = {
   neutral: css({ color: "muted", borderColor: "grid" }),
@@ -52,7 +48,7 @@ export function TurnResultItem({ item }: { item: ConversationItem }) {
   return (
     <div className={wrap} data-testid="conversation-turn-result" data-kind={item.kind}>
       <div className={line}>
-        <span className={`${tagBase} ${tone[toneKey]}`}>{text}</span>
+        <span className={`${tagBase} ${tone[toneKey]}`}>· {text}</span>
         {item.blocks.map((block) => {
           if (block.type === "unknown-vendor") {
             return (

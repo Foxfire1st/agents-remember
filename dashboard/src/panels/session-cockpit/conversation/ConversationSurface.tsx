@@ -44,13 +44,6 @@ const toggle = css({
   _hover: { color: "amber", borderColor: "amber" },
   _focusVisible: { outline: "1px solid token(colors.amber)", outlineOffset: "1px" },
 });
-const note = css({
-  fontSize: "0.64rem",
-  color: "muted",
-  fontStyle: "italic",
-  flexShrink: 0,
-  paddingInline: "0.2rem",
-});
 const empty = css({ color: "muted", fontSize: "0.76rem", padding: "0.6rem 0.2rem" });
 
 export function ConversationSurface({
@@ -130,13 +123,16 @@ export function ConversationSurface({
     );
   }
 
+  // R11 — the offending history capability (tool details first, then overall completeness) drives a
+  // short cue; its full reason lives in the cue's hover disclosure, not an always-visible paragraph.
   const history = projection.capabilities?.history;
-  const historyNote =
-    history !== undefined &&
-    (history.completeness.state !== "supported" || history.toolCompleteness.state !== "supported")
+  const historyCapability =
+    history !== undefined
       ? history.toolCompleteness.state !== "supported"
-        ? history.toolCompleteness.reason
-        : history.completeness.reason
+        ? history.toolCompleteness
+        : history.completeness.state !== "supported"
+          ? history.completeness
+          : null
       : null;
 
   return (
@@ -166,14 +162,14 @@ export function ConversationSurface({
         />
         {projection.capabilities?.live.completeness.state !== undefined &&
         projection.capabilities.live.completeness.state !== "supported" ? (
-          <CapabilityReason capability={projection.capabilities.live.completeness} />
+          <CapabilityReason capability={projection.capabilities.live.completeness} label="live" />
+        ) : null}
+        {historyCapability !== null ? (
+          <span data-testid="history-completeness-note">
+            <CapabilityReason capability={historyCapability} label="history" />
+          </span>
         ) : null}
       </div>
-      {historyNote !== null ? (
-        <div className={note} data-testid="history-completeness-note">
-          history: {historyNote}
-        </div>
-      ) : null}
       <ConversationReconnect
         phase={projection.stream}
         reason={projection.stream === "projection-failed" ? routeError?.detail : undefined}

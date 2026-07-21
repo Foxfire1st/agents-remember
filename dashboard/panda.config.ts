@@ -30,6 +30,10 @@ export default defineConfig({
         colors: {
           bg: { value: "oklch(0.16 0.02 250)" },
           bgPanel: { value: "oklch(0.2 0.02 250)" },
+          // The terminal "well" — the darker inset the xterm pty pane already uses (was hardcoded
+          // #070b0f in panels/Terminal.tsx; 260718-CHATS-L5P FB7.1/V31 promotes it to a token so the
+          // structured conversation stage inherits the SAME well tone as the legacy-raw pane).
+          well: { value: "#070b0f" },
           ink: { value: "oklch(0.92 0.03 90)" },
           grid: { value: "oklch(0.3 0.02 250)" },
           muted: { value: "oklch(0.7 0.02 250)" }, // muted control text (idle mode buttons)

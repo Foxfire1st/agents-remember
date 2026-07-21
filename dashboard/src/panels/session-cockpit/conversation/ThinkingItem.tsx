@@ -18,10 +18,9 @@ const wrap = css({
   contentVisibility: "auto",
   containIntrinsicSize: "auto 4rem",
 });
+// FB7.4 — Claude Code's inline thinking marker (`✻ thinking`), lowercase, not a boxed uppercase label.
 const label = css({
-  fontSize: "0.6rem",
-  letterSpacing: "0.06em",
-  textTransform: "uppercase",
+  fontSize: "0.66rem",
   color: "muted",
   fontStyle: "normal",
 });
@@ -44,7 +43,9 @@ export function ThinkingItem({ item }: { item: ConversationItem }) {
   }
   return (
     <div className={wrap} data-testid="conversation-thinking">
-      <span className={label}>thinking</span>
+      <span className={label}>
+        <span aria-hidden="true">✻</span> thinking
+      </span>
       {item.blocks.map((block) => {
         const text = thinkingText(block);
         if (text === null) return null;

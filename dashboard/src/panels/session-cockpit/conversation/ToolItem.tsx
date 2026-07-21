@@ -16,27 +16,24 @@ import { ClampButton, sourceLineCount, useClampIds } from "./primitives";
 
 const OUTPUT_THRESHOLD_LINES = 12;
 
+// FB7.4 — Claude Code / Toad tool grammar: a `●` gutter glyph (phase-colored) + verb + a dim
+// lowercase phase word. No boxed uppercase tag; color is never the only carrier (the word stays).
 const wrap = css({ display: "grid", gap: "0.2rem", minWidth: "0" });
-const head = css({ display: "flex", alignItems: "baseline", gap: "0.4rem", minWidth: "0", fontSize: "0.74rem" });
-const verb = css({ fontFamily: "mono", color: "cyan", overflowWrap: "anywhere", minWidth: "0" });
-const phaseTag = css({
-  flex: "none",
-  fontSize: "0.6rem",
-  letterSpacing: "0.05em",
-  textTransform: "uppercase",
-  borderWidth: "1px",
-  borderStyle: "solid",
-  borderRadius: "2px",
-  paddingInline: "0.25rem",
-});
+const head = css({ display: "flex", alignItems: "baseline", gap: "0.5rem", minWidth: "0", fontSize: "0.8rem" });
+const gutterDot = css({ flex: "none", fontSize: "0.66rem", lineHeight: "1" });
+const verb = css({ fontFamily: "mono", color: "ink", overflowWrap: "anywhere", minWidth: "0" });
+const phaseWord = css({ flex: "none", fontSize: "0.7rem", color: "muted" });
+// Toad ShellResult idiom: a faint wash with a colored LEFT rule (the `└` relationship), indented
+// under the head — not a four-sided web box.
 const outputRegion = css({
   maxInlineSize: "100%",
   overflowX: "auto",
-  borderWidth: "1px",
-  borderStyle: "solid",
-  borderColor: "grid",
-  borderRadius: "2px",
+  borderRadius: "0",
+  borderLeftWidth: "2px",
+  borderLeftStyle: "solid",
+  borderLeftColor: "color-mix(in oklch, token(colors.grid) 65%, transparent)",
   background: "color-mix(in oklch, token(colors.grid) 22%, transparent)",
+  marginInlineStart: "2ch",
 });
 const outputPre = css({ margin: "0", padding: "0.3rem 0.45rem", fontFamily: "mono", fontSize: "0.7rem", whiteSpace: "pre-wrap", overflowWrap: "anywhere", lineHeight: "1.4", color: "muted" });
 const clampedPre = css({ maxHeight: "10rem", overflow: "hidden" });
@@ -91,10 +88,13 @@ export function ToolItem({ item }: { item: ConversationItem }) {
   return (
     <div className={wrap} data-testid="conversation-tool">
       <div className={head}>
+        <span className={`${gutterDot} ${phaseClass[item.phase]}`} aria-hidden="true">
+          ●
+        </span>
         <span className={verb} title={verbPhrase(item)}>
           {verbPhrase(item)}
         </span>
-        <span className={`${phaseTag} ${phaseClass[item.phase]}`} data-testid="tool-phase">
+        <span className={phaseWord} data-testid="tool-phase">
           {item.phase}
         </span>
       </div>

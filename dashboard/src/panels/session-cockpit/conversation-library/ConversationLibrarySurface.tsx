@@ -64,7 +64,10 @@ const columns = css({
   // the fold. `nowrap` keeps a single flex line whose cross-size is the definite container height, so
   // each column (min-height:0) hands its own overflow to its interior scroller. Stacking at the narrow
   // floor is owned entirely by the `@container` query below (F22 established the container context).
-  "@container (max-width: 640px)": { flexDirection: "column" },
+  // V10 — the two columns (16rem list + 20rem preview + gaps) crush below ~56rem of surface: the list
+  // falls to a ~180px sliver and preview prose splits mid-word. Stack to one column before that, so the
+  // narrow surface (900px window with the rail collapsed, or the ~1000px sweep) reads as a single flow.
+  "@container (max-width: 56rem)": { flexDirection: "column" },
 });
 const listCol = css({ flex: "1 1 16rem", minWidth: "0", minHeight: "0", overflow: "hidden", display: "flex", flexDirection: "column" });
 const previewCol = css({ flex: "2 1 20rem", minWidth: "0", minHeight: "0", overflow: "hidden", display: "flex", flexDirection: "column", gap: "0.3rem" });

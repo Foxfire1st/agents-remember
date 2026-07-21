@@ -37,6 +37,11 @@ const box = css({
   maxHeight: "70%",
   display: "flex",
   flexDirection: "column",
+  // V1 — the panel CLIPS to its own bounds: the keys reference is taller than the panel, and without
+  // this its list rows + footer spilled onto a transparent background over the composer/StatusLine
+  // (help text superimposed on live page text). The cmdk root becomes a bounded flex column so the
+  // list scrolls inside the panel and the footer stays on the panel background.
+  overflow: "hidden",
   background: "bgPanel",
   borderWidth: "1px",
   borderStyle: "solid",
@@ -44,6 +49,13 @@ const box = css({
   borderRadius: "3px",
   boxShadow: "0 10px 40px oklch(0 0 0 / 0.5)",
   // cmdk is unstyled; its data-attributes carry the house look.
+  "& [cmdk-root]": {
+    display: "flex",
+    flexDirection: "column",
+    flex: "1",
+    minHeight: "0",
+    overflow: "hidden",
+  },
   "& [cmdk-input]": {
     font: "inherit",
     fontSize: "0.8rem",
@@ -61,7 +73,7 @@ const box = css({
       outlineOffset: "-2px",
     },
   },
-  "& [cmdk-list]": { overflow: "auto", padding: "0.3rem" },
+  "& [cmdk-list]": { flex: "1", minHeight: "0", overflow: "auto", padding: "0.3rem" },
   "& [cmdk-item]": {
     display: "flex",
     alignItems: "baseline",

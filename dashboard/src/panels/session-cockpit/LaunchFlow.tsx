@@ -126,6 +126,10 @@ const footerRow = css({
 const launchButton = css({
   font: "inherit",
   fontSize: "0.76rem",
+  // RV-3/V12 — an action control never wraps its own label (`launc/h`): it holds width + one line, so
+  // the footer's summary span is the only segment that yields.
+  flexShrink: 0,
+  whiteSpace: "nowrap",
   paddingInline: "0.7rem",
   paddingBlock: "0.2rem",
   background: "transparent",
@@ -135,12 +139,17 @@ const launchButton = css({
   borderColor: "amber",
   borderRadius: "2px",
   cursor: "pointer",
-  _disabled: { opacity: 0.5, cursor: "not-allowed" },
+  // V7 — a disabled primary must not read as ready: drop the amber prominence to a muted, inert chip
+  // so the most emphatic control looks armed ONLY when the pair is complete and the harness detected.
+  _disabled: { opacity: 0.4, cursor: "not-allowed", color: "muted", borderColor: "grid" },
   _focusVisible: { outlineWidth: "1px", outlineStyle: "solid", outlineColor: "amber", outlineOffset: "1px" },
 });
 const quietButton = css({
   font: "inherit",
   fontSize: "0.7rem",
+  // RV-3/V12 — never wrap the label (`dismiss (resolves via the catal/og)`): hold width + one line.
+  flexShrink: 0,
+  whiteSpace: "nowrap",
   paddingInline: "0.45rem",
   paddingBlock: "0.12rem",
   background: "transparent",
@@ -328,6 +337,20 @@ export function LaunchFlow({
   const attempted = selection.vendorDefaults
     ? "vendor defaults (no selection sent)"
     : `${selection.modelKey ?? "—"} · ${selection.effort ?? "—"}`;
+
+  // V7 — a disabled launch always says WHY (never a bare `codex · — · —` em-dash chain). When the pair
+  // is complete the summary is what will launch; otherwise it names the single next step.
+  const launchBlockReason: string | null = posting
+    ? null
+    : unknownId !== null
+      ? "resolving the previous launch via the catalog…"
+      : !harnessId
+        ? "pick a harness"
+        : catalog.status === "ready" && selectedHarness !== undefined && !selectedHarness.detected
+          ? `${selectedHarness.name} is not installed on this daemon`
+          : !selectionComplete(selection)
+            ? "pick a model and effort"
+            : null;
 
   return (
     <div className={overlay} data-testid="launch-flow-overlay" onClick={dismiss}>
@@ -552,7 +575,10 @@ export function LaunchFlow({
             className={smallInput}
             value={leafKey}
             onChange={(event) => setLeafKey(event.target.value)}
-            placeholder="leaf key (optional — the server arbitrates ownership)"
+            // V7 — the placeholder no longer truncates its own sentence; the arbitration note moves to
+            // the field tooltip (progressive disclosure) so the input reads at any width.
+            placeholder="leaf key (optional)"
+            title="If set, the server arbitrates leaf ownership — a leaf already owned is refused, never silently reassigned."
             aria-label="Leaf key"
             data-testid="launch-leaf-key"
           />
@@ -571,7 +597,11 @@ export function LaunchFlow({
             {posting ? "launching…" : "launch"}
           </button>
           <span className={noteLine} data-testid="launch-summary">
-            {harnessId ? `${harnessId} · ${attempted}` : "pick a harness"}
+            {posting
+              ? "launching…"
+              : readyToLaunch
+                ? `${harnessId} · ${attempted}`
+                : (launchBlockReason ?? `${harnessId ?? "pick a harness"} · ${attempted}`)}
           </span>
           <button
             type="button"

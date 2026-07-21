@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 
 import { css, cx } from "../../../styled-system/css";
+import { joinChips } from "../../data/conversation/format";
 import { launchTier } from "../../data/launchEvidence";
 import { deriveEffortMenu, effectiveSelection } from "../../data/sessionCapabilities";
 import type { OpenSession } from "../../data/sessions";
@@ -126,57 +127,103 @@ export function StatusLine({
       ? "—"
       : `${Math.max(0, Math.floor((at - pollHealth.lastBeatAt) / 1000))}s`;
 
+  // R3/A1 — an absent value disappears with its label rather than chaining em-dash placeholders. The
+  // pair and leaf/seat segments collapse entirely when they carry nothing; a lone absent harness stays
+  // (it is the F6 focus target) as a single honest glyph, not one link in a five-dash chain.
+  // V25 — the `effort not echoed` sentinel already begins with "effort", so it is not re-labeled
+  // (was `effort effort not echoed`); a real effort value keeps its `effort ` label.
+  const effortText = effort
+    ? effort === EFFORT_NOT_ECHOED_COPY
+      ? effort
+      : `effort ${effort}`
+    : null;
+  const pairText = joinChips([model ? `model ${model}` : null, effortText]);
+  const leafSeatText = joinChips([leaf ? `leaf ${leaf}` : null, seat ? `seat ${seat}` : null]);
+  // R4/A2 — the healthy steady state is one calm token (`poll ✓`); the reassurance chips (`missed 0`,
+  // `beat age 0s`) surface only when something is actually degraded.
+  const healthySteady = pollHealth.healthy && pollHealth.missedBeats === 0;
+  // R3 (RV-5/manager) — `pty ws —` on a seat with no pane is an em-dash placeholder: show the ws
+  // segment only when a pane actually reports a ws state; the always-relevant poll health stays. The
+  // internal "(UA-5 slot)" reserved placeholder is dropped entirely (it rendered leaked jargon +
+  // bare dashes on every seat; a real ctx/cost readout will render itself when that authority exists).
+  const pollText = healthySteady
+    ? "poll ✓"
+    : `poll ${pollHealth.healthy ? "healthy" : "stale"} · missed ${pollHealth.missedBeats} · beat age ${pollBeatAge}`;
+  const freshnessText = [
+    freshness.ptyWs !== "none" ? WS_COPY[freshness.ptyWs] : null,
+    quiet,
+    pollText,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+
   return (
     <footer
       className={cx(root, "sessions__statusline")}
       data-region="statusline"
       data-testid="sessions-statusline"
     >
-      <span
-        className={cx(segment, focusTarget)}
-        data-focus-target
-        tabIndex={-1}
-        data-testid="status-harness"
-      >
-        harness {session?.harness ?? "—"}
-      </span>
-      <span className={cx(segment, pair)} data-testid="status-pair">
-        model {model ?? "—"} · effort {effort ?? "—"}
-        {tier ? <EvidenceBadge tier={tier} size="sm" /> : null}
-      </span>
-      <span className={segment} data-testid="status-state">
-        <StateDot state={visual} testId="status-dot" />
-        <span>{visual.word}</span>
-        {elapsed ? (
+      {session === undefined ? (
+        <span
+          className={cx(segment, focusTarget)}
+          data-focus-target
+          tabIndex={-1}
+          data-testid="status-empty"
+        >
+          no chat focused — open one from the rail
+        </span>
+      ) : (
+        <>
           <span
-            title="client-measured from the observed turn-state transition — poll/sweep-bounded"
-            data-testid="status-elapsed"
+            className={cx(segment, focusTarget)}
+            data-focus-target
+            tabIndex={-1}
+            data-testid="status-harness"
           >
-            {elapsed}
+            harness {session.harness ?? "—"}
           </span>
-        ) : null}
-      </span>
-      <span className={segment} data-testid="status-leaf-seat">
-        leaf {leaf ?? "—"} · seat {seat ?? "—"}
-      </span>
-      <span className={chip} data-testid="status-pending-sets">
-        pending sets {pendingSets}/2
-      </span>
-      <span className={chip} data-testid="status-queued-messages">
-        queued messages {queued} yours
-      </span>
-      <span className={segment} data-testid="status-ua5-slot">
-        ctx — / cost — (UA-5 slot)
-      </span>
-      <span
-        className={segment}
-        data-testid="status-freshness"
-        title="PTY freshness is pane-local. Turn state is catalog-poll / 10 s sweep bounded."
-      >
-        {WS_COPY[freshness.ptyWs]}
-        {quiet ? ` · ${quiet}` : ""} · poll {pollHealth.healthy ? "healthy" : "stale"} · missed{" "}
-        {pollHealth.missedBeats} · beat age {pollBeatAge}
-      </span>
+          {pairText ? (
+            <span className={cx(segment, pair)} data-testid="status-pair">
+              {pairText}
+              {tier ? <EvidenceBadge tier={tier} size="sm" /> : null}
+            </span>
+          ) : null}
+          <span className={segment} data-testid="status-state">
+            <StateDot state={visual} testId="status-dot" />
+            <span>{visual.word}</span>
+            {elapsed ? (
+              <span
+                title="client-measured from the observed turn-state transition — poll/sweep-bounded"
+                data-testid="status-elapsed"
+              >
+                {elapsed}
+              </span>
+            ) : null}
+          </span>
+          {leafSeatText ? (
+            <span className={segment} data-testid="status-leaf-seat">
+              {leafSeatText}
+            </span>
+          ) : null}
+          {pendingSets > 0 ? (
+            <span className={chip} data-testid="status-pending-sets">
+              pending sets {pendingSets}/2
+            </span>
+          ) : null}
+          {queued > 0 ? (
+            <span className={chip} data-testid="status-queued-messages">
+              queued messages {queued} yours
+            </span>
+          ) : null}
+          <span
+            className={segment}
+            data-testid="status-freshness"
+            title="PTY freshness is pane-local. Turn state is catalog-poll / 10 s sweep bounded."
+          >
+            {freshnessText}
+          </span>
+        </>
+      )}
       {actions ? <span className={actionsSlot}>{actions}</span> : null}
       <span className={hint}>ctrl+k palette · ? keys · F6 regions</span>
     </footer>

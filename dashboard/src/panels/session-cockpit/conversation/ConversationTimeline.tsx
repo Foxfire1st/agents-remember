@@ -21,6 +21,10 @@ import { ConversationItemView, itemAccessibleName } from "./ConversationItemView
 
 const BOTTOM_FOLLOW_PX = 120;
 
+// FB7.1 — the terminal "well": the conversation feed inherits the SAME dark inset the xterm pty
+// pane uses (background: well, 1px grid border), so the structured stage stops reading as a generic
+// web panel sharing the page background. Horizontal inset only (vertical scroll math stays clean for
+// the virtualizer); the centered content column (feedInner, ≈100ch) leaves the well as a gutter.
 const viewport = css({
   flex: "1",
   minHeight: "0",
@@ -28,17 +32,23 @@ const viewport = css({
   overflowX: "hidden",
   position: "relative",
   outline: "none",
+  background: "well",
+  borderWidth: "1px",
+  borderStyle: "solid",
+  borderColor: "grid",
+  borderRadius: "3px",
+  paddingInline: "0.5rem",
 });
-const feedInner = css({ position: "relative", width: "100%" });
+const feedInner = css({ position: "relative", width: "100%", maxWidth: "100ch", marginInline: "auto" });
+// FB7.3 — line-grid rhythm: no per-article hairline rule (neither Toad nor Claude Code rules between
+// items); one blank line of breathing below each item instead of a boxed web-list divider.
 const rowShell = css({
   position: "absolute",
   top: "0",
   left: "0",
   width: "100%",
-  paddingBlock: "0.35rem",
-  borderBottomWidth: "1px",
-  borderBottomStyle: "solid",
-  borderBottomColor: "color-mix(in oklch, token(colors.grid) 45%, transparent)",
+  paddingBlockStart: "0.15rem",
+  paddingBlockEnd: "0.9rem",
   _focusVisible: { outline: "1px solid token(colors.amber)", outlineOffset: "-1px" },
 });
 const newUpdates = css({
@@ -76,23 +86,28 @@ const olderButton = css({
   _hover: { color: "amber", borderColor: "amber" },
   _focusVisible: { outline: "1px solid token(colors.amber)", outlineOffset: "1px" },
 });
-const runRow = css({ display: "grid", gap: "0.15rem", color: "dormant", fontSize: "0.68rem" });
-const runHead = css({ display: "flex", gap: "0.4rem", alignItems: "baseline" });
+// FB7.4 — the collapsed unknown-vendor run is a dim gutter line, not a boxed web row.
+const runRow = css({ display: "grid", gap: "0.15rem", color: "dormant", fontSize: "0.7rem", fontFamily: "mono" });
+const runHead = css({ display: "flex", gap: "0.4rem", alignItems: "baseline", minWidth: "0" });
+const runSummary = css({ minWidth: "0", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" });
+// FB7.4 + V12 — the clamp control reads as a text affordance and NEVER wraps its own label.
 const runButton = css({
   font: "inherit",
-  fontSize: "0.62rem",
+  fontSize: "0.7rem",
+  flex: "none",
+  whiteSpace: "nowrap",
   color: "muted",
   background: "transparent",
-  borderWidth: "1px",
-  borderStyle: "solid",
-  borderColor: "grid",
-  borderRadius: "2px",
-  paddingInline: "0.35rem",
+  border: "none",
+  paddingInline: "0",
   cursor: "pointer",
-  _hover: { color: "amber", borderColor: "amber" },
+  textDecoration: "underline",
+  textDecorationColor: "color-mix(in oklch, token(colors.grid) 60%, transparent)",
+  textUnderlineOffset: "2px",
+  _hover: { color: "amber" },
   _focusVisible: { outline: "1px solid token(colors.amber)", outlineOffset: "1px" },
 });
-const runMember = css({ fontFamily: "mono", fontSize: "0.6rem", color: "dormant", overflowWrap: "anywhere" });
+const runMember = css({ fontFamily: "mono", fontSize: "0.66rem", color: "dormant", overflowWrap: "anywhere", paddingInlineStart: "2ch" });
 
 function isEditableTarget(target: HTMLElement): boolean {
   return (
@@ -121,8 +136,13 @@ function UnknownVendorRun({
   return (
     <div className={runRow} data-testid="unknown-vendor-run">
       <div className={runHead}>
-        <span>
-          {row.items.length} identical unknown vendor events — {row.summary}
+        <span
+          className={runSummary}
+          title={`${row.items.length} unknown vendor events (same summary) — ${row.summary}`}
+        >
+          {/* R12 — "same summary", not "identical": the events share this summary but each carries its
+              own distinct evidence id (they are not duplicates), so the copy must not imply sameness. */}
+          {row.items.length} unknown vendor events (same summary) — {row.summary}
         </span>
         <button
           type="button"

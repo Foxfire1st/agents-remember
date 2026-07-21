@@ -9,6 +9,7 @@ import {
   terminalOpenFailureMessage,
   type OpenSession,
 } from "../../data/sessions";
+import { shortId } from "../../data/conversation/format";
 import { buildTaskTree, leafIdFromKey, leafTitleForKey } from "../../data/taskIdentity";
 import { attachSessionToLeaf } from "../../data/terminal";
 import type { TaskDocNode } from "../../types/projection";
@@ -37,9 +38,19 @@ const action = css({
   borderRadius: "2px",
   paddingInline: "0.5rem",
   paddingBlock: "0.18rem",
+  whiteSpace: "nowrap",
   cursor: "pointer",
   _hover: { background: "rgba(232, 193, 112, 0.1)" },
   _focusVisible: { outlineWidth: "1px", outlineStyle: "solid", outlineColor: "amber", outlineOffset: "1px" },
+  // V8 — a library-level affordance that stays put: disable-with-reason rather than unmount, so the
+  // toolbar never reflows (no teleport / muscle-memory loss) when focus moves to an ineligible row.
+  _disabled: {
+    color: "muted",
+    borderColor: "grid",
+    cursor: "not-allowed",
+    opacity: 0.55,
+    _hover: { background: "transparent" },
+  },
 });
 const badge = css({
   minWidth: 0,
@@ -147,13 +158,20 @@ export function ChatContextBar({
       >
         ＋ Terminal
       </button>
-      {onBrowseHistory && focused && running && focused.harness ? (
+      {onBrowseHistory ? (
+        // V8 — always present; disabled with a reason when the focused row is not a running harness
+        // chat, so the button never disappears/teleports on a focus change.
         <button
           type="button"
           className={action}
           onClick={onBrowseHistory}
+          disabled={!(focused && running && focused.harness)}
           data-testid="chats-browse-history"
-          title="Browse this harness's prior conversations and open one as a new chat"
+          title={
+            focused && running && focused.harness
+              ? "Browse this harness's prior conversations and open one as a new chat"
+              : "Browse history needs a running harness chat focused"
+          }
         >
           Browse history
         </button>
@@ -164,7 +182,10 @@ export function ChatContextBar({
         </span>
       ) : null}
       {selectedLifecycleId && focused?.lifecycleId === selectedLifecycleId ? (
-        <span className={badge}>task {selectedLifecycleId}</span>
+        // R6/B10 — a long task id shows its short suffix; the full value stays in the tooltip.
+        <span className={badge} title={`task ${selectedLifecycleId}`}>
+          task {shortId(selectedLifecycleId)}
+        </span>
       ) : selectedLifecycleId && focused && running && !focused.lifecycleId ? (
         <button
           type="button"
@@ -176,7 +197,9 @@ export function ChatContextBar({
           Route locally to {selectedLifecycleId}
         </button>
       ) : focused?.lifecycleId ? (
-        <span className={badge}>task {focused.lifecycleId}</span>
+        <span className={badge} title={`task ${focused.lifecycleId}`}>
+          task {shortId(focused.lifecycleId)}
+        </span>
       ) : null}
       {leafLabel ? (
         <span className={badge} data-testid="chats-leaf-badge">

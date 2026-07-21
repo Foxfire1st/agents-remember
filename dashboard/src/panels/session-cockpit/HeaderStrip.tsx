@@ -112,7 +112,12 @@ export function HeaderStrip({
     <div className={strip} data-testid="header-strip">
       <span className={identity} data-header-segment="identity">
         <span className={sessionName}>{session.label}</span>
-        {session.harness ? <span className={harnessName}>{session.harness}</span> : null}
+        {/* R10 — no `codex codex` stutter: the harness label is dropped when it merely repeats the
+            session name (a raw terminal literally named after its harness). */}
+        {session.harness &&
+        session.harness.toLowerCase() !== session.label.toLowerCase() ? (
+          <span className={harnessName}>{session.harness}</span>
+        ) : null}
       </span>
       <span
         className={controlSlot}
@@ -145,8 +150,15 @@ export function HeaderStrip({
         data-testid="header-diagnostics"
         title="Freshness: PTY WebSocket state + last-output age (this cockpit's pane, L6). Turn-state freshness is bounded by the 10 s liveness sweep."
       >
-        {WS_WORDS[freshness.ptyWs]}
-        {quiet ? ` · ${quiet}` : ""}
+        {/* R3 (RV/manager) — `ws —` on a seat with no pane is an em-dash placeholder: the ws word
+            shows only when a pane actually reports a ws state; the last-output age still shows when
+            known, and the provenance chips below carry the rest. */}
+        {[
+          freshness.ptyWs !== "none" ? WS_WORDS[freshness.ptyWs] : null,
+          quiet ? quiet : null,
+        ]
+          .filter(Boolean)
+          .join(" · ")}
         {/* Provenance badges (R7): read-only moat-1 facts at their honest tier — the
             EvidenceBadge glyph plus the tier word (pending renders as "requested"). */}
         {session.resolvedModel ? (

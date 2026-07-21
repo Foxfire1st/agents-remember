@@ -430,7 +430,8 @@ describe("freshness + bus footer (R15, R8)", () => {
     const footer = getByTestId("rail-bus-footer");
     expect(footer.textContent).toContain("2 pending");
     expect(footer.textContent).toContain("0 redeliverable");
-    expect(footer.textContent).toContain("heartbeat 2s / stale 60s");
+    // R5/A4 — humanized, not raw `2s / 60s`: the two-unit form reads as human time.
+    expect(footer.textContent).toContain("heartbeat 2 s / stale cutoff 1 m 0 s");
   });
 
   it("states the truth when the supervisor never ticked — never fake numbers", () => {

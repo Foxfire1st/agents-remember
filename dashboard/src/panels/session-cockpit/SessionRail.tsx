@@ -16,6 +16,7 @@ import {
   type RailMasterSection,
   type RailModel,
 } from "../../data/railModel";
+import { humanizeDuration } from "../../data/conversation/format";
 import { turnHintWord, usePtyHarvest } from "../../data/ptyHarvest";
 import { useSessionCockpit } from "../../data/sessionCockpitStore";
 import { hasUnackedSetAttention } from "../../data/setChips";
@@ -110,6 +111,10 @@ const sprintRow = css({
 const bulkButton = css({
   font: "inherit",
   fontSize: "0.62rem",
+  // R1/V12 — an action control never crushes into a letter column: it holds its intrinsic width and
+  // its own line, so the flex row elides the long copy span (below), never the buttons.
+  flex: "none",
+  whiteSpace: "nowrap",
   color: "alarm",
   background: "transparent",
   borderWidth: "1px",
@@ -179,6 +184,13 @@ const leafCaption = css({
   fontSize: "0.62rem",
   color: "muted",
   letterSpacing: "0.04em",
+  // V26 — a long leaf id (`260715_#2067_react-data-testids-01`) truncates at the end with the full
+  // value on hover, never breaking mid-word down the narrow rail.
+  display: "block",
+  minWidth: "0",
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
 });
 const doneFold = css({
   display: "flex",
@@ -197,6 +209,9 @@ const doneFold = css({
 const doneToggle = css({
   font: "inherit",
   fontSize: "0.7rem",
+  // R1/V12 — hold width + own line so the confirm/cancel controls never wrap letters vertically.
+  flex: "none",
+  whiteSpace: "nowrap",
   color: "muted",
   background: "transparent",
   border: "none",
@@ -215,13 +230,36 @@ const groupBox = css({
   flexShrink: 0,
 });
 const groupRows = css({ padding: "0.3rem", display: "grid", gap: "0.25rem" });
-// Row anatomy (RULED R6): dot | role | title | status | End. The title is the flex segment;
-// the status chip is the ONLY elidable segment (min-width 0) — dot/role/title always survive,
-// the chip's truth stays in the row tooltip (railRowTooltip).
-const rowShell = css({
+// Row anatomy (RULED R6 / RV-2): a LABEL group (dot | role | title | markers | chip) and an ACTION
+// group (End, or the armed confirm/cancel). The row is `flex-wrap: wrap`: when the two groups cannot
+// share one line at a narrow rail, the ACTION group wraps whole to a second line — the actions stay
+// single-line and reachable at EVERY width down to the collapse threshold, never letter-wrapping,
+// clipping, or overflowing the `overflow:hidden` aside. Priority when squeezed: actions > chip >
+// inline copy — the label group's title/chip elide (min-width:0 through every nested level) and the
+// armed state drops the chip entirely (the confirm copy already carries the state).
+const rowLabelGroup = css({
   display: "flex",
   alignItems: "center",
   gap: "0.35rem",
+  flex: "1 1 auto",
+  minWidth: "0",
+  overflow: "hidden",
+});
+const rowActionGroup = css({
+  display: "flex",
+  alignItems: "center",
+  gap: "0.35rem",
+  // Grows never, shrinks yes: it takes only the width its controls need on line 1, and on a wrapped
+  // line 2 it shrinks so the elidable inline copy yields while the confirm/cancel buttons hold.
+  flex: "0 1 auto",
+  minWidth: "0",
+});
+const rowShell = css({
+  display: "flex",
+  alignItems: "center",
+  flexWrap: "wrap",
+  gap: "0.35rem",
+  rowGap: "0.2rem",
   minWidth: "0",
   width: "100%",
   textAlign: "left",
@@ -234,6 +272,9 @@ const rowShell = css({
   borderRadius: "2px",
   paddingLeft: "0.5rem",
   cursor: "pointer",
+  transition: "border-color 0.12s ease",
+  // R9 — the row gives approach feedback before the click that arms End (there was none).
+  _hover: { borderColor: "color-mix(in oklch, token(colors.amber) 45%, token(colors.grid))" },
   "&[data-selected='true']": { color: "amber", borderColor: "amber" },
   "&[data-attention-highlight='true']": { borderColor: "cyan" },
   _focusVisible: {
@@ -279,8 +320,11 @@ const roleChip = cva({
   },
 });
 const rowTitle = css({
-  flex: "1",
-  minWidth: "3.5rem", // the title always survives truncation (R6)
+  // RV-2 — the flexible segment truly absorbs (min-width:0): it grows to show the label when there is
+  // room and elides to `…` when the rail is tight, so it never forces the row past the aside. The full
+  // label stays in the row tooltip (railRowTooltip).
+  flex: "1 1 auto",
+  minWidth: "0",
   overflow: "hidden",
   textOverflow: "ellipsis",
   whiteSpace: "nowrap",
@@ -315,7 +359,12 @@ const markerChip = cva({
 });
 const statusChip = cva({
   base: {
-    flexShrink: 1, // the ONLY elidable row segment (R6) — truth stays in the row tooltip
+    // R2 — the state chip shows its whole word when the rail has room (`turn-ended` ~72px < 7rem
+    // ceiling). RV-2: it is elidable (shrinks after the title yields) so it never forces the End
+    // action off the row — the whole word stays in the chip tooltip, and the state also lives in the
+    // StateDot's accessible name. It is dropped entirely while the row is armed (the confirm copy
+    // carries the state), so the confirm/cancel controls always fit inside the aside.
+    flex: "0 1 auto",
     minWidth: "0",
     maxWidth: "7rem",
     overflow: "hidden",
@@ -337,10 +386,13 @@ const statusChip = cva({
     },
   },
 });
+// R9 — a destructive control carries DEMOTED weight until the moment of consequence: muted by
+// default (red would be six alarms shouting from every row and diluting the danger signal), and it
+// warms to alarm only on hover / keyboard focus / the selected row — the approach that arms it.
 const endButton = css({
   font: "inherit",
   fontSize: "0.62rem",
-  color: "alarm",
+  color: "muted",
   background: "transparent",
   border: "none",
   borderLeftWidth: "1px",
@@ -350,7 +402,11 @@ const endButton = css({
   alignSelf: "stretch",
   cursor: "pointer",
   flex: "none",
+  transition: "color 0.12s ease",
+  _hover: { color: "alarm" },
+  "[data-selected='true'] &": { color: "alarm" },
   _focusVisible: {
+    color: "alarm",
     outline: "1px solid token(colors.amber)",
     outlineOffset: "-1px",
   },
@@ -366,6 +422,9 @@ const treeToggleButton = css({
   font: "inherit",
   fontSize: "0.62rem",
   marginLeft: "auto",
+  // V12 — the toggle never wraps its own label (`rol/e vie/w`): it holds width + its own line.
+  flexShrink: 0,
+  whiteSpace: "nowrap",
   color: "muted",
   background: "transparent",
   borderWidth: "1px",
@@ -602,6 +661,12 @@ export function SessionRail({
     const gate = session.leafKey ? heldGates.get(session.leafKey) : undefined;
     const prompt = interactionPromptPreview(session.controlPendingInteraction);
     const selected = session.id === focusedSessionId;
+    // RV-2 — while the row is armed (or showing an end-failure) the status chip is dropped: the
+    // confirm copy already names the state, and dropping the chip guarantees the two controls fit
+    // inside the aside at every rail width.
+    const isArmed = armedEnd === session.id;
+    const hasEndFailure = endFailure?.sessionId === session.id;
+    const showChip = visual.chip !== undefined && !isArmed && !hasEndFailure;
     const chipTone =
       visual.key === "failed"
         ? "alarm"
@@ -646,6 +711,7 @@ export function SessionRail({
           }
         }}
       >
+        <div className={rowLabelGroup}>
         {/* L4 R8: rail dots carry the state WORD as their accessible name — the dot is the
             truncation-surviving signal and must speak, not just color. */}
         <StateDot
@@ -714,7 +780,7 @@ export function SessionRail({
             </span>
           ) : null}
         </span>
-        {visual.chip ? (
+        {showChip ? (
           <span
             className={statusChip({ tone: chipTone })}
             // Question triage (R16): the input? chip's tooltip carries the prompt preview.
@@ -726,10 +792,13 @@ export function SessionRail({
             {visual.chip}
           </span>
         ) : null}
+        </div>
         {/* The End segment renders on EVERY row (ruled anatomy): live rows say "End", dormant
             (landed) rows carry the mockup's compact ✕. Arming shows the honest confirm naming
-            session · leaf · state (L6 R5) before anything is killed. */}
-        {endFailure?.sessionId === session.id ? (
+            session · leaf · state (L6 R5) before anything is killed. The ACTION group wraps below the
+            label group at narrow rails (RV-2) so confirm/cancel are always reachable + single-line. */}
+        <div className={rowActionGroup}>
+        {hasEndFailure ? (
           <span
             className={confirmRow}
             role="alert"
@@ -759,7 +828,7 @@ export function SessionRail({
               dismiss
             </button>
           </span>
-        ) : armedEnd === session.id ? (
+        ) : isArmed ? (
           <span
             className={confirmRow}
             data-testid={`rail-end-confirm-${session.id}`}
@@ -805,6 +874,7 @@ export function SessionRail({
             {options.dormant ? "✕" : "End"}
           </button>
         )}
+        </div>
       </div>
     );
   };
@@ -865,7 +935,7 @@ export function SessionRail({
               className={leafGroup}
               data-testid={`rail-cluster-${cluster.key}`}
             >
-              <span className={leafCaption}>
+              <span className={leafCaption} title={cluster.label}>
                 <span aria-hidden="true">└</span> {cluster.label}
               </span>
               {cluster.seats.map((seat) => renderRow(seat))}
@@ -1015,10 +1085,16 @@ export function SessionRail({
           className={treeToggleButton}
           data-on={treeView ? "true" : "false"}
           onClick={() => setTreeView(!treeView)}
-          title="Toggle the orchestration-tree (spawn-edge) view — provenance inspection only"
+          aria-pressed={treeView}
+          title={
+            treeView
+              ? "Rail view: orchestration tree (spawn-edge provenance). Switch back to the role hierarchy."
+              : "Rail view: role hierarchy. Switch to the orchestration tree (spawn-edge provenance)."
+          }
           data-testid="rail-tree-toggle"
         >
-          {treeView ? "roles" : "tree"}
+          {/* R8 — reads as a view toggle (switch glyph), not a bare taxonomy noun. */}
+          <span aria-hidden="true">⇄</span> {treeView ? "tree view" : "role view"}
         </button>
       </div>
       {treeRows.length === 0 ? (
@@ -1060,13 +1136,23 @@ export function SessionRail({
         {/* Bus summary (R8): anchored numbers — pending vs redeliverable, heartbeat vs cutoff. */}
         {heartbeat && heartbeat.lastTickAt !== null ? (
           <>
-            <span>
-              inbox <b>{heartbeat.pendingInboxCount} pending</b> /{" "}
-              {heartbeat.redeliverableInboxCount} redeliverable
-            </span>
-            <span title="Turn-state freshness is bounded by the 10 s liveness sweep; the supervisor heartbeat is the bus liveness anchor.">
-              heartbeat {heartbeat.ageSeconds ?? "—"}s / stale{" "}
-              {heartbeat.staleCutoffSeconds}s
+            {/* RV-4/R4 — the both-zero inbox collapses to a calm `inbox clear`; the anchored
+                pending/redeliverable pair renders only when there is something to anchor. */}
+            {heartbeat.pendingInboxCount === 0 && heartbeat.redeliverableInboxCount === 0 ? (
+              <span>inbox clear</span>
+            ) : (
+              <span>
+                inbox <b>{heartbeat.pendingInboxCount} pending</b> /{" "}
+                {heartbeat.redeliverableInboxCount} redeliverable
+              </span>
+            )}
+            <span title={`Turn-state freshness is bounded by the 10 s liveness sweep; the supervisor heartbeat is the bus liveness anchor. Raw age ${heartbeat.ageSeconds ?? "—"}s, stale cutoff ${heartbeat.staleCutoffSeconds}s.`}>
+              {/* R5/A4 — humanized, not `570724.69163s / 86400s`: the two-unit form reads as human time. */}
+              heartbeat{" "}
+              {heartbeat.ageSeconds !== null
+                ? humanizeDuration(heartbeat.ageSeconds * 1000)
+                : "—"}{" "}
+              / stale cutoff {humanizeDuration(heartbeat.staleCutoffSeconds * 1000)}
             </span>
           </>
         ) : (

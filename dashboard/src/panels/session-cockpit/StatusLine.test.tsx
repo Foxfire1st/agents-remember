@@ -71,16 +71,18 @@ describe("StatusLine", () => {
     const ordered = Array.from(view.getByTestId("sessions-statusline").children)
       .map((node) => node.getAttribute("data-testid"))
       .filter(Boolean);
-    expect(ordered.slice(0, 8)).toEqual([
+    // RV/R3 — the reserved UA-5 slot (`ctx — / cost — (UA-5 slot)`) is dropped: it rendered leaked
+    // internal jargon + bare em-dashes on every seat and carried no real ctx/cost authority yet.
+    expect(ordered.slice(0, 7)).toEqual([
       "status-harness",
       "status-pair",
       "status-state",
       "status-leaf-seat",
       "status-pending-sets",
       "status-queued-messages",
-      "status-ua5-slot",
       "status-freshness",
     ]);
+    expect(view.queryByTestId("status-ua5-slot")).toBeNull();
     expect(view.getByTestId("status-harness").textContent).toBe("harness claude");
     expect(view.getByTestId("status-pair").textContent).toContain(
       "model claude/sonnet · effort high",
@@ -98,9 +100,6 @@ describe("StatusLine", () => {
     expect(view.getByTestId("status-queued-messages").textContent).toBe(
       "queued messages 1 yours",
     );
-    expect(view.getByTestId("status-ua5-slot").textContent).toBe(
-      "ctx — / cost — (UA-5 slot)",
-    );
     expect(view.getByTestId("status-freshness").textContent).toContain(
       "pty ws ✓ · quiet 3s · poll stale · missed 3 · beat age 2s",
     );
@@ -109,7 +108,7 @@ describe("StatusLine", () => {
     );
   });
 
-  it("keeps the reserved usage slot and absent seat facts visible without inventing evidence", () => {
+  it("collapses to one honest phrase when no chat is focused (R3/A1 — never a five-dash chain)", () => {
     const view = render(
       <StatusLine
         session={undefined}
@@ -118,12 +117,40 @@ describe("StatusLine", () => {
         now={1_000}
       />,
     );
-    expect(view.getByTestId("status-harness").textContent).toBe("harness —");
-    expect(view.getByTestId("status-pair").textContent).toBe("model — · effort —");
-    expect(view.getByTestId("status-state").textContent).toBe("—");
-    expect(view.getByTestId("status-leaf-seat").textContent).toBe("leaf — · seat —");
-    expect(view.getByTestId("status-ua5-slot").textContent).toBe(
-      "ctx — / cost — (UA-5 slot)",
+    // The absent state reads as a short phrase, not `harness — model — · effort — · leaf — · seat —`.
+    expect(view.getByTestId("status-empty").textContent).toBe(
+      "no chat focused — open one from the rail",
     );
+    expect(view.queryByTestId("status-pair")).toBeNull();
+    expect(view.queryByTestId("status-leaf-seat")).toBeNull();
+    expect(view.queryByTestId("status-pending-sets")).toBeNull();
+    expect(view.queryByTestId("status-queued-messages")).toBeNull();
+    // The palette hint stays present.
+    expect(view.getByTestId("sessions-statusline").textContent).toContain(
+      "ctrl+k palette · ? keys · F6 regions",
+    );
+  });
+
+  it("collapses the healthy steady state to one calm token (R4/A2 — reassurance zeros gone)", () => {
+    const session = {
+      ...fromTerminalSessionInfo(L6_CONTROLLED_WORKING),
+      harness: "claude",
+    };
+    const view = render(
+      <StatusLine
+        session={session}
+        cockpit={undefined}
+        pollHealth={{ lastBeatAt: 900, missedBeats: 0, healthy: true }}
+        now={1_000}
+      />,
+    );
+    // No `pending sets 0/2` / `queued messages 0 yours` chips when there is nothing to report.
+    expect(view.queryByTestId("status-pending-sets")).toBeNull();
+    expect(view.queryByTestId("status-queued-messages")).toBeNull();
+    // The freshness cluster is one calm token, not `poll healthy · missed 0 · beat age 0s`.
+    const freshness = view.getByTestId("status-freshness").textContent ?? "";
+    expect(freshness).toContain("poll ✓");
+    expect(freshness).not.toContain("missed 0");
+    expect(freshness).not.toContain("beat age");
   });
 });

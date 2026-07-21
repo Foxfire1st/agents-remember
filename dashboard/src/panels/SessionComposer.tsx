@@ -60,12 +60,16 @@ const dock = css({
 });
 const editorFrame = css({
   minWidth: "0",
-  background: "bg",
+  // FB7.1 — the composer joins the terminal well (same inset tone as the feed + the pty pane).
+  background: "well",
   borderWidth: "1px",
   borderStyle: "solid",
   borderColor: "grid",
   borderRadius: "2px",
   overflow: "hidden",
+  // V4 — the page's primary input MUST show keyboard focus. The inner .cm-focused outline is clipped
+  // by this frame's overflow:hidden, so the frame itself carries the house amber ring on focus.
+  "&:focus-within": { borderColor: "amber" },
   "&[data-answer-mode='true']": { borderColor: "amber" },
   "&[data-disabled='true']": { opacity: "0.62" },
   "& .cm-editor": { minHeight: "2.55rem", maxHeight: "8rem" },
@@ -89,6 +93,11 @@ const sendButton = css({
   font: "inherit",
   fontSize: "0.68rem",
   letterSpacing: "0.03em",
+  // V3 — the send control keeps its full width and single line whatever the stage width: the hint
+  // (footerLeft, flex:1 minWidth:0) is the only part that yields, so `ctrl+↵ send` is never shrunk
+  // under the inspector's edge or wrapped when the inspector opens and the stage column reflows.
+  flexShrink: 0,
+  whiteSpace: "nowrap",
   paddingInline: "0.55rem",
   paddingBlock: "0.12rem",
   borderRadius: "2px",
@@ -383,15 +392,24 @@ export const SessionComposer = forwardRef<SessionComposerHandle, SessionComposer
     // 260718-CHATS-L4 finding A3: group the hint by concern with ONE separator convention (interpunct)
     // and move the honest-boundary capability wall into a tooltip (progressive disclosure). The
     // boundary copy stays present — structured, not a mixed-separator wall.
-    const footerHint = [
-      "markdown",
-      `${effectiveKeymap.composerProfile} keys`,
-      "draft saved",
-      queuedSetHint,
-      queue.some((entry) => entry.state === "queued")
-        ? `${queue.filter((entry) => entry.state === "queued").length} queued · yours`
-        : null,
-    ]
+    // L5P V9: on a legacy-raw terminal seat native submission is unsupported (typing bypasses the
+    // /submit queue), so the markdown/reliable-submit/text-only claims contradict the pane — derive the
+    // hint from the seat instead of stating a controlled-composer capability that does not apply here.
+    // L5P V14: `draft saved` is an exception cue, shown only when a non-empty draft actually exists.
+    const rawTerminalSeat = session.kind === "terminal";
+    const footerHint = (
+      rawTerminalSeat
+        ? [`${effectiveKeymap.composerProfile} keys`, "raw terminal keys pass through"]
+        : [
+            "markdown",
+            `${effectiveKeymap.composerProfile} keys`,
+            draft.draft.length > 0 ? "draft saved" : null,
+            queuedSetHint,
+            queue.some((entry) => entry.state === "queued")
+              ? `${queue.filter((entry) => entry.state === "queued").length} queued · yours`
+              : null,
+          ]
+    )
       .filter(Boolean)
       .join(" · ");
     const RELIABLE_SUBMIT_DETAIL =
@@ -576,11 +594,15 @@ export const SessionComposer = forwardRef<SessionComposerHandle, SessionComposer
         <div className={footer}>
           <span className={footerLeft}>
             {footerHint}
-            {" · "}
-            <span title={RELIABLE_SUBMIT_DETAIL} data-testid="composer-reliability-note">
-              reliable submit
-            </span>
-            {" · text only"}
+            {!rawTerminalSeat ? (
+              <>
+                {" · "}
+                <span title={RELIABLE_SUBMIT_DETAIL} data-testid="composer-reliability-note">
+                  reliable submit
+                </span>
+                {" · text only"}
+              </>
+            ) : null}
           </span>
           <Button
             className={sendButton}

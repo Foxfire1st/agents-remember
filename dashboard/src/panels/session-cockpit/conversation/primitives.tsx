@@ -11,21 +11,22 @@ import type {
   FeatureCapability,
 } from "../../../data/conversation/types";
 
+// FB7.4/V12/A8 — a de-boxed text affordance (`show more (+13 lines)` / `show less`), never a boxed
+// web chip, and never wrapping its own label. Lowercase to match the well's chip grammar.
 const clampButton = css({
   font: "inherit",
-  fontSize: "0.66rem",
-  letterSpacing: "0.04em",
+  fontSize: "0.7rem",
+  whiteSpace: "nowrap",
   color: "muted",
   background: "transparent",
-  borderWidth: "1px",
-  borderStyle: "solid",
-  borderColor: "grid",
-  borderRadius: "2px",
-  paddingInline: "0.4rem",
-  paddingBlock: "0.04rem",
+  border: "none",
+  padding: "0",
   cursor: "pointer",
-  marginTop: "0.2rem",
-  _hover: { color: "amber", borderColor: "amber" },
+  marginTop: "0.15rem",
+  textDecoration: "underline",
+  textDecorationColor: "color-mix(in oklch, token(colors.grid) 60%, transparent)",
+  textUnderlineOffset: "2px",
+  _hover: { color: "amber" },
   _focusVisible: { outline: "1px solid token(colors.amber)", outlineOffset: "1px" },
 });
 
@@ -48,10 +49,10 @@ export function ClampButton({
   noun?: string;
 }) {
   const label = expanded
-    ? "Show less"
+    ? "show less"
     : hiddenLines !== undefined && hiddenLines > 0
-      ? `Show more (+${hiddenLines} ${noun})`
-      : "Show more";
+      ? `show more (+${hiddenLines} ${noun})`
+      : "show more";
   return (
     <button
       type="button"
@@ -117,21 +118,41 @@ export function sourceBadgeLabel(
   return null; // ordinary operator/harness content is unbadged
 }
 
-const reason = css({
+// R11 — a short honest CUE, not a jargon wall. The one-word capability state stays visible above the
+// conversation (`partial`/`unavailable`/`unverified`); the full server reason moves behind hover
+// disclosure (title) so the implementation-jargon paragraph never owns above-the-fold chrome (A3).
+const cue = css({
   fontSize: "0.64rem",
   color: "muted",
-  fontStyle: "italic",
+  cursor: "help",
+  textDecorationLine: "underline",
+  textDecorationStyle: "dotted",
+  textDecorationColor: "color-mix(in oklch, token(colors.muted) 55%, transparent)",
+  textUnderlineOffset: "2px",
+  whiteSpace: "nowrap",
 });
 
 /**
- * A capability reason line (§8): renders the exact server reason for a partial/unavailable/unverified
- * capability. Copy is honest and present, never hidden — but structured, not a wall (A3).
+ * A capability cue (§8, R11): a short honest marker for a partial/unavailable/unverified capability.
+ * The one-word state is the cue; the exact server reason is disclosed on hover (title), never rendered
+ * as an always-visible paragraph. An optional `label` disambiguates which capability the cue is about.
  */
-export function CapabilityReason({ capability }: { capability: FeatureCapability }) {
+export function CapabilityReason({
+  capability,
+  label,
+}: {
+  capability: FeatureCapability;
+  label?: string;
+}) {
   if (capability.state === "supported") return null;
   return (
-    <span className={reason} data-testid="capability-reason" data-state={capability.state}>
-      {capability.state}: {capability.reason}
+    <span
+      className={cue}
+      data-testid="capability-reason"
+      data-state={capability.state}
+      title={`${label ? `${label}: ` : ""}${capability.reason}`}
+    >
+      {label ? `${label} ${capability.state}` : capability.state}
     </span>
   );
 }
