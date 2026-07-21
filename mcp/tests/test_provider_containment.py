@@ -355,6 +355,23 @@ class MetricsTests(unittest.TestCase):
         assert snapshot.error is not None
         self.assertIn("daemon down", snapshot.error)
 
+    def test_sampler_bounds_docker_ps_timeout_into_error_sample(self) -> None:
+        # 260718-CHATS-L5F R6: a slow/hung docker daemon must not escape as a subprocess timeout
+        # traceback every sampling interval; the sampler bounds it into an error-annotated snapshot.
+        with (
+            mock.patch("agents_remember.providers.metrics.docker_command", return_value="docker"),
+            mock.patch(
+                "agents_remember.providers.metrics.run_command",
+                return_value={"returncode": None, "stdout": "", "stderr": "", "timedOut": True},
+            ) as run,
+        ):
+            snapshot = sample_provider_containers(cwd=Path("."), timeout=20)
+        # The sampler asks run_command to bound the timeout rather than raise it.
+        assert run.call_args is not None and run.call_args.kwargs.get("allow_timeout") is True
+        self.assertEqual(snapshot.containers, [])
+        assert snapshot.error is not None
+        self.assertIn("timed out", snapshot.error)
+
     def test_sampler_dockerless_host_yields_error_sample(self) -> None:
         with mock.patch(
             "agents_remember.providers.metrics.docker_command",
@@ -384,7 +401,9 @@ class MetricsTests(unittest.TestCase):
             }
         )
 
-        def fake_run(command: list[str], *, cwd: Path, timeout: int) -> dict[str, object]:
+        def fake_run(
+            command: list[str], *, cwd: Path, timeout: int, allow_timeout: bool = False
+        ) -> dict[str, object]:
             if "stats" in command:
                 return {"returncode": 0, "stdout": stats_line + "\n"}
             return {"returncode": 0, "stdout": ps_line + "\nnot-json\n"}
@@ -413,7 +432,9 @@ class MetricsTests(unittest.TestCase):
             }
         )
 
-        def fake_run(command: list[str], *, cwd: Path, timeout: int) -> dict[str, object]:
+        def fake_run(
+            command: list[str], *, cwd: Path, timeout: int, allow_timeout: bool = False
+        ) -> dict[str, object]:
             if "stats" in command:
                 return {"returncode": 1, "stdout": "", "stderr": ""}
             return {"returncode": 0, "stdout": ps_line + "\n"}

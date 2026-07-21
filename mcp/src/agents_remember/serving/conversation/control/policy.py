@@ -5,7 +5,8 @@ posture (the local single-operator authorization ruling and the canonical
 project scope) from the effective harness mode, each with origin/evidence,
 observed time, freshness, runtime/helper versions, and unavailable/unverified
 reasons. Claude's ``permissionMode`` crosses the live snapshot and is reported
-with its unverified gate reason at the locked-version mismatch; codex approval
+with its control-contract capability reason (unverified until the control seam is
+probed — never a version gate, per the 2026-07-21 ruling / 260718-CHATS-L5F R4); codex approval
 /sandbox values are adapter-private at thread/turn start and never cross, so
 they stay honestly unverified; pi has no built-in permission popup surface.
 There is no ``PATCH``, ``policyWrite``, preview, or mutation surface anywhere

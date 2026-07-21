@@ -108,4 +108,26 @@ describe("activeConversationStore orchestration (F4 keep-alive / LRU, F15 error 
     // No projection was fabricated on failure.
     expect(activeConversationStore.getState().bySession.s1).toBeUndefined();
   });
+
+  it("retries a transient boot-race failure on the quiet connecting phase, never fail-loud (R10)", async () => {
+    // 260718-CHATS-L5F R10 / audit V13: a fresh launch's first fetch can race the runner's boot and
+    // answer transiently (503 / connection refused). Unlike a hard 4xx it must NOT flash the
+    // fail-loud "structured surface unavailable" alarm — it retries quietly across the boot window.
+    let calls = 0;
+    const alwaysTransient = (async () => {
+      calls += 1;
+      return { ok: false, status: 503, json: async () => ({ status: "unavailable", detail: "bridge composing" }) } as Response;
+    }) as unknown as typeof fetch;
+
+    connectConversation("s9", "e1", { fetchImpl: alwaysTransient, eventSourceCtor: FakeEventSource });
+    await flush();
+    // Right after the first transient 503: no fail-loud error (contrast the 409 case above which
+    // sets errorBySession immediately). The surface stays on the quiet connecting phase.
+    expect(activeConversationStore.getState().errorBySession.s9).toBeUndefined();
+    // It keeps retrying rather than giving up after one attempt.
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    expect(calls).toBeGreaterThanOrEqual(2);
+    // Stop the bounded retry loop for a clean teardown.
+    disconnectConversation("s9");
+  });
 });

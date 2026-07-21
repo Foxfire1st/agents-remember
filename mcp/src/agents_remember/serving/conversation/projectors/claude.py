@@ -50,6 +50,16 @@ HARNESS = "claude"
 
 _CANCEL_REASONS = {"cancelled", "interrupted", "user_cancelled"}
 
+# 260718-CHATS-L5F R3: the installed Claude Code (2.1.216+) slash-command lifecycle contract. Each
+# submitted ``/command`` emits a stable ``command_uuid`` triple queued -> started -> completed. It
+# is a first-class typed frame (validated against this exact 3-state contract), not a tolerated
+# stranger — the second-half native slash-command surface (leaves 07/08) consumes it as settlement
+# evidence, correlated by ``command_uuid`` to the replayed command envelope. Until that surface
+# lands the lifecycle mints no timeline item (the native ``result``/history already renders the
+# command), so it never floods as unknown-vendor. Captured specimen preserved in
+# notes/260721-halftime-codex-open-diagnosis.md item 3.
+_COMMAND_LIFECYCLE_STATES = frozenset({"queued", "started", "completed"})
+
 
 def map_evidence_frame(frame: EvidenceFrame, *, evidence_ref: str) -> list[MapperOutput]:
     """Map one full stream-json frame; unrecognized types stay preserved."""
@@ -65,6 +75,13 @@ def map_evidence_frame(frame: EvidenceFrame, *, evidence_ref: str) -> list[Mappe
     if frame_type == "system":
         # api_retry/status feed the canonical status service via the snapshot.
         return []
+    if frame_type == "command_lifecycle":
+        return _map_command_lifecycle(raw)
+    if frame_type == "rate_limit_event":
+        # Rate-limit telemetry feeds the L3 telemetry projection, exactly like codex rateLimits;
+        # it mints no timeline row. Validated so a shape drift surfaces instead of silently passing.
+        required_object(raw.get("rate_limit_info"), "claude rate_limit_event.rate_limit_info")
+        return []
     return [
         MappedUnknownVendor(
             item_id=f"claude-event-{frame.sequence}",
@@ -73,6 +90,23 @@ def map_evidence_frame(frame: EvidenceFrame, *, evidence_ref: str) -> list[Mappe
             created_at=frame.created_at,
         )
     ]
+
+
+def _map_command_lifecycle(raw: Mapping[str, object]) -> list[MapperOutput]:
+    """Strictly recognize the 3-state slash-command lifecycle; mint no timeline item.
+
+    Recognizing the exact contract (rather than falling to unknown-vendor) is what keeps an ordinary
+    claude session flood-free; validating it is what surfaces a genuine future shape drift as an
+    honest failure instead of silent tolerance.
+    """
+
+    required_text(raw.get("command_uuid"), "claude command_lifecycle.command_uuid")
+    state = required_text(raw.get("state"), "claude command_lifecycle.state")
+    if state not in _COMMAND_LIFECYCLE_STATES:
+        raise UnmappableShape(
+            f"claude command_lifecycle.state {state!r} is not a documented lifecycle state"
+        )
+    return []
 
 
 def map_transcript_echo(

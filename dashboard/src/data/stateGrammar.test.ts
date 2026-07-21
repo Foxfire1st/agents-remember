@@ -49,6 +49,27 @@ describe("seatVisualState mapping (spec §2.4)", () => {
     });
   });
 
+  it("liveTurnWorking (R9) overrides a lagging catalog turn-ended with a working state", () => {
+    // 260718-CHATS-L5F R9 / audit V5: while the projection reports a live streaming turn, the
+    // sweep-bounded catalog still reads turn-ended — the fresher projection signal must win so no
+    // authority shows settled-green during a stream.
+    expect(seatVisualState({ turnState: "turn-ended", liveTurnWorking: true })).toMatchObject({
+      key: "working",
+      color: "cyan",
+      pulse: true,
+    });
+  });
+
+  it("liveTurnWorking (R9) NEVER fakes liveness over a terminal / fault / blocked state", () => {
+    // The projection signal slots BELOW the terminal/fault/blocked guards — it can never resurrect
+    // a landed/retired/failed/awaiting-input seat.
+    expect(seatVisualState({ status: "terminated", liveTurnWorking: true }).key).toBe("retired");
+    expect(seatVisualState({ controlState: "failed", liveTurnWorking: true }).key).toBe("failed");
+    expect(
+      seatVisualState({ controlPendingInteraction: { kind: "approval" }, liveTurnWorking: true }).key,
+    ).toBe("awaiting-input");
+  });
+
   it("ready / turn-ended = steady mint", () => {
     expect(seatVisualState({ controlState: "ready" })).toMatchObject({
       key: "ready",

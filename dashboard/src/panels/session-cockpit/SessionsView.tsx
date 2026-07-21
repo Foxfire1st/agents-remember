@@ -69,6 +69,7 @@ import {
   railDefaultPercent,
   stageBelowPtyFloor,
 } from "../../data/sessionLayout";
+import { useActiveConversation } from "../../data/conversation/store";
 import { useSessions } from "../../data/sessions";
 import { shortId } from "../../data/conversation/format";
 import { useDashboard } from "../../data/store";
@@ -293,7 +294,26 @@ export function SessionsView({
   useEffect(() => startSetPromotionWatcher(), []);
   useEffect(() => startSeatStateAnnouncer(), []);
 
-  const focused = sessions.find((session) => session.id === focusedSessionId);
+  // 260718-CHATS-L5F R9 (audit V5): the focused seat's conversation projection carries its OWN live
+  // turn signal over SSE (sub-second), which the sweep-bounded catalog turn-state lags by ~10s. When
+  // the projection shows a turn actively streaming, prefer it so the stage authorities (HeaderStrip
+  // StateDot, StatusLine, WorkingLine) show a WORKING state instead of a settled-green `turn-ended`.
+  // Honest fallback: a stale/disconnected projection is never trusted, and a terminal/fault/blocked
+  // catalog state still wins (seatVisualState checks those first).
+  const focusedLiveTurnWorking = useActiveConversation((state) => {
+    if (focusedSessionId === null || focusedSessionId === undefined) return false;
+    const projection = state.bySession[focusedSessionId];
+    if (projection === undefined || projection.stream !== "live") return false;
+    const status = projection.status;
+    if (status === undefined || status.freshness.state === "stale") return false;
+    const turn = status.turn.state;
+    return turn === "working" || turn === "settling" || turn === "retrying" || turn === "compacting";
+  });
+  const focusedBase = sessions.find((session) => session.id === focusedSessionId);
+  const focused =
+    focusedBase !== undefined && focusedLiveTurnWorking
+      ? { ...focusedBase, liveTurnWorking: true }
+      : focusedBase;
   const focusedLive =
     focused !== undefined && (focused.status ?? "running") === "running";
   // L4 exact-turn interrupt for the focused session (drives WorkingLine's stop control). A ref lets

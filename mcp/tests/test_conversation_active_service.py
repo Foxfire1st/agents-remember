@@ -553,6 +553,74 @@ class ClaudeEngineTests(unittest.IsolatedAsyncioTestCase):
             ["uuid-user-1", "uuid-agent-1", "uuid-result-1:result", "uuid-user-2", "uuid-agent-2", "uuid-result-2:result"],
         )
 
+    async def test_nonuser_transcript_entries_mint_no_echo_unknown_vendor_rows(self) -> None:
+        # 260718-CHATS-L5F R3: the claude transcript carries assistant and result entries alongside
+        # user submission echoes (claude_stream_state emits role="assistant"/"result"). Feeding those
+        # non-user entries to the user-only echo mapper is what produced the developer's image3
+        # "claude:echo: unrecognized submission echo shape" rows. The echo poller must advance past
+        # them, minting zero unknown-vendor echo rows while the user echo + evidence still map.
+        bridge = _ScriptedBridge(harness="claude")
+        bridge.transcript_entries.append(
+            {
+                "sequence": 1,
+                "role": "user",
+                "text": "prompt 1",
+                "createdAt": NOW,
+                "requestId": "req-1",
+                "vendorCorrelationId": "uuid-user-1",
+            }
+        )
+        # The interleaved assistant/result transcript entries the production claude state emits.
+        bridge.transcript_entries.append(
+            {
+                "sequence": 2,
+                "role": "assistant",
+                "text": "answer 1",
+                "createdAt": NOW,
+                "requestId": "req-1",
+                "vendorCorrelationId": "uuid-agent-1",
+            }
+        )
+        bridge.transcript_entries.append(
+            {
+                "sequence": 3,
+                "role": "result",
+                "text": "completed",
+                "createdAt": NOW,
+                "requestId": "req-1",
+                "vendorCorrelationId": "uuid-result-1",
+            }
+        )
+        bridge.push_evidence(
+            "state",
+            {
+                "type": "assistant",
+                "uuid": "uuid-agent-1",
+                "session_id": "vendor-1",
+                "message": {
+                    "role": "assistant",
+                    "content": [{"type": "text", "text": "answer 1"}],
+                },
+            },
+        )
+        bridge.push_evidence(
+            "completed",
+            {"type": "result", "subtype": "success", "is_error": False, "uuid": "uuid-result-1"},
+        )
+        projector = _projector(bridge, harness="claude")
+        result = await projector.page(before_ordinal=None, limit=50)
+        vendor_types = [
+            getattr(block, "vendor_type", None)
+            for item in result.items
+            for block in item.blocks
+            if getattr(block, "type", None) == "unknown-vendor"
+        ]
+        self.assertNotIn("claude:echo", vendor_types)
+        self.assertTrue(
+            all("echo-" not in item.item_id or item.item_id == "uuid-user-1" for item in result.items)
+        )
+        self.assertIn("uuid-user-1", [item.item_id for item in result.items])
+
     async def test_zipper_handles_split_result_across_polls(self) -> None:
         bridge = _ScriptedBridge(harness="claude")
         # Turn 1 result arrives only in a later poll than user 2's echo.
@@ -997,6 +1065,31 @@ class ZipperEvictionGapTests(unittest.IsolatedAsyncioTestCase):
         result = await projector.page(before_ordinal=None, limit=50)
         self.assertEqual([item.item_id for item in result.items], ["uuid-agent-1"])
         self.assertIsNone(result.total_items)
+
+
+class DormantReleaseTests(unittest.IsolatedAsyncioTestCase):
+    async def test_release_dormant_state_frees_heavy_projection_and_retires_shell(self) -> None:
+        # 260718-CHATS-L5F R5: a dormant projector must release its full ProjectionStore, the L5
+        # live-turn/request id-sets, and retained envelopes instead of lingering as a registered
+        # tombstone until 32-LRU eviction. After release the shell is retired (matches() is False),
+        # so the next access re-creates a fresh projector.
+        bridge = _ScriptedBridge(harness="codex")
+        _codex_turn(bridge, "turn-1")
+        _codex_turn(bridge, "turn-2")
+        projector = _projector(bridge)
+        result = await projector.page(before_ordinal=None, limit=50)
+        self.assertGreater(len(result.items), 0)
+        self.assertGreater(len(projector._live_turn_ids), 0)
+
+        projector._release_dormant_state()
+
+        self.assertTrue(projector._closed)
+        self.assertEqual(projector._store.page(before_ordinal=None, limit=50, total_known=True).items, ())
+        self.assertEqual(projector._live_turn_ids, set())
+        self.assertEqual(projector._live_request_ids, set())
+        self.assertEqual(projector._retention, [])
+        # The retired shell no longer matches its identity, so a re-access re-creates it.
+        self.assertFalse(projector.matches(_identity("codex")))
 
 
 if __name__ == "__main__":

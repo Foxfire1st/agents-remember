@@ -22,6 +22,7 @@ from agents_remember.serving.harness_control_adapter import (
 )
 from agents_remember.serving.harness_control_models import (
     AR_EVIDENCE_KEY,
+    AR_EVIDENCE_METHOD_KEY,
     CONTROL_PROTOCOL_VERSION,
     EVIDENCE_PAGE_BYTE_BUDGET,
     MAX_NATIVE_EVIDENCE_PAGE,
@@ -499,19 +500,35 @@ class HarnessControlBridge:
         """Append one reserved-key payload to the bounded buffer; return the redacted event.
 
         The redacted event is what reduction, the command authority, the transcript, and every
-        subscriber see, so ``snapshot.raw`` and all of its projections stay byte-identical.
+        subscriber see, so ``snapshot.raw`` and all of its projections stay byte-identical. The
+        optional out-of-band native method (``AR_EVIDENCE_METHOD_KEY``) is preserved on the frame
+        as typed metadata and stripped from the redacted event alongside the payload key.
         """
 
         if not isinstance(payload, Mapping):
             raise HarnessControlError("adapter evidence payload must be an object")
-        self._append_evidence(event.sequence, event.kind, event.created_at, payload)
+        native_method = event.raw.get(AR_EVIDENCE_METHOD_KEY)
+        if native_method is not None and (
+            not isinstance(native_method, str) or not native_method
+        ):
+            raise HarnessControlError("adapter evidence method must be non-empty text when present")
+        self._append_evidence(
+            event.sequence, event.kind, event.created_at, payload, native_method=native_method
+        )
+        stripped = {AR_EVIDENCE_KEY, AR_EVIDENCE_METHOD_KEY}
         return replace(
             event,
-            raw={key: value for key, value in event.raw.items() if key != AR_EVIDENCE_KEY},
+            raw={key: value for key, value in event.raw.items() if key not in stripped},
         )
 
     def _append_evidence(
-        self, sequence: int, kind: str, created_at: str, payload: Mapping[str, object]
+        self,
+        sequence: int,
+        kind: str,
+        created_at: str,
+        payload: Mapping[str, object],
+        *,
+        native_method: str | None = None,
     ) -> None:
         previous = self._evidence[-1].sequence if self._evidence else 0
         if sequence <= previous:
@@ -524,6 +541,7 @@ class HarnessControlBridge:
                 kind=kind,
                 created_at=created_at,
                 raw=clip_evidence_payload(payload, max_bytes=self._evidence_frame_bytes),
+                native_method=native_method,
             )
         )
 

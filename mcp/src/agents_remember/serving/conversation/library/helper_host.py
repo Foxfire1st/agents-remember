@@ -1,15 +1,17 @@
 """Python host for the locked repository-owned conversation-library helpers (260718-CHATS-L2).
 
 The Claude and Pi dormant libraries run through one versioned JSON-lines Node helper per call:
-spawn, handshake with the locked runtime/helper versions, one operation, exit. The host never
-discovers modules from npm caches, OpenSrc checkouts, or global installs: it runs the exact
-repository helper entry with ``node --import tsx`` from the repository's own locked package.
+spawn, handshake (which reports the observed runtime/helper versions as informational evidence),
+one operation, exit. The host never discovers modules from npm caches, OpenSrc checkouts, or global
+installs: it runs the exact repository helper entry with ``node --import tsx`` from the repository's
+own locked package.
 
-Fail-closed rules: a missing Node runtime, missing helper entry, or uninstalled locked
-dependencies raises :class:`LibraryStoreError`; an ``incompatible`` handshake raises
-:class:`LibraryStoreError` carrying the observed-versus-locked versions; helper-reported
-``stale-identity`` maps to :class:`StaleNativeIdentityError`; raw helper stderr is never
-disclosed (the protocol's allow-list redaction plus this host's fixed-copy boundary).
+THE CONTRACT IS THE ONLY GATE (developer ruling 2026-07-21, 260718-CHATS-L5F R4): the operation
+result — not any runtime/helper version-string comparison — decides success. Fail-closed rules: a
+missing Node runtime, missing helper entry, or uninstalled dependencies raises
+:class:`LibraryStoreError`; an operation the helper cannot perform raises :class:`LibraryStoreError`;
+helper-reported ``stale-identity`` maps to :class:`StaleNativeIdentityError`; raw helper stderr is
+never disclosed (the protocol's allow-list redaction plus this host's fixed-copy boundary).
 """
 
 from __future__ import annotations
@@ -36,6 +38,9 @@ HELPER_ENTRY_BY_HARNESS: Mapping[HelperHarness, str] = {
     "claude": "claude.ts",
     "pi": "pi.ts",
 }
+# Informational provenance only (260718-CHATS-L5F R4): the versions whose contract was captured in
+# the landed fixtures. Sent as ``expected*`` hints on the handshake request but NEVER compared to
+# demote a capability — the operation result is the sole gate (developer ruling 2026-07-21).
 LOCKED_HELPER_VERSION: Mapping[HelperHarness, str] = {
     "claude": "0.3.207",
     "pi": "0.80.7",
@@ -137,13 +142,11 @@ class ConversationLibraryHelperHost:
         handshake = self._expect_handshake(lines[0], requests[0]["requestId"])
         runtime_version = _required_text(handshake, "runtimeVersion")
         helper_version = _required_text(handshake, "helperVersion")
-        if handshake.get("status") != "ready":
-            raise LibraryStoreError(
-                "locked helper/runtime versions are incompatible with the library gate "
-                f"(observed runtime {runtime_version}, helper {helper_version}; locked "
-                f"runtime {LOCKED_RUNTIME_VERSION[harness]}, helper "
-                f"{LOCKED_HELPER_VERSION[harness]})"
-            )
+        # 260718-CHATS-L5F R4 (developer ruling 2026-07-21): the handshake reports the observed
+        # runtime/helper versions as INFORMATIONAL evidence only — it is never a gate. The contract
+        # is the gate: the operation result below is the proof. A helper that cannot perform the
+        # operation raises ``LibraryStoreError`` from ``_expect_result``; a version drift between the
+        # installed runtime and any captured fixture never demotes the surface.
         result = self._expect_result(lines[1], requests[1]["requestId"])
         return result, runtime_version, helper_version
 

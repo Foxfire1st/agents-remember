@@ -94,7 +94,10 @@ class CodexGateTests(unittest.IsolatedAsyncioTestCase):
         await gates.history_capabilities("codex")
         assert probes == 1
 
-    async def test_version_mismatch_demotes_codex_to_unverified(self) -> None:
+    async def test_version_drift_still_enables_codex_when_the_probe_passes(self) -> None:
+        # 260718-CHATS-L5F R4 (developer ruling 2026-07-21): THE CONTRACT IS THE ONLY GATE. A codex
+        # runtime that differs from the fixture's captured version is NOT demoted — the connect+list
+        # probe passing is the proof; the observed version rides the evidence as informational only.
         async def probe(_harness, _root, _env) -> str:
             return "0.999.0"
 
@@ -105,9 +108,10 @@ class CodexGateTests(unittest.IsolatedAsyncioTestCase):
             which=_installed_which(self.tmp),
         )
         capabilities = await gates.history_capabilities("codex")
-        assert capabilities.list.state == "unverified"
-        assert "0.999.0" in capabilities.list.reason
-        assert LOCKED_CODEX_RUNTIME_VERSION in capabilities.list.reason
+        assert capabilities.list.state == "supported"
+        assert capabilities.read.state == "supported"
+        evidence = capabilities.list.evidence
+        assert evidence is not None and evidence.runtime_version == "0.999.0"
 
     async def test_failed_probe_is_unverified_not_unavailable(self) -> None:
         async def probe(_harness, _root, _env) -> str:

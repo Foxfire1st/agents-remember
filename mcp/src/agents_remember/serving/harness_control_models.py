@@ -63,6 +63,18 @@ shape. The control bridge diverts the payload into the bounded evidence deque an
 event without this key, so ``snapshot.raw`` and every projection of it stay byte-identical.
 """
 
+AR_EVIDENCE_METHOD_KEY = "arEvidenceMethod"
+"""Reserved ``AdapterEvent.raw`` key carrying the native notification method / frame ``type``.
+
+Some native protocols (notably the Codex app-server) carry the discriminating method name
+*outside* the notification ``params`` payload. When an adapter diverts only ``params`` under
+``AR_EVIDENCE_KEY`` the method would otherwise be stripped before a projector ever sees it, forcing
+the projector to re-guess meaning from the params shape. An adapter that has this fact sets it here
+so the bridge preserves it on the diverted :class:`EvidenceFrame` as typed ``native_method``
+metadata; like ``AR_EVIDENCE_KEY`` it is stripped from the republished event so ``snapshot.raw``
+stays byte-identical.
+"""
+
 EVIDENCE_TRUNCATION_MARKER = "…[truncated]"
 """Visible marker appended to every clipped evidence payload preview."""
 
@@ -401,6 +413,13 @@ class EvidenceFrame:
     kind: str
     created_at: str
     raw: Mapping[str, object] = field(default_factory=dict)
+    native_method: str | None = None
+    """The native notification method / frame ``type`` when the adapter carries it out of band.
+
+    Preserved verbatim from ``AR_EVIDENCE_METHOD_KEY`` so a projector switches on the real method
+    instead of re-guessing meaning from the ``params`` shape; ``None`` when the adapter embeds the
+    discriminator inside ``raw`` (as Claude and Pi do with the frame ``type``).
+    """
 
 
 @dataclass(frozen=True)
@@ -519,12 +538,15 @@ def snapshot_json(value: AdapterSnapshot) -> dict[str, object]:
 
 
 def evidence_frame_json(value: EvidenceFrame) -> dict[str, object]:
-    return {
+    payload: dict[str, object] = {
         "sequence": value.sequence,
         "kind": value.kind,
         "createdAt": value.created_at,
         "raw": dict(value.raw),
     }
+    if value.native_method is not None:
+        payload["nativeMethod"] = value.native_method
+    return payload
 
 
 def evidence_page_json(value: EvidencePage) -> dict[str, object]:

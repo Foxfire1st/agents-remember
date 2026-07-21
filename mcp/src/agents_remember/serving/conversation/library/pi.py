@@ -1,14 +1,16 @@
 """Pi dormant native conversation library through the locked helper (260718-CHATS-L2).
 
-Every operation runs through the repository-owned locked helper
-(``@earendil-works/pi-coding-agent@0.80.7`` ``SessionManager.list`` / ``open`` +
-``getBranch``) via :class:`ConversationLibraryHelperHost`, handshaking locked versions on every
-spawn. The durable Pi entry id is the native item identity anchor; reading a dormant
-conversation never calls ``switch_session`` on any running process — the helper opens the
-session file read-only and open starts a new AR session (design section 10.4).
+Every operation runs through the repository-owned helper
+(``@earendil-works/pi-coding-agent`` ``SessionManager.list`` / ``open`` +
+``getBranch``) via :class:`ConversationLibraryHelperHost`. The handshake reports the observed
+runtime/helper versions as informational evidence only — THE CONTRACT IS THE ONLY GATE (developer
+ruling 2026-07-21, 260718-CHATS-L5F R4): the ``list``/``getBranch`` operation succeeding is the
+proof, never a version-string comparison. The durable Pi entry id is the native item identity
+anchor; reading a dormant conversation never calls ``switch_session`` on any running process — the
+helper opens the session file read-only and open starts a new AR session (design section 10.4).
 
 Pi native append-only entries are the complete session line, so historical and tool
-completeness are honest ``supported`` once the production gate passes.
+completeness are honest ``supported`` once the production contract probe passes.
 """
 
 from __future__ import annotations

@@ -147,24 +147,54 @@ export interface ConnectOptions {
   limit?: number;
 }
 
+// 260718-CHATS-L5F R10 (audit V13): a fresh chat's first projection fetch races the session's own
+// boot — the runner/bridge is not yet listening for a few hundred ms after the seat row appears. The
+// L4 F20 stream auto-retry only covers a DROPPED live stream, not this first-connect race, so a
+// healthy launch flashed the fail-loud "structured surface unavailable" alarm until a manual retry.
+// The initial hydrate now retries on a quiet `connecting` phase across a bounded window that covers
+// boot; it escalates to the honest `projection-failed` alarm only after the window exhausts, so a
+// genuinely broken session still fails loud — the strip is deferred, never masked.
+const INITIAL_CONNECT_ATTEMPTS = 8;
+const INITIAL_CONNECT_RETRY_MS = 400;
+
+const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+
+// Only a TRANSIENT first-connect failure is the launch/boot race: a connection refused before the
+// runner is listening (httpStatus 0) or a 5xx while the bridge composes (the diagnosis saw the codex
+// bridge answer 503 during boot). A 4xx — 409 epoch/cursor, 404 unknown session — is a real,
+// terminal answer and must fail loud immediately, never masked behind a retry (R10 honesty).
+function isTransientBootFailure(error: { httpStatus: number } | null): boolean {
+  if (error === null) return true; // a null error is a bare transport drop
+  return error.httpStatus === 0 || error.httpStatus >= 500;
+}
+
 async function hydrateAndStream(sessionId: string, runtime: SessionRuntime, limit?: number): Promise<void> {
   const generation = runtime.generation;
   const store = activeConversationStore.getState();
   store.setStreamPhase(sessionId, "connecting");
-  const page = await fetchConversationPage(
-    sessionId,
-    runtime.epoch,
-    { limit },
-    runtime.base,
-    runtime.fetchImpl,
-  );
-  if (runtime.disposed || runtime.generation !== generation) return;
-  if (!page.ok) {
-    activeConversationStore.getState().failStream(sessionId, page.error);
-    return;
+  for (let attempt = 1; ; attempt += 1) {
+    const page = await fetchConversationPage(
+      sessionId,
+      runtime.epoch,
+      { limit },
+      runtime.base,
+      runtime.fetchImpl,
+    );
+    if (runtime.disposed || runtime.generation !== generation) return;
+    if (page.ok) {
+      activeConversationStore.getState().applyPage(sessionId, page.page, "initial");
+      startStream(sessionId, runtime, limit);
+      return;
+    }
+    if (attempt >= INITIAL_CONNECT_ATTEMPTS || !isTransientBootFailure(page.error)) {
+      // A hard failure, or the boot window is exhausted: fail loud with the server's reason.
+      activeConversationStore.getState().failStream(sessionId, page.error);
+      return;
+    }
+    // Transient boot race: stay on the quiet `connecting` phase and give the bridge time to come up.
+    await delay(INITIAL_CONNECT_RETRY_MS);
+    if (runtime.disposed || runtime.generation !== generation) return;
   }
-  activeConversationStore.getState().applyPage(sessionId, page.page, "initial");
-  startStream(sessionId, runtime, limit);
 }
 
 function startStream(sessionId: string, runtime: SessionRuntime, limit?: number): void {

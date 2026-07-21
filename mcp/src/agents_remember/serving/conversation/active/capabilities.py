@@ -2,15 +2,20 @@
 
 Capabilities are per-session evidence, never a global harness marketing table.
 A feature is ``supported``/``partial`` only with landed installed-runtime
-fixture evidence through the production seam; native evidence without a passed
-gate is ``unverified``; a contract the harness cannot provide is
-``unavailable``. An observed runtime/helper version differing from the
-capability evidence demotes the feature to ``unverified`` at read time.
+fixture evidence through the production seam; a native shape whose contract has
+never been probed through a captured fixture is ``unverified``; a contract the
+harness cannot provide is ``unavailable``.
+
+THE CONTRACT IS THE ONLY GATE (developer ruling 2026-07-21, executed in
+260718-CHATS-L5F R4): no capability is gated, locked, or demoted by a
+version-string comparison. The runtime/helper version is informational metadata
+on the evidence record only. A capability demotes solely when its contract fails
+verification or has never been probed — never because an installed version drifts
+from a fixture's captured version (harnesses auto-update; a version predicate made
+the natively-succeeding claude surface unusable).
 """
 
 from __future__ import annotations
-
-from typing import TypeVar
 
 from agents_remember.serving.conversation.models import (
     AttachmentCapabilities,
@@ -191,8 +196,8 @@ def _codex_capabilities() -> ConversationCapabilities:
 
 def _claude_capabilities() -> ConversationCapabilities:
     reason = (
-        "installed 2.1.214 mismatches the locked 2.1.211 gate; the production evidence seam "
-        "remains unexercised at the locked version"
+        "frame contract not yet probed through a captured production fixture; unverified until the "
+        "live stream-json seam is exercised against the running harness (never a version gate)"
     )
 
     def _gated(feature: str) -> FeatureCapability:
@@ -213,8 +218,8 @@ def _claude_capabilities() -> ConversationCapabilities:
                 "claude native pages fail closed stream/replay-only; deep history is the L2 library gate"
             ),
             resume=_unavailable("exact resume/open is the L2 native-library leaf"),
-            completeness=_gated("history completeness requires the locked 2.1.211 library gate"),
-            tool_completeness=_gated("historical tool completeness requires the locked 2.1.211 library gate"),
+            completeness=_gated("history completeness awaits a probed native-library contract"),
+            tool_completeness=_gated("historical tool completeness awaits a probed native-library contract"),
         ),
         controls=ControlCapabilities(
             interrupt=_gated("headless interrupt"),
@@ -327,37 +332,19 @@ def _pi_capabilities() -> ConversationCapabilities:
 
 
 def capabilities_for(harness_id: HarnessId, snapshot: AdapterSnapshot) -> ConversationCapabilities:
-    """Build the exact-session capability set, demoted on version mismatch."""
+    """Build the exact-session capability set.
 
+    The contract is the only gate (developer ruling 2026-07-21): the fixture-declared state stands
+    on its own contract evidence and is never demoted by a version-string comparison against the
+    observed runtime. The observed version rides the evidence record as informational metadata only.
+    """
+
+    del snapshot  # the observed version is no longer a gate; it is informational evidence
     if harness_id == "codex":
-        capabilities = _codex_capabilities()
-        version = snapshot.raw.get("codexCliVersion")
-    elif harness_id == "claude":
-        capabilities = _claude_capabilities()
-        version = snapshot.raw.get("claudeCodeVersion")
-    else:
-        capabilities = _pi_capabilities()
-        version = None
-    if not isinstance(version, str) or not version:
-        return capabilities
-    return ConversationCapabilities(
-        live=_demote_typed(capabilities.live, version),
-        history=_demote_typed(capabilities.history, version),
-        controls=_demote_typed(capabilities.controls, version),
-        telemetry=_demote_typed(capabilities.telemetry, version),
-    )
-
-
-GroupT = TypeVar("GroupT", LiveCapabilities, HistoryCapabilities, ControlCapabilities, TelemetryCapabilities)
-
-
-def _demote_typed(group: GroupT, version: str) -> GroupT:  # noqa: UP047 - Python 3.11 support
-    updates: dict[str, object] = {}
-    for name in type(group).model_fields:
-        value = getattr(group, name)
-        if isinstance(value, FeatureCapability):
-            updates[name] = value.for_observed_runtime(version)
-    return group.model_copy(update=updates)
+        return _codex_capabilities()
+    if harness_id == "claude":
+        return _claude_capabilities()
+    return _pi_capabilities()
 
 
 __all__ = ["capabilities_for"]

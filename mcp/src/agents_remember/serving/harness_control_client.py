@@ -8,6 +8,8 @@ state.
 
 from __future__ import annotations
 
+import contextlib
+import errno
 import json
 import socket
 from collections.abc import Mapping, Sequence
@@ -481,6 +483,29 @@ def _encode_control_request(
     return encoded
 
 
+def _connect_unavailable_detail(endpoint: Path, exc: BaseException) -> str:
+    """Map a control-socket connect failure to an honest lifecycle note (no raw errno surprise).
+
+    260718-CHATS-L5F R6: a controlled runner that already exited leaves either an absent socket
+    (``ENOENT``) or, on an unclean exit, a stale socket file with nothing listening
+    (``ECONNREFUSED`` — the developer's image1 ``[Errno 111] Connection refused`` banner). Both mean
+    the same designed thing: there is no live control endpoint to stop. The stale socket is unlinked
+    best-effort so the next attempt reads the absent (``ENOENT``) case cleanly rather than repeating
+    the refused surprise.
+    """
+
+    error_number = getattr(exc, "errno", None)
+    if error_number == errno.ECONNREFUSED:
+        with contextlib.suppress(OSError):
+            endpoint.unlink()
+        return "the controlled runner already exited (stale control socket, nothing listening)"
+    if error_number == errno.ENOENT:
+        return "the controlled runner already exited (control socket absent)"
+    if isinstance(exc, TimeoutError):
+        return "the control endpoint did not accept a connection within the timeout"
+    return "the control endpoint could not be reached"
+
+
 def _exchange_control(endpoint: Path, encoded: bytes, *, timeout_seconds: float) -> bytes:
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
         client.settimeout(timeout_seconds)
@@ -488,7 +513,8 @@ def _exchange_control(endpoint: Path, encoded: bytes, *, timeout_seconds: float)
             client.connect(str(endpoint))
         except (OSError, TimeoutError) as exc:
             raise HarnessControlClientError(
-                f"control endpoint unavailable before write: {exc}", may_have_sent=False
+                f"control endpoint unavailable before write: {_connect_unavailable_detail(endpoint, exc)}",
+                may_have_sent=False,
             ) from exc
         bytes_handed = False
         try:
@@ -811,12 +837,18 @@ def _evidence_page(result: object, *, expected_bridge_epoch: str | None) -> Evid
         if sequence <= previous:
             raise HarnessControlError("control evidence frames must increase monotonically")
         previous = sequence
+        native_method = raw_frame.get("nativeMethod")
+        if native_method is not None and (
+            not isinstance(native_method, str) or not native_method
+        ):
+            raise HarnessControlError("control evidence nativeMethod must be non-empty text or absent")
         frames.append(
             EvidenceFrame(
                 sequence=sequence,
                 kind=_required_text(raw_frame, "kind"),
                 created_at=_required_text(raw_frame, "createdAt"),
                 raw=_object(raw_frame.get("raw")),
+                native_method=native_method,
             )
         )
     if frames and latest < frames[-1].sequence:

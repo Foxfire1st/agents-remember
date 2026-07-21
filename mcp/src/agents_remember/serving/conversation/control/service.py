@@ -55,12 +55,21 @@ Clock = Callable[[], str]
 MAX_CHANNELS_PER_APP = 64
 """Bounded (session, epoch) channel set per app; oldest evicted (D2)."""
 
+MAX_SESSION_LOCKS_PER_APP = 128
+"""260718-CHATS-L5F R5: the per-session serializer map was created per session and never removed
+(the prime monotonic leak). It is now released on session end AND bounded by construction — the
+oldest UNLOCKED lock is evicted when the cap is exceeded, so a lock in active use is never dropped."""
+
 MAX_INTERRUPTS_PER_CHANNEL = 64
 MAX_WITHDRAWALS_PER_CHANNEL = 64
 MAX_RECOVERIES_PER_CHANNEL = 32
 MAX_ATTACHMENT_OPS_PER_CHANNEL = 32
 MAX_JOURNAL_ENTRIES_PER_CHANNEL = 256
 MAX_SUBMITS_PER_CHANNEL = 256
+MAX_QUEUE_ROWS_PER_CHANNEL = 256
+"""260718-CHATS-L5F R5: the queue-revision bookkeeping map was the one unbounded per-channel store
+(keys ``(kind, op_id, seq)`` were never removed — the open L3 precision-note Todo / D2 anti-pattern).
+Bounded by construction with oldest-key eviction, matching its MAX_*-capped sibling stores."""
 
 RECOVERY_TTL_SECONDS = 900
 """Bounded withdrawal-recovery lease; expiry deletes recoverable content (D3)."""
@@ -154,7 +163,9 @@ class ControlChannel:
     attachments: OrderedDict[str, object] = field(default_factory=OrderedDict)
     journal: OrderedDict[str, JournalEntry] = field(default_factory=OrderedDict)
     submits: OrderedDict[str, tuple[object, object]] = field(default_factory=OrderedDict)
-    queue_rows: dict[tuple[str, str, int], tuple[int, str]] = field(default_factory=dict)
+    queue_rows: OrderedDict[tuple[str, str, int], tuple[int, str]] = field(
+        default_factory=OrderedDict
+    )
     queue_revision: int = 0
     queue_items_key: str = ""
     pending_revision: int = 0
@@ -173,7 +184,7 @@ class ConversationControlService:
         self._clock = clock
         self._secret = os.urandom(32)
         self._channels: OrderedDict[tuple[str, str], ControlChannel] = OrderedDict()
-        self._locks: dict[str, asyncio.Lock] = {}
+        self._locks: OrderedDict[str, asyncio.Lock] = OrderedDict()
 
     @property
     def secret(self) -> bytes:
@@ -200,9 +211,39 @@ class ConversationControlService:
 
         lock = self._locks.get(ar_session_id)
         if lock is None:
+            self._evict_idle_locks()
             lock = asyncio.Lock()
             self._locks[ar_session_id] = lock
+        else:
+            self._locks.move_to_end(ar_session_id)
         return lock
+
+    def _evict_idle_locks(self) -> None:
+        """Drop the oldest UNLOCKED session locks until under the cap; a held lock is never evicted."""
+
+        while len(self._locks) >= MAX_SESSION_LOCKS_PER_APP:
+            evicted = False
+            for key, lock in list(self._locks.items()):
+                if not lock.locked():
+                    del self._locks[key]
+                    evicted = True
+                    break
+            if not evicted:
+                # Every retained lock is currently held (pathological); leave them and stop.
+                break
+
+    def release_session(self, ar_session_id: str) -> None:
+        """Drop every per-session control structure when the session ends (260718-CHATS-L5F R5).
+
+        ``_locks`` was created per session and never removed anywhere — the prime slow leak, keyed by
+        session id and permanent across the daemon lifetime. Its channels (across every epoch) are
+        LRU-bounded but would otherwise linger as dead tombstones until eviction. Both are released
+        here on the terminate/retire authority; this is sync (pure dict ops), safe from any context.
+        """
+
+        self._locks.pop(ar_session_id, None)
+        for key in [key for key in self._channels if key[0] == ar_session_id]:
+            del self._channels[key]
 
     def resolve_entry(self, ar_session_id: str) -> TerminalCatalogEntry:
         return resolve_running_entry(self._runtime, ar_session_id)
@@ -284,7 +325,9 @@ __all__ = [
     "MAX_ATTACHMENT_OPS_PER_CHANNEL",
     "MAX_INTERRUPTS_PER_CHANNEL",
     "MAX_JOURNAL_ENTRIES_PER_CHANNEL",
+    "MAX_QUEUE_ROWS_PER_CHANNEL",
     "MAX_RECOVERIES_PER_CHANNEL",
+    "MAX_SESSION_LOCKS_PER_APP",
     "MAX_SUBMITS_PER_CHANNEL",
     "MAX_WITHDRAWALS_PER_CHANNEL",
     "RECOVERY_TTL_SECONDS",

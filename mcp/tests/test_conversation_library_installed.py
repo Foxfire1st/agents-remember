@@ -537,11 +537,15 @@ class ClaudeGateHonestyTests(unittest.IsolatedAsyncioTestCase):
     def tearDown(self) -> None:
         self._tmpdir.cleanup()
 
-    async def test_installed_claude_version_mismatch_fails_closed_visible(self) -> None:
+    async def test_installed_claude_library_gates_on_contract_not_version(self) -> None:
+        # 260718-CHATS-L5F R4 (developer ruling 2026-07-21): THE CONTRACT IS THE ONLY GATE. The
+        # claude library surface is enabled by the helper's real list CONTRACT, never by a
+        # version-string comparison. A drift between the installed runtime and any captured-fixture
+        # version must NOT fail the surface closed — the observed version is informational evidence.
         if shutil.which("claude") is None:
             self.skipTest("claude is not installed")
         if helper_preflight("claude").reason is not None:
-            self.skipTest(f"locked claude helper unavailable: {helper_preflight('claude').reason}")
+            self.skipTest(f"claude helper unavailable: {helper_preflight('claude').reason}")
         observed = _version_of(shutil.which("claude"))
         gates = LibraryGateRegistry(
             harness_registry=lambda: HARNESSES,
@@ -549,19 +553,15 @@ class ClaudeGateHonestyTests(unittest.IsolatedAsyncioTestCase):
             helper_host=ConversationLibraryHelperHost(),
         )
         capabilities = await gates.history_capabilities("claude")
-        if observed == LOCKED_RUNTIME_VERSION["claude"]:
-            # On a matched install the live gate must fully support the surface.
-            assert capabilities.list.state == "supported"
-            assert capabilities.resume.state == "supported"
-        else:
-            assert capabilities.list.state == "unverified"
-            assert observed is not None and observed in capabilities.list.reason
-            assert LOCKED_RUNTIME_VERSION["claude"] in capabilities.list.reason
-            assert capabilities.read.state == "unverified"
-            assert capabilities.resume.state == "unverified"
+        # Contract-driven outcome only: supported when the list contract verified, or unverified
+        # with a genuine contract-failure reason — never a version-mismatch demotion.
+        assert capabilities.list.state in {"supported", "unverified"}
+        reason = capabilities.list.reason.lower()
+        assert "differs from the locked" not in reason
+        assert "version" not in reason or "mismatch" not in reason
+        if capabilities.list.state == "supported":
             evidence = capabilities.list.evidence
-            assert evidence is not None
-            assert evidence.runtime_version in {"unknown", observed}
+            assert evidence is not None and evidence.runtime_version == observed
 
 
 if __name__ == "__main__":

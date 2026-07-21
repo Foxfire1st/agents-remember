@@ -483,6 +483,18 @@ class ActiveSessionProjector:
             limit=EVIDENCE_PAGE_LIMIT,
         )
         for entry in entries:
+            # Only user submission echoes are consumed here. The claude transcript also carries
+            # assistant and result entries (claude_stream_state emits role="assistant"/"result"),
+            # but those are the evidence/terminal path's authority — claude has no user-frame
+            # evidence, so the echo is the AR-side submission record. Feeding a non-user entry to
+            # the user-only echo mapper is what minted the spurious "claude:echo: unrecognized
+            # submission echo shape" rows in the developer's image3; advance past them without
+            # minting or opening a turn boundary. (260718-CHATS-L5F R3)
+            if entry.get("role") != "user":
+                sequence = entry.get("sequence")
+                if isinstance(sequence, int) and not isinstance(sequence, bool):
+                    self._transcript_after = sequence
+                continue
             # The adapter accepts one turn at a time, so an echo always
             # follows its turn's frames and the next echo always follows the
             # previous turn's result. While a turn is open, flush pending
@@ -830,6 +842,10 @@ class ActiveSessionProjector:
                     not self._subscribers
                     and asyncio.get_running_loop().time() > self._consumer_until
                 ):
+                    # Dormant: no subscribers past the consumer TTL. Release the heavy per-session
+                    # projection now instead of lingering as a registered tombstone until 32-LRU
+                    # eviction (260718-CHATS-L5F R5).
+                    self._release_dormant_state()
                     break
                 try:
                     await self.poll_once()
@@ -853,6 +869,23 @@ class ActiveSessionProjector:
             return
         finally:
             self._poll_task = None
+
+    def _release_dormant_state(self) -> None:
+        """Release the heavy per-session projection when the projector goes dormant (L5F R5).
+
+        Clears the full ProjectionStore items, the L5 live-turn/request id-sets, the retained SSE
+        envelopes, and any pending frames, and retires the shell (``_closed``) so the next access
+        re-creates a fresh projector (``matches`` returns False while closed). The memory is freed
+        immediately rather than held resident in a dead-session tombstone until LRU eviction.
+        """
+
+        self._closed = True
+        self._store = ProjectionStore()
+        self._retention.clear()
+        self._retention_floor = 0
+        self._pending_frames.clear()
+        self._live_turn_ids.clear()
+        self._live_request_ids.clear()
 
     # -- evidence refs -------------------------------------------------------
 

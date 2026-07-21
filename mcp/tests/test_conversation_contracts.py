@@ -523,14 +523,11 @@ def test_unknown_status_evidence_can_never_establish_ready() -> None:
     assert ConversationStatus.model_validate(payload).turn.state == "ready"
 
 
-def test_capability_version_mismatch_demotes_only_that_feature() -> None:
-    feature = _feature()
-    assert feature.for_observed_runtime("0.144.5") == feature
-    demoted = feature.for_observed_runtime("0.145.0")
-    assert demoted.state == "unverified"
-    assert "differs" in demoted.reason
-    unavailable = _feature("unavailable", reason="the exact contract has no such feature")
-    assert unavailable.for_observed_runtime("0.145.0") == unavailable
+def test_capability_has_no_version_demotion_predicate() -> None:
+    # 260718-CHATS-L5F R4 (developer ruling 2026-07-21): THE CONTRACT IS THE ONLY GATE. There is no
+    # ``for_observed_runtime`` version-comparison predicate on FeatureCapability at all — a
+    # capability is never demoted because an installed runtime differs from a fixture's version.
+    assert not hasattr(FeatureCapability, "for_observed_runtime")
 
     capabilities = _capabilities()
     assert capabilities.live.completeness.state == "supported"

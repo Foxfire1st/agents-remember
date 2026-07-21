@@ -140,6 +140,20 @@ class ActiveConversationService:
         self._projectors.clear()
         self._projector_lru.clear()
 
+    async def release_session(self, ar_session_id: str) -> None:
+        """De-register and close one session's projector when the session ends (260718-CHATS-L5F R5).
+
+        Without this the projector self-idles after its consumer TTL but stays REGISTERED, holding a
+        dead session's full ProjectionStore items, L5 live-turn/request id-sets, and up to the
+        retained SSE envelopes until 32-LRU eviction — the tombstone-projector leak. Called on the
+        terminate/retire authority; de-registering here releases the whole projection immediately.
+        """
+
+        projector = self._projectors.pop(ar_session_id, None)
+        self._lru_drop(ar_session_id)
+        if projector is not None:
+            await projector.close()
+
     async def _projector_for(
         self,
         authorization: AuthorizationBinding,

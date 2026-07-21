@@ -18,6 +18,7 @@ from agents_remember.serving.conversation.projectors.common import (
     MappedItem,
     MappedTurnOutcome,
     MappedUnknownVendor,
+    UnmappableShape,
 )
 from agents_remember.serving.harness_control_models import (
     EvidenceFrame,
@@ -38,8 +39,12 @@ def _native(native_id: str, native_type: str, raw: dict, parent: str | None = No
     )
 
 
-def _evidence(sequence: int, kind: str, raw: dict) -> EvidenceFrame:
-    return EvidenceFrame(sequence=sequence, kind=kind, created_at=NOW, raw=raw)
+def _evidence(
+    sequence: int, kind: str, raw: dict, *, native_method: str | None = None
+) -> EvidenceFrame:
+    return EvidenceFrame(
+        sequence=sequence, kind=kind, created_at=NOW, raw=raw, native_method=native_method
+    )
 
 
 def _items(outputs: list) -> list:
@@ -268,6 +273,92 @@ class CodexMapperTests(unittest.TestCase):
         (unknown,) = [o for o in outputs if isinstance(o, MappedUnknownVendor)]
         self.assertIn("codex", unknown.vendor_type)
 
+    def test_fresh_open_startup_burst_mints_zero_unknown_vendor_rows(self) -> None:
+        # 260718-CHATS-L5F R1: the codex 0.144.5 fresh-dashboard-open startup burst — one
+        # ``mcpServer/startupStatus/updated`` per configured MCP server plus ``thread/started``,
+        # ``remoteControl/status/changed`` and an optional ``warning`` — are KNOWN session
+        # lifecycle/status notifications, not truly-unknown frames. Opening a stock codex chat must
+        # produce ZERO unknown-vendor rows. Params shapes captured per the half-time diagnosis.
+        startup_burst = [
+            (
+                "mcpServer/startupStatus/updated",
+                {
+                    "threadId": "thread-1",
+                    "name": "agents-remember",
+                    "status": "running",
+                    "error": None,
+                    "failureReason": None,
+                },
+            ),
+            (
+                "mcpServer/startupStatus/updated",
+                {
+                    "threadId": "thread-1",
+                    "name": "atlassian",
+                    "status": "failed",
+                    "error": "spawn ENOENT",
+                    "failureReason": "startup",
+                },
+            ),
+            ("thread/started", {"thread": {"id": "thread-1"}}),
+            (
+                "remoteControl/status/changed",
+                {
+                    "status": "disconnected",
+                    "serverName": "codex-cloud",
+                    "installationId": "inst-1",
+                    "environmentId": "env-1",
+                },
+            ),
+            ("warning", {"threadId": "thread-1", "message": "service tier downgraded"}),
+            # 260718-CHATS-L5F R1: the ``configWarning`` advisory (observed live at open on evidence
+            # seq 1 in the AR_RUN_CHATS_E2E composed drive) is a sibling of ``warning`` — it must also
+            # mint zero unknown-vendor rows, not leak through as one per fresh codex open.
+            ("configWarning", {"message": "sandbox mode defaulted to read-only"}),
+        ]
+        for sequence, (method, params) in enumerate(startup_burst, start=1):
+            outputs = codex.map_evidence_frame(
+                _evidence(sequence, "codex-notification", params, native_method=method),
+                evidence_ref=REF,
+            )
+            self.assertEqual(
+                outputs, [], f"{method} must mint no item (got {outputs!r})"
+            )
+
+    def test_item_notification_still_maps_when_method_is_carried(self) -> None:
+        # The carried method never suppresses a real item notification.
+        outputs = codex.map_evidence_frame(
+            _evidence(
+                7,
+                "codex-notification",
+                {
+                    "threadId": "thread-1",
+                    "turnId": "turn-1",
+                    "startedAtMs": 1,
+                    "item": {"id": "item-1", "type": "agentMessage", "text": "hi"},
+                },
+                native_method="item/started",
+            ),
+            evidence_ref=REF,
+        )
+        (item,) = _items(outputs)
+        self.assertEqual(item.item_id, "item-1")
+
+    def test_truly_unknown_notification_names_the_method(self) -> None:
+        # A genuinely novel method still falls to unknown-vendor, but WITH the method named.
+        outputs = codex.map_evidence_frame(
+            _evidence(
+                9,
+                "codex-notification",
+                {"threadId": "thread-1", "somethingNovel": True},
+                native_method="thread/futureFeature/appeared",
+            ),
+            evidence_ref=REF,
+        )
+        (unknown,) = [o for o in outputs if isinstance(o, MappedUnknownVendor)]
+        self.assertIn("thread/futureFeature/appeared", unknown.vendor_type)
+        self.assertIn("thread/futureFeature/appeared", unknown.safe_summary)
+
 
 class ClaudeMapperTests(unittest.TestCase):
     def test_assistant_frame_splits_text_thinking_and_tools(self) -> None:
@@ -384,6 +475,63 @@ class ClaudeMapperTests(unittest.TestCase):
         )
         (unknown,) = [o for o in outputs if isinstance(o, MappedUnknownVendor)]
         self.assertIn("brand_new", unknown.vendor_type)
+
+    def test_command_lifecycle_is_recognized_and_mints_no_unknown_vendor(self) -> None:
+        # 260718-CHATS-L5F R3: the installed Claude Code slash-command lifecycle (captured specimen)
+        # is a first-class recognized contract, not a flooding unknown-vendor row. Each of the three
+        # states maps to zero items.
+        for state in ("queued", "started", "completed"):
+            frame = _evidence(
+                1,
+                "state",
+                {
+                    "type": "command_lifecycle",
+                    "command_uuid": "3fbfd39c-31bf-4ea2-8947-efae02df4b9d",
+                    "state": state,
+                    "uuid": "bed1195d-6e53-4461-b0c4-d47ebd2cc95a",
+                    "session_id": "a3ad054c-0000-0000-0000-000000000000",
+                },
+            )
+            self.assertEqual(claude.map_evidence_frame(frame, evidence_ref=REF), [])
+
+    def test_command_lifecycle_unknown_state_surfaces_as_drift(self) -> None:
+        # A genuine future shape drift is caught (strict recognition), not silently tolerated.
+        with self.assertRaises(UnmappableShape):
+            claude.map_evidence_frame(
+                _evidence(
+                    1,
+                    "state",
+                    {
+                        "type": "command_lifecycle",
+                        "command_uuid": "cmd-1",
+                        "state": "paused",
+                    },
+                ),
+                evidence_ref=REF,
+            )
+
+    def test_rate_limit_event_mints_no_items(self) -> None:
+        self.assertEqual(
+            claude.map_evidence_frame(
+                _evidence(
+                    1,
+                    "state",
+                    {
+                        "type": "rate_limit_event",
+                        "rate_limit_info": {
+                            "status": "allowed",
+                            "resetsAt": "2026-07-21T05:00:00Z",
+                            "rateLimitType": "requests",
+                            "overageStatus": "none",
+                        },
+                        "uuid": "u-1",
+                        "session_id": "s-1",
+                    },
+                ),
+                evidence_ref=REF,
+            ),
+            [],
+        )
 
 
 class PiMapperTests(unittest.TestCase):

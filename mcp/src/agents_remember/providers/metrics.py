@@ -245,7 +245,18 @@ def sample_provider_containers(
         ],
         cwd=cwd,
         timeout=timeout,
+        # 260718-CHATS-L5F R6: a slow/hung docker daemon is a bounded, expected transient — return
+        # an error-annotated empty sample (like the dockerless branch) instead of letting a
+        # ``subprocess.TimeoutExpired`` escape and pollute the daemon log with a full traceback
+        # every sampling interval (the developer's image1 metrics_loop noise).
+        allow_timeout=True,
     )
+    if ps.get("timedOut"):
+        return MetricsSnapshot(
+            schema=PROVIDER_METRICS_SCHEMA,
+            sampledAt=sampled_at,
+            error=f"docker ps timed out after {timeout}s",
+        )
     if ps["returncode"] != 0:
         return MetricsSnapshot(
             schema=PROVIDER_METRICS_SCHEMA,

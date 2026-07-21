@@ -77,6 +77,15 @@ export type SeatStateInput = Pick<
 > & {
   /** Declared external wait (AEO `waiting(reason)`) — reserved input, no producer yet. */
   waitingReason?: string;
+  /**
+   * 260718-CHATS-L5F R9 (audit V5): the conversation projection's OWN live turn signal, resolved
+   * fresher than the sweep-bounded catalog `turnState`. When true it means a turn is actively
+   * streaming right now (the projection's SSE knows this sub-second; the catalog seat state lags
+   * ~10s and reads `turn-ended`). It is preferred over the lagging catalog turn-state — but NEVER
+   * over a terminal status, fault, blocked-on-human, or declared wait, which still win above it.
+   * Undefined/false is the honest fallback to the catalog truth (no producer → old behavior).
+   */
+  liveTurnWorking?: boolean;
 };
 
 /**
@@ -97,6 +106,10 @@ export function seatVisualState(input: SeatStateInput): SeatVisualState {
     const base = VISUALS.waiting;
     return { ...base, word: `waiting(${input.waitingReason})`, chip: `waiting: ${input.waitingReason}` };
   }
+  // 260718-CHATS-L5F R9: the projection's fresher live turn signal wins over the lagging catalog
+  // turn-state (a streaming turn must never read settled-green `turn-ended`) — but only AFTER the
+  // terminal/fault/blocked/wait guards above, so it can never fake liveness over a real end state.
+  if (input.liveTurnWorking) return VISUALS.working;
   if (input.turnState === "working") return VISUALS.working;
   if (input.turnState === "turn-ended") return VISUALS["turn-ended"];
   if (input.turnState === "stale") return VISUALS.stale;

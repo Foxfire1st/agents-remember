@@ -58,6 +58,38 @@ class _Socket:
 
 
 class HarnessControlClientRetrySafetyTests(unittest.TestCase):
+    def test_refused_control_socket_yields_honest_note_and_unlinks_stale_socket(self) -> None:
+        # 260718-CHATS-L5F R6: a controlled runner that exited uncleanly leaves a stale socket that
+        # refuses (ECONNREFUSED). The client must render a designed lifecycle note WITHOUT the raw
+        # "[Errno 111] Connection refused" surprise, and unlink the stale socket so the next attempt
+        # sees the absent (ENOENT) case cleanly. (developer image1 banner)
+        import errno as _errno  # noqa: PLC0415
+        import tempfile  # noqa: PLC0415
+
+        with tempfile.TemporaryDirectory() as tmp:
+            stale = Path(tmp) / "control.sock"
+            stale.write_bytes(b"")  # a socket file that exists but has no listener
+
+            class _RefusingSocket(_Socket):
+                def connect(self, _endpoint: str) -> None:
+                    raise ConnectionRefusedError(_errno.ECONNREFUSED, "Connection refused")
+
+            with (
+                mock.patch(
+                    "agents_remember.serving.harness_control_client.socket.socket",
+                    return_value=_RefusingSocket(),
+                ),
+                self.assertRaises(HarnessControlClientError) as raised,
+            ):
+                request_control(_Entry(control_endpoint=stale), "stop")
+            message = str(raised.exception)
+            self.assertIn("already exited", message)
+            self.assertNotIn("Errno", message)
+            self.assertNotIn("Connection refused", message)
+            self.assertFalse(raised.exception.may_have_sent)
+            # The stale socket file was unlinked so the next probe reads the absent case.
+            self.assertFalse(stale.exists())
+
     def test_may_have_sent_is_false_until_socket_accepts_a_byte(self) -> None:
         with (
             mock.patch(

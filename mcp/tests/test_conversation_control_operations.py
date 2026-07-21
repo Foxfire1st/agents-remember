@@ -387,7 +387,11 @@ class ClaudeInterruptGateTests(unittest.IsolatedAsyncioTestCase):
                 turn_id="turn-1",
                 request_id="req-cl-1",
             )
-        self.assertIn("2.1.211", str(raised.exception))
+        # 260718-CHATS-L5F R4: the refusal is contract-driven (unverified until the control seam is
+        # probed), never a version-string comparison. It still refuses before any native call.
+        message = str(raised.exception)
+        self.assertIn("contract", message)
+        self.assertNotIn("2.1.211", message)
         self.assertEqual(len(self.adapter.interrupt_calls), 0)
 
 

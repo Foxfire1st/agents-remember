@@ -128,7 +128,9 @@ def verify_effective_launch(
     """Require the running harness to echo the selected values when its protocol can."""
 
     selected = validate_launch_selection(selection, snapshot)
-    if snapshot.selected_model_key != selected.key:
+    if snapshot.selected_model_key != selected.key and not _resolves_to_same_model(
+        selected, snapshot
+    ):
         raise HarnessControlError(
             f"{selection.harness_id} launch selected model {selection.model_key!r}, but the "
             f"running harness reported {snapshot.selected_model_key!r}"
@@ -144,6 +146,28 @@ def verify_effective_launch(
             f"{selection.harness_id} launch selected effort {selection.effort!r}, but the "
             f"running harness reported {snapshot.selected_effort!r}"
         )
+
+
+def _resolves_to_same_model(selected: ModelCapability, snapshot: CapabilitySnapshot) -> bool:
+    """Accept an alias/default key collision where both keys resolve to one underlying model.
+
+    Claude aliases several catalog keys onto one ``resolved_model`` (the "1M context" variants and
+    ``default`` share a resolved id); the running harness echoes only the resolved id, which
+    ``_select_current_model`` may map back to a different-but-equivalent key. When the requested
+    selection and the reported key resolve to the SAME underlying model the launch succeeded — the
+    distinction is cosmetic. A genuinely different model (different or absent ``resolved_model``)
+    still fails the strict check.
+    """
+
+    if selected.resolved_model is None:
+        return False
+    reported = next(
+        (model for model in snapshot.models if model.key == snapshot.selected_model_key),
+        None,
+    )
+    if reported is None or reported.resolved_model is None:
+        return False
+    return reported.resolved_model == selected.resolved_model
 
 
 def apply_launch_knobs(launch: LaunchSpec, knobs: LaunchKnobs) -> LaunchSpec:

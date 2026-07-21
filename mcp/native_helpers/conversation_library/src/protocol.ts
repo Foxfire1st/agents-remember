@@ -306,23 +306,19 @@ export function buildHandshake(
   observedRuntimeVersion: string,
   observedHelperVersion: string,
 ): HelperHandshake {
-  const selectedVersion = pinnedHelperVersion(request.harnessId);
-  const compatible =
-    request.expectedHelperVersion === selectedVersion &&
-    observedHelperVersion === selectedVersion &&
-    observedRuntimeVersion === request.expectedRuntimeVersion;
+  // 260718-CHATS-L5F R4 (developer ruling 2026-07-21): THE CONTRACT IS THE ONLY GATE. The
+  // handshake reports the observed runtime/helper versions as informational evidence and is always
+  // ``ready`` once the helper loaded and matched the wire protocol version — it never compares
+  // versions to a locked/expected constant to refuse. The real gate is whether the subsequent
+  // list/read/resolve operation succeeds against the installed runtime. ``expectedRuntimeVersion``/
+  // ``expectedHelperVersion`` survive on the request as informational provenance only.
   return {
     protocolVersion: PROTOCOL_VERSION,
     requestId: request.requestId,
-    status: compatible ? "ready" : "incompatible",
+    status: "ready",
     harnessId: request.harnessId,
     runtimeVersion: observedRuntimeVersion,
     helperVersion: observedHelperVersion,
-    ...(compatible
-      ? {}
-      : {
-          detail: "runtime/helper version does not match the requested locked fixture",
-        }),
   };
 }
 

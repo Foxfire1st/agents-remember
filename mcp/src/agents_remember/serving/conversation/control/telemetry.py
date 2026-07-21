@@ -3,10 +3,11 @@
 Every projected metric carries value/unit, origin, scope, observed time,
 freshness, precision, runtime/helper versions, and fixture evidence. Metrics
 are emitted only when their exact-session capability is ``supported`` or
-``partial`` with matching observed runtime/helper versions; missing native
-data is absent (never zero), and a version mismatch demotes the capability to
-``unverified`` so the metric stays absent rather than being presented as
-exact-session truth. The only currently supported metric on the landed
+``partial``; missing native data is absent (never zero). THE CONTRACT IS THE
+ONLY GATE (developer ruling 2026-07-21, 260718-CHATS-L5F R4): a capability is
+demoted only when its contract fails verification or was never probed, never by
+a runtime/helper version-string comparison — the runtime/helper versions ride
+the metric as informational evidence only. The only currently supported metric on the landed
 evidence surface is codex cumulative token usage, read from the latest
 ``thread/tokenUsage/updated`` frame in the bounded evidence window; every
 other documented-but-unobserved contract stays visibly unverified in the

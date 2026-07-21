@@ -59,6 +59,12 @@ export interface OpenSession {
   resolvedEffort?: string;
   turnState?: string;
   turnStateChangedAt?: string;
+  /**
+   * 260718-CHATS-L5F R9: the focused seat's conversation projection reports a live turn actively
+   * streaming right now (fresher than the sweep-bounded `turnState`). Set only from the projection's
+   * own status; `seatVisualState` prefers it over a lagging catalog `turn-ended`. Not from the catalog.
+   */
+  liveTurnWorking?: boolean;
   controlState?: HarnessControlState;
   controlProtocol?: string;
   controlActivity?: HarnessActivityState;

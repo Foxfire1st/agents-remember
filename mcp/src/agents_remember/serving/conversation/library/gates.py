@@ -1,16 +1,19 @@
 """Runtime capability gates for the dormant native conversation library (260718-CHATS-L2).
 
-A harness's library features are enabled only by a live production-path gate against the
-installed runtime: Codex proves ``thread/list`` over a real app-server connection whose
-``initialize`` handshake reports the exact locked CLI version; Claude and Pi prove the locked
-repository helper's handshake (which itself observes the installed runtime/helper versions) plus
-a real native list call. Any version mismatch, missing binary, uninstalled helper, or failed
-probe demotes the whole harness history surface to ``unverified``/``unavailable`` with an exact
-reason — fail closed and visible, never invented parity.
+A harness's library features are enabled only by a live production-path CONTRACT probe against the
+installed runtime: Codex proves ``thread/list`` over a real app-server connection; Claude and Pi
+prove the repository helper's handshake plus a real native list call. A missing binary, uninstalled
+helper, or failed probe demotes the whole harness history surface to ``unverified``/``unavailable``
+with an exact reason — fail closed and visible, never invented parity.
+
+THE CONTRACT IS THE ONLY GATE (developer ruling 2026-07-21, 260718-CHATS-L5F R4): the probe result
+alone decides the state. The observed CLI/runtime/helper version is recorded as informational
+evidence metadata and is NEVER compared to a locked constant to demote a capability — harnesses
+auto-update, and a version predicate is exactly what made a natively-working install fail closed.
 
 The gate result is cached once per installed-executable fingerprint per harness (at most the
-three normalized harnesses, so the cache is bounded by construction); an executable change
-re-runs the gate, which is exactly the design's observed-version demotion rule.
+three normalized harnesses, so the cache is bounded by construction); an executable change re-runs
+the contract probe.
 """
 
 from __future__ import annotations
@@ -37,6 +40,9 @@ from agents_remember.serving.conversation.models import (
 )
 from agents_remember.serving.harnesses import Harness, Which
 
+# Informational only (260718-CHATS-L5F R4): the codex version whose contract was captured in the
+# landed fixture. It is NOT a gate — nothing compares it to the observed runtime. Retained as a
+# published reference/metadata value (and used by installed tests as an environment skip guard).
 LOCKED_CODEX_RUNTIME_VERSION = "0.144.5"
 _NORMALIZED: tuple[HarnessId, ...] = ("codex", "claude", "pi")
 
@@ -235,13 +241,10 @@ class LibraryGateRegistry:
             fixture_id=f"library-gate:codex:{_short(executable)}",
             observed_at=observed_at,
         )
-        if observed_version != LOCKED_CODEX_RUNTIME_VERSION:
-            return _unverified_history(
-                f"observed Codex runtime {observed_version} differs from the locked library "
-                f"gate evidence {LOCKED_CODEX_RUNTIME_VERSION}; the production fixture must be "
-                "repeated for the observed version",
-                evidence,
-            )
+        # 260718-CHATS-L5F R4 (developer ruling 2026-07-21): the real connect+list probe above is
+        # the gate. If it succeeded the history contract verified against the running app-server;
+        # the observed CLI version rides the evidence as informational metadata only and is never
+        # compared to a locked constant.
         return _codex_supported(evidence)
 
     async def _helper_gate(

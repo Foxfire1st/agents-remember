@@ -16,7 +16,11 @@ test("the exact locked helper versions are protocol constants", () => {
   assert.equal(PI_CODING_AGENT_VERSION, "0.80.7");
 });
 
-test("handshake readiness requires the exact runtime and helper tuple", () => {
+test("handshake reports observed versions and is ready by contract, never version-gated", () => {
+  // 260718-CHATS-L5F R4 (developer ruling 2026-07-21): the contract is the only gate. The handshake
+  // reports the observed runtime/helper versions as informational evidence and is always ready once
+  // the helper loaded — a runtime/helper version differing from any expected/locked value NEVER
+  // demotes it. The real gate is whether the subsequent list/read operation succeeds.
   const request = {
     protocolVersion: PROTOCOL_VERSION,
     requestId: "handshake-1",
@@ -25,9 +29,13 @@ test("handshake readiness requires the exact runtime and helper tuple", () => {
     expectedRuntimeVersion: "2.1.211",
     expectedHelperVersion: "0.3.207",
   };
-  assert.equal(buildHandshake(request, "2.1.211", "0.3.207").status, "ready");
-  assert.equal(buildHandshake(request, "2.1.210", "0.3.207").status, "incompatible");
-  assert.equal(buildHandshake(request, "2.1.211", "0.3.206").status, "incompatible");
+  const matched = buildHandshake(request, "2.1.211", "0.3.207");
+  assert.equal(matched.status, "ready");
+  assert.equal(matched.runtimeVersion, "2.1.211");
+  assert.equal(matched.helperVersion, "0.3.207");
+  // A drifted installed runtime/helper is STILL ready (version is not a predicate).
+  assert.equal(buildHandshake(request, "2.1.216", "0.3.207").status, "ready");
+  assert.equal(buildHandshake(request, "2.1.211", "0.3.999").status, "ready");
 });
 
 test("request parser rejects malformed framing and wrong protocol", () => {

@@ -15,6 +15,7 @@
     "test:watch": "vitest",
     "e2e": "playwright test",
     "e2e:production": "playwright test --config playwright.production.config.ts",
+    "e2e:chats": "playwright test --config playwright.chats-e2e.config.ts",
     "perf:cockpit": "vitest run src/panels/session-cockpit/SessionRail.test.tsx src/panels/session-cockpit/VirtualizedInspectorList.test.tsx && playwright test --config playwright.perf.config.ts"
   },
   "dependencies": {

@@ -17,13 +17,14 @@ def parse_list_models_response(
     request_id: str,
     *,
     current_model: str,
+    requested_key: str | None = None,
 ) -> CapabilitySnapshot | None:
     raw_models = _list_models_payload(frame, request_id)
     if raw_models is None:
         return None
     models = tuple(_parse_model(value, index=index) for index, value in enumerate(raw_models))
     _require_unique_model_keys(models)
-    selected = _select_current_model(models, current_model)
+    selected = _select_current_model(models, current_model, requested_key=requested_key)
     return CapabilitySnapshot(
         models=models,
         selected_model_key=selected.key,
@@ -83,11 +84,25 @@ def _require_unique_model_keys(models: tuple[ModelCapability, ...]) -> None:
 
 
 def _select_current_model(
-    models: tuple[ModelCapability, ...], current_model: str
+    models: tuple[ModelCapability, ...],
+    current_model: str,
+    *,
+    requested_key: str | None = None,
 ) -> ModelCapability:
     exact = next((model for model in models if model.key == current_model), None)
     resolved = [model for model in models if model.resolved_model == current_model]
-    selected = exact or next((model for model in resolved if model.is_default), None)
+    # Claude's catalog aliases several keys onto one resolved model (e.g. ``default`` and
+    # ``opus[1m]`` both resolve to ``claude-opus-4-8[1m]``). The running harness echoes only the
+    # resolved id, so when a launch explicitly requested one of those alias keys the requested key
+    # wins over the default collapse — otherwise a natively-succeeding ``opus[1m]`` launch would map
+    # back to ``default`` and be refused. See notes/260721-halftime-codex-open-diagnosis.md item 2.
+    requested = next(
+        (model for model in resolved if requested_key is not None and model.key == requested_key),
+        None,
+    )
+    selected = (
+        exact or requested or next((model for model in resolved if model.is_default), None)
+    )
     if selected is None and len(resolved) == 1:
         selected = resolved[0]
     if selected is None:

@@ -86,6 +86,7 @@ async def negotiate_claude_catalog(
     *,
     current_model: str,
     timeout_seconds: float,
+    requested_key: str | None = None,
 ) -> CapabilitySnapshot:
     """Fetch the dynamic catalog before the long-running state reader owns stdout."""
 
@@ -99,6 +100,7 @@ async def negotiate_claude_catalog(
                 frame,
                 LIST_MODELS_REQUEST_ID,
                 current_model=current_model,
+                requested_key=requested_key,
             )
             if capabilities is None:
                 raise HarnessControlError(

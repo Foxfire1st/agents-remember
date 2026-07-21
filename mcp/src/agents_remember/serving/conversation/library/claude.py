@@ -1,10 +1,11 @@
 """Claude dormant native conversation library through the locked helper (260718-CHATS-L2).
 
 Every operation runs through the repository-owned locked helper
-(``@anthropic-ai/claude-agent-sdk@0.3.207`` ``listSessions`` / ``getSessionMessages`` /
+(``@anthropic-ai/claude-agent-sdk`` ``listSessions`` / ``getSessionMessages`` /
 ``getSessionInfo``) via :class:`ConversationLibraryHelperHost`. The helper handshake on every
-spawn re-proves the locked runtime/helper versions, so a version drift between the gate and a
-call fails closed instead of silently reading an incompatible history.
+spawn reports the observed runtime/helper versions as informational evidence only — THE CONTRACT IS
+THE ONLY GATE (developer ruling 2026-07-21, 260718-CHATS-L5F R4): the native ``list``/``read``
+operation succeeding is the proof; a version drift never demotes the surface.
 
 Claude history is honestly ``partial``: the SDK rebuilds chronological user/assistant chains,
 and thinking/tool/permission records appear only where the installed history persists them.

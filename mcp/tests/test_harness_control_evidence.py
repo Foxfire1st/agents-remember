@@ -406,6 +406,52 @@ class EvidenceBufferTests(unittest.IsolatedAsyncioTestCase):
         finally:
             await bridge.stop("forced")
 
+    async def test_native_method_is_carried_onto_the_frame_and_stripped_from_snapshot(self) -> None:
+        # 260718-CHATS-L5F R1: the Codex adapter carries the notification method out of band under
+        # AR_EVIDENCE_METHOD_KEY so the projector switches on the real method instead of re-guessing
+        # from the params shape. The bridge must preserve it as typed EvidenceFrame.native_method and
+        # strip it from the republished snapshot exactly like AR_EVIDENCE_KEY (byte-identical).
+        from agents_remember.serving.harness_control_client import _evidence_page  # noqa: PLC0415
+        from agents_remember.serving.harness_control_models import (  # noqa: PLC0415
+            AR_EVIDENCE_METHOD_KEY,
+            evidence_page_json,
+        )
+
+        identity = _identity()
+        adapter = _EvidenceAdapter()
+        bridge = HarnessControlBridge(identity, adapter, clock=lambda: NOW)
+        await bridge.start(_launch(identity))
+        try:
+            params = {"threadId": "thread-1", "name": "atlassian", "status": "running"}
+            adapter.emit(
+                "codex-notification",
+                {
+                    "codexMethod": "mcpServer/startupStatus/updated",
+                    AR_EVIDENCE_METHOD_KEY: "mcpServer/startupStatus/updated",
+                    AR_EVIDENCE_KEY: dict(params),
+                },
+            )
+            await _settle()
+            page = bridge.evidence()
+            self.assertEqual(len(page.frames), 1)
+            frame = page.frames[0]
+            self.assertEqual(frame.native_method, "mcpServer/startupStatus/updated")
+            self.assertEqual(frame.raw, params)
+            # The reserved method key never leaks into the redacted snapshot.
+            snapshot_raw = bridge.snapshot().raw
+            self.assertNotIn(AR_EVIDENCE_KEY, snapshot_raw)
+            self.assertNotIn(AR_EVIDENCE_METHOD_KEY, snapshot_raw)
+            self.assertEqual(snapshot_raw["codexMethod"], "mcpServer/startupStatus/updated")
+            # The method survives the IPC serialize -> deserialize round trip.
+            restored = _evidence_page(
+                evidence_page_json(page), expected_bridge_epoch=page.bridge_epoch
+            )
+            self.assertEqual(
+                restored.frames[0].native_method, "mcpServer/startupStatus/updated"
+            )
+        finally:
+            await bridge.stop("forced")
+
     async def test_buffer_count_eviction_reports_honest_gap_floor_at_two_sizes(self) -> None:
         for limit, emitted, expected_floor, expected_kept in ((4, 6, 2, 4), (2, 4, 2, 2)):
             with self.subTest(limit=limit):

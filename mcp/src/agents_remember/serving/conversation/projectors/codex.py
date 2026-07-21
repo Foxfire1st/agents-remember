@@ -48,6 +48,29 @@ from agents_remember.serving.harness_control_models import (
 
 HARNESS = "codex"
 
+# Codex 0.144.5 app-server session lifecycle / status / telemetry notifications that mint no
+# conversation item. They cross the same ``codex-notification`` evidence kind as the item and delta
+# methods, but the fresh-open startup burst (one ``mcpServer/startupStatus/updated`` per configured
+# MCP server, ``thread/started``, ``remoteControl/status/changed``, the ``warning``/``configWarning``
+# advisory family) carries no timeline content — exactly like the already-dropped usage/rate frames.
+# They are recognized by the native method the adapter now preserves and dropped explicitly, never
+# re-guessed from params shape and never flooded as one unknown-vendor row per server. The
+# ``configWarning`` advisory in particular fires at open on setups with a config note (observed live
+# in the AR_RUN_CHATS_E2E composed drive as ``codex:notification:configWarning`` on evidence seq 1) —
+# a sibling of ``warning``, telemetry-like, no timeline item. See
+# notes/260721-halftime-codex-open-diagnosis.md.
+_SILENT_NOTIFICATION_METHODS = frozenset(
+    {
+        "thread/started",
+        "mcpServer/startupStatus/updated",
+        "remoteControl/status/changed",
+        "warning",
+        "configWarning",
+        "account/rateLimits/updated",
+        "thread/tokenUsage/updated",
+    }
+)
+
 
 def map_native_frame(frame: NativeEvidenceFrame, *, evidence_ref: str) -> list[MapperOutput]:
     """Map one ``thread/read`` item frame; unknown types stay visible."""
@@ -101,6 +124,11 @@ def map_evidence_frame(frame: EvidenceFrame, *, evidence_ref: str) -> list[Mappe
                 created_at=frame.created_at,
             )
         ]
+    method = frame.native_method
+    if method in _SILENT_NOTIFICATION_METHODS:
+        # Session lifecycle/status/telemetry; no timeline item. Recognized by the native method,
+        # dropped explicitly the same way ``state``-kind frames and usage frames are dropped.
+        return []
     if isinstance(params.get("item"), dict):
         started = "startedAtMs" in params
         item = required_object(params.get("item"), "codex item params.item")
@@ -151,8 +179,12 @@ def map_evidence_frame(frame: EvidenceFrame, *, evidence_ref: str) -> list[Mappe
     return [
         MappedUnknownVendor(
             item_id=f"codex-event-{frame.sequence}",
-            vendor_type="codex:notification",
-            safe_summary="unrecognized codex notification params",
+            vendor_type=f"codex:notification:{method}" if method else "codex:notification",
+            safe_summary=(
+                f"unrecognized codex notification {method}"
+                if method
+                else "unrecognized codex notification params"
+            ),
             turn_id=optional_text(params.get("turnId")),
             created_at=frame.created_at,
         )

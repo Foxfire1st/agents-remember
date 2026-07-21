@@ -3,11 +3,14 @@
 Exact-session capability states for the control surface (interrupt, typed
 attachments, read-only policy) and the telemetry projection. A feature is
 ``supported`` only with landed installed-runtime fixture evidence captured
-through the production seam (the L2E ``control-plane/*`` rows); native evidence
-without a passed gate is ``unverified``; a contract the harness cannot provide
-on this surface is ``unavailable``. An observed runtime/helper version that
-differs from the capability evidence demotes the feature to ``unverified`` at
-read time (the shared ``FeatureCapability.for_observed_runtime`` rule).
+through the production seam (the L2E ``control-plane/*`` rows); a native shape
+whose contract has never been probed through a captured fixture is
+``unverified``; a contract the harness cannot provide on this surface is
+``unavailable``.
+
+THE CONTRACT IS THE ONLY GATE (developer ruling 2026-07-21, 260718-CHATS-L5F R4):
+no capability is demoted by a version-string comparison against the observed
+runtime/helper. The version is informational evidence metadata only.
 
 The L1 active-page capability view stays its own conservative pre-L2E evidence
 (its reasons name this leaf); this module is the control routes' own gate
@@ -47,8 +50,8 @@ _PI_HELPER = "0.80.7"
 _OBSERVED_AT = "2026-07-20T00:00:00+02:00"
 
 _CLAUDE_MISMATCH = (
-    "installed 2.1.214 mismatches the locked 2.1.211 gate; the production control seam "
-    "remains unexercised at the locked version"
+    "control contract not yet probed through a captured production fixture; unverified until the "
+    "control-plane seam is exercised against the running harness (never a version gate)"
 )
 
 _ATTACHMENT_MIME_TYPES = tuple(sorted(SUBMIT_ASSET_MIME_TYPES))
@@ -299,67 +302,27 @@ _TELEMETRY = {
 
 
 def control_capabilities_for(harness_id: HarnessId, snapshot: AdapterSnapshot) -> ControlCapabilities:
-    """Build the exact-session control capability set, demoted on version mismatch."""
+    """Build the exact-session control capability set.
 
-    capabilities = _CONTROLS[harness_id]()
-    version = _observed_version(harness_id, snapshot)
-    if version is None:
-        return capabilities
-    return ControlCapabilities(
-        interrupt=capabilities.interrupt.for_observed_runtime(version),
-        steer=capabilities.steer,
-        follow_up=capabilities.follow_up,
-        attachments=_demote_attachments(capabilities.attachments, version),
-        policy_read=capabilities.policy_read.for_observed_runtime(version),
-    )
+    The contract is the only gate (developer ruling 2026-07-21): the fixture-declared state is never
+    demoted by a version-string comparison. The observed version is informational metadata only.
+    """
+
+    del snapshot  # the observed version is no longer a gate; it is informational evidence
+    return _CONTROLS[harness_id]()
 
 
 def telemetry_capabilities_for(
     harness_id: HarnessId, snapshot: AdapterSnapshot
 ) -> TelemetryCapabilities:
-    """Build the exact-session telemetry capability set, demoted on version mismatch."""
+    """Build the exact-session telemetry capability set.
 
-    capabilities = _TELEMETRY[harness_id]()
-    version = _observed_version(harness_id, snapshot)
-    if version is None:
-        return capabilities
-    return TelemetryCapabilities(
-        context=capabilities.context.for_observed_runtime(version),
-        usage=capabilities.usage.for_observed_runtime(version),
-        cost=capabilities.cost.for_observed_runtime(version),
-        rate_limit=capabilities.rate_limit.for_observed_runtime(version),
-        compaction=capabilities.compaction.for_observed_runtime(version),
-    )
+    The contract is the only gate (developer ruling 2026-07-21): no version-string demotion; the
+    observed version rides the evidence record as informational metadata only.
+    """
 
-
-def _observed_version(harness_id: HarnessId, snapshot: AdapterSnapshot) -> str | None:
-    key = "codexCliVersion" if harness_id == "codex" else "claudeCodeVersion"
-    if harness_id == "pi":
-        return None
-    value = snapshot.raw.get(key)
-    return value if isinstance(value, str) and value else None
-
-
-def _demote_attachments(capabilities: AttachmentCapabilities, version: str) -> AttachmentCapabilities:
-    return AttachmentCapabilities(
-        image=_demote_attachment(capabilities.image, version),
-        file=_demote_attachment(capabilities.file, version),
-        resource=_demote_attachment(capabilities.resource, version),
-    )
-
-
-def _demote_attachment(capability: AttachmentCapability, version: str) -> AttachmentCapability:
-    demoted = capability.for_observed_runtime(version)
-    if demoted is capability:
-        return capability
-    return capability.model_copy(
-        update={
-            "state": demoted.state,
-            "reason": demoted.reason,
-            "max_bytes": 0,
-            "max_count": 0,
-        }
-    )
+    del snapshot  # the observed version is no longer a gate; it is informational evidence
+    return _TELEMETRY[harness_id]()
 
 
 __all__ = ["control_capabilities_for", "telemetry_capabilities_for"]

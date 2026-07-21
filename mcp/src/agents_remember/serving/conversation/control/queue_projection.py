@@ -22,6 +22,7 @@ from typing import Literal, cast
 from agents_remember.serving.conversation.control.previews import payload_digest, redacted_preview
 from agents_remember.serving.conversation.control.refs import OperationIdentity, mint_ref
 from agents_remember.serving.conversation.control.service import (
+    MAX_QUEUE_ROWS_PER_CHANNEL,
     ControlChannel,
     ConversationControlService,
 )
@@ -92,10 +93,14 @@ def _queue_row(
         revision = prior[0] + 1
     else:
         revision = prior[0]
-    channel.queue_rows[(identity.kind, identity.operation_id, identity.sequence)] = (
-        revision,
-        content_key,
-    )
+    row_key = (identity.kind, identity.operation_id, identity.sequence)
+    channel.queue_rows[row_key] = (revision, content_key)
+    # 260718-CHATS-L5F R5: bound the revision-bookkeeping map with oldest-key eviction (D2). An
+    # evicted key simply restarts at revision 1 if its operation ever reappears — settled operations
+    # do not, so the bound is invisible to live rows and closes the open unbounded-growth Todo.
+    channel.queue_rows.move_to_end(row_key)
+    while len(channel.queue_rows) > MAX_QUEUE_ROWS_PER_CHANNEL:
+        channel.queue_rows.popitem(last=False)
     operation_ref = mint_ref(
         service.secret,
         "operation-ref",

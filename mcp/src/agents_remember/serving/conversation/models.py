@@ -650,30 +650,12 @@ class FeatureCapability(WireModel):
             raise ValueError(f"{self.state} requires production runtime-fixture evidence")
         return self
 
-    def for_observed_runtime(
-        self,
-        runtime_version: str,
-        *,
-        helper_version: str | None = None,
-    ) -> FeatureCapability:
-        """Fail closed when runtime evidence no longer matches the observed process."""
-
-        evidence = self.evidence
-        if evidence is None:
-            # The state/evidence validator permits this only for an explicitly unavailable
-            # feature; absence is its authority and cannot be promoted or demoted by a version.
-            return self
-        mismatch = evidence.runtime_version != runtime_version
-        if evidence.helper_version is not None:
-            mismatch = mismatch or evidence.helper_version != helper_version
-        if not mismatch:
-            return self
-        return self.model_copy(
-            update={
-                "state": "unverified",
-                "reason": "observed runtime/helper version differs from capability evidence",
-            }
-        )
+    # NOTE (260718-CHATS-L5F R4, developer ruling 2026-07-21): there is deliberately NO
+    # ``for_observed_runtime`` version-demotion here. The contract is the only gate; a capability is
+    # never demoted because an installed runtime/helper version drifts from the fixture's captured
+    # version. The runtime/helper version survives on ``CapabilityEvidence`` as informational
+    # metadata only. A capability demotes solely when its contract fails verification or was never
+    # probed — expressed directly by the builder that mints it.
 
 
 class AttachmentCapability(FeatureCapability):

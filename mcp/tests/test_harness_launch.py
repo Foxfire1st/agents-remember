@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 from agents_remember.errors import HarnessControlError
+from agents_remember.serving.claude_stream_capabilities import _select_current_model
 from agents_remember.serving.harness_capabilities import (
     CapabilitySnapshot,
     EffortOption,
@@ -146,6 +147,77 @@ def test_effective_launch_compares_vendor_echo_to_the_canonical_catalog_key() ->
             _snapshot(selected_model="fable", selected_effort="high"),
             require_effort_echo=True,
         )
+
+
+def _aliased_snapshot(*, selected_model: str | None) -> CapabilitySnapshot:
+    """Claude 2.1.216-shape catalog: ``default`` and ``opus[1m]`` alias one resolved model."""
+
+    efforts = (
+        EffortOption("low", "low"),
+        EffortOption("medium", "medium"),
+        EffortOption("high", "high"),
+    )
+    return CapabilitySnapshot(
+        models=(
+            ModelCapability(
+                key="default",
+                resolved_model="claude-opus-4-8[1m]",
+                display_name="Default",
+                supports_effort=True,
+                effort_options=efforts,
+                default_effort="medium",
+                is_default=True,
+            ),
+            ModelCapability(
+                key="opus[1m]",
+                resolved_model="claude-opus-4-8[1m]",
+                display_name="Opus 4.8 (1M context)",
+                supports_effort=True,
+                effort_options=efforts,
+                default_effort="medium",
+                is_default=False,
+            ),
+        ),
+        selected_model_key=selected_model,
+        selected_effort=None,
+    )
+
+
+def test_effective_launch_accepts_alias_collapsed_onto_default_resolved_model() -> None:
+    # 260718-CHATS-L5F R2: a launch that explicitly requested ``opus[1m]`` natively succeeds, but
+    # the running harness echoes the resolved id which the catalog also aliases as ``default``.
+    # Because both keys resolve to the same underlying model the launch VALIDATES — it must not be
+    # refused as "requested provenance — never validated". Regression pin for the developer's
+    # image3 refused pair.
+    verify_effective_launch(
+        _selection(harness="claude", model="opus[1m]", effort="medium"),
+        _aliased_snapshot(selected_model="default"),
+        require_effort_echo=False,
+    )
+
+
+def test_effective_launch_still_refuses_a_genuinely_different_model() -> None:
+    # The resolved-identity acceptance never masks a truly different model: ``other`` is not in the
+    # catalog at all, so there is no resolved-model to compare and the strict check still fires.
+    with pytest.raises(HarnessControlError, match="running harness reported 'other'"):
+        verify_effective_launch(
+            _selection(harness="claude", model="opus[1m]", effort="medium"),
+            _aliased_snapshot(selected_model="other"),
+            require_effort_echo=False,
+        )
+
+
+def test_select_current_model_prefers_requested_alias_over_default_collapse() -> None:
+    models = _aliased_snapshot(selected_model=None).models
+    # No requested key -> the historical default-collapse.
+    assert _select_current_model(models, "claude-opus-4-8[1m]").key == "default"
+    # The requested alias wins when its resolved model matches the echoed resolution.
+    assert (
+        _select_current_model(
+            models, "claude-opus-4-8[1m]", requested_key="opus[1m]"
+        ).key
+        == "opus[1m]"
+    )
 
 
 def test_apply_launch_knobs_preserves_fixed_argv_and_refuses_duplicate_authority() -> None:

@@ -51,6 +51,7 @@ from agents_remember.serving.harness_capabilities import (
 )
 from agents_remember.serving.harness_control_models import (
     AR_EVIDENCE_KEY,
+    AR_EVIDENCE_METHOD_KEY,
     CONTROL_PROTOCOL_VERSION,
     REQUIRED_ADAPTER_CAPABILITIES,
     AdapterEvent,
@@ -593,7 +594,14 @@ class CodexAppServerAdapter:
             self._handle_settings_updated(params)
             await self._emit("state", raw={"codexMethod": method, AR_EVIDENCE_KEY: params})
             return
-        await self._emit("codex-notification", raw={"codexMethod": method, AR_EVIDENCE_KEY: params})
+        await self._emit(
+            "codex-notification",
+            raw={
+                "codexMethod": method,
+                AR_EVIDENCE_METHOD_KEY: method,
+                AR_EVIDENCE_KEY: params,
+            },
+        )
 
     async def _handle_turn_completed(self, params: JsonObject) -> None:
         self._validate_thread(params)
@@ -657,7 +665,11 @@ class CodexAppServerAdapter:
             self._transcript_sequence -= 1
             await self._emit(
                 "codex-notification",
-                raw={"codexMethod": "item/completed", AR_EVIDENCE_KEY: params},
+                raw={
+                    "codexMethod": "item/completed",
+                    AR_EVIDENCE_METHOD_KEY: "item/completed",
+                    AR_EVIDENCE_KEY: params,
+                },
             )
             return
         await self._emit(
