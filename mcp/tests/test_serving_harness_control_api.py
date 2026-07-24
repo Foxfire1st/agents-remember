@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import inspect
+import json
 import sys
 import tempfile
 import unittest
 from dataclasses import replace
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from unittest import mock
 
@@ -21,6 +22,7 @@ from agents_remember.errors import (
     HarnessBridgeEpochMismatchError,
     HarnessControlClientError,
     HarnessControlError,
+    HarnessInteractionNotPendingError,
     HarnessRequestConflictError,
 )
 from agents_remember.serving import harness_control_api
@@ -28,6 +30,8 @@ from agents_remember.serving.harness_capabilities import CapabilitySnapshot, Set
 from agents_remember.serving.harness_capability_catalog import CapabilityCatalogResult
 from agents_remember.serving.harness_control_api import register_harness_control_routes
 from agents_remember.serving.harness_control_models import (
+    AdapterSnapshot,
+    ControlIdentity,
     ReconciliationResult,
     SubmissionAuthorityDescriptor,
     SubmissionLookup,
@@ -86,6 +90,7 @@ class HarnessControlApiTests(unittest.TestCase):
             control_endpoint=self.tmp / "control.sock",
         )
         self.catalog.upsert(self.live)
+        self.moment = NOW
         app = FastAPI()
         register_harness_control_routes(
             app,
@@ -94,7 +99,7 @@ class HarnessControlApiTests(unittest.TestCase):
             harness_registry=lambda: HARNESSES,
             catalog=self.catalog,
             host=mock.Mock(),
-            liveness_clock=lambda: NOW,
+            liveness_clock=lambda: self.moment,
             liveness_config=TerminalCatalogLivenessConfig(),
             capability_catalog=self.capabilities,  # type: ignore[arg-type]
         )
@@ -495,6 +500,152 @@ class HarnessControlApiTests(unittest.TestCase):
         self.assertNotIn("vendorThread", str(response.json()))
         self.assertNotIn("private", str(response.json()))
 
+    def _interaction_snapshot(self) -> AdapterSnapshot:
+        return AdapterSnapshot(
+            identity=ControlIdentity(
+                ar_session_id=self.live.id,
+                tmux_name=self.live.tmux_name,
+                created_at=self.live.created_at,
+            ),
+            control="ready",
+            activity="settling",
+            acceptance="queued",
+        )
+
+    def test_interaction_response_sends_the_structured_answers_map_without_a_lifecycle(self) -> None:
+        # The catalog row has lifecycle_id=None: this route is the lifecycle-free answer channel.
+        self.assertIsNone(self.live.lifecycle_id)
+        answers = {"Which mode should be used?": "Safe"}
+        with (
+            mock.patch(
+                "agents_remember.serving.harness_control_api.read_submission_authority",
+                return_value=SubmissionAuthorityDescriptor(bridge_epoch=BRIDGE_EPOCH),
+            ),
+            mock.patch(
+                "agents_remember.serving.harness_control_api.respond_control_interaction",
+                return_value=self._interaction_snapshot(),
+            ) as respond,
+        ):
+            response = self.client.post(
+                "/api/terminal/live/interaction-response",
+                json={
+                    "interactionId": "question-1",
+                    "expectedBridgeEpoch": BRIDGE_EPOCH,
+                    "answers": answers,
+                },
+            )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["status"], "accepted")
+        self.assertEqual(response.json()["activity"], "settling")
+        self.assertIsNone(response.json()["pendingInteraction"])
+        self.assertEqual(respond.call_args.args[0].id, self.live.id)
+        self.assertEqual(
+            respond.call_args.kwargs,
+            {"interaction_id": "question-1", "response": json.dumps(answers)},
+        )
+
+    def test_interaction_response_permission_kind_still_passes_the_plain_response(self) -> None:
+        with (
+            mock.patch(
+                "agents_remember.serving.harness_control_api.read_submission_authority",
+                return_value=SubmissionAuthorityDescriptor(bridge_epoch=BRIDGE_EPOCH),
+            ),
+            mock.patch(
+                "agents_remember.serving.harness_control_api.respond_control_interaction",
+                return_value=self._interaction_snapshot(),
+            ) as respond,
+        ):
+            response = self.client.post(
+                "/api/terminal/live/interaction-response",
+                json={
+                    "interactionId": "permission-1",
+                    "expectedBridgeEpoch": BRIDGE_EPOCH,
+                    "response": "allow",
+                },
+            )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["status"], "accepted")
+        self.assertEqual(
+            respond.call_args.kwargs,
+            {"interaction_id": "permission-1", "response": "allow"},
+        )
+
+    def test_interaction_response_wrong_interaction_id_is_an_honest_not_pending(self) -> None:
+        with (
+            mock.patch(
+                "agents_remember.serving.harness_control_api.read_submission_authority",
+                return_value=SubmissionAuthorityDescriptor(bridge_epoch=BRIDGE_EPOCH),
+            ),
+            mock.patch(
+                "agents_remember.serving.harness_control_api.respond_control_interaction",
+                side_effect=HarnessInteractionNotPendingError(
+                    "interaction response does not match the pending interaction"
+                ),
+            ),
+        ):
+            response = self.client.post(
+                "/api/terminal/live/interaction-response",
+                json={
+                    "interactionId": "question-2",
+                    "expectedBridgeEpoch": BRIDGE_EPOCH,
+                    "answers": {"Which mode should be used?": "Safe"},
+                },
+            )
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.json()["status"], "not-pending")
+        self.assertIn("does not match the pending interaction", response.json()["detail"])
+
+    def test_interaction_response_is_epoch_guarded_like_the_other_control_routes(self) -> None:
+        with (
+            mock.patch(
+                "agents_remember.serving.harness_control_api.read_submission_authority",
+                return_value=SubmissionAuthorityDescriptor(bridge_epoch=BRIDGE_EPOCH),
+            ),
+            mock.patch(
+                "agents_remember.serving.harness_control_api.respond_control_interaction"
+            ) as respond,
+        ):
+            response = self.client.post(
+                "/api/terminal/live/interaction-response",
+                json={
+                    "interactionId": "question-1",
+                    "expectedBridgeEpoch": "stale-epoch",
+                    "answers": {"Which mode should be used?": "Safe"},
+                },
+            )
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.json()["status"], "bridge-epoch-mismatch")
+        self.assertEqual(response.json()["expectedBridgeEpoch"], "stale-epoch")
+        self.assertEqual(response.json()["actualBridgeEpoch"], BRIDGE_EPOCH)
+        respond.assert_not_called()
+
+    def test_interaction_response_requires_exactly_one_payload_shape(self) -> None:
+        bodies = (
+            {"interactionId": "q", "expectedBridgeEpoch": BRIDGE_EPOCH},
+            {
+                "interactionId": "q",
+                "expectedBridgeEpoch": BRIDGE_EPOCH,
+                "response": "allow",
+                "answers": {"Q?": "A"},
+            },
+            {"interactionId": "q", "expectedBridgeEpoch": BRIDGE_EPOCH, "answers": {}},
+            {
+                "interactionId": "q",
+                "expectedBridgeEpoch": BRIDGE_EPOCH,
+                "answers": {"Q?": " "},
+            },
+        )
+        with mock.patch(
+            "agents_remember.serving.harness_control_api.respond_control_interaction"
+        ) as respond:
+            for body in bodies:
+                with self.subTest(body=body):
+                    response = self.client.post(
+                        "/api/terminal/live/interaction-response", json=body
+                    )
+                    self.assertEqual(response.status_code, 422)
+        respond.assert_not_called()
+
     def test_unknown_and_non_control_sessions_are_distinct(self) -> None:
         unknown = self.client.post("/api/terminal/ghost/set-model", json={"model": "model-b"})
         self.catalog.upsert(
@@ -565,6 +716,169 @@ class HarnessControlApiTests(unittest.TestCase):
             native = self.client.get("/api/terminal/live/capabilities")
         self.assertEqual(native.status_code, 200)
         self.assertEqual(read.call_args.args[0].id, self.live.id)
+
+    def test_control_routes_reuse_a_fresh_liveness_observation_within_the_memo_ttl(self) -> None:
+        # A submit cluster (authority -> submit -> status) re-probed tmux, the
+        # pane, and the bridge snapshot before every call; a fresh alive observation is now reused
+        # for CONTROL_LIVENESS_MEMO_TTL_SECONDS instead.
+        with mock.patch(
+            "agents_remember.serving.harness_control_api.read_control_capabilities",
+            return_value=CapabilitySnapshot((), None, None),
+        ):
+            first = self.client.get("/api/terminal/live/capabilities")
+            second = self.client.get("/api/terminal/live/capabilities")
+        self.assertEqual((first.status_code, second.status_code), (200, 200))
+        self.assertEqual(self.observe.call_count, 1)
+
+    def test_memoized_liveness_still_fails_a_dead_bridge_with_a_typed_503(self) -> None:
+        # The memo only skips the pre-work observation; the control IPC itself is the stronger
+        # liveness probe, so a bridge that dies inside the TTL still surfaces a typed 503.
+        with mock.patch(
+            "agents_remember.serving.harness_control_api.read_control_capabilities",
+            return_value=CapabilitySnapshot((), None, None),
+        ):
+            alive = self.client.get("/api/terminal/live/capabilities")
+        self.assertEqual(alive.status_code, 200)
+        with mock.patch(
+            "agents_remember.serving.harness_control_api.submit_control_prompt",
+            side_effect=HarnessControlError("bridge died after the memoized observation"),
+        ):
+            response = self.client.post(
+                "/api/terminal/live/submit",
+                json={
+                    "requestId": "request-dead-bridge",
+                    "text": "one message",
+                    "expectedBridgeEpoch": BRIDGE_EPOCH,
+                },
+            )
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.json()["status"], "control-unavailable")
+        self.assertEqual(self.observe.call_count, 1)
+
+    def test_control_routes_re_observe_after_the_memo_ttl_expires(self) -> None:
+        with mock.patch(
+            "agents_remember.serving.harness_control_api.read_control_capabilities",
+            return_value=CapabilitySnapshot((), None, None),
+        ):
+            first = self.client.get("/api/terminal/live/capabilities")
+            self.moment = NOW + timedelta(
+                seconds=harness_control_api.CONTROL_LIVENESS_MEMO_TTL_SECONDS + 0.1
+            )
+            second = self.client.get("/api/terminal/live/capabilities")
+        self.assertEqual((first.status_code, second.status_code), (200, 200))
+        self.assertEqual(self.observe.call_count, 2)
+
+
+class ControlLivenessMemoRetentionTests(unittest.TestCase):
+    """The control-route liveness memo has to stay bounded.
+
+    A seat that leaves ``running`` 404s inside ``_running_control_entry`` before the memo's ``get``
+    runs, so the memo's own expiry branch never sees that seat again. These tests pin the reclaim
+    that replaces it, and assert on ``_entries`` directly because retention -- not any response
+    body -- is the property under test (same idiom as the contract-cache retention test).
+    """
+
+    def setUp(self) -> None:
+        self._dir = tempfile.TemporaryDirectory()
+        self.tmp = Path(self._dir.name)
+        self.catalog = TerminalCatalog(self.tmp / "terminal-sessions.json")
+        self.moment = NOW
+        memos: list[harness_control_api._ControlLivenessMemo] = []
+        real_memo_class = harness_control_api._ControlLivenessMemo
+
+        def _capture_memo() -> harness_control_api._ControlLivenessMemo:
+            memo = real_memo_class()
+            memos.append(memo)
+            return memo
+
+        app = FastAPI()
+        # The memo is an app-scoped local of the registrar, so capture the instance it builds.
+        with mock.patch.object(harness_control_api, "_ControlLivenessMemo", _capture_memo):
+            register_harness_control_routes(
+                app,
+                workspace_root=self.tmp,
+                coordination_root=self.tmp,
+                harness_registry=lambda: HARNESSES,
+                catalog=self.catalog,
+                host=mock.Mock(),
+                liveness_clock=lambda: self.moment,
+                liveness_config=TerminalCatalogLivenessConfig(),
+                capability_catalog=_CapabilityCatalog(),  # type: ignore[arg-type]
+            )
+        (self.memo,) = memos
+        self.client = TestClient(app)
+        self.alive = mock.patch(
+            "agents_remember.serving.harness_control_api.observe_terminal_liveness",
+            side_effect=lambda _catalog, _host, entry, **_kwargs: TerminalLivenessObservation(
+                entry, True
+            ),
+        )
+        self.alive.start()
+
+    def tearDown(self) -> None:
+        self.alive.stop()
+        self.client.close()
+        self._dir.cleanup()
+
+    def _seat(self, session: str) -> TerminalCatalogEntry:
+        return TerminalCatalogEntry(
+            id=session,
+            label="Claude",
+            kind="harness",
+            harness="claude",
+            lifecycle_id=None,
+            cwd=self.tmp,
+            tmux_name=f"ar-{session}",
+            command=("claude",),
+            created_at="2026-07-16T08:00:00+00:00",
+            last_attached_at="2026-07-16T08:00:00+00:00",
+            status="running",
+            control_endpoint=self.tmp / "control.sock",
+        )
+
+    def test_memo_reclaims_seats_that_left_running_without_ever_being_read_again(self) -> None:
+        with mock.patch(
+            "agents_remember.serving.harness_control_api.read_control_capabilities",
+            return_value=CapabilitySnapshot((), None, None),
+        ):
+            for index in range(8):
+                seat = self._seat(f"seat-{index}")
+                self.catalog.upsert(seat)
+                served = self.client.get(f"/api/terminal/{seat.id}/capabilities")
+                self.assertEqual(served.status_code, 200)
+                self.catalog.upsert(replace(seat, status="terminated"))
+            self.assertEqual(len(self.memo._entries), 8)  # every seat memoized while running
+
+            # The terminated seats are now unreachable for the memo: the route 404s on catalog
+            # status before ``get`` -- the only pre-fix eviction path -- could ever run again.
+            gone = self.client.get("/api/terminal/seat-0/capabilities")
+            self.assertEqual(gone.status_code, 404)
+            self.assertEqual(len(self.memo._entries), 8)
+
+            self.moment = NOW + timedelta(
+                seconds=harness_control_api.CONTROL_LIVENESS_MEMO_TTL_SECONDS + 0.1
+            )
+            survivor = self._seat("still-running")
+            self.catalog.upsert(survivor)
+            still_served = self.client.get(f"/api/terminal/{survivor.id}/capabilities")
+            self.assertEqual(still_served.status_code, 200)
+
+        # Only the one seat whose observation is still fresh survives; the eight stranded
+        # ``TerminalCatalogEntry`` rows are reclaimed instead of held for the daemon's lifetime.
+        self.assertEqual(list(self.memo._entries), ["still-running"])
+
+    def test_memo_caps_the_seats_memoized_inside_a_single_ttl_window(self) -> None:
+        # Expiry cannot help while every observation is still fresh, so the cap is the backstop.
+        memo = harness_control_api._ControlLivenessMemo(max_entries=3)
+        entry = self._seat("burst")
+        for index in range(5):
+            memo.put(f"burst-{index}", at=NOW + timedelta(milliseconds=index), entry=entry)
+
+        newest = NOW + timedelta(milliseconds=4)
+        self.assertEqual(sorted(memo._entries), ["burst-2", "burst-3", "burst-4"])
+        # A put never evicts its own observation, so the TTL reuse still holds for the newest.
+        self.assertIsNotNone(memo.get("burst-4", at=newest))
+        self.assertIsNone(memo.get("burst-0", at=newest))
 
 
 if __name__ == "__main__":

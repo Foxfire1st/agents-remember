@@ -3,10 +3,10 @@ import type { OpenSession } from "../../data/sessions";
 import type { PerSessionCockpit } from "../../data/sessionCockpitStore";
 import { HeaderStrip } from "./HeaderStrip";
 
-// The SessionStage container (260715-FEUI-L2 S5, spec §1.2): the fixed layer order —
-// HeaderStrip (always) → the reserved WorkingLine slot (rendered by L6) → the surface (the PTY,
-// L6) → the composer (L5). This leaf ships the container + HeaderStrip; the PTY/composer
-// placeholders keep L1's keyboard-zone markers alive so the zone contract stays testable.
+// The SessionStage container: the fixed layer order —
+// HeaderStrip (always) → the reserved WorkingLine slot → the surface (the PTY)
+// → the composer. The container ships with HeaderStrip; the PTY/composer
+// placeholders keep the keyboard-zone markers alive so the zone contract stays testable.
 
 const stage = css({
   display: "flex",
@@ -28,19 +28,19 @@ const headerRow = css({
   _focusVisible: { outlineWidth: "1px", outlineStyle: "solid", outlineColor: "amber", outlineOffset: "1px" },
 });
 const headerHost = css({ flex: "1", minWidth: "0" });
+// The focus-handoff note is screen-reader-only — the
+// announcement (accessibility) survives, the visible banner-per-closed-chat does not.
 const handoffNote = css({
-  fontSize: "0.7rem",
-  color: "amber",
-  borderWidth: "1px",
-  borderStyle: "solid",
-  borderColor: "color-mix(in oklch, token(colors.amber) 45%, transparent)",
-  borderRadius: "2px",
-  paddingInline: "0.4rem",
-  paddingBlock: "0.15rem",
-  flexShrink: 0,
+  position: "absolute",
+  width: "1px",
+  height: "1px",
+  padding: "0",
+  margin: "-1px",
+  overflow: "hidden",
+  clipPath: "inset(50%)",
+  whiteSpace: "nowrap",
+  border: "0",
 });
-// The reserved WorkingLine slot — zero-height until L6 renders the turn theater into it.
-const workingLineSlot = css({ flexShrink: 0, minHeight: "0" });
 const emptyIdentity = css({ fontSize: "0.78rem", color: "muted" });
 
 export function SessionStage({
@@ -48,21 +48,24 @@ export function SessionStage({
   cockpit,
   handoff,
   headerExtra,
-  workingLine,
+  headerActions,
   controlPopover,
   children,
 }: {
   focused: OpenSession | undefined;
   cockpit: PerSessionCockpit | undefined;
-  /** One-line focus-handoff note (F17): the previously focused seat retired/landed. */
+  /** One-line focus-handoff note: the previously focused seat retired/landed. */
   handoff: string | null;
   /** View-owned header chips (the ~80-col floor hint) — rendered after the strip. */
   headerExtra?: React.ReactNode;
-  /** L6's WorkingLine (spec §1.2-2) — the reserved slot's ONLY tenant. */
-  workingLine?: React.ReactNode;
-  /** L4: controlled ModelEffortControl popover state (palette commands open the same popover). */
+  /** Stage-level action buttons (inspector/rail toggles) live on the
+      title row's right — the StatusLine bar they sat on is gone. */
+  headerActions?: React.ReactNode;
+  /** Controlled ModelEffortControl popover state (palette commands open the same popover). */
   controlPopover?: { open: boolean; onOpenChange: (open: boolean) => void };
-  /** The surface + composer placeholders (owned by SessionsView so L1's zone markers persist). */
+  /** The surface + composer placeholders (owned by SessionsView so the zone markers persist).
+      The WorkingLine slot lives HERE too, between the
+      conversation and the composer — the stage's top chrome no longer reserves it. */
   children: React.ReactNode;
 }) {
   return (
@@ -79,16 +82,20 @@ export function SessionStage({
           </span>
         )}
         {headerExtra}
+        {headerActions ? (
+          <span
+            style={{ flex: "none", display: "inline-flex", gap: "0.4rem" }}
+            data-testid="stage-header-actions"
+          >
+            {headerActions}
+          </span>
+        ) : null}
       </header>
       {handoff ? (
         <div className={handoffNote} role="status" data-testid="stage-handoff-note">
           {handoff}
         </div>
       ) : null}
-      <div data-slot="working-line" className={workingLineSlot} data-testid="stage-working-line-slot">
-        {/* The reserved WorkingLine slot — L6's turn theater (verb, ~elapsed, ⏹ stop). */}
-        {workingLine}
-      </div>
       {children}
     </div>
   );

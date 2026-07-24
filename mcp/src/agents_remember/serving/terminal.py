@@ -6,7 +6,7 @@ xterm.js renders verbatim in the browser (slice 6e). The host language is irrele
 wire format -- a Python PTY emits the same bytes a node-pty would -- so this stays stdlib-only
 (no Node sidecar, one process).
 
-Each session wraps its child in ``tmux new-session -A -s <name>`` so the session *persists*:
+Each session wraps its child in ``tmux [-T sync] new-session -A -s <name>`` so the session *persists*:
 the tmux server outlives the dashboard process and the browser connection, so a restart or a
 dropped WebSocket re-attaches the same live harness (``-A`` = attach-or-create) instead of
 losing it. The host keeps a registry of live sessions correlated to a lifecycle/worktree.
@@ -34,6 +34,7 @@ import subprocess
 import termios
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
+from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
@@ -52,6 +53,20 @@ _TMUX_NAME_PREFIX = "ar"
 
 _UNSAFE_TMUX_CHARS = re.compile(r"[^A-Za-z0-9_-]+")
 """tmux session names cannot contain ``.`` or ``:``; everything outside this class is collapsed."""
+
+_TMUX_VERSION = re.compile(r"\btmux\s+(?:next-)?(\d+)\.(\d+)")
+"""The ``major.minor`` pair inside ``tmux -V`` output (``tmux 3.4``, ``tmux 3.2a``, ``tmux next-3.6``).
+
+Deliberately narrow: builds that report no numeric release (``tmux master``, OpenBSD base's
+``tmux openbsd-7.5``) do not match and are treated as *unknown*, never as new-enough. A capability we
+cannot prove is one we must not assert on the argv."""
+
+_TMUX_CLIENT_CAPABILITY_MIN_VERSION = (3, 2)
+"""First tmux release accepting the client-capability global ``-T <capabilities>``.
+
+Introduced in tmux 3.2 ("CHANGES FROM 3.1c TO 3.2"); 3.1c's own option string carries no ``T``. tmux
+rejects an unknown global *hard* -- usage block, exit 1, no session -- so passing ``-T`` to an older
+binary would kill every browser attach rather than costing a redraw optimisation."""
 
 _SUSPEND_BYTE = b"\x1a"
 """Ctrl-Z (SIGTSTP), stripped from stdin writes to **suspend-unsafe** sessions only (bare-pane harnesses
@@ -134,6 +149,54 @@ def _tmux_client_environment(parent: Mapping[str, str]) -> dict[str, str]:
     child.pop("TMUX_PANE", None)
     child["TERM"] = "xterm-256color"
     return child
+
+
+def _parse_tmux_version(text: str) -> tuple[int, int] | None:
+    """Extract ``(major, minor)`` from ``tmux -V`` output, or ``None`` when it is not a numeric release.
+
+    Pure, so the whole version gate is testable without an old tmux binary on the box.
+    """
+    match = _TMUX_VERSION.search(text)
+    if match is None:
+        return None
+    return (int(match.group(1)), int(match.group(2)))
+
+
+@lru_cache(maxsize=1)
+def _tmux_version() -> tuple[int, int] | None:
+    """The local tmux release, probed once per process (``None`` when tmux is absent/unparseable).
+
+    Cached: this gates the argv of *every* browser attach, and a subprocess per attach would put a
+    fork on the WebSocket connect path for an answer that cannot change while the daemon runs.
+    """
+    try:
+        result = subprocess.run(
+            ["tmux", "-V"],
+            check=False,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            timeout=_TERMINATE_TIMEOUT,
+            env=_tmux_client_environment(os.environ),
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if result.returncode != 0:
+        # Pre-1.4 tmux has no -V at all (usage + non-zero); unknown, so assume nothing.
+        return None
+    return _parse_tmux_version(result.stdout if isinstance(result.stdout, str) else "")
+
+
+def _tmux_supports_client_capabilities(version: tuple[int, int] | None) -> bool:
+    """Whether this tmux accepts ``-T`` (unknown versions answer ``False``).
+
+    Below the floor the synchronized-output framing is simply unavailable -- a redraw the browser may
+    see mid-repaint, which is a cosmetic loss, unlike the doomed argv it replaces. Note ``new-session
+    -e`` (:func:`_env_flags`) shipped in the same 3.2 release and carries its own, pre-existing floor
+    on the detached-create path; this probe covers only the client-capability assertion.
+    """
+    return version is not None and version >= _TMUX_CLIENT_CAPABILITY_MIN_VERSION
 
 
 def _tmux_has_session(name: str) -> bool:
@@ -371,17 +434,31 @@ def terminal_session_name(sid: str) -> str:
 
 
 def _build_tmux_command(
-    name: str, cwd: Path, harness: Sequence[str], env: Mapping[str, str] | None = None
+    name: str,
+    cwd: Path,
+    harness: Sequence[str],
+    env: Mapping[str, str] | None = None,
+    *,
+    client_capabilities: bool | None = None,
 ) -> list[str]:
-    """The persistent-session argv: ``tmux new-session -A -s <name> -c <cwd> [-e K=V …] -- <harness>``.
+    """The persistent-session argv: ``tmux [-T sync] new-session -A -s <name> ...``.
 
-    Pure -- no I/O -- so the command construction is unit-testable on its own. ``-A`` attaches
-    to an existing session of that name (persistence) or creates it; the optional ``-e KEY=VALUE``
-    flags seed spawn env (L2 knob injection); ``--`` ends tmux's option parsing so the fixed harness
-    argv is never reinterpreted as tmux flags.
+    Pure given an explicit ``client_capabilities``; the ``None`` default consults the process-cached
+    :func:`_tmux_version` probe, so the command construction stays unit-testable on its own. ``-A``
+    attaches to an existing session of that name (persistence) or creates it; the optional
+    ``-e KEY=VALUE`` flags seed spawn env (L2 knob injection); ``--`` ends tmux's option parsing so the
+    fixed harness argv is never reinterpreted as tmux flags. ``-T sync`` is a client-scoped capability
+    assertion: xterm 6 implements DEC synchronized output, so tmux can frame each pane redraw
+    atomically instead of exposing its intermediate top-to-bottom rewrite to the browser. It is
+    omitted below tmux 3.2 (:data:`_TMUX_CLIENT_CAPABILITY_MIN_VERSION`), where the flag does not
+    exist and would abort the spawn -- this is the sole client-attaching argv, so a hard dependency
+    here would cost *all* terminal function on such a host rather than one redraw optimisation.
     """
+    if client_capabilities is None:
+        client_capabilities = _tmux_supports_client_capabilities(_tmux_version())
     return [
         "tmux",
+        *(("-T", "sync") if client_capabilities else ()),
         "new-session",
         "-A",
         "-s",

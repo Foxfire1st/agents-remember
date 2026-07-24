@@ -9,9 +9,10 @@ import {
 } from "./catalogPoll";
 import { sessionCockpitStore } from "./sessionCockpitStore";
 import { sessionStore } from "./sessions";
+import { TERMINAL_CATALOG_REQUEST_TIMEOUT_MS } from "./terminal";
 
-// The hoisted shared poll driver (260715-FEUI-L2 R1): one interval regardless of subscriber
-// count, poll-health beats recorded on every read (R15/F3).
+// The hoisted shared poll driver: one interval regardless of subscriber
+// count, poll-health beats recorded on every read.
 
 const okResponse = (sessions: unknown[]) =>
   ({ ok: true, json: async () => ({ sessions }) }) as Response;
@@ -75,6 +76,40 @@ describe("hydrateTerminalSessionsFromCatalog", () => {
     expect(sessionCockpitStore.getState().pollHealth).toMatchObject({ missedBeats: 0, healthy: true });
   });
 
+  it("a hung catalog socket expires as ONE honestly-recorded missed beat; the poll loop survives (260721 live wedge)", async () => {
+    vi.useFakeTimers();
+    try {
+      const fetchMock = vi
+        .fn()
+        // A half-dead socket: never settles until the fetchWithTimeout bound aborts it.
+        .mockImplementationOnce(
+          (_url: string, init?: RequestInit) =>
+            new Promise((_resolve, reject) => {
+              init?.signal?.addEventListener("abort", () =>
+                reject(new DOMException("The operation was aborted.", "AbortError")),
+              );
+            }),
+        )
+        .mockResolvedValueOnce(okResponse([catalogRow({ id: "row-1" })]));
+      vi.stubGlobal("fetch", fetchMock);
+
+      const hungBeat = hydrateTerminalSessionsFromCatalog(false);
+      await vi.advanceTimersByTimeAsync(TERMINAL_CATALOG_REQUEST_TIMEOUT_MS);
+      await hungBeat;
+      // The timed-out beat counts as exactly ONE missed beat — honestly recorded, not frozen.
+      expect(sessionCockpitStore.getState().pollHealth).toMatchObject({ missedBeats: 1, healthy: true });
+
+      // The loop is alive: the next beat fires on a FRESH socket (the single-flight slot was
+      // released), hydrates rows, and resets the missed counter.
+      await hydrateTerminalSessionsFromCatalog(false);
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(sessionStore.getState().sessions.map((session) => session.id)).toEqual(["row-1"]);
+      expect(sessionCockpitStore.getState().pollHealth).toMatchObject({ missedBeats: 0, healthy: true });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("keeps the empty-list guard: an empty catalog only applies when allowed", async () => {
     sessionStore.getState().add("Chat", "existing");
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(okResponse([])));
@@ -91,6 +126,38 @@ describe("hydrateTerminalSessionsFromCatalog", () => {
     );
     await hydrateTerminalSessionsFromCatalog(true, new Set(["dead"]));
     expect(sessionStore.getState().sessions.map((session) => session.id)).toEqual(["alive"]);
+  });
+
+  it("does zero store work on an unchanged payload, reconciles a changed one (260721 F2)", async () => {
+    let rows = [catalogRow({ id: "row-1" }), catalogRow({ id: "row-2" })];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation(() => Promise.resolve(okResponse(rows))),
+    );
+    await hydrateTerminalSessionsFromCatalog(false);
+    const settled = sessionStore.getState();
+    const listener = vi.fn();
+    const unsubscribe = sessionStore.subscribe(listener);
+    try {
+      // A byte-identical next beat: the store is not touched (no notification, same references —
+      // the always-mounted hidden SessionsView renders nothing), but the health beat still lands.
+      await hydrateTerminalSessionsFromCatalog(false);
+      expect(listener).not.toHaveBeenCalled();
+      expect(sessionStore.getState()).toBe(settled);
+      expect(sessionCockpitStore.getState().pollHealth.lastBeatAt).not.toBeNull();
+
+      // A changed payload reconciles: the changed row is replaced, the unchanged row keeps
+      // object identity so memoized downstream surfaces skip it.
+      rows = [catalogRow({ id: "row-1" }), catalogRow({ id: "row-2", turnState: "turn-ended" })];
+      await hydrateTerminalSessionsFromCatalog(false);
+      expect(listener).toHaveBeenCalledTimes(1);
+      const next = sessionStore.getState();
+      expect(next.sessions[0]).toBe(settled.sessions[0]);
+      expect(next.sessions[1]).not.toBe(settled.sessions[1]);
+      expect(next.sessions[1]?.turnState).toBe("turn-ended");
+    } finally {
+      unsubscribe();
+    }
   });
 });
 

@@ -1,4 +1,4 @@
-// The Notes Reader screen (L17): the L9 coordination-notes reading experience rebuilt on the SAME
+// The Notes Reader screen: the coordination-notes reading experience rebuilt on the SAME
 // full-view pattern the Change-Set / File Viewer use — a task-scoped takeover whose LEFT RAIL is the
 // master's notes tree (from /api/notes/list, reports/ included) with the open note highlighted, and
 // whose content pane renders the opened note by REUSING the File Viewer's `DualPane` primitive:
@@ -9,7 +9,7 @@
 // There is no second bespoke reader: the layout is the ChangeSetViewer rail+pane+back idiom and the
 // content is `DualPane`. The view is CONTROLLED — the open `path` and rail `onSelectNote` are lifted
 // to CockpitShell (like the File Viewer's persisted state) so selection survives back/forward.
-import { useEffect, useState } from "react";
+import { memo, useEffect, useState } from "react";
 import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
 
 import { css } from "../../../styled-system/css";
@@ -98,7 +98,7 @@ const placeholder = css({ height: "100%", display: "grid", placeItems: "center",
 // Content-pane fill + the truncation banner (mirrors DualPane's own `fill`/`banner`): a truncated
 // MARKDOWN note takes DualPane's partnerless-markdown path, which has no banner (only CodeSide does),
 // so a >2-MiB markdown note -- the dominant note type -- would silently drop its "showing the first
-// 2 MiB" contract. We render the same banner here, above the pane, for that case (L18 finding 2).
+// 2 MiB" contract. We render the same banner here, above the pane, for that case.
 const paneFill = css({ height: "100%", minHeight: "0", display: "flex", flexDirection: "column" });
 const paneBody = css({ flex: "1", minHeight: "0" });
 const truncBanner = css({
@@ -134,7 +134,7 @@ function dualPaneProps(note: NoteContent): { code: FileContent | null; sidecar: 
     : { code: noteAsFileContent(note), sidecar: { state: "empty" } };
 }
 
-export function NotesReaderViewer({
+function NotesReaderViewerImpl({
   repo,
   master,
   path,
@@ -236,3 +236,8 @@ export function NotesReaderViewer({
     </div>
   );
 }
+
+// Memoized (tab-switch CPU): kept mounted (hidden) once opened — the shell re-renders on
+// every view switch with unchanged props, and the memo gate skips this subtree then; the reader's
+// own state still drives its updates.
+export const NotesReaderViewer = memo(NotesReaderViewerImpl);

@@ -1,9 +1,9 @@
 // The File Viewer center tab (full-bleed): a repo selector + a mainline/enclosure scope
-// selector drive two Headless Tree explorers (code + onboarding) over the L1 files API; the
+// selector drive two Headless Tree explorers (code + onboarding) over the files API; the
 // right side is the reusable DualPane. Pairing is bidirectional: opening a code file derives
 // its sidecar (forward); opening a sidecar opens its partner code file (reverse), or shows an
 // overview placeholder. View-mode (split/single) persists across file switches.
-import { useEffect, useState } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 import { Button, ListBox, ListBoxItem, Popover, Select, SelectValue } from "react-aria-components";
 import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
 
@@ -148,7 +148,7 @@ function PickList({
   );
 }
 
-export function FileViewer() {
+function FileViewerImpl({ active = true }: { active?: boolean }) {
   const [repos, setRepos] = useState<RepoCatalogEntry[]>([]);
   const [repo, setRepo] = useState<string>("");
   const [scope, setScope] = useState<Scope>("mainline");
@@ -156,12 +156,20 @@ export function FileViewer() {
   const [sidecar, setSidecar] = useState<SidecarView>({ state: "empty" });
   const [split, setSplit] = usePersistedFlag("fileviewer.split", true);
   const [error, setError] = useState<string | null>(null);
+  // The Cockpit keeps this layer mounted-but-hidden until its view is selected; the boot catalog
+  // read waits for the FIRST real showing. `settled` marks a completed attempt (success OR
+  // failure) so later hide/show cycles never re-read — the same once-per-lifetime posture the
+  // mount effect had before — while StrictMode's replayed effect simply re-joins the shared
+  // in-flight read (data/inflight.ts) instead of firing a second GET.
+  const settledRef = useRef(false);
 
   useEffect(() => {
+    if (!active || settledRef.current) return;
     let alive = true;
     fetchRepos()
       .then((cat) => {
         if (!alive) return;
+        settledRef.current = true;
         // Defensive: a catalog response without `repos` (unexpected server shape, generic test
         // stubs) must degrade to the empty list — `undefined` here put every later render's
         // `repos.find` into a crash loop.
@@ -171,12 +179,14 @@ export function FileViewer() {
         if (first) setRepo((r) => r || first.repo);
       })
       .catch((e) => {
-        if (alive) setError(describeError(e));
+        if (!alive) return;
+        settledRef.current = true;
+        setError(describeError(e));
       });
     return () => {
       alive = false;
     };
-  }, []);
+  }, [active]);
 
   // Reset the open file when the scope root changes.
   useEffect(() => {
@@ -261,3 +271,8 @@ export function FileViewer() {
     </div>
   );
 }
+
+// Memoized (tab-switch CPU): a keep-alive cockpit layer — the shell re-renders on every
+// view switch, and the memo gate skips this whole subtree unless `active` (or another prop)
+// actually changed; the viewer's own store subscriptions still drive its updates.
+export const FileViewer = memo(FileViewerImpl);

@@ -65,17 +65,21 @@ merge → cleanup → carryover`. Merge is not its own gate — only timing.
 
 ---
 
-## Pre-push quality gate
+## Commit and push quality gates
 
 If the repo ships a quality wrapper and hooks:
 
 - **CI** — `<your CI workflow>` runs the wrapper on every push/PR to the spear (non-bypassable
   backstop).
+- **Local pre-commit** — `<.githooks/pre-commit>` runs the wrapper before an ordinary commit.
+- **Workflow closeout** — the closeout apply path runs the wrapper before creating its code commit,
+  even when local hooks are not configured.
 - **Local pre-push** — `<.githooks/pre-push>` runs the same wrapper and blocks the push. Enable it
   once per clone with `<./setup-hooks.sh, if present>`; `git push --no-verify` bypasses intentionally.
 
-Point at the wrapper itself in [`tools.md`](tools.md); keep both gates calling the project-owned
-wrapper, not a hand-picked subset.
+Point at the wrapper itself in [`tools.md`](tools.md); keep every gate calling the project-owned
+wrapper, not a hand-picked subset. If the wrapper has a risk threshold such as CRAP, the default
+command must enforce it; repository-owned gates must not rely on a strict opt-in flag.
 
 ---
 

@@ -1,5 +1,5 @@
 import { AnimatePresence, motion } from "motion/react";
-import { useState } from "react";
+import { memo, useState } from "react";
 
 import { css, cva } from "../../styled-system/css";
 import { postAttentionDismiss } from "../data/actions";
@@ -10,9 +10,9 @@ import { Dot } from "../grammar/Dot";
 import { Panel } from "../grammar/Panel";
 import type { AttentionItem, TaskDocNode } from "../types/projection";
 
-// The home-screen attention queue (note 06): the server-ranked list of what needs the human,
+// The home-screen attention queue: the server-ranked list of what needs the human,
 // rebuilt from mc2's renderAttn UX. "Open" jumps to the item's lifecycle in the detail view — the
-// deliberate queue↔detail coupling. Lifecycle-bound rows are dismissable (leaf-28 S5.2): a
+// deliberate queue↔detail coupling. Lifecycle-bound rows are dismissable: a
 // per-item "Dismiss" and "Clear all" both POST a current acknowledgement. Lifecycle rows are scoped
 // by lifecycle id, gate rows are consumed by cancelling/deleting the gate, and actionable-drift rows
 // are repo-level one-shot signals anchored by the drift snapshot timestamp.
@@ -118,12 +118,19 @@ function canDismiss(item: AttentionItem): boolean {
   );
 }
 
-export function AttentionQueue({ onSelect }: { onSelect: (lifecycleId: string) => void }) {
+function AttentionQueueImpl({
+  onSelect,
+  active = true,
+}: {
+  onSelect: (lifecycleId: string) => void;
+  active?: boolean;
+}) {
   const queue = useDashboard(selectQueue);
   const docs = useDashboard((state) => state.analytics?.taskDocuments ?? EMPTY_TASK_DOCS);
-  // Wait times advance locally between emissions — the change gate (260703-L15) no longer
-  // re-serves the queue every tick just because the waits aged.
-  const nowMs = useNowMs();
+  // Wait times advance locally between emissions — the change gate no longer
+  // re-serves the queue every tick just because the waits aged. A hidden kept-alive rail freezes
+  // this clock; it has no visible age labels to refresh.
+  const nowMs = useNowMs(10_000, active);
   const [clearing, setClearing] = useState(false);
   const [dismissing, setDismissing] = useState<ReadonlySet<string>>(() => new Set());
   const dismissableQueue = queue.filter(canDismiss);
@@ -239,3 +246,8 @@ export function AttentionQueue({ onSelect }: { onSelect: (lifecycleId: string) =
     </Panel>
   );
 }
+
+// Memoized (tab-switch CPU): a persistent rail panel — the shell re-renders on every view
+// switch with unchanged props, and the memo gate skips this subtree then; the queue's own store
+// subscriptions still drive its updates.
+export const AttentionQueue = memo(AttentionQueueImpl);

@@ -1,4 +1,4 @@
-"""Exact-turn interrupt operation ledger (260718-CHATS-L3, R1).
+"""Exact-turn interrupt operation ledger.
 
 One idempotent interrupt authority per (session, epoch) channel, keyed by
 authenticated caller + ``(bridgeEpoch, turnId, requestId)`` with an immutable
@@ -9,15 +9,18 @@ rejected``); settlement is the correlated terminal native event
 never settlement: an ``accepted`` interrupt settles only when the exact turn's
 terminal evidence crosses the landed evidence/completion surface.
 
-The L2E substrate owns the epoch-guarded native write and its replay-once
+The substrate owns the epoch-guarded native write and its replay-once
 cache; this ledger serializes every same-session interrupt above that cache
-(L2E precision note 4: the pair cache is not a concurrency lock). Replaying an
+(that pair cache is not a concurrency lock). Replaying an
 identical tuple returns the stored projection and causes no second native
 write; reusing a request id with a different tuple is ``request-conflict``;
 lost responses stay reconcilable through ``interrupt-status`` /
 ``interrupt-reconcile`` with the same id — the browser never mints a
-replacement. For pi (no native turn identity) the caller's ``turnId`` names
-the exact active AR operation id, which the substrate guards pre-write.
+replacement. For pi and claude (no native turn identity) the caller's
+``turnId`` names the exact active AR operation id, which the substrate
+guards pre-write; the claude wire projects that same id as
+``status.turn.turnId`` while the turn works, so the projected identity
+round-trips back to the active turn with no translation.
 """
 
 from __future__ import annotations
@@ -50,13 +53,17 @@ from agents_remember.serving.harness_control_client import (
     interrupt_control,
     read_control_evidence,
 )
-from agents_remember.serving.harness_control_models import InterruptResult
+from agents_remember.serving.harness_control_models import (
+    AR_TERMINAL_OUTCOME_KEY,
+    InterruptResult,
+)
 from agents_remember.serving.terminal_catalog import TerminalCatalogEntry
 
 Acknowledgement = Literal["requested", "accepted", "unknown", "rejected"]
 Settlement = Literal["pending", "interrupted", "already-settled", "failed"]
 
 _CODEX_TERMINAL_STATUSES = {"interrupted", "completed", "failed"}
+_CLAUDE_CANCEL_REASONS = {"cancelled", "interrupted", "user_cancelled"}
 _PI_ABORTED = "aborted"
 _PI_ERROR = "error"
 
@@ -311,7 +318,11 @@ async def _observe_settlement(
     outcome = await (
         _codex_terminal_outcome(service, entry, record)
         if record.harness_id == "codex"
-        else _pi_terminal_outcome(service, entry, record)
+        else (
+            _claude_terminal_outcome(service, entry, record)
+            if record.harness_id == "claude"
+            else _pi_terminal_outcome(service, entry, record)
+        )
     )
     if outcome is None:
         return
@@ -349,6 +360,61 @@ async def _codex_terminal_outcome(
             if status == "completed":
                 return "already-settled", "the exact turn completed natively before interruption"
             return "failed", "native turn/completed failed the exact turn"
+        if not page.truncated:
+            return None
+        after = page.frames[-1].sequence
+
+
+async def _claude_terminal_outcome(
+    service: ConversationControlService,  # noqa: ARG001 - clock/epoch owner kept for symmetry
+    entry: TerminalCatalogEntry,
+    record: InterruptRecord,
+) -> tuple[Settlement, str] | None:
+    """Settle from the exact turn's correlated result classification.
+
+    Claude runs one active turn at a time, so the first completed-kind result frame after the
+    interrupt's evidence floor IS the exact operation's settlement. The adapter-attributed
+    ``arTerminalOutcome`` stamp carries the accepted-interrupt correlation: an
+    ``error_during_execution`` result reads interrupted only through that stamp — the same
+    native shape without it keeps its failed meaning.
+    """
+
+    after = record.evidence_floor
+    while True:
+        page = await asyncio.to_thread(
+            read_control_evidence,
+            entry,
+            after_sequence=after,
+            expected_bridge_epoch=record.bridge_epoch,
+        )
+        for frame in page.frames:
+            if frame.kind != "completed" or frame.raw.get("type") != "result":
+                continue
+            stamped = frame.raw.get(AR_TERMINAL_OUTCOME_KEY)
+            if stamped == "cancelled":
+                return (
+                    "interrupted",
+                    "the accepted interrupt correlated the exact Claude turn's error-shaped result",
+                )
+            if stamped == "completed":
+                return (
+                    "already-settled",
+                    "the exact Claude turn completed natively before interruption",
+                )
+            if stamped == "failed":
+                return (
+                    "failed",
+                    "the exact Claude turn's result failed without an accepted interrupt",
+                )
+            # Stamp-less fallback (foreign/older evidence): native classification only.
+            if frame.raw.get("subtype") == "success" and frame.raw.get("is_error") is False:
+                return (
+                    "already-settled",
+                    "the exact Claude turn completed natively before interruption",
+                )
+            if frame.raw.get("terminal_reason") in _CLAUDE_CANCEL_REASONS:
+                return "interrupted", "native terminal_reason settled the exact Claude turn"
+            return "failed", "native result failed the exact Claude turn"
         if not page.truncated:
             return None
         after = page.frames[-1].sequence

@@ -6,9 +6,9 @@
 #
 #     ./setup-hooks.sh
 #
-# It points git at .githooks/. The pre-commit hook checks generated package and
-# harness copies, and the pre-push hook runs the project quality wrapper (ruff +
-# Pyright + pytest + CRAP, enforcing). Bypass a single hook run intentionally
+# It points git at .githooks/. Both pre-commit and pre-push check generated
+# package/harness copies and run the project quality wrapper (ruff + Pyright +
+# pytest + mandatory CRAP enforcement). Bypass a single hook run intentionally
 # with `git commit --no-verify` or `git push --no-verify`.
 #
 # Note: this is local fast feedback only. The non-bypassable backstop is the

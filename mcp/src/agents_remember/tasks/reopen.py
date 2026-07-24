@@ -1,4 +1,4 @@
-"""Reopen a completed leaf TASK under its exact same leaf id (L11, the ``task_reopen`` tool).
+"""Reopen a completed leaf TASK under its exact same leaf id (the ``task_reopen`` tool).
 
 Reopen is a task-state reset, not a worktree operation — which is why it lives in the
 ``tasks`` package even though it also rewrites the leaf's enclosure contract.
@@ -27,6 +27,7 @@ from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 
+from agents_remember.observer.landing_state import LANDING_FINAL_BASENAME
 from agents_remember.tasks.document import TaskDocument
 from agents_remember.tasks.leaf_doc import find_leaf_doc
 from agents_remember.tasks.store import read_task_doc, write_task_docs
@@ -76,6 +77,7 @@ def reopen_task(contract_path: Path, *, dry_run: bool = False) -> WorktreeComman
         memory_state="",
     )
     doc_reset = _reset_leaf_doc(contract, dry_run=dry_run)
+    frozen_cleared = _clear_frozen_landing(contract, dry_run=dry_run)
     if not dry_run:
         write_contract(contract.contract_path, updated)
     return WorktreeCommandResult(
@@ -84,6 +86,7 @@ def reopen_task(contract_path: Path, *, dry_run: bool = False) -> WorktreeComman
             "state": "would-reopen" if dry_run else "reopened",
             **status_payload(updated if not dry_run else contract),
             "doc": doc_reset,
+            "frozenLanding": frozen_cleared,
             "summary": (
                 "Reopen preview: the contract state and leaf doc would be reset as listed."
                 if dry_run
@@ -97,6 +100,28 @@ def reopen_task(contract_path: Path, *, dry_run: bool = False) -> WorktreeComman
             "nextOperation": "worktree_start",
         },
     )
+
+
+def _clear_frozen_landing(contract: WorktreeContract, *, dry_run: bool) -> str:
+    """Delete the frozen landing-final.json so the reopened arc starts clean.
+
+    The landing freeze persists a finished leaf's landing facts beside its
+    contract and pulls it out of the landing sweep permanently. A reopen makes those facts a
+    lie: the leaf re-enters the sweep, but until this file is gone its second finish cannot
+    re-freeze (a stale-but-loadable file would keep the leaf out of the sweep and serve the
+    first-finish facts forever). Removing it here is what lets the re-finished leaf freeze with
+    fresh facts.
+    """
+    final_path = contract.contract_path.parent / LANDING_FINAL_BASENAME
+    if not final_path.exists():
+        return "absent"
+    if dry_run:
+        return "would-delete"
+    try:
+        final_path.unlink()
+    except OSError:
+        return "delete-failed"
+    return "deleted"
 
 
 def _reopen_blockers(contract: WorktreeContract) -> list[str]:

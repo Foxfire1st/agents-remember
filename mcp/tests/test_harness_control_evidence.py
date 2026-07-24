@@ -1,4 +1,4 @@
-"""Contract tests for the 260718-CHATS-L0E native evidence and resume substrate."""
+"""Contract tests for the native evidence and resume substrate."""
 
 from __future__ import annotations
 
@@ -407,7 +407,7 @@ class EvidenceBufferTests(unittest.IsolatedAsyncioTestCase):
             await bridge.stop("forced")
 
     async def test_native_method_is_carried_onto_the_frame_and_stripped_from_snapshot(self) -> None:
-        # 260718-CHATS-L5F R1: the Codex adapter carries the notification method out of band under
+        # The Codex adapter carries the notification method out of band under
         # AR_EVIDENCE_METHOD_KEY so the projector switches on the real method instead of re-guessing
         # from the params shape. The bridge must preserve it as typed EvidenceFrame.native_method and
         # strip it from the republished snapshot exactly like AR_EVIDENCE_KEY (byte-identical).
@@ -814,7 +814,7 @@ class EvidenceIpcTests(unittest.IsolatedAsyncioTestCase):
 
 
 # ---------------------------------------------------------------------------
-# Per-harness mapper round-trips through the production seam (R6/R7/R8, R12(i))
+# Per-harness mapper round-trips through the production seam
 # ---------------------------------------------------------------------------
 
 
@@ -1028,10 +1028,14 @@ class CodexEvidenceTests(unittest.IsolatedAsyncioTestCase):
             page = await adapter.read_native_page(cursor=None, limit=10, byte_budget=1024)
             self.assertGreaterEqual(len(page.frames), 1)
             self.assertEqual(page.frames[0].native_id, "item-big")
-            self.assertEqual(page.frames[0].raw["arEvidenceTruncated"], True)
-            preview = page.frames[0].raw["preview"]
-            assert isinstance(preview, str)
-            self.assertTrue(preview.endswith("…[truncated]"))
+            # The oversized item clips content-first: the frame still parses as its exact
+            # native shape (id/type survive) with the giant text visibly truncated in place.
+            self.assertEqual(page.frames[0].raw["arEvidenceContentTruncated"], True)
+            self.assertEqual(page.frames[0].raw["type"], "agentMessage")
+            text = page.frames[0].raw["text"]
+            assert isinstance(text, str)
+            self.assertIn("…[truncated]", text)
+            self.assertLess(len(text), 4096)
             # Continuation from the last returned frame never overlaps and never gaps.
             chained = [f.native_id for f in page.frames]
             cursor = page.next_cursor or chained[-1]
@@ -1420,7 +1424,7 @@ class ClaudeEvidenceTests(unittest.IsolatedAsyncioTestCase):
 
 
 # ---------------------------------------------------------------------------
-# Codex resume launch channel (R10, R12(vi))
+# Codex resume launch channel
 # ---------------------------------------------------------------------------
 
 
@@ -1443,7 +1447,7 @@ class ResumeChannelTests(unittest.TestCase):
         self.assertEqual(parse_runner_config(command[3]).resume_thread_id, "thread-9")
 
     def test_runner_payload_without_the_field_parses_to_none(self) -> None:
-        # The pre-L0E payload shape (no resumeThreadId key) must keep parsing unchanged.
+        # The older payload shape (no resumeThreadId key) must keep parsing unchanged.
         config = self._config()
         command = control_runner_command(config)
         raw = json.loads(base64.urlsafe_b64decode(command[3].encode("ascii")))
@@ -1588,7 +1592,7 @@ class ClipHelperTests(unittest.TestCase):
             clip_evidence_payload({"bad": object()}, max_bytes=128)
 
     def test_clip_preserves_pi_message_end_stop_reason_without_content(self) -> None:
-        # 260718-CHATS-L3E R1/R2/R4: a clipped pi message_end keeps its type and stopReason enum
+        # A clipped pi message_end keeps its type and stopReason enum
         # at their original paths, and nothing else (no role, no content blocks, no message text).
         frame = {
             "type": "message_end",
@@ -1617,7 +1621,7 @@ class ClipHelperTests(unittest.TestCase):
         self.assertLessEqual(len(serialized.encode("utf-8")), 512)
 
     def test_clip_preserves_codex_turn_identity_and_status_without_content(self) -> None:
-        # 260718-CHATS-L3E R1/R3/R4: a clipped codex turn/completed keeps turn.id + turn.status
+        # A clipped codex turn/completed keeps turn.id + turn.status
         # (both are read by _codex_terminal_outcome) and drops the large items body.
         params = {
             "turn": {
@@ -1662,27 +1666,18 @@ class ClipHelperTests(unittest.TestCase):
         self.assertEqual(no_reason["type"], "message_end")
         self.assertNotIn("message", no_reason)
 
-    def test_clip_drops_giant_identity_scalar_without_raising_or_leaking(self) -> None:
-        # 260718-CHATS-L3E Finding 1: a wire-reachable valid frame with an over-length string in a
-        # preserved path must DROP that field whole (never truncate-and-keep, which could
-        # mis-correlate at settlement) and still clip totally at the production 32 KiB budget —
-        # never raise (a raise in the bridge event loop is session-fatal), never cross the value.
+    def test_clip_bounds_giant_identity_scalar_without_raising_or_leaking(self) -> None:
+        # A wire-reachable valid frame
+        # with an over-length string in a preserved path must never raise (a raise in the bridge
+        # event loop is session-fatal) and its full value must never cross. The content-first
+        # clip truncates the scalar WITH the visible marker, so settlement equality can only
+        # fail closed — a truncated id can never equal a real retained id because real ids never
+        # contain the marker. When the clip degrades to the legacy envelope (structure itself
+        # over budget), over-length preserved scalars still drop whole at the 256-char boundary.
         budget = 32 * 1024
         giant = "z" * 40000 + "GIANT_TAIL"
-        notice = {"arEvidenceTruncated", "originalBytes", "preview"}
-        cases = (
-            (
-                {
-                    "type": giant,
-                    "message": {
-                        "role": "assistant",
-                        "content": [{"type": "text", "text": "hi"}],
-                        "stopReason": "aborted",
-                    },
-                },
-                {"message": {"stopReason": "aborted"}},
-            ),
-            (
+        content_clipped = _obj(
+            clip_evidence_payload(  # must not raise
                 {
                     "type": "message_end",
                     "message": {
@@ -1691,41 +1686,48 @@ class ClipHelperTests(unittest.TestCase):
                         "stopReason": giant,
                     },
                 },
-                {"type": "message_end"},
-            ),
-            (
-                {"turn": {"id": giant, "status": "interrupted", "items": [{"text": "hi"}]}},
-                {"turn": {"status": "interrupted"}},
-            ),
-            (
-                {"turn": {"id": "turn-x", "status": giant, "items": [{"text": "hi"}]}},
-                {"turn": {"id": "turn-x"}},
-            ),
+                max_bytes=budget,
+            )
         )
-        for index, (payload, expected_preserved) in enumerate(cases):
-            with self.subTest(case=index):
-                clipped = _obj(clip_evidence_payload(payload, max_bytes=budget))  # must not raise
-                self.assertEqual(clipped["arEvidenceTruncated"], True)
-                serialized = json.dumps(clipped, ensure_ascii=False, separators=(",", ":"))
-                self.assertLessEqual(len(serialized.encode("utf-8")), budget)
-                # The oversized scalar's full value never crosses (its tail sentinel is dropped).
-                self.assertNotIn("GIANT_TAIL", serialized)
-                preserved_view = {key: value for key, value in clipped.items() if key not in notice}
-                self.assertEqual(preserved_view, expected_preserved)
-        # Boundary: exactly 256 chars is preserved; 257 is dropped whole.
-        padding = {"pad": "x" * 40000}
-        kept_256 = _obj(clip_evidence_payload({"type": "t" * 256, **padding}, max_bytes=budget))
+        self.assertEqual(content_clipped["arEvidenceContentTruncated"], True)
+        serialized = json.dumps(content_clipped, ensure_ascii=False, separators=(",", ":"))
+        self.assertLessEqual(len(serialized.encode("utf-8")), budget)
+        # The oversized scalar's full value never crosses (its tail sentinel is dropped) and the
+        # kept prefix is visibly marked, so it can never satisfy an exact-equality correlation.
+        self.assertNotIn("GIANT_TAIL", serialized)
+        stop_reason = _obj(content_clipped["message"])["stopReason"]
+        assert isinstance(stop_reason, str)
+        self.assertIn("…[truncated]", stop_reason)
+        # Envelope regime: many short strings put the STRUCTURE over budget, so the ladder cannot
+        # help and the legacy envelope applies — over-length preserved scalars drop whole there.
+        structure_pad = {"items": [{"i": "x"} for _ in range(4000)]}
+        envelope = _obj(
+            clip_evidence_payload(
+                {"turn": {"id": giant, "status": "interrupted"}, **structure_pad},
+                max_bytes=budget,
+            )
+        )
+        self.assertEqual(envelope["arEvidenceTruncated"], True)
+        self.assertNotIn("GIANT_TAIL", json.dumps(envelope, ensure_ascii=False))
+        self.assertEqual(envelope.get("turn"), {"status": "interrupted"})
+        # Boundary at the envelope: exactly 256 chars is preserved; 257 is dropped whole.
+        kept_256 = _obj(
+            clip_evidence_payload({"type": "t" * 256, **structure_pad}, max_bytes=budget)
+        )
+        self.assertEqual(kept_256["arEvidenceTruncated"], True)
         self.assertEqual(kept_256.get("type"), "t" * 256)
-        dropped_257 = _obj(clip_evidence_payload({"type": "t" * 257, **padding}, max_bytes=budget))
+        dropped_257 = _obj(
+            clip_evidence_payload({"type": "t" * 257, **structure_pad}, max_bytes=budget)
+        )
         self.assertNotIn("type", dropped_257)
 
 
 class EvidenceTruncationSettlementIpcTests(unittest.IsolatedAsyncioTestCase):
-    """260718-CHATS-L3E R6/R8: oversized (>32 KiB) production terminal frames driven through the
+    """Oversized (>32 KiB) production terminal frames driven through the
     REAL evidence path (real bridge clip at the production budget + the real ``read_control_evidence``
-    IPC surface that interrupt settlement consumes) keep the tiny identity/status enums the L3
+    IPC surface that interrupt settlement consumes) keep the tiny identity/status enums the
     settlement consumers read. The scan helpers mirror ``control.operations`` verbatim so a green
-    run here is the acceptance link for L3's ``_pi_stop_reason`` / ``_codex_terminal_outcome``.
+    run here is the acceptance link for ``_pi_stop_reason`` / ``_codex_terminal_outcome``.
     """
 
     async def _serve(
@@ -1815,9 +1817,10 @@ class EvidenceTruncationSettlementIpcTests(unittest.IsolatedAsyncioTestCase):
                 await _wait_for_evidence(bridge, 1)
                 frames = await self._read_all_evidence(entry)
                 self.assertEqual(len(frames), 1)
-                # The frame really did exceed the 32 KiB budget and was clipped ...
-                self.assertEqual(frames[0].raw.get("arEvidenceTruncated"), True)
-                # ... yet its stopReason survives to the exact read L3 settles "already-settled" on.
+                # The frame really did exceed the 32 KiB budget and was clipped content-first:
+                # the native shape survives whole with its giant text visibly truncated ...
+                self.assertEqual(frames[0].raw.get("arEvidenceContentTruncated"), True)
+                # ... so its stopReason survives to the exact read settlement settles "already-settled" on.
                 self.assertEqual(self._pi_latest_stop_reason(frames), "stop")
             finally:
                 await server.close()
@@ -1833,7 +1836,7 @@ class EvidenceTruncationSettlementIpcTests(unittest.IsolatedAsyncioTestCase):
                 await _wait_for_evidence(bridge, 1)
                 frames = await self._read_all_evidence(entry)
                 self.assertEqual(len(frames), 1)
-                self.assertEqual(frames[0].raw.get("arEvidenceTruncated"), True)
+                self.assertEqual(frames[0].raw.get("arEvidenceContentTruncated"), True)
                 # The clipped abort settles "interrupted" instead of stalling pending forever.
                 self.assertEqual(self._pi_latest_stop_reason(frames), "aborted")
             finally:
@@ -1857,7 +1860,8 @@ class EvidenceTruncationSettlementIpcTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(len(frames), 2)
                 # The small mid-turn frame crossed whole; only the final abort was clipped.
                 self.assertNotIn("arEvidenceTruncated", frames[0].raw)
-                self.assertEqual(frames[1].raw.get("arEvidenceTruncated"), True)
+                self.assertNotIn("arEvidenceContentTruncated", frames[0].raw)
+                self.assertEqual(frames[1].raw.get("arEvidenceContentTruncated"), True)
                 self.assertEqual(self._pi_latest_stop_reason(frames), "aborted")
             finally:
                 await server.close()

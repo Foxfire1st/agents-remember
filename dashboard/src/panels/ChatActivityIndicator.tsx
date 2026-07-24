@@ -71,10 +71,17 @@ function isLiveHarness(session: OpenSession): boolean {
   return session.kind === "harness" && session.status === "running";
 }
 
-function activityState(turnState: string | undefined): ChatActivityState {
+function activityState(
+  turnState: string | undefined,
+  controlState: OpenSession["controlState"],
+): ChatActivityState {
   if (turnState === "awaiting-input") return "needs-input";
   if (turnState === "working") return "working";
   if (turnState === "turn-ended") return "idle";
+  // A fresh ready-idle chat carries NO seat turn claim (the sweep
+  // stamps none until its first turn) — its calm idle reads from the control lifecycle,
+  // never from a fabricated stale/turn-ended.
+  if (turnState === undefined && controlState === "ready") return "idle";
   return "unknown";
 }
 
@@ -105,7 +112,7 @@ export function summarizeChatActivity(
     .map((session) => ({
       id: session.id,
       role: sessionSeatRole(session),
-      state: activityState(session.turnState),
+      state: activityState(session.turnState, session.controlState),
     }))
     .sort((left, right) => left.role.localeCompare(right.role) || left.id.localeCompare(right.id));
   if (seats.length === 0) return undefined;

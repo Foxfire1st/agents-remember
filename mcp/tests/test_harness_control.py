@@ -38,6 +38,7 @@ from agents_remember.serving.harness_control_api import register_harness_control
 from agents_remember.serving.harness_control_bridge import HarnessControlBridge
 from agents_remember.serving.harness_control_client import (
     read_control_capabilities,
+    read_control_snapshot,
     read_submission_authority,
     read_submission_status,
     reconcile_control_prompt,
@@ -62,6 +63,8 @@ from agents_remember.serving.harness_control_models import (
     AdapterSnapshot,
     ControlIdentity,
     ControlOperationRef,
+    InteractionQuestion,
+    InteractionQuestionOption,
     InteractionResponse,
     LaunchSpec,
     PendingInteraction,
@@ -1442,6 +1445,176 @@ class HarnessControlIpcTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(adapter.reconciliation_requests, [])
             finally:
                 adapter.release_submit.set()
+                await server.close()
+                await bridge.stop("forced")
+
+    async def test_session_direct_interaction_response_round_trips_without_a_lifecycle(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as tmp_str:
+            root = Path(tmp_str)
+            identity = _identity("api-interaction")
+            adapter = _FakeAdapter()
+            bridge = HarnessControlBridge(identity, adapter)
+            await bridge.start(_launch(identity))
+            bridge_epoch = bridge.submission_authority().bridge_epoch
+            endpoint = LocalControlEndpoint.for_session(root / "control", identity)
+            server = HarnessControlServer(endpoint, bridge)
+            await server.start()
+            catalog = TerminalCatalog(root / "terminal-sessions.json")
+            entry = TerminalCatalogEntry(
+                id=identity.ar_session_id,
+                label="Worker",
+                kind="harness",
+                harness="claude",
+                lifecycle_id=None,
+                cwd=root,
+                tmux_name=identity.tmux_name,
+                command=("claude",),
+                created_at=identity.created_at,
+                last_attached_at=identity.created_at,
+                status="running",
+                control_state="ready",
+                control_endpoint=endpoint.path,
+                control_protocol=CONTROL_PROTOCOL_VERSION,
+            )
+            catalog.upsert(entry)
+            app = FastAPI()
+            register_harness_control_routes(
+                app,
+                workspace_root=root,
+                coordination_root=root,
+                harness_registry=lambda: (),
+                catalog=catalog,
+                host=TerminalHost(tmux_probe=lambda _name: True),
+                liveness_clock=lambda: datetime(2026, 7, 16, 8, 0, tzinfo=UTC),
+                liveness_config=TerminalCatalogLivenessConfig(),
+            )
+            try:
+                with (
+                    mock.patch(
+                        "agents_remember.serving.harness_control_api.observe_terminal_liveness",
+                        return_value=TerminalLivenessObservation(entry, True),
+                    ),
+                    TestClient(app) as client,
+                ):
+                    await bridge.submit(
+                        bridge.prompt("ask", source="terminal", request_id="question-operation")
+                    )
+                    pending = PendingInteraction(
+                        interaction_id="question-1",
+                        kind="user-input",
+                        prompt="Mode: Which mode should be used?",
+                        created_at="2026-07-16T08:00:01+00:00",
+                        choices=("Safe", "Fast"),
+                        questions=(
+                            InteractionQuestion(
+                                text="Which mode should be used?",
+                                header="Mode",
+                                options=(
+                                    InteractionQuestionOption(
+                                        label="Safe", description="Use safe mode"
+                                    ),
+                                    InteractionQuestionOption(label="Fast"),
+                                ),
+                            ),
+                        ),
+                    )
+                    adapter.emit(
+                        AdapterEvent(
+                            1,
+                            "state",
+                            identity,
+                            pending.created_at,
+                            snapshot=replace(
+                                bridge.snapshot(),
+                                activity="blocked",
+                                acceptance="rejected",
+                                pending_interaction=pending,
+                            ),
+                        )
+                    )
+                    await _settle_events()
+
+                    # The structured pages survive the IPC snapshot read toward the surfaces.
+                    snapshot = await asyncio.to_thread(read_control_snapshot, entry)
+                    assert snapshot.pending_interaction is not None
+                    self.assertEqual(snapshot.pending_interaction.questions, pending.questions)
+
+                    answers = {"Which mode should be used?": "Safe"}
+                    answered = await asyncio.to_thread(
+                        client.post,
+                        f"/api/terminal/{identity.ar_session_id}/interaction-response",
+                        json={
+                            "interactionId": "question-1",
+                            "expectedBridgeEpoch": bridge_epoch,
+                            "answers": answers,
+                        },
+                    )
+                    self.assertEqual(answered.status_code, 200)
+                    self.assertEqual(answered.json()["status"], "accepted")
+                    self.assertIsNone(answered.json()["pendingInteraction"])
+                    self.assertEqual(adapter.responses[-1].interaction_id, "question-1")
+                    self.assertEqual(adapter.responses[-1].response, json.dumps(answers))
+
+                    stale = await asyncio.to_thread(
+                        client.post,
+                        f"/api/terminal/{identity.ar_session_id}/interaction-response",
+                        json={
+                            "interactionId": "question-1",
+                            "expectedBridgeEpoch": bridge_epoch,
+                            "answers": answers,
+                        },
+                    )
+                    self.assertEqual(stale.status_code, 409)
+                    self.assertEqual(stale.json()["status"], "not-pending")
+
+                    permission = PendingInteraction(
+                        interaction_id="permission-1",
+                        kind="permission",
+                        prompt="Allow git status?",
+                        created_at="2026-07-16T08:00:02+00:00",
+                        choices=("allow", "deny"),
+                    )
+                    adapter.emit(
+                        AdapterEvent(
+                            2,
+                            "state",
+                            identity,
+                            permission.created_at,
+                            snapshot=replace(
+                                bridge.snapshot(),
+                                activity="blocked",
+                                pending_interaction=permission,
+                            ),
+                        )
+                    )
+                    await _settle_events()
+                    wrong_epoch = await asyncio.to_thread(
+                        client.post,
+                        f"/api/terminal/{identity.ar_session_id}/interaction-response",
+                        json={
+                            "interactionId": "permission-1",
+                            "expectedBridgeEpoch": "stale-epoch",
+                            "response": "allow",
+                        },
+                    )
+                    self.assertEqual(wrong_epoch.status_code, 409)
+                    self.assertEqual(wrong_epoch.json()["status"], "bridge-epoch-mismatch")
+
+                    allowed = await asyncio.to_thread(
+                        client.post,
+                        f"/api/terminal/{identity.ar_session_id}/interaction-response",
+                        json={
+                            "interactionId": "permission-1",
+                            "expectedBridgeEpoch": bridge_epoch,
+                            "response": "allow",
+                        },
+                    )
+                    self.assertEqual(allowed.status_code, 200)
+                    self.assertEqual(allowed.json()["status"], "accepted")
+                    self.assertEqual(adapter.responses[-1].response, "allow")
+            finally:
                 await server.close()
                 await bridge.stop("forced")
 

@@ -1,12 +1,12 @@
 """Shared browse-scope resolution + error mapping for the read-only serving APIs.
 
-Extracted from ``serving/files.py`` (L1) so the Change-Set Viewer backend (L3,
-``serving/changeset.py``) reuses one resolver + one error map instead of a parallel
+Extracted from ``serving/files.py`` so the Change-Set Viewer backend
+(``serving/changeset.py``) reuses one resolver + one error map instead of a parallel
 copy. A ``{repo, mainline|enclosure}`` resolves to a :class:`FileScope` of roots;
 ``run_scoped`` runs a domain function over that scope and maps domain errors to the
 serving status idiom (404 unknown-repo/unknown-scope/not-found, 400 bad-path).
 
-Security posture (inherited from the Task-6 localhost routes): every served path is
+Security posture (inherited from the other localhost serving routes): every served path is
 confined to an allow-listed root (``confine_rel`` realpath check); the repo allow-list
 is ``config.allowed_repo_ids`` and worktree roots come from on-disk leaf-enclosure
 contracts.
@@ -66,7 +66,7 @@ def language_for(path: Path) -> str:
 def decode_capped(raw: bytes, cap: int) -> tuple[str, bool]:
     """Decode the first ``cap`` bytes of ``raw`` as UTF-8, cut on a codepoint boundary.
 
-    260703-L18 finding 5: the read APIs slice ``raw[:cap]`` before ``decode("utf-8")``. When an
+    The read APIs slice ``raw[:cap]`` before ``decode("utf-8")``. When an
     oversize file's multi-byte character straddles the cap the slice ends mid-character, ``decode``
     raises ``UnicodeDecodeError``, and the caller's binary fallback misreports the whole (perfectly
     textual) file as ``language: "binary"`` with empty content. Backward-scan off any partial trailing
@@ -105,12 +105,26 @@ class FileScope:
 
 def _iter_repo_contracts(config: McpRuntimeConfig, repo_id: str) -> Iterator[WorktreeContract]:
     """Active leaf-enclosure contracts for ``repo_id`` (allow-listed, on-disk, not abandoned)."""
+    for contract in _iter_active_contracts(config):
+        if contract.repo_name == repo_id:
+            yield contract
+
+
+def _iter_active_contracts(config: McpRuntimeConfig) -> Iterator[WorktreeContract]:
+    """Every active leaf-enclosure contract in ONE tasks-tree walk + parse pass.
+
+    The files catalog (``serving/files.py list_repos``) needs the active
+    population for EVERY allow-listed repo; iterating per repo cost N full ``tasks/`` rglob
+    walks + N parses of the same contracts (the measured /api/files/repos bottleneck).
+    Callers needing one repo filter the bucketed result; per-repo filtering semantics
+    (skip malformed / abandoned / worktree-gone) are unchanged.
+    """
     for path in iter_leaf_enclosure_contracts(config.coordination_root / "tasks"):
         try:
             contract = load_contract(path)
         except (ContractError, OSError):
             continue  # one malformed contract never aborts the catalog
-        if contract.repo_name != repo_id or contract.cleanup == "abandoned":
+        if contract.cleanup == "abandoned":
             continue
         if not contract.code_worktree.exists():
             continue  # cleaned-up enclosure: the contract lingers, the worktree is gone

@@ -16,6 +16,11 @@ from agents_remember.memory_quality.check import DriftCheckContext, run_memory_q
 from agents_remember.observer.events import now_iso
 from agents_remember.observer.paths import observer_logs_root
 from agents_remember.worktrees.modules.args import WorktreeArgs
+from agents_remember.worktrees.modules.code_quality_gate import (
+    code_quality_gate_preview,
+    requires_strict_code_quality,
+    run_strict_code_quality_gate,
+)
 from agents_remember.worktrees.modules.context import contract_context
 from agents_remember.worktrees.modules.git import (
     changed_worktree_paths,
@@ -274,11 +279,14 @@ def closeout_preview_payload(contract, args: WorktreeArgs) -> dict[str, object]:
     memory_would_commit = memory_dirty or _refresh_plans_have_work(
         metadata_refresh, entity_refresh, route_overview_refresh, route_index_refresh
     )
+    code_quality_gate = code_quality_gate_preview(
+        contract.repo_name, code_would_commit=code_dirty
+    )
     return {
         "state": "would-closeout",
         **status_payload(contract),
         "phase": "commit-approval-pending",
-        "summary": "Closeout preview only; no commits were created. External-memory closeout will commit code first, refresh onboarding verification metadata, affected entity fingerprints, route overview metadata, and route indexes to that code commit, run memory_quality_check, then commit memory and ledger.",
+        "summary": "Closeout preview only; no commits were created. When code would commit, strict project-owned code quality runs first. External-memory closeout then refreshes onboarding verification metadata, affected entity fingerprints, route overview metadata, and route indexes to that code commit, runs memory_quality_check, and commits memory and ledger.",
         **next_guidance(
             "request_commit_approval",
             tool="worktree_closeout_apply",
@@ -293,6 +301,7 @@ def closeout_preview_payload(contract, args: WorktreeArgs) -> dict[str, object]:
         "commit_approval_required": True,
         "approval_question": "Approve creating the code, memory, and ledger commits with these messages?",
         "closeout_order": [
+            "run-strict-code-quality-if-code-commit",
             "commit-code",
             "refresh-onboarding-metadata-and-entity-fingerprints",
             "refresh-route-overview-metadata-and-indexes",
@@ -312,6 +321,7 @@ def closeout_preview_payload(contract, args: WorktreeArgs) -> dict[str, object]:
         "route_overview_body_gate": route_overview_body_gate,
         "route_overviews_attested_no_impact": route_overview_body_gate["attested_no_impact"],
         "route_index_refresh": route_index_refresh,
+        "code_quality_gate": code_quality_gate,
         "integration_reopen": _preview_integration_reopen(
             contract, code_dirty=code_dirty, memory_would_commit=memory_would_commit
         ),
@@ -321,6 +331,7 @@ def closeout_preview_payload(contract, args: WorktreeArgs) -> dict[str, object]:
                 "would_commit": code_dirty,
                 "message": args.code_commit_message,
                 "worktree": contract.code_worktree.as_posix(),
+                "strict_code_quality_before_commit": bool(code_quality_gate["required"]),
             },
             "memory": {
                 "would_commit": memory_would_commit,
@@ -574,6 +585,14 @@ def closeout_result(args: WorktreeArgs) -> WorktreeCommandResult:
         )
         attested_overviews = overview_gate["attested_no_impact"]
         stamped_overviews = overview_gate["stamped_without_body_review"]
+    code_would_commit = worktree_dirty(contract.code_worktree)
+    code_quality_gate = code_quality_gate_preview(
+        contract.repo_name, code_would_commit=code_would_commit
+    )
+    if requires_strict_code_quality(
+        contract.repo_name, code_would_commit=code_would_commit
+    ):
+        code_quality_gate = run_strict_code_quality_gate(contract.code_worktree)
     code_commit = commit_if_dirty(contract.code_worktree, args.code_commit_message)
     code_commit_date = commit_date(contract.code_worktree, code_commit)
     memory_commit = ""
@@ -648,6 +667,7 @@ def closeout_result(args: WorktreeArgs) -> WorktreeCommandResult:
             "route_overviews_stamped_without_body_review": stamped_overviews,
             "route_index_refresh": route_index_refresh,
             "memory_quality": memory_quality,
+            "code_quality_gate": code_quality_gate,
             "integration_reopen": integration_reopen,
             "closeout_gate": _closeout_gate_payload(gate_guard),
         },

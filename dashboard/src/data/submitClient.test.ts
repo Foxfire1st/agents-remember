@@ -26,7 +26,10 @@ import {
 import { announcerStore } from "./announcer";
 import { sessionCockpitStore } from "./sessionCockpitStore";
 import { fromTerminalSessionInfo, sessionStore } from "./sessions";
-import { stopSubmissionLifecyclePolling } from "./submissionLifecycleClient";
+import {
+  pollSubmissionLifecycleOnce,
+  stopSubmissionLifecyclePolling,
+} from "./submissionLifecycleClient";
 import { startSubmitRecord } from "./submitMachine";
 
 const start = () =>
@@ -442,6 +445,29 @@ describe("store driver + gates", () => {
     });
   });
 
+  it("never contradicts an in-flight working turn with a stale disconnected mark (260721 D2)", () => {
+    // The sweep can mark a busy bridge "disconnected" MID-TURN; the projection's own live-turn
+    // signal is fresher proof of control life and must outrank that catalog word (mirrors
+    // seatVisualState). Without the live signal the honest disconnected gate stands.
+    const liveTurn = {
+      ...fromTerminalSessionInfo(L5_READY_SESSION),
+      controlState: "disconnected" as const,
+      liveTurnWorking: true,
+    };
+    expect(submissionGate(liveTurn)).toEqual({ ready: true, editable: true });
+    const quiet = { ...liveTurn, liveTurnWorking: false };
+    expect(submissionGate(quiet)).toMatchObject({
+      ready: false,
+      editable: true,
+      reason: "native control is disconnected",
+    });
+    // A terminal "failed" diagnosis is never overridden by the live signal.
+    expect(submissionGate({ ...liveTurn, controlState: "failed" })).toMatchObject({
+      ready: false,
+      reason: expect.stringContaining("native control failed"),
+    });
+  });
+
   it("announces receipt truth politely for the focused session only", async () => {
     expect(submissionReceiptAnnouncement({ ...start(), phase: "accepted" })).toBe(
       "message accepted — delivered",
@@ -449,6 +475,15 @@ describe("store driver + gates", () => {
     expect(
       submissionReceiptAnnouncement({ ...start(), phase: "rejected", detail: "policy refused" }),
     ).toBe("message rejected: policy refused");
+    // A bare queued receipt never earns the withdrawable claim; the authority's own queued does.
+    expect(submissionReceiptAnnouncement({ ...start(), phase: "queued" })).toBe("message queued");
+    expect(
+      submissionReceiptAnnouncement({
+        ...start(),
+        phase: "queued",
+        serverLifecycleState: "queued",
+      }),
+    ).toBe("message queued — withdrawable");
 
     sessionCockpitStore.setState({ focusedSessionId: "l5-ready" });
     await submitSessionText("l5-ready", L5_EXACT_TEXT, {
@@ -525,6 +560,79 @@ describe("store driver + gates", () => {
         state: "queued",
       }),
     ]);
+  });
+
+  it("announces a bare queued receipt without a withdrawable claim, then settles delivering on the dispatching poll", async () => {
+    sessionCockpitStore.setState({ focusedSessionId: "l5-ready" });
+    sessionCockpitStore.getState().setComposerDraft("l5-ready", L5_EXACT_TEXT);
+    const revision = sessionCockpitStore.getState().perSession["l5-ready"].composer.draftRevision;
+    const outcome = await submitSessionText("l5-ready", L5_EXACT_TEXT, {
+      requestId: L5_REQUEST_ID,
+      expectedBridgeEpoch: "bridge-epoch-l5",
+      source: "composer",
+      submittedRevision: revision,
+      transport: {
+        submit: async () => submitReceipt("queued"),
+        reconcile: vi.fn(),
+      },
+    });
+    // Receipt time: no lifecycle word yet — the honest queued claim carries no withdrawable
+    // tail, while the draft still clears at the queued commit point.
+    expect(outcome).toMatchObject({
+      status: "started",
+      record: { phase: "queued", serverLifecycleState: undefined },
+    });
+    expect(announcerStore.getState().polite.text).toBe("message queued");
+    let cockpit = sessionCockpitStore.getState().perSession["l5-ready"];
+    expect(cockpit.composer.draft).toBe("");
+    expect(cockpit.queue).toHaveLength(1);
+
+    // The dispatch-grace reality: the first status poll reports dispatching (withdraw would
+    // answer not-withdrawable), so the record settles to delivering and the queue empties —
+    // but dispatching is not terminal, so the lifecycle watch keeps the record poll-locked.
+    const lifecycleStatus = (state: "dispatching" | "delivered") => ({
+      bridgeEpoch: "bridge-epoch-l5",
+      submissions: [
+        {
+          requestId: L5_REQUEST_ID,
+          outcome: "found" as const,
+          submission: {
+            state,
+            submittedAt: "2026-07-17T10:00:00Z",
+            updatedAt: "2026-07-17T10:00:01Z",
+            acceptedAt: null,
+            withdrawable: false,
+            detail: null,
+          },
+        },
+      ],
+    });
+    const lifecycle = {
+      authority: vi.fn(async () => ({ bridgeEpoch: "bridge-epoch-l5" })),
+      withdraw: vi.fn(),
+      status: vi
+        .fn()
+        .mockImplementationOnce(async () => lifecycleStatus("dispatching"))
+        .mockImplementationOnce(async () => lifecycleStatus("delivered")),
+    };
+    const remaining = await pollSubmissionLifecycleOnce("l5-ready", lifecycle);
+    expect(remaining).toBe(1);
+    cockpit = sessionCockpitStore.getState().perSession["l5-ready"];
+    expect(cockpit.submitHistory[0]).toMatchObject({
+      phase: "delivering",
+      serverLifecycleState: "dispatching",
+    });
+    expect(cockpit.queue).toEqual([]);
+    expect(cockpit.composer.draft).toBe("");
+
+    // The delivered upgrade on a later poll is the terminal word that ends the watch.
+    expect(await pollSubmissionLifecycleOnce("l5-ready", lifecycle)).toBe(0);
+    cockpit = sessionCockpitStore.getState().perSession["l5-ready"];
+    expect(cockpit.submitHistory[0]).toMatchObject({
+      phase: "accepted",
+      serverLifecycleState: "delivered",
+    });
+    expect(cockpit.queue).toEqual([]);
   });
 
   it("records a background queue receipt without clearing or joining composer pop-back state", async () => {

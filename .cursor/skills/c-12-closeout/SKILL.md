@@ -1,12 +1,12 @@
 ---
 name: c-12-closeout
-description: "Close out approved Agents Remember edits by preserving the applicable approval authority, missing-onboarding checks, external-memory onboarding refresh, memory quality, ledger alignment, and no automatic push for worktree-backed tasks."
+description: "Close out approved Agents Remember edits by preserving approval authority, mandatory strict code quality before code commit, missing-onboarding checks, external-memory refresh, memory quality, ledger alignment, and no automatic push."
 ---
 
 # c-12-closeout Closeout
 
-Use this skill when approved Agents Remember edits need to be committed and the
-repository uses external memory.
+Use this skill when approved Agents Remember edits in an external- or
+internal-memory worktree need to be committed.
 
 The `c-12-closeout` skill owns closeout sequencing for worktree-backed tasks.
 **Closeout is worktree-only:** every change affecting the code repo runs through a
@@ -64,6 +64,12 @@ cannot be repaired inside the leaf, or when a quo-vadis decision is required.
 Real closeout uses the matching apply tool with an `intent_note`. The note records the applicable
 authority: either explicit developer commit approval or delegated accepted-series authority. Agents
 must not treat a vague "looks good" or their own preference as authority.
+
+Approval remains outside and before apply: preview, relay, and the applicable explicit or delegated
+authority must be complete before `worktree_closeout_apply`. Once apply begins, it reruns its
+read-only validations and, when code would commit, runs the strict project-owned quality wrapper as
+the first apply-time gate before any code, memory, ledger, contract, or applied-gate mutation. The
+wrapper's CRAP threshold is mandatory: every score at or above the configured threshold fails.
 
 For a developer-gated closeout, the relay follows the `l-01-agent-lifecycles` orchestrator hand-off protocol: run the
 preview/dry-run first, then call
@@ -144,9 +150,11 @@ Rules:
 
 ## Preconditions
 
-The `c-12-closeout` skill resolves or consumes the current `c-08-ar-coordination-context-resolver` context, requires external memory
-mode, and requires the code checkout/worktree and memory repo/worktree to be on
-the same selected branch.
+The `c-12-closeout` skill resolves or consumes the current
+`c-08-ar-coordination-context-resolver` context. External-memory closeout
+requires the code checkout/worktree and memory repo/worktree to be on the same
+selected branch; internal-memory closeout commits its memory changes with the
+code worktree.
 
 Ledger compatibility is based on code-to-memory commit mappings, not branch
 metadata.
@@ -198,18 +206,34 @@ External-memory closeout order is:
 2. if onboarding is still missing, escalate to run/rerun the curator's memory pass through the
    `c-05-create-or-update-onboarding-files` skill before committing code (solo flat sessions with no
    separate curator seat create it directly)
-3. commit code changes and capture `C2` plus its commit date
-4. run the `c-02-memory-quality-control` skill's drift check against `C2` to produce the full memory update worklist
-5. verify each changed source file's sidecar content was updated in this task (by the curator's pass
+3. after preview and the applicable commit authority are complete, call
+   `worktree_closeout_apply`; its initial checks are read-only
+4. when code would commit, run the default strict project-owned quality wrapper before any
+   mutation; mandatory CRAP enforcement fails every score at or above the configured threshold
+5. commit code changes and capture `C2` plus its commit date
+6. run the `c-02-memory-quality-control` skill's drift check against `C2` to produce the full memory update worklist
+7. verify each changed source file's sidecar content was updated in this task (by the curator's pass
    in the chain above), then refresh affected onboarding `lastVerifiedCommitHash` and `lastVerifiedCommitDate` to `C2`; a changed source file with an unmodified sidecar body fails the closeout instead of receiving a metadata-only refresh
-6. refresh affected repo entity catalog `git-blob-set-v1` fingerprints against `C2` when changed source paths are listed as entity evidence
-7. refresh affected route overview `lastVerifiedCommitHash` / `lastVerifiedCommitDate` metadata to `C2`
-8. refresh generated route indexes so `overview.index.json` matches the updated onboarding tree
-9. run MCP `memory_quality_check`; fix reported memory findings before continuing
-10. commit memory-content changes and capture `M2`
-11. prepend `C2 | M2` to `memory.md`
-12. commit the ledger update as `L2`
-13. update the task contract closeout state
+8. refresh affected repo entity catalog `git-blob-set-v1` fingerprints against `C2` when changed source paths are listed as entity evidence
+9. refresh affected route overview `lastVerifiedCommitHash` / `lastVerifiedCommitDate` metadata to `C2`
+10. refresh generated route indexes so `overview.index.json` matches the updated onboarding tree
+11. run MCP `memory_quality_check`; fix reported memory findings before continuing
+12. commit memory-content changes and capture `M2`
+13. prepend `C2 | M2` to `memory.md`
+14. commit the ledger update as `L2`
+15. update the task contract closeout state
+
+## Internal-Memory Order
+
+Internal-memory closeout order is:
+
+1. run the same missing-onboarding and changed-sidecar preconditions before preview
+2. complete preview and the applicable explicit or delegated commit authority
+3. call `worktree_closeout_apply`; its initial validations are read-only
+4. when code would commit, run the default strict project-owned quality wrapper before any
+   mutation, including mandatory failure for every CRAP score at or above the configured threshold
+5. commit the code and internal-memory changes together
+6. update the task contract closeout state
 
 Entity fingerprints must be refreshed after the code commit and before the
 memory-content commit because `git-blob-set-v1` uses `HEAD:<path>` Git blobs.
@@ -241,6 +265,13 @@ verification metadata is missing, external memory is not resolved, the code and
 memory checkouts are on different selected branches, or no code or memory
 changes exist.
 
+For an Agents Remember code commit, closeout also fails without mutation when
+the strict project-owned quality wrapper cannot run or exits non-zero. This
+includes any CRAP score at or above the configured threshold. Fix the reported
+source, test, coverage, or environment issue, rerun the strict wrapper and
+closeout preview, and only then retry apply; never bypass the failure with a
+direct commit.
+
 Closeout also fails without mutation when a changed source file's existing
 sidecar body was not updated in the current task, so verification metadata is
 never advanced over stale onboarding content. This applies to committed-range
@@ -266,7 +297,9 @@ curator seat runs that skill itself.
 4. The `c-12-closeout` skill must not commit without the applicable authority after a closeout
    preview: explicit developer commit approval for standalone/final work, or recorded delegated
    series authority for subordinate accepted-series work.
-5. The `c-12-closeout` skill must not create a memory content commit whose affected onboarding metadata still points at pre-closeout code.
-6. The `c-12-closeout` skill must not create a memory content commit before route overview metadata, generated route indexes, and `memory_quality_check` are clean for the new code commit.
-7. The `c-12-closeout` skill must not push automatically.
-8. The `c-12-closeout` skill must not advance `lastVerifiedCommitHash` / `lastVerifiedCommitDate` for a changed source file whose sidecar content was not updated in the current task; a metadata-only refresh that masks drift is prohibited.
+5. The `c-12-closeout` skill must not create an Agents Remember code commit until the strict
+   project-owned wrapper, including mandatory CRAP enforcement, passes in the current worktree.
+6. The `c-12-closeout` skill must not create a memory content commit whose affected onboarding metadata still points at pre-closeout code.
+7. The `c-12-closeout` skill must not create a memory content commit before route overview metadata, generated route indexes, and `memory_quality_check` are clean for the new code commit.
+8. The `c-12-closeout` skill must not push automatically.
+9. The `c-12-closeout` skill must not advance `lastVerifiedCommitHash` / `lastVerifiedCommitDate` for a changed source file whose sidecar content was not updated in the current task; a metadata-only refresh that masks drift is prohibited.

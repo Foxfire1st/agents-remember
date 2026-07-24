@@ -36,10 +36,11 @@ new code worktree.
 Closeout is run by `c-12-closeout`. For worktree-backed tasks, the `c-09-git-worktree-manager` skill
 hands the `c-12-closeout` skill the task `contract.md`; the `c-12-closeout` skill keeps code and memory aligned:
 
-1. commit code
-2. refresh affected onboarding metadata to the code commit
-3. commit memory content
-4. update and commit `memory.md`
+1. run the strict project-owned quality wrapper before an Agents Remember source commit
+2. commit code
+3. refresh affected onboarding metadata to the code commit
+4. commit memory content
+5. update and commit `memory.md`
 
 The `c-12-closeout` skill records the closeout commits back into the contract, and the `c-09-git-worktree-manager` skill owns the
 later integration and cleanup of those committed branches.

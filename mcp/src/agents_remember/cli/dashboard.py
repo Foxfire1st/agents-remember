@@ -3,7 +3,7 @@
 Mirrors the MCP server's ``--config`` contract (``load_config`` over the same trusted MCP
 settings JSON), so the dashboard resolves the identical coordination context. ``--sim``
 replays a recorded observer fixture through the byte-identical serving path instead of live
-state (slice 4b); the sim's throwaway root is held alive for the server's lifetime.
+state; the sim's throwaway root is held alive for the server's lifetime.
 """
 
 from __future__ import annotations
@@ -28,6 +28,18 @@ from agents_remember.serving.sim import SimError, build_sim, parse_sim_speed
 _DEV_CONFIG_ENV = "AR_DASHBOARD_DEV_CONFIG"
 _DEV_INTERVAL_ENV = "AR_DASHBOARD_DEV_INTERVAL"
 _DEV_HEARTBEAT_ENV = "AR_DASHBOARD_DEV_HEARTBEAT"
+
+# The dashboard always has a browser tab holding an EventSource open on
+# ``/api/stream`` (and ``/api/events``). Those handlers are ``while True`` streaming responses that
+# never return on their own, so uvicorn's *unbounded* default graceful shutdown waits for them
+# forever on SIGTERM: the listening socket closes (port released) but the process hangs as a zombie
+# with its landing sweep still spawning git/gh -- exactly the three survivors observed live, killable
+# only by SIGKILL. A bounded graceful window makes SIGTERM force-cancel the lingering streams and run
+# the lifespan shutdown (which cancels the projector/landing/supervisor tasks) within a few seconds.
+# Fast API/JSON requests finish well inside this window; only the intentionally-endless SSE streams
+# are force-closed, which is exactly the desired behaviour on shutdown. uvicorn types this as whole
+# seconds (``int | None``), so keep it an int.
+DASHBOARD_GRACEFUL_SHUTDOWN_SECONDS = 3
 
 
 def _dev_app():
@@ -150,6 +162,7 @@ def run(args: argparse.Namespace) -> int:
             host=args.host,
             port=port,
             access_log=not args.no_access_log,
+            timeout_graceful_shutdown=DASHBOARD_GRACEFUL_SHUTDOWN_SECONDS,
         )
         return 0
     if args.sim:
@@ -165,7 +178,13 @@ def run(args: argparse.Namespace) -> int:
         )
     else:
         app = create_app(config, interval=args.interval, heartbeat=args.heartbeat)
-    uvicorn.run(app, host=args.host, port=port, access_log=not args.no_access_log)
+    uvicorn.run(
+        app,
+        host=args.host,
+        port=port,
+        access_log=not args.no_access_log,
+        timeout_graceful_shutdown=DASHBOARD_GRACEFUL_SHUTDOWN_SECONDS,
+    )
     return 0
 
 

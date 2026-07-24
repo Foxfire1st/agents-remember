@@ -18,11 +18,13 @@ the submission-provenance batch.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 
 from agents_remember.serving.conversation.models import (
+    ConversationContentBlock,
     ConversationCorrelation,
     ConversationItem,
+    DiffBlock,
     MarkdownBlock,
     TextBlock,
     ThinkingBlock,
@@ -44,20 +46,22 @@ from agents_remember.serving.conversation.projectors.common import (
     required_text,
     unknown_input_provenance,
 )
-from agents_remember.serving.harness_control_models import EvidenceFrame
+from agents_remember.serving.harness_control_models import (
+    AR_TERMINAL_OUTCOME_KEY,
+    EvidenceFrame,
+)
 
 HARNESS = "claude"
 
 _CANCEL_REASONS = {"cancelled", "interrupted", "user_cancelled"}
 
-# 260718-CHATS-L5F R3: the installed Claude Code (2.1.216+) slash-command lifecycle contract. Each
+# The installed Claude Code (2.1.216+) slash-command lifecycle contract. Each
 # submitted ``/command`` emits a stable ``command_uuid`` triple queued -> started -> completed. It
 # is a first-class typed frame (validated against this exact 3-state contract), not a tolerated
-# stranger — the second-half native slash-command surface (leaves 07/08) consumes it as settlement
+# stranger — the later native slash-command surface consumes it as settlement
 # evidence, correlated by ``command_uuid`` to the replayed command envelope. Until that surface
 # lands the lifecycle mints no timeline item (the native ``result``/history already renders the
-# command), so it never floods as unknown-vendor. Captured specimen preserved in
-# notes/260721-halftime-codex-open-diagnosis.md item 3.
+# command), so it never floods as unknown-vendor.
 _COMMAND_LIFECYCLE_STATES = frozenset({"queued", "started", "completed"})
 
 
@@ -256,12 +260,122 @@ def _map_tool_use(
                         summary=name,
                         data=block.get("input"),
                     ),
+                    *_tool_mutation_diff_blocks(name, block.get("input")),
                 ),
                 correlation=ConversationCorrelation(tool_call_id=tool_id),
                 created_at=created_at,
             )
         )
     ]
+
+
+def _edit_diff_blocks(
+    tool_input: Mapping[str, object],
+) -> tuple[ConversationContentBlock, ...]:
+    old = tool_input.get("old_string")
+    new = tool_input.get("new_string")
+    if not isinstance(old, str) or not isinstance(new, str):
+        return ()
+    return (
+        DiffBlock(
+            block_id="diff-0",
+            path=optional_text(tool_input.get("file_path")),
+            old_text=old,
+            new_text=new,
+        ),
+    )
+
+
+def _multi_edit_diff_blocks(
+    tool_input: Mapping[str, object],
+) -> tuple[ConversationContentBlock, ...]:
+    edits = tool_input.get("edits")
+    if not isinstance(edits, list):
+        return ()
+    path = optional_text(tool_input.get("file_path"))
+    blocks: list[ConversationContentBlock] = []
+    for index, raw_edit in enumerate(edits):
+        if not isinstance(raw_edit, Mapping):
+            continue
+        old = raw_edit.get("old_string")
+        new = raw_edit.get("new_string")
+        if isinstance(old, str) and isinstance(new, str):
+            blocks.append(
+                DiffBlock(
+                    block_id=f"diff-{index}",
+                    path=path,
+                    old_text=old,
+                    new_text=new,
+                )
+            )
+    return tuple(blocks)
+
+
+def _write_diff_blocks(
+    tool_input: Mapping[str, object],
+) -> tuple[ConversationContentBlock, ...]:
+    content = tool_input.get("content")
+    if not isinstance(content, str):
+        return ()
+    # The old file state never crosses the wire, so this is honestly the written
+    # content (all-additions), not a fabricated against-disk diff.
+    return (
+        DiffBlock(
+            block_id="diff-0",
+            path=optional_text(tool_input.get("file_path")),
+            new_text=content,
+        ),
+    )
+
+
+def _notebook_edit_diff_blocks(
+    tool_input: Mapping[str, object],
+) -> tuple[ConversationContentBlock, ...]:
+    new_source = tool_input.get("new_source")
+    if not isinstance(new_source, str):
+        return ()
+    return (
+        DiffBlock(
+            block_id="diff-0",
+            path=optional_text(tool_input.get("notebook_path")),
+            new_text=new_source,
+        ),
+    )
+
+
+_TOOL_MUTATION_DIFF_MAPPERS: dict[
+    str,
+    Callable[[Mapping[str, object]], tuple[ConversationContentBlock, ...]],
+] = {
+    "Edit": _edit_diff_blocks,
+    "MultiEdit": _multi_edit_diff_blocks,
+    "Write": _write_diff_blocks,
+    "NotebookEdit": _notebook_edit_diff_blocks,
+}
+
+
+def _tool_mutation_diff_blocks(
+    name: str, tool_input: object
+) -> tuple[ConversationContentBlock, ...]:
+    """Diff blocks for Claude's file-mutating tools, derived from the tool_use input.
+
+    The input already carries the exact change (old/new strings for Edit, the written
+    content for Write), so the projection shows WHAT changed — the changed line sets the
+    other harnesses render via DiffBlock — not just that something changed. Only the
+    harness's own input is re-shaped; nothing is diffed against disk state we never saw.
+    Unknown input shapes contribute no diff (the raw ToolInputBlock still carries them).
+
+    Shape checks are required at this boundary because Claude tool input is vendor-owned
+    data. A malformed or unsupported shape retains its raw ToolInputBlock and contributes
+    no synthesized diff.
+    """
+
+    if not isinstance(tool_input, Mapping):
+        return ()
+    mapper = _TOOL_MUTATION_DIFF_MAPPERS.get(name)
+    if mapper is None:
+        return ()
+    return mapper(tool_input)
 
 
 def _map_tool_carrier(
@@ -276,6 +390,20 @@ def _map_tool_carrier(
         raise UnmappableShape("replayed user frames are consumed as submission echoes")
     message = required_object(raw.get("message"), "claude user frame.message")
     content = message.get("content")
+    if isinstance(content, str):
+        # Claude Code records local slash-command turns (<command-name>…, <local-command-stdout>,
+        # caveat wrappers) as user frames whose content is a bare STRING, not a block list. One
+        # such frame must never kill the projection (a mid-transcript /effort
+        # record crash-looped the replay — generation churn, dead cursors, "structured surface
+        # unavailable" for the whole session). Preserve it instead.
+        return [
+            MappedUnknownVendor(
+                item_id=f"claude-user-{raw.get('uuid') or evidence_ref.rsplit(':', 1)[-1]}-text",
+                vendor_type="claude-user-content:text",
+                safe_summary=f"claude user text frame: {content.strip()[:80] or 'empty'}",
+                created_at=created_at,
+            )
+        ]
     if not isinstance(content, list):
         raise UnmappableShape("claude user frame content must be a list of blocks")
     outputs: list[MapperOutput] = []
@@ -348,7 +476,19 @@ def _map_result(
 ) -> list[MapperOutput]:
     uuid = required_text(raw.get("uuid"), "claude result frame uuid")
     outcome: TerminalOutcomeValue
-    if raw.get("subtype") == "success" and raw.get("is_error") is False:
+    # The adapter-attributed correlated classification is the authority when present: claude
+    # answers an accepted interrupt with a plain error_during_execution/is_error result, so
+    # only the adapter's accepted-interrupt correlation distinguishes interrupted from failed.
+    # Native-frame classification remains the fallback for stamp-less evidence (older fixtures,
+    # foreign streams).
+    stamped = raw.get(AR_TERMINAL_OUTCOME_KEY)
+    if stamped == "completed":
+        outcome = "completed"
+    elif stamped == "cancelled":
+        outcome = "interrupted"
+    elif stamped == "failed":
+        outcome = "failed"
+    elif raw.get("subtype") == "success" and raw.get("is_error") is False:
         outcome = "completed"
     elif raw.get("terminal_reason") in _CANCEL_REASONS:
         outcome = "interrupted"

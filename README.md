@@ -15,6 +15,10 @@
   <i>Note: caches and search snippets may serve an outdated copy of this README — the docs site above is canonical and always current.</i>
 </p>
 
+<p align="center">
+  <img src="./agents-remember-welcome.png" alt="Agents Remember mission-control welcome screen: Agents orchestrate attention, Tasks commit intent, and Memory preserves truth." width="833">
+</p>
+
 ##
 
 ## Table of Contents
@@ -217,6 +221,11 @@ Edit runtime assets in root `agents-md-files/`, `benchmarks/`, `providers/`,
 and `system/`, then run `python3 scripts/sync-runtime.py` to refresh MCP package
 data only. The pre-commit and pre-push hooks run
 `python3 scripts/sync-runtime.py --check`.
+
+Both hooks also run `python -m agents_remember.code_quality.check`. Its default
+command enforces Ruff, Pyright, the full pytest suite, and the configured CRAP
+threshold; closeout runs the same strict wrapper before creating an Agents
+Remember code commit even when hooks are not configured.
 
 The installed runtime lives in `ar-coordination/` — by default `<workspace>/ar-coordination/`,
 inside the workspace (never your home directory) — not in the source checkout. The

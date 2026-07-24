@@ -1,4 +1,4 @@
-// The ModelEffortControl (260715-FEUI-L4 R1/R2/R3/R5/F16): exact-session sourcing, the
+// The ModelEffortControl: exact-session sourcing, the
 // disabled-with-verbatim-error popover, the corrected effort-menu derivation on screen, staged
 // re-gating with the defaultEffort pre-highlight, the serialized pair apply, and the chips row
 // carrying acceptance WORDS as text.
@@ -161,14 +161,13 @@ describe("fetch failure (F16) + the 409 disable reason (R3)", () => {
 
 describe("the corrected effort menu on screen (R1)", () => {
   it("FRESH CLAUDE: null selectedEffort + omitted thought_level configOption still renders the " +
-    "FULL menu with 'effort not echoed' — never 'no effort control'", async () => {
+    "FULL menu — never 'no effort control'; the trigger stays plain (260723)", async () => {
     const session = liveSeat({ harness: "claude" });
     stubFetch({
       [`/api/terminal/${session.id}/capabilities`]: { status: 200, body: CLAUDE_FRESH_SESSION_SNAPSHOT },
     });
     const { getByTestId, queryByTestId } = render(<Harness session={session} />);
     await waitFor(() => expect(getByTestId("model-effort-efforts")).toBeTruthy());
-    expect(getByTestId("effort-not-echoed").textContent).toContain("effort not echoed");
     expect(queryByTestId("effort-menu-none")).toBeNull();
     const efforts = [...getByTestId("model-effort-efforts").querySelectorAll("[data-testid^='effort-option-']")];
     expect(efforts.map((node) => node.getAttribute("data-testid"))).toEqual([
@@ -178,7 +177,28 @@ describe("the corrected effort menu on screen (R1)", () => {
       "effort-option-xhigh",
       "effort-option-max",
     ]);
-    expect(getByTestId("model-effort-trigger-effort").textContent).toBe("effort not echoed");
+    // No sentinel anywhere: with no server value and no launch-resolved value the
+    // effort segment disappears from the trigger; the menu never carries an explainer note.
+    expect(queryByTestId("effort-not-echoed")).toBeNull();
+    expect(queryByTestId("model-effort-trigger-effort")).toBeNull();
+  });
+
+  it("FRESH CLAUDE with launch knobs: the trigger and menu read the launch-resolved effort plainly (260723)", async () => {
+    const session = liveSeat({
+      harness: "claude",
+      resolvedModel: "claude-fable-5[1m]",
+      resolvedEffort: "xhigh",
+    });
+    stubFetch({
+      [`/api/terminal/${session.id}/capabilities`]: { status: 200, body: CLAUDE_FRESH_SESSION_SNAPSHOT },
+    });
+    const { getByTestId, queryByTestId } = render(<Harness session={session} />);
+    await waitFor(() => expect(getByTestId("model-effort-efforts")).toBeTruthy());
+    // The pair reads as the values the session is RUNNING — no sentinel, no provenance chrome.
+    expect(getByTestId("model-effort-trigger-model").textContent).toBe("claude-fable-5[1m]");
+    expect(getByTestId("model-effort-trigger-effort").textContent).toBe("xhigh");
+    expect(queryByTestId("effort-not-echoed")).toBeNull();
+    expect(getByTestId("effort-option-xhigh").getAttribute("data-effective")).toBe("true");
   });
 
   it("staging an effortless row (haiku) renders 'no effort control for this model' — never inherited", async () => {
@@ -275,7 +295,7 @@ describe("apply (R2/R5)", () => {
     fireEvent.click(getByTestId("effort-option-xhigh"));
     expect(getByTestId("model-effort-apply").textContent).toBe("apply model + effort (serialized)");
     fireEvent.click(getByTestId("model-effort-apply"));
-    // Both queued pendings land per kind — never clobbered (R5).
+    // Both queued pendings land per kind — never clobbered.
     await waitFor(() => {
       const pendings = store.getState().perSession[session.id].pendingSets;
       expect(pendings.model?.requestedValue).toBe("gpt-5.6-terra");

@@ -732,8 +732,10 @@ def create_server(config: McpRuntimeConfig) -> Any:
         memory_commit_message: str = "",
         ledger_commit_message: str = "",
     ) -> dict[str, Any]:
-        """Non-mutating preview of a worktree-backed closeout (what code/memory/ledger commits would
-        be made). Nothing is committed. Pair with worktree_closeout_apply."""
+        """Non-mutating preview of a worktree-backed closeout. Reports the proposed
+        code/memory/ledger commits and whether strict project-owned code quality, including
+        mandatory CRAP enforcement, will run before the code commit. Pair with
+        worktree_closeout_apply after approval."""
         return worktree_closeout_preview_payload(
             config,
             contract_path,
@@ -751,9 +753,11 @@ def create_server(config: McpRuntimeConfig) -> Any:
         ledger_commit_message: str = "",
         dry_run: bool = False,
     ) -> dict[str, Any]:
-        """Apply a worktree closeout: commits code, then memory, then ledger. MUTATING and
-        commit-gated — only after explicit developer commit approval; preview first
-        (worktree_closeout_preview or dry_run=true). Requires intent_note."""
+        """Apply an approved worktree closeout. When code would commit, runs strict
+        project-owned quality with mandatory CRAP enforcement before any code, memory,
+        ledger, contract, or applied-gate mutation; then commits code, memory, and ledger
+        in order. MUTATING and commit-gated: preview and approval precede apply.
+        Requires intent_note."""
         return worktree_closeout_apply_payload(
             config,
             contract_path,

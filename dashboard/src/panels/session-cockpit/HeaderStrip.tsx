@@ -1,19 +1,16 @@
 import { css } from "../../../styled-system/css";
-import { launchTier } from "../../data/launchEvidence";
 import type { OpenSession } from "../../data/sessions";
 import type { PerSessionCockpit } from "../../data/sessionCockpitStore";
 import { seatVisualState } from "../../data/stateGrammar";
 import { leafIdFromKey } from "../../data/taskIdentity";
-import { EvidenceBadge } from "../../grammar/EvidenceBadge";
 import { ModelEffortControl } from "./ModelEffortControl";
 import { StateDot } from "./StateDot";
 
-// The HeaderStrip (260715-FEUI-L2 S5, spec §1.2 — R10): identity → controls → state →
+// The HeaderStrip: identity → controls → state →
 // diagnostics, in that order. Elision runs diagnostics-first (highest flex-shrink), then
-// leaf/seat; identity + state NEVER elide (flex: none). The controls slot hosts L4's
+// leaf context; identity + state NEVER elide (flex: none). The controls slot hosts the
 // ModelEffortControl (design §6 — the chrome is the ONLY place model/effort exist for controlled
-// sessions, §1.5-1). Provenance badges (R7 — moat 1, read-only) ride the diagnostics cluster:
-// honest requested-tier wording only, never a claim the server did not make.
+// sessions; one plain pair, no provenance duplication in diagnostics).
 
 const strip = css({
   display: "flex",
@@ -26,7 +23,7 @@ const strip = css({
 const identity = css({ flex: "none", display: "inline-flex", alignItems: "baseline", gap: "0.4rem" });
 const sessionName = css({ fontSize: "0.82rem", color: "ink" });
 const harnessName = css({ fontSize: "0.74rem", color: "muted" });
-// The control + its chips may shrink (after diagnostics, before leaf/seat) — never the trigger's
+// The control + its chips may shrink (after diagnostics, before leaf context) — never the trigger's
 // identity words themselves; chip text elides inside AcceptanceChip.
 const controlSlot = css({
   flex: "0 1 auto",
@@ -44,7 +41,7 @@ const stateCluster = css({
   fontSize: "0.72rem",
   color: "muted",
 });
-// Diagnostics elide FIRST: the only min-width:0 shrinking segment; leaf/seat elides after it.
+// Diagnostics elide FIRST: the only min-width:0 shrinking segment; leaf context elides after it.
 const diagnostics = css({
   flex: "0 4 auto",
   minWidth: "0",
@@ -55,7 +52,7 @@ const diagnostics = css({
   color: "muted",
   marginLeft: "auto",
 });
-const leafSeat = css({
+const leafContext = css({
   flex: "0 2 auto",
   minWidth: "0",
   overflow: "hidden",
@@ -82,7 +79,7 @@ function quietFor(lastOutputAt: number | null, now: number): string | undefined 
 }
 
 const WS_WORDS: Record<PerSessionCockpit["freshness"]["ptyWs"], string> = {
-  none: "ws —", // no PTY attached in this cockpit (the pane lands in L6) — absent, never faked
+  none: "ws —", // no PTY attached in this cockpit (the pane is owned by the PtySurface) — absent, never faked
   connected: "ws ✓",
   reconnecting: "ws reconnecting",
   dropped: "ws dropped",
@@ -103,16 +100,12 @@ export function HeaderStrip({
   const visual = seatVisualState(session);
   const freshness = cockpit?.freshness ?? { ptyWs: "none" as const, lastOutputAt: null };
   const quiet = quietFor(freshness.lastOutputAt, now);
-  // 260715-FEUI-L3 R7: the launch tier derives from CONTROL-STATE truth on the row (the pure
-  // tier machine), never from the open response — the same derivation every surface uses.
-  const evidenceTier = launchTier(session);
-  const seatRole = session.spawnRole ?? session.seatRole;
 
   return (
     <div className={strip} data-testid="header-strip">
       <span className={identity} data-header-segment="identity">
         <span className={sessionName}>{session.label}</span>
-        {/* R10 — no `codex codex` stutter: the harness label is dropped when it merely repeats the
+        {/* No `codex codex` stutter: the harness label is dropped when it merely repeats the
             session name (a raw terminal literally named after its harness). */}
         {session.harness &&
         session.harness.toLowerCase() !== session.label.toLowerCase() ? (
@@ -125,7 +118,7 @@ export function HeaderStrip({
         data-slot="model-effort-control"
         data-testid="header-control-slot"
       >
-        {/* L4: the one ModelEffortControl — renders nothing for non-harness/ended sessions. */}
+        {/* The one ModelEffortControl — renders nothing for non-harness/ended sessions. */}
         <ModelEffortControl
           session={session}
           cockpit={cockpit}
@@ -134,14 +127,16 @@ export function HeaderStrip({
         />
       </span>
       <span className={stateCluster} data-header-segment="state" data-testid="header-state">
-        <StateDot state={visual} testId="header-dot" />
-        <span>{visual.word}</span>
+        <StateDot
+          state={visual}
+          testId="header-dot"
+          ariaLabel={visual.key === "unclassified" ? "state unavailable" : undefined}
+        />
+        {visual.key === "unclassified" ? null : <span>{visual.word}</span>}
       </span>
-      {session.leafKey || seatRole ? (
-        <span className={leafSeat} data-header-segment="leaf-seat" data-testid="header-leaf-seat">
-          {session.leafKey ? `leaf ${leafIdFromKey(session.leafKey)}` : null}
-          {session.leafKey && seatRole ? " · " : null}
-          {seatRole ? `seat ${seatRole}` : null}
+      {session.leafKey ? (
+        <span className={leafContext} data-header-segment="leaf" data-testid="header-leaf">
+          leaf {leafIdFromKey(session.leafKey)}
         </span>
       ) : null}
       <span
@@ -150,7 +145,7 @@ export function HeaderStrip({
         data-testid="header-diagnostics"
         title="Freshness: PTY WebSocket state + last-output age (this cockpit's pane, L6). Turn-state freshness is bounded by the 10 s liveness sweep."
       >
-        {/* R3 (RV/manager) — `ws —` on a seat with no pane is an em-dash placeholder: the ws word
+        {/* `ws —` on a seat with no pane is an em-dash placeholder: the ws word
             shows only when a pane actually reports a ws state; the last-output age still shows when
             known, and the provenance chips below carry the rest. */}
         {[
@@ -159,17 +154,8 @@ export function HeaderStrip({
         ]
           .filter(Boolean)
           .join(" · ")}
-        {/* Provenance badges (R7): read-only moat-1 facts at their honest tier — the
-            EvidenceBadge glyph plus the tier word (pending renders as "requested"). */}
-        {session.resolvedModel ? (
-          <span className={provenanceChip} data-testid="header-provenance-model">
-            {" "}
-            model {session.resolvedModel}
-            {session.resolvedEffort ? ` · ${session.resolvedEffort}` : ""}{" "}
-            <EvidenceBadge tier={evidenceTier} size="sm" /> (
-            {evidenceTier === "pending" ? "requested" : evidenceTier})
-          </span>
-        ) : null}
+        {/* No model/effort duplication here — the ModelEffortControl is the one
+            header surface for the running pair; launch problems raise the FailedLaunchBanner. */}
         {session.spawnLevel ? (
           <span className={provenanceChip} data-testid="header-provenance-level">
             {" "}

@@ -87,6 +87,16 @@ class HarnessRequestConflictError(HarnessControlError):
     """A retained request id was reused with a different immutable source or payload."""
 
 
+class HarnessInteractionNotPendingError(HarnessControlError):
+    """An interaction response named an interaction that is not the pending one.
+
+    The submission authority raises this (never a generic control error) when a respond
+    request arrives with no matching pending interaction, with no active ordinary operation,
+    or twice for the same interaction, so the serving route can answer with the honest
+    ``not-pending`` conflict status instead of an unavailable claim.
+    """
+
+
 class HarnessBridgeEpochMismatchError(HarnessControlError):
     """A caller addressed lifecycle state from a replaced hosted runner generation."""
 

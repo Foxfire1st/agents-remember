@@ -89,9 +89,10 @@ An external memory repo does not force sibling repositories into external mode. 
 
 External-memory changes need code and memory to stay mapped. `c-12-closeout` handles that sequence for both direct edits in the current checkout and worktree-backed tasks:
 
-1. commit code
-2. refresh onboarding metadata against the code commit
-3. commit memory content
-4. update `memory.md`
+1. for Agents Remember source changes, run its strict project-owned quality wrapper
+2. commit code
+3. refresh onboarding metadata against the code commit
+4. commit memory content
+5. update `memory.md`
 
 Do not manually update the ledger unless you are deliberately repairing memory history.

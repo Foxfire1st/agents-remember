@@ -56,6 +56,26 @@ describe("Operations chat activity", () => {
     expect(summary?.detail).toBe("curator: unknown; reviewer: unknown; worker: idle");
   });
 
+  it("maps a fresh ready-idle chat (no turn claim yet) to idle, never unknown (260718-CHATS-L5I A2b)", () => {
+    // The sweep no longer stamps stale/turn-ended on a fresh chat: a ready control with no
+    // turnState IS the calm idle seat — the dot/label must not read unknown-alarming.
+    const summary = summarizeChatActivity(
+      [session({ id: "worker", controlState: "ready" })],
+      { leafKey: LEAF },
+    );
+
+    expect(summary).toEqual({ state: "idle", label: "idle", detail: "worker: idle" });
+  });
+
+  it("keeps a booting chat honest: a starting control with no turn claim stays unknown", () => {
+    const summary = summarizeChatActivity(
+      [session({ id: "worker", controlState: "starting" })],
+      { leafKey: LEAF },
+    );
+
+    expect(summary?.state).toBe("unknown");
+  });
+
   it("aggregates multiple role seats deterministically without hiding individual states", () => {
     const summary = summarizeChatActivity(
       [

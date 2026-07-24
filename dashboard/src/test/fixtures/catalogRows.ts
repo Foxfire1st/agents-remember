@@ -1,7 +1,7 @@
 import type { TerminalCatalogRow } from "../../types/terminalCatalog";
 
-// Catalog-row fixtures (260715-FEUI-L2 S6), FULL wire shape (`TerminalCatalogEntry.to_json()`),
-// placed under src/test/fixtures to be shared with the L3 fixture pack. `catalogRow` builds one
+// Catalog-row fixtures in the FULL wire shape (`TerminalCatalogEntry.to_json()`),
+// placed under src/test/fixtures so multiple test suites can import them. `catalogRow` builds one
 // row with sane defaults; `FLEET` is the mockup-mirroring scenario (flat command spine, two leaf
 // clusters, a completed folder, an awaiting-input scout, a failed launch, a landed probe).
 
@@ -171,7 +171,7 @@ export const FLEET: TerminalCatalogRow[] = [
   }),
 ];
 
-// ── 260715-FEUI-L6 fixture pack (R9) — APPENDED, never reshaping FLEET ──────────────────────
+// ── Extra fixture pack — APPENDED, never reshaping FLEET ─────────────────────────────────────
 // The two archetypes + interaction kinds + stop residuals, as separate exports so FLEET-order-
 // dependent tests stay byte-identical.
 
@@ -251,6 +251,133 @@ export const L6_INTERACTION_UNREPRESENTABLE: TerminalCatalogRow = catalogRow({
   controlPendingInteraction: {
     kind: "vendor-custom",
     payload: { opaque: true },
+  },
+});
+
+/** A STRUCTURED AskUserQuestion interaction — two question pages (one
+ *  single-select, one multiSelect), each with ITS OWN option group. The legacy flattened
+ *  prompt/choices stay on the row (compat) but the bar renders the structured pages. */
+export const L5I_INTERACTION_QUESTIONS: TerminalCatalogRow = catalogRow({
+  id: "l5i-ix-questions",
+  label: "worker-l5i-questions",
+  spawnRole: "worker",
+  seatRole: "worker",
+  leafKey: `${MASTER_2}/05i_structured_decisions`,
+  lifecycleId: "lc-l5i-questions",
+  controlState: "ready",
+  turnState: "awaiting-input",
+  turnStateChangedAt: "2026-07-22T09:00:00Z",
+  controlPendingInteraction: {
+    interactionId: "ix_l5i_questions",
+    kind: "user-input",
+    prompt: "Base: Which base branch?\nExtras: Which extras should run?",
+    choices: ["main", "develop", "tests", "docs", "bench"],
+    questions: [
+      {
+        text: "Which base branch?",
+        header: "Base",
+        options: [
+          { label: "main", description: "the gated main line" },
+          { label: "develop", description: "the integration branch" },
+        ],
+        multiSelect: false,
+      },
+      {
+        text: "Which extras should run?",
+        header: "Extras",
+        options: [
+          { label: "tests" },
+          { label: "docs" },
+          { label: "bench" },
+        ],
+        multiSelect: true,
+      },
+    ],
+  },
+});
+
+/** One structured question on a seat WITHOUT a lifecycle — answerable via the direct
+ *  session route (this case used to be unanswerable from the cockpit). */
+export const L5I_INTERACTION_NO_LIFECYCLE: TerminalCatalogRow = catalogRow({
+  id: "l5i-ix-nolifecycle",
+  label: "worker-l5i-nolifecycle",
+  spawnRole: "worker",
+  seatRole: "worker",
+  controlState: "ready",
+  turnState: "awaiting-input",
+  turnStateChangedAt: "2026-07-22T09:01:00Z",
+  controlPendingInteraction: {
+    interactionId: "ix_l5i_nolifecycle",
+    kind: "user-input",
+    prompt: "Pet: Which would you rather have as a pet?",
+    choices: ["A tiny dragon", "A talking cat"],
+    questions: [
+      {
+        text: "Which would you rather have as a pet?",
+        header: "Pet",
+        options: [
+          { label: "A tiny dragon", description: "breathes warm air" },
+          { label: "A talking cat", description: "judges your code" },
+        ],
+        multiSelect: false,
+      },
+    ],
+  },
+});
+
+/** A permission-kind interaction (choices exactly allow/deny, no structured questions) on
+ *  a seat WITHOUT a lifecycle — answered via the direct route's `response` body. */
+export const L5I_INTERACTION_PERMISSION: TerminalCatalogRow = catalogRow({
+  id: "l5i-ix-permission",
+  label: "worker-l5i-permission",
+  spawnRole: "worker",
+  seatRole: "worker",
+  controlState: "ready",
+  turnState: "awaiting-input",
+  turnStateChangedAt: "2026-07-22T09:02:00Z",
+  controlPendingInteraction: {
+    interactionId: "ix_l5i_permission",
+    kind: "permission",
+    prompt: "Allow Claude tool Bash?",
+    choices: ["allow", "deny"],
+    questions: [],
+  },
+});
+
+/** A seat on a PRE-FIX runner (spawned before the runner-PYTHONPATH fix): NO top-level
+ *  `questions`, but the full claude-native structure at `raw.input.questions` (text key
+ *  `question`). Parsed as structured and answered through the direct route — no lifecycle. */
+export const L5I_INTERACTION_LEGACY_RUNNER: TerminalCatalogRow = catalogRow({
+  id: "l5i-ix-legacy-runner",
+  label: "worker-l5i-legacy-runner",
+  spawnRole: "worker",
+  seatRole: "worker",
+  controlState: "ready",
+  turnState: "awaiting-input",
+  turnStateChangedAt: "2026-07-22T09:03:00Z",
+  controlPendingInteraction: {
+    interactionId: "ix_l5i_legacy_runner",
+    kind: "user-input",
+    prompt: "Test pick: Pick one — purely a rendering test?",
+    choices: ["A tiny dragon", "A talking cat"],
+    questions: [],
+    raw: {
+      input: {
+        questions: [
+          {
+            header: "Test pick",
+            multiSelect: false,
+            options: [
+              { label: "A tiny dragon", description: "breathes warm air" },
+              { label: "A talking cat", description: "judges your code" },
+            ],
+            question: "Pick one — purely a rendering test?",
+          },
+        ],
+      },
+      toolName: "AskUserQuestion",
+      toolUseId: "toolu_01legacy",
+    },
   },
 });
 

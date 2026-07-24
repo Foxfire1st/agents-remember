@@ -14,6 +14,7 @@ import {
   enterEndgame,
   enterReconcileWindow,
   latestActiveSubmit,
+  lifecycleWatchState,
   projectSubmissionLifecycle,
   RECONCILE_WINDOW_MS,
   reconcileDelay,
@@ -23,6 +24,7 @@ import {
   refreshReconcileElapsed,
   releaseDraft,
   retryPayload,
+  serverConfirmedQueued,
   startSubmitRecord,
   type SubmitRecord,
   type SubmitRouteFailure,
@@ -33,7 +35,7 @@ import type {
   SubmissionReceiptWire,
 } from "../types/harnessCapabilities";
 
-// Browser transport + store driver for FEUI-L5's reliable submit path. A browser-level fetch
+// Browser transport + store driver for the reliable submit path. A browser-level fetch
 // rejection carries no mayHaveSent evidence, so it is ALWAYS ambiguous here. The only safe resend
 // arm accepts an explicit PreDispatchTransportError from an injected transport or the server's
 // exact control-IPC pre-dispatch certificate, then reuses the same request id + immutable text.
@@ -515,6 +517,17 @@ export function submissionGate(session: OpenSession | undefined): SubmissionGate
     };
   }
   if (session.controlState !== "ready") {
+    // The sweep marks a bridge "disconnected" when one snapshot
+    // read loses to a busy booting/working bridge — including MID-TURN — and the gate then
+    // contradicted the seat's own working line and a just-accepted submit. A turn streaming
+    // through the conversation projection right now is fresher proof of control life than that
+    // sweep-bounded catalog word, so it outranks "disconnected" (the sweep's uncertainty mark) —
+    // never "failed" (the terminal diagnosis). This mirrors seatVisualState, which already
+    // ranks the same live signal over the lagging catalog turn-state; the send then follows the
+    // designed working-turn flow (the authority queues it).
+    if (session.controlState === "disconnected" && session.liveTurnWorking === true) {
+      return { ready: true, editable: true };
+    }
     const reason =
       session.controlState === "failed"
         ? "native control failed — inspect the session evidence"
@@ -549,7 +562,11 @@ export function submissionReceiptAnnouncement(record: SubmitRecord): string | nu
     case "accepted":
       return "message accepted — delivered";
     case "queued":
-      return "message queued — withdrawable";
+      // Withdrawability is the authority's word, not the receipt's: a bare queued receipt is
+      // usually already dispatching under the dispatch grace, so it never earns the claim.
+      return serverConfirmedQueued(record)
+        ? "message queued — withdrawable"
+        : "message queued";
     case "rejected":
       return `message rejected${record.detail ? `: ${record.detail}` : ""}`;
     case "unsupported":
@@ -583,12 +600,25 @@ function settleStoredSubmission(
         state: "queued",
       });
     }
-    if (lifecycleTransport) ensureSubmissionLifecyclePolling(sessionId, lifecycleTransport);
+  }
+  // The queued path polls from enqueue; a record that exited the reconcile loop non-terminal
+  // (delivering/unknown) is owed the same terminal word — keep the poller alive for it too, so
+  // the composer settles on the server's word instead of "delivering…" forever.
+  if (
+    lifecycleTransport &&
+    ((record.source === "composer" && record.phase === "queued") ||
+      lifecycleWatchState(record, Date.now()) === "active")
+  ) {
+    ensureSubmissionLifecyclePolling(sessionId, lifecycleTransport);
   }
   if (
     record.source === "composer" &&
     record.clearDraftOnAccept &&
-    (record.phase === "accepted" || record.phase === "queued")
+    // Sent text once stayed in the composer: a submit observed at
+    // "delivering" jumped straight past "queued" (claude's lifecycle can report dispatching
+    // first; its delivered transition lands via the bounded lifecycle watch), so dispatch
+    // counts as committed: the draft clears on ANY of queued/delivering/accepted.
+    (record.phase === "accepted" || record.phase === "queued" || record.phase === "delivering")
   ) {
     cockpit.clearComposerDraftIfRevision(sessionId, record.submittedRevision);
   }

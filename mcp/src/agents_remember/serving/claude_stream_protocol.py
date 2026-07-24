@@ -9,6 +9,8 @@ from pathlib import Path
 
 from agents_remember.errors import HarnessControlError
 from agents_remember.serving.harness_control_models import (
+    InteractionQuestion,
+    InteractionQuestionOption,
     PendingInteraction,
     TerminalOutcome,
 )
@@ -20,6 +22,14 @@ _IDENTITY_CHANGING_COMMANDS = frozenset(
     {"clear", "continue", "exit", "fork", "login", "logout", "quit", "resume"}
 )
 _NATIVE_CAPABILITY_COMMANDS = frozenset({"effort", "model"})
+# Claude's native cancel enums on a result frame's ``terminal_reason``: an error frame carrying
+# one of these is an unambiguous user cut on its own, with no accepted-interrupt correlation.
+_NATIVE_CANCEL_TERMINAL_REASONS = frozenset({"cancelled", "interrupted", "user_cancelled"})
+# The abort shape Claude emits when a native interrupt tears the stream down (probe-locked on the
+# claude 2.1.217 interrupt fixture: ``error_during_execution`` / ``is_error`` with this reason).
+# It is NOT a standalone cancel reason — an unprovoked ``aborted_streaming`` stays ``failed`` — but
+# it is the frame-shape discriminator that, conjoined with an accepted interrupt, proves a clean cut.
+_ABORT_TERMINAL_REASON = "aborted_streaming"
 
 
 @dataclass(frozen=True)
@@ -101,6 +111,48 @@ def list_models_request(request_id: str) -> dict[str, object]:
         "request_id": request_id,
         "request": {"subtype": "list_models"},
     }
+
+
+def interrupt_frame(request_id: str) -> dict[str, object]:
+    """The native mid-turn interrupt control request (probe-locked on claude 2.1.217).
+
+    A raw ``control_request`` with ``request.subtype == "interrupt"`` is natively accepted while
+    a turn is running: the harness answers a ``control_response`` success carrying
+    ``{"still_queued": []}`` and the turn terminates with an ``error_during_execution`` /
+    ``is_error`` result (there is no dedicated native ``interrupted`` subtype).
+    """
+
+    return {
+        "type": "control_request",
+        "request_id": request_id,
+        "request": {"subtype": "interrupt"},
+    }
+
+
+def interrupt_response_outcome(
+    frame: Mapping[str, object], request_id: str
+) -> tuple[bool, str | None] | None:
+    """Correlate one control_response to the interrupt request; ``None`` when unrelated.
+
+    Returns ``(True, None)`` for the native success answer and ``(False, detail)`` for a native
+    refusal. A malformed control_response envelope raises; an unrelated request id stays
+    untouched so another caller's pending control request is never consumed.
+    """
+
+    if frame.get("type") != "control_response":
+        return None
+    response = _mapping(frame.get("response"), "Claude control response")
+    if response.get("request_id") != request_id:
+        return None
+    if response.get("subtype") == "success":
+        return True, None
+    error = response.get("error")
+    detail = (
+        error
+        if isinstance(error, str) and error
+        else "Claude refused the interrupt control request"
+    )
+    return False, detail
 
 
 def bootstrap_message() -> dict[str, object]:
@@ -273,13 +325,15 @@ def pending_interaction(
     tool_input = _mapping(request.get("input"), "Claude permission input")
     tool_use_id = _required_text(request, "tool_use_id", "Claude permission request")
     if tool_name == "AskUserQuestion":
-        prompt, choices = _question_prompt(tool_input)
+        questions = _question_pages(tool_input)
+        prompt, choices = _question_prompt(questions)
         kind = "user-input"
     else:
         title = request.get("title")
         prompt = title if isinstance(title, str) else f"Allow Claude tool {tool_name}?"
         choices = ("allow", "deny")
         kind = "permission"
+        questions = ()
     return PendingInteraction(
         interaction_id=request_id,
         kind=kind,
@@ -287,6 +341,7 @@ def pending_interaction(
         created_at=created_at,
         choices=choices,
         raw={"toolName": tool_name, "toolUseId": tool_use_id, "input": dict(tool_input)},
+        questions=questions,
     )
 
 
@@ -346,10 +401,28 @@ def optional_text(value: object) -> str | None:
     return value if isinstance(value, str) and value else None
 
 
-def terminal_outcome(frame: Mapping[str, object]) -> TerminalOutcome:
+def terminal_outcome(
+    frame: Mapping[str, object], *, interrupt_accepted: bool = False
+) -> TerminalOutcome:
+    """Classify one result frame; an accepted interrupt remaps ONLY the abort shape.
+
+    Claude answers an accepted interrupt with an ``error_during_execution`` / ``is_error``
+    result carrying ``terminal_reason == "aborted_streaming"`` (probe-locked on 2.1.217) —
+    natively indistinguishable from a real failure except for that reason plus the adapter's
+    accepted-interrupt correlation. The remap is therefore CONJUNCTIVE: only an accepted
+    interrupt whose result is genuinely abort-shaped settles ``cancelled``. A real error that
+    RACES the accept window — a 429/``api_error`` or a tool failure — carries its own
+    ``terminal_reason`` (never ``aborted_streaming``) and keeps its ``failed`` meaning; an
+    accepted interrupt is not licence to relabel an unrelated failure as a clean user cut. A
+    native success stays ``completed`` even then (the interrupt raced a natural completion), and
+    an unprovoked ``aborted_streaming`` with no accepted interrupt stays ``failed``.
+    """
+
     if frame.get("subtype") == "success" and frame.get("is_error") is False:
         return "completed"
-    if frame.get("terminal_reason") in {"cancelled", "interrupted", "user_cancelled"}:
+    if frame.get("terminal_reason") in _NATIVE_CANCEL_TERMINAL_REASONS:
+        return "cancelled"
+    if interrupt_accepted and frame.get("terminal_reason") == _ABORT_TERMINAL_REASON:
         return "cancelled"
     return "failed"
 
@@ -426,12 +499,13 @@ def _pending_requests(response: Mapping[str, object]) -> tuple[dict[str, object]
     return tuple(pending)
 
 
-def _question_prompt(tool_input: Mapping[str, object]) -> tuple[str, tuple[str, ...]]:
+def _question_pages(tool_input: Mapping[str, object]) -> tuple[InteractionQuestion, ...]:
+    """Parse the full per-page AskUserQuestion structure; the one validation authority."""
+
     questions = tool_input.get("questions")
     if not isinstance(questions, list) or not questions:
         raise HarnessControlError("Claude AskUserQuestion input requires questions")
-    prompt_lines: list[str] = []
-    choices: list[str] = []
+    pages: list[InteractionQuestion] = []
     for question in questions:
         item = _mapping(question, "Claude AskUserQuestion question")
         header = _required_text(item, "header", "Claude AskUserQuestion question")
@@ -439,13 +513,35 @@ def _question_prompt(tool_input: Mapping[str, object]) -> tuple[str, tuple[str, 
         options = item.get("options")
         if not isinstance(options, list):
             raise HarnessControlError("Claude AskUserQuestion options must be an array")
-        labels = [
-            _required_text(_mapping(option, "Claude question option"), "label", "Claude option")
-            for option in options
-        ]
-        prompt_lines.append(f"{header}: {text}")
-        choices.extend(labels)
-    return "\n".join(prompt_lines), tuple(choices)
+        multi_select = item.get("multiSelect", False)
+        if not isinstance(multi_select, bool):
+            raise HarnessControlError("Claude AskUserQuestion multiSelect must be a boolean")
+        pages.append(
+            InteractionQuestion(
+                text=text,
+                header=header,
+                options=tuple(_question_option(option) for option in options),
+                multi_select=multi_select,
+            )
+        )
+    return tuple(pages)
+
+
+def _question_option(raw: object) -> InteractionQuestionOption:
+    option = _mapping(raw, "Claude question option")
+    label = _required_text(option, "label", "Claude option")
+    description = option.get("description")
+    if description is not None and not isinstance(description, str):
+        raise HarnessControlError("Claude question option description must be text")
+    return InteractionQuestionOption(label=label, description=description)
+
+
+def _question_prompt(pages: tuple[InteractionQuestion, ...]) -> tuple[str, tuple[str, ...]]:
+    """Derive the legacy flattened rendering from the parsed pages (kept for old surfaces)."""
+
+    prompt_lines = [f"{page.header}: {page.text}" for page in pages]
+    choices = tuple(option.label for page in pages for option in page.options)
+    return "\n".join(prompt_lines), choices
 
 
 def _question_answers(tool_input: Mapping[str, object], response_text: str) -> dict[str, str]:

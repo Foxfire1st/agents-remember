@@ -25,7 +25,6 @@ class CheckConfig:
     coverage_json: Path | None
     threshold: float
     top: int
-    fail_on_crap_threshold: bool
 
 
 @dataclass(frozen=True)
@@ -193,9 +192,7 @@ def run_crap_calculator(
     over_threshold = [score for score in scores if score.crap >= config.threshold]
     if over_threshold:
         printer(f"{len(over_threshold)} function(s) meet or exceed the CRAP threshold.")
-        if config.fail_on_crap_threshold:
-            return 1
-        printer("CRAP threshold is report-only; pass --fail-on-crap-threshold to gate on it.")
+        return 1
     return 0
 
 
@@ -227,7 +224,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
             "Run the Agents Remember source quality suite: Ruff, Pyright, Radon, "
-            "pytest coverage, and CRAP-Calculator."
+            "pytest coverage, and mandatory CRAP threshold enforcement."
         )
     )
     parser.add_argument(
@@ -250,13 +247,13 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         help="Optional path for the generated Coverage.py JSON report.",
     )
-    parser.add_argument("--threshold", type=float, default=crap_calculator.DEFAULT_CRAP_THRESHOLD)
-    parser.add_argument("--top", type=int, default=crap_calculator.DEFAULT_TOP)
     parser.add_argument(
-        "--fail-on-crap-threshold",
-        action="store_true",
-        help="Return a failing exit code when any function meets or exceeds the CRAP threshold.",
+        "--threshold",
+        type=float,
+        default=crap_calculator.DEFAULT_CRAP_THRESHOLD,
+        help="Fail when any function has a CRAP score at or above this value.",
     )
+    parser.add_argument("--top", type=int, default=crap_calculator.DEFAULT_TOP)
     return parser
 
 
@@ -268,7 +265,6 @@ def config_from_args(args: argparse.Namespace) -> CheckConfig:
         coverage_json=args.coverage_json,
         threshold=args.threshold,
         top=args.top,
-        fail_on_crap_threshold=args.fail_on_crap_threshold,
     )
 
 

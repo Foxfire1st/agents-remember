@@ -1,4 +1,4 @@
-"""Interrupt ledger contract tests (260718-CHATS-L3, R1/R7).
+"""Interrupt ledger contract tests.
 
 Every test drives the REAL composition up to the harness edge: a real bridge +
 IPC server on a real socket, the real submission authority, and the landed L2E
@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import unittest
+from typing import cast
 from unittest import mock
 
 from _control_plane import OPERATOR, FakeControlAdapter, make_harness
@@ -19,8 +20,11 @@ from agents_remember.errors import (
     HarnessControlClientError,
 )
 from agents_remember.serving.conversation.control import attachments, operations
+from agents_remember.serving.conversation.control.capabilities import (
+    control_capabilities_for,
+    interrupt_capability_for,
+)
 from agents_remember.serving.conversation.control.service import (
-    CapabilityRefusedError,
     ConversationControlService,
     OperationConflictError,
     OperationNotFoundError,
@@ -29,6 +33,7 @@ from agents_remember.serving.conversation.models import (
     ConversationSubmitRequest,
     TextSubmitBlock,
 )
+from agents_remember.serving.terminal_catalog import TerminalCatalogEntry
 
 
 class CodexInterruptTests(unittest.IsolatedAsyncioTestCase):
@@ -305,7 +310,7 @@ class PiInterruptTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(status.settlement, "interrupted")
 
     async def test_pi_oversized_contentful_message_end_settles_not_pending(self) -> None:
-        # Finding 2 facet (a): a content-ful message_end whose frame serializes over the
+        # A content-ful message_end whose frame serializes over the
         # bridge's 32 KiB evidence budget is stored as the truncation envelope. Pre-L3E that
         # envelope had no "type"/stopReason, so _pi_stop_reason skipped it and settlement
         # stalled `pending` forever (the runaway-generation interrupt case). L3E preserves
@@ -335,7 +340,7 @@ class PiInterruptTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(status.settlement, "already-settled")
 
     async def test_pi_clipped_final_abort_after_tool_use_settles_interrupted(self) -> None:
-        # Finding 2 facet (b): a small mid-turn message_end (stopReason "toolUse") precedes an
+        # A small mid-turn message_end (stopReason "toolUse") precedes an
         # OVERSIZED (> 32 KiB) final message_end with stopReason "aborted". Pre-L3E the final
         # frame clipped to a type-less envelope, so the latest VISIBLE stopReason was "toolUse"
         # and settlement affirmatively mis-read `already-settled` while the abort took effect.
@@ -367,31 +372,98 @@ class PiInterruptTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(status.settlement, "interrupted")
 
 
-class ClaudeInterruptGateTests(unittest.IsolatedAsyncioTestCase):
+class ClaudeInterruptTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
         self.adapter = FakeControlAdapter(harness="claude", vendor_id="claude-1")
         self.harness = make_harness(self, self.adapter, "ar-ops-cl", harness="claude")
         await self.harness.start()
         self.service = self.harness.service
+        self.epoch = self.harness.epoch
 
     async def asyncTearDown(self) -> None:
         await self.harness.stop()
 
-    async def test_unverified_capability_refuses_before_any_native_call(self) -> None:
-        with self.assertRaises(CapabilityRefusedError) as raised:
-            await operations.interrupt(
-                self.service,
-                OPERATOR,
-                "ar-ops-cl",
-                expected_bridge_epoch=self.harness.epoch,
-                turn_id="turn-1",
-                request_id="req-cl-1",
-            )
-        # 260718-CHATS-L5F R4: the refusal is contract-driven (unverified until the control seam is
-        # probed), never a version-string comparison. It still refuses before any native call.
-        message = str(raised.exception)
-        self.assertIn("contract", message)
-        self.assertNotIn("2.1.211", message)
+    async def _submit(self, request_id: str) -> None:
+        await operations_submit(self.service, "ar-ops-cl", request_id, "work", self.epoch)
+        self.adapter.set_activity("running")
+
+    async def _interrupt(self, turn: str = "req-cl-1", request_id: str = "int-cl-1"):
+        return await operations.interrupt(
+            self.service,
+            OPERATOR,
+            "ar-ops-cl",
+            expected_bridge_epoch=self.epoch,
+            turn_id=turn,
+            request_id=request_id,
+        )
+
+    async def _status(self, turn: str = "req-cl-1", request_id: str = "int-cl-1"):
+        return await operations.interrupt_status(
+            self.service,
+            OPERATOR,
+            "ar-ops-cl",
+            expected_bridge_epoch=self.epoch,
+            turn_id=turn,
+            request_id=request_id,
+            reconcile=False,
+        )
+
+    async def test_supported_capability_reports_probe_fixture_evidence(self) -> None:
+        snapshot = await self.service.live_snapshot(
+            cast(TerminalCatalogEntry, self.harness.control_entry)
+        )
+        capability = control_capabilities_for("claude", snapshot).interrupt
+        self.assertEqual(capability.state, "supported")
+        self.assertEqual(capability.evidence_tier, "runtime-fixture")
+        assert capability.evidence is not None
+        self.assertEqual(capability.evidence.fixture_id, "claude-2.1.217-installed-20260722")
+        self.assertEqual(capability.evidence.runtime_version, "2.1.217")
+
+    async def test_interrupt_accessor_shares_the_control_gate_verdict(self) -> None:
+        # The accessor the L1 active-page view bridges must be the gate's own verdict object,
+        # never a second declaration of the interrupt state.
+        snapshot = await self.service.live_snapshot(
+            cast(TerminalCatalogEntry, self.harness.control_entry)
+        )
+        self.assertEqual(
+            interrupt_capability_for("claude", snapshot),
+            control_capabilities_for("claude", snapshot).interrupt,
+        )
+
+    async def test_interrupt_uses_operation_identity_and_settles_interrupted(self) -> None:
+        await self._submit("req-cl-1")
+        operation = await self._interrupt()
+        self.assertEqual(operation.acknowledgement, "accepted")
+        self.assertEqual(operation.settlement, "pending")
+        self.assertEqual(self.adapter.interrupt_calls[0]["expected_operation_id"], "req-cl-1")
+        self.assertIsNone(self.adapter.interrupt_calls[0]["turn_id"])
+        self.adapter.claude_settle("cancelled")
+        status = await self._status()
+        self.assertEqual(status.settlement, "interrupted")
+        self.assertIsNotNone(status.settled_at)
+        self.assertEqual(operations.interrupt_http_status(status), 200)
+
+    async def test_natural_completion_settles_already_settled(self) -> None:
+        await self._submit("req-cl-1")
+        await self._interrupt()
+        self.adapter.claude_settle("completed")
+        status = await self._status()
+        self.assertEqual(status.settlement, "already-settled")
+        self.assertEqual(operations.interrupt_http_status(status), 200)
+
+    async def test_unprovoked_error_result_settles_failed(self) -> None:
+        await self._submit("req-cl-1")
+        await self._interrupt()
+        self.adapter.claude_settle("failed")
+        status = await self._status()
+        self.assertEqual(status.settlement, "failed")
+        self.assertEqual(operations.interrupt_http_status(status), 503)
+
+    async def test_stale_expected_identity_refuses_before_any_native_call(self) -> None:
+        await self._submit("req-cl-1")
+        operation = await self._interrupt(turn="req-cl-stale", request_id="int-cl-2")
+        self.assertEqual(operation.acknowledgement, "rejected")
+        self.assertEqual(operation.settlement, "failed")
         self.assertEqual(len(self.adapter.interrupt_calls), 0)
 
 

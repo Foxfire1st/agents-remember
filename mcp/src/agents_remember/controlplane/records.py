@@ -194,6 +194,28 @@ def apply_gate(gate: GateRecord, *, now: str) -> GateRecord:
     return gate.model_copy(update={"ts": now, "state": "applied"})
 
 
+def reopen_gate(gate: GateRecord, *, now: str) -> GateRecord:
+    """A new snapshot returning a decided gate to open after its decision could not be applied.
+
+    The adapter-interaction channel (``hosted_interactions``) consumes a decision by returning
+    its note to the pending vendor interaction; when that respond fails, the decision was never
+    consumable, so the gate goes back to open -- decision attribution cleared -- and awaits a
+    fresh decision instead of staying decided-not-applied forever. The decided record stays in
+    the append-only log, so the failed attempt remains auditable history.
+    """
+    return gate.model_copy(
+        update={
+            "ts": now,
+            "state": "open",
+            "decidedBy": None,
+            "decidedVia": None,
+            "decidingRole": None,
+            "decisionNote": None,
+            "decidedAt": None,
+        }
+    )
+
+
 def _coerce_evidence_refs(
     evidence_refs: Sequence[GateEvidenceRef | dict[str, Any]] | None,
 ) -> list[GateEvidenceRef]:

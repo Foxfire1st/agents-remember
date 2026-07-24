@@ -7,9 +7,9 @@ import {
   seatVisualState,
 } from "./stateGrammar";
 
-// The dot-grammar contract (260715-FEUI-L2 R14, rulings 2026-07-16): one mapping for every
+// The dot-grammar contract: one mapping for every
 // surface; blocked-on-human is STEADY, only working/failed pulse, and the pulse is the slow
-// ease-in-out ruling — never steps().
+// ease-in-out one — never steps().
 
 describe("seatVisualState mapping (spec §2.4)", () => {
   it("working = cyan SLOW PULSE", () => {
@@ -50,7 +50,7 @@ describe("seatVisualState mapping (spec §2.4)", () => {
   });
 
   it("liveTurnWorking (R9) overrides a lagging catalog turn-ended with a working state", () => {
-    // 260718-CHATS-L5F R9 / audit V5: while the projection reports a live streaming turn, the
+    // While the projection reports a live streaming turn, the
     // sweep-bounded catalog still reads turn-ended — the fresher projection signal must win so no
     // authority shows settled-green during a stream.
     expect(seatVisualState({ turnState: "turn-ended", liveTurnWorking: true })).toMatchObject({
@@ -81,6 +81,23 @@ describe("seatVisualState mapping (spec §2.4)", () => {
       color: "mint",
       pulse: false,
       chip: "turn-ended",
+    });
+  });
+
+  it("a fresh chat reads starting → ready and NEVER stale / turn-ended (260718-CHATS-L5I A2b)", () => {
+    // The sweep makes NO seat claim until a fresh chat's first turn, so the dot follows the
+    // control lifecycle: cyan starting during boot, then calm mint ready with NO chip — the
+    // boot stale chip and the fake turn-ended chip are gone from the fresh-chat trajectory.
+    expect(seatVisualState({ controlState: "starting" })).toMatchObject({
+      key: "starting",
+      chip: "starting",
+    });
+    expect(seatVisualState({ controlState: "ready" })).toMatchObject({
+      key: "ready",
+      word: "ready",
+      color: "mint",
+      pulse: false,
+      chip: undefined,
     });
   });
 

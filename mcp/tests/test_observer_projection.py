@@ -9,6 +9,7 @@ readers (provider current-state + worktree enclosures).
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import subprocess
@@ -40,6 +41,7 @@ from agents_remember.memory_quality.integrity.onboarding_drift_check import summ
 from agents_remember.memory_quality.integrity.onboarding_drift_check.models import DriftRow
 from agents_remember.observer.drift_snapshots import drift_snapshot_path
 from agents_remember.observer.events import Event
+from agents_remember.observer.landing_state import LandingStateRefresher
 from agents_remember.observer.paths import (
     DRIFT_SNAPSHOT_SCHEMA,
     drift_snapshot_dir,
@@ -364,7 +366,7 @@ class FoldTests(unittest.TestCase):
         self.assertEqual(proj.ask, {"kind": "decision"})
 
     def test_awaiting_developer_then_resume(self) -> None:
-        # NOTIFY-AND-CONTINUE turn end (leaf-28): non-terminal awaiting-developer
+        # NOTIFY-AND-CONTINUE turn end: non-terminal awaiting-developer
         # carries the summary on the ask carrier; resume clears it back to running.
         await_only = project_lifecycle(
             [
@@ -727,7 +729,7 @@ class WorkspaceTests(unittest.TestCase):
         self.assertEqual([lc.id for lc in proj.lifecycles], ["LC1"])
 
     def test_persistent_synthesis_skips_abandoned_and_reopened_enclosures(self) -> None:
-        # No worktree, no persistent lifecycle (L11): an abandoned enclosure's worktrees were
+        # No worktree, no persistent lifecycle: an abandoned enclosure's worktrees were
         # discarded and a reopened one awaits its next worktree_start — neither may synthesize
         # a paused zombie into the operations tree.
         proj = project_workspace(
@@ -746,7 +748,7 @@ class WorkspaceTests(unittest.TestCase):
         # worktree_abandon records cleanup=abandoned in the contract but may not own the
         # lifecycle's event log (the ambient dies with a server restart), and the store's
         # single-writer invariant forbids a foreign lifecycle.ended append — so the READER
-        # projects the terminal state from the contract (L11).
+        # projects the terminal state from the contract.
         log = [
             _started(lifecycle_id="LC-DEAD", ts=T0),
             _event(
@@ -1380,7 +1382,7 @@ class SnapshotReaderTests(unittest.TestCase):
         return contract
 
     def test_read_enclosures_stat_worktree_existence(self) -> None:
-        """L11: codeWorktreeExists/memoryWorktreeExists are stat'ed truth at snapshot time.
+        """codeWorktreeExists/memoryWorktreeExists are stat'ed truth at snapshot time.
 
         Matches how the worktree tools report existence (``status_payload``'s
         ``code_worktree.exists()``): the flags flip as the directories appear on disk,
@@ -1404,7 +1406,7 @@ class SnapshotReaderTests(unittest.TestCase):
         self.assertEqual((both.codeWorktreeExists, both.memoryWorktreeExists), (True, True))
 
     def test_read_enclosures_reopened_is_reset_awaiting_restart_not_archived(self) -> None:
-        """L11: ``cleanup=reopened`` means contract-reset-awaiting-restart, not live work.
+        """``cleanup=reopened`` means contract-reset-awaiting-restart, not live work.
 
         The reopened contract must still project (it is NOT archived like
         completed/abandoned — the leaf is coming back), but with existence False so the
@@ -1531,7 +1533,7 @@ class TokenSeriesTests(unittest.TestCase):
         self.assertEqual(series[-1].cumulative, 10 * TOKEN_SERIES_MAX)
 
     def test_long_series_is_decimated_to_the_bound(self) -> None:
-        # 260703-L15: the served fuel gauge is bounded -- a long lifecycle's series decimates
+        # The served fuel gauge is bounded -- a long lifecycle's series decimates
         # to TOKEN_SERIES_MAX (newest TOKEN_SERIES_RECENT exact, older history uniform-thinned,
         # first sample kept) instead of growing ~60 B/sample into every lifecycle delta.
         count = 3000
@@ -1655,7 +1657,7 @@ class AttentionQueueTests(unittest.TestCase):
         self.assertEqual(proj.analytics.attentionQueue[0].kind, "dormant-fleeting")
 
     def test_awaiting_developer_yields_one_info_item(self) -> None:
-        # NOTIFY-AND-CONTINUE turn end (leaf-28): exactly one awaiting-developer item,
+        # NOTIFY-AND-CONTINUE turn end: exactly one awaiting-developer item,
         # info severity, carrying the summary as its detail -- no double-emission.
         proj = project_workspace(
             [
@@ -2580,12 +2582,14 @@ class ProjectAndWriteAnalyticsTests(unittest.TestCase):
             "agents_remember.observer.projection_store._gather_repo_surfaces",
             side_effect=[first, refreshed],
         ) as gather:
+            # REPO_SURFACE_REFRESH_TTL_SECONDS is 120s: a second
+            # read 10s after the fill still hits the cache; only a read past the 120s TTL refreshes.
             one = _gather_repo_surfaces_cached(config, FRESH)
             two = _gather_repo_surfaces_cached(
                 config, datetime(2026, 6, 13, 18, 0, 40, tzinfo=UTC)
             )
             three = _gather_repo_surfaces_cached(
-                config, datetime(2026, 6, 13, 18, 0, 46, tzinfo=UTC)
+                config, datetime(2026, 6, 13, 18, 2, 31, tzinfo=UTC)
             )
 
         self.assertIs(one, first)
@@ -2717,7 +2721,7 @@ class TaskDocumentsReaderTests(unittest.TestCase):
         self.assertEqual(nodes[0].docPath, (root / "03c_x.json").as_posix())
 
     def test_exposes_orchestrates_on_the_task_doc_node(self) -> None:
-        # L14: the orchestration-command relation rides the projection so the dashboard can derive
+        # The orchestration-command relation rides the projection so the dashboard can derive
         # the orchestration > master > leaf hierarchy; docs without the field project [].
         sprint_root = self.coord / "tasks" / "repo-a" / "sprint-02"
         write_task_doc(
@@ -2791,7 +2795,7 @@ class TaskDocumentsReaderTests(unittest.TestCase):
         self.assertEqual(node.docPath, (root / f"{leaf_id}.json").as_posix())
 
     def test_resolves_leaf_doc_lifecycle_from_doc_id_case_insensitively(self) -> None:
-        # The real-world series shape (L10 regression): the enclosure leaf id is the lowercase
+        # The real-world series shape: the enclosure leaf id is the lowercase
         # enclosures/ directory name ("260628-l7"), the doc slug is a numbered filename that never
         # matches it, the doc id is uppercase ("260628-L7"), and the doc carries no lifecycleId and
         # no enclosures[] refs. The doc must still bind to the enclosure's lifecycle.
@@ -2856,7 +2860,7 @@ class TaskDocumentsReaderTests(unittest.TestCase):
         [series] = read_series_documents(self.coord, now=FRESH)
         self.assertEqual(series.seriesId, "series")
         self.assertEqual([ref.number for ref in series.subTasks], ["1"])
-        # F6: the always-on series surface is a bounded summary; authored sections are fetched
+        # The always-on series surface is a bounded summary; authored sections are fetched
         # through the task-document body endpoint.
         self.assertEqual(series.sections, [])
 
@@ -3422,6 +3426,58 @@ class EngineProcessTests(unittest.TestCase):
         self.assertEqual(node.landing[0].factState, "stale")
         self.assertEqual(node.landing[0].staleSeconds, 60.0)
         self.assertEqual(node.landing[1].state, "open")
+
+    def test_frozen_landing_rows_do_not_break_the_reducer(self) -> None:
+        # The reducer does LandingRefNode(**ref) unguarded and
+        # LandingRefNode is extra="forbid". Rows served by the freeze (landing_state.current()) must
+        # be a strict subset of the node's fields, or project_and_write raises ValidationError and
+        # every projection tick stalls silently. Assert the served frozen-row shape maps cleanly.
+        now = datetime(2026, 7, 12, 16, 0, tzinfo=UTC)
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            contract = default_contract(
+                task_name="landing-frozen",
+                repo_name="repo-frozen",
+                workflow_kind="light",
+                memory_mode="disabled",
+                coordination_root=root,
+                code_repo_path=root / "repo-frozen",
+                code_source_branch="feat/frozen",
+                code_work_branch="ar/frozen",
+                code_base_commit="base-frozen",
+                worktree_name="landing-frozen",
+            )
+            contract = replace(contract, closeout_status="completed", cleanup="completed")
+            contract.contract_path.parent.mkdir(parents=True, exist_ok=True)
+            write_contract(contract.contract_path, contract)
+
+            def observed(target: object) -> list[dict[str, object]]:
+                return [
+                    {
+                        "kind": "origin-feat",
+                        "label": "origin/feat/frozen",
+                        "state": "pushed",
+                        "factState": "observed",
+                    }
+                ]
+
+            config = McpRuntimeConfig(
+                config_path=root / "settings.json",
+                coordination_root=root,
+                workspace_root=root,
+                transcript_root=root / "logs" / "mcp",
+            )
+            refresher = LandingStateRefresher(config, observe=observed)
+            asyncio.run(refresher.refresh_once(now=now))
+            served = refresher.current(contract, now=now)
+            assert served is not None
+
+        node = build_engine_processes(
+            [_facts(status={"code_worktree_exists": True, "landing": served})], [], [], []
+        )[0]
+        self.assertEqual([ref.kind for ref in node.landing], ["origin-feat"])
+        self.assertEqual(node.landing[0].state, "pushed")
+        self.assertEqual(node.landing[0].factState, "observed")
 
     def test_project_workspace_wires_engine_processes(self) -> None:
         proj = project_workspace(

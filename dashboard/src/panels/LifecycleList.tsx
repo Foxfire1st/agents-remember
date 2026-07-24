@@ -1,4 +1,4 @@
-import { useState, type CSSProperties } from "react";
+import { memo, useState, type CSSProperties } from "react";
 
 import {
   Header,
@@ -36,7 +36,14 @@ import {
 import { Dot } from "../grammar/Dot";
 import { Panel } from "../grammar/Panel";
 import { RankBadge, type RankTier } from "../grammar/RankBadge";
-import type { AgentPickupNode, EnclosureNode, LifecycleProjection, SeriesNode, TaskDocNode } from "../types/projection";
+import type {
+  AgentPickupNode,
+  Analytics,
+  EnclosureNode,
+  LifecycleProjection,
+  SeriesNode,
+  TaskDocNode,
+} from "../types/projection";
 import { AgentPickupIndicator } from "./AgentPickupIndicator";
 import {
   ChatActivityIndicator,
@@ -108,7 +115,7 @@ const groupHeader = css({
 });
 const row = cva({
   base: {
-    position: "relative", // anchors the tier fold-corner pseudo-element (L14)
+    position: "relative", // anchors the tier fold-corner pseudo-element
     display: "flex",
     alignItems: "baseline",
     gap: "0.3rem",
@@ -134,9 +141,9 @@ const row = cva({
         borderLeftColor: "grid",
       },
     },
-    // The V4 command treatment (L14 sketch): a folded corner top-left, a tier ghost wash fading
+    // The command treatment: a folded corner top-left, a tier ghost wash fading
     // into the row bg, and — orchestration only — a gold top hairline. Renders ONLY on rows whose
-    // tier is set, i.e. when an orchestration task exists (D3); flat runs never see it.
+    // tier is set, i.e. when an orchestration task exists; flat runs never see it.
     tier: {
       orchestration: {
         borderTopWidth: "1px",
@@ -214,12 +221,14 @@ const rowMeta = css({
   textOverflow: "ellipsis",
   whiteSpace: "nowrap",
 });
-export function LifecycleList({
+function LifecycleListImpl({
   selectedId,
   onSelect,
+  active = true,
 }: {
   selectedId: string | null;
   onSelect: (id: string) => void;
+  active?: boolean;
 }) {
   const [pivot, setPivot] = useState<Pivot>("repo");
   const { collapsedKeys, toggleCollapsed } = useCollapsedTaskGroups();
@@ -227,135 +236,193 @@ export function LifecycleList({
   const enclosures = useDashboard((s) => s.enclosures);
   const analytics = useDashboard((s) => s.analytics);
   const sessions = useSessions((state) => state.sessions);
-  // Row staleness advances locally between emissions — the change gate (260703-L15) no longer
-  // re-serves a lifecycle every tick just because its age moved.
-  const nowMs = useNowMs();
-  const docs = analytics?.taskDocuments ?? [];
-  const series = analytics?.series ?? [];
-  const agentPickups = analytics?.agentPickups ?? [];
-  const enclosuresByLifecycle = groupEnclosuresByLifecycle(Object.values(enclosures));
-  const rows = operationRows({
-    lifecycles: Object.values(lifecycles),
-    lifecycleById: lifecycles,
-    enclosures,
-    enclosuresByLifecycle,
-    docs,
-    series,
-    agentPickups,
-    sessions,
-    nowMs,
-  });
-  const groups = groupRows(rows, pivot);
-  const selectedSelection = parseTaskSelection(selectedId, lifecycles, analytics);
-  const selectedKey = selectedSelection ? selectionKey(selectedSelection) : selectedId;
-
-  const head = (
-    <div className={headRow}>
-      <h2 className={headTitle}>Tasks · {rows.length}</h2>
-      <ToggleButtonGroup
-        className={pivotBar}
-        selectionMode="single"
-        disallowEmptySelection
-        selectedKeys={[pivot]}
-        onSelectionChange={(keys) => {
-          const next = [...keys][0];
-          if (next === "repo" || next === "phase") setPivot(next);
-        }}
-        aria-label="Group tasks by"
-      >
-        <ToggleButton id="repo" className={pivotBtn}>
-          BY REPO
-        </ToggleButton>
-        <ToggleButton id="phase" className={pivotBtn}>
-          BY PHASE
-        </ToggleButton>
-      </ToggleButtonGroup>
-    </div>
-  );
-
+  // Row staleness advances locally between emissions — the change gate no longer
+  // re-serves a lifecycle every tick just because its age moved. A hidden kept-alive rail freezes
+  // this clock so its React Aria list does no background reconstruction.
+  const nowMs = useNowMs(10_000, active);
   return (
-    <Panel testid="lifecycle-list" head={head} className={sizing}>
-      {rows.length === 0 ? (
-        <p className="muted">No tasks.</p>
-      ) : (
-        <ListBox
-          className={listBox}
-          aria-label="Tasks"
-          selectionMode="single"
-          selectedKeys={selectedKey ? [selectedKey] : []}
-          onSelectionChange={(keys) => {
-            const id = [...keys][0];
-            if (typeof id === "string") onSelect(id);
-          }}
-        >
-          {groups.map((group) => {
-            const descendantKeys = descendantBearingKeys(group.rows);
-            const visibleRows =
-              pivot === "repo" ? visibleHierarchyRows(group.rows, collapsedKeys) : group.rows;
-            return (
-              <ListBoxSection key={group.key} className={section}>
-                <Header className={groupHeader}>{group.label}</Header>
-                {visibleRows.map((item) => {
-                  const secondary = pivot === "repo" ? item.secondary : item.repo;
-                  const hasDescendants =
-                    pivot === "repo" &&
-                    item.secondary === "master" &&
-                    descendantKeys.has(item.key);
-                  const collapsed = collapsedKeys.has(item.key);
-                  return (
-                    <ListBoxItem
-                      key={item.key}
-                      id={item.key}
-                      textValue={item.label}
-                      className={row({
-                        fleeting: item.fleeting,
-                        // Tier rows carry the V4 treatment and indent by margin (below); non-tier
-                        // nesting keeps today's leaf look untouched (the flat-run regression rule).
-                        nested: item.depth > 0 && !item.tier,
-                        tier: item.tier,
-                      })}
-                      style={indentStyle(item)}
-                      data-depth={item.depth}
-                      data-parent-key={item.parentKey}
-                      data-tier={item.tier}
-                    >
-                      {hasDescendants ? (
-                        <TaskGroupDisclosure
-                          label={item.label}
-                          collapsed={collapsed}
-                          onToggle={() => toggleCollapsed(item.key)}
-                        />
-                      ) : null}
-                      <span
-                        aria-label={`Task progress: ${item.variant}; phase: ${item.phase}`}
-                        title={`Task progress: ${item.variant}; phase: ${item.phase}`}
-                        data-testid="task-state"
-                      >
-                        <Dot variant={item.variant} />
-                      </span>
-                      {item.tier ? <RankBadge tier={item.tier} size="row" /> : null}
-                      <span className={rowId} title={item.title}>
-                        {item.label}
-                      </span>
-                      <span className={rowSec}>{secondary}</span>
-                      <ChatActivityIndicator summary={item.chatActivity} />
-                      <AgentPickupIndicator pickup={item.pickup} />
-                      {item.gate ? <span className={rowGate}>{item.gate}</span> : null}
-                      <span className={rowMeta}>
-                        {item.meta}
-                        {item.inferred ? " · inf" : ""}
-                      </span>
-                    </ListBoxItem>
-                  );
-                })}
-              </ListBoxSection>
-            );
-          })}
-        </ListBox>
-      )}
-    </Panel>
+    <LifecycleListRender
+      active={active}
+      selectedId={selectedId}
+      onSelect={onSelect}
+      pivot={pivot}
+      setPivot={setPivot}
+      collapsedKeys={collapsedKeys}
+      toggleCollapsed={toggleCollapsed}
+      lifecycles={lifecycles}
+      enclosures={enclosures}
+      analytics={analytics}
+      sessions={sessions}
+      nowMs={nowMs}
+    />
   );
 }
+
+interface LifecycleListRenderProps {
+  active: boolean;
+  selectedId: string | null;
+  onSelect: (id: string) => void;
+  pivot: Pivot;
+  setPivot: (pivot: Pivot) => void;
+  collapsedKeys: ReadonlySet<string>;
+  toggleCollapsed: (key: string) => void;
+  lifecycles: Record<string, LifecycleProjection>;
+  enclosures: Record<string, EnclosureNode>;
+  analytics: Analytics | null;
+  sessions: OpenSession[];
+  nowMs: number;
+}
+
+const LifecycleListRender = memo(
+  function LifecycleListRender({
+    selectedId,
+    onSelect,
+    pivot,
+    setPivot,
+    collapsedKeys,
+    toggleCollapsed,
+    lifecycles,
+    enclosures,
+    analytics,
+    sessions,
+    nowMs,
+  }: LifecycleListRenderProps) {
+    const docs = analytics?.taskDocuments ?? [];
+    const series = analytics?.series ?? [];
+    const agentPickups = analytics?.agentPickups ?? [];
+    const enclosuresByLifecycle = groupEnclosuresByLifecycle(Object.values(enclosures));
+    const rows = operationRows({
+      lifecycles: Object.values(lifecycles),
+      lifecycleById: lifecycles,
+      enclosures,
+      enclosuresByLifecycle,
+      docs,
+      series,
+      agentPickups,
+      sessions,
+      nowMs,
+    });
+    const groups = groupRows(rows, pivot);
+    const selectedSelection = parseTaskSelection(selectedId, lifecycles, analytics);
+    const selectedKey = selectedSelection ? selectionKey(selectedSelection) : selectedId;
+
+    const head = (
+      <div className={headRow}>
+        <h2 className={headTitle}>Tasks · {rows.length}</h2>
+        <ToggleButtonGroup
+          className={pivotBar}
+          selectionMode="single"
+          disallowEmptySelection
+          selectedKeys={[pivot]}
+          onSelectionChange={(keys) => {
+            const next = [...keys][0];
+            if (next === "repo" || next === "phase") setPivot(next);
+          }}
+          aria-label="Group tasks by"
+        >
+          <ToggleButton id="repo" className={pivotBtn}>
+            BY REPO
+          </ToggleButton>
+          <ToggleButton id="phase" className={pivotBtn}>
+            BY PHASE
+          </ToggleButton>
+        </ToggleButtonGroup>
+      </div>
+    );
+
+    return (
+      <Panel testid="lifecycle-list" head={head} className={sizing}>
+        {rows.length === 0 ? (
+          <p className="muted">No tasks.</p>
+        ) : (
+          <ListBox
+            className={listBox}
+            aria-label="Tasks"
+            selectionMode="single"
+            selectedKeys={selectedKey ? [selectedKey] : []}
+            onSelectionChange={(keys) => {
+              const id = [...keys][0];
+              if (typeof id === "string") onSelect(id);
+            }}
+          >
+            {groups.map((group) => {
+              const descendantKeys = descendantBearingKeys(group.rows);
+              const visibleRows =
+                pivot === "repo" ? visibleHierarchyRows(group.rows, collapsedKeys) : group.rows;
+              return (
+                <ListBoxSection key={group.key} className={section}>
+                  <Header className={groupHeader}>{group.label}</Header>
+                  {visibleRows.map((item) => {
+                    const secondary = pivot === "repo" ? item.secondary : item.repo;
+                    const hasDescendants =
+                      pivot === "repo" &&
+                      item.secondary === "master" &&
+                      descendantKeys.has(item.key);
+                    const collapsed = collapsedKeys.has(item.key);
+                    return (
+                      <ListBoxItem
+                        key={item.key}
+                        id={item.key}
+                        textValue={item.label}
+                        className={row({
+                          fleeting: item.fleeting,
+                          // Tier rows carry the command treatment and indent by margin (below); non-tier
+                          // nesting keeps today's leaf look untouched (the flat-run regression rule).
+                          nested: item.depth > 0 && !item.tier,
+                          tier: item.tier,
+                        })}
+                        style={indentStyle(item)}
+                        data-depth={item.depth}
+                        data-parent-key={item.parentKey}
+                        data-tier={item.tier}
+                      >
+                        {hasDescendants ? (
+                          <TaskGroupDisclosure
+                            label={item.label}
+                            collapsed={collapsed}
+                            onToggle={() => toggleCollapsed(item.key)}
+                          />
+                        ) : null}
+                        <span
+                          aria-label={`Task progress: ${item.variant}; phase: ${item.phase}`}
+                          title={`Task progress: ${item.variant}; phase: ${item.phase}`}
+                          data-testid="task-state"
+                        >
+                          <Dot variant={item.variant} />
+                        </span>
+                        {item.tier ? <RankBadge tier={item.tier} size="row" /> : null}
+                        <span className={rowId} title={item.title}>
+                          {item.label}
+                        </span>
+                        <span className={rowSec}>{secondary}</span>
+                        <ChatActivityIndicator summary={item.chatActivity} />
+                        <AgentPickupIndicator pickup={item.pickup} />
+                        {item.gate ? <span className={rowGate}>{item.gate}</span> : null}
+                        <span className={rowMeta}>
+                          {item.meta}
+                          {item.inferred ? " · inf" : ""}
+                        </span>
+                      </ListBoxItem>
+                    );
+                  })}
+                </ListBoxSection>
+              );
+            })}
+          </ListBox>
+        )}
+      </Panel>
+    );
+  },
+  // Persist the last visible React Aria tree while the rail is display:none. Store subscriptions
+  // still update the cheap controller above, but changed catalog/projection props do not rebuild
+  // the hidden collection. Re-showing passes active=true and renders once from current truth.
+  (_previous, next) => !next.active,
+);
+
+// Memoized (tab-switch CPU): a persistent rail panel — the shell re-renders on every view
+// switch with unchanged props, and the memo gate skips this subtree then; the list's own store
+// subscriptions still drive its updates.
+export const LifecycleList = memo(LifecycleListImpl);
 
 interface OperationRowsInput {
   lifecycles: LifecycleProjection[];
@@ -366,7 +433,7 @@ interface OperationRowsInput {
   series: SeriesNode[];
   agentPickups: AgentPickupNode[];
   sessions: OpenSession[];
-  nowMs: number; // the age-display clock — served staleness advances locally (260703-L15)
+  nowMs: number; // the age-display clock — served staleness advances locally
 }
 
 interface OperationRow {
@@ -386,14 +453,14 @@ interface OperationRow {
   fallbackOrder: string;
   parentKey?: string;
   depth: number;
-  // The command tier (L14): "orchestration" for a master doc carrying `orchestrates`,
+  // The command tier: "orchestration" for a master doc carrying `orchestrates`,
   // "management" for a master commanded by one. Unset (no insignia) everywhere else.
   tier?: RankTier;
   fleeting: boolean;
   inferred: boolean;
 }
 
-// The 22px indent grammar (L14 sketch): tier rows indent by their full depth; a non-tier row's
+// The 22px indent grammar: tier rows indent by their full depth; a non-tier row's
 // first level of nesting is today's `nested` padding (unchanged — the flat-run regression rule),
 // so only levels beyond it add margin (a leaf under a commanded master sits one step further).
 function indentStyle(item: Pick<OperationRow, "depth" | "tier">): CSSProperties | undefined {
@@ -409,7 +476,7 @@ interface OperationGroup {
 
 function operationRows(input: OperationRowsInput): OperationRow[] {
   const representedLifecycleIds = new Set<string>();
-  // The identity rule (L11): one task entry per enclosureId. A doc row that resolved through an
+  // The identity rule: one task entry per enclosureId. A doc row that resolved through an
   // enclosure CLAIMS that leaf; a lifecycle bound to the same enclosure annotates the claimed row
   // (via the lifecycleForEnclosure fallback below) instead of rendering a second entry.
   const representedEnclosureIds = new Set<string>();
@@ -417,7 +484,7 @@ function operationRows(input: OperationRowsInput): OperationRow[] {
   const docsByLifecycle = groupDocs(input.docs);
   const pickupsByLifecycle = groupPickups(input.agentPickups);
   const enclosureList = Object.values(input.enclosures);
-  // The visibility rule (L11): a leaf is active while its worktree physically exists — the
+  // The visibility rule: a leaf is active while its worktree physically exists — the
   // projection's stat'ed truth, never a cleanup-state proxy. Completed/abandoned worktrees are
   // gone (hidden, as before), and a reopened contract (cleanup=reopened) has none until
   // worktree_start recreates them, so it stays hidden like any other planned leaf.
@@ -499,9 +566,9 @@ function operationRows(input: OperationRowsInput): OperationRow[] {
     .sort(compareRows);
 }
 
-// The command facts for a master-shaped row (L14): an orchestration doc IS the gold tier; a master
+// The command facts for a master-shaped row: an orchestration doc IS the gold tier; a master
 // named in some orchestration doc's `orchestrates` takes the purple tier and nests under it. Docs
-// commanded by nothing carry neither — the whole treatment vanishes in a flat run (D3).
+// commanded by nothing carry neither — the whole treatment vanishes in a flat run.
 function commandFacts(
   doc: Pick<TaskDocNode, "kind" | "docPath" | "id" | "title" | "orchestrates">,
   allDocs: TaskDocNode[],
@@ -577,7 +644,7 @@ function seriesRow(
   const variant = lifecycle?.state ?? statusVariant(series.status);
   const gate = gateHint(lifecycle?.gate?.kind);
   // A folder-keyed series fallback row is still a master seat: it answers to its seriesId (the
-  // task folder), its title, or its doc folder when an orchestration doc names it (L14).
+  // task folder), its title, or its doc folder when an orchestration doc names it.
   const commander = orchestratorParentKey(
     [
       series.seriesId,
@@ -699,7 +766,7 @@ function groupRows(rows: OperationRow[], pivot: Pivot): OperationGroup[] {
     }));
 }
 
-// Depth-first hierarchy flatten. Historically two levels (master > leaf); the L14 orchestration
+// Depth-first hierarchy flatten. Historically two levels (master > leaf); the orchestration
 // tier adds a third (orchestration > master > leaf), so this walks parent links to any depth.
 // A `seen` guard plus the trailing sweep keep pathological parent data (a cycle, e.g. two
 // orchestration docs naming each other) from dropping rows: unreachable rows append top-level.
@@ -766,7 +833,7 @@ function selectionKey(selection: ReturnType<typeof parseTaskSelection>): string 
 // The row's gate chip is the DURABLE gate kind only. The wait-loop-era fallback to the lifecycle's bare
 // `ask` payload (the question string, else the literal "ask") was retired with notify-and-continue: the
 // attention queue carries the notification and GateResponder owns durable gates, so a bare `ask` no
-// longer renders a gate affordance in the tasks row (L17 supplement).
+// longer renders a gate affordance in the tasks row.
 function gateHint(kind: string | undefined): string {
   return kind ?? "";
 }
@@ -850,10 +917,10 @@ function enclosureForDoc(
   enclosures: EnclosureNode[],
 ): EnclosureNode | undefined {
   const dir = pathDir(doc.docPath);
-  // Enclosure leaf ids are lowercase directory names (enclosures/260628-l7/) while doc ids are
-  // uppercase (260628-L7): every leafId comparison here is case-insensitive, matching the
+  // Enclosure leaf ids are lowercase directory names while doc ids are
+  // uppercase: every leafId comparison here is case-insensitive, matching the
   // normalization RailChat and the change-set bar already use. Exact joins only: since
-  // task_reopen (L11), reopening a leaf reuses its EXACT leaf id, so the old `-rN`
+  // task_reopen, reopening a leaf reuses its EXACT leaf id, so the old `-rN`
   // suffix admission heuristic is gone.
   const stem = pathStem(doc.docPath).toLowerCase();
   const docId = doc.id ? doc.id.toLowerCase() : undefined;
@@ -868,7 +935,7 @@ function enclosureForDoc(
 // contract's recorded lifecycleId, or a live lifecycle still anchored to the enclosure
 // (lifecycle.enclosure). This is the annotation source for a doc row whose own lifecycleId is
 // unset or stale: the bound lifecycle's gate/staleness enrich the leaf's single row instead
-// of rendering a duplicate lifecycle card for the same enclosureId (L11).
+// of rendering a duplicate lifecycle card for the same enclosureId.
 function lifecycleForEnclosure(
   enclosure: EnclosureNode,
   lifecycles: LifecycleProjection[],

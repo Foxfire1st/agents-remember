@@ -22,6 +22,7 @@ from agents_remember.errors import (
     HarnessAdapterDisconnectedError,
     HarnessBridgeEpochMismatchError,
     HarnessControlError,
+    HarnessInteractionNotPendingError,
     HarnessRequestConflictError,
 )
 from agents_remember.serving.harness_capabilities import SET_ACCEPTANCE_VALUES, SetResult
@@ -65,6 +66,25 @@ Publisher = Callable[[], None]
 OperationResolution = Literal["applied", "not-applied"]
 _OperationKey = tuple[ControlOperationKind, str]
 
+DISPATCH_ACCEPTANCE_GRACE_SECONDS = 0.5
+"""Bound the synchronous wait for vendor acceptance evidence on a dispatchable submit head.
+
+Claude's replay echo (the proof behind acceptance="immediate") is emitted with
+the turn's first output, so it ARRIVES at vendor TTFT -- measured ~4.25s live (FIONREAD on the
+adapter pipe: claude's stdout stays empty from prompt dispatch until first-token time) -- while its
+frame timestamp suggests ~22ms. Waiting for it held every dashboard submit POST for the full TTFT.
+Inside the grace a fast adapter keeps its synchronous immediate receipt and the instant busy /
+synchronous-rejection paths are untouched; past it the submit answers "queued" honestly, the record
+stays live, and status/reconcile project acceptance when the echo lands. "immediate" is still only
+minted on verified acceptance evidence."""
+
+
+def _consume_future_exception(future: asyncio.Future[object]) -> None:
+    """Retrieve a late exception on a future whose bounded waiter already returned."""
+
+    if not future.cancelled():
+        future.exception()
+
 
 @dataclass
 class _OperationRecord:
@@ -106,14 +126,18 @@ class HarnessSubmissionAuthority:
         set_snapshot: SnapshotSetter,
         publish: Publisher,
         bridge_epoch: str | None = None,
+        dispatch_grace_seconds: float = DISPATCH_ACCEPTANCE_GRACE_SECONDS,
     ) -> None:
         if timeline_limit < 1 or ledger_limit < 1:
             raise HarnessControlError("submission authority limits must be positive")
         if ledger_limit < timeline_limit:
             raise HarnessControlError("submission ledger limit cannot be below timeline limit")
+        if dispatch_grace_seconds <= 0:
+            raise HarnessControlError("submission authority dispatch grace must be positive")
         self._adapter = adapter
         self._timeline_limit = timeline_limit
         self._ledger_limit = ledger_limit
+        self._dispatch_grace_seconds = dispatch_grace_seconds
         self._clock = clock
         self._snapshot = snapshot
         self._set_snapshot = set_snapshot
@@ -223,10 +247,25 @@ class HarnessSubmissionAuthority:
             self._wake.set()
             if not wait_for_dispatch:
                 return self._receipt(record, "queued")
-        # Preserve the existing immediate receipt when an idle adapter can accept now.  A later
-        # prompt returns queued immediately instead of waiting behind the active vendor operation.
+        # An idle adapter keeps its synchronous immediate receipt when acceptance evidence lands
+        # inside the dispatch grace; a later prompt returns queued immediately instead of waiting
+        # behind the active vendor operation.  Past the grace the honest synchronous answer is
+        # "queued" -- slow vendor evidence (Claude's echo flushes at turn TTFT) must not hold the
+        # submit response.  The record stays live and status/reconcile project the outcome.
         assert future is not None
-        return cast(SubmissionReceipt, await asyncio.shield(future))
+        try:
+            return cast(
+                SubmissionReceipt,
+                await asyncio.wait_for(
+                    asyncio.shield(future), timeout=self._dispatch_grace_seconds
+                ),
+            )
+        except TimeoutError:
+            # Nobody waits on the record's future now; consume a late exception (authority stop
+            # during dispatch) instead of leaking an unretrieved-future warning.
+            future.add_done_callback(_consume_future_exception)
+            async with self._lock:
+                return self._pending_dispatch_receipt(record)
 
     async def set_model(self, model_key: str) -> SetResult:
         return await self._admit_setter("set-model", model_key)
@@ -240,13 +279,17 @@ class HarnessSubmissionAuthority:
             pending = self._snapshot().pending_interaction
             active = self._records.get(self._active) if self._active is not None else None
             if pending is None or pending.interaction_id != response.interaction_id:
-                raise HarnessControlError(
+                raise HarnessInteractionNotPendingError(
                     "interaction response does not match the pending interaction"
                 )
             if active is None or active.state not in {"dispatching", "delivered", "unknown"}:
-                raise HarnessControlError("interaction response has no active ordinary operation")
+                raise HarnessInteractionNotPendingError(
+                    "interaction response has no active ordinary operation"
+                )
             if response.interaction_id in self._responded_interactions:
-                raise HarnessControlError("interaction response was already submitted")
+                raise HarnessInteractionNotPendingError(
+                    "interaction response was already submitted"
+                )
             operation = active.ref
             self._responded_interactions.add(response.interaction_id)
         try:
@@ -932,6 +975,28 @@ class HarnessSubmissionAuthority:
         elif record.state == "withdrawn":
             detail = "the queued submission was withdrawn and will not be dispatched"
         return self._receipt(record, acceptance, detail=detail)
+
+    def _pending_dispatch_receipt(self, record: _OperationRecord) -> SubmissionReceipt:
+        """Receipt for a live record whose acceptance evidence outlasted the dispatch grace.
+
+        "queued" is the honest synchronous word for a not-yet-vendor-verified submission: the
+        record stays live on the timeline, and status/reconcile project acceptance when the echo
+        lands.  A record that raced into a terminal or ambiguous state during the grace reports
+        its exact state through the duplicate mapping instead.
+        """
+
+        if record.state == "dispatching":
+            return self._receipt(
+                record,
+                "queued",
+                detail=(
+                    "dispatch is in flight; acceptance evidence is pending — "
+                    "query status/reconcile with the same request id"
+                ),
+            )
+        if record.state == "queued":
+            return self._receipt(record, "queued")
+        return self._duplicate_receipt(record)
 
     def _receipt(
         self,

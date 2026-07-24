@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 from collections import OrderedDict, deque
 from collections.abc import AsyncIterator, Callable, Mapping
-from dataclasses import replace
+from dataclasses import dataclass, replace
 
 from agents_remember.errors import (
     HarnessAdapterBusyError,
@@ -18,6 +18,8 @@ from agents_remember.serving.claude_stream_protocol import (
     command_unsupported_detail,
     correlation_envelope,
     interaction_response_frame,
+    interrupt_frame,
+    interrupt_response_outcome,
     message_text,
     optional_text,
     pending_interaction,
@@ -36,12 +38,14 @@ from agents_remember.serving.claude_stream_submission import (
 from agents_remember.serving.claude_stream_transport import ClaudeStreamTransport
 from agents_remember.serving.harness_control_models import (
     AR_EVIDENCE_KEY,
+    AR_TERMINAL_OUTCOME_KEY,
     AcceptanceState,
     AdapterEvent,
     AdapterSnapshot,
     ControlIdentity,
     ControlOperationRef,
     InteractionResponse,
+    InterruptResult,
     PromptRequest,
     ReconciliationResult,
     ShutdownMode,
@@ -53,6 +57,27 @@ from agents_remember.serving.harness_control_models import (
 
 Clock = Callable[[], str]
 CorrelationFactory = Callable[[], str]
+
+_ACTIVE_TURN_ID_KEY = "activeTurnId"
+"""Snapshot-raw key carrying the wire turn identity of the one active Claude turn.
+
+Claude has no native turn identity, so the wire projects the accepted operation's id for the
+turn's whole lifetime — the exact identity the exact-turn interrupt contract guards pre-write
+(the control authority maps a caller's ``turnId`` onto ``expectedOperationId`` for claude).
+The key is shared with the codex adapter so the canonical status authority reads one name.
+It must ride the acceptance/result EVENT raw: the bridge accumulates ``snapshot.raw`` from
+event raw keys only, so a snapshot-only stamp never crosses the IPC seam. The result event
+carries a null tombstone so a settled turn's identity can never leak into a later frame's
+``running`` activity as a stale id.
+"""
+
+
+@dataclass
+class _PendingControl:
+    """One in-flight adapter control request awaiting its correlated control_response."""
+
+    future: asyncio.Future[tuple[bool, str | None, dict[str, object]]]
+    target_request_id: str
 
 
 class ClaudeStreamState:
@@ -88,6 +113,10 @@ class ClaudeStreamState:
         self._reader_task: asyncio.Task[None] | None = None
         self._event_sequence = 0
         self._transcript_sequence = 0
+        self._control_sequence = 0
+        self._pending_control: dict[str, _PendingControl] = {}
+        self._interrupt_accepted: set[str] = set()
+        self._last_interrupt: tuple[tuple[str, str], InterruptResult] | None = None
 
     @property
     def retained_submission_count(self) -> int:
@@ -221,6 +250,95 @@ class ClaudeStreamState:
             pending_interaction=None,
             raw={**self._snapshot.raw, "lastInteractionResponseAt": response.responded_at},
         )
+
+    async def interrupt(
+        self,
+        *,
+        turn_id: str | None,
+        expected_operation_id: str | None,
+    ) -> InterruptResult:
+        """One native interrupt control request against the exact active turn, replaying once.
+
+        Claude has no native turn identity: the wire projects the accepted operation's id as
+        the turn identity (``activeTurnId``), and the control authority hands it back here as
+        the caller's expected active-operation id. Like Pi, that id must match the current
+        active operation before any native bytes are written, so a stale reconcile can never
+        interrupt a successor. The native control_response answer is awaited on the reader's
+        request-id correlation; an accepted interrupt is recorded so the turn's error-shaped
+        result settles ``cancelled`` (interrupted), never ``failed``. A repeat naming the
+        same (expected, active) pair replays the first acknowledgement with no second write.
+        """
+
+        self._require_available()
+        if turn_id is not None:
+            raise HarnessControlError(
+                "Claude interrupt does not accept turn identity; use expectedOperationId"
+            )
+        if not self._accepted_order:
+            raise HarnessControlError("no active Claude turn to interrupt")
+        record = self._history[self._accepted_order[0]]
+        active = record.operation
+        if expected_operation_id is not None and expected_operation_id != active.operation_id:
+            raise HarnessControlError(
+                "interrupt operation id does not match the active Claude operation"
+            )
+        pair = (expected_operation_id or active.operation_id, active.operation_id)
+        if self._last_interrupt is not None and self._last_interrupt[0] == pair:
+            return self._last_interrupt[1]
+        self._control_sequence += 1
+        control_id = f"ar-claude-interrupt-{self._control_sequence}"
+        future: asyncio.Future[tuple[bool, str | None, dict[str, object]]] = (
+            asyncio.get_running_loop().create_future()
+        )
+        self._pending_control[control_id] = _PendingControl(
+            future=future, target_request_id=record.request.request_id
+        )
+        try:
+            await self._transport.write_frame(interrupt_frame(control_id))
+            accepted, detail, response_frame = await asyncio.wait_for(
+                asyncio.shield(future),
+                timeout=self._limits.acceptance_timeout_seconds,
+            )
+        except TimeoutError:
+            # The request bytes were sent but the answer is genuinely lost. Keep the
+            # correlation entry so a late success still records the accepted interrupt
+            # before the turn settles; the acknowledgement stays honestly unknown.
+            future.add_done_callback(consume_future_exception)
+            result = InterruptResult(
+                acknowledgement="unknown",
+                bridge_epoch="",
+                operation=active,
+                vendor_correlation_id=control_id,
+                detail=(
+                    "Claude did not answer the interrupt control request before the "
+                    "acknowledgement bound"
+                ),
+            )
+        except BaseException:
+            self._pending_control.pop(control_id, None)
+            raise
+        else:
+            self._pending_control.pop(control_id, None)
+            if accepted:
+                result = InterruptResult(
+                    acknowledgement="accepted",
+                    bridge_epoch="",
+                    operation=active,
+                    vendor_correlation_id=control_id,
+                    detail="native interrupt acknowledged for the exact active Claude turn",
+                    raw={"claudeEvent": response_frame},
+                )
+            else:
+                result = InterruptResult(
+                    acknowledgement="rejected",
+                    bridge_epoch="",
+                    operation=active,
+                    vendor_correlation_id=control_id,
+                    detail=detail,
+                    raw={"claudeEvent": response_frame},
+                )
+        self._last_interrupt = (pair, result)
+        return result
 
     def reconcile(self, request_id: str) -> ReconciliationResult:
         record = self._history.get(request_id)
@@ -418,6 +536,7 @@ class ClaudeStreamState:
             ("result", None): self._handle_result,
             ("system", "api_retry"): self._handle_retry,
             ("system", "status"): self._handle_status,
+            ("control_response", None): self._handle_control_response,
             ("control_cancel_request", None): self._handle_interaction_cancel,
         }
         direct = handlers.get((frame_type, subtype))
@@ -440,6 +559,41 @@ class ClaudeStreamState:
             pending_interaction=interaction,
         )
         await self._emit("state", raw={"claudeEventType": "control_request"})
+
+    async def _handle_control_response(self, frame: Mapping[str, object]) -> None:
+        """Resolve one adapter control request (the interrupt) by its correlated request id.
+
+        A control_response naming no pending adapter request keeps the pre-interrupt behavior:
+        preserved as generic evidence, never consumed. A matched success for the interrupt
+        records the accepted-interrupt correlation while its target turn is still active, so
+        the turn's error-shaped result settles interrupted; a late answer after the turn
+        settled records nothing (the result already kept its native meaning).
+        """
+
+        response = frame.get("response")
+        request_id = response.get("request_id") if isinstance(response, Mapping) else None
+        pending = self._pending_control.get(request_id) if isinstance(request_id, str) else None
+        if not isinstance(request_id, str) or pending is None:
+            await self._emit(
+                "state",
+                raw={
+                    "claudeEventType": "control_response",
+                    AR_EVIDENCE_KEY: dict(frame),
+                },
+            )
+            return
+        outcome = interrupt_response_outcome(frame, request_id)
+        if outcome is None:
+            return
+        accepted, detail = outcome
+        if (
+            accepted
+            and self._accepted_order
+            and self._accepted_order[0] == pending.target_request_id
+        ):
+            self._interrupt_accepted.add(pending.target_request_id)
+        if not pending.future.done():
+            pending.future.set_result((accepted, detail, dict(frame)))
 
     async def _handle_replayed_user(self, frame: Mapping[str, object]) -> None:
         wire_text = raw_message_text(frame)
@@ -475,7 +629,10 @@ class ClaudeStreamState:
                     self._accepted_order.append(abandoned.request.request_id)
                 await self._emit(
                     "state",
-                    raw={"lateClaudeReplayIgnored": abandoned.request.request_id},
+                    raw={
+                        "lateClaudeReplayIgnored": abandoned.request.request_id,
+                        _ACTIVE_TURN_ID_KEY: abandoned.operation.operation_id,
+                    },
                 )
                 return
             raise HarnessControlError(
@@ -514,7 +671,14 @@ class ClaudeStreamState:
             vendor_correlation_id=record.correlation_id,
             created_at=accepted_at,
         )
-        await self._emit("state", transcript=(transcript,), raw={"acceptanceEvidence": "replay"})
+        await self._emit(
+            "state",
+            transcript=(transcript,),
+            raw={
+                "acceptanceEvidence": "replay",
+                _ACTIVE_TURN_ID_KEY: record.operation.operation_id,
+            },
+        )
 
     async def _handle_assistant(self, frame: Mapping[str, object]) -> None:
         self._snapshot = replace(self._snapshot, activity="running")
@@ -569,7 +733,15 @@ class ClaudeStreamState:
             raise HarnessControlError("Claude result changed session identity")
         request_id = self._accepted_order.popleft() if self._accepted_order else None
         record: ClaudeSubmission | None = None
-        outcome = terminal_outcome(frame)
+        # The accepted-interrupt correlation is the ONLY distinction between an interrupted
+        # turn and a real failure: natively both arrive as error_during_execution/is_error.
+        interrupt_accepted = request_id is not None and request_id in self._interrupt_accepted
+        if request_id is not None:
+            self._interrupt_accepted.discard(request_id)
+            for control_id, pending in tuple(self._pending_control.items()):
+                if pending.target_request_id == request_id:
+                    self._pending_control.pop(control_id, None)
+        outcome = terminal_outcome(frame, interrupt_accepted=interrupt_accepted)
         completed_at = self._created_at(frame)
         detail = result_detail(frame)
         terminal = TerminalResult(
@@ -598,10 +770,18 @@ class ClaudeStreamState:
         self._snapshot = replace(self._snapshot, activity=activity)
         if record is None:
             raise HarnessControlError("Claude result has no exact active operation")
+        # The correlated classification rides the diverted payload copy as adapter-attributed
+        # evidence so the projector and the interrupt settlement ledger read the same truth;
+        # the native frame keys stay byte-intact beside the reserved ar* stamp.
+        payload = {**frame, AR_TERMINAL_OUTCOME_KEY: outcome}
         await self._emit(
             "completed",
             transcript=(transcript,),
-            raw={"terminalOutcome": outcome, AR_EVIDENCE_KEY: dict(frame)},
+            raw={
+                "terminalOutcome": outcome,
+                _ACTIVE_TURN_ID_KEY: None,
+                AR_EVIDENCE_KEY: payload,
+            },
             operation=record.operation,
         )
         if record is not None and not record.terminal_future.done():
@@ -707,6 +887,19 @@ class ClaudeStreamState:
         self._pending_by_correlation.pop(record.correlation_id, None)
 
     def _complete_pending_on_disconnect(self, detail: str, *, control_error: bool = False) -> None:
+        for control_id, pending in tuple(self._pending_control.items()):
+            if not pending.future.done():
+                control_response_error: HarnessControlError
+                if control_error:
+                    control_response_error = HarnessControlError(detail)
+                else:
+                    control_response_error = HarnessAdapterDisconnectedError(
+                        detail,
+                        may_have_sent=True,
+                        vendor_correlation_id=control_id,
+                    )
+                pending.future.set_exception(control_response_error)
+        self._pending_control.clear()
         for request_id in tuple(self._pending_by_text.values()):
             record = self._history[request_id]
             record.acceptance = "unknown"

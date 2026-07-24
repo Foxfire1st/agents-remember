@@ -1,3 +1,4 @@
+import { insertNewlineAndIndent } from "@codemirror/commands";
 import { markdown } from "@codemirror/lang-markdown";
 import { Compartment, EditorState, Prec } from "@codemirror/state";
 import { EditorView, keymap } from "@codemirror/view";
@@ -27,7 +28,7 @@ import {
   submitSessionDraft,
 } from "../data/submitClient";
 import { sessionCockpitStore, useSessionCockpit } from "../data/sessionCockpitStore";
-import { latestActiveSubmit } from "../data/submitMachine";
+import { latestActiveSubmit, serverConfirmedQueued } from "../data/submitMachine";
 import {
   dismissWithdrawnRecovery,
   restoreWithdrawnRecovery,
@@ -41,13 +42,15 @@ import {
 } from "../data/keymap/preferences";
 import type { OpenSession } from "../data/sessions";
 import { QueuePreview } from "./session-cockpit/QueuePreview";
+import type { ConversationInterrupt } from "./session-cockpit/conversation/useConversationControls";
 import {
   INTERACTION_ANSWERED,
   INTERACTION_ANSWERING,
   INTERACTION_COMPOSER_MODE,
+  STOP_TURN_DISABLED_REASON,
 } from "./session-cockpit/lifecycleCopy";
 
-// One CM6 markdown composer for every session surface (FEUI-L5): per-session drafts live in the
+// One CM6 markdown composer for every session surface: per-session drafts live in the
 // cockpit store, Ctrl+Enter submits through /submit, Enter remains a newline, and Alt+Up performs
 // an epoch-bound atomic server withdrawal before restoring text. No component here owns a
 // PTY connection or paste helper; raw xterm typing remains the only raw-stdin path.
@@ -60,14 +63,14 @@ const dock = css({
 });
 const editorFrame = css({
   minWidth: "0",
-  // FB7.1 — the composer joins the terminal well (same inset tone as the feed + the pty pane).
+  // The composer joins the terminal well (same inset tone as the feed + the pty pane).
   background: "well",
   borderWidth: "1px",
   borderStyle: "solid",
   borderColor: "grid",
   borderRadius: "2px",
   overflow: "hidden",
-  // V4 — the page's primary input MUST show keyboard focus. The inner .cm-focused outline is clipped
+  // The page's primary input MUST show keyboard focus. The inner .cm-focused outline is clipped
   // by this frame's overflow:hidden, so the frame itself carries the house amber ring on focus.
   "&:focus-within": { borderColor: "amber" },
   "&[data-answer-mode='true']": { borderColor: "amber" },
@@ -93,7 +96,7 @@ const sendButton = css({
   font: "inherit",
   fontSize: "0.68rem",
   letterSpacing: "0.03em",
-  // V3 — the send control keeps its full width and single line whatever the stage width: the hint
+  // The send control keeps its full width and single line whatever the stage width: the hint
   // (footerLeft, flex:1 minWidth:0) is the only part that yields, so `ctrl+↵ send` is never shrunk
   // under the inspector's edge or wrapped when the inspector opens and the stage column reflows.
   flexShrink: 0,
@@ -116,6 +119,43 @@ const sendButton = css({
     outlineOffset: "1px",
   },
   _disabled: { opacity: "0.45", cursor: "default", transform: "none" },
+});
+// The stop control docks beside send — where every chat product puts
+// it — not on the working line. Demoted weight until hover/focus takes the amber accent; red
+// stays reserved for the moment of consequence. Same welded-evidence gating as before.
+const stopButtonEnabled = css({
+  font: "inherit",
+  fontSize: "0.68rem",
+  flexShrink: 0,
+  whiteSpace: "nowrap",
+  color: "muted",
+  background: "transparent",
+  borderWidth: "1px",
+  borderStyle: "solid",
+  borderColor: "grid",
+  borderRadius: "2px",
+  paddingInline: "0.45rem",
+  paddingBlock: "0.12rem",
+  cursor: "pointer",
+  _hover: { color: "amber", borderColor: "amber" },
+  _focusVisible: { outline: "1px solid token(colors.amber)", outlineOffset: "1px" },
+});
+const stopButtonDisabled = css({
+  font: "inherit",
+  fontSize: "0.68rem",
+  flexShrink: 0,
+  whiteSpace: "nowrap",
+  color: "muted",
+  background: "transparent",
+  borderWidth: "1px",
+  borderStyle: "solid",
+  borderColor: "grid",
+  borderRadius: "2px",
+  paddingInline: "0.45rem",
+  paddingBlock: "0.12rem",
+  cursor: "not-allowed",
+  opacity: 0.7,
+  _focusVisible: { outline: "1px solid token(colors.amber)", outlineOffset: "1px" },
 });
 const status = css({
   display: "flex",
@@ -182,6 +222,10 @@ export interface SessionComposerProps {
   onSlashAtLineStart?: () => void;
   onEscape?: () => void;
   ariaLabel?: string;
+  /** The shared exact-turn interrupt — renders the ⏹ stop beside send while a turn works. */
+  interrupt?: ConversationInterrupt;
+  /** The view-owned working signal (SSE-preferred) that mounts/unmounts the stop control. */
+  turnWorking?: boolean;
 }
 
 export const SessionComposer = forwardRef<SessionComposerHandle, SessionComposerProps>(
@@ -192,6 +236,8 @@ export const SessionComposer = forwardRef<SessionComposerHandle, SessionComposer
       onSlashAtLineStart,
       onEscape,
       ariaLabel = `Message ${session.label}`,
+      interrupt,
+      turnWorking = false,
     },
     forwardedRef,
   ) {
@@ -210,6 +256,15 @@ export const SessionComposer = forwardRef<SessionComposerHandle, SessionComposer
     const draft = cockpit?.composer ?? { draft: "", draftRevision: 0 };
     const queue = cockpit?.queue ?? [];
     const submitHistory = cockpit?.submitHistory ?? [];
+    // Queued-grace honesty: a bare queued receipt is usually already dispatching on the
+    // claude path (withdraw answers not-withdrawable), so the queue surfaces — preview, the
+    // "N queued · yours" count, the alt+↑ hint — show an entry only once the authority's own
+    // lifecycle word confirms the pre-dispatch queued state on its submit record.
+    const confirmedQueue = queue.filter((entry) =>
+      serverConfirmedQueued(
+        submitHistory.find((record) => record.requestId === entry.requestId),
+      ),
+    );
     const withdrawalRecovery =
       cockpit?.withdrawal?.phase === "recovery" ? cockpit.withdrawal : undefined;
     const composerHistory = submitHistory.filter((record) => record.source === "composer");
@@ -248,7 +303,17 @@ export const SessionComposer = forwardRef<SessionComposerHandle, SessionComposer
         return;
       }
       void submitSessionDraft(session.id).then((outcome) => {
-        if (outcome.status === "blocked") setNotice(outcome.reason);
+        if (outcome.status !== "blocked") return;
+        // Playwright-measured: a send deferred only because native control is still
+        // booting used to echo the gate reason a second time — visually identical to the standing
+        // gate line, so the press read as silence. Acknowledge it in the status family's own
+        // vocabulary ("sending…"/"delivering…", "composer draft unchanged"): control is still
+        // connecting and the draft is safe. A hard block keeps the server's reason.
+        setNotice(
+          session.controlState === "starting" || session.controlState === "disconnected"
+            ? "connecting… · composer draft unchanged"
+            : outcome.reason,
+        );
       });
     }, [answerInteractionId, session]);
     const submitRef = useRef(submit);
@@ -281,7 +346,10 @@ export const SessionComposer = forwardRef<SessionComposerHandle, SessionComposer
               return entry.commandId !== "focus.stageHeader" || callbackRef.current.onEscape !== undefined;
             };
             return [{ key: codeMirrorBinding(entry.chord), run }];
-          }),
+          })
+          // With plain Enter bound to send, Shift+Enter is the explicit
+          // newline — bound here at the same precedence so no profile/default can shadow it.
+          .concat([{ key: "Shift-Enter", run: insertNewlineAndIndent }]),
       [effectiveKeymap.signature],
     );
 
@@ -389,30 +457,31 @@ export const SessionComposer = forwardRef<SessionComposerHandle, SessionComposer
       });
     }, [composerKeymap, effectiveKeymap.composerProfile, keymapCompartment, profileCompartment]);
 
-    // 260718-CHATS-L4 finding A3: group the hint by concern with ONE separator convention (interpunct)
+    // Group the hint by concern with ONE separator convention (interpunct)
     // and move the honest-boundary capability wall into a tooltip (progressive disclosure). The
     // boundary copy stays present — structured, not a mixed-separator wall.
-    // L5P V9: on a legacy-raw terminal seat native submission is unsupported (typing bypasses the
+    // On a legacy-raw terminal seat native submission is unsupported (typing bypasses the
     // /submit queue), so the markdown/reliable-submit/text-only claims contradict the pane — derive the
     // hint from the seat instead of stating a controlled-composer capability that does not apply here.
-    // L5P V14: `draft saved` is an exception cue, shown only when a non-empty draft actually exists.
+    // `draft saved` is an exception cue, shown only when a non-empty draft actually exists.
+    // The footer shows EXCEPTION CUES ONLY
+    // (draft saved, queued counts). Static capability facts (markdown, keymap profile, reliable
+    // submit, text only) are one-fact-one-place: they live in the tooltip below and the keys
+    // reference, never as standing chrome. Raw terminal seats no longer mount this composer.
     const rawTerminalSeat = session.kind === "terminal";
     const footerHint = (
       rawTerminalSeat
-        ? [`${effectiveKeymap.composerProfile} keys`, "raw terminal keys pass through"]
+        ? []
         : [
-            "markdown",
-            `${effectiveKeymap.composerProfile} keys`,
             draft.draft.length > 0 ? "draft saved" : null,
             queuedSetHint,
-            queue.some((entry) => entry.state === "queued")
-              ? `${queue.filter((entry) => entry.state === "queued").length} queued · yours`
-              : null,
+            confirmedQueue.length > 0 ? `${confirmedQueue.length} queued · yours` : null,
           ]
     )
       .filter(Boolean)
       .join(" · ");
-    const RELIABLE_SUBMIT_DETAIL =
+    const CAPABILITY_DETAIL =
+      `markdown · ${effectiveKeymap.composerProfile} keys · text only · ` +
       "reliable path: receipts + reconcile · terminal lines join the same queue without receipts";
 
     const retry = () => {
@@ -444,7 +513,7 @@ export const SessionComposer = forwardRef<SessionComposerHandle, SessionComposer
 
     return (
       <div className={dock} data-testid="session-composer">
-        <QueuePreview queue={queue} />
+        <QueuePreview queue={confirmedQueue} sessionId={session.id} />
         <div
           ref={frameRef}
           className={editorFrame}
@@ -496,7 +565,7 @@ export const SessionComposer = forwardRef<SessionComposerHandle, SessionComposer
             ) : null}
             {latest?.phase === "queued" ? (
               <span>
-                queued · withdrawable ·{" "}
+                {serverConfirmedQueued(latest) ? "queued · withdrawable" : "queued"} ·{" "}
                 {latest.clearDraftOnAccept ? "draft released" : "composer draft unchanged"}
               </span>
             ) : null}
@@ -592,18 +661,48 @@ export const SessionComposer = forwardRef<SessionComposerHandle, SessionComposer
           </div>
         ) : null}
         <div className={footer}>
-          <span className={footerLeft}>
+          <span
+            className={footerLeft}
+            title={CAPABILITY_DETAIL}
+            data-testid="composer-reliability-note"
+          >
             {footerHint}
-            {!rawTerminalSeat ? (
-              <>
-                {" · "}
-                <span title={RELIABLE_SUBMIT_DETAIL} data-testid="composer-reliability-note">
-                  reliable submit
-                </span>
-                {" · text only"}
-              </>
-            ) : null}
           </span>
+          {/* The stop control sits beside send while a turn works —
+              the working line stays a pure status cue. Same welded-evidence gating:
+              enabled only with real turn + capability evidence, else the honest reason. */}
+          {turnWorking ? (
+            interrupt?.available && interrupt.onStop !== undefined ? (
+              <button
+                type="button"
+                className={stopButtonEnabled}
+                onClick={interrupt.onStop}
+                disabled={interrupt.pending}
+                title={
+                  interrupt.pending
+                    ? "interrupt requested…"
+                    : `Stop the current turn · ${interrupt.keyshortcut}`
+                }
+                aria-label="Stop turn"
+                aria-keyshortcuts={interrupt.keyshortcut}
+                data-testid="session-composer-stop"
+              >
+                ⏹ stop
+              </button>
+            ) : (
+              <button
+                type="button"
+                className={stopButtonDisabled}
+                disabled
+                title={interrupt?.reason ?? STOP_TURN_DISABLED_REASON}
+                aria-label={`Stop turn — ${interrupt?.reason ?? STOP_TURN_DISABLED_REASON}`}
+                data-disabled-reason={interrupt?.reason ?? STOP_TURN_DISABLED_REASON}
+                data-testid="session-composer-stop"
+              >
+                ⏹ stop
+              </button>
+            )
+          ) : null}
           <Button
             className={sendButton}
             isDisabled={

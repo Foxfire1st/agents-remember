@@ -70,14 +70,17 @@ def mark_legacy_control_unsupported(
 def snapshot_turn_state(
     snapshot: AdapterSnapshot,
     harness_id: HarnessId | None = None,
-) -> SeatTurnState:
+    *,
+    previous: SeatTurnState | None = None,
+) -> SeatTurnState | None:
     """Project adapter evidence onto the seat vocabulary through the canonical
-    conversation status authority (260718-CHATS-L1, R3).
+    conversation status authority.
 
     Orchestration no longer maps adapter fields on its own: the same canonical
     classification the Chats serving consumes produces the turn state, and the
-    single seat projection rule translates it. Parity with the pre-canonical
-    mapping is exact and pinned by tests.
+    single seat projection rule translates it. ``previous`` is the catalog row's
+    current seat claim — it feeds only the settle/boot hysteresis; a ``None``
+    return makes no new claim and the row keeps its last one.
     """
 
     # Deferred import: terminal_liveness imports this module, and the
@@ -87,4 +90,4 @@ def snapshot_turn_state(
         snapshot_seat_turn_state,
     )
 
-    return snapshot_seat_turn_state(snapshot, harness_id)
+    return snapshot_seat_turn_state(snapshot, harness_id, previous=previous)

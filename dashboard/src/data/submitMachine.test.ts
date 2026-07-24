@@ -14,6 +14,9 @@ import {
   enterEndgame,
   enterReconcileWindow,
   latestActiveSubmit,
+  LIFECYCLE_WATCH_WINDOW_MS,
+  lifecycleWatchState,
+  projectSubmissionLifecycle,
   RECONCILE_WINDOW_MS,
   reconcileDelay,
   recordReconcileDelay,
@@ -21,6 +24,7 @@ import {
   reduceReconciliation,
   releaseDraft,
   retryPayload,
+  serverConfirmedQueued,
   settleSubmissionObservation,
   startSubmitRecord,
   type SubmissionLifecycleObservation,
@@ -57,6 +61,24 @@ describe("submit receipt machine", () => {
     if (acceptance === "rejected" || acceptance === "unsupported") {
       expect(result.detail).toBe(submitReceipt(acceptance).detail);
     }
+  });
+
+  it("treats a bare queued receipt as acceptance evidence, never a lifecycle report", () => {
+    const queued = reduceReceipt(start(), submitReceipt("queued"), 200);
+    expect(queued.phase).toBe("queued");
+    expect(queued.serverLifecycleState).toBeUndefined();
+    expect(serverConfirmedQueued(queued)).toBe(false);
+
+    const immediate = reduceReceipt(start(), submitReceipt("immediate"), 200);
+    expect(immediate.serverLifecycleState).toBe("delivered");
+
+    // Only the lifecycle endpoint's own word earns (or forfeits) the pre-dispatch queued mark.
+    expect(serverConfirmedQueued(projectSubmissionLifecycle(queued, "queued", null, 300))).toBe(
+      true,
+    );
+    expect(
+      serverConfirmedQueued(projectSubmissionLifecycle(queued, "dispatching", null, 300)),
+    ).toBe(false);
   });
 
   it.each(
@@ -186,5 +208,58 @@ describe("submit receipt machine", () => {
         1,
       ),
     ).toEqual({ action: "preserve" });
+  });
+});
+
+describe("lifecycle watch", () => {
+  it("aligns the per-entry watch window with the reconcile window", () => {
+    expect(LIFECYCLE_WATCH_WINDOW_MS).toBe(RECONCILE_WINDOW_MS);
+  });
+
+  it("starts the bounded watch on the first non-terminal post-queue word and keeps its start", () => {
+    const queued = projectSubmissionLifecycle(start(), "queued", null, 200);
+    expect(queued.lifecycleWatchStartedAt).toBeUndefined();
+    expect(lifecycleWatchState(queued, 200)).toBe("active");
+
+    const delivering = projectSubmissionLifecycle(queued, "dispatching", null, 300);
+    expect(delivering.lifecycleWatchStartedAt).toBe(300);
+    expect(lifecycleWatchState(delivering, 300)).toBe("active");
+
+    // Repeated dispatching polls must not re-arm the window, or it could never expire.
+    const repolled = projectSubmissionLifecycle(delivering, "dispatching", null, 400);
+    expect(repolled.lifecycleWatchStartedAt).toBe(300);
+
+    // A possible-send unknown stays watched until its own terminal word.
+    const unknown = projectSubmissionLifecycle(delivering, "unknown", null, 500);
+    expect(unknown.lifecycleWatchStartedAt).toBe(300);
+    expect(lifecycleWatchState(unknown, 500)).toBe("active");
+  });
+
+  it.each(["delivered", "withdrawn", "rejected", "unsupported"] as const)(
+    "ends the watch on the terminal %s word",
+    (state) => {
+      const delivering = projectSubmissionLifecycle(start(), "dispatching", null, 300);
+      const terminal = projectSubmissionLifecycle(delivering, state, null, 400);
+      expect(terminal.lifecycleWatchStartedAt).toBe(300);
+      expect(lifecycleWatchState(terminal, 400)).toBe("inactive");
+    },
+  );
+
+  it("expires the watch past the bounded window and never watches other flows' phases", () => {
+    const delivering = projectSubmissionLifecycle(start(), "dispatching", null, 1_000);
+    expect(lifecycleWatchState(delivering, 1_000 + LIFECYCLE_WATCH_WINDOW_MS)).toBe("active");
+    expect(lifecycleWatchState(delivering, 1_001 + LIFECYCLE_WATCH_WINDOW_MS)).toBe("expired");
+
+    for (const phase of [
+      "sending",
+      "reconciling",
+      "endgame",
+      "route-error",
+      "generation-lost",
+      "not-found",
+      "released",
+    ] as const) {
+      expect(lifecycleWatchState({ ...delivering, phase }, 1_000)).toBe("inactive");
+    }
   });
 });

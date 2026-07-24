@@ -1,4 +1,4 @@
-"""Shared service/route test topology for 260718-CHATS-L3 control suites.
+"""Shared service/route test topology for control suites.
 
 One full running seam: a structural fake adapter (interrupt- and asset-capable)
 behind a real ``HarnessControlBridge`` + ``HarnessControlServer`` on a real
@@ -40,6 +40,7 @@ from agents_remember.serving.harness_control_ipc import (
 )
 from agents_remember.serving.harness_control_models import (
     AR_EVIDENCE_KEY,
+    AR_TERMINAL_OUTCOME_KEY,
     CONTROL_PROTOCOL_VERSION,
     REQUIRED_ADAPTER_CAPABILITIES,
     AcceptanceState,
@@ -395,6 +396,35 @@ class FakeControlAdapter:
 
         self.pi_emit_message_end(text="final answer", stop_reason=stop_reason)
         self.pi_release()
+
+    def claude_settle(self, outcome: str = "cancelled") -> None:
+        """Emit the claude result settlement evidence with the adapter-correlated stamp.
+
+        Mirrors ``claude_stream_state._handle_result``: the completed event carries the native
+        result frame plus the adapter-attributed ``arTerminalOutcome`` classification — the
+        accepted-interrupt correlation the settlement ledger reads. ``cancelled`` reproduces
+        the probe-locked interrupted shape (error_during_execution/is_error +
+        aborted_streaming), ``failed`` the unprovoked error, ``completed`` natural completion.
+        """
+
+        operation = self.operations[-1] if self.operations else None
+        self.emit(
+            "completed",
+            {
+                "terminalOutcome": outcome,
+                AR_EVIDENCE_KEY: {
+                    "type": "result",
+                    "subtype": "success" if outcome == "completed" else "error_during_execution",
+                    "is_error": outcome != "completed",
+                    "terminal_reason": "aborted_streaming" if outcome == "cancelled" else None,
+                    "session_id": self.vendor_id,
+                    "uuid": f"claude-result-{outcome}",
+                    AR_TERMINAL_OUTCOME_KEY: outcome,
+                },
+            },
+            snapshot=replace(self.current, activity="idle") if self.current else None,
+            operation=operation,
+        )
 
 
 class ControlledEntry:

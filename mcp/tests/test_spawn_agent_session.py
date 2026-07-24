@@ -1,4 +1,4 @@
-"""Tests for the agent-facing ``spawn_agent_session`` MCP tool + the serving paste endpoint (slice L2).
+"""Tests for the agent-facing ``spawn_agent_session`` MCP tool + the serving paste endpoint.
 
 The tool composes the EXISTING session primitives (opener + leaf claim + log-confirmed paste + submit).
 These tests inject a fake host + fake paster + a fake ``which`` so the composition is exercised without a
@@ -21,6 +21,7 @@ from fastapi.testclient import TestClient
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
+import agents_remember
 from agents_remember.kernel.agentic_settings import agentic_settings_path
 from agents_remember.mcp.config import McpRuntimeConfig, RepositoryScope
 from agents_remember.mcp.tools.terminal import spawn_agent_session_payload
@@ -40,6 +41,10 @@ from agents_remember.serving.terminal import TerminalSessionBinding
 from agents_remember.serving.terminal_catalog import TerminalCatalog, TerminalCatalogEntry
 from agents_remember.serving.terminal_paste import PasteResult
 from agents_remember.tasks import TaskDocument, write_task_doc
+
+# The source root of the agents_remember package this test process imported -- what the opener
+# seeds onto every harness-runner spawn's PYTHONPATH.
+_DAEMON_PACKAGE_ROOT = str(Path(agents_remember.__file__).resolve().parent.parent)
 
 
 def _config(root: Path) -> McpRuntimeConfig:
@@ -264,7 +269,7 @@ class SpawnAgentSessionTests(unittest.TestCase):
         self.assertEqual(paster.calls, [])
 
     def test_spawn_records_role_from_env_and_reports_it(self) -> None:
-        # L14: the AR_SPAWN_ROLE riding the caller's env is persisted on the catalog row and
+        # The AR_SPAWN_ROLE riding the caller's env is persisted on the catalog row and
         # reported in the payload — the Chats command tree groups command chats by it.
         path = agentic_settings_path(self.tmp)
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -487,6 +492,7 @@ class SpawnKnobApplicationTests(unittest.TestCase):
                 "AR_SPAWN_ROLE": "worker",
                 "AR_SPAWN_MODEL": "claude-fable-5",
                 "AR_SPAWN_EFFORT": "ultracode",
+                "PYTHONPATH": _DAEMON_PACKAGE_ROOT,
             },
         )
         self.assertEqual(paster.calls, [])
@@ -532,6 +538,7 @@ class SpawnKnobApplicationTests(unittest.TestCase):
                 "AR_SPAWN_ROLE": "worker",
                 "AR_SPAWN_MODEL": "gpt-5.6-sol",
                 "AR_SPAWN_EFFORT": "xhigh",
+                "PYTHONPATH": _DAEMON_PACKAGE_ROOT,
             },
         )
 
@@ -625,7 +632,7 @@ class SpawnKnobApplicationTests(unittest.TestCase):
         self.assertEqual(row.launch_args, ("--dangerously-skip-permissions",))
 
     def test_prompt_keywords_are_recorded_but_withheld_from_spawn(self) -> None:
-        # The original L16 acceptance case: strategist as effort:max + promptKeywords:["ultracode"]
+        # The original acceptance case: strategist as effort:max + promptKeywords:["ultracode"]
         # dispatches claude with --effort max and the keyword riding the paste.
         self._write_settings(
             {
@@ -739,7 +746,7 @@ class SpawnKnobApplicationTests(unittest.TestCase):
 
 
 class SettingsDefinedHarnessTests(unittest.TestCase):
-    """260703-L16 registry openness: orchestration.harnesses entries ADD new harnesses or OVERRIDE
+    """Registry openness: orchestration.harnesses entries ADD new harnesses or OVERRIDE
     builtin defaults; unknown-everywhere ids refuse pointing at the manual; vocab-less user
     harnesses refuse the model/effort knobs with guidance."""
 
@@ -896,12 +903,12 @@ class SettingsDefinedHarnessTests(unittest.TestCase):
 
 
 class SpawnLevelResolutionTests(unittest.TestCase):
-    """260703-L16 (ruling 2026-07-07T08:15): the dispatch level parameter + rolesPerLevel
+    """The dispatch level parameter + rolesPerLevel
     resolution -- repo-local level override > global level override > repo-local role default >
     global role default > detection-gated default -- with the resolved level
     recorded in spawn provenance."""
 
-    # The developer's canonical reviewer economics (docs/reference/harnesses.md walks this).
+    # The canonical reviewer economics (docs/reference/harnesses.md walks this).
     ECONOMICS: ClassVar[dict] = {
         "roles": {"reviewer": {"harness": "claude", "model": "sonnet", "effort": "high"}},
         "rolesPerLevel": {
@@ -1133,7 +1140,7 @@ class SpawnLevelResolutionTests(unittest.TestCase):
         self.assertEqual(row.to_json()["spawnLevel"], "master")
 
     def test_default_level_dispatch_is_unchanged_for_existing_callers(self) -> None:
-        # No settings file, no level, no role env: exactly the pre-L16 dispatch (plain argv),
+        # No settings file, no level, no role env: exactly the pre-level-feature dispatch (plain argv),
         # with the defaulted level recorded as provenance.
         payload = self._spawn()
         self.assertEqual(payload["status"], "spawned-unbriefed")
@@ -1183,7 +1190,7 @@ class SpawnLevelResolutionTests(unittest.TestCase):
 
 
 class SpawnHarnessResolutionTests(unittest.TestCase):
-    """The L13 spawn seam after HFX2-L10: repo-local settings > global settings >
+    """The spawn seam: repo-local settings > global settings >
     detection-gated default, read per-use through the agentic-settings loader."""
 
     def setUp(self) -> None:
@@ -1344,7 +1351,7 @@ class TerminalPasteEndpointTests(unittest.TestCase):
         self.assertNotIn("capture", body)
 
     def test_paste_endpoint_unconfirmed_ships_the_pane_capture(self) -> None:
-        # 260707-HFX-L3 loud failure at the HTTP seam too: an unconfirmed paste carries the pane
+        # Loud failure at the HTTP seam too: an unconfirmed paste carries the pane
         # capture so the caller can see what the target composer actually showed.
         paster = _FakePaster(delivered=False, submitted=False, capture="claude> (still booting)")
         with self._client(paster) as client:

@@ -2,18 +2,21 @@
 
 from __future__ import annotations
 
+import json
+import threading
 from collections.abc import Callable, Sequence
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from agents_remember.errors import (
     HarnessBridgeEpochMismatchError,
     HarnessControlClientError,
     HarnessControlError,
+    HarnessInteractionNotPendingError,
     HarnessRequestConflictError,
 )
 from agents_remember.serving.conversation import register_conversation_routes
@@ -38,12 +41,14 @@ from agents_remember.serving.harness_control_client import (
     read_submission_authority,
     read_submission_status,
     reconcile_control_prompt,
+    respond_control_interaction,
     set_control_effort,
     set_control_model,
     submit_control_prompt,
     withdraw_control_submission,
 )
 from agents_remember.serving.harness_control_models import (
+    pending_interaction_json,
     public_receipt_json,
     public_reconciliation_json,
     submission_authority_json,
@@ -101,6 +106,37 @@ class HarnessWithdrawRequest(BaseModel):
     request_id: str = Field(alias="requestId", min_length=1)
 
 
+class HarnessInteractionResponseRequest(BaseModel):
+    """One session-direct interaction answer; no lifecycle is required anywhere.
+
+    ``response`` is the permission-kind payload (``allow``/``deny``); ``answers`` is the
+    structured user-input payload mapping every question's exact text to its answer, sent
+    to the adapter as the same JSON answers map the gate channel validates.
+    """
+
+    interaction_id: str = Field(alias="interactionId", min_length=1)
+    expected_bridge_epoch: str = Field(alias="expectedBridgeEpoch", min_length=1)
+    response: str | None = Field(default=None, min_length=1)
+    answers: dict[str, str] | None = None
+
+    @field_validator("answers")
+    @classmethod
+    def non_empty_answers(cls, value: dict[str, str] | None) -> dict[str, str] | None:
+        if value is None:
+            return None
+        if not value:
+            raise ValueError("answers must answer at least one question")
+        if any(not question.strip() or not answer.strip() for question, answer in value.items()):
+            raise ValueError("answers must map non-empty question text to non-empty answers")
+        return value
+
+    @model_validator(mode="after")
+    def exactly_one_payload(self) -> HarnessInteractionResponseRequest:
+        if (self.response is None) == (self.answers is None):
+            raise ValueError("exactly one of response or answers is required")
+        return self
+
+
 def resolve_terminal_open_selection(
     *,
     kind: str,
@@ -109,7 +145,7 @@ def resolve_terminal_open_selection(
     effort: str | None,
     workspace: Path,
 ) -> ResolvedLaunch | None:
-    """Translate a complete dashboard pair into L2's single native launch selection."""
+    """Translate a complete dashboard pair into a single native launch selection."""
 
     if model is None and effort is None:
         return None
@@ -142,9 +178,9 @@ def register_harness_control_routes(
     """Register request/response control routes; async output remains on existing streams."""
 
     pre_session = capability_catalog or HarnessCapabilityCatalog(workspace_root)
-    # L0 one-time composition binding: the immutable app-scoped conversation
+    # One-time composition binding: the immutable app-scoped conversation
     # runtime is installed exactly once, here, while every existing authority is
-    # already in hand. Child leaves consume it through the request dependencies
+    # already in hand. Downstream call sites consume it through the request dependencies
     # and never edit this registration again.
     conversation_runtime = ConversationRuntime(
         scope=ConversationScope(
@@ -160,6 +196,9 @@ def register_harness_control_routes(
         authorization=LocalOperatorAuthorizationResolver.for_workspace(workspace_root),
     )
     register_conversation_routes(app, conversation_runtime)
+    # One memo per app registration: the control routes below share it, and a fresh app (tests,
+    # a restarted daemon) starts with an empty one.
+    liveness_memo = _ControlLivenessMemo()
 
     @app.get("/api/harnesses/{harness}/capabilities")
     async def api_harness_capabilities(harness: str, refresh: bool = False) -> JSONResponse:
@@ -186,6 +225,7 @@ def register_harness_control_routes(
             host=host,
             checked_at=liveness_clock(),
             liveness_config=liveness_config,
+            liveness_memo=liveness_memo,
         )
         if isinstance(entry_or_error, JSONResponse):
             return entry_or_error
@@ -203,6 +243,7 @@ def register_harness_control_routes(
             host=host,
             checked_at=liveness_clock(),
             liveness_config=liveness_config,
+            liveness_memo=liveness_memo,
         )
         if isinstance(entry_or_error, JSONResponse):
             return entry_or_error
@@ -220,6 +261,7 @@ def register_harness_control_routes(
             host=host,
             checked_at=liveness_clock(),
             liveness_config=liveness_config,
+            liveness_memo=liveness_memo,
         )
         if isinstance(entry_or_error, JSONResponse):
             return entry_or_error
@@ -237,6 +279,7 @@ def register_harness_control_routes(
             host=host,
             checked_at=liveness_clock(),
             liveness_config=liveness_config,
+            liveness_memo=liveness_memo,
         )
         if isinstance(entry_or_error, JSONResponse):
             return entry_or_error
@@ -257,6 +300,7 @@ def register_harness_control_routes(
             host=host,
             checked_at=liveness_clock(),
             liveness_config=liveness_config,
+            liveness_memo=liveness_memo,
         )
         if isinstance(entry_or_error, JSONResponse):
             return entry_or_error
@@ -283,6 +327,7 @@ def register_harness_control_routes(
             host=host,
             checked_at=liveness_clock(),
             liveness_config=liveness_config,
+            liveness_memo=liveness_memo,
         )
         if isinstance(entry_or_error, JSONResponse):
             return entry_or_error
@@ -306,6 +351,7 @@ def register_harness_control_routes(
             host=host,
             checked_at=liveness_clock(),
             liveness_config=liveness_config,
+            liveness_memo=liveness_memo,
         )
         if isinstance(entry_or_error, JSONResponse):
             return entry_or_error
@@ -340,6 +386,7 @@ def register_harness_control_routes(
             host=host,
             checked_at=liveness_clock(),
             liveness_config=liveness_config,
+            liveness_memo=liveness_memo,
         )
         if isinstance(entry_or_error, JSONResponse):
             return entry_or_error
@@ -355,6 +402,138 @@ def register_harness_control_routes(
             return _control_unavailable(exc)
         return JSONResponse(content=public_reconciliation_json(result), status_code=200)
 
+    @app.post("/api/terminal/{session}/interaction-response")
+    def api_terminal_interaction_response(
+        session: str, request: HarnessInteractionResponseRequest
+    ) -> JSONResponse:
+        """Session-direct answer to one pending vendor interaction.
+
+        This is the lifecycle-free answer channel: the durable gate channel can only project
+        and apply decisions under a lifecycle, so a seat without one could never be answered.
+        The epoch guard is the same authority-descriptor pre-check the other control routes
+        enforce; the exact interaction id remains the respond authority's own guard.
+        """
+
+        entry_or_error = _running_control_entry(
+            session,
+            catalog=catalog,
+            host=host,
+            checked_at=liveness_clock(),
+            liveness_config=liveness_config,
+            liveness_memo=liveness_memo,
+        )
+        if isinstance(entry_or_error, JSONResponse):
+            return entry_or_error
+        try:
+            authority = read_submission_authority(entry_or_error)
+        except HarnessControlError as exc:
+            return _control_unavailable(exc)
+        if authority.bridge_epoch != request.expected_bridge_epoch:
+            return _bridge_epoch_mismatch(
+                HarnessBridgeEpochMismatchError(
+                    request.expected_bridge_epoch, authority.bridge_epoch
+                )
+            )
+        response_text = (
+            request.response
+            if request.response is not None
+            else json.dumps(request.answers, ensure_ascii=False)
+        )
+        try:
+            snapshot = respond_control_interaction(
+                entry_or_error,
+                interaction_id=request.interaction_id,
+                response=response_text,
+            )
+        except HarnessInteractionNotPendingError as exc:
+            return JSONResponse(
+                content={"status": "not-pending", "detail": str(exc)},
+                status_code=409,
+            )
+        except HarnessControlError as exc:
+            return _control_unavailable(exc)
+        return JSONResponse(
+            content={
+                "status": "accepted",
+                "activity": snapshot.activity,
+                "acceptance": snapshot.acceptance,
+                "pendingInteraction": pending_interaction_json(snapshot.pending_interaction),
+            },
+            status_code=200,
+        )
+
+
+CONTROL_LIVENESS_MEMO_TTL_SECONDS = 2.5
+"""Reuse a fresh alive control-route observation instead of re-probing on every request."""
+
+CONTROL_LIVENESS_MEMO_MAX_ENTRIES = 64
+"""Hard ceiling on memoized seats -- far above any plausible count controlled inside one TTL."""
+
+
+class _ControlLivenessMemo:
+    """Short-TTL in-process memo of alive harness-with-endpoint observations.
+
+    Every control route paid full liveness pre-work (tmux has-session + capture-pane subprocesses,
+    an IPC snapshot read, and a full-catalog JSON upsert) before its real work, so one submit
+    cluster (authority -> submit -> status) repeated that per request. Only alive/running
+    harness-with-endpoint observations enter the memo -- failures never do, so failure hysteresis
+    is untouched, the 10s background sweep remains the reconciler, and the control IPC itself is
+    the stronger liveness probe (a dead bridge still fails the request with a typed 503).
+    Trade-off: the hosted interaction synchronizer gets fewer control-route observations (at most
+    one per TTL per session; its sweep cadence is unchanged). The lock serializes the FastAPI
+    threadpool's get/check/put sequences, matching the catalog's own threading idiom.
+    """
+
+    def __init__(self, *, max_entries: int = CONTROL_LIVENESS_MEMO_MAX_ENTRIES) -> None:
+        self._entries: dict[str, tuple[datetime, TerminalCatalogEntry]] = {}
+        self._lock = threading.Lock()
+        self._max_entries = max_entries
+
+    def get(self, session: str, *, at: datetime) -> TerminalCatalogEntry | None:
+        with self._lock:
+            memoized = self._entries.get(session)
+            if memoized is None:
+                return None
+            fresh_until, entry = memoized
+            if at >= fresh_until:
+                del self._entries[session]
+                return None
+            return entry
+
+    def put(self, session: str, *, at: datetime, entry: TerminalCatalogEntry) -> None:
+        """Memoize one alive observation and reclaim the rows no route can reach any more.
+
+        ``get`` drops a row once it expires, but a seat that leaves ``running``
+        never reaches ``get`` again -- ``_running_control_entry`` 404s on the catalog status first --
+        so its whole ``TerminalCatalogEntry`` (``control_raw`` included) would be stranded for the
+        daemon's lifetime. ``put`` is the memo's only growth point, so reclaiming here bounds the
+        dict at every instant, on a path that has just paid for a tmux probe and an IPC snapshot.
+        """
+
+        fresh_until = at + timedelta(seconds=CONTROL_LIVENESS_MEMO_TTL_SECONDS)
+        with self._lock:
+            self._entries[session] = (fresh_until, entry)
+            self._reclaim_locked(at=at)
+
+    def _reclaim_locked(self, *, at: datetime) -> None:
+        """Drop expired rows, then the oldest survivors while the cap is still exceeded.
+
+        Mirrors ``TerminalCatalog.compact``: expiry is the real reclaimer and the cap is only the
+        backstop for a burst of seats memoized inside one TTL window. The row closest to expiry is
+        the cheapest to lose -- it buys the least remaining re-probe relief -- and under the
+        daemon's forward-moving liveness clock the row just stored holds the newest ``fresh_until``,
+        so a ``put`` does not evict its own observation. An overflow eviction only costs the next
+        request for that seat one full observation; it never asserts anything about liveness.
+        """
+
+        live = {
+            session: memoized for session, memoized in self._entries.items() if at < memoized[0]
+        }
+        if len(live) > self._max_entries:
+            by_expiry = sorted(live.items(), key=lambda item: item[1][0])
+            live = dict(by_expiry[len(by_expiry) - self._max_entries :])
+        self._entries = live
+
 
 def _running_control_entry(
     session: str,
@@ -363,10 +542,14 @@ def _running_control_entry(
     host: TerminalLivenessHost,
     checked_at: datetime,
     liveness_config: TerminalCatalogLivenessConfig,
+    liveness_memo: _ControlLivenessMemo,
 ) -> TerminalCatalogEntry | JSONResponse:
     entry = catalog.get(session)
     if entry is None or entry.status != "running":
         return JSONResponse(content={"status": "unknown-session"}, status_code=404)
+    memoized = liveness_memo.get(session, at=checked_at)
+    if memoized is not None:
+        return memoized
     observation = observe_terminal_liveness(
         catalog,
         host,
@@ -385,6 +568,7 @@ def _running_control_entry(
             },
             status_code=409,
         )
+    liveness_memo.put(session, at=checked_at, entry=live_entry)
     return live_entry
 
 

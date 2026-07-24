@@ -16,15 +16,19 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import contextlib
 import json
 import os
+import subprocess
 import sys
 import tempfile
 import threading
 import time
 import unittest
+from collections.abc import MutableMapping
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 from unittest import mock
 
 import httpx
@@ -69,8 +73,18 @@ from agents_remember.serving.actions import (
     GateDecisionIntent,
     evaluate_action,
 )
-from agents_remember.serving.app import _if_none_match_matches, create_app, stream_events
-from agents_remember.serving.build_info import ServingBuild, resolve_serving_build
+from agents_remember.serving.app import (
+    _if_none_match_matches,
+    _ProjectionBodyCache,
+    create_app,
+    stream_events,
+)
+from agents_remember.serving.build_info import (
+    ServingBuild,
+    _git_worktree_dirty,
+    resolve_serving_build,
+)
+from agents_remember.serving.conversation.active.api import SSE_MEDIA_TYPE
 from agents_remember.serving.delta import (
     VOLATILE_AGE_FIELDS,
     DeltaEvent,
@@ -94,6 +108,7 @@ from agents_remember.serving.sim import (
 from agents_remember.serving.static import dashboard_static_dir
 from agents_remember.serving.terminal import TerminalHost
 from pydantic import BaseModel
+from starlette.middleware.gzip import DEFAULT_EXCLUDED_CONTENT_TYPES
 
 _TS = "2026-06-14T10:00:00Z"
 _FRESH_GATE_TS = "2999-01-01T10:00:00+00:00"
@@ -227,7 +242,7 @@ class DeltaTests(unittest.TestCase):
             [{"id": "L1"}, {"id": "L2"}, {"id": "L3"}],
         )
 
-    # ── The change gate (260703-L15): volatile now-relative ages never emit ──────────
+    # ── The change gate: volatile now-relative ages never emit ──────────
 
     def test_volatile_only_lifecycle_change_yields_no_deltas(self) -> None:
         # staleSeconds is recomputed from the tick clock every projection; without the
@@ -256,7 +271,7 @@ class DeltaTests(unittest.TestCase):
         self.assertEqual(deltas[0].data, changed)  # the emitted node carries the fresh age
 
     def test_every_seconds_field_is_classified_volatile_or_content(self) -> None:
-        """L15 review follow-up (L15R-1): the server<->client volatile-field sets are a
+        """The server<->client volatile-field sets are a
         two-sided lockstep guarded only by literal pins. This reflection guard catches the
         server side of the drift: every ``*Seconds`` field on every projection model must be
         EITHER in VOLATILE_AGE_FIELDS (now-relative, stripped from stable forms) OR in the
@@ -522,7 +537,7 @@ class AppTests(unittest.TestCase):
 
 
 class StateEtagTests(unittest.TestCase):
-    """The /api/state change gate (260703-L15): 200 -> ETag -> 304, real change -> new ETag."""
+    """The /api/state change gate: 200 -> ETag -> 304, real change -> new ETag."""
 
     def setUp(self) -> None:
         self._dir = tempfile.TemporaryDirectory()
@@ -602,6 +617,252 @@ class StateEtagTests(unittest.TestCase):
         self.assertFalse(_if_none_match_matches(None, "abc-3"))
 
 
+class ProjectionBodyCacheTests(unittest.TestCase):
+    """/api/state reuses the per-instance dump; ETag/304 gate unchanged."""
+
+    def setUp(self) -> None:
+        self._dir = tempfile.TemporaryDirectory()
+        self.tmp = Path(self._dir.name)
+
+    def tearDown(self) -> None:
+        self._dir.cleanup()
+
+    def _client_with_held_projection(
+        self, held: list[WorkspaceProjection], *, interval: float = 0.02
+    ) -> TestClient:
+        patcher = mock.patch(
+            "agents_remember.serving.projector.project_and_write",
+            side_effect=lambda config, *, now, provider_refresher=None, landing_state=None: held[0],
+        )
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        # Same posture as StateEtagTests: the world changes only through the mocked
+        # project_and_write, so the tick loop stays interval-paced.
+        return TestClient(create_app(_config(self.tmp), interval=interval, watch_changes=False))
+
+    def test_cache_keys_on_instance_identity(self) -> None:
+        cache = _ProjectionBodyCache()
+        first = _projection()
+        body = cache.body(first)
+        self.assertIs(cache.body(first), body)  # same instance: memo hit, shared read-only dict
+        refreshed = _projection(lifecycles=(_lifecycle("L2"),))
+        new_body = cache.body(refreshed)  # a new instance refreshes the memo
+        self.assertIsNot(new_body, body)
+        self.assertEqual(new_body["lifecycles"][0]["id"], "L2")
+
+    @staticmethod
+    def _memoized_body(response: httpx.Response) -> dict[str, object]:
+        """The served body minus ``supervisorHeartbeat`` (deliberately volatile, never cached)."""
+        body = response.json()
+        body.pop("supervisorHeartbeat", None)
+        return body
+
+    def test_repeat_polls_share_one_dump_per_published_instance(self) -> None:
+        # interval=100: prime publishes once and the loop never ticks again during the test,
+        # so the published instance (the memo key) is stable across these requests. Freshness
+        # after a real content change is covered by StateEtagTests (a tick swaps the instance,
+        # which refreshes the memo) and by StreamSnapshotCacheTests below.
+        held = [_projection(lifecycles=(_lifecycle("L1"),))]
+        with (
+            # autospec+side_effect: count calls while calling the real dump through.
+            mock.patch.object(
+                WorkspaceProjection,
+                "model_dump",
+                autospec=True,
+                side_effect=WorkspaceProjection.model_dump,
+            ) as dump_spy,
+            self._client_with_held_projection(held, interval=100) as client,
+        ):
+            first = client.get("/api/state")
+            self.assertEqual(first.status_code, 200)
+            etag = first.headers["etag"]
+            self.assertEqual(dump_spy.call_count, 1)
+
+            second = client.get("/api/state")
+            self.assertEqual(second.status_code, 200)
+            # Same memoized payload; only the volatile heartbeat tail may move.
+            self.assertEqual(self._memoized_body(second), self._memoized_body(first))
+            self.assertEqual(dump_spy.call_count, 1)  # memo hit: no re-dump
+
+            cached = client.get("/api/state", headers={"If-None-Match": etag})
+            self.assertEqual(cached.status_code, 304)
+            self.assertEqual(dump_spy.call_count, 1)  # the 304 path never touches the body
+
+
+class StreamSnapshotCacheTests(unittest.IsolatedAsyncioTestCase):
+    """N SSE subscribers share the one per-instance snapshot dump."""
+
+    def setUp(self) -> None:
+        self._dir = tempfile.TemporaryDirectory()
+        self.tmp = Path(self._dir.name)
+
+    def tearDown(self) -> None:
+        self._dir.cleanup()
+
+    async def test_subscribers_share_one_snapshot_dump_until_content_changes(self) -> None:
+        projector = Projector(_config(self.tmp), interval=100)
+        await projector.prime()
+        with mock.patch.object(
+            WorkspaceProjection,
+            "model_dump",
+            autospec=True,
+            side_effect=WorkspaceProjection.model_dump,
+        ) as dump_spy:
+            gen1 = stream_events(projector)
+            first = await asyncio.wait_for(gen1.__anext__(), timeout=1)
+            self.assertEqual(first.event, "snapshot")
+            gen2 = stream_events(projector)
+            second = await asyncio.wait_for(gen2.__anext__(), timeout=1)
+            self.assertEqual(second.event, "snapshot")
+            self.assertEqual(dump_spy.call_count, 1)  # one dump served both subscribers
+            self.assertEqual(first.data, second.data)
+
+            # The per-connect volatile injection rides a copy: mutating one subscriber's
+            # payload never pollutes what the next subscriber is served.
+            assert isinstance(first.data, dict)
+            first.data["servingBuild"] = {"version": "injected"}
+            gen3 = stream_events(projector)
+            third = await asyncio.wait_for(gen3.__anext__(), timeout=1)
+            self.assertNotIn("servingBuild", third.data)
+            self.assertEqual(dump_spy.call_count, 1)
+
+            # A content change mints a new revision -> the next snapshot re-dumps once.
+            _, current = projector.current()
+            assert current is not None
+            projector._publish_projection(
+                current.model_copy(update={"lifecycles": [_lifecycle("L2")]})
+            )
+            gen4 = stream_events(projector)
+            fourth = await asyncio.wait_for(gen4.__anext__(), timeout=1)
+            self.assertEqual(fourth.event, "snapshot")
+            self.assertEqual(fourth.data["lifecycles"][0]["id"], "L2")
+            self.assertEqual(dump_spy.call_count, 2)
+        for gen in (gen1, gen2, gen3, gen4):
+            await gen.aclose()
+        self.assertEqual(len(projector._subscribers), 0)
+
+
+class GzipMiddlewareTests(unittest.TestCase):
+    """Gzip for big JSON GETs; SSE stays uncompressed and unbuffered."""
+
+    def setUp(self) -> None:
+        self._dir = tempfile.TemporaryDirectory()
+        self.tmp = Path(self._dir.name)
+
+    def tearDown(self) -> None:
+        self._dir.cleanup()
+
+    def _client_with_held_projection(self, held: list[WorkspaceProjection]) -> TestClient:
+        patcher = mock.patch(
+            "agents_remember.serving.projector.project_and_write",
+            side_effect=lambda config, *, now, provider_refresher=None, landing_state=None: held[0],
+        )
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        return TestClient(create_app(_config(self.tmp), interval=0.02, watch_changes=False))
+
+    def test_large_json_get_is_gzipped_for_gzip_clients(self) -> None:
+        held = [_projection(lifecycles=tuple(_lifecycle(f"L{i}") for i in range(50)))]
+        with self._client_with_held_projection(held) as client:
+            identity = client.get("/api/state", headers={"Accept-Encoding": "identity"})
+            self.assertEqual(identity.status_code, 200)
+            self.assertNotIn("content-encoding", identity.headers)
+
+            zipped = client.get("/api/state", headers={"Accept-Encoding": "gzip"})
+            self.assertEqual(zipped.status_code, 200)
+            self.assertEqual(zipped.headers["content-encoding"], "gzip")
+            # The wire body really shrank (httpx transparently decodes for .json()).
+            self.assertLess(int(zipped.headers["content-length"]), len(identity.content))
+            zipped_body, identity_body = zipped.json(), identity.json()
+            # supervisorHeartbeat is deliberately volatile (computed at response time).
+            zipped_body.pop("supervisorHeartbeat", None)
+            identity_body.pop("supervisorHeartbeat", None)
+            self.assertEqual(zipped_body, identity_body)
+
+    def test_conversation_sse_media_type_is_gzip_excluded(self) -> None:
+        # The conversation event streams ride plain StreamingResponse with the same media
+        # type; pin that starlette's gzip exclusion keeps covering them. The live-flow proof
+        # for the /api/stream channel is GzipSseFlowTests below (raw-ASGI: this starlette's
+        # TestClient awaits app completion, so an infinite SSE stream cannot go through it).
+        self.assertTrue(
+            any(SSE_MEDIA_TYPE.startswith(excluded) for excluded in DEFAULT_EXCLUDED_CONTENT_TYPES)
+        )
+
+
+class GzipSseFlowTests(unittest.IsolatedAsyncioTestCase):
+    """Through the real middleware stack, /api/stream flows uncompressed."""
+
+    def setUp(self) -> None:
+        self._dir = tempfile.TemporaryDirectory()
+        self.tmp = Path(self._dir.name)
+
+    def tearDown(self) -> None:
+        self._dir.cleanup()
+
+    async def test_snapshot_frame_flows_uncompressed_before_the_stream_ends(self) -> None:
+        held = [_projection(lifecycles=(_lifecycle("L1"),))]
+        patcher = mock.patch(
+            "agents_remember.serving.projector.project_and_write",
+            side_effect=lambda config, *, now, provider_refresher=None, landing_state=None: held[0],
+        )
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        app = create_app(_config(self.tmp), interval=100, watch_changes=False)
+        scope = {
+            "type": "http",
+            "asgi": {"version": "3.0"},
+            "http_version": "1.1",
+            "method": "GET",
+            "scheme": "http",
+            "path": "/api/stream",
+            "raw_path": b"/api/stream",
+            "query_string": b"",
+            "root_path": "",
+            "headers": [(b"host", b"testserver"), (b"accept-encoding", b"gzip")],
+            "client": ("127.0.0.1", 12345),
+            "server": ("127.0.0.1", 80),
+        }
+        messages: list[MutableMapping[str, Any]] = []
+        started = asyncio.Event()
+        first_frame = asyncio.Event()
+
+        requested = False
+
+        async def receive() -> dict[str, Any]:
+            nonlocal requested
+            if not requested:
+                requested = True
+                return {"type": "http.request", "body": b"", "more_body": False}
+            await asyncio.Event().wait()  # no further client input; ends with the task
+            raise AssertionError("unreachable")
+
+        async def send(message: MutableMapping[str, Any]) -> None:
+            messages.append(message)
+            if message["type"] == "http.response.start":
+                started.set()
+            elif message["type"] == "http.response.body" and b"\n\n" in message.get("body", b""):
+                first_frame.set()  # a COMPLETE terminated frame while the stream is open
+
+        async with app.router.lifespan_context(app):
+            task = asyncio.create_task(app(scope, receive, send))
+            try:
+                # If GZipMiddleware buffered the stream into a compression window these
+                # waits would expire: no bytes could arrive before the connection ends.
+                await asyncio.wait_for(started.wait(), timeout=2)
+                await asyncio.wait_for(first_frame.wait(), timeout=2)
+            finally:
+                task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await task
+        start = next(m for m in messages if m["type"] == "http.response.start")
+        headers = {k.decode().lower(): v.decode() for k, v in start["headers"]}
+        self.assertEqual(start["status"], 200)
+        self.assertTrue(headers["content-type"].startswith("text/event-stream"))
+        self.assertNotIn("content-encoding", headers)  # SSE is gzip-excluded
+        body = b"".join(m.get("body", b"") for m in messages if m["type"] == "http.response.body")
+        self.assertIn(b"event: snapshot", body)  # plain SSE text, not a gzip window
+
+
 class BuildInfoTests(unittest.TestCase):
     def test_resolves_commit_in_a_git_checkout(self) -> None:
         build = resolve_serving_build()
@@ -619,6 +880,8 @@ class BuildInfoTests(unittest.TestCase):
             build = resolve_serving_build(anchor=Path(tmp))
         self.assertIsNone(build.commit)
         self.assertNotIn("commit", build.payload())  # never a faked hash
+        self.assertFalse(build.dirty)
+        self.assertNotIn("dirty", build.payload())  # the wheel path stays clean
 
     def test_payload_shape_is_camel_case(self) -> None:
         build = ServingBuild(
@@ -636,6 +899,106 @@ class BuildInfoTests(unittest.TestCase):
                 "dashboardBuild": "dashboard-123",
             },
         )
+
+    def test_dirty_flag_is_additive_on_the_payload(self) -> None:
+        clean = ServingBuild(version="9.9.9", commit="abc1234", booted_at="2026-07-07T05:00:00Z")
+        self.assertNotIn("dirty", clean.payload())  # omitted, never a faked "clean" fact
+        dirty = ServingBuild(
+            version="9.9.9", commit="abc1234", booted_at="2026-07-07T05:00:00Z", dirty=True
+        )
+        self.assertEqual(dirty.payload()["dirty"], True)
+
+    def test_dirty_detection_in_a_checkout(self) -> None:
+        def git(root: Path, *argv: str) -> None:
+            subprocess.run(
+                ["git", *argv],
+                cwd=root,
+                check=True,
+                capture_output=True,
+                stdin=subprocess.DEVNULL,
+            )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            git(root, "init", "--quiet")
+            (root / "tracked.txt").write_text("one\n", encoding="utf-8")
+            git(root, "add", "tracked.txt")
+            git(
+                root,
+                "-c",
+                "user.email=test@example.com",
+                "-c",
+                "user.name=test",
+                "commit",
+                "--quiet",
+                "-m",
+                "init",
+            )
+            clean = resolve_serving_build(anchor=root)
+            self.assertIsNotNone(clean.commit)
+            self.assertFalse(clean.dirty)  # a committed tree is clean
+
+            (root / "loose.txt").write_text("untracked\n", encoding="utf-8")
+            self.assertTrue(resolve_serving_build(anchor=root).dirty)  # untracked counts
+
+            git(root, "add", "loose.txt")
+            git(
+                root,
+                "-c",
+                "user.email=test@example.com",
+                "-c",
+                "user.name=test",
+                "commit",
+                "--quiet",
+                "-m",
+                "track loose",
+            )
+            (root / "tracked.txt").write_text("two\n", encoding="utf-8")
+            self.assertTrue(resolve_serving_build(anchor=root).dirty)  # tracked edits count
+
+    def test_dirty_probe_is_tri_state_and_fails_open(self) -> None:
+        # The probe must never fabricate a "clean" tree it did not verify. Proven-clean
+        # is False, proven-dirty is True, and an UNPROVABLE probe (git status raises or exits
+        # non-zero) fails OPEN to None -- "not proven clean", never pristine. Reverting to the
+        # old fail-closed `return False` collapses both unknown cases to a fabricated clean.
+        run = "agents_remember.serving.build_info.subprocess.run"
+        anchor = Path("/some/checkout")
+
+        dirty = subprocess.CompletedProcess(args=[], returncode=0, stdout=" M edited.py\n")
+        with mock.patch(run, return_value=dirty):
+            self.assertIs(_git_worktree_dirty(anchor), True)
+
+        clean = subprocess.CompletedProcess(args=[], returncode=0, stdout="")
+        with mock.patch(run, return_value=clean):
+            self.assertIs(_git_worktree_dirty(anchor), False)  # proven clean, distinct from None
+
+        # git present, HEAD resolved, but `status` specifically raises (locked index, etc.).
+        with mock.patch(run, side_effect=OSError("git status: index locked")):
+            self.assertIsNone(_git_worktree_dirty(anchor))  # unknown, NOT a fabricated clean
+
+        # `status` runs but exits non-zero (e.g. a transient repo error).
+        failed = subprocess.CompletedProcess(args=[], returncode=128, stdout="", stderr="fatal")
+        with mock.patch(run, return_value=failed):
+            self.assertIsNone(_git_worktree_dirty(anchor))
+
+    def test_status_failure_does_not_assert_a_pristine_tree(self) -> None:
+        # End-to-end: a commit DID resolve (rev-parse ok) but `git status` failed, so the
+        # stamp must serve the hash WITHOUT claiming the tree is clean. Unknown dirtiness is
+        # omitted from the wire exactly like a clean tree, but the object holds None (not False)
+        # so nothing internally asserts a verified-pristine tree.
+        def fake_run(argv: list[str], *args: Any, **kwargs: Any) -> subprocess.CompletedProcess:
+            if argv[:2] == ["git", "rev-parse"]:
+                return subprocess.CompletedProcess(argv, 0, stdout="deadbee\n", stderr="")
+            raise OSError("git status: index locked")
+
+        with mock.patch("agents_remember.serving.build_info.subprocess.run", side_effect=fake_run):
+            build = resolve_serving_build(anchor=Path("/some/checkout"))
+
+        self.assertEqual(build.commit, "deadbee")  # the hash resolved and rides the wire
+        self.assertIsNone(build.dirty)  # dirtiness is UNKNOWN -- not the fail-closed False
+        payload = build.payload()
+        self.assertEqual(payload["commit"], "deadbee")
+        self.assertNotIn("dirty", payload)  # absence is not a pristine claim, just no warning
 
 
 class ActionGateTests(unittest.TestCase):
@@ -1102,6 +1465,14 @@ class CliRunTests(unittest.TestCase):
         load.assert_called_once_with("/abs/settings.json")
         create.assert_called_once()
         serve.assert_called_once()
+        # A bounded graceful-shutdown window must be passed so an open SSE
+        # stream cannot make SIGTERM hang the process forever (port released, zombie survives).
+        _, kwargs = serve.call_args
+        self.assertEqual(
+            kwargs["timeout_graceful_shutdown"],
+            cli_dashboard.DASHBOARD_GRACEFUL_SHUTDOWN_SECONDS,
+        )
+        self.assertGreater(kwargs["timeout_graceful_shutdown"], 0)
 
     def test_run_reports_config_error(self) -> None:
         with mock.patch.object(cli_dashboard, "load_config", side_effect=ConfigError("bad")):
@@ -1124,6 +1495,11 @@ class CliRunTests(unittest.TestCase):
         self.assertEqual(args[0], "agents_remember.cli.dashboard:_dev_app")
         self.assertTrue(kwargs["factory"])
         self.assertTrue(kwargs["reload"])
+        # The reload dev path shuts down on the same bounded graceful window.
+        self.assertEqual(
+            kwargs["timeout_graceful_shutdown"],
+            cli_dashboard.DASHBOARD_GRACEFUL_SHUTDOWN_SECONDS,
+        )
 
     def test_run_reload_with_sim_is_rejected(self) -> None:
         with mock.patch.object(cli_dashboard, "load_config", return_value=object()):

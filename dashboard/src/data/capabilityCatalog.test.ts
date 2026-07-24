@@ -11,9 +11,10 @@ import {
   cacheStatusNote,
   fetchHarnessCapabilities,
   harnessCapabilities,
+  HARNESS_CAPABILITIES_REQUEST_TIMEOUT_MS,
 } from "./capabilityCatalog";
 
-// The pre-session capability store (260715-FEUI-L3 R1/R2): dynamic-only, verbatim errors,
+// The pre-session capability store: dynamic-only, verbatim errors,
 // miss-cost honesty. No fallback catalog exists anywhere in this module — these tests prove the
 // store can only ever contain what the daemon actually said.
 
@@ -21,6 +22,16 @@ const ok = (body: unknown) =>
   ({ ok: true, status: 200, json: async () => body }) as Response;
 const err = (status: number, body: unknown) =>
   ({ ok: false, status, json: async () => body }) as Response;
+
+// A half-dead socket (live wedge class): never settles on its own; rejects only when
+// the request's abort signal fires — what a REAL fetch does when the fetchWithTimeout bound
+// aborts it.
+const hungSocketImplementation = (_url: string, init?: RequestInit) =>
+  new Promise((_resolve, reject) => {
+    init?.signal?.addEventListener("abort", () =>
+      reject(new DOMException("The operation was aborted.", "AbortError")),
+    );
+  });
 
 beforeEach(() => capabilityCatalogStore.setState({ perHarness: {} }));
 afterEach(() => vi.unstubAllGlobals());
@@ -145,6 +156,31 @@ describe("fetchHarnessCapabilities", () => {
     vi.stubGlobal("fetch", fetchMock);
     await Promise.all([fetchHarnessCapabilities("claude"), fetchHarnessCapabilities("claude")]);
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("a hung capabilities socket expires into a transport error and releases the single-flight slot", async () => {
+    vi.useFakeTimers();
+    try {
+      const fetchMock = vi
+        .fn()
+        .mockImplementationOnce(hungSocketImplementation)
+        .mockResolvedValueOnce(ok(capabilityEnvelope("claude", "hit")));
+      vi.stubGlobal("fetch", fetchMock);
+
+      const hung = fetchHarnessCapabilities("claude");
+      await vi.advanceTimersByTimeAsync(HARNESS_CAPABILITIES_REQUEST_TIMEOUT_MS);
+      const entry = await hung; // NEVER throws — the ordinary transport error entry
+      expect(entry.fetchState).toBe("error");
+      expect(entry.error?.httpStatus).toBeNull();
+      expect(entry.error?.status).toBe("transport");
+
+      // Slot released: a later read re-fires and succeeds instead of joining the hung socket.
+      const recovered = await fetchHarnessCapabilities("claude");
+      expect(recovered.fetchState).toBe("idle");
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("refresh:true NEVER silently joins an in-flight plain read — it chains a real refresh (review finding 3)", async () => {

@@ -1,4 +1,4 @@
-"""Contract tests for the 260718-CHATS-L2E native control-plane substrate."""
+"""Contract tests for the native control-plane substrate."""
 
 from __future__ import annotations
 
@@ -28,6 +28,7 @@ from agents_remember.serving.codex_app_server_adapter import (
 )
 from agents_remember.serving.harness_capabilities import CapabilitySnapshot, SetResult
 from agents_remember.serving.harness_control_bridge import HarnessControlBridge
+from agents_remember.serving.harness_control_claude import ClaudeStreamJsonAdapter
 from agents_remember.serving.harness_control_client import (
     _interrupt_result,
     _operation_timeline,
@@ -745,6 +746,160 @@ class PiInterruptTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn("nothing to abort", result.detail or "")
         finally:
             await adapter.stop("forced")
+
+
+# ---------------------------------------------------------------------------
+# Claude interrupt (REAL stream-json adapter, fake transport, bridge + IPC)
+# ---------------------------------------------------------------------------
+
+
+_CLAUDE_FIXTURES = Path(__file__).parent / "fixtures" / "claude_stream_json"
+_CLAUDE_SESSION = "11111111-1111-4111-8111-111111111111"
+
+
+def _claude_fixture(version: str, name: str) -> list[dict[str, object]]:
+    return [
+        json.loads(line) for line in (_CLAUDE_FIXTURES / version / name).read_text().splitlines()
+    ]
+
+
+def _claude_replay(written: Mapping[str, object]) -> dict[str, object]:
+    return {**written, "isReplay": True, "session_id": _CLAUDE_SESSION, "timestamp": NOW}
+
+
+class _FakeClaudeTransport:
+    def __init__(self, frames: list[dict[str, object]] | None = None) -> None:
+        self.frames: asyncio.Queue[dict[str, object] | None] = asyncio.Queue()
+        for frame in frames or []:
+            self.frames.put_nowait(frame)
+        self.writes: list[dict[str, object]] = []
+        self.stop_modes: list[ShutdownMode] = []
+        self._returncode: int | None = None
+        self._write_event = asyncio.Event()
+
+    @property
+    def returncode(self) -> int | None:
+        return self._returncode
+
+    async def start(self, argv, *, cwd, env) -> None:
+        del argv, cwd, env
+
+    async def read_frame(self) -> dict[str, object] | None:
+        return await self.frames.get()
+
+    async def write_frame(self, frame, *, before_write=None) -> None:
+        if before_write is not None:
+            before_write()
+        self.writes.append(dict(frame))
+        self._write_event.set()
+
+    async def stop(self, mode: ShutdownMode) -> None:
+        self.stop_modes.append(mode)
+        self._returncode = 0
+        self.frames.put_nowait(None)
+
+    def feed(self, frame: Mapping[str, object]) -> None:
+        self.frames.put_nowait(dict(frame))
+
+    async def wait_for_writes(self, count: int) -> None:
+        while len(self.writes) < count:
+            self._write_event.clear()
+            if len(self.writes) < count:
+                await asyncio.wait_for(self._write_event.wait(), timeout=1.0)
+
+
+class ClaudeInterruptTests(unittest.IsolatedAsyncioTestCase):
+    """The REAL claude adapter behind the bridge + IPC interrupt route (probe-locked shape)."""
+
+    async def _serve(self, adapter, identity: ControlIdentity, tmp: str):
+        bridge = HarnessControlBridge(identity, adapter, clock=lambda: NOW)
+        await bridge.start(_launch(identity, harness_id="claude"))
+        endpoint = LocalControlEndpoint.for_session(Path(tmp), identity)
+        server = HarnessControlServer(endpoint, bridge)
+        await server.start()
+        return bridge, server, _ControlledEntry(identity, endpoint.path)
+
+    async def _active_turn(self, transport: _FakeClaudeTransport, bridge) -> None:
+        submission = asyncio.create_task(
+            bridge.submit(
+                bridge.prompt("write an essay", source="terminal", request_id="req-int-1")
+            )
+        )
+        await transport.wait_for_writes(4)
+        transport.feed(_claude_replay(transport.writes[3]))
+        receipt = await asyncio.wait_for(submission, timeout=1.0)
+        assert receipt.acceptance == "immediate"
+
+    async def test_interrupt_routes_through_bridge_and_ipc_and_settles_interrupted(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            identity = _identity("claude-int-ipc")
+            transport = _FakeClaudeTransport(_claude_fixture("2.1.210", "initialization.jsonl"))
+            adapter = ClaudeStreamJsonAdapter(
+                transport_factory=lambda: transport, clock=lambda: NOW
+            )
+            bridge, server, entry = await self._serve(adapter, identity, tmp)
+            try:
+                await self._active_turn(transport, bridge)
+                descriptor = await asyncio.to_thread(read_submission_authority, entry)
+                interrupt_task = asyncio.create_task(
+                    asyncio.to_thread(
+                        interrupt_control,
+                        entry,
+                        expected_bridge_epoch=descriptor.bridge_epoch,
+                    )
+                )
+                await transport.wait_for_writes(5)
+                self.assertEqual(
+                    transport.writes[4],
+                    {
+                        "type": "control_request",
+                        "request_id": "ar-claude-interrupt-1",
+                        "request": {"subtype": "interrupt"},
+                    },
+                )
+                control_response, aborted, marker, result = _claude_fixture(
+                    "2.1.217", "interrupt.jsonl"
+                )
+                transport.feed(control_response)
+                acknowledgement = await asyncio.wait_for(interrupt_task, timeout=5.0)
+                self.assertEqual(acknowledgement.acknowledgement, "accepted")
+                self.assertEqual(acknowledgement.bridge_epoch, descriptor.bridge_epoch)
+                self.assertEqual(acknowledgement.vendor_correlation_id, "ar-claude-interrupt-1")
+                assert acknowledgement.operation is not None
+                self.assertEqual(acknowledgement.operation.kind, "prompt")
+
+                transport.feed(aborted)
+                transport.feed(marker)
+                transport.feed(result)
+                await _settle()
+                results = [entry for entry in bridge.transcript() if entry.role == "result"]
+                self.assertEqual(len(results), 1)
+                assert results[0].terminal_result is not None
+                self.assertEqual(results[0].terminal_result.outcome, "cancelled")
+            finally:
+                await server.close()
+                await bridge.stop("forced")
+
+    async def test_interrupt_without_an_active_turn_fails_typed_over_ipc(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            identity = _identity("claude-int-idle")
+            transport = _FakeClaudeTransport(_claude_fixture("2.1.210", "initialization.jsonl"))
+            adapter = ClaudeStreamJsonAdapter(
+                transport_factory=lambda: transport, clock=lambda: NOW
+            )
+            bridge, server, entry = await self._serve(adapter, identity, tmp)
+            try:
+                descriptor = await asyncio.to_thread(read_submission_authority, entry)
+                with self.assertRaisesRegex(HarnessControlError, "no active Claude turn"):
+                    await asyncio.to_thread(
+                        interrupt_control,
+                        entry,
+                        expected_bridge_epoch=descriptor.bridge_epoch,
+                    )
+                self.assertEqual(len(transport.writes), 3)
+            finally:
+                await server.close()
+                await bridge.stop("forced")
 
 
 # ---------------------------------------------------------------------------

@@ -1,13 +1,14 @@
 import { useStore } from "zustand";
 import { createStore } from "zustand/vanilla";
 
+import { fetchWithTimeout } from "./fetchWithTimeout";
 import type {
   CapabilityCacheStatus,
   CapabilityEnvelope,
 } from "../types/harnessCapabilities";
 import { CAPABILITY_SCHEMA } from "../types/harnessCapabilities";
 
-// The pre-session capability catalog store (260715-FEUI-L3 R1, design §4.2): one envelope per
+// The pre-session capability catalog store (design §4.2): one envelope per
 // harness, mirrored from `GET /api/harnesses/{h}/capabilities` and NOTHING else. HONESTY
 // INVARIANTS live in this shape:
 //   - DYNAMIC-ONLY: there is no fallback catalog, no seeded rows, no persistence — a picker is
@@ -61,16 +62,16 @@ function patchHarness(harness: string, entry: PerHarnessCapabilities): void {
 }
 
 /**
- * COST HONESTY (R2): the daemon runs the same short-lived native discovery process on a cache
+ * COST HONESTY: the daemon runs the same short-lived native discovery process on a cache
  * MISS as on refresh=true — the flag only forces invalidation. So the miss/loading treatment and
  * the refresh treatment carry the SAME cost naming. GENERIC copy only: observed per-harness
- * seconds are L5 evidence and never become UI constants.
+ * seconds are runtime evidence and never become UI constants.
  */
 export function capabilityCostNote(harness: string): string {
   return `starts a short-lived native ${harness} process`;
 }
 
-/** Loading copy — both modes carry the SAME `capabilityCostNote` cost naming (R2). */
+/** Loading copy — both modes carry the SAME `capabilityCostNote` cost naming. */
 export function capabilityLoadingCopy(harness: string, mode: "initial" | "refresh"): string {
   return mode === "refresh"
     ? `refreshing ${harness} capabilities — ${capabilityCostNote(harness)}`
@@ -93,7 +94,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
 
-// Validates every field a picker actually reads (review finding 4): a malformed 200 must land
+// Validates every field a picker actually reads: a malformed 200 must land
 // in the honest schema-mismatch error path, never crash rendering after being adopted.
 function isEffortOption(value: unknown): boolean {
   return (
@@ -135,7 +136,7 @@ function isEnvelope(body: unknown): body is CapabilityEnvelope {
 }
 
 async function readError(response: Response): Promise<CapabilityCatalogError> {
-  // A non-JSON/shapeless error body is a TRANSPORT-level fact (review finding 2): the server's
+  // A non-JSON/shapeless error body is a TRANSPORT-level fact: the server's
   // own vocabulary (`capability-unavailable`/`control-unavailable`) is used only when the
   // server actually said it — a 502 gateway page must never wear a server status word.
   let status = "transport";
@@ -151,8 +152,8 @@ async function readError(response: Response): Promise<CapabilityCatalogError> {
 }
 
 // Per-harness single-flight (the daemon has its own per-key lock; the client mirrors it so a
-// re-rendering picker never stacks concurrent GETs). Refresh semantics are EXPLICIT (review
-// finding 3): a plain read joins any in-flight read, but `refresh: true` is a promise of
+// re-rendering picker never stacks concurrent GETs). Refresh semantics are EXPLICIT: a plain
+// read joins any in-flight read, but `refresh: true` is a promise of
 // daemon-side invalidation — it joins only an in-flight REFRESH, and chains behind an in-flight
 // plain read so the invalidation actually happens.
 interface InflightRead {
@@ -161,6 +162,14 @@ interface InflightRead {
 }
 const inflight = new Map<string, InflightRead>();
 let catalogGeneration = 0;
+
+/**
+ * Hard bound for one capabilities read: the per-key single-flight above makes an unbounded hung
+ * socket fatal to every later read of that harness — it would join the hung promise and stay
+ * `loading`/`refreshing` forever (the catalog-poll wedge class). Expiry lands as the
+ * ordinary `transport` error entry and releases the slot.
+ */
+export const HARNESS_CAPABILITIES_REQUEST_TIMEOUT_MS = 10_000;
 
 /**
  * Dev-bench scenario boundary: discard both rendered catalog state and single-flight ownership.
@@ -206,7 +215,7 @@ export function fetchHarnessCapabilities(
   patchHarness(harness, {
     ...current,
     // A refresh — or any re-read over an existing snapshot — is 'refreshing'; only the very
-    // first read of a harness is 'loading'. Both render the same cost naming (R2).
+    // first read of a harness is 'loading'. Both render the same cost naming.
     fetchState: refresh || current.envelope ? "refreshing" : "loading",
     error: undefined,
   });
@@ -215,8 +224,9 @@ export function fetchHarnessCapabilities(
     let entry: PerHarnessCapabilities;
     try {
       const query = refresh ? "?refresh=true" : "";
-      const response = await fetch(
+      const response = await fetchWithTimeout(
         `${base}/api/harnesses/${encodeURIComponent(harness)}/capabilities${query}`,
+        HARNESS_CAPABILITIES_REQUEST_TIMEOUT_MS,
       );
       if (!response.ok) {
         entry = { fetchState: "error", error: await readError(response) };

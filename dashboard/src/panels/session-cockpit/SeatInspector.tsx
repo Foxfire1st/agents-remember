@@ -62,11 +62,13 @@ export function SeatInspector({
   cockpit,
   pickups = EMPTY_PICKUPS,
   heartbeat = null,
+  visible = true,
 }: {
   session: OpenSession | undefined;
   cockpit: PerSessionCockpit | undefined;
   pickups?: readonly AgentPickupNode[];
   heartbeat?: SupervisorHeartbeat | null;
+  visible?: boolean;
 }) {
   const [active, setActive] = useState<InspectorTab>("evidence");
   const uid = useId();
@@ -147,7 +149,12 @@ export function SeatInspector({
         hidden={active !== "bus"}
         data-testid="inspector-panel-bus"
       >
-        <BusPane session={session} pickups={pickups} heartbeat={heartbeat} />
+        <BusPane
+          session={session}
+          pickups={pickups}
+          heartbeat={heartbeat}
+          ageClockActive={visible && active === "bus"}
+        />
       </div>
     </div>
   );

@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
+import { HARNESS_CATALOG_REQUEST_TIMEOUT_MS } from "./harnessCatalog";
 import {
   attachSessionToLeaf,
   bracketedPaste,
@@ -15,9 +16,20 @@ import {
   submitAndConfirm,
   terminateTerminalSession,
   terminalSocketUrl,
+  TERMINAL_CATALOG_REQUEST_TIMEOUT_MS,
   uploadSessionImage,
   type TerminalSink,
 } from "./terminal";
+
+// A half-dead socket (live wedge class): never settles on its own; rejects only when
+// the request's abort signal fires — what a REAL fetch does when the fetchWithTimeout bound
+// aborts it. Unbounded, every caller single-flighted behind this promise wedges with it.
+const hungSocketImplementation = (_url: string, init?: RequestInit) =>
+  new Promise((_resolve, reject) => {
+    init?.signal?.addEventListener("abort", () =>
+      reject(new DOMException("The operation was aborted.", "AbortError")),
+    );
+  });
 
 // A minimal WebSocket stand-in: records sends, lets the test push frames + close events.
 class FakeSocket {
@@ -572,6 +584,46 @@ describe("fetchTerminalSessions", () => {
     expect(await fetchTerminalSessionsOrNull()).toBeNull();
     vi.unstubAllGlobals();
   });
+
+  it("shares one in-flight catalog read between concurrent callers (boot/poll single-flight)", async () => {
+    const sessions = [{ id: "s1", kind: "terminal" }];
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: () => Promise.resolve({ sessions }) });
+    vi.stubGlobal("fetch", fetchMock);
+    const [one, two] = await Promise.all([
+      fetchTerminalSessionsOrNull(),
+      fetchTerminalSessionsOrNull(),
+    ]);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(one).toEqual(sessions);
+    expect(two).toEqual(sessions);
+    // Settle cleared the slot: the next poll beat re-fires.
+    expect(await fetchTerminalSessionsOrNull()).toEqual(sessions);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    vi.unstubAllGlobals();
+  });
+
+  it("a hung catalog socket expires within the bound as a failed beat; the next beat re-fires on a fresh socket", async () => {
+    vi.useFakeTimers();
+    try {
+      const sessions = [{ id: "s1", kind: "terminal" }];
+      const fetchMock = vi
+        .fn()
+        .mockImplementationOnce(hungSocketImplementation)
+        .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ sessions }) });
+      vi.stubGlobal("fetch", fetchMock);
+
+      const hung = fetchTerminalSessionsOrNull();
+      await vi.advanceTimersByTimeAsync(TERMINAL_CATALOG_REQUEST_TIMEOUT_MS);
+      await expect(hung).resolves.toBeNull(); // an expired beat is the ordinary null failure, not a wedge
+
+      // The bound released the single-flight slot: the next read fires a fresh request and succeeds.
+      await expect(fetchTerminalSessionsOrNull()).resolves.toEqual(sessions);
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+      vi.unstubAllGlobals();
+    }
+  });
 });
 
 describe("terminateTerminalSession", () => {
@@ -845,5 +897,39 @@ describe("fetchHarnesses", () => {
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("offline")));
     expect(await fetchHarnesses()).toEqual([]);
     vi.unstubAllGlobals();
+  });
+
+  it("shares one in-flight catalog read between concurrent signal-less callers (boot single-flight)", async () => {
+    const harnesses = [{ id: "claude", name: "Claude Code", detected: true }];
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: () => Promise.resolve({ harnesses }) });
+    vi.stubGlobal("fetch", fetchMock);
+    const [one, two] = await Promise.all([fetchHarnesses(), fetchHarnesses()]);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(one).toEqual(harnesses);
+    expect(two).toEqual(harnesses);
+    vi.unstubAllGlobals();
+  });
+
+  it("a hung boot catalog socket expires within the bound instead of wedging every signal-less caller", async () => {
+    vi.useFakeTimers();
+    try {
+      const harnesses = [{ id: "claude", name: "Claude Code", detected: true }];
+      const fetchMock = vi
+        .fn()
+        .mockImplementationOnce(hungSocketImplementation)
+        .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ harnesses }) });
+      vi.stubGlobal("fetch", fetchMock);
+
+      const hung = fetchHarnesses();
+      await vi.advanceTimersByTimeAsync(HARNESS_CATALOG_REQUEST_TIMEOUT_MS);
+      await expect(hung).resolves.toEqual([]); // the ordinary "daemon did not answer" read, not a wedge
+
+      // Slot released: the retry fires a fresh request and succeeds.
+      await expect(fetchHarnesses()).resolves.toEqual(harnesses);
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+      vi.unstubAllGlobals();
+    }
   });
 });

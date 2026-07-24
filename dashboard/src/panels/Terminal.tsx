@@ -23,7 +23,6 @@ const host = css({
   borderRadius: "3px",
   overflow: "hidden",
   "& .xterm": { height: "100%" },
-  "& .xterm-viewport": { overflowY: "auto !important" },
 });
 
 // A dark VT theme keyed to the cockpit's CRT palette (xterm needs concrete colours, not tokens).
@@ -83,7 +82,26 @@ function hasViewportScrollback(term: XtermTerminal): boolean {
   return term.buffer.active.type === "normal" && term.buffer.active.baseY > 0;
 }
 
-/** Byte-stream observation hooks (260715-FEUI-L6 R7) — wired by PtySurface for LEGACY RAW panes
+function isMacPlatform(): boolean {
+  return typeof navigator !== "undefined" && navigator.platform.startsWith("Mac");
+}
+
+function isCopyShortcut(event: KeyboardEvent): boolean {
+  // Platform-gated deliberately. macOS copies with Cmd and reserves Ctrl+C for the interrupt, so
+  // accepting `ctrlKey` platform-blind made Ctrl+C over a selection a fully dead key there — no
+  // copy (the OS chord is Cmd+C) and no ETX (this handler suppressed it). Ctrl held alongside Cmd
+  // on macOS also reads as interrupt: an ambiguous chord must reach the running program, because a
+  // missed SIGINT costs more than a missed copy.
+  const copyModifierHeld = isMacPlatform() ? event.metaKey && !event.ctrlKey : event.ctrlKey;
+  return (
+    event.type === "keydown" &&
+    event.key.toLowerCase() === "c" &&
+    copyModifierHeld &&
+    !event.altKey
+  );
+}
+
+/** Byte-stream observation hooks — wired by PtySurface for LEGACY RAW panes
  *  only; controlled panes render the runner line-log and need none of this. Held in refs so a
  *  changing identity never tears the terminal down. */
 export interface TerminalStreamHooks {
@@ -104,6 +122,7 @@ export function Terminal({
   screenReaderMode = false,
   ariaLabel,
   keyEventFilter,
+  plainTextSelection = false,
   hooks,
   onOutput,
   onSocketState,
@@ -112,21 +131,25 @@ export function Terminal({
   sessionId: string;
   onConnection?: (conn: TerminalConnection | null) => void;
   readOnly?: boolean;
-  /** Renderer choice (260715-FEUI-L6 R1 / master OQ-B): DOM baseline by measurement; `webgl`
+  /** Renderer choice: DOM baseline by measurement; `webgl`
    *  loads @xterm/addon-webgl lazily and falls back to DOM on failure or context loss. */
   renderer?: "dom" | "webgl";
-  /** xterm screenReaderMode (R2): opt-in — it maintains an a11y tree at a rendering cost. */
+  /** xterm screenReaderMode: opt-in — it maintains an a11y tree at a rendering cost. */
   screenReaderMode?: boolean;
-  /** Accessible pane name (R2): label + harness + state, applied to the host group. */
+  /** Accessible pane name: label + harness + state, applied to the host group. */
   ariaLabel?: string;
   /** Return false to keep xterm from consuming a key (the PTY reserved set, defence-in-depth
    *  under the window-capture tinykeys layer). Default: xterm handles everything. */
   keyEventFilter?: (event: KeyboardEvent) => boolean;
+  /** Selection-first mouse ownership for a terminal whose application does not own useful click
+   *  gestures (Codex and generic shell seats). tmux mouse reporting remains active for wheel/
+   *  copy-mode navigation, but a primary-button drag is promoted to xterm's native selection path. */
+  plainTextSelection?: boolean;
   hooks?: TerminalStreamHooks;
   /** Fires on every PTY output chunk (freshness `lastOutputAt`; caller throttles). */
   onOutput?: () => void;
   onSocketState?: (state: "connected" | "reconnecting" | "dropped") => void;
-  /** The pane's REAL column count after every fit — the ~80-col floor truth (R8). */
+  /** The pane's REAL column count after every fit — the ~80-col floor truth. */
   onResizeCols?: (cols: number) => void;
 }) {
   const hostRef = useRef<HTMLDivElement>(null);
@@ -186,17 +209,58 @@ export function Terminal({
       convertEol: false,
       scrollback: 5000,
       screenReaderMode: screenReaderModeRef.current,
+      macOptionClickForcesSelection: plainTextSelection,
+      altClickMovesCursor: !plainTextSelection,
     });
     termRef.current = term;
     const fit = new FitAddon();
     term.loadAddon(fit);
-    if (keyEventFilterRef.current) {
+    term.attachCustomKeyEventHandler((event) => {
+      // Selection-aware copy: xterm's default key path turns Ctrl+C into ETX and prevents the
+      // browser copy event. Once a selection exists, leave this one chord to the browser; without
+      // a selection it still reaches the running terminal as interrupt.
+      if (isCopyShortcut(event) && term.hasSelection()) return false;
       // xterm-level guard for the reserved set: even when the window-capture layer is inactive,
-      // a reserved chord is never consumed by (or leaked into) the pane.
-      term.attachCustomKeyEventHandler((event) => keyEventFilterRef.current?.(event) ?? true);
-    }
+      // a bound reserved chord is never consumed by (or leaked into) the pane.
+      return keyEventFilterRef.current?.(event) ?? true;
+    });
     term.open(node);
-    // Stream-observation hooks (R7) — registration is unconditional-cheap; the callbacks decide.
+    let selectionSnapshot = "";
+    const selectionSub = term.onSelectionChange(() => {
+      // DOM-renderer row replacements do not move xterm's range, but the text underneath that range
+      // can change while a TUI repaints. Copy the text the operator actually highlighted, not a
+      // later screen occupying the same coordinates.
+      selectionSnapshot = term.hasSelection() ? term.getSelection() : "";
+    });
+    const handleCopy = (event: ClipboardEvent) => {
+      if (!selectionSnapshot || !term.hasSelection() || !event.clipboardData) return;
+      event.clipboardData.setData("text/plain", selectionSnapshot);
+      event.preventDefault();
+      event.stopPropagation();
+      // Release the range now that its bytes are on the clipboard. The copy chord is also the
+      // interrupt chord: a selection outliving its own copy makes the NEXT Ctrl+C copy the same
+      // text again instead of reaching the PTY, and xterm only clears a selection on some OTHER
+      // key or a click — so Ctrl+C alone could never recover the interrupt.
+      term.clearSelection();
+    };
+    node.addEventListener("copy", handleCopy, { capture: true });
+    const forcePlainTextSelection = (event: MouseEvent) => {
+      if (
+        !plainTextSelection ||
+        event.button !== 0 ||
+        term.modes.mouseTrackingMode !== "drag"
+      )
+        return;
+      // xterm deliberately gives mouse mode ownership to the PTY unless its platform selection
+      // modifier is held. The `drag` protocol here is tmux's outer mouse mode for a pane whose own
+      // app requests no mouse events; modes such as `any`/`vt200` remain app-owned. Promote the real
+      // event before xterm's listeners see it, preserving wheel reporting while making a plain drag
+      // take the exact native selection path (Option on macOS, Shift elsewhere).
+      const modifier = isMacPlatform() ? "altKey" : "shiftKey";
+      Object.defineProperty(event, modifier, { configurable: true, value: true });
+    };
+    node.addEventListener("mousedown", forcePlainTextSelection, { capture: true });
+    // Stream-observation hooks — registration is unconditional-cheap; the callbacks decide.
     const bellSub = term.onBell(() => hooksRef.current?.onBell?.());
     const titleSub = term.onTitleChange((title) => hooksRef.current?.onTitle?.(title));
     const osc133Sub = term.parser.registerOscHandler(133, (data) => {
@@ -207,7 +271,7 @@ export function Terminal({
       hooksRef.current?.onOsc9?.(data);
       return false;
     });
-    // Renderer decision (OQ-B): DOM is the measured baseline; webgl loads lazily and demotes
+    // Renderer decision: DOM is the measured baseline; webgl loads lazily and demotes
     // itself back to DOM on load failure or GPU context loss (xterm's documented contract).
     let webglAddon: { dispose(): void } | null = null;
     let disposed = false;
@@ -283,21 +347,71 @@ export function Terminal({
     // at mount sticks at the wrong size because the flex layout + the mono web font settle *after*
     // this effect runs — so re-fit on the next frame and once `document.fonts` is ready, on top of
     // the ResizeObserver that catches every later container change.
-    const refit = () => {
+    //
+    // Switch-back glitch: keep-alive panes hide with display:none and re-show with the SAME
+    // box, so the ResizeObserver fires on every switch-back. An unconditional re-fit is never silent
+    // there: the fit proposal overshoots the live geometry by exactly the clipped-row shrink (the corrected
+    // row count sits below the raw proposal), so the renderer clears + grows, the rAF correction
+    // measures the same overflow and shrinks back — two resizes, two PTY winsize changes, and the
+    // viewport re-syncing to its offset in between (the quick resize-then-scroll seen on every
+    // switch-back). An unchanged box means the fitted geometry (and the clipped-row correction) is already
+    // correct: skip the fit and only re-report the cols truth (the reported cols reset on every focus switch).
+    let fittedWidth = 0;
+    let fittedHeight = 0;
+    let fontSettlePending = false;
+    const refit = (force = false) => {
       // Skip while the host is hidden (display:none on a view switch → 0×0): fitting to 0 would ship
       // a degenerate winsize and collapse the running app's layout. The ResizeObserver re-fits on show.
       if (!node.clientWidth || !node.clientHeight) return;
+      if (
+        !force &&
+        !fontSettlePending &&
+        node.clientWidth === fittedWidth &&
+        node.clientHeight === fittedHeight
+      ) {
+        onResizeColsRef.current?.(term.cols);
+        return;
+      }
+      fontSettlePending = false;
+      fittedWidth = node.clientWidth;
+      fittedHeight = node.clientHeight;
       fit.fit();
+      // The terminal's last row can render clipped: the fit addon's
+      // assumed cell height can undershoot the renderer's REAL cell height under fractional
+      // devicePixelRatio (measured live: screen 756px inside a 744px host — one clipped row). After the renderer applies the fit, measure the actual overflow
+      // and drop just enough rows. Shrink-only: real container growth re-enters through the
+      // ResizeObserver → fit.fit() path above.
+      window.requestAnimationFrame(() => {
+        if (disposed) return;
+        const screen = node.querySelector(".xterm-screen");
+        if (!(screen instanceof HTMLElement) || term.rows <= 4) return;
+        const overflow =
+          screen.getBoundingClientRect().bottom - node.getBoundingClientRect().bottom;
+        if (overflow <= 1) return;
+        const cell = screen.getBoundingClientRect().height / term.rows;
+        const drop = Math.max(1, Math.ceil(overflow / cell));
+        term.resize(term.cols, Math.max(4, term.rows - drop));
+        conn.sendResize(term.cols, term.rows);
+        onResizeColsRef.current?.(term.cols);
+      });
       conn.sendResize(term.cols, term.rows);
       onResizeColsRef.current?.(term.cols);
     };
     refit();
     let alive = true;
-    const raf = requestAnimationFrame(refit);
+    const raf = requestAnimationFrame(() => refit());
     void document.fonts.ready.then(() => {
-      if (alive) refit();
+      if (!alive) return;
+      // The font settles cell metrics, never the box: force one refit past the unchanged-box
+      // guard. If the pane is hidden when it lands, force the refit on the re-show instead of
+      // fitting blind — the guard alone would keep the pre-settle geometry forever.
+      if (!node.clientWidth || !node.clientHeight) {
+        fontSettlePending = true;
+        return;
+      }
+      refit(true);
     });
-    const observer = new ResizeObserver(refit);
+    const observer = new ResizeObserver(() => refit());
     observer.observe(node);
 
     return () => {
@@ -307,8 +421,11 @@ export function Terminal({
       if (connectionRef.current === conn) connectionRef.current = null;
       onConnRef.current?.(null);
       node.removeEventListener("wheel", handleWheel, { capture: true });
+      node.removeEventListener("copy", handleCopy, { capture: true });
+      node.removeEventListener("mousedown", forcePlainTextSelection, { capture: true });
       observer.disconnect();
       dataSub?.dispose();
+      selectionSub.dispose();
       bellSub.dispose();
       titleSub.dispose();
       osc133Sub.dispose();
@@ -317,13 +434,9 @@ export function Terminal({
       webglAddon = null;
       conn.dispose();
       if (termRef.current === term) termRef.current = null;
-      // xterm 5.5's Viewport constructor owns a setTimeout that its disposer does not cancel.
-      // React StrictMode tears down the probe mount in the same task, so synchronous disposal
-      // makes that timer read an already-disposed RenderService (`dimensions`). Let xterm's own
-      // queued sync run first; all application listeners and the socket are already detached.
-      window.setTimeout(() => term.dispose(), 0);
+      term.dispose();
     };
-  }, [readOnly, renderer, sessionId, socketFactory]);
+  }, [plainTextSelection, readOnly, renderer, sessionId, socketFactory]);
 
   return (
     <div
@@ -331,7 +444,7 @@ export function Terminal({
       className={host}
       data-testid="terminal-host"
       role="group"
-      // A group landmark must always carry a name (review finding 6): the cockpit passes the
+      // A group landmark must always carry a name: the cockpit passes the
       // full label+harness+state name; legacy call sites pass their session label; the
       // sessionId fallback keeps the landmark named even with neither.
       aria-label={ariaLabel ?? `terminal session ${sessionId}`}

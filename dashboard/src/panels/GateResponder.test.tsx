@@ -211,6 +211,69 @@ describe("GateResponder", () => {
     expect(deliverToSession).not.toHaveBeenCalled();
   });
 
+  it("surfaces a reopened gate's adapterDecisionFailure: prior answer, proven-undelivered honesty, and reason (M6)", () => {
+    const reopened: GateNode = {
+      ...GATE,
+      id: "REOPENED-1",
+      kind: "agent-question",
+      state: "open",
+      packet: {
+        adapterInteraction: { sessionId: "s1", interactionId: "approval-1" },
+        adapterDecisionFailure: {
+          delivery: "not-sent",
+          decision: "rejected",
+          decisionNote: "Use the shorter commit message.",
+          reason: "control bridge is not connected",
+          attempts: 3,
+        },
+      },
+    };
+    const { getByTestId } = render(<GateResponder lifecycleId="LC1" gateNode={reopened} />);
+    const notice = getByTestId("gate-decision-failure");
+    expect(getByTestId("gate-decision-failure-lead").textContent).toContain(
+      "previous rejection could not be applied",
+    );
+    expect(getByTestId("gate-decision-failure-answer").textContent).toContain(
+      "Use the shorter commit message.",
+    );
+    expect(getByTestId("gate-decision-failure-delivery").textContent).toContain("never received it");
+    // Honesty: a proven-undelivered answer must NOT read as maybe-delivered.
+    expect(notice.textContent).not.toContain("may already hold it");
+    expect(getByTestId("gate-decision-failure-reason").textContent).toContain(
+      "control bridge is not connected",
+    );
+  });
+
+  it("does NOT surface a failure notice on a normal open gate (no adapterDecisionFailure) (M6)", () => {
+    const { queryByTestId } = render(<GateResponder lifecycleId="LC1" gateNode={GATE} />);
+    expect(queryByTestId("gate-decision-failure")).toBeNull();
+  });
+
+  it("states may-already-hold honesty for an unknown-delivery reopen, and invents no prior answer (M6)", () => {
+    const reopened: GateNode = {
+      ...GATE,
+      id: "REOPENED-2",
+      kind: "agent-question",
+      state: "open",
+      packet: {
+        adapterDecisionFailure: {
+          delivery: "unknown",
+          decision: "approved",
+          reason: "control write timed out after dispatch",
+        },
+      },
+    };
+    const { getByTestId, queryByTestId } = render(
+      <GateResponder lifecycleId="LC1" gateNode={reopened} />,
+    );
+    expect(getByTestId("gate-decision-failure-lead").textContent).toContain(
+      "previous approval could not be applied",
+    );
+    expect(getByTestId("gate-decision-failure-delivery").textContent).toContain("may already hold it");
+    // A bare approval carried no note — the answer block is absent, never fabricated.
+    expect(queryByTestId("gate-decision-failure-answer")).toBeNull();
+  });
+
   it("uses the durable adapter-interaction gate as the sole response source", async () => {
     const adapterGate: GateNode = {
       ...GATE,

@@ -1,4 +1,4 @@
-"""Production-route tests for the active conversation API (260718-CHATS-L1, R6).
+"""Production-route tests for the active conversation API.
 
 Every test drives the REAL composition on one event loop: a per-session
 ``HarnessControlBridge`` + ``HarnessControlServer`` on a real user-private
@@ -12,13 +12,17 @@ mappers do and lets the real submission authority own dispatch/provenance.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import tempfile
 import unittest
-from collections.abc import AsyncIterator, Mapping
+from collections.abc import AsyncIterator, Mapping, MutableMapping
 from dataclasses import replace
+from itertools import pairwise
 from pathlib import Path
+from typing import Any
 from unittest import mock
+from urllib.parse import urlencode
 
 import httpx
 import uvicorn
@@ -83,6 +87,7 @@ from agents_remember.serving.terminal_liveness import (
     utc_now,
 )
 from fastapi import FastAPI
+from starlette.middleware.gzip import GZipMiddleware
 
 NOW = "2026-07-19T08:00:00+00:00"
 OPERATOR = AuthorizationBinding(
@@ -295,6 +300,10 @@ class _Harness:
         self.runtime = runtime
         self.app = FastAPI()
         register_conversation_routes(self.app, runtime)
+        # Mirror serving/app.py: the production stack gzips JSON GETs, and its
+        # responder holds http.response.start until the first body chunk even
+        # for the gzip-excluded SSE channels.
+        self.app.add_middleware(GZipMiddleware, compresslevel=6)
         self.control_entry = _ControlledEntry(session, self.endpoint.path)
         self._replacement: tuple | None = None
         self._auth_patcher = mock.patch(
@@ -353,9 +362,12 @@ def _sse_frames(text: str) -> list[dict[str, str]]:
             continue
         parsed: dict[str, str] = {}
         for line in block.splitlines():
+            if line.startswith(":"):
+                continue  # SSE comment (the priming line); EventSource ignores these natively
             key, _, value = line.partition(": ")
             parsed[key] = value
-        frames.append(parsed)
+        if parsed:
+            frames.append(parsed)
     return frames
 
 
@@ -467,7 +479,7 @@ class ProductionRouteTests(unittest.IsolatedAsyncioTestCase):
         self.harness._auth_patcher.stop()
         # The real L0 resolver reads only the ASGI peer; uvicorn's default
         # loopback-trusted proxy handling rewrites the peer from XFF here,
-        # converting this request into a remote-class refusal (L0 probe-2).
+        # converting this request into a remote-class refusal.
         response = await self.client.get(
             "/api/terminal/ar-api-1/conversation",
             params={"expectedBridgeEpoch": self.epoch},
@@ -496,6 +508,15 @@ class ProductionRouteTests(unittest.IsolatedAsyncioTestCase):
         self.assertGreaterEqual(page["status"]["revision"], 1)
         self.assertEqual(page["capabilities"]["history"]["toolCompleteness"]["state"], "partial")
         self.assertIn("lossy", page["capabilities"]["history"]["toolCompleteness"]["reason"])
+        # The stop/steer gating reads ONLY this L1 view: interrupt carries the landed L3 gate
+        # verdict (supported, runtime-fixture); steer stays unavailable (no ordinary submit action).
+        interrupt = page["capabilities"]["controls"]["interrupt"]
+        self.assertEqual(interrupt["state"], "supported")
+        self.assertEqual(interrupt["evidenceTier"], "runtime-fixture")
+        self.assertEqual(
+            interrupt["evidence"]["fixtureId"], "codex-0.144.5-installed-20260718"
+        )
+        self.assertEqual(page["capabilities"]["controls"]["steer"]["state"], "unavailable")
 
     async def test_page_user_item_provenance_via_real_authority(self) -> None:
         await self._drive_codex_turn(client_id="req-page-1")
@@ -739,6 +760,122 @@ class ProductionRouteTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(refused.status_code, 409)
 
+    async def test_fresh_page_cursor_chains_the_first_live_frame(self) -> None:
+        # A fresh page names event cursor 0 (the stream origin);
+        # frame 1 must carry it as previousCursor, or the browser chain guard
+        # (previousCursor !== null) re-pages on every fresh chat.
+        page = await self._page()
+        frames_text = ""
+        async with self.client.stream(
+            "GET",
+            self._events_path(),
+            params={"expectedBridgeEpoch": self.epoch, "after": page["eventCursor"]},
+        ) as response:
+            self.assertEqual(response.status_code, 200)
+            await self._drive_codex_turn("turn-1")
+
+            async def _collect() -> str:
+                collected = ""
+                async for chunk in response.aiter_text():
+                    collected += chunk
+                    if "turn-1-agent" in collected:
+                        return collected
+                return collected
+
+            frames_text = await asyncio.wait_for(_collect(), timeout=20.0)
+        data = [json.loads(frame["data"]) for frame in _sse_frames(frames_text)]
+        self.assertEqual(data[0]["sequence"], 1)
+        self.assertEqual(data[0]["previousCursor"], page["eventCursor"])
+        for earlier, later in pairwise(data):
+            self.assertEqual(later["previousCursor"], earlier["cursor"])
+
+    async def test_caught_up_stream_flushes_headers_via_priming_comment(self) -> None:
+        # The GZipMiddleware responder holds http.response.start
+        # until the first body chunk even for the gzip-excluded SSE media type, so a
+        # caught-up subscription used to sit headerless until the next mutation (the
+        # constant ~14s "connecting…" on an idle fresh chat). One SSE comment line
+        # primes the stream: headers flush at connect and EventSource ignores the
+        # comment natively. Raw ASGI, same reason as GzipSseFlowTests: an infinite
+        # stream cannot go through a response-collecting client.
+        page = await self._page()
+        query = urlencode({"expectedBridgeEpoch": self.epoch, "after": page["eventCursor"]})
+        scope = {
+            "type": "http",
+            "asgi": {"version": "3.0"},
+            "http_version": "1.1",
+            "method": "GET",
+            "scheme": "http",
+            "path": self._events_path(),
+            "raw_path": self._events_path().encode(),
+            "query_string": query.encode(),
+            "root_path": "",
+            "headers": [(b"host", b"testserver"), (b"accept-encoding", b"gzip")],
+            "client": ("127.0.0.1", 12345),
+            "server": ("127.0.0.1", 80),
+        }
+        messages: list[MutableMapping[str, Any]] = []
+        started = asyncio.Event()
+        domain_frame = asyncio.Event()
+        requested = False
+
+        async def receive() -> dict[str, object]:
+            nonlocal requested
+            if not requested:
+                requested = True
+                return {"type": "http.request", "body": b"", "more_body": False}
+            await asyncio.Event().wait()  # no further client input; ends with the task
+            raise AssertionError("unreachable")
+
+        async def send(message: MutableMapping[str, Any]) -> None:
+            messages.append(message)
+            if message["type"] == "http.response.start":
+                started.set()
+            elif message["type"] == "http.response.body" and b"event: conversation" in message.get(
+                "body", b""
+            ):
+                domain_frame.set()
+
+        task = asyncio.create_task(self.harness.app(scope, receive, send))
+        try:
+            # Without the priming comment this wait expires: no body chunk exists
+            # until the next mutation, so the middleware never releases the headers.
+            await asyncio.wait_for(started.wait(), timeout=2)
+            bodies = [
+                message.get("body", b"")
+                for message in messages
+                if message["type"] == "http.response.body"
+            ]
+            # The first (and so far only) chunk is the comment: no event field, no data.
+            self.assertEqual(bodies, [b": connected\n\n"])
+            self.adapter.emit(
+                "codex-notification",
+                {
+                    "codexMethod": "item/completed",
+                    AR_EVIDENCE_KEY: _codex_params(
+                        {"id": "prime-agent", "type": "agentMessage", "text": "after the comment"},
+                        turn="turn-prime",
+                    ),
+                },
+            )
+            # A real domain frame still flows on the same stream afterwards.
+            await asyncio.wait_for(domain_frame.wait(), timeout=15)
+        finally:
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+        start = next(message for message in messages if message["type"] == "http.response.start")
+        headers = {k.decode().lower(): v.decode() for k, v in start["headers"]}
+        self.assertEqual(start["status"], 200)
+        self.assertTrue(headers["content-type"].startswith("text/event-stream"))
+        self.assertNotIn("content-encoding", headers)  # SSE stays gzip-excluded
+        first_domain = next(
+            index
+            for index, message in enumerate(messages)
+            if message["type"] == "http.response.body"
+            and b"event: conversation" in message.get("body", b"")
+        )
+        self.assertLess(messages.index(start), first_domain)
+
     async def test_orchestration_parity_with_canonical_status(self) -> None:
         await self._drive_codex_turn()
         page = await self._page()
@@ -858,6 +995,10 @@ class PiProductionRouteTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(tool["kind"], "tool-call")
         self.assertEqual(tool["phase"], "completed")
         self.assertEqual(page["capabilities"]["history"]["read"]["state"], "supported")
+        interrupt = page["capabilities"]["controls"]["interrupt"]
+        self.assertEqual(interrupt["state"], "supported")
+        self.assertEqual(interrupt["evidenceTier"], "runtime-fixture")
+        self.assertEqual(interrupt["evidence"]["fixtureId"], "pi-0.80.7-installed-20260718")
         self.assertEqual(page["page"]["totalItems"], 3)
 
 

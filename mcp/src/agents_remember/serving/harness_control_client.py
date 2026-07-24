@@ -21,6 +21,7 @@ from agents_remember.errors import (
     HarnessBridgeEpochMismatchError,
     HarnessControlClientError,
     HarnessControlError,
+    HarnessInteractionNotPendingError,
     HarnessRequestConflictError,
 )
 from agents_remember.serving.harness_capabilities import (
@@ -43,6 +44,8 @@ from agents_remember.serving.harness_control_models import (
     ControlState,
     EvidenceFrame,
     EvidencePage,
+    InteractionQuestion,
+    InteractionQuestionOption,
     InterruptAcknowledgement,
     InterruptResult,
     NativeEvidenceFrame,
@@ -70,6 +73,16 @@ SET_CONTROL_TIMEOUT_SECONDS = 35.0
 
 EVIDENCE_PAGE_TIMEOUT_SECONDS = 35.0
 """Bound a native history page (e.g. Codex thread/read) above the 2-second control default."""
+
+SUBMIT_TIMEOUT_SECONDS = 10.0
+"""Bound a prompt submit above the harness CLI's replay echo (measured 2-10s), not the 2s default.
+
+The bridge legitimately waits for the harness CLI's replay echo before answering
+a submit; the 2.0s control default timed out first and degraded accepted messages to
+acceptance="unknown", pushing the frontend into a spurious 120s reconcile loop. Only submit waits
+this long -- snapshot/evidence/capability reads keep failing fast at 2.0s, and >10s still degrades
+honestly to unknown -> reconcile, under the adapter's 30s acceptance_timeout.
+"""
 
 
 class ControlledSession(Protocol):
@@ -202,6 +215,7 @@ def submit_control_prompt(
             entry,
             "submit",
             payload,
+            timeout_seconds=SUBMIT_TIMEOUT_SECONDS,
         )
     except HarnessControlClientError as exc:
         if not exc.may_have_sent:
@@ -486,9 +500,9 @@ def _encode_control_request(
 def _connect_unavailable_detail(endpoint: Path, exc: BaseException) -> str:
     """Map a control-socket connect failure to an honest lifecycle note (no raw errno surprise).
 
-    260718-CHATS-L5F R6: a controlled runner that already exited leaves either an absent socket
+    A controlled runner that already exited leaves either an absent socket
     (``ENOENT``) or, on an unclean exit, a stale socket file with nothing listening
-    (``ECONNREFUSED`` — the developer's image1 ``[Errno 111] Connection refused`` banner). Both mean
+    (``ECONNREFUSED`` — the ``[Errno 111] Connection refused`` banner). Both mean
     the same designed thing: there is no live control endpoint to stop. The stale socket is unlinked
     best-effort so the next attempt reads the absent (``ENOENT``) case cleanly rather than repeating
     the refused surprise.
@@ -556,6 +570,8 @@ def _decode_control_response(response: bytes) -> object:
             )
         if raw.get("status") == "request-id-conflict":
             raise HarnessRequestConflictError(detail)
+        if raw.get("status") == "interaction-not-pending":
+            raise HarnessInteractionNotPendingError(detail)
         raise HarnessControlError(detail)
     return raw.get("result")
 
@@ -1031,6 +1047,49 @@ def _read_line(client: socket.socket) -> bytes:
     return bytes(data[: data.index(b"\n")])
 
 
+def _interaction_questions(raw: object) -> tuple[InteractionQuestion, ...]:
+    """Parse the additive structured question pages; absent means a pre-structure peer."""
+
+    if raw is None:
+        return ()
+    if not isinstance(raw, list):
+        raise HarnessControlError("pending interaction questions must be a list")
+    pages: list[InteractionQuestion] = []
+    for item in raw:
+        if not isinstance(item, Mapping):
+            raise HarnessControlError("pending interaction question must be an object")
+        raw_options = item.get("options", [])
+        if not isinstance(raw_options, list):
+            raise HarnessControlError("pending interaction question options must be a list")
+        options: list[InteractionQuestionOption] = []
+        for raw_option in raw_options:
+            if not isinstance(raw_option, Mapping):
+                raise HarnessControlError("pending interaction question option must be an object")
+            description = raw_option.get("description")
+            if description is not None and not isinstance(description, str):
+                raise HarnessControlError(
+                    "pending interaction question option description must be text or null"
+                )
+            options.append(
+                InteractionQuestionOption(
+                    label=_required_text(raw_option, "label"),
+                    description=description,
+                )
+            )
+        multi_select = item.get("multiSelect", False)
+        if not isinstance(multi_select, bool):
+            raise HarnessControlError("pending interaction question multiSelect must be boolean")
+        pages.append(
+            InteractionQuestion(
+                text=_required_text(item, "text"),
+                header=_required_text(item, "header"),
+                options=tuple(options),
+                multi_select=multi_select,
+            )
+        )
+    return tuple(pages)
+
+
 def _snapshot(raw: Mapping[str, object]) -> AdapterSnapshot:
     identity_raw = raw.get("identity")
     if not isinstance(identity_raw, Mapping):
@@ -1061,6 +1120,7 @@ def _snapshot(raw: Mapping[str, object]) -> AdapterSnapshot:
             created_at=_required_text(pending_raw, "createdAt"),
             choices=tuple(choices_raw),
             raw=_object(pending_raw.get("raw")),
+            questions=_interaction_questions(pending_raw.get("questions")),
         )
     sequence = raw.get("lastEventSequence", 0)
     if not isinstance(sequence, int) or isinstance(sequence, bool) or sequence < 0:

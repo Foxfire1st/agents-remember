@@ -1,4 +1,4 @@
-// The sessions view shell (260715-FEUI-L1 S2–S5): scaffold structure + the keyboard/palette
+// The sessions view shell: scaffold structure + the keyboard/palette
 // foundation wired end-to-end under jsdom — zones resolved from real DOM markers, tinykeys at the
 // window, cmdk palette pages, and the F6 focus cycle (design §5.3).
 import {
@@ -7,11 +7,26 @@ import {
   fireEvent,
   render,
   waitFor,
+  within,
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { sessionCockpitStore } from "../../data/sessionCockpitStore";
 import { lifecycleNoticeStore } from "../../data/sessionLifecycle";
+import { emptyProjection } from "../../data/conversation/reducer";
+import {
+  activeConversationStore,
+  connectConversation,
+  disconnectConversation,
+} from "../../data/conversation/store";
+import type {
+  ActiveConversationRef,
+  ActiveEventCursor,
+  ConversationCapabilities,
+  ConversationItem,
+  ConversationPage,
+  ConversationStatus,
+} from "../../data/conversation/types";
 import { fromTerminalSessionInfo, sessionStore } from "../../data/sessions";
 import { dashboardStore } from "../../data/store";
 import { capabilityEnvelope } from "../../test/fixtures/capabilityEnvelopes";
@@ -29,7 +44,7 @@ function seedReadyComposerSession() {
   sessionCockpitStore.setState({ focusedSessionId: null });
 }
 
-// 260718-CHATS-L4: a legacy-raw terminal (no controlState) keeps its interactive PTY as the primary
+// A legacy-raw terminal (no controlState) keeps its interactive PTY as the primary
 // stage body — the remaining home of the `pty` keyboard zone. The zone-contract tests target it.
 function seedLegacyRawSession() {
   sessionStore
@@ -49,28 +64,92 @@ function seedLegacyRawSession() {
   sessionCockpitStore.setState({ focusedSessionId: "legacy-raw" });
 }
 
-// xterm cannot mount under jsdom (L6 rule: xterm stays OUT of jsdom) — the PtySurface's lazy
+// A projected conversation status seeded straight into the active-conversation
+// store. The stage's own connect is neutralized by a never-resolving fetch stub in each such test,
+// so the seeded stream phase stays exactly where the test puts it.
+const L5Q_IDENTITY: ActiveConversationRef = {
+  harnessId: "codex",
+  vendorConversationId: "v",
+  projectScope: "/r",
+  identityDigest: "d",
+  arSessionId: "worker-l4",
+  bridgeEpoch: "e1",
+};
+
+function l5qStatus(turnState: ConversationStatus["turn"]["state"]): ConversationStatus {
+  return {
+    identity: L5Q_IDENTITY,
+    revision: 1,
+    observedAt: "2026-07-20T00:00:00Z",
+    freshness: {
+      state: "fresh",
+      lastEvidenceAt: null,
+      ageMs: null,
+      staleAfterMs: 1,
+      observationBound: "poll",
+    },
+    process: { state: "connected", generation: "g" },
+    turn: { state: turnState, turnId: "turn-live-1", stateSince: null },
+    evidence: { strength: "exact", origin: "codex" },
+  };
+}
+
+function seedLiveProjection(sessionId: string, turnState: ConversationStatus["turn"]["state"]): void {
+  activeConversationStore.setState({
+    bySession: {
+      [sessionId]: {
+        ...emptyProjection(L5Q_IDENTITY),
+        stream: "live",
+        status: l5qStatus(turnState),
+      },
+    },
+  });
+}
+
+/** fetch that never resolves: the stage's conversation connect/hydrate can never clobber a seeded projection. */
+function stubHangingFetch(): void {
+  vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>(() => {})));
+}
+
+// xterm cannot mount under jsdom — the PtySurface's lazy
 // Terminal resolves to this inert stand-in; the real terminal rules live in Terminal.tsx.
-vi.mock("../Terminal", () => ({
-  Terminal: ({
-    sessionId,
-    readOnly,
-  }: {
-    sessionId: string;
-    readOnly?: boolean;
-  }) => (
-    <div
-      data-testid={`mock-terminal-${sessionId}`}
-      data-read-only={String(readOnly ?? false)}
-    />
-  ),
-}));
+// The mount/unmount ledgers make a dispose/recreate observable at the composition level:
+// Terminal.tsx's unmount cleanup is the socket dispose + xterm dispose, so an empty unmount
+// ledger across a switch IS the no-dispose proof.
+const mockTerminalMounts: string[] = [];
+const mockTerminalUnmounts: string[] = [];
+vi.mock("../Terminal", async () => {
+  const { useEffect } = await import("react");
+  return {
+    Terminal: ({
+      sessionId,
+      readOnly,
+    }: {
+      sessionId: string;
+      readOnly?: boolean;
+    }) => {
+      useEffect(() => {
+        mockTerminalMounts.push(sessionId);
+        return () => {
+          mockTerminalUnmounts.push(sessionId);
+        };
+      }, [sessionId]);
+      return (
+        <div
+          data-testid={`mock-terminal-${sessionId}`}
+          data-read-only={String(readOnly ?? false)}
+        />
+      );
+    },
+  };
+});
 
 afterEach(() => {
   cleanup();
   window.localStorage.clear(); // react-resizable-panels persists layout under autoSaveId
   sessionStore.getState().hydrate([]);
   sessionCockpitStore.setState({ focusedSessionId: null, perSession: {} });
+  activeConversationStore.getState().reset();
   dashboardStore.setState({ lifecycles: {} });
   lifecycleNoticeStore.setState({
     residuals: [],
@@ -82,7 +161,7 @@ afterEach(() => {
 });
 
 describe("scaffold structure (S2)", () => {
-  it("renders the scope root + rail/stage/inspector/statusline with markers and zones", () => {
+  it("renders the scope root + rail/stage/inspector with markers and zones (F-c: no statusline region)", () => {
     const { getByRole, getByTestId, queryByRole, queryByTestId } = render(
       <SessionsView active />,
     );
@@ -99,9 +178,10 @@ describe("scaffold structure (S2)", () => {
     expect(getByTestId("sessions-inspector").getAttribute("data-region")).toBe(
       "inspector",
     );
-    expect(getByTestId("sessions-statusline").getAttribute("data-region")).toBe(
-      "statusline",
-    );
+    // The StatusLine bar is unmounted and its F6 `statusline`
+    // focus region is gone — the inspector/rail toggles moved into the stage header actions.
+    expect(queryByTestId("sessions-statusline")).toBeNull();
+    expect(getByTestId("sessions-toggle-inspector").closest("[data-testid='stage-header-actions']")).not.toBeNull();
     expect(
       getByTestId("sessions-toggle-inspector").getAttribute("aria-expanded"),
     ).toBe("false");
@@ -118,7 +198,7 @@ describe("scaffold structure (S2)", () => {
       inspectorHandle.getAttribute("data-panel-resize-handle-enabled"),
     ).toBe("false");
 
-    // 260718-CHATS-L4: the empty stage no longer hosts a PTY placeholder (the structured body only
+    // The empty stage no longer hosts a PTY placeholder (the structured body only
     // mounts for a focused session); it invites the operator to pick/launch a chat.
     expect(queryByTestId("sessions-pty-placeholder")).toBeNull();
     expect(getByTestId("stage-empty-identity")).not.toBeNull();
@@ -220,9 +300,9 @@ describe("~280px rail calibration on first real measurement (review round 2, fin
 describe("command palette (S3)", () => {
   it("opens on ctrl+k from the chrome zone and closes on Escape, returning focus to the invoker", async () => {
     const { getByTestId, queryByTestId } = render(<SessionsView active />);
-    const invoker = getByTestId("sessions-statusline").querySelector(
-      "[data-focus-target]",
-    ) as HTMLElement;
+    // The statusline invoker is gone — the inspector toggle
+    // now lives in the stage-header actions and is an ordinary chrome-zone control.
+    const invoker = getByTestId("sessions-toggle-inspector");
     invoker.focus();
 
     fireEvent.keyDown(invoker, { key: "k", code: "KeyK", ctrlKey: true });
@@ -231,7 +311,7 @@ describe("command palette (S3)", () => {
 
     fireEvent.keyDown(input, { key: "Escape", code: "Escape" });
     expect(queryByTestId("sessions-palette")).toBeNull();
-    expect(document.activeElement).toBe(invoker); // R7: close returns focus to the invoker
+    expect(document.activeElement).toBe(invoker); // close returns focus to the invoker
   });
 
   it("? opens the keyboard-reference page listing the real chord tables (one options source)", () => {
@@ -363,11 +443,8 @@ describe("focus model (S4, design §5.3)", () => {
       key: "F6",
       code: "F6",
     });
-    expect(regionOf(document.activeElement)).toBe("statusline");
-    fireEvent.keyDown(document.activeElement as Element, {
-      key: "F6",
-      code: "F6",
-    });
+    // The statusline region is gone. With the inspector default-closed the
+    // cycle is rail → stage → rail, so F6 from the stage skips the closed inspector and wraps to rail.
     expect(regionOf(document.activeElement)).toBe("rail");
 
     fireEvent.click(getByTestId("sessions-toggle-inspector"));
@@ -568,14 +645,16 @@ describe("focus model (S4, design §5.3)", () => {
     );
   });
 
-  it("Shift+F6 cycles backward", () => {
-    const { getByTestId } = render(<SessionsView active />);
-    (
-      getByTestId("sessions-rail").querySelector(
-        "[data-focus-target]",
-      ) as HTMLElement
-    ).focus();
-    fireEvent.keyDown(document.activeElement as Element, {
+  it("Shift+F6 cycles backward", async () => {
+    // With the statusline region removed the cycle is rail → stage →
+    // inspector. Land on the stage composer, then step BACKWARD to the rail (the previous region).
+    seedReadyComposerSession();
+    const { findByTestId } = render(<SessionsView active />);
+    const composer = (
+      await findByTestId("session-composer-editor")
+    ).querySelector(".cm-content") as HTMLElement;
+    composer.focus();
+    fireEvent.keyDown(composer, {
       key: "F6",
       code: "F6",
       shiftKey: true,
@@ -584,7 +663,7 @@ describe("focus model (S4, design §5.3)", () => {
       document.activeElement
         ?.closest("[data-region]")
         ?.getAttribute("data-region"),
-    ).toBe("statusline");
+    ).toBe("rail");
   });
 
   it("Esc from the composer lands on the stage header", async () => {
@@ -909,7 +988,7 @@ describe("authoritative landed cleanup through rail and palette callers (F5-S5-2
         "cleanup-smart-live",
       ),
     );
-    // 260718-CHATS-L4: a controlled seat's live body is now the structured ConversationSurface, not
+    // A controlled seat's live body is now the structured ConversationSurface, not
     // the PTY, so this test asserts the focus-handoff subject only; conversation keep-alive across
     // focus is the LRU'd active-conversation store (covered by its own store tests).
     fireEvent.click(getByTestId(`rail-done-toggle-${master}`));
@@ -1055,10 +1134,204 @@ describe("L6: stage surface, WorkingLine, InteractionBar, stop residuals", () =>
         getByTestId("working-line"),
       ),
     ).toBe(true);
+    // The slot docks between the conversation and the
+    // composer — after the stage body, before the composer — not in the stage's top chrome.
+    const slot = getByTestId("stage-working-line-slot");
+    const stageBody = getByTestId("chats-stage-body");
+    const composer = getByTestId("session-composer");
+    expect(stageBody.compareDocumentPosition(slot) & 4).toBe(4);
+    expect(slot.compareDocumentPosition(composer) & 4).toBe(4);
     expect(getByTestId("working-line-verb").textContent).toBe("working");
-    const stop = getByTestId("working-line-stop") as HTMLButtonElement;
+    // The stop control docks in the composer footer beside send —
+    // the working line carries none.
+    expect(queryByTestId("working-line-stop")).toBeNull();
+    const stop = getByTestId("session-composer-stop") as HTMLButtonElement;
     expect(stop.disabled).toBe(true);
     expect(stop.getAttribute("data-disabled-reason")).toContain("UA-7");
+    // Beside send: the stop immediately precedes the send control in the footer.
+    expect(stop.compareDocumentPosition(getByTestId("session-composer-send")) & 4).toBe(4);
+  });
+
+  it("source-selects the conversation-driven WorkingLine while the harness seat's stream is live (L5Q)", async () => {
+    stubHangingFetch();
+    const { getByTestId, queryByTestId } = render(<SessionsView active />);
+    await waitFor(() =>
+      expect(sessionCockpitStore.getState().focusedSessionId).toBe(
+        "worker-tui",
+      ),
+    );
+    fireEvent.click(getByTestId("rail-row-worker-l4")); // catalog: working
+    await waitFor(() => expect(queryByTestId("working-line")).not.toBeNull());
+    // No live stream yet: the catalog-driven line can only say the plain word.
+    expect(getByTestId("working-line-verb").textContent).toBe("working");
+    // A live projection takes over the slot — a canonical wire state word can only come from the
+    // conversation source.
+    act(() => seedLiveProjection("worker-l4", "settling"));
+    await waitFor(() =>
+      expect(getByTestId("working-line-verb").textContent).toBe("settling"),
+    );
+    // The stream dropping to reconnecting hands the slot back to the catalog-driven line.
+    act(() => {
+      const current = activeConversationStore.getState().bySession["worker-l4"];
+      activeConversationStore.setState({
+        bySession: { "worker-l4": { ...current, stream: "reconnecting" } },
+      });
+    });
+    await waitFor(() =>
+      expect(getByTestId("working-line-verb").textContent).toBe("working"),
+    );
+  });
+
+  it("keeps the catalog-driven WorkingLine for a legacy raw seat even with a live projection (L5Q)", async () => {
+    sessionStore.getState().hydrate([
+      fromTerminalSessionInfo(
+        catalogRow({
+          id: "legacy-working",
+          label: "legacy raw worker",
+          kind: "terminal",
+          harness: undefined,
+          seatRole: "terminal",
+          status: "running",
+          turnState: "working",
+          turnStateChangedAt: "2026-07-16T09:15:00Z",
+        }),
+      ),
+    ]);
+    sessionCockpitStore.setState({ focusedSessionId: "legacy-working" });
+    // A live projection showing a canonical state word must NOT leak onto a non-harness seat.
+    act(() => seedLiveProjection("legacy-working", "settling"));
+    const { getByTestId, queryByTestId } = render(<SessionsView active />);
+    await waitFor(() => expect(queryByTestId("working-line")).not.toBeNull());
+    expect(getByTestId("working-line-verb").textContent).toBe("working");
+  });
+
+  it("keeps a switched-away chat's surface mounted end-to-end: focus switches preserve the SAME viewport DOM node (F-j)", async () => {
+    // A prior glitch: switching chats unloaded the conversation in
+    // React, so the timeline remounted at the top and yanked back to the bottom. Through the real
+    // view (rail clicks, real stores), the focused chat's surface must round-trip untouched.
+    stubHangingFetch();
+    // Give worker-l4 a REAL warm conversation (live runtime + projection): connectConversation
+    // creates the runtime (its hydrate hangs on the stubbed fetch), then the seeded projection
+    // puts the stream live — exactly the warm state a previously focused chat is in.
+    connectConversation("worker-l4", "e1", {
+      fetchImpl: vi.fn(() => new Promise<Response>(() => {})) as unknown as typeof fetch,
+    });
+    seedLiveProjection("worker-l4", "ready");
+    const { getByTestId } = render(<SessionsView active />);
+    await waitFor(() =>
+      expect(sessionCockpitStore.getState().focusedSessionId).toBe("worker-tui"),
+    );
+    fireEvent.click(getByTestId("rail-row-worker-l4"));
+    await waitFor(() =>
+      expect(sessionCockpitStore.getState().focusedSessionId).toBe("worker-l4"),
+    );
+    const wrapper = getByTestId("conversation-keepalive-worker-l4");
+    expect(wrapper.getAttribute("aria-hidden")).toBeNull();
+    const viewport = within(wrapper).getByTestId("conversation-viewport");
+
+    fireEvent.click(getByTestId("rail-row-worker-tui"));
+    await waitFor(() =>
+      expect(sessionCockpitStore.getState().focusedSessionId).toBe("worker-tui"),
+    );
+    // Mounted but hidden — never unloaded.
+    expect(
+      getByTestId("conversation-keepalive-worker-l4").getAttribute("aria-hidden"),
+    ).toBe("true");
+    expect(
+      within(getByTestId("conversation-keepalive-worker-l4")).queryByTestId(
+        "conversation-viewport",
+      ),
+    ).not.toBeNull();
+
+    fireEvent.click(getByTestId("rail-row-worker-l4"));
+    await waitFor(() =>
+      expect(sessionCockpitStore.getState().focusedSessionId).toBe("worker-l4"),
+    );
+    const restored = getByTestId("conversation-keepalive-worker-l4");
+    expect(restored.getAttribute("aria-hidden")).toBeNull();
+    expect(
+      within(restored).getByTestId("conversation-viewport"),
+    ).toBe(viewport);
+    disconnectConversation("worker-l4");
+  });
+
+  // A warm projection WITH items (the earlier seeds carry status only), so the timeline has
+  // scrollable content for the scroll-restore test.
+  function seedWorkerL4Items(count: number): void {
+    const items: ConversationItem[] = Array.from({ length: count }, (_, index) => ({
+      itemId: `worker-l4-item-${index + 1}`,
+      globalOrdinal: index + 1,
+      revision: 1,
+      lane: "harness",
+      source: "harness-live",
+      provenance: { strength: "exact", origin: "codex" },
+      role: "assistant",
+      kind: "message",
+      phase: "completed",
+      blocks: [
+        {
+          blockId: `worker-l4-item-${index + 1}-b`,
+          type: "markdown",
+          markdown: `message ${index + 1}`,
+        },
+      ],
+    })) as unknown as ConversationItem[];
+    const page: ConversationPage = {
+      identity: L5Q_IDENTITY,
+      items,
+      page: { olderCursor: null, hasOlder: false },
+      eventCursor: "evt-0" as ActiveEventCursor,
+      hydrationId: "h",
+      status: l5qStatus("ready"),
+      capabilities: undefined as unknown as ConversationCapabilities,
+    };
+    activeConversationStore.getState().applyPage("worker-l4", page, "initial");
+    activeConversationStore.getState().setStreamPhase("worker-l4", "live");
+  }
+
+  it("restores the focused chat's scroll position across a cockpit view switch (F-ac)", async () => {
+    // A prior defect: switching cockpit TABS (Chats ↔ Operations ↔
+    // Files) reopened the chat at the START — the layer hides with display:none, which destroys
+    // the DOM scroll offset. Through the real view: the position is remembered on scroll and
+    // restored on re-show, on the SAME viewport node.
+    stubHangingFetch();
+    connectConversation("worker-l4", "e1", {
+      fetchImpl: vi.fn(() => new Promise<Response>(() => {})) as unknown as typeof fetch,
+    });
+    seedWorkerL4Items(6);
+    const { getByTestId, rerender } = render(<SessionsView active />);
+    await waitFor(() =>
+      expect(sessionCockpitStore.getState().focusedSessionId).toBe("worker-tui"),
+    );
+    fireEvent.click(getByTestId("rail-row-worker-l4"));
+    await waitFor(() =>
+      expect(sessionCockpitStore.getState().focusedSessionId).toBe("worker-l4"),
+    );
+    const viewport = within(
+      getByTestId("conversation-keepalive-worker-l4"),
+    ).getByTestId("conversation-viewport");
+    // jsdom has no layout: pin the scroll geometry, then read mid-conversation.
+    Object.defineProperty(viewport, "scrollHeight", { configurable: true, value: 2000 });
+    Object.defineProperty(viewport, "clientHeight", { configurable: true, value: 600 });
+    // The operator's scroll arrives with trusted input — the intent lock's disengagement is
+    // input-gated, so a bare scroll event (content-driven semantics) would never flip the lock.
+    fireEvent.wheel(viewport);
+    viewport.scrollTop = 456;
+    fireEvent.scroll(viewport);
+
+    // Away: the chats layer goes display:none (the browser resets the offset silently — applied
+    // by hand here, jsdom has no layout to destroy it).
+    rerender(<SessionsView active={false} />);
+    viewport.scrollTop = 0;
+
+    // Back: the remembered offset is restored pre-paint on the same node.
+    rerender(<SessionsView active />);
+    const restored = within(
+      getByTestId("conversation-keepalive-worker-l4"),
+    ).getByTestId("conversation-viewport");
+    expect(restored).toBe(viewport);
+    expect(restored.scrollTop).toBe(456);
+    disconnectConversation("worker-l4");
   });
 
   it("renders the InteractionBar on the interaction axis: above the composer, never replacing it", async () => {
@@ -1155,7 +1428,7 @@ describe("L6: stage surface, WorkingLine, InteractionBar, stop residuals", () =>
     );
   });
 
-  it("surfaces a retired seat's stop residual as an INFORMATIONAL line — never a failure state", async () => {
+  it("records a retired seat's stop residual in the lifecycle store — informational, never a failure — with NO stacked DOM notice (F-f ruling)", async () => {
     const { getByTestId, queryByTestId } = render(<SessionsView active />);
     await waitFor(() =>
       expect(sessionCockpitStore.getState().focusedSessionId).toBe(
@@ -1178,17 +1451,28 @@ describe("L6: stage surface, WorkingLine, InteractionBar, stop residuals", () =>
         },
       });
     });
+    // StopResidualNotes is unmounted from SessionsView. The lifecycle
+    // store still RECORDS the residual (the never-silently-discarded guarantee), so assert the
+    // store state instead of DOM. The residual is a `retire` note — never a "termination failed".
     await waitFor(() =>
-      expect(queryByTestId("stage-handoff-note")).not.toBeNull(),
+      expect(
+        lifecycleNoticeStore
+          .getState()
+          .residuals.some((residual) => residual.sessionId === "worker-l4"),
+      ).toBe(true),
     );
-    await waitFor(() =>
-      expect(queryByTestId("stop-residual-worker-l4")).not.toBeNull(),
+    const residual = lifecycleNoticeStore
+      .getState()
+      .residuals.find((entry) => entry.sessionId === "worker-l4")!;
+    expect(residual.kind).toBe("retire");
+    expect(residual.detail).toBe("control command queue is stopped");
+    expect(residual.detail.toLowerCase()).not.toContain("fail");
+    // No stop-residual DOM surface renders any more.
+    expect(queryByTestId("stop-residual-worker-l4")).toBeNull();
+    // The focus-handoff note still renders (role=status, visually hidden — do not assert visibility).
+    expect(queryByTestId("stage-handoff-note")?.getAttribute("role")).toBe(
+      "status",
     );
-    const note = getByTestId("stop-residual-worker-l4");
-    expect(note.getAttribute("role")).toBe("status");
-    expect(note.textContent).toContain("informational");
-    expect(note.textContent).toContain("control command queue is stopped");
-    expect(note.textContent?.toLowerCase()).not.toContain("fail");
   });
 
   it("hides the conversation.stop palette command when no turn is interruptible — no phantom 'unavailable' entry (L4 F2)", async () => {
@@ -1236,8 +1520,45 @@ describe("L6: stage surface, WorkingLine, InteractionBar, stop residuals", () =>
     expect(queryByTestId("palette-cmd-conversation.stop")).toBeNull();
   });
 
-  it("captures an UNFOCUSED seat's retire residual — never silently discarded (review F1, sev-3)", async () => {
-    const { queryByTestId, getByTestId } = render(<SessionsView active />);
+  it("on a live stream the line and the stop read the SAME projection evidence — a sweep-lagged catalog patch cannot unmount them (L5Q)", async () => {
+    stubHangingFetch();
+    const { getByTestId, queryByTestId } = render(<SessionsView active />);
+    await waitFor(() =>
+      expect(sessionCockpitStore.getState().focusedSessionId).toBe(
+        "worker-tui",
+      ),
+    );
+    fireEvent.click(getByTestId("rail-row-worker-l4"));
+    act(() => seedLiveProjection("worker-l4", "working"));
+    await waitFor(() => expect(queryByTestId("working-line")).not.toBeNull());
+    // Working + a resolvable turn id on the live wire: the welded stop is actionable —
+    // hosted in the composer beside send, never on the line.
+    expect(queryByTestId("working-line-stop")).toBeNull();
+    expect((getByTestId("session-composer-stop") as HTMLButtonElement).disabled).toBe(false);
+    // The catalog's sweep-lagged duplicate of the same interaction must not unmount the fresher
+    // SSE-driven line (the catalog-only line would yield to awaiting-input).
+    act(() => {
+      sessionStore.getState().patch("worker-l4", {
+        controlPendingInteraction: {
+          interactionId: "ix-stale",
+          kind: "input",
+          prompt: "?",
+        },
+      });
+    });
+    expect(queryByTestId("working-line")).not.toBeNull();
+    // Only the projection's OWN state change ends turn theater — line and stop leave together.
+    act(() => {
+      const current = activeConversationStore.getState().bySession["worker-l4"];
+      activeConversationStore.setState({
+        bySession: { "worker-l4": { ...current, status: l5qStatus("ready") } },
+      });
+    });
+    await waitFor(() => expect(queryByTestId("working-line")).toBeNull());
+  });
+
+  it("captures an UNFOCUSED seat's retire residual in the store — never silently discarded (review F1, sev-3)", async () => {
+    const { queryByTestId } = render(<SessionsView active />);
     await waitFor(() =>
       expect(sessionCockpitStore.getState().focusedSessionId).toBe(
         "worker-tui",
@@ -1254,13 +1575,21 @@ describe("L6: stage surface, WorkingLine, InteractionBar, stop residuals", () =>
         },
       });
     });
+    // The residual is RECORDED in the lifecycle store by the focus-independent sweep
+    // even though StopResidualNotes no longer renders any DOM surface — assert the store state.
     await waitFor(() =>
-      expect(queryByTestId("stop-residual-worker-caps")).not.toBeNull(),
+      expect(
+        lifecycleNoticeStore
+          .getState()
+          .residuals.some((residual) => residual.sessionId === "worker-caps"),
+      ).toBe(true),
     );
-    const note = getByTestId("stop-residual-worker-caps");
-    expect(note.getAttribute("role")).toBe("status");
-    expect(note.textContent).toContain("informational");
-    expect(note.textContent?.toLowerCase()).not.toContain("fail");
+    const residual = lifecycleNoticeStore
+      .getState()
+      .residuals.find((entry) => entry.sessionId === "worker-caps")!;
+    expect(residual.kind).toBe("retire");
+    expect(residual.detail.toLowerCase()).not.toContain("fail");
+    expect(queryByTestId("stop-residual-worker-caps")).toBeNull();
     // No handoff fired — focus never touched this seat.
     expect(sessionCockpitStore.getState().focusedSessionId).toBe("worker-tui");
     expect(queryByTestId("stage-handoff-note")).toBeNull();
@@ -1325,5 +1654,130 @@ describe("launch flow + failed-launch banner integration (L3: R5, R6)", () => {
           ?.getAttribute("aria-pressed"),
       ).toBe("true"),
     );
+  });
+});
+
+// ── harness↔terminal archetype switches keep the whole PTY stack alive ──────────────
+// A prior glitch: switching from a harness seat to a terminal seat (and back)
+// redrew and rescrolled the terminal. Root cause: the stage rendered EITHER PtySurface OR the
+// conversation pool — the archetype switch UNMOUNTED the entire PTY stack (Terminal unmount ⇒
+// conn.dispose socket teardown + xterm dispose), and the return paid full boot. The fix keeps
+// BOTH layers mounted as persistent siblings (keptHidden: visibility + aria-hidden). These tests
+// pin the contract end-to-end through the real view (rail clicks, real stores): the terminal's
+// xterm instance + connection are never disposed/recreated, the hidden layer is out of the
+// a11y/zone/focus contract, and the rail-click focus lands in the VISIBLE layer only.
+describe("B1: harness↔terminal keeps the PTY stack alive", () => {
+  beforeEach(() => {
+    mockTerminalMounts.length = 0;
+    mockTerminalUnmounts.length = 0;
+    sessionStore.getState().hydrate([
+      ...FLEET.map(fromTerminalSessionInfo),
+      fromTerminalSessionInfo(
+        catalogRow({
+          id: "raw-term",
+          label: "raw terminal seat",
+          kind: "terminal",
+          harness: undefined,
+          seatRole: "terminal",
+          status: "running",
+        }),
+      ),
+    ]);
+    sessionCockpitStore.setState({ focusedSessionId: null });
+    // No conversation backend here: the harness seats' epoch resolve fails quietly (bounded
+    // window), the composition contract is what's under test.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () => ({ ok: false, status: 503, json: async () => ({}) }) as Response,
+      ),
+    );
+  });
+
+  it("harness → terminal → harness → terminal: no dispose, no recreate — only layer visibility flips", async () => {
+    const { findByTestId, getByTestId, queryByTestId } = render(
+      <SessionsView active />,
+    );
+    await waitFor(() =>
+      expect(sessionCockpitStore.getState().focusedSessionId).toBe("worker-tui"),
+    );
+    // Harness only: no PTY layer at all — lazy-on-first-terminal-focus, composer present.
+    expect(queryByTestId("pty-layer")).toBeNull();
+    expect(getByTestId("session-composer")).not.toBeNull();
+
+    // → terminal: the layer mounts; the composer leaves (the one honest box change that the
+    // terminal's ResizeObserver refits to — no mount cascade).
+    fireEvent.click(getByTestId("rail-row-raw-term"));
+    await waitFor(() =>
+      expect(sessionCockpitStore.getState().focusedSessionId).toBe("raw-term"),
+    );
+    const terminalNode = await findByTestId("mock-terminal-raw-term");
+    expect(queryByTestId("session-composer")).toBeNull();
+    expect(getByTestId("pty-layer").getAttribute("aria-hidden")).toBeNull();
+    expect(getByTestId("conversation-layer").getAttribute("aria-hidden")).toBe(
+      "true",
+    );
+
+    // → harness: THE FIX — xterm instance + connection survive the archetype switch.
+    fireEvent.click(getByTestId("rail-row-worker-tui"));
+    await waitFor(() =>
+      expect(sessionCockpitStore.getState().focusedSessionId).toBe("worker-tui"),
+    );
+    expect(mockTerminalUnmounts).toEqual([]); // no dispose (Terminal's cleanup is the socket teardown)
+    expect(getByTestId("mock-terminal-raw-term")).toBe(terminalNode); // no recreate — same node
+    expect(getByTestId("pty-layer").getAttribute("aria-hidden")).toBe("true");
+    expect(getByTestId("conversation-layer").getAttribute("aria-hidden")).toBeNull();
+    expect(getByTestId("session-composer")).not.toBeNull();
+    // The hidden layer dropped out of the pty zone/focus contract…
+    expect(getByTestId("pty-surface").getAttribute("data-kbzone")).toBeNull();
+    expect(getByTestId("pty-surface").getAttribute("data-focus-target")).toBeNull();
+
+    // → terminal again: the SAME stack re-shows. One mount across the whole round trip.
+    fireEvent.click(getByTestId("rail-row-raw-term"));
+    await waitFor(() =>
+      expect(sessionCockpitStore.getState().focusedSessionId).toBe("raw-term"),
+    );
+    expect(getByTestId("mock-terminal-raw-term")).toBe(terminalNode);
+    expect(mockTerminalMounts.filter((id) => id === "raw-term")).toHaveLength(1);
+    expect(mockTerminalUnmounts).toEqual([]);
+    expect(getByTestId("pty-layer").getAttribute("aria-hidden")).toBeNull();
+    expect(getByTestId("pty-surface").getAttribute("data-kbzone")).toBe("pty");
+  });
+
+  it("the F-l rail-click focus lands in the VISIBLE layer only — the hidden terminal can't steal it", async () => {
+    const { findByTestId, getByTestId } = render(<SessionsView active />);
+    await waitFor(() =>
+      expect(sessionCockpitStore.getState().focusedSessionId).toBe("worker-tui"),
+    );
+    // Visit the terminal so the (later hidden) layer exists; the raw seat has no composer, so the
+    // focus lands inside the PTY layer itself.
+    fireEvent.click(getByTestId("rail-row-raw-term"));
+    await waitFor(() =>
+      expect(sessionCockpitStore.getState().focusedSessionId).toBe("raw-term"),
+    );
+    await findByTestId("mock-terminal-raw-term");
+    await waitFor(() =>
+      expect(
+        (document.activeElement as HTMLElement | null)?.closest(
+          "[data-testid='pty-layer']",
+        ),
+      ).not.toBeNull(),
+    );
+
+    // Back to the harness seat: the deferred rail-click focus must land in the composer — never
+    // inside the hidden PTY stack.
+    fireEvent.click(getByTestId("rail-row-worker-tui"));
+    await waitFor(() =>
+      expect(sessionCockpitStore.getState().focusedSessionId).toBe("worker-tui"),
+    );
+    const composer = (
+      await findByTestId("session-composer-editor")
+    ).querySelector(".cm-content");
+    await waitFor(() => expect(document.activeElement).toBe(composer));
+    expect(
+      (document.activeElement as HTMLElement | null)?.closest(
+        "[data-testid='pty-layer']",
+      ),
+    ).toBeNull();
   });
 });

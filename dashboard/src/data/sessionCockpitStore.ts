@@ -7,10 +7,10 @@ import { sessionStore } from "./sessions";
 import type { SubmitRecord } from "./submitMachine";
 import { compactSubmitHistory, compactSubmitQueue } from "./submitRetention";
 
-// The sessions-cockpit client store (260715-FEUI-L2 S3, design §4.3). HONESTY INVARIANTS live in
+// The sessions-cockpit client store (design §4.3). HONESTY INVARIANTS live in
 // this shape: server truth is mirrored, never invented — `requested` and `effective` are separate
 // fields everywhere, a queued set NEVER moves the effective marker, and evidence tiers start at
-// 'pending' until control state proves better (L4 wires the promotion paths). Kept separate from
+// 'pending' until control state proves better. Kept separate from
 // `sessionStore` (the catalog mirror) and `dashboardStore` (the projection): this is per-seat
 // cockpit state — drafts, ledgers, clocks, freshness — not catalog truth.
 
@@ -39,18 +39,18 @@ export interface SetLedgerEntry {
   kind: "model" | "effort";
   requestedValue: string;
   result: SetResultSnapshot;
-  /** Explicit operator act (design §9.8 F22) — feeds the unacknowledged-outcomes attention count. */
+  /** Explicit operator act (design §9.8) — feeds the unacknowledged-outcomes attention count. */
   acknowledged: boolean;
 }
 
-/** The exact-session capability GET (L4) — never the pre-session cache (design §6.1). */
+/** The exact-session capability GET — never the pre-session cache (design §6.1). */
 export interface CapabilitySnapshot {
   sessionId: string;
   fetchedAt: number;
   payload: CapabilitySnapshotWire;
 }
 
-/** An exact-session capability GET failure, verbatim (F16) — the control disables on it. */
+/** An exact-session capability GET failure, verbatim — the control disables on it. */
 export interface SnapshotErrorInfo {
   /** null = the fetch itself threw (network loss / malformed body). */
   httpStatus: number | null;
@@ -61,7 +61,7 @@ export interface SnapshotErrorInfo {
   at: number;
 }
 
-/** A set-model/set-effort HTTP-boundary failure (R3) — NEVER a 200 unknown/unsupported. */
+/** A set-model/set-effort HTTP-boundary failure — NEVER a 200 unknown/unsupported. */
 export interface SetRouteErrorInfo {
   kind: "model" | "effort";
   /** The value the failed POST carried — the retry affordance resends exactly it. */
@@ -69,7 +69,7 @@ export interface SetRouteErrorInfo {
   httpStatus: number | null;
   status: string;
   detail: string;
-  /** 503 outage — the only route error with a retry affordance (R3). */
+  /** 503 outage — the only route error with a retry affordance. */
   retryable: boolean;
   at: number;
 }
@@ -114,13 +114,13 @@ export interface PerSessionCockpit {
   liveSnapshot?: CapabilitySnapshot;
   /** The exact-session GET is in flight (popover spinner / chrome chip honesty). */
   snapshotLoading: boolean;
-  /** Last exact-session GET failure — cleared by the next successful snapshot (F16). */
+  /** Last exact-session GET failure — cleared by the next successful snapshot. */
   snapshotError?: SnapshotErrorInfo;
   /** Per-kind echo-verified effective values (SetResult evidence) — see EchoEvidence. */
   echoEvidence: { model?: EchoEvidence; effort?: EchoEvidence };
-  /** Last set-route HTTP failure (R3: 404/409/503/transport) — cleared on the next set. */
+  /** Last set-route HTTP failure (404/409/503/transport) — cleared on the next set. */
   setRouteError?: SetRouteErrorInfo;
-  /** The serialized model+effort pair change in progress (R5) — absent when none. */
+  /** The serialized model+effort pair change in progress — absent when none. */
   pairChange?: PairChangeState;
   /** Per-kind so a pair change never clobbers the other knob's in-flight set. */
   pendingSets: { model?: PendingSet; effort?: PendingSet };
@@ -132,23 +132,23 @@ export interface PerSessionCockpit {
   };
   composer: {
     draft: string;
-    draftRevision: number /* submit lifecycle lands in L5 */;
+    draftRevision: number /* full submit lifecycle handled separately */;
   };
-  surfaceTab: "terminal"; // 'transcript' joins when UA-1 lands
+  surfaceTab: "terminal"; // 'transcript' joins when the transcript surface lands
   /** Client-measured turn clock (~-labeled, sweep-bounded honesty): observed transitions only. */
   turnClock: { workingSince: number | null; lastObservedTurnState?: string };
-  /** Per-pane freshness (R15). 'none' = no PTY attached in this cockpit yet (L6 writes it). */
+  /** Per-pane freshness. 'none' = no PTY attached in this cockpit yet. */
   freshness: {
     ptyWs: "none" | "connected" | "reconnecting" | "dropped";
     lastOutputAt: number | null;
   };
-  /** The cockpit's OWN queued submits (a list, not a chip — F13); whole truth is UA-8-gated. */
+  /** The cockpit's OWN queued submits (a list, not a chip). */
   queue: QueuedSubmit[];
-  /** Durable-for-the-view receipt/reconciliation ledger; L7 renders this in the inspector. */
+  /** Durable-for-the-view receipt/reconciliation ledger; rendered in the inspector. */
   submitHistory: SubmitRecord[];
   /** One bounded Alt+Up transaction: response-loss convergence or revision-safe recovery. */
   withdrawal?: WithdrawalState;
-  /** InteractionBar round-trip state (L6 R4 / design §7.3 F7) — absent when nothing in flight. */
+  /** InteractionBar round-trip state (design §7.3) — absent when nothing in flight. */
   interactionAnswer?: InteractionAnswerState;
 }
 
@@ -156,8 +156,10 @@ export interface PerSessionCockpit {
 export interface InteractionAnswerState {
   interactionId: string;
   inflight: boolean;
-  /** Exact payload retained for a same-interaction retry. */
+  /** Exact payload retained for a same-interaction retry (a summary when `answers` is set). */
   answer: string;
+  /** Structured questions mode: the retry payload is THIS map (every question's exact text). */
+  answers?: Record<string, string>;
   /** Composer revision that owns the answer; retry success may clear only this revision. */
   draftRevision?: number;
   /** The POST failure, verbatim (never silent) — cleared by retry. */
@@ -180,12 +182,12 @@ const emptyPerSession = (): PerSessionCockpit => ({
   submitHistory: [],
 });
 
-/** Catalog-poll beats missed before the rail shows the stale banner (R15/F3). */
+/** Catalog-poll beats missed before the rail shows the stale banner. */
 export const POLL_STALE_MISSED_BEATS = 3;
 
 const TREE_VIEW_KEY = "cockpit.sessions.orchestration-tree";
 
-// Open-question decision (leaf doc): the orchestration-tree toggle persists PER USER via
+// The orchestration-tree toggle persists PER USER via
 // localStorage — it is an inspection preference (like the calm-cockpit toggle), not session
 // state, and the low-stakes call favors the cheaper, already-idiomatic mechanism.
 function readPersistedTreeView(): boolean {
@@ -209,9 +211,9 @@ export interface SessionCockpitState {
   /** Mirrors of the view-owned layout facts (design §4.3) — SessionsView syncs them one-way. */
   layout: { railCollapsed: boolean; inspectorCollapsed: boolean };
   paletteOpen: boolean;
-  /** The palette-toggled spawn-edge provenance view (R5) — persisted per user (see above). */
+  /** The palette-toggled spawn-edge provenance view — persisted per user (see above). */
   orchestrationTreeView: boolean;
-  /** Catalog-poll health (R15/F3): a dead 2500 ms poll freezes every row — global state. */
+  /** Catalog-poll health: a dead 2500 ms poll freezes every row — global state. */
   pollHealth: {
     lastBeatAt: number | null;
     missedBeats: number;
@@ -363,7 +365,7 @@ export const sessionCockpitStore = createStore<SessionCockpitState>((set) => ({
         ...current,
         // acknowledged defaults false; benign outcomes (immediate, non-clamp echo-verified,
         // queued) are appended pre-acknowledged by the set client — only outcomes that DEMAND
-        // attention (unsupported / clamp / unknown) drive the rail marker (R6).
+        // attention (unsupported / clamp / unknown) drive the rail marker.
         setLedger: [...current.setLedger, { acknowledged: false, ...entry }],
         // Deliberately NOT touching launchEvidence here: a set outcome — even `immediate` — is
         // its own ledger fact; the effective marker moves only via setLaunchEvidence with proof.
@@ -396,7 +398,7 @@ export const sessionCockpitStore = createStore<SessionCockpitState>((set) => ({
       withPerSession(state, id, (current) => ({
         ...current,
         liveSnapshot,
-        // A successful readback clears the fetch-failure state — the two never coexist (F16).
+        // A successful readback clears the fetch-failure state — the two never coexist.
         snapshotLoading: false,
         snapshotError: undefined,
       })),

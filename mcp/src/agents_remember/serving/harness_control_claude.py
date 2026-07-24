@@ -41,6 +41,7 @@ from agents_remember.serving.harness_control_models import (
     ControlIdentity,
     ControlOperationRef,
     InteractionResponse,
+    InterruptResult,
     LaunchSpec,
     PromptRequest,
     ReconciliationResult,
@@ -367,6 +368,27 @@ class ClaudeStreamJsonAdapter:
         if self._state is None:
             raise HarnessControlError(self._unsupported_detail or "Claude adapter is unsupported")
         await self._state.respond(response)
+
+    async def interrupt(
+        self,
+        *,
+        turn_id: str | None,
+        expected_operation_id: str | None,
+    ) -> InterruptResult:
+        """Structural ``InterruptCapableAdapter`` opt-in: the native stream-json interrupt.
+
+        Probe-locked on claude 2.1.217: a mid-turn ``control_request`` interrupt is natively
+        accepted (control_response success, ``still_queued`` []) and the turn terminates with
+        an ``error_during_execution``/``is_error`` result, which the state machine settles as
+        interrupted through the accepted-interrupt correlation — never as a failure.
+        """
+
+        if self._state is None:
+            raise HarnessControlError(self._unsupported_detail or "Claude adapter is unsupported")
+        return await self._state.interrupt(
+            turn_id=turn_id,
+            expected_operation_id=expected_operation_id,
+        )
 
     async def reconcile(self, request_id: str) -> ReconciliationResult:
         if self._state is not None:

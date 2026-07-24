@@ -50,7 +50,8 @@ describe("effective keymap preferences", () => {
       }),
     );
     expect(bindingFor(keymap, "palette.open")?.chord).toBe("Control+K");
-    expect(bindingFor(keymap, "composer.submit")?.chord).toBe("Control+Enter");
+    // Plain Enter is the default send chord in harness chats.
+    expect(bindingFor(keymap, "composer.submit")?.chord).toBe("Enter");
     expect(keymap.composerProfile).toBe("emacs");
     expect(keymap.issues.join(" ")).toMatch(/browser-reserved|duplicate/);
     expect(keymap.issues.join(" ")).toContain("unknown command");

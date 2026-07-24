@@ -37,6 +37,7 @@ from agents_remember.serving.terminal import (
     TerminalHost,
     TerminalSession,
     _build_tmux_command,
+    _parse_tmux_version,
     _spawn_pty,
     _tmux_cancel_copy_mode,
     _tmux_client_environment,
@@ -45,6 +46,8 @@ from agents_remember.serving.terminal import (
     _tmux_kill_session,
     _tmux_probe_session,
     _tmux_session_name,
+    _tmux_supports_client_capabilities,
+    _tmux_version,
     ensure_terminal_input_ready,
     pane_in_mode,
 )
@@ -181,7 +184,33 @@ class BuildCommandTests(unittest.TestCase):
             self.assertEqual(child["AR_KEEP"], "required")
 
     def test_build_tmux_command_wraps_harness(self) -> None:
-        argv = _build_tmux_command("ar-lc1", Path("/work/tree"), ["claude", "--resume"])
+        argv = _build_tmux_command(
+            "ar-lc1", Path("/work/tree"), ["claude", "--resume"], client_capabilities=True
+        )
+        self.assertEqual(
+            argv,
+            [
+                "tmux",
+                "-T",
+                "sync",
+                "new-session",
+                "-A",
+                "-s",
+                "ar-lc1",
+                "-c",
+                "/work/tree",
+                "--",
+                "claude",
+                "--resume",
+            ],
+        )
+
+    def test_build_tmux_command_omits_capability_flag_without_support(self) -> None:
+        # tmux < 3.2 has no -T global and rejects unknown globals hard (usage, exit 1, no session),
+        # so the client-capability assertion must vanish rather than take the whole attach down.
+        argv = _build_tmux_command(
+            "ar-lc1", Path("/work/tree"), ["claude", "--resume"], client_capabilities=False
+        )
         self.assertEqual(
             argv,
             [
@@ -197,6 +226,73 @@ class BuildCommandTests(unittest.TestCase):
                 "--resume",
             ],
         )
+
+    def test_build_tmux_command_consults_version_probe_by_default(self) -> None:
+        # The default path is the one every browser attach takes: no explicit capability argument.
+        with mock.patch("agents_remember.serving.terminal._tmux_version", return_value=(3, 1)):
+            old = _build_tmux_command("ar-lc1", Path("/work/tree"), ["cat"])
+        with mock.patch("agents_remember.serving.terminal._tmux_version", return_value=(3, 2)):
+            new = _build_tmux_command("ar-lc1", Path("/work/tree"), ["cat"])
+        self.assertNotIn("-T", old)
+        self.assertEqual(new[:3], ["tmux", "-T", "sync"])
+
+    def test_parse_tmux_version_reads_release_forms(self) -> None:
+        self.assertEqual(_parse_tmux_version("tmux 3.4\n"), (3, 4))
+        self.assertEqual(_parse_tmux_version("tmux 3.2a\n"), (3, 2))
+        self.assertEqual(_parse_tmux_version("tmux 3.1c\n"), (3, 1))
+        self.assertEqual(_parse_tmux_version("tmux 2.8\n"), (2, 8))
+        self.assertEqual(_parse_tmux_version("tmux next-3.6\n"), (3, 6))
+        # Non-numeric builds are unknown, not new-enough: never assert a capability we cannot prove.
+        self.assertIsNone(_parse_tmux_version("tmux master\n"))
+        self.assertIsNone(_parse_tmux_version("tmux openbsd-7.5\n"))
+        self.assertIsNone(_parse_tmux_version(""))
+
+    def test_client_capability_floor_is_tmux_3_2(self) -> None:
+        # -T shipped in tmux 3.2 ("CHANGES FROM 3.1c TO 3.2"); 3.1c's option string carries no T.
+        self.assertFalse(_tmux_supports_client_capabilities((3, 1)))
+        self.assertFalse(_tmux_supports_client_capabilities((2, 9)))
+        self.assertTrue(_tmux_supports_client_capabilities((3, 2)))
+        self.assertTrue(_tmux_supports_client_capabilities((3, 4)))
+        self.assertTrue(_tmux_supports_client_capabilities((4, 0)))
+        # tmux absent or unparseable -- degrade, do not gamble the spawn.
+        self.assertFalse(_tmux_supports_client_capabilities(None))
+
+    def test_tmux_version_probes_once_per_process(self) -> None:
+        # This gates the argv of every attach; a fork per WebSocket connect is not acceptable, and
+        # the answer cannot change while the daemon runs.
+        calls: list[Sequence[str]] = []
+
+        def run(argv: Sequence[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+            calls.append(list(argv))
+            return subprocess.CompletedProcess(list(argv), 0, stdout="tmux 3.4\n", stderr="")
+
+        _tmux_version.cache_clear()
+        try:
+            with mock.patch("agents_remember.serving.terminal.subprocess.run", side_effect=run):
+                self.assertEqual(_tmux_version(), (3, 4))
+                self.assertEqual(_tmux_version(), (3, 4))
+        finally:
+            _tmux_version.cache_clear()
+        self.assertEqual(calls, [["tmux", "-V"]])
+
+    def test_tmux_version_is_none_when_probe_fails(self) -> None:
+        # No tmux, a hung tmux, and a pre-1.4 tmux (no -V at all) are all "unknown", never "new enough".
+        outcomes: list[Exception | subprocess.CompletedProcess[str]] = [
+            FileNotFoundError("tmux"),
+            subprocess.TimeoutExpired(["tmux", "-V"], 5.0),
+            subprocess.CompletedProcess(["tmux", "-V"], 1, stdout="usage: tmux\n", stderr=""),
+        ]
+        for outcome in outcomes:
+            with self.subTest(outcome=type(outcome).__name__):
+                _tmux_version.cache_clear()
+                try:
+                    with mock.patch(
+                        "agents_remember.serving.terminal.subprocess.run",
+                        side_effect=[outcome],
+                    ):
+                        self.assertIsNone(_tmux_version())
+                finally:
+                    _tmux_version.cache_clear()
 
     def test_session_name_sanitizes_unsafe_chars(self) -> None:
         # tmux names cannot carry "." or ":" -- both collapse to a single hyphen.
@@ -234,8 +330,12 @@ class TerminalHostRegistryTests(unittest.TestCase):
         self.existing_tmux.add(name)
 
     def test_open_builds_tmux_command_and_registers(self) -> None:
-        session = self.host.open("lc1", cwd=self.tmp, command=["claude"], lifecycle_id="LC-1")
-        self.assertEqual(self.spawner.calls[0][:4], ["tmux", "new-session", "-A", "-s"])
+        # Pinned to a known-modern tmux so the argv assertion does not depend on the host's binary.
+        with mock.patch("agents_remember.serving.terminal._tmux_version", return_value=(3, 4)):
+            session = self.host.open("lc1", cwd=self.tmp, command=["claude"], lifecycle_id="LC-1")
+        self.assertEqual(
+            self.spawner.calls[0][:6], ["tmux", "-T", "sync", "new-session", "-A", "-s"]
+        )
         self.assertEqual(self.spawner.calls[0][-2:], ["--", "claude"])
         self.assertEqual(session.tmux_name, "ar-lc1")
         self.assertEqual(session.lifecycle_id, "LC-1")
@@ -243,6 +343,21 @@ class TerminalHostRegistryTests(unittest.TestCase):
         self.assertEqual(self.host.sessions(), [session])
         self.assertEqual(self.host.for_lifecycle("LC-1"), [session])
         self.assertEqual(self.host.for_lifecycle("other"), [])
+
+    def test_open_and_attach_drop_capability_flag_on_old_tmux(self) -> None:
+        # The whole point of M5: on tmux < 3.2 the client argv must still be *runnable*. -T is the
+        # sole client-attaching global here, so keeping it would cost every browser attach (both
+        # kinds), not just the synchronized-output framing it buys.
+        with mock.patch("agents_remember.serving.terminal._tmux_version", return_value=(3, 1)):
+            durable = self.host.open("lc1", cwd=self.tmp, command=["claude"], lifecycle_id="LC-1")
+            self.host.attach(
+                "lc1", cwd=self.tmp, command=["claude"], lifecycle_id="LC-1", name=durable.tmux_name
+            )
+        self.assertEqual(len(self.spawner.calls), 2)
+        for argv in self.spawner.calls:
+            self.assertNotIn("-T", argv)
+            self.assertNotIn("sync", argv)
+            self.assertEqual(argv[:4], ["tmux", "new-session", "-A", "-s"])
 
     def test_open_is_idempotent_for_live_session(self) -> None:
         first = self.host.open("lc1", cwd=self.tmp, command=["cat"])
@@ -320,7 +435,7 @@ class TerminalHostRegistryTests(unittest.TestCase):
     def test_custom_name_overrides_derived(self) -> None:
         session = self.host.open("lc1", cwd=self.tmp, command=["cat"], name="custom")
         self.assertEqual(session.tmux_name, "custom")
-        self.assertEqual(self.spawner.calls[0][4], "custom")
+        self.assertEqual(self.spawner.calls[0][6], "custom")
 
     def test_has_session_uses_tmux_probe(self) -> None:
         self.existing_tmux.add("ar-lc1")

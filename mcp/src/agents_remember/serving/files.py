@@ -1,12 +1,12 @@
 """Read-only files API: browse code + paired onboarding across repos/worktrees.
 
-L1 of the operations-integration series. Bridges the dashboard serving layer to the
-kernel :class:`CoordinationContext` so the File Viewer (L2) and Change-Set Viewer
-(L3/L4) can enumerate repositories and their ``{mainline + active worktree
+Bridges the dashboard serving layer to the
+kernel :class:`CoordinationContext` so the File Viewer and Change-Set Viewer
+can enumerate repositories and their ``{mainline + active worktree
 enclosures}``, list a scoped directory level (code + paired onboarding), read one
 file, and resolve the 1:1 code<->onboarding sidecar pairing in both directions.
 
-Security posture (inherited from the Task-6 localhost routes): GET-only, read-only,
+Security posture (inherited from the other localhost serving routes): GET-only, read-only,
 127.0.0.1-bound, no auth/CORS. Every served path is confined to an allow-listed root
 (``confine_rel`` realpath check). The repo allow-list is ``config.allowed_repo_ids``;
 worktree roots come from on-disk leaf-enclosure contracts.
@@ -16,12 +16,15 @@ Missing onboarding is never an error: a repo with no AR memory still browses its
 ``status: "missing"`` -- the placeholder the File Viewer renders, not a failure.
 
 Scope resolution (``FileScope`` / ``resolve_scope`` / ``run_scoped``) + the language
-map live in the sibling ``serving/scope.py`` so the Change-Set Viewer backend (L3)
+map live in the sibling ``serving/scope.py`` so the Change-Set Viewer backend
 reuses them; ``FileScope`` and ``_resolve_within`` are re-exported here for callers.
 """
 
 from __future__ import annotations
 
+import time
+from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -42,12 +45,13 @@ from agents_remember.memory_quality.integrity.onboarding_drift_check.discovery i
 )
 from agents_remember.serving.scope import (
     FileScope,
-    _iter_repo_contracts,
+    _iter_active_contracts,
     _resolve_within,
     decode_capped,
     language_for,
     run_scoped,
 )
+from agents_remember.worktrees.worktree_contract import WorktreeContract
 
 # A read is capped so a pathological file never blocks the event loop; mirrors the
 # serving.app image-upload cap. The full byte size is still reported (truncated=True).
@@ -56,9 +60,58 @@ _MAX_FILE_BYTES = 2 * 1024 * 1024
 
 # --- catalog ---------------------------------------------------------------
 
+# /api/files/repos fired 2x per dashboard boot (React StrictMode) plus on
+# every File Viewer refresh, and each call re-walked + re-parsed the whole ``tasks/`` tree
+# PER REPO (the measured refresh bottleneck: 8x rglob + 8x contract-parse passes). The
+# assembly below walks ONCE; this short-TTL memo (mirroring the ``_RepoSurfaceCacheEntry``
+# idiom in observer/projection_store.py) makes repeat/StrictMode calls free. Expiry-based,
+# not invalidated: a newly started enclosure appears in the catalog within the TTL, which
+# the browse UI tolerates. Served as a shared dict -- callers must not mutate it (the route
+# serializes it straight into the JSONResponse).
+_REPO_CATALOG_TTL_SECONDS = 15.0
 
-def list_repos(config: McpRuntimeConfig) -> dict[str, Any]:
-    """The catalog: every allow-listed repo with its mainline + active enclosures."""
+
+@dataclass(frozen=True)
+class _RepoCatalogCacheEntry:
+    at: float
+    value: dict[str, Any]
+
+
+_repo_catalog_cache: dict[tuple[str, tuple[str, ...]], _RepoCatalogCacheEntry] = {}
+
+
+def _repo_catalog_cache_key(config: McpRuntimeConfig) -> tuple[str, tuple[str, ...]]:
+    return (config.coordination_root.as_posix(), tuple(sorted(config.allowed_repo_ids)))
+
+
+def list_repos(
+    config: McpRuntimeConfig, *, now: Callable[[], float] = time.monotonic
+) -> dict[str, Any]:
+    """The catalog: every allow-listed repo with its mainline + active enclosures.
+
+    Serves the TTL memo while fresh (``now`` is the TTL clock, injectable for tests);
+    on a miss the catalog is re-assembled with a single tasks-tree walk.
+    """
+    key = _repo_catalog_cache_key(config)
+    entry = _repo_catalog_cache.get(key)
+    moment = now()
+    if entry is not None and 0 <= moment - entry.at < _REPO_CATALOG_TTL_SECONDS:
+        return entry.value
+    value = _assemble_repo_catalog(config)
+    _repo_catalog_cache[key] = _RepoCatalogCacheEntry(at=moment, value=value)
+    return value
+
+
+def _assemble_repo_catalog(config: McpRuntimeConfig) -> dict[str, Any]:
+    """One walk + parse pass over ``tasks/``, contracts bucketed by repo, rows in repo order.
+
+    Within a repo the worktree rows keep ``iter_leaf_enclosure_contracts``' sorted-path
+    order (bucketing preserves iteration order), so the response is byte-identical to the
+    former per-repo iteration.
+    """
+    contracts_by_repo: dict[str, list[WorktreeContract]] = {}
+    for contract in _iter_active_contracts(config):
+        contracts_by_repo.setdefault(contract.repo_name, []).append(contract)
     repos: list[dict[str, Any]] = []
     for repo_id in config.allowed_repo_ids:
         scope = config.repositories[repo_id]
@@ -70,7 +123,7 @@ def list_repos(config: McpRuntimeConfig) -> dict[str, Any]:
                 "leafId": c.leaf_id,
                 "taskName": c.task_name,
             }
-            for c in _iter_repo_contracts(config, repo_id)
+            for c in contracts_by_repo.get(repo_id, [])
         ]
         repos.append(
             {
@@ -138,7 +191,7 @@ def read_file(scope: FileScope, rel: str) -> dict[str, Any]:
     truncated = len(raw) > _MAX_FILE_BYTES
     try:
         # Cut at a UTF-8 codepoint boundary so an oversize text file whose multi-byte char straddles
-        # the cap returns its first ~2 MiB with truncated=True, never an empty "binary" (L18 finding 5).
+        # the cap returns its first ~2 MiB with truncated=True, never an empty "binary".
         content, truncated = decode_capped(raw, _MAX_FILE_BYTES)
         language = language_for(src)
     except UnicodeDecodeError:
@@ -196,7 +249,7 @@ def _onboarding_doc_body(scope: FileScope, rel: str) -> str | None:
     except OSError:
         return None
     try:
-        # Same codepoint-boundary cut as read_file (260703-L18 finding 5): a >2 MiB overview whose
+        # Same codepoint-boundary cut as read_file: a >2 MiB overview whose
         # multi-byte char straddles the cap renders its first ~2 MiB instead of degrading to a placeholder.
         return decode_capped(raw, _MAX_FILE_BYTES)[0]
     except UnicodeDecodeError:

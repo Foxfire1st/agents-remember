@@ -1,7 +1,7 @@
 #!/usr/bin/env sh
 # Pre-push quality gate: run the project-owned suite and block the push on any
-# finding (ruff, Pyright, the full pytest suite, and CRAP via
-# --fail-on-crap-threshold). Bypass intentionally with `git push --no-verify`.
+# finding (ruff, Pyright, the full pytest suite, and mandatory CRAP).
+# Bypass intentionally with `git push --no-verify`.
 #
 # Enable once per clone:  git config core.hooksPath .githooks
 # Prerequisite:           pip install -e "mcp[dev]"
@@ -47,4 +47,4 @@ checkout_pythonpath="$root/mcp/src"
 if [ -n "${PYTHONPATH:-}" ]; then
   checkout_pythonpath="$checkout_pythonpath:$PYTHONPATH"
 fi
-PYTHONPATH="$checkout_pythonpath" "$py" -m agents_remember.code_quality.check --fail-on-crap-threshold
+PYTHONPATH="$checkout_pythonpath" "$py" -m agents_remember.code_quality.check

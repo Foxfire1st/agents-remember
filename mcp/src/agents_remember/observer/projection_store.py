@@ -2,7 +2,7 @@
 
 ``read_lifecycle_logs`` enumerates the per-lifecycle truth; ``project_and_write``
 ties reading, the pure reduction, and the write together (the entry the serving
-layer drives on a tick, slice 04). Projections are written tmp-write +
+layer drives on a tick). Projections are written tmp-write +
 ``os.replace`` so a polling dashboard reader never sees a half-written
 ``latest-state.json`` -- stronger than the plain ``write_text`` of the
 ``setup_progress`` precedent, which a concurrent reader can tear.
@@ -71,14 +71,18 @@ if TYPE_CHECKING:
 LATEST_STATE = "latest-state.json"
 LATEST_METRICS = "latest-metrics.json"
 PROVIDER_REFRESH_TTL_SECONDS = 10.0
-REPO_SURFACE_REFRESH_TTL_SECONDS = 15.0
-# F6 guardrail: the projection ticks every 1s, so a per-tick over-budget warning would be pure spam.
+# Repo-surface TTL: this walk opens+parses every onboarding document across EVERY managed
+# repo (8 memory repos, thousands of markdown files) — py-spy measured it as the dominant slice
+# of the projection tick at the old 15 s TTL. Staleness/coverage/ledger panels tolerate minutes
+# of lag; the tick budget does not tolerate the walk.
+REPO_SURFACE_REFRESH_TTL_SECONDS = 120.0
+# Guardrail: the projection ticks every 1s, so a per-tick over-budget warning would be pure spam.
 # Log at most this often -- enough to surface a body-heavy broadcast in the logs without flooding them.
 TASK_DOCUMENTS_PAYLOAD_WARN_INTERVAL_SECONDS = 300.0
 
 logger = logging.getLogger(__name__)
 
-# F6: last time the over-budget task-doc payload warning fired, keyed "at" (an in-place-mutated dict --
+# Last time the over-budget task-doc payload warning fired, keyed "at" (an in-place-mutated dict --
 # the codebase idiom for cross-tick module state, e.g. _task_doc_cache -- so no rebinding `global`).
 _last_task_payload_warn: dict[str, datetime] = {}
 
@@ -99,7 +103,7 @@ class _LifecycleLogCacheEntry:
     log_events: list[Event]
 
 
-# 260712-PTS-L2 R1/R2: ONE leaf-enclosure-contract enumeration + parse pass per tick, shared by
+# ONE leaf-enclosure-contract enumeration + parse pass per tick, shared by
 # read_enclosures, read_engine_process_facts, and drift-snapshot pruning (each previously ran its
 # own walk + load_contract pass = 3x per tick). The cache reuses a parsed contract while its
 # (mtime_ns, size, ctime_ns) is unchanged and prunes to the live enumeration each build. Mutated only on the
@@ -107,7 +111,7 @@ class _LifecycleLogCacheEntry:
 # matching the module-level cache discipline of _lifecycle_log_cache below.
 _contract_snapshot_cache = ContractSnapshotCache()
 
-# 260707-HFX2-L12 F9/F7: the projection re-read + re-validated EVERY lifecycle's full events.jsonl
+# The projection re-read + re-validated EVERY lifecycle's full events.jsonl
 # each 1s tick. Heartbeats append only every 15s (and stop entirely once a leaf is parked past its
 # inactivity cutoff), so most logs are byte-identical between ticks. This cache reuses the parsed
 # event list when a log's (mtime_ns, size) is unchanged, bounding per-tick parse cost to the logs
@@ -116,7 +120,7 @@ _lifecycle_log_cache: dict[str, _LifecycleLogCacheEntry] = {}
 
 
 def read_lifecycle_logs(root: Path) -> list[list[Event]]:
-    """Every per-lifecycle log under ``lifecycles/<id>/events.jsonl``, validated (F9/F7-cached).
+    """Every per-lifecycle log under ``lifecycles/<id>/events.jsonl``, validated (cached).
 
     Heartbeats are coalesced into ``heartbeat.json`` sidecars, so a heartbeat tick changes one tiny
     JSON file instead of invalidating the cached parse of the full event log.
@@ -210,7 +214,7 @@ def project_and_write(
     moment = now or datetime.now(UTC)
     root = observer_root(config)
     coordination_root = config.coordination_root
-    # 260712-PTS-L2: ONE contract pass per tick -- the snapshot is built here on the projection
+    # ONE contract pass per tick -- the snapshot is built here on the projection
     # worker thread and handed (immutable) to read_enclosures, drift-snapshot pruning, and
     # read_engine_process_facts below, replacing their three independent walk+parse passes.
     contract_snapshot = _contract_snapshot_cache.build(coordination_root / "tasks")
@@ -275,11 +279,11 @@ def project_and_write(
 def _warn_if_task_documents_payload_over_budget(
     projection: WorkspaceProjection, *, now: datetime
 ) -> int:
-    """Flag (rate-limited) when the broadcast serialises a body-heavy task-doc payload (F6/CS-6 D1).
+    """Flag (rate-limited) when the broadcast serialises a body-heavy task-doc payload.
 
     Returns the measured body-byte cost so callers/tests can assert on it. This is observability only --
     no truncation, no contract change -- surfacing the unbounded ``analytics.taskDocuments`` payload that
-    the escalated F6 windowing follow-up will bound, so the growth is visible in logs instead of silent.
+    a planned windowing follow-up will bound, so the growth is visible in logs instead of silent.
     """
     payload_bytes = task_documents_body_bytes(projection.analytics.taskDocuments)
     if payload_bytes <= TASK_DOCUMENTS_PAYLOAD_BUDGET_BYTES:

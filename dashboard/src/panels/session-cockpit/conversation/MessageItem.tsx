@@ -25,6 +25,10 @@ const userWrap = css({
 });
 const headRow = css({ display: "flex", alignItems: "baseline", gap: "0.4rem", minWidth: "0" });
 const roleGlyph = css({ color: "amber", flex: "none", fontSize: "0.8rem" });
+// A STREAMING message carries ToolItem's phase grammar (FB7.4): a phase-colored ● plus the dim
+// lowercase wire word — color is never the only carrier.
+const streamDot = css({ flex: "none", fontSize: "0.66rem", lineHeight: "1", color: "cyan" });
+const phaseWord = css({ flex: "none", fontSize: "0.7rem", color: "muted" });
 const clampRegion = css({ position: "relative" });
 const fileRow = css({
   display: "inline-flex",
@@ -119,6 +123,16 @@ export function MessageItem({ item }: { item: ConversationItem }) {
       <div className={headRow}>
         {isUser ? <span className={roleGlyph} aria-hidden="true">&gt;</span> : null}
         <SourceBadge lane={item.lane} source={item.source} />
+        {item.phase === "streaming" ? (
+          <>
+            <span className={streamDot} aria-hidden="true">
+              ●
+            </span>
+            <span className={phaseWord} data-testid="message-phase">
+              {item.phase}
+            </span>
+          </>
+        ) : null}
       </div>
       <div className={clampRegion}>
         <div id={regionId}>

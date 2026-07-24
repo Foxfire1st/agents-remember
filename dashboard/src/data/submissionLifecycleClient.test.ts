@@ -19,7 +19,7 @@ import {
   type SubmissionStatusBatchWire,
   type WithdrawalResultWire,
 } from "./submissionLifecycleClient";
-import { latestActiveSubmit, startSubmitRecord } from "./submitMachine";
+import { latestActiveSubmit, LIFECYCLE_WATCH_WINDOW_MS, startSubmitRecord } from "./submitMachine";
 import type { SubmissionLifecycleState } from "../types/harnessCapabilities";
 
 const SESSION = "seat / lifecycle";
@@ -191,13 +191,15 @@ describe("submission lifecycle transport", () => {
     });
   });
 
-  it("polls immediately then at the visible cadence and stops after dispatch", async () => {
+  it("polls immediately then at the visible cadence, keeps polling past dispatch, and stops on delivered", async () => {
     vi.useFakeTimers();
     seedQueued();
     const status = vi
       .fn()
       .mockResolvedValueOnce(found("queued"))
-      .mockResolvedValueOnce(found("dispatching"));
+      .mockResolvedValueOnce(found("dispatching"))
+      .mockResolvedValueOnce(found("dispatching"))
+      .mockResolvedValueOnce(found("delivered"));
     ensureSubmissionLifecyclePolling(SESSION, transport({ status }));
 
     await vi.advanceTimersByTimeAsync(0);
@@ -206,9 +208,55 @@ describe("submission lifecycle transport", () => {
     expect(status).toHaveBeenCalledTimes(1);
     await vi.advanceTimersByTimeAsync(1);
     expect(status).toHaveBeenCalledTimes(2);
+    // Dispatching dequeues the QueuePreview entry but is NOT terminal: the composer is still owed
+    // the server's terminal word, so polling continues at the same cadence.
     expect(sessionCockpitStore.getState().perSession[SESSION].queue).toEqual([]);
+    expect(sessionCockpitStore.getState().perSession[SESSION].submitHistory[0]).toMatchObject({
+      phase: "delivering",
+      serverLifecycleState: "dispatching",
+    });
+    await vi.advanceTimersByTimeAsync(VISIBLE_STATUS_POLL_MS);
+    expect(status).toHaveBeenCalledTimes(3);
+
+    // The delivered upgrade lands on a later poll and settles the record terminally.
+    await vi.advanceTimersByTimeAsync(VISIBLE_STATUS_POLL_MS);
+    expect(status).toHaveBeenCalledTimes(4);
+    expect(sessionCockpitStore.getState().perSession[SESSION].submitHistory[0]).toMatchObject({
+      phase: "accepted",
+      serverLifecycleState: "delivered",
+    });
+    // Terminal word reached: the poller stops on its own.
+    await vi.advanceTimersByTimeAsync(VISIBLE_STATUS_POLL_MS * 3);
+    expect(status).toHaveBeenCalledTimes(4);
     expect(HIDDEN_STATUS_POLL_MS).toBe(2_500);
     expect(STATUS_FAILURE_BACKOFF_MS).toEqual([1_000, 2_000, 5_000]);
+  });
+
+  it("settles a never-terminal dispatch honestly on the bounded watch window instead of polling forever", async () => {
+    vi.useFakeTimers();
+    seedQueued();
+    const status = vi.fn(async () => found("dispatching"));
+    ensureSubmissionLifecyclePolling(SESSION, transport({ status }));
+
+    await vi.advanceTimersByTimeAsync(0);
+    expect(status).toHaveBeenCalledTimes(1);
+    // Poll through the whole watch window: the record stays delivering and keeps polling.
+    await vi.advanceTimersByTimeAsync(LIFECYCLE_WATCH_WINDOW_MS);
+    const callsAtWindow = status.mock.calls.length;
+    expect(callsAtWindow).toBeGreaterThan(1);
+    expect(sessionCockpitStore.getState().perSession[SESSION].submitHistory[0]).toMatchObject({
+      phase: "delivering",
+      serverLifecycleState: "dispatching",
+    });
+
+    // The first poll pass past the window settles the record on the honest endgame boundary and
+    // stops polling rather than spinning "delivering…" forever.
+    await vi.advanceTimersByTimeAsync(VISIBLE_STATUS_POLL_MS * 2);
+    expect(status).toHaveBeenCalledTimes(callsAtWindow);
+    expect(sessionCockpitStore.getState().perSession[SESSION].submitHistory[0]).toMatchObject({
+      phase: "endgame",
+      detail: "still unresolved — keep waiting, copy requestId, or release the retained draft",
+    });
   });
 
   it("keeps an old poll completion from applying to or deleting a new same-id poller", async () => {
@@ -494,7 +542,9 @@ describe("atomic Alt+Up withdrawal", () => {
         now: () => 67,
       });
       delayedStatus.resolve(found("queued"));
-      await expect(poll).resolves.toBe(0);
+      // The withdrawal settled delivering/ambiguous — non-terminal, so the lifecycle watch keeps
+      // the record poll-locked until the server's terminal word (or the bounded window).
+      await expect(poll).resolves.toBe(1);
 
       const cockpit = sessionCockpitStore.getState().perSession[SESSION];
       expect(cockpit.queue).toEqual([]);
@@ -576,7 +626,9 @@ describe("atomic Alt+Up withdrawal", () => {
       await withdrawLastQueuedSubmission(SESSION, { transport: localTransport, now: () => 69 });
 
       delayedStatus.resolve(found(olderState));
-      await expect(poll).resolves.toBe(0);
+      // A possible-send join lands ambiguous/unknown — non-terminal and still watched — while a
+      // preserved queued poll leaves the local terminal loss with nothing left to poll.
+      await expect(poll).resolves.toBe(olderState === "dispatching" ? 1 : 0);
       const cockpit = sessionCockpitStore.getState().perSession[SESSION];
       expect(cockpit.queue).toEqual([]);
       expect(cockpit.withdrawal).toBeUndefined();

@@ -1,6 +1,6 @@
 #!/usr/bin/env sh
-# Pre-commit generated-copy gate. Keep this lightweight: it only verifies that
-# generated package/harness copies were refreshed from their canonical roots.
+# Pre-commit gate: verify generated copies and run the same mandatory source
+# quality wrapper used by closeout, pre-push, and CI.
 
 root="$(git rev-parse --show-toplevel)" || exit 1
 cd "$root" || exit 1
@@ -29,3 +29,9 @@ echo "[pre-commit] checking generated runtime asset copies..."
 "$py" scripts/sync-runtime.py --check || exit 1
 echo "[pre-commit] checking shipped dashboard bundle..."
 "$py" scripts/sync-dashboard.py --check || exit 1
+echo "[pre-commit] running quality wrapper (ruff + Pyright + pytest + CRAP, enforcing)..."
+checkout_pythonpath="$root/mcp/src"
+if [ -n "${PYTHONPATH:-}" ]; then
+  checkout_pythonpath="$checkout_pythonpath:$PYTHONPATH"
+fi
+PYTHONPATH="$checkout_pythonpath" "$py" -m agents_remember.code_quality.check

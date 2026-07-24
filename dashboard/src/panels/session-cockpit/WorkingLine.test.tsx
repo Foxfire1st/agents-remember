@@ -1,4 +1,4 @@
-// The WorkingLine (260715-FEUI-L6 R6, spec §1.2-2): single home of turn theater — rendered only
+// The WorkingLine: single home of turn theater — rendered only
 // while working, plain "working" (never whimsy), ~-labeled tabular elapsed, the UA-7-gated stop
 // control welded in, slow-pulse glyph only.
 import { cleanup, render } from "@testing-library/react";
@@ -75,9 +75,21 @@ describe("WorkingLine", () => {
     expect(queryByTestId("working-line-elapsed")).toBeNull();
   });
 
-  it("welds in the Stop-turn control, disabled with the UA-7 reason", () => {
-    const { getByTestId } = render(
+  it("renders NO stop control without a wired interrupt (F-at: controlled seats host it beside send)", () => {
+    const { queryByTestId } = render(
       <WorkingLine session={workingSession()} cockpit={cockpitWorkingSince(NOW)} now={NOW} />,
+    );
+    expect(queryByTestId("working-line-stop")).toBeNull();
+  });
+
+  it("keeps the line-hosted stop for the raw-terminal path, disabled with the UA-7 reason", () => {
+    const { getByTestId } = render(
+      <WorkingLine
+        session={workingSession()}
+        cockpit={cockpitWorkingSince(NOW)}
+        now={NOW}
+        interrupt={{ available: false, pending: false, keyshortcut: "Control+Shift+." }}
+      />,
     );
     const stop = getByTestId("working-line-stop") as HTMLButtonElement;
     expect(stop.disabled).toBe(true);

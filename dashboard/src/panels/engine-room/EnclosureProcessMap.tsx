@@ -1,4 +1,5 @@
 import { motion } from "motion/react";
+import { useEffect, useRef } from "react";
 
 import { css } from "../../../styled-system/css";
 import type { EngineProcessNode, GateNode, LedgerNode, ProviderNode } from "../../types/projection";
@@ -11,10 +12,11 @@ import {
   dissolveShell,
   stageContent,
 } from "./engineRoomStyles";
+import { useElementVisible } from "./useElementVisible";
 import { useShouldAnimate } from "./useShouldAnimate";
 
 const mapWrap = css({
-  position: "relative", // G6: stacking context for the atmospheric backdrop
+  position: "relative", // stacking context for the atmospheric backdrop
   overflow: "hidden", // clip the backdrop video to the rounded box
   display: "flex",
   flexDirection: "column",
@@ -26,7 +28,7 @@ const mapWrap = css({
   background: "bg",
 });
 
-// 05o — a pre-contract / stale-base blocked-start node (5f §2.1) is now drawn entirely inside the canvas
+// A pre-contract / stale-base blocked-start node is now drawn entirely inside the canvas
 // as the big red `FleetingEnclosure` box (EnclosureCanvas), so this shell no longer renders an HTML banner.
 
 // t18 — abandon: the enclosure dissolves (the shell dims + desaturates) and keeps an "abandoned" record.
@@ -38,7 +40,7 @@ function AbandonRecord({ node }: { node: EngineProcessNode }) {
   );
 }
 
-// 5h H4 — cleanup teardown: the SUCCESS counterpart. The worktree LANDED, so it de-materialises back
+// Cleanup teardown: the SUCCESS counterpart. The worktree LANDED, so it de-materialises back
 // into the official line (the same `.dissolve`), but the record reads success — and names the `origin-main`
 // tip it rejoined (the "back into main" seam), never faked (dropped when the probe couldn't resolve it).
 function CleanupRecord({ node }: { node: EngineProcessNode }) {
@@ -52,9 +54,9 @@ function CleanupRecord({ node }: { node: EngineProcessNode }) {
   );
 }
 
-// The Engine Room pod stage: the bird's-eye `EnclosureCanvas` (5g) inside the promote-in-place
+// The Engine Room pod stage: the bird's-eye `EnclosureCanvas` inside the promote-in-place
 // shell. The map is keyed-stable by worktreeGroup upstream (S0), so a blocked fleeting node
-// solidifies in place into the contract-anchored enclosure (T4 morph, 5f S3) — never a teleport.
+// solidifies in place into the contract-anchored enclosure (T4 morph, S3) — never a teleport.
 // The ghost banner fades as the node promotes; `layout` carries the morph. Honest motion: under
 // data-effects=off / reduced-motion the shell is an instant swap (no tween).
 export function EnclosureProcessMap({ node, gateNode, workspaceEngines = [], officialLedger }: {
@@ -64,13 +66,26 @@ export function EnclosureProcessMap({ node, gateNode, workspaceEngines = [], off
   officialLedger?: LedgerNode;
 }) {
   const animate = useShouldAnimate();
+  // Pause the backdrop decode while the room's cockpit layer is display:none (kept mounted across tab
+  // switches) — a looping filtered+blended 4.4 MB mp4 is the other half of the idle burn.
+  // autoPlay still covers the first visible mount; this only tracks later hide/show flips.
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const visible = useElementVisible(wrapRef);
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+    if (visible) void video.play()?.catch(() => {});
+    else video.pause();
+  }, [visible, animate]);
   // Teardown = the enclosure de-materialising (the `.dissolve` shell): t18 abandon (failure, no landing)
-  // and 5h H4 cleanup (success, landed → retiring back into the official line). Both dim + desaturate; the
+  // and cleanup (success, landed → retiring back into the official line). Both dim + desaturate; the
   // record + tone differ. data-abandoned is kept for the existing abandon test; data-teardown is the hook.
   const abandoned = node.phase === "abandoned";
   const teardown = abandoned ? "abandon" : node.phase === "cleanup-pending" ? "cleanup" : null;
   return (
     <motion.div
+      ref={wrapRef}
       className={mapWrap}
       data-testid="process-map"
       data-abandoned={abandoned || undefined}
@@ -80,10 +95,11 @@ export function EnclosureProcessMap({ node, gateNode, workspaceEngines = [], off
       animate={{ opacity: 1, scale: 1 }}
       transition={{ duration: 0.25, ease: "easeOut" }}
     >
-      {/* G6: faint blueprint boomerang backdrop — only when effects are on (absent + lazy when calm). */}
+      {/* faint blueprint boomerang backdrop — only when effects are on (absent + lazy when calm). */}
       {animate ? (
         <div className={backdrop} aria-hidden="true" data-testid="backdrop">
           <video
+            ref={videoRef}
             className={backdropVideo}
             src="/assets/blueprint-boomerang.mp4"
             autoPlay
@@ -95,7 +111,7 @@ export function EnclosureProcessMap({ node, gateNode, workspaceEngines = [], off
         </div>
       ) : null}
       <div className={stageContent}>
-        {/* 05o — a fleeting (born-blocked) enclosure now renders inside the canvas as the big red
+        {/* a fleeting (born-blocked) enclosure now renders inside the canvas as the big red
             `FleetingEnclosure` box (podstage `.fbox`); the old HTML banner strip is gone. */}
         {teardown === "abandon" ? <AbandonRecord node={node} /> : null}
         {teardown === "cleanup" ? <CleanupRecord node={node} /> : null}

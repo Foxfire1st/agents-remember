@@ -1,4 +1,4 @@
-"""Canonical conversation status authority (260718-CHATS-L1, R3).
+"""Canonical conversation status authority.
 
 One revisioned mapping from adapter evidence to the canonical
 :class:`ConversationStatus` vocabulary, consumed identically by the Chats
@@ -45,6 +45,16 @@ Clock = Callable[[], str]
 
 STALE_AFTER_MS = 15_000
 """One liveness-sweep cadence plus slack; the projector polls far faster."""
+
+EVIDENCE_EXPECTED_TURN_STATES: frozenset[ConversationTurnState] = frozenset(
+    {"working", "settling", "retrying", "compacting"}
+)
+"""The turn states where fresh evidence is EXPECTED to keep flowing.
+
+Staleness claims that expected evidence stopped arriving. A ready-idle, waiting, or
+needs-input chat expects no turn events — its quiet is healthy, so it can never be
+``stale``; only an active turn's silence is the alarm this threshold was tuned for.
+"""
 
 OBSERVATION_BOUND = "poll"
 """The daemon observes the bridge through bounded IPC polls, never PTY output."""
@@ -155,31 +165,54 @@ def classify_snapshot(
 def seat_turn_state_for(
     process: ProcessEvidence,
     turn_state: ConversationTurnState | None,
-) -> SeatTurnState:
+    *,
+    previous: SeatTurnState | None = None,
+) -> SeatTurnState | None:
     """Project canonical status onto the orchestration seat vocabulary.
 
     This is the single projection rule; orchestration never re-derives seat
-    state from adapter fields. Parity with the pre-canonical mapping is exact
-    and pinned by tests: live turn states are ``working`` and wait states are
-    ``awaiting-input`` regardless of process transitions (activity led the
-    legacy mapping), a settled session is ``turn-ended`` only with connected
-    evidence, and anything else is ``stale``.
+    state from adapter fields. Live turn states are ``working`` and wait states
+    are ``awaiting-input`` regardless of process transitions (activity led the
+    legacy mapping), and anything degraded with no live turn evidence is
+    ``stale``.
+
+    A ``None`` return makes NO seat claim — the sweep keeps
+    the row's last claim (or none) and the control lifecycle's own
+    ``starting``/``ready`` renders the calm idle state. Two honest applications,
+    both keyed on the row's prior claim (``previous``), never on adapter fields:
+
+    - ``turn-ended`` claims a turn ENDED, so a settled session stamps it only
+      when this seat previously claimed a live or degraded turn (working /
+      awaiting-input / stale). A fresh ready-idle chat that never ran a turn
+      claims nothing instead of faking an ended one.
+    - a booting process (``starting``) with no turn evidence and no prior claim
+      claims nothing instead of crying ``stale`` through a healthy boot.
     """
 
     if turn_state in {"working", "settling", "retrying", "compacting"}:
         return "working"
     if turn_state in {"waiting", "needs-input"}:
         return "awaiting-input"
-    if process.state == "connected" and turn_state in {"ready", "interrupted", "failed"}:
+    if process.state == "connected" and turn_state in {"interrupted", "failed"}:
         return "turn-ended"
+    if process.state == "connected" and turn_state == "ready":
+        return "turn-ended" if previous in {"working", "awaiting-input", "stale"} else None
+    if turn_state is None and process.state == "starting" and previous is None:
+        return None
     return "stale"
 
 
 def snapshot_seat_turn_state(
     snapshot: AdapterSnapshot,
     harness_id: HarnessId | None = None,
-) -> SeatTurnState:
-    """Canonical status -> seat state for the catalog projection consumer."""
+    *,
+    previous: SeatTurnState | None = None,
+) -> SeatTurnState | None:
+    """Canonical status -> seat state for the catalog projection consumer.
+
+    ``previous`` is the catalog row's current seat claim; it feeds only the
+    settle/boot hysteresis above, never a fabricated state.
+    """
 
     classification = classify_snapshot(snapshot, harness_id)
     turn_state = (
@@ -187,14 +220,18 @@ def snapshot_seat_turn_state(
         if classification.turn is not None
         else None
     )
-    return seat_turn_state_for(classification.process, turn_state)
+    return seat_turn_state_for(classification.process, turn_state, previous=previous)
 
 
 def _active_turn_id(
     snapshot: AdapterSnapshot,
     harness_id: HarnessId | None,
 ) -> str | None:
-    if harness_id != "codex":
+    # Codex stamps its native turn id; claude stamps the accepted operation's id, its only
+    # honest turn identity (claude_stream_state._ACTIVE_TURN_ID_KEY), which is exactly the
+    # identity the exact-turn interrupt contract resolves back to the active turn. Pi
+    # projects no working-turn identity on this surface.
+    if harness_id not in {"codex", "claude"}:
         return None
     value = snapshot.raw.get("activeTurnId")
     return value if isinstance(value, str) and value else None
@@ -413,6 +450,12 @@ class ConversationStatusService:
         return False
 
     def _compute_stale(self, now: str) -> bool:
+        # The threshold fits a working turn's cadence, so staleness
+        # is claimed only while a turn is active and evidence is genuinely expected. An
+        # idle ready/waiting/needs-input chat is live and quiet — its age_ms keeps
+        # advancing honestly in the freshness block, but quiet is never the alarm.
+        if self._turn.state not in EVIDENCE_EXPECTED_TURN_STATES:
+            return False
         age = _age_ms(self._last_evidence_at, now)
         return age is not None and age > STALE_AFTER_MS
 
@@ -448,6 +491,7 @@ class ConversationStatusService:
 
 
 __all__ = [
+    "EVIDENCE_EXPECTED_TURN_STATES",
     "OBSERVATION_BOUND",
     "STALE_AFTER_MS",
     "ConversationStatusService",

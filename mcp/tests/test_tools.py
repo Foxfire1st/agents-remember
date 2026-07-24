@@ -140,6 +140,25 @@ class McpToolTests(unittest.TestCase):
             ]
             self.assertEqual(missing, [], f"tools missing a description: {missing}")
 
+    def test_closeout_tool_descriptions_pin_strict_quality_before_mutation(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            path = root / ".codex" / "mcp" / "settings.json"
+            write_json(path, settings_payload(root))
+            config = load_config(path)
+
+            server = create_server(config)
+            tools = {
+                tool.name: tool.description or ""
+                for tool in asyncio.run(server.list_tools())
+            }
+
+            self.assertIn("mandatory CRAP enforcement", tools["worktree_closeout_preview"])
+            self.assertIn("before the code commit", tools["worktree_closeout_preview"])
+            self.assertIn("mandatory CRAP enforcement", tools["worktree_closeout_apply"])
+            self.assertIn("before any code", tools["worktree_closeout_apply"])
+            self.assertIn("approval precede apply", tools["worktree_closeout_apply"])
+
     def test_context_packet_tool_delegates_to_controller(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)

@@ -1,15 +1,20 @@
-// The InteractionBar (260715-FEUI-L6 R4/R9): kind-awareness, the gate-only answer path, and the
+// The InteractionBar: kind-awareness, the gate-only answer path, and the
 // full round-trip — answering… → verbatim error + retry | answered-waiting (poll-bounded).
 // xterm never appears here: the bar has no terminal dependency by construction.
-import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, waitFor, within } from "@testing-library/react";
 import { createRef } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { sessionCockpitStore } from "../../data/sessionCockpitStore";
 import { fromTerminalSessionInfo } from "../../data/sessions";
 import { dashboardStore } from "../../data/store";
+import { clearSubmissionAuthorityCache } from "../../data/submissionLifecycleClient";
 import type { LifecycleProjection } from "../../types/projection";
 import {
+  L5I_INTERACTION_LEGACY_RUNNER,
+  L5I_INTERACTION_NO_LIFECYCLE,
+  L5I_INTERACTION_PERMISSION,
+  L5I_INTERACTION_QUESTIONS,
   L6_INTERACTION_CHOICES,
   L6_INTERACTION_FREETEXT,
   L6_INTERACTION_UNREPRESENTABLE,
@@ -58,6 +63,7 @@ function composerHandleRef(text = "") {
 beforeEach(() => {
   sessionCockpitStore.setState({ perSession: {} });
   dashboardStore.setState({ lifecycles: {} });
+  clearSubmissionAuthorityCache();
 });
 
 afterEach(() => {
@@ -281,5 +287,193 @@ describe("focus + announce honesty", () => {
     unmount();
     await waitFor(() => expect(document.activeElement).toBe(invoker));
     invoker.remove();
+  });
+});
+
+
+// ── Structured decision items through the session-direct route ──────────────
+
+/** Fetch stub for the direct route: authority descriptor + captured interaction-response POSTs. */
+function stubDirectRoute(options: { postStatus?: number; postDetail?: string } = {}) {
+  const posts: Array<{ url: string; body: Record<string, unknown> }> = [];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url: string, init?: RequestInit) => {
+      const target = String(url);
+      if (target.includes("/submission-authority")) {
+        return { ok: true, status: 200, json: async () => ({ bridgeEpoch: "ep-1" }) } as Response;
+      }
+      if (target.includes("/interaction-response")) {
+        posts.push({ url: target, body: JSON.parse(String(init?.body)) });
+        const status = options.postStatus ?? 200;
+        return {
+          ok: status >= 200 && status < 300,
+          status,
+          json: async () =>
+            status === 200
+              ? { status: "accepted" }
+              : { status: "not-pending", detail: options.postDetail ?? "" },
+        } as Response;
+      }
+      throw new Error(`unexpected fetch ${target}`);
+    }),
+  );
+  return posts;
+}
+
+describe("structured questions (260718-CHATS-L5I)", () => {
+  const questionsSession = () => fromTerminalSessionInfo(L5I_INTERACTION_QUESTIONS);
+  const noLifecycleSession = () => fromTerminalSessionInfo(L5I_INTERACTION_NO_LIFECYCLE);
+  const permissionSession = () => fromTerminalSessionInfo(L5I_INTERACTION_PERMISSION);
+
+  it("renders each question with ITS OWN option group — never the flat concatenation", () => {
+    stubDirectRoute();
+    const { getByTestId, getAllByTestId, queryByTestId } = render(
+      <InteractionBar session={questionsSession()} />,
+    );
+    const questions = getAllByTestId("interaction-bar-question");
+    expect(questions).toHaveLength(2);
+    expect(
+      within(questions[0]).getAllByTestId("interaction-bar-question-option").map((b) => b.textContent),
+    ).toEqual(["main", "develop"]);
+    expect(
+      within(questions[1]).getAllByTestId("interaction-bar-question-toggle").map((b) => b.textContent),
+    ).toEqual(["tests", "docs", "bench"]);
+    // The legacy flattened prompt ("Base: …\nExtras: …") must not double as the question text.
+    expect(queryByTestId("interaction-bar-prompt")).toBeNull();
+    expect(getByTestId("interaction-bar-progress").textContent).toContain("0 of 2");
+    expect(getByTestId("interaction-bar-multiselect-hint")).toBeDefined();
+    // Per-question headers render as their own chips.
+    expect(getAllByTestId("interaction-bar-question-header").map((h) => h.textContent)).toEqual([
+      "Base",
+      "Extras",
+    ]);
+  });
+
+  it("multi-page: records per question (changeable), submits ONE answers map when ALL are answered", async () => {
+    const posts = stubDirectRoute();
+    const { getByTestId, getAllByTestId, queryByTestId } = render(
+      <InteractionBar session={questionsSession()} />,
+    );
+    const questions = getAllByTestId("interaction-bar-question");
+    fireEvent.click(within(questions[0]).getAllByTestId("interaction-bar-question-option")[0]); // main
+    await waitFor(() =>
+      expect(getByTestId("interaction-bar-question-recorded").textContent).toContain("main"),
+    );
+    // All-or-nothing: one answered question sends NOTHING yet.
+    expect(posts).toHaveLength(0);
+    // The record stays changeable while siblings are open.
+    fireEvent.click(within(questions[0]).getAllByTestId("interaction-bar-question-option")[1]); // develop
+    await waitFor(() =>
+      expect(getByTestId("interaction-bar-question-recorded").textContent).toContain("develop"),
+    );
+    // multiSelect toggles join into ONE answer for that question.
+    fireEvent.click(within(questions[1]).getAllByTestId("interaction-bar-question-toggle")[0]); // tests
+    fireEvent.click(within(questions[1]).getAllByTestId("interaction-bar-question-toggle")[2]); // bench
+    fireEvent.click(getByTestId("interaction-bar-question-confirm"));
+    await waitFor(() => expect(queryByTestId("interaction-bar-answered")).not.toBeNull());
+    expect(posts).toHaveLength(1);
+    expect(posts[0]?.body).toEqual({
+      interactionId: "ix_l5i_questions",
+      expectedBridgeEpoch: "ep-1",
+      answers: { "Which base branch?": "develop", "Which extras should run?": "tests, bench" },
+    });
+  });
+
+  it("a NO-LIFECYCLE seat answers a single-question page on click — the 'bad bug' fix", async () => {
+    const posts = stubDirectRoute();
+    // No gate is projected for this seat (it has no lifecycle) — the direct route must carry it.
+    const { getAllByTestId, queryByTestId } = render(
+      <InteractionBar session={noLifecycleSession()} />,
+    );
+    fireEvent.click(getAllByTestId("interaction-bar-question-option")[0]); // "A tiny dragon"
+    await waitFor(() => expect(queryByTestId("interaction-bar-answered")).not.toBeNull());
+    expect(posts).toHaveLength(1);
+    expect(posts[0]?.url).toBe("/api/terminal/l5i-ix-nolifecycle/interaction-response");
+    expect(posts[0]?.body).toEqual({
+      interactionId: "ix_l5i_nolifecycle",
+      expectedBridgeEpoch: "ep-1",
+      answers: { "Which would you rather have as a pet?": "A tiny dragon" },
+    });
+  });
+
+  it("a PRE-FIX runner seat renders structured pages from raw.input.questions and answers directly", async () => {
+    const posts = stubDirectRoute();
+    const { getAllByTestId, getByTestId, queryByTestId } = render(
+      <InteractionBar session={fromTerminalSessionInfo(L5I_INTERACTION_LEGACY_RUNNER)} />,
+    );
+    expect(getAllByTestId("interaction-bar-question")).toHaveLength(1);
+    expect(getByTestId("interaction-bar-question-text").textContent).toBe(
+      "Pick one — purely a rendering test?",
+    );
+    expect(getByTestId("interaction-bar-question-header").textContent).toBe("Test pick");
+    fireEvent.click(getAllByTestId("interaction-bar-question-option")[0]); // "A tiny dragon"
+    await waitFor(() => expect(queryByTestId("interaction-bar-answered")).not.toBeNull());
+    expect(posts).toHaveLength(1);
+    expect(posts[0]?.url).toBe("/api/terminal/l5i-ix-legacy-runner/interaction-response");
+    expect(posts[0]?.body).toEqual({
+      interactionId: "ix_l5i_legacy_runner",
+      expectedBridgeEpoch: "ep-1",
+      answers: { "Pick one — purely a rendering test?": "A tiny dragon" },
+    });
+  });
+
+  it("permission-kind still uses the `response` body through the direct route", async () => {
+    const posts = stubDirectRoute();
+    const { getAllByTestId, queryByTestId } = render(
+      <InteractionBar session={permissionSession()} />,
+    );
+    fireEvent.click(getAllByTestId("interaction-bar-choice")[0]); // "allow"
+    await waitFor(() => expect(queryByTestId("interaction-bar-answered")).not.toBeNull());
+    expect(posts).toHaveLength(1);
+    expect(posts[0]?.body).toEqual({
+      interactionId: "ix_l5i_permission",
+      expectedBridgeEpoch: "ep-1",
+      response: "allow",
+    });
+    expect("answers" in (posts[0]?.body ?? {})).toBe(false);
+  });
+
+  it("a 409 not-pending surfaces honestly; retry re-sends the SAME answers map", async () => {
+    const bodies: Array<Record<string, unknown>> = [];
+    let status = 409;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        const target = String(url);
+        if (target.includes("/submission-authority")) {
+          return { ok: true, status: 200, json: async () => ({ bridgeEpoch: "ep-1" }) } as Response;
+        }
+        if (target.includes("/interaction-response")) {
+          bodies.push(JSON.parse(String(init?.body)));
+          return {
+            ok: status < 300,
+            status,
+            json: async () =>
+              status === 200
+                ? { status: "accepted" }
+                : { status: "not-pending", detail: "already answered from the terminal" },
+          } as Response;
+        }
+        throw new Error(`unexpected fetch ${target}`);
+      }),
+    );
+    const { getAllByTestId, getByTestId, queryByTestId } = render(
+      <InteractionBar session={noLifecycleSession()} />,
+    );
+    fireEvent.click(getAllByTestId("interaction-bar-question-option")[1]); // "A talking cat"
+    await waitFor(() => expect(queryByTestId("interaction-bar-error")).not.toBeNull());
+    expect(getByTestId("interaction-bar-error").textContent).toContain("not-pending");
+    expect(getByTestId("interaction-bar-error").textContent).toContain(
+      "already answered from the terminal",
+    );
+    status = 200;
+    fireEvent.click(getByTestId("interaction-bar-retry"));
+    await waitFor(() => expect(queryByTestId("interaction-bar-answered")).not.toBeNull());
+    expect(bodies).toHaveLength(2);
+    expect(bodies[0]).toEqual(bodies[1]);
+    expect(bodies[0]?.answers).toEqual({
+      "Which would you rather have as a pet?": "A talking cat",
+    });
   });
 });

@@ -9,13 +9,12 @@ import {
   terminalOpenFailureMessage,
   type OpenSession,
 } from "../../data/sessions";
-import { shortId } from "../../data/conversation/format";
-import { buildTaskTree, leafIdFromKey, leafTitleForKey } from "../../data/taskIdentity";
+import { buildTaskTree } from "../../data/taskIdentity";
 import { attachSessionToLeaf } from "../../data/terminal";
 import type { TaskDocNode } from "../../types/projection";
 import { LeafAttachPicker } from "../LeafAttachPicker";
 
-const bar = css({
+const launchBar = css({
   display: "flex",
   alignItems: "center",
   flexWrap: "wrap",
@@ -25,6 +24,12 @@ const bar = css({
   borderBottomStyle: "solid",
   borderBottomColor: "grid",
   flexShrink: 0,
+});
+const sessionActions = css({
+  display: "inline-flex",
+  alignItems: "center",
+  gap: "0.35rem",
+  minWidth: "0",
 });
 const action = css({
   font: "inherit",
@@ -40,7 +45,9 @@ const action = css({
   paddingBlock: "0.18rem",
   whiteSpace: "nowrap",
   cursor: "pointer",
+  transition: "transform 120ms cubic-bezier(0.23, 1, 0.32, 1)",
   _hover: { background: "rgba(232, 193, 112, 0.1)" },
+  _active: { transform: "scale(0.97)" },
   _focusVisible: { outlineWidth: "1px", outlineStyle: "solid", outlineColor: "amber", outlineOffset: "1px" },
   // V8 — a library-level affordance that stays put: disable-with-reason rather than unmount, so the
   // toolbar never reflows (no teleport / muscle-memory loss) when focus moves to an ineligible row.
@@ -52,62 +59,24 @@ const action = css({
     _hover: { background: "transparent" },
   },
 });
-const badge = css({
-  minWidth: 0,
-  maxWidth: "24rem",
-  overflow: "hidden",
-  textOverflow: "ellipsis",
-  whiteSpace: "nowrap",
-  color: "muted",
-  fontSize: "0.68rem",
-  borderWidth: "1px",
-  borderStyle: "solid",
-  borderColor: "grid",
-  borderRadius: "2px",
-  paddingInline: "0.4rem",
-  paddingBlock: "0.16rem",
-});
 const refusal = css({ color: "red", fontSize: "0.68rem" });
 
 export interface ChatContextBarProps {
-  focused?: OpenSession;
   selectedLifecycleId?: string;
-  selectedLeafKey?: string;
-  taskDocuments: TaskDocNode[];
-  contextMaster?: string;
   onLaunchChat: () => void;
   onSessionOpened: (sessionId: string) => void;
-  /** 260718-CHATS-L4: open the in-stage native history browser for the focused controlled session. */
-  onBrowseHistory?: () => void;
 }
 
 /**
- * The small product-duty bar for the canonical Chats cockpit. It deliberately keeps the old
- * lifecycle attachment semantics honest: launch inheritance is sent to the server, while attaching
- * an already-open legacy row remains a local route preference because no server endpoint exists.
- * Leaf attach/move is different: it always crosses the authoritative server boundary first.
+ * The rail owns only chat creation and navigation. Actions that mutate or inspect the focused
+ * session live beside that session's stage header in ChatSessionActions below.
  */
 export function ChatContextBar({
-  focused,
   selectedLifecycleId,
-  selectedLeafKey,
-  taskDocuments,
-  contextMaster,
   onLaunchChat,
   onSessionOpened,
-  onBrowseHistory,
 }: ChatContextBarProps) {
-  const [leafAttachError, setLeafAttachError] = useState<string | null>(null);
   const [sessionOpenError, setSessionOpenError] = useState<string | null>(null);
-  const leafTree = useMemo(() => buildTaskTree(taskDocuments), [taskDocuments]);
-  const pickerContextMaster =
-    contextMaster ?? (selectedLeafKey ? selectedLeafKey.split("/").filter(Boolean)[1] : undefined);
-  const running = focused !== undefined && (focused.status ?? "running") === "running";
-
-  const attachLifecycleLocally = () => {
-    if (!focused || !running || focused.lifecycleId || !selectedLifecycleId) return;
-    sessionStore.getState().setLifecycle(focused.id, selectedLifecycleId);
-  };
 
   const launchTerminal = async () => {
     setSessionOpenError(null);
@@ -119,28 +88,8 @@ export function ChatContextBar({
     onSessionOpened(result.session.id);
   };
 
-  const attachLeaf = async (leafKey: string, seatRole: string) => {
-    if (!focused || !running || !leafKey || focused.leafKey === leafKey) return;
-    setLeafAttachError(null);
-    const result = await attachSessionToLeaf(focused.id, leafKey, seatRole);
-    if (result === "ok") {
-      sessionStore.getState().applyLeafAssignment(focused.id, leafKey, seatRole);
-      notifySessionCatalogChanged("leaf", focused.id);
-      return;
-    }
-    setLeafAttachError(
-      result === "leaf-taken"
-        ? `leaf already has a ${seatRole} seat`
-        : "could not attach to leaf",
-    );
-  };
-
-  const leafLabel = focused?.leafKey
-    ? (leafTitleForKey(taskDocuments, focused.leafKey) ?? leafIdFromKey(focused.leafKey))
-    : null;
-
   return (
-    <div className={bar} data-testid="chats-context-bar" aria-label="Chat launch and routing">
+    <div className={launchBar} data-testid="chats-context-bar" aria-label="Create chat sessions">
       <button
         type="button"
         className={action}
@@ -158,54 +107,79 @@ export function ChatContextBar({
       >
         ＋ Terminal
       </button>
-      {onBrowseHistory ? (
-        // V8 — always present; disabled with a reason when the focused row is not a running harness
-        // chat, so the button never disappears/teleports on a focus change.
-        <button
-          type="button"
-          className={action}
-          onClick={onBrowseHistory}
-          disabled={!(focused && running && focused.harness)}
-          data-testid="chats-browse-history"
-          title={
-            focused && running && focused.harness
-              ? "Browse this harness's prior conversations and open one as a new chat"
-              : "Browse history needs a running harness chat focused"
-          }
-        >
-          Browse history
-        </button>
-      ) : null}
       {sessionOpenError ? (
         <span className={refusal} role="alert" data-testid="chats-session-open-error">
           {sessionOpenError}
         </span>
       ) : null}
-      {selectedLifecycleId && focused?.lifecycleId === selectedLifecycleId ? (
-        // R6/B10 — a long task id shows its short suffix; the full value stays in the tooltip.
-        <span className={badge} title={`task ${selectedLifecycleId}`}>
-          task {shortId(selectedLifecycleId)}
-        </span>
-      ) : selectedLifecycleId && focused && running && !focused.lifecycleId ? (
-        <button
-          type="button"
-          className={action}
-          onClick={attachLifecycleLocally}
-          data-testid="chats-attach-lifecycle"
-          title="Routes this existing row locally; only new launches inherit the task on the server."
-        >
-          Route locally to {selectedLifecycleId}
-        </button>
-      ) : focused?.lifecycleId ? (
-        <span className={badge} title={`task ${focused.lifecycleId}`}>
-          task {shortId(focused.lifecycleId)}
-        </span>
-      ) : null}
-      {leafLabel ? (
-        <span className={badge} data-testid="chats-leaf-badge">
-          leaf {leafLabel}
-        </span>
-      ) : null}
+    </div>
+  );
+}
+
+export interface ChatSessionActionsProps {
+  focused?: OpenSession;
+  selectedLeafKey?: string;
+  taskDocuments: TaskDocNode[];
+  contextMaster?: string;
+  /** Open the in-stage native history browser for the focused controlled session. */
+  onBrowseHistory: () => void;
+}
+
+/**
+ * Actions whose object is the focused session. Keeping them in the stage header makes ownership
+ * explicit: the rail chooses a session; this cluster inspects or routes that selected session.
+ */
+export function ChatSessionActions({
+  focused,
+  selectedLeafKey,
+  taskDocuments,
+  contextMaster,
+  onBrowseHistory,
+}: ChatSessionActionsProps) {
+  const [leafAttachError, setLeafAttachError] = useState<string | null>(null);
+  const leafTree = useMemo(() => buildTaskTree(taskDocuments), [taskDocuments]);
+  const pickerContextMaster =
+    contextMaster ?? (selectedLeafKey ? selectedLeafKey.split("/").filter(Boolean)[1] : undefined);
+  const running = focused !== undefined && (focused.status ?? "running") === "running";
+
+  const attachLeaf = async (leafKey: string, seatRole: string) => {
+    if (!focused || !running || !leafKey || focused.leafKey === leafKey) return;
+    setLeafAttachError(null);
+    const result = await attachSessionToLeaf(focused.id, leafKey, seatRole);
+    if (result === "ok") {
+      sessionStore.getState().applyLeafAssignment(focused.id, leafKey, seatRole);
+      notifySessionCatalogChanged("leaf", focused.id);
+      return;
+    }
+    setLeafAttachError(
+      result === "leaf-taken"
+        ? `leaf already has a ${seatRole} seat`
+        : "could not attach to leaf",
+    );
+  };
+
+  return (
+    <span
+      className={sessionActions}
+      data-testid="chats-session-actions"
+      aria-label="Selected chat actions"
+    >
+      {/* Stable placement preserves muscle memory across focus changes; ineligible sessions keep a
+          disabled control with the reason in its title instead of teleporting the toolbar. */}
+      <button
+        type="button"
+        className={action}
+        onClick={onBrowseHistory}
+        disabled={!(focused && running && focused.harness)}
+        data-testid="chats-browse-history"
+        title={
+          focused && running && focused.harness
+            ? "Browse this harness's prior conversations and open one as a new chat"
+            : "Browse history needs a running harness chat focused"
+        }
+      >
+        Browse history
+      </button>
       {focused && running && leafTree.length > 0 ? (
         <LeafAttachPicker
           tree={leafTree}
@@ -213,7 +187,7 @@ export function ChatContextBar({
           onPick={(leafKey, seatRole) => void attachLeaf(leafKey, seatRole)}
           testId="chats-attach-leaf-picker"
           label={focused.leafKey ? "Move leaf" : "Attach to leaf"}
-          align="left"
+          align="right"
           seatRole={attachSeatRole(focused)}
           roleOptions={focused.kind === "terminal" ? ["terminal"] : undefined}
         />
@@ -227,6 +201,6 @@ export function ChatContextBar({
           {leafAttachError}
         </span>
       ) : null}
-    </div>
+    </span>
   );
 }

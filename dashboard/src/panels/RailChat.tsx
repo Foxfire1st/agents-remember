@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useState } from "react";
+import { lazy, memo, Suspense, useEffect, useState } from "react";
 
 import { css } from "../../styled-system/css";
 import {
@@ -26,11 +26,11 @@ import type { EngineProcessNode, TaskDocNode, TaskStepNode } from "../types/proj
 import { LeafAttachPicker } from "./LeafAttachPicker";
 import { SessionComposer } from "./SessionComposer";
 
-// The single-instance right-rail chat viewer (slice L5 S2/S3, fixes 2-4): the rail toggles between the
+// The single-instance right-rail chat viewer: the rail toggles between the
 // Event River and THIS surface. It is anchored on the durable QUALIFIED LEAF ID (`leafKey`), not the
 // enclosure, so it resolves with no live worktree and after finalize.
 //
-// Create-from-anywhere (L5 fix): a chat is NEVER gated on a leaf. When a leaf is being viewed the rail
+// Create-from-anywhere: a chat is NEVER gated on a leaf. When a leaf is being viewed the rail
 // shows that leaf's chat + (optional) terminal; when NO leaf is viewed it shows the latest UNATTACHED
 // (free) chat/terminal and still lets you start one. A free chat carries an "Attach to leaf ▾" picker so
 // it can be moved onto ANY projected leaf afterwards (the chat then "moves to that leaf"). The focused
@@ -242,7 +242,7 @@ function buildLeafContextPackage({
   return lines.filter((line): line is string => line !== null).join("\n");
 }
 
-export function RailChat({
+function RailChatImpl({
   leafKey,
   selectedLifecycleId,
   taskDocuments = [],
@@ -509,8 +509,13 @@ export function RailChat({
   );
 }
 
-// One pane (chat or terminal): a truncating header with a hover-revealed full name (fix 4) and a
-// terminate control (fix 3), the live terminal, and its composer.
+// Memoized (tab-switch CPU): a persistent rail panel — the shell re-renders on every view
+// switch with unchanged props, and the memo gate skips this subtree then; the chat's own store
+// subscriptions still drive its updates.
+export const RailChat = memo(RailChatImpl);
+
+// One pane (chat or terminal): a truncating header with a hover-revealed full name and a
+// terminate control, the live terminal, and its composer.
 function Pane({
   role,
   session,

@@ -5,6 +5,7 @@ from __future__ import annotations
 import unittest
 
 from agents_remember.serving.conversation.models import (
+    ConversationItem,
     DiffBlock,
     MarkdownBlock,
     TextBlock,
@@ -49,6 +50,33 @@ def _evidence(
 
 def _items(outputs: list) -> list:
     return [output.item for output in outputs if isinstance(output, MappedItem)]
+
+
+def _claude_tool_item(name: str, tool_input: object, *, tool_id: str) -> ConversationItem:
+    outputs = claude.map_evidence_frame(
+        _evidence(
+            1,
+            "state",
+            {
+                "type": "assistant",
+                "uuid": "uuid-1",
+                "session_id": "sess-1",
+                "message": {
+                    "role": "assistant",
+                    "content": [
+                        {
+                            "type": "tool_use",
+                            "id": tool_id,
+                            "name": name,
+                            "input": tool_input,
+                        }
+                    ],
+                },
+            },
+        ),
+        evidence_ref=REF,
+    )
+    return next(item for item in _items(outputs) if item.item_id == tool_id)
 
 
 class CodexMapperTests(unittest.TestCase):
@@ -274,11 +302,11 @@ class CodexMapperTests(unittest.TestCase):
         self.assertIn("codex", unknown.vendor_type)
 
     def test_fresh_open_startup_burst_mints_zero_unknown_vendor_rows(self) -> None:
-        # 260718-CHATS-L5F R1: the codex 0.144.5 fresh-dashboard-open startup burst — one
+        # The codex 0.144.5 fresh-dashboard-open startup burst — one
         # ``mcpServer/startupStatus/updated`` per configured MCP server plus ``thread/started``,
         # ``remoteControl/status/changed`` and an optional ``warning`` — are KNOWN session
         # lifecycle/status notifications, not truly-unknown frames. Opening a stock codex chat must
-        # produce ZERO unknown-vendor rows. Params shapes captured per the half-time diagnosis.
+        # produce ZERO unknown-vendor rows.
         startup_burst = [
             (
                 "mcpServer/startupStatus/updated",
@@ -311,7 +339,7 @@ class CodexMapperTests(unittest.TestCase):
                 },
             ),
             ("warning", {"threadId": "thread-1", "message": "service tier downgraded"}),
-            # 260718-CHATS-L5F R1: the ``configWarning`` advisory (observed live at open on evidence
+            # The ``configWarning`` advisory (observed live at open on evidence
             # seq 1 in the AR_RUN_CHATS_E2E composed drive) is a sibling of ``warning`` — it must also
             # mint zero unknown-vendor rows, not leak through as one per fresh codex open.
             ("configWarning", {"message": "sandbox mode defaulted to read-only"}),
@@ -361,6 +389,34 @@ class CodexMapperTests(unittest.TestCase):
 
 
 class ClaudeMapperTests(unittest.TestCase):
+    def test_local_command_string_content_user_frame_is_preserved_not_fatal(self) -> None:
+        # Claude Code records local slash-command turns (/effort etc.) as
+        # user frames with bare STRING content. The transcript replay hit one mid-file and the
+        # UnmappableShape crash-looped the projector (generation churn → dead cursors →
+        # "structured surface unavailable" for the whole session). String content must map to
+        # a preserved row, never a projection-fatal error.
+        outputs = claude.map_evidence_frame(
+            _evidence(
+                1,
+                "state",
+                {
+                    "type": "user",
+                    "uuid": "uuid-cmd",
+                    "session_id": "sess-1",
+                    "message": {
+                        "role": "user",
+                        "content": "<command-name>/effort</command-name> max",
+                    },
+                },
+            ),
+            evidence_ref=REF,
+        )
+        self.assertEqual(len(outputs), 1)
+        preserved = outputs[0]
+        assert isinstance(preserved, MappedUnknownVendor)
+        self.assertEqual(preserved.vendor_type, "claude-user-content:text")
+        self.assertIn("/effort", preserved.safe_summary)
+
     def test_assistant_frame_splits_text_thinking_and_tools(self) -> None:
         outputs = claude.map_evidence_frame(
             _evidence(
@@ -393,6 +449,80 @@ class ClaudeMapperTests(unittest.TestCase):
         self.assertEqual(tool.parent_item_id, "uuid-1")
         self.assertEqual(tool.blocks[0].summary, "Bash")
         self.assertEqual(tool.correlation.tool_call_id, "toolu_1")
+
+    def test_file_mutation_tool_use_carries_diff_blocks(self) -> None:
+        cases = (
+            (
+                "Edit",
+                {
+                    "file_path": "/repo/a.ts",
+                    "old_string": "const a = 1;",
+                    "new_string": "const a = 2;",
+                },
+                (("diff-0", "/repo/a.ts", "const a = 1;", "const a = 2;"),),
+            ),
+            (
+                "MultiEdit",
+                {
+                    "file_path": "/repo/multi.ts",
+                    "edits": [
+                        {"old_string": "one", "new_string": "ONE"},
+                        "not-an-edit",
+                        {"old_string": "missing-new"},
+                        {"old_string": "two", "new_string": "TWO"},
+                    ],
+                },
+                (
+                    ("diff-0", "/repo/multi.ts", "one", "ONE"),
+                    ("diff-3", "/repo/multi.ts", "two", "TWO"),
+                ),
+            ),
+            (
+                "Write",
+                {"file_path": "/repo/b.md", "content": "# fresh\nbody"},
+                (("diff-0", "/repo/b.md", None, "# fresh\nbody"),),
+            ),
+            (
+                "NotebookEdit",
+                {"notebook_path": "/repo/c.ipynb", "new_source": "print('new')"},
+                (("diff-0", "/repo/c.ipynb", None, "print('new')"),),
+            ),
+        )
+        for index, (name, tool_input, expected) in enumerate(cases):
+            with self.subTest(name=name):
+                item = _claude_tool_item(name, tool_input, tool_id=f"toolu_{index}")
+                input_block = item.blocks[0]
+                assert isinstance(input_block, ToolInputBlock)
+                self.assertEqual(input_block.data, tool_input)
+                diffs = [block for block in item.blocks if isinstance(block, DiffBlock)]
+                self.assertEqual(
+                    [
+                        (diff.block_id, diff.path, diff.old_text, diff.new_text)
+                        for diff in diffs
+                    ],
+                    list(expected),
+                )
+
+    def test_malformed_or_unknown_tool_input_keeps_only_the_raw_input(self) -> None:
+        cases = (
+            ("Edit", {"old_string": "old", "new_string": 2}),
+            ("MultiEdit", {"edits": {"not": "a list"}}),
+            ("Write", {"content": 2}),
+            ("NotebookEdit", {"new_source": 2}),
+            ("UnknownMutation", {"file_path": "/repo/a", "content": "new"}),
+            ("Edit", "not-a-mapping"),
+        )
+        for index, (name, tool_input) in enumerate(cases):
+            with self.subTest(name=name, tool_input=tool_input):
+                item = _claude_tool_item(
+                    name,
+                    tool_input,
+                    tool_id=f"toolu_invalid_{index}",
+                )
+                self.assertEqual(len(item.blocks), 1)
+                input_block = item.blocks[0]
+                assert isinstance(input_block, ToolInputBlock)
+                self.assertEqual(input_block.data, tool_input)
 
     def test_tool_result_upserts_same_tool_item(self) -> None:
         outputs = claude.map_evidence_frame(
@@ -440,6 +570,33 @@ class ClaudeMapperTests(unittest.TestCase):
             items = _items(outputs)
             self.assertEqual(items[0].kind, "turn-result")
 
+    def test_result_frame_adapter_stamp_carries_the_interrupt_correlation(self) -> None:
+        # Claude answers an accepted interrupt with a plain error_during_execution/is_error
+        # result (probe-locked 2.1.217, terminal_reason aborted_streaming): only the adapter's
+        # arTerminalOutcome stamp distinguishes interrupted from a real failure. The identical
+        # native shape stamped "failed" (no accepted interrupt) must keep its failed meaning.
+        for stamp, expected in (
+            ("cancelled", "interrupted"),
+            ("failed", "failed"),
+            ("completed", "completed"),
+        ):
+            frame = {
+                "type": "result",
+                "subtype": "success" if stamp == "completed" else "error_during_execution",
+                "is_error": stamp != "completed",
+                "uuid": "uuid-r",
+                "stop_reason": None,
+                "terminal_reason": None if stamp == "completed" else "aborted_streaming",
+                "arTerminalOutcome": stamp,
+            }
+            outputs = claude.map_evidence_frame(
+                _evidence(3, "completed", frame), evidence_ref=REF
+            )
+            outcomes = [o for o in outputs if isinstance(o, MappedTurnOutcome)]
+            self.assertEqual((stamp, outcomes[0].outcome), (stamp, expected))
+            items = _items(outputs)
+            self.assertEqual(items[0].phase, expected)
+
     def test_transcript_echo_is_exact_submission_user_item(self) -> None:
         outputs = claude.map_transcript_echo(
             {
@@ -477,7 +634,7 @@ class ClaudeMapperTests(unittest.TestCase):
         self.assertIn("brand_new", unknown.vendor_type)
 
     def test_command_lifecycle_is_recognized_and_mints_no_unknown_vendor(self) -> None:
-        # 260718-CHATS-L5F R3: the installed Claude Code slash-command lifecycle (captured specimen)
+        # The installed Claude Code slash-command lifecycle (captured specimen)
         # is a first-class recognized contract, not a flooding unknown-vendor row. Each of the three
         # states maps to zero items.
         for state in ("queued", "started", "completed"):

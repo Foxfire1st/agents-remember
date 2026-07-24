@@ -33,7 +33,7 @@ export interface OpenSession {
   lifecycleId?: string;
   /** The durable leaf-identity key (qualified leaf id `repo/master/leaf-id`) this chat is bound to. */
   leafKey?: string;
-  /** The AR_SPAWN_ROLE recorded at spawn (L14) — the Chats command-tree grouping key. */
+  /** The AR_SPAWN_ROLE recorded at spawn — the Chats command-tree grouping key. */
   spawnRole?: string;
   /** The role occupying the leaf binding; authoritative for grouping and seat identity. */
   seatRole?: string;
@@ -42,7 +42,7 @@ export interface OpenSession {
   landedAt?: string;
   landedReason?: string;
   landedEdge?: string;
-  // Retirement provenance (260715-FEUI-L2 R4): surfaced on tooltips + the seat inspector.
+  // Retirement provenance: surfaced on tooltips + the seat inspector.
   retiredAt?: string;
   retiredBySession?: string;
   retiredReason?: string;
@@ -60,7 +60,7 @@ export interface OpenSession {
   turnState?: string;
   turnStateChangedAt?: string;
   /**
-   * 260718-CHATS-L5F R9: the focused seat's conversation projection reports a live turn actively
+   * The focused seat's conversation projection reports a live turn actively
    * streaming right now (fresher than the sweep-bounded `turnState`). Set only from the projection's
    * own status; `seatVisualState` prefers it over a lagging catalog `turn-ended`. Not from the catalog.
    */
@@ -73,7 +73,7 @@ export interface OpenSession {
   controlPendingInteraction?: Record<string, unknown>;
   controlLastEventSequence?: number;
   controlRaw?: Record<string, unknown>;
-  // Liveness probe evidence, mirrored for the freshness surfaces (R15).
+  // Liveness probe evidence, mirrored for the freshness surfaces.
   livenessFailures?: number;
   livenessFirstFailedAt?: string;
   livenessLastFailedAt?: string;
@@ -151,7 +151,7 @@ interface SessionState {
   close: (id: string) => void;
   setStatus: (id: string, status: TerminalSessionStatus) => void;
   /**
-   * Merge server-observed fields into one row (the seat-event reconciler, L2 S2). The poll stays
+   * Merge server-observed fields into one row (the seat-event reconciler). The poll stays
    * authoritative: anything patched here is confirmed or replaced by the next catalog hydrate.
    */
   patch: (id: string, partial: Partial<OpenSession>) => void;
@@ -226,6 +226,27 @@ function isLiveSession(session: OpenSession): boolean {
   return (session.status ?? "running") === "running";
 }
 
+/**
+ * Field-level equality for one catalog-mapped row. Object-valued
+ * fields (controlRaw / controlPendingInteraction) arrive as fresh references from every poll's
+ * JSON.parse, so they compare by content; everything else is a primitive. Key ORDER never differs
+ * between rows from the same mapping (`fromTerminalSessionInfo`), so a key-count + per-key walk
+ * suffices.
+ */
+function sameSessionValue(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (a !== null && b !== null && typeof a === "object" && typeof b === "object") {
+    return JSON.stringify(a) === JSON.stringify(b);
+  }
+  return false;
+}
+
+function sameSessionRow(a: OpenSession, b: OpenSession): boolean {
+  const keys = Object.keys(a) as (keyof OpenSession)[];
+  if (keys.length !== Object.keys(b).length) return false;
+  return keys.every((key) => sameSessionValue(a[key], b[key]));
+}
+
 function liveLabels(sessions: OpenSession[]): string[] {
   return sessions.filter(isLiveSession).map((session) => session.label);
 }
@@ -294,14 +315,35 @@ export const sessionStore = createStore<SessionState>((set) => ({
       const live = sessions.filter(isLiveSession);
       const preferred = preferredActiveId && live.some((session) => session.id === preferredActiveId);
       const retainedActive = state.activeId && live.some((session) => session.id === state.activeId);
+      const activeId = preferred
+        ? preferredActiveId
+        : retainedActive
+          ? state.activeId
+          : (live[0]?.id ?? sessions[0]?.id ?? null);
+      // Reconcile against the current rows instead of replacing them wholesale. The
+      // 2500 ms catalog poll is authoritative but usually byte-identical between beats; the old
+      // wholesale swap gave every row a fresh reference each beat, so the always-mounted (hidden)
+      // SessionsView re-rendered per beat (~150–200 ms measured on the Operations view). Reusing
+      // the previous object for each content-identical row keeps selector/memo identity, and a
+      // beat that changed NOTHING returns the same state — zustand then notifies nobody and an
+      // unchanged payload produces zero UI work. Semantics are untouched: any row whose content
+      // actually diverged from the catalog (incl. an unconfirmed seat-event pre-apply) is still
+      // replaced on the very next beat.
+      let rowsChanged = state.sessions.length !== sessions.length;
+      const nextSessions = sessions.map((session, index) => {
+        const current = state.sessions[index];
+        if (current?.id === session.id && sameSessionRow(current, session)) {
+          return current;
+        }
+        rowsChanged = true;
+        return session;
+      });
+      const count = trackedOrdinal(nextSessions);
+      if (!rowsChanged && state.activeId === activeId && state.count === count) return state;
       return {
-        sessions,
-        count: trackedOrdinal(sessions),
-        activeId: preferred
-          ? preferredActiveId
-          : retainedActive
-            ? state.activeId
-            : (live[0]?.id ?? sessions[0]?.id ?? null),
+        sessions: nextSessions,
+        count,
+        activeId,
       };
     }),
   close: (id) =>
@@ -404,7 +446,7 @@ export function findSessionForLifecycle(lifecycleId: string): OpenSession | unde
 
 /**
  * The single LIVE session bound to `leafKey` (mirrors {@link findSessionForLifecycle}). Pass `role`
- * to find the leaf's chat vs. its terminal independently — a leaf can hold one of each (L5 fix 2).
+ * to find the leaf's chat vs. its terminal independently — a leaf can hold one of each.
  */
 export function findSessionForLeaf(leafKey: string, role?: SessionRole): OpenSession | undefined {
   return sessionStore

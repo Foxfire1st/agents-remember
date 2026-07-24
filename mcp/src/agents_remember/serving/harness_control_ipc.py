@@ -15,6 +15,7 @@ from typing import Any, cast
 from agents_remember.errors import (
     HarnessBridgeEpochMismatchError,
     HarnessControlError,
+    HarnessInteractionNotPendingError,
     HarnessRequestConflictError,
 )
 from agents_remember.serving.harness_capabilities import (
@@ -53,7 +54,13 @@ from agents_remember.serving.harness_control_models import (
 )
 from agents_remember.serving.harness_submission_authority import OperationResolution
 
-MAX_CONTROL_MESSAGE_BYTES = 64 * 1024
+# 64 KiB starved real sessions — a single conversation item carrying a large
+# tool output exceeds it, and the reader-side cap then fails EVERY page fetch for that session
+# regardless of the requested limit (the chats UI renders an empty history for exactly the heavy
+# sessions worth inspecting). 16 MiB is a ceiling, not a target — memory per message stays
+# bounded by actual payloads. The durable fix is the codex-path byte-budget + per-item clipping
+# (read_native_page / arEvidenceContentTruncated) applied to the claude projection page path.
+MAX_CONTROL_MESSAGE_BYTES = 16 * 1024 * 1024
 MAX_TRANSCRIPT_PAGE = 500
 MAX_EVIDENCE_PAGE = 500
 
@@ -533,6 +540,8 @@ def _error_response(error: Exception) -> dict[str, object]:
         )
     elif isinstance(error, HarnessRequestConflictError):
         response["status"] = "request-id-conflict"
+    elif isinstance(error, HarnessInteractionNotPendingError):
+        response["status"] = "interaction-not-pending"
     return response
 
 
@@ -546,6 +555,8 @@ def _raise_control_response_error(raw: Mapping[str, object]) -> None:
         )
     if status == "request-id-conflict":
         raise HarnessRequestConflictError(detail)
+    if status == "interaction-not-pending":
+        raise HarnessInteractionNotPendingError(detail)
     raise HarnessControlError(detail)
 
 

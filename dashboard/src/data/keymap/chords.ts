@@ -1,4 +1,4 @@
-// The chrome/composer chord tables (260715-FEUI-L1 S4, design §5.2) — data, not code, so the
+// The chrome/composer chord tables (design §5.2) — data, not code, so the
 // tinykeys binding, the `?` keyboard-reference palette page, and the collision tests all read one
 // source. Zone scoping is per-chord: a chord fires only when the event's zone is listed — chords
 // the harnesses bind (Alt+Up/Down, Alt+,/.) are deliberately chrome-only so they always pass
@@ -69,7 +69,7 @@ export const CHROME_CHORDS: ZoneChord[] = [
     // isPrintable/isEditableTarget contract covers every printable chord; no per-chord flag.
   },
   {
-    // 260718-CHATS-L4 R6 (design §9.5): the exact-turn interrupt — the one rebindable non-Escape
+    // The exact-turn interrupt (design §9.5): the one rebindable non-Escape
     // stop chord. Control-based on every platform (matching the app's Control+K convention), fires in
     // chrome + composer, and is excluded from the raw-PTY zone (which only handles PTY_RESERVED). The
     // `conversation.stop` command's `when` gate keeps it inert unless a working turn is interruptible.
@@ -82,8 +82,10 @@ export const CHROME_CHORDS: ZoneChord[] = [
 
 export const COMPOSER_CHORDS: ZoneChord[] = [
   {
-    chord: "Control+Enter",
-    label: "ctrl+↵",
+    // Plain Enter SENDS in harness chats — the TUI
+    // convention; Shift+Enter inserts the newline (bound in SessionComposer beside this chord).
+    chord: "Enter",
+    label: "↵",
     commandId: "composer.submit",
     zones: ["composer"],
   },

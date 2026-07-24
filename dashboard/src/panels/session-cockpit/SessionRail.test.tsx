@@ -1,6 +1,7 @@
-// The rail's jsdom state matrix (260715-FEUI-L2 S6): ruled row anatomy + hierarchy, the dot
+// The rail's jsdom state matrix: ruled row anatomy + hierarchy, the dot
 // grammar on real DOM, the attention strip, gate/brief markers, bulk end with honest previews,
-// the bus footer, and the cross-surface consistency contract (rail dot ≡ HeaderStrip dot).
+// bus-footer removal, and the cross-surface consistency contract (rail dot ≡ HeaderStrip dot).
+import { Profiler } from "react";
 import {
   act,
   cleanup,
@@ -85,7 +86,7 @@ describe("rail-state matrix (R14 — one grammar on real DOM)", () => {
       expect(dot.getAttribute("data-state-color"), session.id).toBe(
         visual.color,
       );
-      // L4 R8: the rail dot SPEAKS its state word (aria-label), never color-only.
+      // The rail dot SPEAKS its state word (aria-label), never color-only.
       expect(dot.getAttribute("role"), session.id).toBe("img");
       expect(dot.getAttribute("aria-label"), session.id).toBe(
         `state: ${visual.word}`,
@@ -363,8 +364,8 @@ describe("completed folder + bulk end (R17)", () => {
     expect(toggle.textContent).toContain("completed · 2");
     fireEvent.click(toggle);
     expect(getByTestId("rail-row-landed-w1")).toBeDefined();
-    // Completed rows carry landedReason in the tooltip (R17) and keep the ruled End segment as
-    // the mockup's compact ✕ (review finding 5).
+    // Completed rows carry landedReason in the tooltip and keep the ruled End segment as
+    // a compact ✕.
     expect(getByTestId("rail-row-landed-w1").getAttribute("title")).toContain(
       "landed: leaf integrated",
     );
@@ -414,7 +415,37 @@ describe("completed folder + bulk end (R17)", () => {
   });
 });
 
-describe("freshness + bus footer (R15, R8)", () => {
+describe("freshness (R15) + bus-footer removal (F-c)", () => {
+  it("does not rebuild the hierarchy for a successful beat timestamp it never renders", () => {
+    const sessions = fleet();
+    const onRender = vi.fn();
+    render(
+      <Profiler id="session-rail" onRender={onRender}>
+        <SessionRail
+          onFocusSession={vi.fn()}
+          focusedSessionId={null}
+          model={buildRailModel(sessions)}
+          rollup={attentionRollup(sessions)}
+        />
+      </Profiler>,
+    );
+    onRender.mockClear();
+
+    act(() =>
+      sessionCockpitStore.setState((state) => ({
+        pollHealth: { ...state.pollHealth, lastBeatAt: 1_000 },
+      })),
+    );
+    expect(onRender).not.toHaveBeenCalled();
+
+    act(() =>
+      sessionCockpitStore.setState((state) => ({
+        pollHealth: { ...state.pollHealth, missedBeats: 1 },
+      })),
+    );
+    expect(onRender).toHaveBeenCalled();
+  });
+
   it("shows the poll-stale banner once beats are missed past the cutoff", () => {
     sessionCockpitStore.setState({
       pollHealth: { lastBeatAt: null, missedBeats: 3, healthy: false },
@@ -425,21 +456,12 @@ describe("freshness + bus footer (R15, R8)", () => {
     );
   });
 
-  it("renders anchored bus numbers: pending vs redeliverable, heartbeat vs stale cutoff", () => {
-    const { getByTestId } = renderRail();
-    const footer = getByTestId("rail-bus-footer");
-    expect(footer.textContent).toContain("2 pending");
-    expect(footer.textContent).toContain("0 redeliverable");
-    // R5/A4 — humanized, not raw `2s / 60s`: the two-unit form reads as human time.
-    expect(footer.textContent).toContain("heartbeat 2 s / stale cutoff 1 m 0 s");
-  });
-
-  it("states the truth when the supervisor never ticked — never fake numbers", () => {
-    dashboardStore.setState({ supervisorHeartbeat: null });
-    const { getByTestId } = renderRail();
-    expect(getByTestId("rail-bus-footer").textContent).toContain(
-      "supervisor has not ticked",
-    );
+  it("renders NO rail-bus-footer — inbox counts + supervisor liveness live in the top bar (F-c ruling)", () => {
+    // To declutter, the rail bus footer (inbox pending/redeliverable + heartbeat/stale cutoff) is
+    // removed; one authority per fact — those numbers now live only in the top bar, with the
+    // anchored detail in the Inspector's BusPane.
+    const { queryByTestId } = renderRail();
+    expect(queryByTestId("rail-bus-footer")).toBeNull();
   });
 });
 
@@ -622,7 +644,7 @@ describe("L8: measured rail virtualization boundary", () => {
   });
 });
 
-describe("L6: honest terminate confirm + cleanup outcome + legacy-raw bell marker", () => {
+describe("L6/F-g: immediate terminate + failure honesty + cleanup outcome + legacy-raw bell marker", () => {
   beforeEach(() => {
     lifecycleNoticeStore.setState({
       residuals: [],
@@ -633,7 +655,10 @@ describe("L6: honest terminate confirm + cleanup outcome + legacy-raw bell marke
     ptyHarvestStore.setState({ bySession: {} });
   });
 
-  it("End arms an inline confirm NAMING session · leaf · state before terminating (R5)", async () => {
+  it("End terminates the seat IMMEDIATELY — no armed inline confirm (F-g ruling)", async () => {
+    // Clicking a row's End button terminates immediately; the earlier armed inline confirm
+    // (confirm/execute/cancel) no longer exists. The seat name · leaf · state now lives in the
+    // End button's title only. Bulk end keeps its confirm.
     const terminated: string[] = [];
     vi.stubGlobal(
       "fetch",
@@ -649,15 +674,18 @@ describe("L6: honest terminate confirm + cleanup outcome + legacy-raw bell marke
         return { ok: true, json: async () => ({ sessions: [] }) } as Response;
       }),
     );
-    const { getByTestId, findByTestId } = renderRail();
-    fireEvent.click(getByTestId("rail-end-worker-l4"));
-    expect(terminated).toHaveLength(0); // arming alone never kills anything
-    const confirm = await findByTestId("rail-end-confirm-worker-l4");
-    expect(confirm.textContent).toContain("worker-L4-serving");
-    expect(confirm.textContent).toContain("leaf 04_serving");
-    expect(confirm.textContent).toContain("state working");
-    fireEvent.click(getByTestId("rail-end-execute-worker-l4"));
+    const { getByTestId, queryByTestId } = renderRail();
+    const end = getByTestId("rail-end-worker-l4");
+    // The honest name · leaf · state moved to the button title (was the armed confirm copy).
+    expect(end.getAttribute("title")).toContain("worker-L4-serving");
+    expect(end.getAttribute("title")).toContain("leaf 04_serving");
+    expect(end.getAttribute("title")).toContain("state working");
+    fireEvent.click(end);
     await act(async () => {});
+    // No armed confirm exists any more — the POST fires straight away.
+    expect(queryByTestId("rail-end-confirm-worker-l4")).toBeNull();
+    expect(queryByTestId("rail-end-execute-worker-l4")).toBeNull();
+    expect(queryByTestId("rail-end-cancel-worker-l4")).toBeNull();
     expect(terminated).toEqual(["/api/terminal/worker-l4/terminate"]);
   });
 
@@ -686,8 +714,9 @@ describe("L6: honest terminate confirm + cleanup outcome + legacy-raw bell marke
       }),
     );
     const { getByTestId, findByTestId } = renderRail();
+    // Clicking End runs the terminate directly (no armed confirm); a failed POST
+    // renders the failure in place — never a silent disarm.
     fireEvent.click(getByTestId("rail-end-worker-l4"));
-    fireEvent.click(getByTestId("rail-end-execute-worker-l4"));
     const error = await findByTestId("rail-end-error-worker-l4");
     expect(error.getAttribute("role")).toBe("alert");
     expect(error.textContent).toContain("bridge host unavailable"); // verbatim
@@ -698,16 +727,8 @@ describe("L6: honest terminate confirm + cleanup outcome + legacy-raw bell marke
     expect(terminated).toEqual(["/api/terminal/worker-l4/terminate"]);
   });
 
-  it("cancel disarms without terminating", async () => {
-    const fetchSpy = vi.fn();
-    vi.stubGlobal("fetch", fetchSpy);
-    const { getByTestId, findByTestId, queryByTestId } = renderRail();
-    fireEvent.click(getByTestId("rail-end-worker-l4"));
-    await findByTestId("rail-end-confirm-worker-l4");
-    fireEvent.click(getByTestId("rail-end-cancel-worker-l4"));
-    expect(queryByTestId("rail-end-confirm-worker-l4")).toBeNull();
-    expect(fetchSpy).not.toHaveBeenCalled();
-  });
+  // The "cancel disarms without terminating" test is removed — there is no armed
+  // confirm to cancel any more (the immediate-terminate test above asserts no confirm/cancel render).
 
   it("renders the landed-cleanup route's own outcome, skips included (R5)", () => {
     lifecycleNoticeStore.getState().recordCleanupOutcome({

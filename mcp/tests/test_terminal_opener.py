@@ -8,6 +8,7 @@ paths inherit.
 
 from __future__ import annotations
 
+import os
 import sys
 import tempfile
 import threading
@@ -20,12 +21,17 @@ from unittest import mock
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
+import agents_remember
 from agents_remember.serving.harness_control_runner import parse_runner_config
 from agents_remember.serving.harness_launch import ResolvedLaunch
 from agents_remember.serving.harnesses import Harness
 from agents_remember.serving.terminal import TerminalSessionBinding
 from agents_remember.serving.terminal_catalog import TerminalCatalog, TerminalCatalogEntry
 from agents_remember.serving.terminal_opener import open_terminal_session
+
+# The source root of the agents_remember package this test process imported (``.../mcp/src``) --
+# what the opener must seed onto the runner spawn's PYTHONPATH.
+_DAEMON_PACKAGE_ROOT = str(Path(agents_remember.__file__).resolve().parent.parent)
 
 
 class _FakeHost:
@@ -142,10 +148,16 @@ class OpenTerminalSessionTests(unittest.TestCase):
         # The AR_SPAWN_ROLE riding the spawn env is recorded on the durable row (L14).
         self.assertEqual(entry.spawn_role, "worker")
         self.assertEqual(entry.binding_role, "worker")
-        # The knob env was seeded into the detached tmux spawn.
+        # The knob env was seeded into the detached tmux spawn, plus the daemon's own package
+        # source root on PYTHONPATH so the runner imports the same agents_remember code.
         self.assertEqual(
             self.host.ensured[0]["env"],
-            {"AR_SPAWN_MODEL": "opus", "AR_SPAWN_EFFORT": "high", "AR_SPAWN_ROLE": "worker"},
+            {
+                "AR_SPAWN_MODEL": "opus",
+                "AR_SPAWN_EFFORT": "high",
+                "AR_SPAWN_ROLE": "worker",
+                "PYTHONPATH": _DAEMON_PACKAGE_ROOT,
+            },
         )
         # Provenance survives the catalog round-trip (migration-safe camelCase keys).
         self.assertEqual(entry.to_json()["spawnedBySession"], "manager-9")
@@ -155,6 +167,23 @@ class OpenTerminalSessionTests(unittest.TestCase):
         self.assertEqual(entry.control_state, "starting")
         self.assertIsNotNone(entry.control_endpoint)
         self.assertEqual(entry.control_protocol, "ar-harness-control/v1")
+
+    def test_runner_spawn_env_without_caller_env_is_exactly_the_package_root(self) -> None:
+        self._open()
+        self.assertEqual(self.host.ensured[0]["env"], {"PYTHONPATH": _DAEMON_PACKAGE_ROOT})
+
+    def test_runner_spawn_env_prepends_to_a_caller_seeded_pythonpath(self) -> None:
+        self._open(env={"PYTHONPATH": "/custom/seed"})
+        env = self.host.ensured[0]["env"]
+        assert isinstance(env, dict)
+        self.assertEqual(env["PYTHONPATH"], f"{_DAEMON_PACKAGE_ROOT}{os.pathsep}/custom/seed")
+
+    def test_plain_terminal_spawn_env_is_left_untouched(self) -> None:
+        # Only the harness-control runner needs the daemon's code root; a shell spawn keeps the
+        # caller env byte-identical.
+        result = self._open(kind="terminal", harness=None, env={"AR_SPAWN_ROLE": "worker"})
+        self.assertEqual(result.status, "opened")
+        self.assertEqual(self.host.ensured[0]["env"], {"AR_SPAWN_ROLE": "worker"})
 
     def test_future_bridge_endpoint_is_additive_control_metadata(self) -> None:
         endpoint = self.tmp / "control" / "worker.sock"
@@ -300,7 +329,11 @@ class KnobApplicationTests(unittest.TestCase):
         self.assertEqual(runner.resolved_launch, resolved)
         self.assertEqual(
             self.host.ensured[0]["env"],
-            {"AR_SPAWN_MODEL": "claude-fable-5", "AR_SPAWN_EFFORT": "max"},
+            {
+                "AR_SPAWN_MODEL": "claude-fable-5",
+                "AR_SPAWN_EFFORT": "max",
+                "PYTHONPATH": _DAEMON_PACKAGE_ROOT,
+            },
         )
 
     def test_live_reopen_preserves_actual_pair_command_and_endpoint(self) -> None:
@@ -417,7 +450,11 @@ class KnobApplicationTests(unittest.TestCase):
         self.assertEqual(_runner_config(self.host).resolved_launch, resolved)
         self.assertEqual(
             self.host.ensured[0]["env"],
-            {"AR_SPAWN_MODEL": "gpt-5.6-sol", "AR_SPAWN_EFFORT": "xhigh"},
+            {
+                "AR_SPAWN_MODEL": "gpt-5.6-sol",
+                "AR_SPAWN_EFFORT": "xhigh",
+                "PYTHONPATH": _DAEMON_PACKAGE_ROOT,
+            },
         )
 
     def test_launch_args_remain_on_the_base_command_before_adapter_preparation(self) -> None:

@@ -1,4 +1,4 @@
-"""Active session projector engine (260718-CHATS-L1, R2/R4).
+"""Active session projector engine.
 
 One projector per running session: it hydrates the projection from native
 authority (native pages where the harness has them, the live evidence window
@@ -117,6 +117,57 @@ class ZipperEvidenceEvicted(AgentsRememberError):
     """
 
 
+class EvidenceTimelineRegressed(AgentsRememberError):
+    """The bridge's evidence tip moved BACKWARD: the timeline was re-baselined.
+
+    After an interrupt the runner can reset its evidence numbering; the projector's consumed
+    watermark then exceeds the new tip, ``caught_up`` computes true forever, and the projection
+    silently freezes on its pre-reset window while the session keeps running. A regressed tip is
+    never healthy: gap out so the next page rebuilds against the re-baselined timeline.
+    """
+
+
+_TURN_BODY_FRAME_TYPES = frozenset({"assistant", "user"})
+"""Claude wire types that occur ONLY inside a turn body: model output and tool-result carriers.
+
+``user`` here is the non-replay tool-result carrier -- replayed user submissions are consumed by
+the adapter (``_handle_replayed_user``) and never diverted to evidence, so a ``user`` evidence
+frame is always in-turn.
+"""
+
+_TURN_OPENING_LIFECYCLE_STATES = frozenset({"queued", "started"})
+"""The pre-result half of the 2.1.216+ slash-command lifecycle; ``completed`` closes a settled turn."""
+
+
+def _opens_echo_turn_body(frame: EvidenceFrame) -> bool:
+    """Whether a frame trailing the last result PROVES an in-flight turn body.
+
+    An ALLOWLIST on purpose. The evicted-window realignment counts retained turn bodies to
+    decide how many retained echoes are orphans, so a frame wrongly counted as an open body
+    shifts the ENTIRE realigned tail one turn early -- every answer rendered above the user
+    message that produced it, the newest user message orphaned answerless: exactly the
+    ghost ``_realign_evicted_hydration_zip`` exists to eliminate. Frames trail the last result
+    for reasons that have nothing to do with a new turn: a SETTLED slash-command turn's
+    post-result ``command_lifecycle``/``completed`` close (the live 2.1.218 wire), rate-limit
+    telemetry, an interrupt ``control_response`` that lost the race to natural completion and
+    arrives unmatched after its turn's result (``claude_stream_state._handle_result`` pops the
+    pending control entry when the turn settles, so the late answer crosses as generic
+    evidence), and any frame type this mapper has never seen. A denylist re-admitted all of
+    those; only the shapes the live wire proves are in-turn may count.
+
+    Asymmetric on purpose too: over-counting shifts every retained turn, while under-counting
+    (a genuinely in-flight body whose only retained frame is an unrecognized shape) misplaces
+    at most the single newest turn -- the honest side to err on when the tail is ambiguous.
+    """
+
+    frame_type = frame.raw.get("type")
+    if frame_type in _TURN_BODY_FRAME_TYPES:
+        return True
+    if frame_type == "command_lifecycle":
+        return frame.raw.get("state") in _TURN_OPENING_LIFECYCLE_STATES
+    return False
+
+
 @dataclass(frozen=True)
 class PageResult:
     """The atomic page assembly inputs a route serializes."""
@@ -187,7 +238,7 @@ class ActiveSessionProjector:
         self._pending_frames: list[EvidenceFrame] = []
         self._echo_turn_open = False
         self._known_eviction_floor = 0
-        # 260718-CHATS-L5 F1: turns/requests already carried by the live window, so the lazy
+        # Turns/requests already carried by the live window, so the lazy
         # native-tip re-walk never re-projects them as disjoint-id native-history twins.
         self._live_turn_ids: set[str] = set()
         self._live_request_ids: set[str] = set()
@@ -220,7 +271,21 @@ class ActiveSessionProjector:
         await self._ensure_hydrated()
         async with self._apply_lock:
             await self._refresh_native_tip()
-            total_known = self._native_complete and self._evidence_window_complete
+            # Completeness is one predicate over every channel that can still owe the store
+            # content: the native history, the evidence window, AND the zipper's pending
+            # frames (projected content the store cannot show until its echo arrives).
+            # Routing the pend through `has_older` instead decorrelated
+            # the base invariant `has_older <=> an older cursor exists` (store.py mints both
+            # from one expression): the page shipped hasOlder with olderCursor absent, so the
+            # browser rendered a live "Load older" button that refetches the newest page
+            # forever. Pending frames are NEWER content -- the older-history channel cannot
+            # carry them. Suppressing the total is the honest signal: the page stops asserting
+            # "this is the whole history" without asserting an older page that does not exist.
+            total_known = (
+                self._native_complete
+                and self._evidence_window_complete
+                and not self._pending_frames
+            )
             window = self._store.page(
                 before_ordinal=before_ordinal, limit=limit, total_known=total_known
             )
@@ -228,6 +293,8 @@ class ActiveSessionProjector:
             assert self._snapshot is not None
             return PageResult(
                 items=window.items,
+                # Both minted by the store from one expression: hasOlder is true exactly when
+                # an older cursor exists. Nothing may widen one without the other.
                 older_ordinal=window.older_ordinal,
                 has_older=window.has_older,
                 total_items=window.total_items,
@@ -309,7 +376,7 @@ class ActiveSessionProjector:
         self._echo_turn_open = False
         # The rebuild re-derives from native authority first, then the live window; the live-turn
         # sets must start empty so the hydration walk projects prior-session native history in full
-        # (F1 suppression only ever applies to turns this run has already observed live).
+        # (the twin suppression only ever applies to turns this run has already observed live).
         self._live_turn_ids.clear()
         self._live_request_ids.clear()
         if self._mapper.uses_native_pages:
@@ -322,6 +389,13 @@ class ActiveSessionProjector:
         self._apply_interaction_transitions(snapshot)
         self._snapshot = snapshot
         self._status.observe(snapshot, self._mapper.harness_id)
+        # The hydration baseline is delivered atomically with every page (page()),
+        # so it is already held by any cursor holder: the first poll must not
+        # re-emit it. A re-emitted envelope carries recomputed derived freshness
+        # (observed_at/age_ms) at the SAME revision, which the browser reducer's
+        # same-revision/different-payload guard treats as a protocol fault — a
+        # deterministic re-page on every quiet fresh chat.
+        self._status_revision_emitted = self._status.revision
 
     async def _walk_native_pages(self, *, preserve_cursor_on_failure: bool) -> None:
         prior = self._native_cursor
@@ -375,6 +449,11 @@ class ActiveSessionProjector:
                 limit=EVIDENCE_PAGE_LIMIT,
                 expected_bridge_epoch=self._identity.bridge_epoch,
             )
+            if self._hydrated and page.latest_sequence < self._evidence_after:
+                raise EvidenceTimelineRegressed(
+                    f"evidence tip regressed (latest {page.latest_sequence} < consumed "
+                    f"{self._evidence_after}): the bridge re-baselined its timeline"
+                )
             if page.evicted_before_sequence > 0:
                 self._evidence_window_complete = False
             if (
@@ -404,13 +483,13 @@ class ActiveSessionProjector:
         outputs = self._map_evidence_frame(frame, ref)
         if self._mapper.uses_native_pages and not self._mapper.eager_native_continuation:
             # Lazy-native harness (codex): the live frame settles this turn under its live-id
-            # namespace; remember it so the native-tip re-walk cannot mint a disjoint-id twin (F1).
+            # namespace; remember it so the native-tip re-walk cannot mint a disjoint-id twin.
             self._record_live_turn(outputs)
             self._native_dirty = True
         self._apply_outputs(outputs, ref)
 
     def _record_live_turn(self, outputs: list[MapperOutput]) -> None:
-        """Record the live turns/requests a native re-walk must not re-project as twins (F1)."""
+        """Record the live turns/requests a native re-walk must not re-project as twins."""
 
         for output in outputs:
             if isinstance(output, MappedItem):
@@ -429,12 +508,12 @@ class ActiveSessionProjector:
     def _drop_live_settled_natives(
         self, outputs: list[MapperOutput], live_native_turns: set[str]
     ) -> list[MapperOutput]:
-        """Drop native-page outputs for turns already carried by the live window (F1).
+        """Drop native-page outputs for turns already carried by the live window.
 
         On a hosted codex thread the live notification channel and ``thread/read`` use DISJOINT id
         namespaces for the same settled turn (live ``msg_*``/UUID item ids vs positional ``item-N``),
         so the store's id-keyed dedupe can never converge them and ``_refresh_native_tip``'s post-turn
-        re-walk mints a second, native-history twin of every settled turn (L4 verdict F1, deterministic
+        re-walk mints a second, native-history twin of every settled turn (deterministic
         2/2 turns on the wire). The live window already carries each settled turn's full item payloads
         (see ``_CodexProjector``), so a native frame whose turn is already live is a pure duplicate.
 
@@ -482,18 +561,23 @@ class ActiveSessionProjector:
             after_sequence=self._transcript_after,
             limit=EVIDENCE_PAGE_LIMIT,
         )
+        if not self._hydrated:
+            # Hydration drains the retained window (live polls keep the one-page cadence):
+            # the evicted-window realignment pairs echoes with bodies by count, so it must
+            # see every retained submission, not just the first page.
+            entries = await self._read_retained_transcript(entries)
+        if not self._hydrated and not self._evidence_window_complete:
+            entries = self._realign_evicted_hydration_zip(entries)
         for entry in entries:
             # Only user submission echoes are consumed here. The claude transcript also carries
             # assistant and result entries (claude_stream_state emits role="assistant"/"result"),
             # but those are the evidence/terminal path's authority — claude has no user-frame
             # evidence, so the echo is the AR-side submission record. Feeding a non-user entry to
             # the user-only echo mapper is what minted the spurious "claude:echo: unrecognized
-            # submission echo shape" rows in the developer's image3; advance past them without
-            # minting or opening a turn boundary. (260718-CHATS-L5F R3)
+            # submission echo shape" rows; advance past them without
+            # minting or opening a turn boundary.
             if entry.get("role") != "user":
-                sequence = entry.get("sequence")
-                if isinstance(sequence, int) and not isinstance(sequence, bool):
-                    self._transcript_after = sequence
+                self._advance_transcript_watermark(entry)
                 continue
             # The adapter accepts one turn at a time, so an echo always
             # follows its turn's frames and the next echo always follows the
@@ -510,23 +594,9 @@ class ActiveSessionProjector:
                     # The previous turn's result never crossed (evidence
                     # eviction); the turn closes honestly without one.
                     pass
-            ref = self._echo_ref(entry.get("sequence"))
-            outputs: list[MapperOutput]
-            try:
-                outputs = self._mapper.map_transcript_echo(entry, evidence_ref=ref)
-            except UnmappableShape:
-                outputs = [
-                    MappedUnknownVendor(
-                        item_id=f"echo-{self._identity.bridge_epoch[:12]}-{entry.get('sequence')}",
-                        vendor_type="claude:echo",
-                        safe_summary="unrecognized submission echo shape",
-                    )
-                ]
-            self._apply_outputs(outputs, ref)
+            self._apply_echo_item(entry)
             self._echo_turn_open = True
-            sequence = entry.get("sequence")
-            if isinstance(sequence, int) and not isinstance(sequence, bool):
-                self._transcript_after = sequence
+            self._advance_transcript_watermark(entry)
         # End of cycle: emit the open turn's frames, stopping after its
         # result so a future turn's frames stay pending for their own echo.
         while self._pending_frames:
@@ -536,15 +606,139 @@ class ActiveSessionProjector:
                 self._echo_turn_open = False
                 break
 
+    def _realign_evicted_hydration_zip(
+        self, entries: tuple[Mapping[str, object], ...]
+    ) -> tuple[Mapping[str, object], ...]:
+        """Realign the echo/evidence tails when hydration meets an evicted evidence window.
+
+        The echo zipper pairs each user submission with the turn body that follows it by strict
+        alternation — sound only while both channels start at the same turn. The bridge's
+        evidence deque (2,000 frames) prefix-evicts whole turn bodies far earlier than the
+        transcript deque (1,000 entries) evicts their echoes, so a re-hydration after dormancy
+        can retain echoes whose bodies are gone; the first retained echo then pairs with a
+        LATER turn's body, pinning every retained answer a constant number of turns early and
+        orphaning the newest user messages. Both channels
+        keep suffix order, so the honest realignment is by turn count: leading echoes without
+        a surviving body project as bare user items, leading bodies without a surviving echo
+        project echo-less, and the paired tails zip in order. Live polling never realigns —
+        eviction there gaps ordering-fault (ZipperEvidenceEvicted) instead.
+        """
+        echo_count = sum(1 for entry in entries if entry.get("role") == "user")
+        result_indexes = [
+            index
+            for index, frame in enumerate(self._pending_frames)
+            if frame.raw.get("type") == "result"
+        ]
+        trailing_start = result_indexes[-1] + 1 if result_indexes else 0
+        trailing_open = any(
+            _opens_echo_turn_body(frame) for frame in self._pending_frames[trailing_start:]
+        )
+        body_count = len(result_indexes) + (1 if trailing_open else 0)
+        if echo_count <= body_count:
+            # Leading bodies whose echoes aged out of the transcript first project echo-less;
+            # with no retained echoes the whole retained window is echo-less, so it drains.
+            flushed = 0
+            while self._pending_frames and (flushed < body_count - echo_count or echo_count == 0):
+                frame = self._pending_frames.pop(0)
+                self._apply_evidence_frame(frame)
+                if frame.raw.get("type") == "result":
+                    flushed += 1
+            return entries
+        orphans = echo_count - body_count
+        kept: list[Mapping[str, object]] = []
+        for entry in entries:
+            if entry.get("role") == "user" and orphans:
+                orphans -= 1
+                self._apply_echo_item(entry)
+                self._advance_transcript_watermark(entry)
+                continue
+            kept.append(entry)
+        return tuple(kept)
+
+    async def _read_retained_transcript(
+        self, first_page: tuple[Mapping[str, object], ...]
+    ) -> tuple[Mapping[str, object], ...]:
+        """Drain the retained transcript window (bounded by the bridge's 1,000-entry deque).
+
+        Hydration only: the evicted-window realignment pairs retained echoes with retained
+        turn bodies by count, so it must see EVERY retained submission echo — a single
+        500-entry page of a longer retained window would undercount the echoes and misalign
+        the zip it exists to fix. Pages chain off the last entry's sequence because the
+        watermark advances only as entries are zipped.
+        """
+
+        entries = list(first_page)
+        full_page = len(first_page) == EVIDENCE_PAGE_LIMIT
+        while full_page:
+            last = entries[-1].get("sequence")
+            if not isinstance(last, int) or isinstance(last, bool):
+                break
+            page = await asyncio.to_thread(
+                self._read_transcript,
+                self._entry,
+                after_sequence=last,
+                limit=EVIDENCE_PAGE_LIMIT,
+            )
+            entries.extend(page)
+            full_page = len(page) == EVIDENCE_PAGE_LIMIT
+        return tuple(entries)
+
+    def _apply_echo_item(self, entry: Mapping[str, object]) -> None:
+        """Map one user submission echo and apply its item; turn state is the caller's."""
+
+        ref = self._echo_ref(entry.get("sequence"))
+        outputs: list[MapperOutput]
+        try:
+            outputs = self._mapper.map_transcript_echo(entry, evidence_ref=ref)
+        except UnmappableShape:
+            outputs = [
+                MappedUnknownVendor(
+                    item_id=f"echo-{self._identity.bridge_epoch[:12]}-{entry.get('sequence')}",
+                    vendor_type="claude:echo",
+                    safe_summary="unrecognized submission echo shape",
+                )
+            ]
+        self._apply_outputs(outputs, ref)
+
+    def _advance_transcript_watermark(self, entry: Mapping[str, object]) -> None:
+        sequence = entry.get("sequence")
+        if isinstance(sequence, int) and not isinstance(sequence, bool):
+            self._transcript_after = sequence
+
     def _apply_evidence_frame(self, frame: EvidenceFrame) -> None:
         ref = self._evidence_ref(frame.sequence)
         self._apply_outputs(self._map_evidence_frame(frame, ref), ref)
+
 
     def _map_evidence_frame(
         self,
         frame: EvidenceFrame,
         evidence_ref: str,
     ) -> list[MapperOutput]:
+        if frame.raw.get("arEvidenceTruncated") is True:
+            # The substrate's own clip envelope (an oversized frame bounded to the
+            # evidence budget) is not a vendor shape — exact parsing would brand a
+            # by-design truncation "malformed", so classify it honestly here for every
+            # harness. The preserved `type` label names what was clipped.
+            frame_type = frame.raw.get("type")
+            original_bytes = frame.raw.get("originalBytes")
+            type_label = frame_type if isinstance(frame_type, str) else "native"
+            size_label = (
+                f" ({original_bytes} bytes)"
+                if isinstance(original_bytes, int) and not isinstance(original_bytes, bool)
+                else ""
+            )
+            return [
+                MappedUnknownVendor(
+                    item_id=f"vendor-{self._identity.bridge_epoch[:12]}-{frame.sequence}",
+                    vendor_type=f"{self._mapper.harness_id}:evidence-truncated",
+                    safe_summary=(
+                        f"oversized {type_label} frame clipped to the evidence budget{size_label}"
+                    ),
+                    turn_id=None,
+                    created_at=frame.created_at,
+                )
+            ]
         try:
             return self._mapper.map_evidence_frame(frame, evidence_ref=evidence_ref)
         except UnmappableShape:
@@ -703,9 +897,10 @@ class ActiveSessionProjector:
         return ConversationEventEnvelope(
             identity=self._identity,
             cursor=self._event_cursor(self._sequence),
-            previous_cursor=self._event_cursor(self._sequence - 1)
-            if self._sequence > 1
-            else None,
+            # Genesis (sequence 1) chains to cursor 0, the stream origin a fresh
+            # page already names: every live frame carries a real predecessor,
+            # so the browser chain guard never re-pages on a healthy stream.
+            previous_cursor=self._event_cursor(self._sequence - 1),
             sequence=self._sequence,
             event_id=f"{self._generation}:{self._sequence}",
             emitted_at=self._clock(),
@@ -775,9 +970,7 @@ class ActiveSessionProjector:
         return ConversationEventEnvelope(
             identity=self._identity,
             cursor=self._event_cursor(self._sequence),
-            previous_cursor=self._event_cursor(self._sequence - 1)
-            if self._sequence > 1
-            else None,
+            previous_cursor=self._event_cursor(self._sequence - 1),
             sequence=self._sequence,
             event_id=f"{self._generation}:{self._sequence}",
             emitted_at=self._clock(),
@@ -844,7 +1037,7 @@ class ActiveSessionProjector:
                 ):
                     # Dormant: no subscribers past the consumer TTL. Release the heavy per-session
                     # projection now instead of lingering as a registered tombstone until 32-LRU
-                    # eviction (260718-CHATS-L5F R5).
+                    # eviction.
                     self._release_dormant_state()
                     break
                 try:
@@ -852,7 +1045,7 @@ class ActiveSessionProjector:
                 except HarnessBridgeEpochMismatchError:
                     await self._gap("generation-changed")
                     return
-                except ZipperEvidenceEvicted:
+                except (ZipperEvidenceEvicted, EvidenceTimelineRegressed):
                     await self._gap("ordering-fault")
                     return
                 except (ValidationError, UnmappableShape):
@@ -871,9 +1064,9 @@ class ActiveSessionProjector:
             self._poll_task = None
 
     def _release_dormant_state(self) -> None:
-        """Release the heavy per-session projection when the projector goes dormant (L5F R5).
+        """Release the heavy per-session projection when the projector goes dormant.
 
-        Clears the full ProjectionStore items, the L5 live-turn/request id-sets, the retained SSE
+        Clears the full ProjectionStore items, the live-turn/request id-sets, the retained SSE
         envelopes, and any pending frames, and retires the shell (``_closed``) so the next access
         re-creates a fresh projector (``matches`` returns False while closed). The memory is freed
         immediately rather than held resident in a dead-session tombstone until LRU eviction.

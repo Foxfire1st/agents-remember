@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import gsap from "gsap";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -92,7 +92,7 @@ describe("EnclosureCanvas — landing arc (5h H2)", () => {
   });
 
   it("renders without crashing when the projection node omits the landing arc (pre-5h/persisted data)", () => {
-    // A projection produced before the slice-5h `landing` field omits it entirely (not []); the
+    // A projection produced before the `landing` field was added omits it entirely (not []); the
     // canvas must degrade to no landing dock, never throw on `node.landing.find`.
     const node = { ...nodeFrom("engine-landing-ffonly") };
     delete (node as { landing?: unknown }).landing;
@@ -262,7 +262,7 @@ describe("EnclosureCanvas — conduit wiring polish (5h cleanup)", () => {
 
   it("draws the provider clone arrows from the official engine across to the worktree engine (cloned-from, not re-indexed)", () => {
     const { container } = render(<EnclosureProcessMap node={nodeFrom("engine-bootstrap")} />);
-    // 5f §7.2: the seed/clone copies the index ACROSS from the official-line engine — CGC bows over the
+    // The seed/clone copies the index ACROSS from the official-line engine — CGC bows over the
     // top (official 135,150 → worktree 1057,150), GrepAI under the bottom — NOT worktree-node → engine.
     expect(container.querySelector('[data-kind="cgc-seed"] path')?.getAttribute("d")).toBe("M135 150 C 345 34, 847 34, 1057 150");
     expect(container.querySelector('[data-kind="grepai-clone"] path')?.getAttribute("d")).toBe("M135 500 C 345 604, 847 604, 1057 500");
@@ -464,7 +464,7 @@ describe("EnclosureCanvas — ledger popover columns (5h Tier 2)", () => {
     const popover = await screen.findByTestId("ledger-popover");
     const current = popover.querySelector('[data-current="true"]');
     expect(current).not.toBeNull();
-    // the newest row carries the real 5h message + the recorded wall-clock (06-18 18:19), not a hash alone
+    // the newest row carries the real commit message + the recorded wall-clock (06-18 18:19), not a hash alone
     expect(current?.textContent).toContain("dashboard(5h): ledger popover on both warp couplers");
     expect(current?.textContent).toContain("06-18 18:19");
     // 7 cells: code date | code msg | code hash | ⇄ seam | memory hash | memory msg | memory date
@@ -569,7 +569,7 @@ describe("EnclosureCanvas — T7B provider-plan block (05o: scan-at-engine + gat
     // a steady gate + the alarm-parity attention badge
     const gate = queryByTestId("gate");
     expect(gate).not.toBeNull();
-    // 05o dev fix: the alarm bar is a VERTICAL bar attached to the LEFT side of the worktree provider engine
+    // The alarm bar is a VERTICAL bar attached to the LEFT side of the worktree provider engine
     // (x≈1045, the engine is at 1057), NOT a horizontal bar across it and NOT on the code worktree node (which
     // would put the bar at x≈771). Guards the geometry regression — x beside the engine + taller than wide.
     const gx = Number(gate?.getAttribute("x"));
@@ -630,7 +630,7 @@ describe("EnclosureCanvas — integration conflict (T14C · terminal)", () => {
     const stop = getByTestId("terminal-stop");
     expect(stop.getAttribute("data-kind")).toBe("integration");
     // the conflict words ride a banner (the ⛔ glyph carries the STOP semantics); the words are off the lane
-    // line so the red conduit no longer bisects them (05o legibility fix).
+    // line so the red conduit no longer bisects them (legibility fix).
     expect(stop.textContent).toMatch(/conflict/i);
     expect(stop.textContent).toContain("⛔");
     expect(queryByTestId("gate")).toBeNull(); // terminal STOP, never the recoverable Gate (no gate testid)
@@ -664,5 +664,137 @@ describe("EnclosureProcessMap — continuous-identity abandon (T18)", () => {
     expect(queryByTestId("remote-strip")).toBeNull();
     expect(queryByTestId("cleanup-record")).toBeNull();
     expect(getByTestId("lane-historical").textContent).toContain("historical");
+  });
+});
+
+// ── Engine Room CPU fix: off-screen pause + transform-driven fx ─────────────────────
+// The cockpit keeps the Engine Room mounted (display:none) across tab switches, so the animation
+// substrate must sleep while the canvas doesn't intersect. jsdom has no IntersectionObserver — a
+// controllable mock drives the hide/show flips (same pattern as useElementVisible.test.tsx).
+const observed = new Map<Element, IntersectionObserverCallback>();
+class MockIntersectionObserver {
+  private readonly callback: IntersectionObserverCallback;
+  readonly root = null;
+  readonly rootMargin = "0px";
+  readonly thresholds = [0];
+  constructor(callback: IntersectionObserverCallback) {
+    this.callback = callback;
+  }
+  observe = (element: Element) => observed.set(element, this.callback);
+  unobserve = (element: Element) => void observed.delete(element);
+  disconnect = () => observed.clear();
+  takeRecords = (): IntersectionObserverEntry[] => [];
+}
+
+function installMockIO() {
+  observed.clear();
+  (globalThis as { IntersectionObserver?: unknown }).IntersectionObserver = MockIntersectionObserver;
+}
+
+function uninstallMockIO() {
+  observed.clear();
+  delete (globalThis as { IntersectionObserver?: unknown }).IntersectionObserver;
+}
+
+function fireIntersection(element: Element, isIntersecting: boolean) {
+  act(() => {
+    observed.get(element)?.(
+      [{ isIntersecting, target: element } as IntersectionObserverEntry],
+      {} as IntersectionObserver,
+    );
+  });
+}
+
+describe("EnclosureCanvas — off-screen GSAP pause (260721 C1)", () => {
+  beforeEach(() => {
+    document.documentElement.removeAttribute("data-effects"); // effects ON — the context builds
+    installMockIO();
+  });
+  afterEach(() => {
+    uninstallMockIO();
+  });
+
+  it("pauses every context tween while hidden and resumes on re-show — without rebuilding the context", () => {
+    const contextSpy = vi.spyOn(gsap, "context");
+    const { getByTestId } = render(
+      <EnclosureProcessMap node={nodeFrom("engine-bootstrap")} workspaceEngines={WORKSPACE_ENGINES} />,
+    );
+    expect(contextSpy).toHaveBeenCalledTimes(1);
+    const ctx = contextSpy.mock.results[0].value as gsap.Context;
+    const tweens = ctx.getTweens() as gsap.core.Tween[];
+    expect(tweens.length).toBeGreaterThan(0);
+    expect(tweens.every((tween) => !tween.paused())).toBe(true); // running while on-screen
+
+    fireIntersection(getByTestId("enclosure-canvas"), false); // the tab switch hides the layer
+    expect(tweens.every((tween) => tween.paused())).toBe(true);
+
+    fireIntersection(getByTestId("enclosure-canvas"), true); // back on-screen → mid-beat resume
+    expect(tweens.every((tween) => !tween.paused())).toBe(true);
+    // the pause never reverted/rebuilt the choreography: still the one original context
+    expect(contextSpy).toHaveBeenCalledTimes(1);
+    contextSpy.mockRestore();
+  });
+
+  it("keeps a context rebuilt while hidden paused (a projection beat landing under display:none)", () => {
+    const contextSpy = vi.spyOn(gsap, "context");
+    const view = render(
+      <EnclosureProcessMap node={nodeFrom("engine-bootstrap")} workspaceEngines={WORKSPACE_ENGINES} />,
+    );
+    fireIntersection(view.getByTestId("enclosure-canvas"), false);
+    // the signature changes while the tab is hidden → the choreography reverts + rebuilds; the new
+    // context must inherit the pause in the same commit (the pause effect trails the build effect).
+    view.rerender(
+      <EnclosureProcessMap node={nodeFrom("engine-sync-needed")} workspaceEngines={WORKSPACE_ENGINES} />,
+    );
+    expect(contextSpy).toHaveBeenCalledTimes(2);
+    const rebuilt = contextSpy.mock.results[1].value as gsap.Context;
+    const tweens = rebuilt.getTweens() as gsap.core.Tween[];
+    expect(tweens.length).toBeGreaterThan(0);
+    expect(tweens.every((tween) => tween.paused())).toBe(true);
+
+    fireIntersection(view.getByTestId("enclosure-canvas"), true);
+    expect(tweens.every((tween) => !tween.paused())).toBe(true);
+    contextSpy.mockRestore();
+  });
+});
+
+describe("EnclosureProcessMap — backdrop video follows layer visibility (260721 C1)", () => {
+  beforeEach(() => {
+    document.documentElement.removeAttribute("data-effects"); // effects ON — the backdrop mounts
+    installMockIO();
+  });
+  afterEach(() => {
+    uninstallMockIO();
+  });
+
+  it("pauses the looping blueprint video while hidden and plays it again on re-show", () => {
+    const playSpy = vi.spyOn(HTMLMediaElement.prototype, "play");
+    const pauseSpy = vi.spyOn(HTMLMediaElement.prototype, "pause");
+    const { getByTestId } = render(<EnclosureProcessMap node={nodeFrom("engine-bootstrap")} />);
+    const video = getByTestId("backdrop").querySelector("video");
+    expect(video).not.toBeNull();
+    expect(playSpy).toHaveBeenCalled(); // visible on mount → playing
+    expect(pauseSpy).not.toHaveBeenCalled();
+
+    fireIntersection(getByTestId("process-map"), false);
+    expect(pauseSpy).toHaveBeenCalledTimes(1);
+
+    fireIntersection(getByTestId("process-map"), true);
+    expect(playSpy.mock.calls.length).toBeGreaterThanOrEqual(2); // resumed
+    expect(pauseSpy).toHaveBeenCalledTimes(1);
+    playSpy.mockRestore();
+    pauseSpy.mockRestore();
+  });
+});
+
+describe("EnclosureCanvas — transform-driven fx geometry (260721 C1)", () => {
+  it("renders the warp-surge bands at FULL geometry so scaleY-from-the-link replaces the y1/y2 attr tween", () => {
+    const { container } = render(<EnclosureProcessMap node={nodeFrom("engine-bootstrap")} />);
+    const up = container.querySelector('[data-testid="warp-surge"][data-dir="up"]');
+    const down = container.querySelector('[data-testid="warp-surge"][data-dir="down"]');
+    // cy = 342; the old tween's targets were y1/y2 = 342∓26 / 342∓4 — now the rendered geometry,
+    // with GSAP scaling from (x, 342) instead of writing attributes every frame.
+    expect([up?.getAttribute("y1"), up?.getAttribute("y2")]).toEqual(["316", "338"]);
+    expect([down?.getAttribute("y1"), down?.getAttribute("y2")]).toEqual(["368", "346"]);
   });
 });

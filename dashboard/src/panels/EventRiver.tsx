@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { memo, useMemo, useState } from "react";
 
 import { useVirtualizer } from "@tanstack/react-virtual";
 
@@ -52,7 +52,7 @@ const meta = css({ fontSize: "0.68rem", color: "muted", letterSpacing: "0" });
 
 const ROW_ESTIMATE = 40;
 
-export function EventRiver() {
+function EventRiverImpl() {
   const events = useDashboard((s) => s.events);
   const eventsHydrated = useDashboard((s) => s.eventsHydrated || s.events.length > 0);
   const lifecycles = useDashboard((s) => s.lifecycles);
@@ -115,6 +115,11 @@ export function EventRiver() {
     </Panel>
   );
 }
+
+// Memoized (tab-switch CPU): a persistent rail panel — the shell re-renders on every view
+// switch with unchanged (here: no) props, and the memo gate skips this subtree then; the river's
+// own store subscriptions still drive its updates.
+export const EventRiver = memo(EventRiverImpl);
 
 function EventRow({
   event,

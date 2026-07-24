@@ -34,7 +34,7 @@ from agents_remember.serving.conversation.projectors.common import (
 from agents_remember.serving.harness_control_models import SubmissionSource
 
 MAX_PENDING_DELTA_ITEMS = 64
-"""Delta-before-item buffering is bounded per projection (D2)."""
+"""Delta-before-item buffering is bounded per projection."""
 
 MAX_PENDING_DELTAS_PER_ITEM = 64
 
@@ -56,12 +56,12 @@ def _preserved_input_authority(existing: ConversationItem) -> dict[str, object]:
     user-role input items the whole authority triple (lane, source, provenance) is ONE resolved
     unit: input authority is resolved exactly once, via ``apply_provenance``, never by a native
     re-map. A native re-map re-emits the default ``unknown-input``/``native-history`` authority;
-    before 260718-CHATS-L5 H2 the upsert adopted the candidate's ``unknown-input`` lane/source while
+    previously the upsert adopted the candidate's ``unknown-input`` lane/source while
     preserving the existing (resolved) provenance -- splitting the triple into a
     ``lane="unknown-input"`` item that carries ``strength="exact"`` and an operator producer. That
     item violates ``ConversationItem.preserve_input_authority`` but is stored silently (``model_copy``
-    skips validation) and only 500s the active-page route later, at response re-validation (L4 verdict
-    E2, intermittent under real codex traffic). Keep the triple together so a re-map never reverts or
+    skips validation) and only 500s the active-page route later, at response re-validation
+    (intermittent under real codex traffic). Keep the triple together so a re-map never reverts or
     splits a resolved input authority. Non-user (harness) items retain their legitimate
     ``harness-live`` <-> ``native-history`` source transition.
     """
@@ -133,6 +133,9 @@ class ProjectionStore:
         """
 
         candidate = mapped.item
+        # Captured BEFORE any block union: exactly the blocks the mapper emitted now with
+        # aggregated content — the authority buffered stream deltas must never replay on top of.
+        mapper_authoritative = _authoritative_block_ids(candidate)
         existing = self._items.get(candidate.item_id)
         if existing is None:
             item = candidate.model_copy(
@@ -141,7 +144,7 @@ class ProjectionStore:
             self._items[item.item_id] = item
             self._order.append(item.item_id)
             self._track_provenance(item)
-            tail = self._flush_pending_deltas(item)
+            tail = self._flush_pending_deltas(item, authoritative_block_ids=mapper_authoritative)
             return [StoreMutation(kind="append-item", item=item), *tail]
         if existing.kind == candidate.kind == "tool-call":
             candidate = candidate.model_copy(
@@ -150,7 +153,7 @@ class ProjectionStore:
         comparable_existing = existing.model_copy(
             update={field: None for field in _NORMALIZED_FIELDS}
         )
-        # 260718-CHATS-L5 F4: the candidate inherits the same input-authority the real upsert below
+        # The candidate inherits the same input-authority the real upsert below
         # preserves BEFORE the comparison, so a re-map that differs only in the fields a re-map must
         # never own (an ``unknown-input``/``native-history`` re-map of an already-resolved user item)
         # compares equal and stays a true no-op, honoring the store's idempotence docstring rather
@@ -162,7 +165,9 @@ class ProjectionStore:
             }
         )
         if comparable_candidate == comparable_existing:
-            return self._flush_pending_deltas(existing)
+            return self._flush_pending_deltas(
+                existing, authoritative_block_ids=mapper_authoritative
+            )
         item = candidate.model_copy(
             update={
                 "revision": existing.revision + 1,
@@ -175,11 +180,20 @@ class ProjectionStore:
         self._track_provenance(item)
         return [
             StoreMutation(kind="upsert-item", item=item),
-            *self._flush_pending_deltas(item),
+            *self._flush_pending_deltas(item, authoritative_block_ids=mapper_authoritative),
         ]
 
     def apply_delta(self, mapped: MappedBlockDelta) -> list[StoreMutation]:
-        """Apply one block delta in revision order; buffer delta-before-item."""
+        """Apply one block delta in revision order; buffer only delta-before-item.
+
+        A delta addressed to a block the EXISTING item does not carry yet mints that block in
+        place: codex streams commandExecution output deltas before any output block exists on the
+        started item, and buffering them used to hide the live stream entirely and then replay it
+        on top of the completed aggregate. The mint is emitted as a full ``upsert-item`` so a
+        subscriber that never saw the block converges without a re-page (the browser reducer
+        re-pages on a delta naming an unknown block). Buffering is reserved for the true arrival
+        race — the item itself not seen yet.
+        """
 
         item = self._items.get(mapped.item_id)
         if item is None:
@@ -187,8 +201,9 @@ class ProjectionStore:
             return []
         block_id = mapped.block_id or self._default_block(item)
         if not self._has_block(item, block_id):
-            self._buffer_delta(mapped)
-            return []
+            minted = self._mint_block_with_text(item, block_id, mapped.delta)
+            self._items[minted.item_id] = minted
+            return [StoreMutation(kind="upsert-item", item=minted)]
         mutation = self._apply_delta_to(item, block_id, mapped.delta)
         return [mutation] if mutation is not None else []
 
@@ -261,7 +276,21 @@ class ProjectionStore:
         if len(pending) < MAX_PENDING_DELTAS_PER_ITEM:
             pending.append(mapped)
 
-    def _flush_pending_deltas(self, item: ConversationItem) -> list[StoreMutation]:
+    def _flush_pending_deltas(
+        self,
+        item: ConversationItem,
+        *,
+        authoritative_block_ids: frozenset[str] = frozenset(),
+    ) -> list[StoreMutation]:
+        """Apply buffered delta-before-item arrivals; authoritative blocks drop their backlog.
+
+        A block the just-applied item carried WITH content is the aggregate authority over
+        everything that streamed before it (codex ``aggregatedOutput`` on ``item/completed``);
+        replaying the buffered prefix on top would duplicate that text, so those deltas are
+        dropped. Deltas for blocks the item did not carry (or carried empty) still apply,
+        minting the block when it does not exist yet.
+        """
+
         pending = self._pending_deltas.pop(item.item_id, None)
         if not pending:
             return []
@@ -269,12 +298,34 @@ class ProjectionStore:
         for delta in pending:
             current = self._items[item.item_id]
             block_id = delta.block_id or self._default_block(current)
+            if block_id in authoritative_block_ids:
+                continue
             if not self._has_block(current, block_id):
+                minted = self._mint_block_with_text(current, block_id, delta.delta)
+                self._items[minted.item_id] = minted
+                mutations.append(StoreMutation(kind="upsert-item", item=minted))
                 continue
             mutation = self._apply_delta_to(current, block_id, delta.delta)
             if mutation is not None:
                 mutations.append(mutation)
         return mutations
+
+    @staticmethod
+    def _mint_block_with_text(
+        item: ConversationItem, block_id: str, text: str
+    ) -> ConversationItem:
+        """The item with a new typed text block carrying the first delta, revision bumped."""
+
+        block: ConversationContentBlock
+        if item.kind == "tool-call":
+            block = ToolOutputBlock(block_id=block_id, text=text)
+        elif item.kind == "thinking":
+            block = ThinkingBlock(block_id=block_id, markdown=text)
+        else:
+            block = MarkdownBlock(block_id=block_id, markdown=text)
+        return item.model_copy(
+            update={"blocks": (*item.blocks, block), "revision": item.revision + 1}
+        )
 
     def _apply_delta_to(
         self,
@@ -329,6 +380,26 @@ class ProjectionStore:
         if item.kind == "tool-call":
             return "output"
         return "markdown"
+
+
+def _block_content_text(block: ConversationContentBlock) -> str:
+    """The appendable text a block carries; empty for non-text block kinds."""
+
+    if isinstance(block, MarkdownBlock | ThinkingBlock):
+        return block.markdown
+    if isinstance(block, TextBlock):
+        return block.text
+    if isinstance(block, ToolOutputBlock):
+        return block.text or ""
+    return ""
+
+
+def _authoritative_block_ids(candidate: ConversationItem) -> frozenset[str]:
+    """Blocks a mapped item carries with aggregated non-empty content (delta backlog authority)."""
+
+    return frozenset(
+        block.block_id for block in candidate.blocks if _block_content_text(block)
+    )
 
 
 def _union_blocks(

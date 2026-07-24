@@ -7,17 +7,20 @@ import { seatVisualState } from "../../data/stateGrammar";
 import type { ConversationInterrupt } from "./conversation/useConversationControls";
 import { STOP_TURN_DISABLED_REASON } from "./lifecycleCopy";
 
-// The WorkingLine (260715-FEUI-L6 R6, spec §1.2-2): the SINGLE home of turn theater. Renders
-// ONLY while the focused seat's state is `working`, in the reserved slot directly under the
-// HeaderStrip. Anatomy, fixed: `◐ <activity form | "working"> · ~elapsed · ⏹ stop`.
+// The WorkingLine: the CATALOG-DRIVEN home of turn theater.
+// The reserved slot directly under the HeaderStrip chooses its source per
+// freshness: a harness seat whose conversation stream is LIVE renders ConversationWorkingLine
+// (SSE, sub-second); everything else — legacy raw sessions, the SSE connect/reconnect window —
+// renders THIS line, whose elapsed honestly bounds its own poll/sweep staleness. Renders ONLY
+// while the focused seat's state is `working`. Anatomy, fixed: `◐ <activity form | "working"> · ~elapsed · ⏹ stop`.
 //   - The activity form is shown only when a REAL one is known; otherwise the plain word
-//     "working" — NEVER whimsy verbs (spec §1.1-10).
+//     "working" — NEVER whimsy verbs.
 //   - ~elapsed comes from the client turnClock: the clock starts at the OBSERVED transition
 //     (poll/10 s-sweep bounded), so the `~` label is the honesty marker, tabular-nums.
-//   - The Stop-turn control is WELDED in at the line's fixed end position, UA-7-gated: disabled
+//   - The Stop-turn control is WELDED in at the line's fixed end position: disabled
 //     with the reason until the interrupt route exists (design §9.7). Retry/compaction states
-//     join this line when UA-5 exposes them.
-//   - Spinner = the slow-pulse `◐` glyph only (2.4 s ease-in-out — the animation ruling): no
+//     join this line once those states are exposed on the wire.
+//   - Spinner = the slow-pulse `◐` glyph only (2.4 s ease-in-out): no
 //     shimmer, no braille frames; frozen by html[data-effects="off"], steady under
 //     prefers-reduced-motion. Turn theater NEVER renders per rail row.
 
@@ -54,8 +57,8 @@ const stopButton = css({
   opacity: 0.7,
   _focusVisible: { outline: "1px solid token(colors.amber)", outlineOffset: "1px" },
 });
-// The enabled interrupt (L4): demoted weight (muted border) until hover/focus, where it takes the
-// amber accent — red is reserved for the moment of consequence, not the resting state (finding A6).
+// The enabled interrupt: demoted weight (muted border) until hover/focus, where it takes the
+// amber accent — red is reserved for the moment of consequence, not the resting state.
 const stopButtonEnabled = css({
   font: "inherit",
   fontSize: "0.66rem",
@@ -84,11 +87,11 @@ export function formatApproxElapsed(elapsedMs: number): string {
 
 /**
  * The REAL activity form when one is known. No wire field carries one today (turn-state is a
- * bit, not a verb phrase; UA-1 reasoning headers / UA-5 states land later), so this returns
+ * bit, not a verb phrase; reasoning headers / richer turn-states land later), so this returns
  * undefined and the line says plain "working" — never a decorative gerund.
  */
 export function workingActivityForm(session: OpenSession): string | undefined {
-  void session; // the seam stays typed — UA-1/UA-5 fields plug in here
+  void session; // the seam stays typed — future reasoning-header / turn-state fields plug in here
   return undefined;
 }
 
@@ -103,8 +106,8 @@ export function WorkingLine({
   /** Test seam: freezes the clock; production ticks itself. */
   now?: number;
   /**
-   * L4 exact-turn interrupt integration. When absent the stop control stays a disabled placeholder
-   * (the pre-L4 behavior). When present and available, the stop button becomes actionable and gated
+   * Exact-turn interrupt integration. When absent the stop control stays a disabled placeholder.
+   * When present and available, the stop button becomes actionable and gated
    * by real turn + capability evidence.
    */
   interrupt?: ConversationInterrupt;
@@ -139,14 +142,17 @@ export function WorkingLine({
           {formatApproxElapsed(at - since)}
         </span>
       ) : null}
-      {interrupt?.available && interrupt.onStop !== undefined ? (
+      {/* With no interrupt wired the line renders NO stop control —
+          controlled seats host it in the composer beside send; only the raw-terminal path
+          (which mounts no composer) still receives one here. */}
+      {interrupt === undefined ? null : interrupt.available && interrupt.onStop !== undefined ? (
         <button
           type="button"
           className={stopButtonEnabled}
           onClick={interrupt.onStop}
           disabled={interrupt.pending}
-          // Honest ACTION tooltip on the enabled control (F24): the command action + its effective
-          // chord — never the known-stale L1 capability reason (which the hook no longer emits here).
+          // Honest ACTION tooltip on the enabled control: the command action + its effective
+          // chord — never the known-stale capability reason (which the hook no longer emits here).
           title={interrupt.pending ? "interrupt requested…" : `Stop the current turn · ${interrupt.keyshortcut}`}
           aria-label="Stop turn"
           aria-keyshortcuts={interrupt.keyshortcut}
@@ -159,9 +165,9 @@ export function WorkingLine({
           type="button"
           className={stopButton}
           disabled
-          title={interrupt?.reason ?? STOP_TURN_DISABLED_REASON}
-          aria-label={`Stop turn — ${interrupt?.reason ?? STOP_TURN_DISABLED_REASON}`}
-          data-disabled-reason={interrupt?.reason ?? STOP_TURN_DISABLED_REASON}
+          title={interrupt.reason ?? STOP_TURN_DISABLED_REASON}
+          aria-label={`Stop turn — ${interrupt.reason ?? STOP_TURN_DISABLED_REASON}`}
+          data-disabled-reason={interrupt.reason ?? STOP_TURN_DISABLED_REASON}
           data-testid="working-line-stop"
         >
           ⏹ stop

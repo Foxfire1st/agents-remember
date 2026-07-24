@@ -34,14 +34,13 @@ const trigger = css({
 });
 // The popover: dark panel rendered in a PORTAL to <body> with FIXED positioning, so it escapes the rail's
 // `overflow: hidden` (which was clipping it mid-air) and any ancestor stacking/transform context. `align`
-// decides which edge it pins to so it never runs off-screen (the rail sits at the right edge → pin right;
-// the Chats strip is on the left → pin left). Position is measured from the trigger on open.
+// decides which trigger edge it pins to; vertical placement uses the actual room above/below instead of
+// an arbitrary screen-height cap. Position is measured from the trigger on open and on viewport movement.
 const menu = css({
   position: "fixed",
   zIndex: "1000",
   minWidth: "15rem",
   maxWidth: "min(24rem, 82vw)",
-  maxHeight: "min(50vh, 22rem)",
   overflowY: "auto",
   background: "bgPanel",
   borderWidth: "1px",
@@ -167,17 +166,37 @@ export function LeafAttachPicker({
   const [path, setPath] = useState<TaskTreeNode[]>([]);
   const [selectedRole, setSelectedRole] = useState<string | undefined>(seatRole);
   // The fixed-position anchor for the portaled menu, measured from the trigger (null until opened).
-  const [coords, setCoords] = useState<{ top: number; left?: number; right?: number } | null>(null);
+  const [coords, setCoords] = useState<{
+    top?: number;
+    bottom?: number;
+    left?: number;
+    right?: number;
+    maxHeight: number;
+  } | null>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
 
   const measure = () => {
     const rect = triggerRef.current?.getBoundingClientRect();
     if (!rect) return;
+    const viewportPadding = 8;
+    const triggerGap = 4;
+    const availableBelow = window.innerHeight - rect.bottom - triggerGap - viewportPadding;
+    const availableAbove = rect.top - triggerGap - viewportPadding;
+    const openAbove = availableBelow < 240 && availableAbove > availableBelow;
+    const vertical = openAbove
+      ? { bottom: window.innerHeight - rect.top + triggerGap, maxHeight: availableAbove }
+      : { top: rect.bottom + triggerGap, maxHeight: availableBelow };
     setCoords(
       align === "right"
-        ? { top: rect.bottom + 4, right: Math.max(4, window.innerWidth - rect.right) }
-        : { top: rect.bottom + 4, left: rect.left },
+        ? {
+            ...vertical,
+            right: Math.max(viewportPadding, window.innerWidth - rect.right),
+          }
+        : {
+            ...vertical,
+            left: Math.max(viewportPadding, rect.left),
+          },
     );
   };
 
@@ -245,7 +264,13 @@ export function LeafAttachPicker({
             <div
               ref={menuRef}
               className={menu}
-              style={{ top: coords.top, left: coords.left, right: coords.right }}
+              style={{
+                top: coords.top,
+                bottom: coords.bottom,
+                left: coords.left,
+                right: coords.right,
+                maxHeight: coords.maxHeight,
+              }}
               role="menu"
               aria-label={label}
               data-testid={`${testId}-menu`}

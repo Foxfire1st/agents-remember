@@ -1,12 +1,13 @@
-// The canonical Chats cockpit (built through 260715-FEUI-L1..L8): rail / stage / inspector
-// as a react-resizable-panels group with the narrow-width rules (inspector auto-collapses
-// <~1100px, rail <~900px — both reopenable) and the ~80-col PTY floor hint chip. L2 fills the
-// rail (SessionRail — ruled role hierarchy + fleet attention), the stage container + HeaderStrip
-// (empty ModelEffortControl slot for L4, reserved WorkingLine slot for L6), and the focused-seat
-// inspector card (L7 made it tabbed). The PTY and reliable composer are
-// keyboard-zone anchors. The view root carries [data-view="sessions"]:
-// the WebTUI scope root (S1) and the keyboard layer's home.
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+// The canonical Chats cockpit: rail / stage / inspector as a react-resizable-panels group with
+// the narrow-width rules (inspector auto-collapses <~1100px, rail <~900px — both reopenable) and
+// the ~80-col PTY floor hint chip. The rail (SessionRail — ruled role hierarchy + fleet
+// attention), the stage container + HeaderStrip (the ModelEffortControl slot and the WorkingLine
+// slot — source-selected: the SSE-driven ConversationWorkingLine while the focused harness seat's
+// conversation stream is live, the catalog-driven WorkingLine otherwise; the slot sits between
+// conversation and composer, not in the stage's top chrome), and the focused-seat inspector card
+// (tabbed). The PTY and reliable composer are keyboard-zone anchors. The view root carries
+// [data-view="sessions"]: the WebTUI scope root and the keyboard layer's home.
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Panel,
   PanelGroup,
@@ -51,6 +52,7 @@ import {
   useSessionCockpit,
 } from "../../data/sessionCockpitStore";
 import { startRetireResidualSweep } from "../../data/sessionLifecycle";
+import { seatVisualState } from "../../data/stateGrammar";
 import {
   cycleEffortRequested,
   startSetPromotionWatcher,
@@ -75,20 +77,19 @@ import { shortId } from "../../data/conversation/format";
 import { useDashboard } from "../../data/store";
 import type { AgentPickupNode, TaskDocNode } from "../../types/projection";
 import { CockpitLiveRegions } from "./CockpitLiveRegions";
-import { ChatContextBar } from "./ChatContextBar";
+import { ChatContextBar, ChatSessionActions } from "./ChatContextBar";
 import { CommandPalette } from "./CommandPalette";
 import { FailedLaunchBanner } from "./FailedLaunchBanner";
 import { InteractionBar } from "./InteractionBar";
 import { LaunchFlow, type LaunchPrefill } from "./LaunchFlow";
 import { LandedCleanupNotice } from "./LandedCleanupNotice";
 import { ChatsStageBody } from "./ChatsStageBody";
+import { ConversationWorkingLine } from "./conversation/ConversationWorkingLine";
 import { useConversationInterrupt } from "./conversation/useConversationControls";
 import { SeatInspector } from "./SeatInspector";
 import { endLanded, SessionRail } from "./SessionRail";
 import { SessionStage } from "./SessionStage";
 import { SetOutcomeToasts } from "./SetOutcomeToasts";
-import { StopResidualNotes } from "./StopResidualNotes";
-import { StatusLine } from "./StatusLine";
 import { useKeyboardZones } from "./useKeyboardZones";
 import { WorkingLine } from "./WorkingLine";
 import {
@@ -106,6 +107,8 @@ const root = css({
   minWidth: "0",
   gap: "0.4rem",
 });
+// The WorkingLine slot — zero-height when idle, docked between conversation and composer.
+const workingLineSlot = css({ flexShrink: 0, minHeight: "0" });
 const pane = css({
   height: "100%",
   minWidth: "0",
@@ -127,6 +130,10 @@ const stagePane = css({
   flexDirection: "column",
   gap: "0.4rem",
   overflow: "hidden",
+  // The stage sat flush against the rail (a measured 3px gap, zero
+  // padding), gluing the stage title to the rail edge. A deliberate inline gutter separates
+  // the two panels.
+  paddingInlineStart: "0.75rem",
 });
 const floorChip = css({
   fontSize: "0.64rem",
@@ -185,7 +192,7 @@ export interface SessionsViewProps {
   contextMaster?: string;
 }
 
-export function SessionsView({
+function SessionsViewImpl({
   active,
   selectedLifecycleId,
   selectedLeafKey,
@@ -225,7 +232,7 @@ export function SessionsView({
   const inspectorCollapsedRef = useRef(inspectorCollapsed);
   inspectorCollapsedRef.current = inspectorCollapsed;
   const [stageNarrow, setStageNarrow] = useState(false);
-  // The VISIBLE pane's real column count (L6 R8): when a pane reports, the ~80-col floor chip
+  // The VISIBLE pane's real column count: when a pane reports, the ~80-col floor chip
   // reflects the pane truth instead of the pixel estimate.
   const [ptyCols, setPtyCols] = useState<number | null>(null);
   const composerRef = useRef<SessionComposerHandle>(null);
@@ -244,13 +251,12 @@ export function SessionsView({
     [],
   );
 
-  // ── L2: the shared session feed + cockpit state ─────────────────────────────────────────
+  // ── The shared session feed + cockpit state ─────────────────────────────────────────
   const sessions = useSessions((state) => state.sessions);
   const activeSessionId = useSessions((state) => state.activeId);
   const focusedSessionId = useSessionCockpit((state) => state.focusedSessionId);
   const treeView = useSessionCockpit((state) => state.orchestrationTreeView);
   const perSession = useSessionCockpit((state) => state.perSession);
-  const pollHealth = useSessionCockpit((state) => state.pollHealth);
   const projectedTaskDocuments = useDashboard(
     (state) => state.analytics?.taskDocuments ?? EMPTY_DOCS,
   );
@@ -262,7 +268,7 @@ export function SessionsView({
     (state) => state.supervisorHeartbeat,
   );
   const [handoff, setHandoff] = useState<string | null>(null);
-  // L3: the LaunchFlow dialog — opened from the palette, or pre-filled by the failed-launch
+  // The LaunchFlow dialog — opened from the palette, or pre-filled by the failed-launch
   // banner's 'Launch corrected…' (the refused pair, re-gated against the live catalog).
   const [launch, setLaunch] = useState<{
     open: boolean;
@@ -270,10 +276,10 @@ export function SessionsView({
   }>({
     open: false,
   });
-  // L4: the ModelEffortControl popover state lives here so the palette commands open the SAME
-  // popover the header trigger opens (one control, two surfaces — design FQ2).
+  // The ModelEffortControl popover state lives here so the palette commands open the SAME
+  // popover the header trigger opens (one control, two surfaces).
   const [controlPopoverOpen, setControlPopoverOpen] = useState(false);
-  // 260718-CHATS-L4: the structured Chats stage-mode toggles (in-stage history browser and the
+  // The structured Chats stage-mode toggles (in-stage history browser and the
   // default-off terminal-diagnostics drawer). Both live here + in the palette (design §12.6) and
   // reset on focus change. A focus-return token restores the invoker when the library closes (§14.1).
   const [chatsLibraryOpen, setChatsLibraryOpen] = useState(false);
@@ -286,15 +292,15 @@ export function SessionsView({
   chatsDiagnosticsOpenRef.current = chatsDiagnosticsOpen;
 
   useEffect(() => startCockpitMirror(), []);
-  // Review F1 (sev-3): retire residuals are captured for EVERY row — focus-independent — so an
+  // Retire residuals are captured for EVERY row — focus-independent — so an
   // unfocused seat's retireControlStopError still surfaces (and resurfaces after a reload).
   useEffect(() => startRetireResidualSweep(), []);
-  // L4 R4: the promotion/drift watcher (turn-ended + focus re-GETs) and the assertive
+  // The promotion/drift watcher (turn-ended + focus re-GETs) and the assertive
   // failed/awaiting-input announcer — both refcounted, view-lifetime.
   useEffect(() => startSetPromotionWatcher(), []);
   useEffect(() => startSeatStateAnnouncer(), []);
 
-  // 260718-CHATS-L5F R9 (audit V5): the focused seat's conversation projection carries its OWN live
+  // The focused seat's conversation projection carries its OWN live
   // turn signal over SSE (sub-second), which the sweep-bounded catalog turn-state lags by ~10s. When
   // the projection shows a turn actively streaming, prefer it so the stage authorities (HeaderStrip
   // StateDot, StatusLine, WorkingLine) show a WORKING state instead of a settled-green `turn-ended`.
@@ -316,7 +322,15 @@ export function SessionsView({
       : focusedBase;
   const focusedLive =
     focused !== undefined && (focused.status ?? "running") === "running";
-  // L4 exact-turn interrupt for the focused session (drives WorkingLine's stop control). A ref lets
+  // The WorkingLine slot's source-selection rule. A harness seat whose
+  // conversation stream is LIVE gets the SSE-driven ConversationWorkingLine (sub-second, same
+  // projection evidence as the stop control); legacy raw sessions and the SSE connect/reconnect
+  // window keep the catalog-driven WorkingLine, which honestly bounds its own staleness.
+  const focusedConversationLive = useActiveConversation((state) => {
+    if (focusedSessionId === null || focusedSessionId === undefined) return false;
+    return state.bySession[focusedSessionId]?.stream === "live";
+  });
+  // Exact-turn interrupt for the focused session (drives WorkingLine's stop control). A ref lets
   // the registered `conversation.stop` command + chord always read the latest availability/onStop
   // without re-registering on every projection tick.
   const chatsInterrupt = useConversationInterrupt(focusedSessionId ?? undefined);
@@ -381,7 +395,7 @@ export function SessionsView({
     chatsLibraryReturnRef.current = null;
   }, []);
 
-  // Diagnostics drawer focus-return token (§12.6/§14.1, F9): capture on open from any invoker
+  // Diagnostics drawer focus-return token (§12.6/§14.1): capture on open from any invoker
   // (toolbar button, reconnect action, palette), restore on close so focus never drops to <body>.
   const toggleChatsDiagnostics = useCallback((open: boolean) => {
     if (open) {
@@ -411,11 +425,11 @@ export function SessionsView({
     }
   }, [activeSessionId, focusedSessionId, sessions]);
 
-  // R9 smart-default focus (never an empty landing) + F17 focus handoff. An extant landed row
+  // Smart-default focus (never an empty landing) + focus handoff. An extant landed row
   // remains deliberately inspectable; once the focused row is actually removed (for example by
   // landed cleanup), focus must move to the smart live default instead of pointing at nothing.
-  // R6 — remember the last-known human LABEL of the focused seat too, so the focus-handoff banner
-  // names the seat the operator knows (`l5p-reverify`) instead of leading with its raw UUID once the
+  // Remember the last-known human LABEL of the focused seat too, so the focus-handoff banner
+  // names the seat the operator knows (its human label) instead of leading with its raw UUID once the
   // row is gone (its label is no longer in `sessions` at handoff time).
   const lastFocusRef = useRef<{ id: string | null; status: string; label: string | null }>({
     id: null,
@@ -451,7 +465,7 @@ export function SessionsView({
         `${current?.label ?? previous.label ?? shortId(previous.id)} ${word}${why ? ` — ${why}` : ""} · focus handed off`,
       );
       // Retire residuals are NOT captured here: the focus-independent sweep
-      // (startRetireResidualSweep) owns that for every row, focused or not (review F1).
+      // (startRetireResidualSweep) owns that for every row, focused or not.
       const next = smartDefaultFocus(sessions);
       rememberLiveSession(next);
       sessionCockpitStore.getState().setFocusedSession(next);
@@ -493,7 +507,7 @@ export function SessionsView({
     sessionCockpitStore.getState().setPaletteOpen(palette.open);
   }, [palette.open]);
 
-  // L3: the launch command — the palette is the flow's entry point (design §7.1).
+  // The launch command — the palette is the flow's entry point (design §7.1).
   useEffect(() => {
     return registry.register({
       id: "session.launch",
@@ -503,7 +517,7 @@ export function SessionsView({
     });
   }, [registry]);
 
-  // L4: the ModelEffortControl's palette surface — the SAME popover the header trigger opens.
+  // The ModelEffortControl's palette surface — the SAME popover the header trigger opens.
   useEffect(() => {
     const controlAvailable = () =>
       focused !== undefined &&
@@ -530,7 +544,7 @@ export function SessionsView({
     };
   }, [registry, focused]);
 
-  // 260718-CHATS-L4: the structured-Chats stage toggles are discoverable palette commands (design
+  // The structured-Chats stage toggles are discoverable palette commands (design
   // §12.6) — browse native history in-stage, and the default-off terminal-diagnostics drawer. Both
   // gate on a focused controlled session.
   useEffect(() => {
@@ -553,7 +567,7 @@ export function SessionsView({
         when: controlled,
         run: () => toggleChatsDiagnostics(!chatsDiagnosticsOpenRef.current),
       }),
-      // §4.4 return path (F16): a palette return command consuming the same library focus token.
+      // §4.4 return path: a palette return command consuming the same library focus token.
       registry.register({
         id: "conversation.backToChat",
         title: "Back to current chat",
@@ -561,7 +575,7 @@ export function SessionsView({
         when: () => chatsLibraryOpenRef.current,
         run: () => closeChatsLibrary(),
       }),
-      // R6/§9.5: the exact-turn interrupt — palette command + the Control+Shift+. chord both dispatch
+      // §9.5: the exact-turn interrupt — palette command + the Control+Shift+. chord both dispatch
       // this. `when` gates it to an interruptible working turn, so it never offers a dead stop.
       registry.register({
         id: "conversation.stop",
@@ -577,8 +591,8 @@ export function SessionsView({
     };
   }, [registry, focused, openChatsLibrary]);
 
-  // L2 palette commands (dynamic titles carry the HONEST preview counts + names): the tree
-  // toggle, jump-to-attention, bulk end at sprint + master level, and question triage (R16).
+  // Palette commands (dynamic titles carry the HONEST preview counts + names): the tree
+  // toggle, jump-to-attention, bulk end at sprint + master level, and question triage.
   useEffect(() => {
     const disposers = [
       registry.register({
@@ -636,7 +650,7 @@ export function SessionsView({
           id: `triage.${seat.id}`,
           title: `Answer pending question — ${seat.label}${preview ? `: “${preview}”` : ""}`,
           keywords: ["answer", "question", "pending", "input"],
-          // L6 R4: answering was the user's explicit intent — focus the seat's InteractionBar
+          // Answering was the user's explicit intent — focus the seat's InteractionBar
           // (the palette invoked it; this is the invoked action, not a focus steal).
           run: () => {
             focusSession(seat.id);
@@ -716,7 +730,7 @@ export function SessionsView({
 
   const closePalette = useCallback(() => {
     setPalette({ open: false, page: "commands", initialQuery: "" });
-    // R7: palette close returns focus to its invoker (when it is still in the document).
+    // Palette close returns focus to its invoker (when it is still in the document).
     const invoker = paletteInvokerRef.current;
     if (invoker?.isConnected) invoker.focus();
     paletteInvokerRef.current = null;
@@ -869,7 +883,7 @@ export function SessionsView({
         cycleRegion,
         focusStageHeader: () => focusSelector(STAGE_HEADER_SELECTOR),
         focusTerminal: () => focusSelector(PTY_HOST_SELECTOR),
-        // L2: alt+↑/↓ cycles the rail order (spine → clusters → unattached, live rows only).
+        // alt+↑/↓ cycles the rail order (spine → clusters → unattached, live rows only).
         switchSession: (direction) => {
           const order = railCycleOrder(model);
           if (order.length === 0) return;
@@ -882,7 +896,7 @@ export function SessionsView({
               : order[(index + direction + order.length) % order.length];
           focusSession(next);
         },
-        // L4 R7: cycle the REQUESTED effort through the live menu — no dialog; the chips carry
+        // Cycle the REQUESTED effort through the live menu — no dialog; the chips carry
         // the async honesty story.
         cycleEffort: (direction) => {
           if (focusedSessionId)
@@ -921,16 +935,15 @@ export function SessionsView({
 
   useKeyboardZones({ active, dispatch });
 
-  // The ~80-col floor chip (design §2, R3): the chip must always reflect the STAGE's actual
+  // The ~80-col floor chip (design §2): the chip must always reflect the STAGE's actual
   // width — it is re-measured from every path that can change it (root resizes via the observer
   // below, and panel-layout changes via the PanelGroup onLayout callback), so a divider drag or a
-  // palette-driven collapse can neither miss a squeeze nor leave a stale false alarm (review
-  // round 2, finding 1).
+  // palette-driven collapse can neither miss a squeeze nor leave a stale false alarm.
   const measureStage = useCallback(() => {
     setStageNarrow(stageBelowPtyFloor(stageRef.current?.clientWidth ?? 0));
   }, []);
 
-  // ~280px rail default (review round 2, finding 4): react-resizable-panels is percentage-only,
+  // ~280px rail default: react-resizable-panels is percentage-only,
   // so on the FIRST real width measurement — and only when the user has no persisted layout —
   // the rail is resized to the percentage equivalent of the design's ~280px target. One-shot;
   // the persisted layout (autoSaveId) owns everything afterwards.
@@ -951,7 +964,7 @@ export function SessionsView({
     calibrateRail(rootRef.current?.clientWidth ?? 0);
   }, [calibrateRail, measureStage]);
 
-  // Narrow-width rules (R3): rail behavior is unchanged. The inspector defaults closed and only
+  // Narrow-width rules: rail behavior is unchanged. The inspector defaults closed and only
   // auto-reopens after a width recovery when that same width transition closed it; a deliberate
   // default close is never undone by a resize.
   useEffect(() => {
@@ -1036,7 +1049,7 @@ export function SessionsView({
         >
           <aside
             className={cx(pane, "sessions__rail")}
-            // V11 — a collapsed rail leaves NO residual sliver: display:none removes the aside's own
+            // A collapsed rail leaves NO residual sliver: display:none removes the aside's own
             // padding/border box (~21px) entirely, so the 0px panel is truly empty, not a dead strip.
             // The drag min stays at RAIL_MIN_PERCENT (12%); below it the panel snaps fully collapsed and
             // the ☰ rail chip (StatusLine) plus the in-place resize handle are the reopen affordances.
@@ -1048,17 +1061,25 @@ export function SessionsView({
           >
             <h2 className={paneHeading}>Chats</h2>
             <ChatContextBar
-              focused={focused}
               selectedLifecycleId={selectedLifecycleId}
-              selectedLeafKey={selectedLeafKey}
-              taskDocuments={taskDocuments}
-              contextMaster={contextMaster}
               onLaunchChat={() => setLaunch({ open: true })}
               onSessionOpened={focusSession}
-              onBrowseHistory={openChatsLibrary}
             />
             <SessionRail
-              onFocusSession={focusSession}
+              onFocusSession={(sessionId) => {
+                // Clicking a chat in the rail lands the CURSOR in the chat
+                // input — the composer's focus target for controlled seats, the PTY host for
+                // raw terminals. Deferred a frame so the stage has re-rendered for the new seat.
+                focusSession(sessionId);
+                window.requestAnimationFrame(() => {
+                  const stageTarget = document.querySelector<HTMLElement>(
+                    regionTargetSelector("stage"),
+                  );
+                  const target =
+                    stageTarget ?? document.querySelector<HTMLElement>(PTY_HOST_SELECTOR);
+                  target?.focus();
+                });
+              }}
               focusedSessionId={focusedSessionId}
               model={model}
               rollup={rollup}
@@ -1092,8 +1113,45 @@ export function SessionsView({
                 onOpenChange: setControlPopoverOpen,
               }}
               handoff={handoff}
+              headerActions={
+                // The inspector/rail toggles live on the title row's
+                // right — the StatusLine bar they sat on is removed (declutter).
+                <>
+                  <ChatSessionActions
+                    focused={focused}
+                    selectedLeafKey={selectedLeafKey}
+                    taskDocuments={taskDocuments}
+                    contextMaster={contextMaster}
+                    onBrowseHistory={openChatsLibrary}
+                  />
+                  {railCollapsed ? (
+                    <button
+                      type="button"
+                      className={reopenButton}
+                      onClick={() => railRef.current?.expand()}
+                      data-testid="sessions-reopen-rail"
+                    >
+                      ☰ rail
+                    </button>
+                  ) : null}
+                  <button
+                    ref={inspectorToggleRef}
+                    type="button"
+                    className={reopenButton}
+                    aria-controls="chats-inspector"
+                    aria-expanded={!inspectorCollapsed}
+                    onClick={() => {
+                      if (inspectorCollapsed) expandInspector("operator");
+                      else collapseInspector("operator");
+                    }}
+                    data-testid="sessions-toggle-inspector"
+                  >
+                    {inspectorCollapsed ? "◫ show inspector" : "◫ hide inspector"}
+                  </button>
+                </>
+              }
               headerExtra={
-                // R8: with a live pane the chip reflects the pane's REAL column count; the pixel
+                // With a live pane the chip reflects the pane's REAL column count; the pixel
                 // estimate only covers the pane-less stage.
                 (ptyCols !== null ? ptyCols < PTY_MIN_COLS : stageNarrow) ? (
                   <span
@@ -1111,19 +1169,12 @@ export function SessionsView({
                   </span>
                 ) : null
               }
-              workingLine={
-                focusedLive ? (
-                  <WorkingLine
-                    session={focused}
-                    cockpit={perSession[focused.id]}
-                    interrupt={chatsInterrupt}
-                  />
-                ) : undefined
-              }
             >
-              <StopResidualNotes />
-              {/* L3 R6: a focused FAILED launch renders its refusal verbatim — ABOVE the pty
-                  surface (ruled merge resolution); never hidden, never auto-retried;
+              {/* Ending a chat produces NO stacked notice —
+                  StopResidualNotes is unmounted; stop details stay recorded in the lifecycle
+                  store for the Inspector/debug surfaces. */}
+              {/* A focused FAILED launch renders its refusal verbatim — ABOVE the pty
+                  surface; never hidden, never auto-retried;
                   Retire / 'Launch corrected…' are the only actions. */}
               {focusedLive && focused.controlState === "failed" ? (
                 <FailedLaunchBanner
@@ -1133,7 +1184,7 @@ export function SessionsView({
                   }
                 />
               ) : null}
-              {/* 260718-CHATS-L4: the structured one-roof body replaces the unconditional PTY. It
+              {/* The structured one-roof body replaces the unconditional PTY. It
                   hosts the default ConversationSurface, the in-stage history library, and the
                   default-off read-only terminal-diagnostics drawer; a legacy-raw session keeps its
                   interactive PTY as the primary body inside it. */}
@@ -1145,17 +1196,53 @@ export function SessionsView({
                 diagnosticsOpen={chatsDiagnosticsOpen}
                 onToggleDiagnostics={toggleChatsDiagnostics}
                 onSessionOpened={focusSession}
+                viewActive={active}
               />
+              {/* The turn theater sits where the eye
+                  waits for the next message — under the conversation, above the composer
+                  (the bottom-left "chat is still working" spot) — not in the stage's top
+                  chrome nobody watches mid-turn. Same source-selection rule. */}
+              <div
+                data-slot="working-line"
+                className={workingLineSlot}
+                data-testid="stage-working-line-slot"
+              >
+                {focusedLive ? (
+                  focused.kind === "harness" && focusedConversationLive ? (
+                    <ConversationWorkingLine sessionId={focused.id} />
+                  ) : (
+                    <WorkingLine
+                      session={focused}
+                      cockpit={perSession[focused.id]}
+                      // Only the raw-terminal path (no composer) keeps a line-hosted
+                      // stop; controlled seats host it in the composer beside send.
+                      interrupt={
+                        focused.kind === "terminal" ? chatsInterrupt : undefined
+                      }
+                    />
+                  )
+                ) : null}
+              </div>
               {focusedLive ? (
                 <InteractionBar session={focused} composerRef={composerRef} />
               ) : null}
-              {focusedLive ? (
+              {/* A raw terminal seat gets NO
+                  dashboard composer — the vendor TUI owns input there, and the dead editor +
+                  its two explanation bars only shrank the terminal. Controlled seats keep it. */}
+              {focusedLive && focused.kind !== "terminal" ? (
                 <SessionComposer
                   ref={composerRef}
                   session={focused}
                   queuedSetHint={queuedComposerHint(perSession[focused.id])}
                   onSlashAtLineStart={() => openPalette("commands", "/")}
                   onEscape={() => focusSelector(STAGE_HEADER_SELECTOR)}
+                  // The ⏹ stop docks beside send — SSE-preferred working signal, catalog
+                  // fallback, the same precedence the WorkingLine slot's source-selection uses.
+                  interrupt={chatsInterrupt}
+                  turnWorking={
+                    focusedLiveTurnWorking ||
+                    seatVisualState(focused).key === "working"
+                  }
                 />
               ) : null}
             </SessionStage>
@@ -1193,7 +1280,7 @@ export function SessionsView({
             aria-label="Inspector"
           >
             <h2 className={paneHeading}>Evidence · Capabilities · Bus</h2>
-            {/* The focused seat's provenance/outcome card (R7/R17) — the L7 tabbed inspector
+            {/* The focused seat's provenance/outcome card — the tabbed inspector
                 (Evidence · Capabilities · Bus) replaces this pane. */}
             <div className={inspectorScroll} data-focus-target tabIndex={-1}>
               <SeatInspector
@@ -1201,45 +1288,16 @@ export function SessionsView({
                 cockpit={focused ? perSession[focused.id] : undefined}
                 pickups={pickups}
                 heartbeat={supervisorHeartbeat}
+                visible={active && !inspectorCollapsed}
               />
             </div>
           </aside>
         </Panel>
       </PanelGroup>
       <LandedCleanupNotice />
-      <StatusLine
-        session={focused}
-        cockpit={focused ? perSession[focused.id] : undefined}
-        pollHealth={pollHealth}
-        actions={
-          <>
-            {railCollapsed ? (
-              <button
-                type="button"
-                className={reopenButton}
-                onClick={() => railRef.current?.expand()}
-                data-testid="sessions-reopen-rail"
-              >
-                ☰ rail
-              </button>
-            ) : null}
-            <button
-              ref={inspectorToggleRef}
-              type="button"
-              className={reopenButton}
-              aria-controls="chats-inspector"
-              aria-expanded={!inspectorCollapsed}
-              onClick={() => {
-                if (inspectorCollapsed) expandInspector("operator");
-                else collapseInspector("operator");
-              }}
-              data-testid="sessions-toggle-inspector"
-            >
-              {inspectorCollapsed ? "◫ show inspector" : "◫ hide inspector"}
-            </button>
-          </>
-        }
-      />
+      {/* The StatusLine bar is REMOVED — every fact it held
+          was duplicated (seat/harness/ws/quiet live in the HeaderStrip; poll health surfaces as
+          an exception through the attention system) and its actions moved to the title row. */}
       <CommandPalette
         open={palette.open}
         page={palette.page}
@@ -1257,7 +1315,7 @@ export function SessionsView({
         onClose={() => setLaunch({ open: false })}
         onFocusSession={focusSession}
       />
-      {/* L7 F22: unfocused set outcomes persist until explicitly marked seen; R8: live regions. */}
+      {/* Unfocused set outcomes persist until explicitly marked seen; live regions. */}
       <SetOutcomeToasts
         sessions={sessions}
         focusedSessionId={focusedSessionId}
@@ -1267,3 +1325,8 @@ export function SessionsView({
     </div>
   );
 }
+
+// Memoized to bound tab-switch CPU cost: a keep-alive cockpit layer — the shell re-renders on every
+// view switch, and the memo gate skips this whole subtree unless `active` (or another prop)
+// actually changed; the cockpit's own store subscriptions still drive its updates.
+export const SessionsView = memo(SessionsViewImpl);

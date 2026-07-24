@@ -75,6 +75,20 @@ metadata; like ``AR_EVIDENCE_KEY`` it is stripped from the republished event so 
 stays byte-identical.
 """
 
+AR_TERMINAL_OUTCOME_KEY = "arTerminalOutcome"
+"""Adapter-attributed correlated terminal classification riding one diverted evidence payload.
+
+Some harnesses emit no native marker that distinguishes an interrupt settlement from a real
+failure (claude's stream-json answers an accepted interrupt with a plain
+``error_during_execution``/``is_error`` result). The adapter is the only component that knows an
+interrupt was accepted for the exact settling operation, so it stamps its correlated
+:class:`TerminalOutcome` on the diverted payload copy under this reserved ``ar*`` key. The native
+frame keys stay byte-intact; consumers (projectors, the interrupt settlement ledger) trust the
+stamp when present and fall back to native-frame classification only when it is absent. The
+truncation envelope re-carries the scalar so a clipped settlement frame never loses the
+correlation.
+"""
+
 EVIDENCE_TRUNCATION_MARKER = "…[truncated]"
 """Visible marker appended to every clipped evidence payload preview."""
 
@@ -147,6 +161,28 @@ class LaunchSpec:
 
 
 @dataclass(frozen=True)
+class InteractionQuestionOption:
+    """One selectable option of a structured interaction question page."""
+
+    label: str
+    description: str | None = None
+
+
+@dataclass(frozen=True)
+class InteractionQuestion:
+    """One structured question page of a vendor interaction (e.g. Claude AskUserQuestion).
+
+    The flattened ``prompt``/``choices`` on :class:`PendingInteraction` stay the legacy
+    rendering; this per-page structure is what a structured answer map keys on.
+    """
+
+    text: str
+    header: str
+    options: tuple[InteractionQuestionOption, ...] = ()
+    multi_select: bool = False
+
+
+@dataclass(frozen=True)
 class PendingInteraction:
     interaction_id: str
     kind: str
@@ -154,6 +190,7 @@ class PendingInteraction:
     created_at: str
     choices: tuple[str, ...] = ()
     raw: Mapping[str, object] = field(default_factory=dict)
+    questions: tuple[InteractionQuestion, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -487,6 +524,17 @@ class NativePageReader(Protocol):
     ) -> NativeEvidencePage: ...
 
 
+def interaction_question_json(value: InteractionQuestion) -> dict[str, object]:
+    return {
+        "text": value.text,
+        "header": value.header,
+        "options": [
+            {"label": option.label, "description": option.description} for option in value.options
+        ],
+        "multiSelect": value.multi_select,
+    }
+
+
 def pending_interaction_json(value: PendingInteraction | None) -> dict[str, object] | None:
     if value is None:
         return None
@@ -497,6 +545,7 @@ def pending_interaction_json(value: PendingInteraction | None) -> dict[str, obje
         "createdAt": value.created_at,
         "choices": list(value.choices),
         "raw": dict(value.raw),
+        "questions": [interaction_question_json(question) for question in value.questions],
     }
 
 
@@ -627,12 +676,25 @@ def _preserved_evidence_identity(payload: Mapping[str, object]) -> dict[str, obj
     * ``turn.id`` + ``turn.status`` — the codex terminal-turn identity and status enum; the
       read correlates ``frame.raw["turn"]["id"] == turn_id`` before taking ``turn["status"]``,
       so both must survive or the frame is skipped. The turn's items/error never cross.
+    * top-level ``subtype`` + ``terminal_reason`` — the claude result-frame terminal enums; the
+      claude settlement read classifies the completed-kind frame from exactly these two.
+    * ``arTerminalOutcome`` — the adapter-attributed correlated terminal classification
+      (:data:`AR_TERMINAL_OUTCOME_KEY`); the claude settlement read takes it over the native
+      ``error_during_execution`` shape, so it must survive or a clipped interrupt settlement
+      degrades to a mis-read failure.
     """
 
     preserved: dict[str, object] = {}
     frame_type = _bounded_identity_scalar(payload.get("type"))
     if frame_type is not None:
         preserved["type"] = frame_type
+    for claude_terminal_key in ("subtype", "terminal_reason"):
+        scalar = _bounded_identity_scalar(payload.get(claude_terminal_key))
+        if scalar is not None:
+            preserved[claude_terminal_key] = scalar
+    adapter_outcome = _bounded_identity_scalar(payload.get(AR_TERMINAL_OUTCOME_KEY))
+    if adapter_outcome is not None:
+        preserved[AR_TERMINAL_OUTCOME_KEY] = adapter_outcome
     message = payload.get("message")
     if isinstance(message, Mapping):
         stop_reason = _bounded_identity_scalar(message.get("stopReason"))
@@ -652,15 +714,50 @@ def _preserved_evidence_identity(payload: Mapping[str, object]) -> dict[str, obj
     return preserved
 
 
+_CONTENT_TRUNCATION_LIMITS = (65536, 16384, 4096, 1024, 320)
+"""Descending per-string character ceilings the content-preserving clip attempts.
+
+The floor stays above ``MAX_PRESERVED_EVIDENCE_SCALAR_CHARS`` so identity/status scalars are
+never shortened by a content clip; anything that still exceeds the byte budget at the floor is
+structurally oversized and degrades to the legacy preview envelope.
+"""
+
+
+def _truncate_string_leaves(value: object, limit: int) -> object:
+    """A structural copy of ``value`` with every string VALUE longer than ``limit`` shortened.
+
+    Only leaf string values shrink — each carries the truncation marker plus its omitted length,
+    so a shortened tool input/output stays visibly partial. Mapping keys, nesting, numbers, and
+    booleans are untouched, which is what keeps exact schema discrimination valid on the copy.
+    """
+
+    if isinstance(value, str):
+        if len(value) <= limit:
+            return value
+        omitted = len(value) - limit
+        return f"{value[:limit]}{EVIDENCE_TRUNCATION_MARKER} [{omitted} chars omitted]"
+    if isinstance(value, Mapping):
+        return {key: _truncate_string_leaves(item, limit) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_truncate_string_leaves(item, limit) for item in value]
+    return value
+
+
 def clip_evidence_payload(payload: Mapping[str, object], *, max_bytes: int) -> Mapping[str, object]:
     """Bound one JSON evidence payload to ``max_bytes`` serialized, with any clip visible.
 
-    Unclipped payloads are returned as a plain copy. Clipped payloads become an envelope whose
-    own serialized size never exceeds ``max_bytes`` and whose preview ends with the truncation
-    marker, so consumers never mistake a partial payload for a complete native frame. The
-    envelope additionally re-carries the frame's terminal-identity enums at their original
-    payload paths (``_preserved_evidence_identity``) so exact-turn interrupt settlement stays
-    honest for oversized frames; no other content from the original frame crosses.
+    Unclipped payloads are returned as a plain copy. An oversized payload degrades by CONTENT
+    before structure: long string leaves are truncated in place (marker + omitted count) at
+    descending ceilings until the serialized copy fits, and the copy is stamped
+    ``arEvidenceContentTruncated``/``originalBytes``. Every mapper still parses the exact native
+    shape — frame type, ids, tool inputs, diffs all survive — so an oversized Write/Edit/output
+    frame renders as its real item with visibly shortened text instead of an unknown-vendor row.
+
+    Only when even the structure cannot fit inside the budget does the legacy preview envelope
+    apply: serialized size never exceeds ``max_bytes``, the preview ends with the truncation
+    marker so consumers never mistake a partial payload for a complete native frame, and the
+    frame's terminal-identity enums re-cross at their original payload paths
+    (``_preserved_evidence_identity``) so exact-turn interrupt settlement stays honest.
     """
 
     if max_bytes < 1:
@@ -672,6 +769,18 @@ def clip_evidence_payload(payload: Mapping[str, object], *, max_bytes: int) -> M
     if len(encoded.encode("utf-8")) <= max_bytes:
         return dict(payload)
     original_bytes = len(encoded.encode("utf-8"))
+    for limit in _CONTENT_TRUNCATION_LIMITS:
+        softened = _truncate_string_leaves(dict(payload), limit)
+        if not isinstance(softened, dict):  # pragma: no cover - Mapping input always copies to dict
+            break
+        clipped_content: dict[str, object] = {
+            **softened,
+            "arEvidenceContentTruncated": True,
+            "originalBytes": original_bytes,
+        }
+        serialized = json.dumps(clipped_content, ensure_ascii=False, separators=(",", ":"))
+        if len(serialized.encode("utf-8")) <= max_bytes:
+            return clipped_content
     preserved = _preserved_evidence_identity(payload)
     preview = encoded
     for _ in range(64):

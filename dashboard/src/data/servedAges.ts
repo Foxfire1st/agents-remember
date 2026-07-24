@@ -1,4 +1,4 @@
-// The client half of the change-gate's volatile-age contract (260703-L15).
+// The client half of the change-gate's volatile-age contract.
 //
 // The server's SSE diff compares STABLE forms: the now-relative age fields listed in
 // VOLATILE_AGE_FIELDS are recomputed from the tick clock every projection, so comparing
@@ -10,7 +10,7 @@
 // advanced": the value is still never *computed* from the render clock, only aged forward
 // from the served anchor (localhost clocks; sub-second skew is far below display grain).
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 /** Mirror of serving/delta.py VOLATILE_AGE_FIELDS — keep the two sets in lockstep. */
 export const VOLATILE_AGE_FIELDS: ReadonlySet<string> = new Set([
@@ -74,12 +74,22 @@ export function servedAgeSeconds(
  * A coarse ticking clock for age display. Panels that render served ages re-render on this
  * step (default 10 s) instead of riding the old per-second full-payload churn; fmtWait's
  * display grain (s → m → h → d) makes a 10 s step visually seamless above the first minute.
+ *
+ * Kept-mounted cockpit layers pass `active=false` while hidden. Their last value then remains
+ * frozen without scheduling React work, and the clock catches up once when the layer is shown.
  */
-export function useNowMs(stepMs = 10_000): number {
+export function useNowMs(stepMs = 10_000, active = true): number {
   const [now, setNow] = useState(() => Date.now());
+  const wasActive = useRef(active);
   useEffect(() => {
+    if (!active) {
+      wasActive.current = false;
+      return;
+    }
+    if (!wasActive.current) setNow(Date.now());
+    wasActive.current = true;
     const id = window.setInterval(() => setNow(Date.now()), stepMs);
     return () => window.clearInterval(id);
-  }, [stepMs]);
+  }, [active, stepMs]);
   return now;
 }

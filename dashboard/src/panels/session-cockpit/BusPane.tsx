@@ -117,10 +117,12 @@ export function BusPane({
   session,
   pickups,
   heartbeat,
+  ageClockActive = true,
 }: {
   session: OpenSession | undefined;
   pickups: readonly AgentPickupNode[];
   heartbeat: SupervisorHeartbeat | null;
+  ageClockActive?: boolean;
 }) {
   const [focusedOnly, setFocusedOnly] = useState(false);
   // Reply interaction state lives above the virtual row and the focused-seat filter. TanStack
@@ -128,7 +130,7 @@ export function BusPane({
   const [replyStateByEntry, setReplyStateByEntry] = useState<Record<string, BusReplyState>>({});
   const activeEntryIds = useRef<Set<string>>(new Set());
   activeEntryIds.current = new Set(pickups.map((pickup) => pickup.entryId));
-  const nowMs = useNowMs();
+  const nowMs = useNowMs(10_000, ageClockActive);
   const focusedFilterActive = focusedOnly && session !== undefined;
   const visible = focusedFilterActive
     ? pickups.filter((pickup) => pickupMatchesFocusedSeat(pickup, session))

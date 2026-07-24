@@ -17,26 +17,27 @@ import {
 } from "../../data/setClient";
 import { deriveSetChips } from "../../data/setChips";
 import {
-  EFFORT_NOT_ECHOED_COPY,
   NO_EFFORT_CONTROL_COPY,
   NO_SELECTED_MODEL_COPY,
   snapshotErrorCopy,
 } from "../../data/setControlsCopy";
 import { AcceptanceChip } from "./AcceptanceChip";
 
-// The ModelEffortControl (260715-FEUI-L4 R1/R2/R5, design §6): ONE control, mounted into L2's
+// The ModelEffortControl (design §6): ONE control, mounted into the
 // HeaderStrip slot, with the palette exposing the same actions. HONESTY INVARIANTS:
 //   - options come from the EXACT-SESSION snapshot only (data/sessionCapabilities — never the
 //     pre-session harness cache); the popover open always re-GETs.
-//   - a GET failure renders the control DISABLED with the verbatim error + retry (F16) — never
+//   - a GET failure renders the control DISABLED with the verbatim error + retry — never
 //     an empty menu; a 409 names 'no native protocol control endpoint' as the disable reason.
-//   - the effort menu is the selected row's sessionSettable options (native order) + the
-//     nullable top-level selectedEffort — null with a menu says 'effort not echoed'; a row
+//   - the effort menu is the selected row's sessionSettable options (native order); a row
 //     without options says 'no effort control for this model'; keys verbatim (Pi provider/id).
+//   - the trigger shows the model and effort the session is RUNNING — the freshest of
+//     echo/snapshot evidence with the launch-resolved value as the fallback (one plain pair,
+//     no provenance chrome; problems surface through the error/chip paths).
 //   - requested ≠ effective everywhere: staging is a REQUEST; the marker moves only on evidence
 //     (the chips row renders data/setChips — the same models every surface reads).
 //   - selecting a new model re-gates the menu and pre-highlights that row's defaultEffort;
-//     applying model+effort together runs the SERIALIZED pair flow (R5).
+//     applying model+effort together runs the SERIALIZED pair flow.
 
 const slotRow = css({ display: "inline-flex", alignItems: "baseline", gap: "0.3rem", minWidth: "0" });
 const trigger = css({
@@ -171,7 +172,7 @@ export function ModelEffortControl({
     setStagedEffort(null);
   }, [isOpen, session.id]);
 
-  // Popover open re-GETs the exact-session snapshot — the ONLY options source (R1).
+  // Popover open re-GETs the exact-session snapshot — the ONLY options source.
   useEffect(() => {
     if (isOpen) void refreshSessionSnapshot(session.id);
   }, [isOpen, session.id]);
@@ -185,17 +186,13 @@ export function ModelEffortControl({
   if (!session.harness || !live) return null;
 
   const modelWord = effective.modelKey ?? session.resolvedModel ?? "model —";
-  const effortWord =
-    effective.effort ??
-    (snapshot
-      ? deriveEffortMenu(snapshot).kind === "no-effort-control"
-        ? "no effort control"
-        : EFFORT_NOT_ECHOED_COPY
-      : (session.resolvedEffort ?? "effort —"));
+  // The running effort: freshest server evidence first, launch-resolved value otherwise. When
+  // neither exists the segment disappears — never a sentinel in the trigger.
+  const effortWord = effective.effort ?? session.resolvedEffort ?? null;
   const sourceWord =
     effective.modelSource === "none" ? "requested at launch — no readback yet" : `source: ${effective.modelSource}`;
 
-  // Menus derive from the STAGED row when one is staged (re-gating, R1).
+  // Menus derive from the STAGED row when one is staged (re-gating).
   const menuModelKey = stagedModel ?? snapshot?.selectedModelKey ?? null;
   const menu = snapshot ? deriveEffortMenu(snapshot, menuModelKey) : null;
 
@@ -223,19 +220,23 @@ export function ModelEffortControl({
         <Button
           className={trigger}
           data-testid="model-effort-trigger"
-          aria-label={`model and effort control — ${modelWord} · ${effortWord}`}
+          aria-label={`model and effort control — ${modelWord}${effortWord ? ` · ${effortWord}` : ""}`}
           aria-description={sourceWord}
           data-effective-source={effective.modelSource}
         >
           <span aria-hidden="true">⚙</span>
           <span data-testid="model-effort-trigger-model">{modelWord}</span>
-          <span aria-hidden="true">·</span>
-          <span data-testid="model-effort-trigger-effort">{effortWord}</span>
+          {effortWord ? (
+            <>
+              <span aria-hidden="true">·</span>
+              <span data-testid="model-effort-trigger-effort">{effortWord}</span>
+            </>
+          ) : null}
         </Button>
         <Popover className={popover} placement="bottom start">
           <Dialog className={dialogBody} aria-label="Model and effort control">
             {snapshotError ? (
-              // F16: fetch failure ⇒ control disabled with the VERBATIM error + retry — never
+              // Fetch failure ⇒ control disabled with the VERBATIM error + retry — never
               // an empty menu (the 409 reason doubles as the no-native-control disable).
               <>
                 <span className={heading}>control unavailable</span>
@@ -294,23 +295,18 @@ export function ModelEffortControl({
                   </span>
                 ) : (
                   <>
-                    {menu.selected === null && menuModelKey === snapshot.selectedModelKey && effective.effort === null ? (
-                      <span className={noteLine} data-testid="effort-not-echoed">
-                        {EFFORT_NOT_ECHOED_COPY} — the menu is live; the session has not echoed a
-                        value yet
-                      </span>
-                    ) : null}
                     <div className={optionList} data-testid="model-effort-efforts">
                       {menu.options.map((option) => {
                         const isEffective =
-                          menuModelKey === effective.modelKey && effective.effort === option.key;
+                          menuModelKey === effective.modelKey &&
+                          (effective.effort ?? session.resolvedEffort) === option.key;
                         return (
                           <Button
                             key={option.key}
                             className={optionButton}
                             aria-pressed={stagedEffort === option.key}
                             data-effective={isEffective ? "true" : undefined}
-                            // R1: a NEWLY staged model pre-highlights ITS advertised default —
+                            // A NEWLY staged model pre-highlights ITS advertised default —
                             // a visible suggestion, never an auto-staged request.
                             data-prehighlight={
                               modelChanged && stagedEffort === null && menu.defaultEffort === option.key

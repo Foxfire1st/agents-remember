@@ -1,20 +1,21 @@
-"""Control-domain capability evidence (260718-CHATS-L3).
+"""Control-domain capability evidence.
 
 Exact-session capability states for the control surface (interrupt, typed
 attachments, read-only policy) and the telemetry projection. A feature is
 ``supported`` only with landed installed-runtime fixture evidence captured
-through the production seam (the L2E ``control-plane/*`` rows); a native shape
+through the production seam (the ``control-plane/*`` rows); a native shape
 whose contract has never been probed through a captured fixture is
 ``unverified``; a contract the harness cannot provide on this surface is
 ``unavailable``.
 
-THE CONTRACT IS THE ONLY GATE (developer ruling 2026-07-21, 260718-CHATS-L5F R4):
+THE CONTRACT IS THE ONLY GATE:
 no capability is demoted by a version-string comparison against the observed
 runtime/helper. The version is informational evidence metadata only.
 
-The L1 active-page capability view stays its own conservative pre-L2E evidence
-(its reasons name this leaf); this module is the control routes' own gate
-authority, built over the same fixture discipline. Nothing here enables a
+The active-page capability view keeps its own conservative pre-production-seam evidence
+for every feature except ``controls.interrupt``: that one verdict is bridged
+from this module (single source — ``interrupt_capability_for``) now that the
+interrupt control seam has landed fixture evidence. Nothing here enables a
 feature from documentation or changelog text.
 """
 
@@ -39,15 +40,18 @@ from agents_remember.serving.harness_control_models import (
 
 _CODEX_FIXTURE = "codex-0.144.5-installed-20260718"
 _CLAUDE_FIXTURE = "claude-2.1.211-installed-20260718"
+_CLAUDE_INTERRUPT_FIXTURE = "claude-2.1.217-installed-20260722"
 _PI_FIXTURE = "pi-0.80.7-installed-20260718"
 
 _CODEX_RUNTIME = "0.144.5"
 _CLAUDE_RUNTIME = "2.1.211"
+_CLAUDE_INTERRUPT_RUNTIME = "2.1.217"
 _CLAUDE_HELPER = "0.3.207"
 _PI_RUNTIME = "0.80.7"
 _PI_HELPER = "0.80.7"
 
 _OBSERVED_AT = "2026-07-20T00:00:00+02:00"
+_CLAUDE_INTERRUPT_OBSERVED = "2026-07-22T19:00:00+02:00"
 
 _CLAUDE_MISMATCH = (
     "control contract not yet probed through a captured production fixture; unverified until the "
@@ -64,6 +68,7 @@ def _fixture(
     fixture_id: str,
     *,
     helper_version: str | None = None,
+    observed_at: str = _OBSERVED_AT,
 ) -> FeatureCapability:
     return FeatureCapability(
         state=state,
@@ -73,7 +78,7 @@ def _fixture(
             runtime_version=runtime_version,
             helper_version=helper_version,
             fixture_id=fixture_id,
-            observed_at=_OBSERVED_AT,
+            observed_at=observed_at,
         ),
     )
 
@@ -165,11 +170,17 @@ def _codex_controls() -> ControlCapabilities:
 
 
 def _claude_controls() -> ControlCapabilities:
-    interrupt = _adapter(
-        "unverified",
-        f"headless interrupt: {_CLAUDE_MISMATCH}",
-        _CLAUDE_RUNTIME,
+    interrupt = _fixture(
+        "supported",
+        "installed probe observed one native control_request interrupt accepted on a live "
+        "2.1.217 stream-json session through the production adapter-bridge-IPC seam "
+        "(control_response success, still_queued []), with the correlated "
+        "error_during_execution result settling interrupted under replay-once semantics",
+        _CLAUDE_INTERRUPT_RUNTIME,
+        _CLAUDE_INTERRUPT_FIXTURE,
+        observed_at=_CLAUDE_INTERRUPT_OBSERVED,
     )
+    unprobed = _adapter("unverified", _CLAUDE_MISMATCH, _CLAUDE_RUNTIME)
     return ControlCapabilities(
         interrupt=interrupt,
         steer=_unavailable("not an ordinary submit action"),
@@ -178,7 +189,7 @@ def _claude_controls() -> ControlCapabilities:
             image=_image_capability(
                 "unverified",
                 f"image staging: {_CLAUDE_MISMATCH}",
-                interrupt,
+                unprobed,
             ),
             file=_no_asset_kind("file"),
             resource=_no_asset_kind("resource"),
@@ -304,7 +315,7 @@ _TELEMETRY = {
 def control_capabilities_for(harness_id: HarnessId, snapshot: AdapterSnapshot) -> ControlCapabilities:
     """Build the exact-session control capability set.
 
-    The contract is the only gate (developer ruling 2026-07-21): the fixture-declared state is never
+    The contract is the only gate: the fixture-declared state is never
     demoted by a version-string comparison. The observed version is informational metadata only.
     """
 
@@ -312,12 +323,23 @@ def control_capabilities_for(harness_id: HarnessId, snapshot: AdapterSnapshot) -
     return _CONTROLS[harness_id]()
 
 
+def interrupt_capability_for(harness_id: HarnessId, snapshot: AdapterSnapshot) -> FeatureCapability:
+    """The exact-session interrupt verdict — the single source of truth for that one control.
+
+    The active-page capability view bridges its ``controls.interrupt`` from this accessor, so
+    the gate's verdict lives in exactly one place (the per-harness declarations above); when the
+    verdict changes here, the active-page view follows with no second copy to edit.
+    """
+
+    return control_capabilities_for(harness_id, snapshot).interrupt
+
+
 def telemetry_capabilities_for(
     harness_id: HarnessId, snapshot: AdapterSnapshot
 ) -> TelemetryCapabilities:
     """Build the exact-session telemetry capability set.
 
-    The contract is the only gate (developer ruling 2026-07-21): no version-string demotion; the
+    The contract is the only gate: no version-string demotion; the
     observed version rides the evidence record as informational metadata only.
     """
 
@@ -325,4 +347,4 @@ def telemetry_capabilities_for(
     return _TELEMETRY[harness_id]()
 
 
-__all__ = ["control_capabilities_for", "telemetry_capabilities_for"]
+__all__ = ["control_capabilities_for", "interrupt_capability_for", "telemetry_capabilities_for"]

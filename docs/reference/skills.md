@@ -19,7 +19,7 @@ python3 scripts/sync-skills.py
 ```
 
 That refreshes the generated MCP package-data copy and every harness starter
-package skill folder. The pre-push hook runs
+package skill folder. The pre-commit and pre-push hooks run
 `python3 scripts/sync-skills.py --check` so unsynced copies fail before push.
 
 ## Lifecycle And Workflow Skills

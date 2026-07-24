@@ -6,7 +6,7 @@ import sys
 import tempfile
 import threading
 import unittest
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
@@ -15,6 +15,14 @@ from unittest import mock
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
+from agents_remember.errors import HarnessControlError
+from agents_remember.serving.harness_control_models import (
+    AcceptanceState,
+    ActivityState,
+    AdapterSnapshot,
+    ControlIdentity,
+    ControlState,
+)
 from agents_remember.serving.terminal import TmuxProbeResult, _tmux_probe_session
 from agents_remember.serving.terminal_catalog import (
     TerminalCatalog,
@@ -22,6 +30,9 @@ from agents_remember.serving.terminal_catalog import (
     TerminalSessionStatus,
 )
 from agents_remember.serving.terminal_liveness import (
+    DEFAULT_CONTROL_READ_FAILURE_THRESHOLD,
+    DEFAULT_STARTING_SWEEP_INTERVAL_SECONDS,
+    SnapshotReader,
     TerminalCatalogLivenessConfig,
     TerminalCatalogLivenessSweeper,
 )
@@ -40,6 +51,56 @@ def _entry(session_id: str, *, status: TerminalSessionStatus = "running") -> Ter
         created_at="2026-07-07T00:00:00+00:00",
         last_attached_at="2026-07-07T00:00:00+00:00",
         status=status,
+    )
+
+
+def _starting_entry(session_id: str) -> TerminalCatalogEntry:
+    return replace(
+        _entry(session_id),
+        control_state="starting",
+        control_endpoint=Path(f"/tmp/{session_id}.sock"),
+    )
+
+
+def _ready_entry(session_id: str) -> TerminalCatalogEntry:
+    return replace(
+        _entry(session_id),
+        control_state="ready",
+        control_activity="idle",
+        control_acceptance="immediate",
+        control_endpoint=Path(f"/tmp/{session_id}.sock"),
+        turn_state="working",
+    )
+
+
+def _snapshot(
+    entry: TerminalCatalogEntry,
+    *,
+    control: ControlState,
+    activity: ActivityState,
+    acceptance: AcceptanceState,
+) -> AdapterSnapshot:
+    return AdapterSnapshot(
+        identity=ControlIdentity(entry.id, entry.tmux_name, entry.created_at),
+        control=control,
+        activity=activity,
+        acceptance=acceptance,
+        vendor_session_id="vendor-1",
+        raw={},
+    )
+
+
+def _ready_snapshot(entry: TerminalCatalogEntry) -> AdapterSnapshot:
+    return _snapshot(entry, control="ready", activity="idle", acceptance="immediate")
+
+
+def _starting_snapshot(entry: TerminalCatalogEntry) -> AdapterSnapshot:
+    return _snapshot(entry, control="starting", activity="unknown", acceptance="unknown")
+
+
+def _failing_snapshot(_entry: TerminalCatalogEntry) -> AdapterSnapshot:
+    raise HarnessControlError(
+        "control endpoint unavailable after request bytes were sent: timed out"
     )
 
 
@@ -137,6 +198,47 @@ class TerminalCatalogLivenessTests(unittest.TestCase):
                 pane_gone_failure_threshold=1,
                 sweep_interval_seconds=sweep_interval_seconds,
             ),
+        )
+
+    def _starting_sweeper(
+        self,
+        host: _FakeHost,
+        *,
+        snapshot_reader: SnapshotReader = _ready_snapshot,
+        catalog: TerminalCatalog | None = None,
+    ) -> TerminalCatalogLivenessSweeper:
+        return TerminalCatalogLivenessSweeper(
+            catalog or self.catalog,
+            host,
+            now=self.clock,
+            config=TerminalCatalogLivenessConfig(
+                failure_threshold=3,
+                minimum_failure_window_seconds=5.0,
+                pane_gone_failure_threshold=1,
+                sweep_interval_seconds=10.0,
+            ),
+            pane_capturer=lambda _tmux_name: "",
+            snapshot_reader=snapshot_reader,
+        )
+
+    def _control_sweeper(
+        self,
+        host: _FakeHost,
+        *,
+        snapshot_reader: SnapshotReader,
+    ) -> TerminalCatalogLivenessSweeper:
+        return TerminalCatalogLivenessSweeper(
+            self.catalog,
+            host,
+            now=self.clock,
+            config=TerminalCatalogLivenessConfig(
+                failure_threshold=3,
+                minimum_failure_window_seconds=5.0,
+                pane_gone_failure_threshold=1,
+                sweep_interval_seconds=0.0,
+            ),
+            pane_capturer=lambda _tmux_name: "",
+            snapshot_reader=snapshot_reader,
         )
 
     def test_transient_failure_storm_leaves_sessions_running_until_window_elapsed(self) -> None:
@@ -297,7 +399,7 @@ class TerminalCatalogLivenessTests(unittest.TestCase):
         small = run_sweep(5)
         large = run_sweep(500)
 
-        # F1/CS-6 D2: the batch()-wrapped sweep does exactly ONE disk read + ONE disk write regardless of
+        # The batch()-wrapped sweep does exactly ONE disk read + ONE disk write regardless of
         # how many rows the catalog holds -- the per-row read-modify-writes hit the in-memory buffer. The
         # old per-mutator disk RMW made both counts grow with the row count (O(n) disk ops, each O(n)).
         self.assertEqual(small, (1, 1, 1, 1, 1))
@@ -329,6 +431,276 @@ class TerminalCatalogLivenessTests(unittest.TestCase):
         self.assertFalse(thread.is_alive())
         if errors:
             raise errors[0]
+
+    def test_starting_row_is_observed_inside_the_full_sweep_blackout(self) -> None:
+        # A chat spawned just after a full sweep waited up to ~10s for its row to
+        # flip starting -> ready; the starting fast-path re-probes inside the full-sweep blackout.
+        host = _FakeHost(TmuxProbeResult(exists=True, evidence="alive"))
+        sweeper = self._starting_sweeper(host)
+
+        sweeper.refresh()  # full sweep on an empty catalog
+        self.catalog.upsert(_starting_entry("fresh"))
+        self.clock.advance(2)  # deep inside the 10s full-sweep blackout
+
+        entries = sweeper.refresh()
+
+        self.assertEqual(host.calls, 1)
+        row = self.catalog.get("fresh")
+        assert row is not None
+        self.assertEqual(row.control_state, "ready")
+        self.assertEqual([entry.control_state for entry in entries], ["ready"])
+
+    def test_starting_fast_path_is_cadence_limited_and_leaves_full_cadence_alone(self) -> None:
+        host = _FakeHost(TmuxProbeResult(exists=True, evidence="alive"))
+        sweeper = self._starting_sweeper(host, snapshot_reader=_starting_snapshot)
+        self.catalog.upsert(_starting_entry("fresh"))
+
+        sweeper.refresh()  # full sweep probes it once; the bridge stays "starting"
+        self.assertEqual(host.calls, 1)
+
+        self.clock.advance(DEFAULT_STARTING_SWEEP_INTERVAL_SECONDS)
+        sweeper.refresh()  # first fast-path probe
+        self.assertEqual(host.calls, 2)
+
+        self.clock.advance(0.5 * DEFAULT_STARTING_SWEEP_INTERVAL_SECONDS)
+        sweeper.refresh()  # inside the 1s fast-path cadence: skipped
+        self.assertEqual(host.calls, 2)
+
+        self.clock.advance(0.6 * DEFAULT_STARTING_SWEEP_INTERVAL_SECONDS)
+        sweeper.refresh()  # past the 1s fast-path cadence: probed again
+        self.assertEqual(host.calls, 3)
+
+        self.clock.advance(8)
+        sweeper.refresh()  # the 10s full-sweep cadence is unchanged
+        self.assertEqual(host.calls, 4)
+
+    def test_non_starting_rows_are_not_reprobed_inside_the_blackout(self) -> None:
+        self.catalog.upsert(_entry("steady"))  # no control endpoint: never "starting"
+        host = _FakeHost(TmuxProbeResult(exists=True, evidence="alive"))
+        sweeper = self._starting_sweeper(host)
+
+        sweeper.refresh()
+        self.assertEqual(host.calls, 1)
+
+        self.clock.advance(2)
+        entries = sweeper.refresh()
+
+        self.assertEqual(host.calls, 1)
+        self.assertEqual([entry.id for entry in entries], ["steady"])
+
+    def test_starting_fast_path_preserves_failure_hysteresis_window(self) -> None:
+        self.catalog.upsert(_starting_entry("dying"))
+        host = _FakeHost(TmuxProbeResult(exists=False, evidence="tmux-command-failed"))
+        sweeper = self._starting_sweeper(host)
+
+        sweeper.refresh()  # full sweep: failure #1 at t=0
+        self.clock.advance(1)
+        sweeper.refresh()  # fast-path failure #2 at t=1
+        self.clock.advance(1)
+        sweeper.refresh()  # fast-path failure #3 at t=2
+
+        row = self.catalog.get("dying")
+        assert row is not None
+        # Threshold 3 is reached, but only 2s elapsed: the 5s minimum failure window
+        # (with_liveness_failure) still gates exit marking -- the fast path cannot accelerate it.
+        self.assertEqual(row.liveness_failures, 3)
+        self.assertEqual(row.status, "running")
+
+        self.clock.advance(1)
+        sweeper.refresh()  # failure #4 at t=3: window still open
+        row = self.catalog.get("dying")
+        assert row is not None
+        self.assertEqual(row.status, "running")
+
+        self.clock.advance(1)
+        sweeper.refresh()  # failure #5 at t=4: 4s < 5s window
+        self.clock.advance(1)
+        sweeper.refresh()  # failure #6 at t=5: the 5s window has elapsed
+
+        row = self.catalog.get("dying")
+        assert row is not None
+        self.assertEqual(row.status, "exited")
+        self.assertEqual(row.exit_evidence, "tmux-command-failed")
+
+    def test_starting_fast_path_commits_one_batch_and_caps_the_probe_set(self) -> None:
+        catalog = _CountingCatalog(self.tmp / "terminal-sessions-starting.json")
+        host = _FakeHost(TmuxProbeResult(exists=True, evidence="alive"))
+        sweeper = self._starting_sweeper(host, catalog=catalog)
+
+        sweeper.refresh()  # full sweep on an empty catalog
+        for index in range(6):
+            catalog.upsert(_starting_entry(f"start-{index}"))
+        catalog.disk_read_calls = 0
+        catalog.disk_write_calls = 0
+        self.clock.advance(2)
+
+        entries = sweeper.refresh()
+
+        self.assertEqual(host.calls, 4)  # the probe set is capped at 4 rows
+        self.assertEqual(sum(entry.control_state == "ready" for entry in entries), 4)
+        # One disk read for the scan + one at batch begin + one for the refreshed list, and a
+        # single batch-commit write for all four probes' read-modify-writes.
+        self.assertEqual(catalog.disk_read_calls, 3)
+        self.assertEqual(catalog.disk_write_calls, 1)
+
+    def test_single_control_read_failure_keeps_the_last_projected_state(self) -> None:
+        # Measured live twice -- one snapshot read lost to a busy bridge during
+        # an active working turn flipped a provably-working seat to control_state="disconnected"
+        # (+ turn_state="stale") on that very sweep. One ambiguous read failure is the ABSENCE of
+        # evidence, not evidence of loss: the row keeps its last projected state.
+        self.catalog.upsert(_ready_entry("busy"))
+        host = _FakeHost(TmuxProbeResult(exists=True, evidence="alive"))
+        sweeper = self._control_sweeper(host, snapshot_reader=_failing_snapshot)
+
+        sweeper.refresh()
+
+        row = self.catalog.get("busy")
+        assert row is not None
+        self.assertEqual(row.control_state, "ready")
+        self.assertEqual(row.control_activity, "idle")
+        self.assertEqual(row.control_acceptance, "immediate")
+        self.assertEqual(row.turn_state, "working")
+        self.assertEqual((row.control_raw or {}).get("controlReadFailures"), 1)
+        self.assertIn("timed out", str((row.control_raw or {}).get("bridgeError")))
+
+    def test_consecutive_control_read_failures_mark_disconnected_at_the_threshold(self) -> None:
+        self.catalog.upsert(_ready_entry("busy"))
+        host = _FakeHost(TmuxProbeResult(exists=True, evidence="alive"))
+        sweeper = self._control_sweeper(host, snapshot_reader=_failing_snapshot)
+
+        for expected in range(1, DEFAULT_CONTROL_READ_FAILURE_THRESHOLD):
+            sweeper.refresh()
+            row = self.catalog.get("busy")
+            assert row is not None
+            self.assertEqual(row.control_state, "ready")
+            self.assertEqual(row.turn_state, "working")
+            self.assertEqual((row.control_raw or {}).get("controlReadFailures"), expected)
+
+        sweeper.refresh()  # the threshold-th consecutive failure: disconnected is now honest
+
+        row = self.catalog.get("busy")
+        assert row is not None
+        self.assertEqual(row.control_state, "disconnected")
+        self.assertEqual(row.control_activity, "unknown")
+        self.assertEqual(row.control_acceptance, "unknown")
+        self.assertEqual(row.turn_state, "stale")
+        self.assertEqual(
+            (row.control_raw or {}).get("controlReadFailures"),
+            DEFAULT_CONTROL_READ_FAILURE_THRESHOLD,
+        )
+
+    def test_successful_control_read_clears_the_failure_count(self) -> None:
+        self.catalog.upsert(_ready_entry("busy"))
+        host = _FakeHost(TmuxProbeResult(exists=True, evidence="alive"))
+        failures = {"remaining": DEFAULT_CONTROL_READ_FAILURE_THRESHOLD - 1}
+
+        def flaky(entry: TerminalCatalogEntry) -> AdapterSnapshot:
+            if failures["remaining"] > 0:
+                failures["remaining"] -= 1
+                raise HarnessControlError("timed out")
+            return _ready_snapshot(entry)
+
+        sweeper = self._control_sweeper(host, snapshot_reader=flaky)
+
+        for _ in range(DEFAULT_CONTROL_READ_FAILURE_THRESHOLD - 1):
+            sweeper.refresh()
+        row = self.catalog.get("busy")
+        assert row is not None
+        self.assertEqual(
+            (row.control_raw or {}).get("controlReadFailures"),
+            DEFAULT_CONTROL_READ_FAILURE_THRESHOLD - 1,
+        )
+
+        sweeper.refresh()  # the bridge answers again: recovery wipes the counter and the error
+
+        row = self.catalog.get("busy")
+        assert row is not None
+        self.assertEqual(row.control_state, "ready")
+        self.assertIsNone((row.control_raw or {}).get("controlReadFailures"))
+        self.assertIsNone((row.control_raw or {}).get("bridgeError"))
+
+        failures["remaining"] = 1
+        sweeper.refresh()  # a fresh single failure restarts the count -- it did not accumulate
+
+        row = self.catalog.get("busy")
+        assert row is not None
+        self.assertEqual(row.control_state, "ready")
+        self.assertEqual((row.control_raw or {}).get("controlReadFailures"), 1)
+
+    def test_dead_tmux_marks_exited_promptly_despite_control_read_hysteresis(self) -> None:
+        # The control-read counter must not delay process-gone marking: a row already inside the
+        # hysteresis window exit-marks on the very next pane-gone probe, and the dead session's
+        # bridge is never read at all.
+        self.catalog.upsert(
+            replace(
+                _ready_entry("dying"),
+                control_raw={"controlReadFailures": DEFAULT_CONTROL_READ_FAILURE_THRESHOLD - 1},
+            )
+        )
+        host = _FakeHost(TmuxProbeResult(exists=False, evidence="pane-gone"))
+
+        def forbidden_reader(_entry: TerminalCatalogEntry) -> AdapterSnapshot:
+            raise AssertionError("a dead tmux session must not reach the snapshot read")
+
+        sweeper = self._control_sweeper(host, snapshot_reader=forbidden_reader)
+
+        sweeper.refresh()
+
+        row = self.catalog.get("dying")
+        assert row is not None
+        self.assertEqual(row.status, "exited")
+        self.assertEqual(row.exit_evidence, "pane-gone")
+
+    def test_booting_row_stays_on_the_fast_path_across_read_failures_until_it_opens(self) -> None:
+        # While a bridge boots, its control socket is not listening yet, so the
+        # snapshot read raises HarnessControlError on every fast-path sweep. A 3-strike counter
+        # used to rewrite control_state to "disconnected" on failure #3 -- but the fast path selects
+        # rows with control_state=="starting", so that write evicted a still-BOOTING row from the fast
+        # path mid-boot, stranding it on the 10s full-sweep cadence (measured: bind@12s served ready
+        # at 20.0s instead of 12.5s). A never-ready row must stay "starting" through however many read
+        # failures its boot takes so it rides the fast path and flips ready the moment the bridge opens.
+        self.catalog.upsert(_starting_entry("booting"))
+        host = _FakeHost(TmuxProbeResult(exists=True, evidence="alive"))
+        # The bridge answers only after 5 failed reads -- well past the 3-strike disconnect threshold.
+        remaining_boot_failures = {"count": 5}
+
+        def slow_boot(entry: TerminalCatalogEntry) -> AdapterSnapshot:
+            if remaining_boot_failures["count"] > 0:
+                remaining_boot_failures["count"] -= 1
+                raise HarnessControlError(
+                    "control endpoint unavailable after request bytes were sent: timed out"
+                )
+            return _ready_snapshot(entry)
+
+        sweeper = self._starting_sweeper(host, snapshot_reader=slow_boot)
+
+        sweeper.refresh()  # full sweep: boot read failure #1
+        row = self.catalog.get("booting")
+        assert row is not None
+        self.assertEqual(row.control_state, "starting")
+
+        # Read failures #2..#5 all land on the 1s fast path, carrying the strike count past the
+        # threshold. Reverting the guard flips control_state to "disconnected" at failure #3, which
+        # drops the row from the control_state=="starting" fast-path selection for good.
+        for _ in range(4):
+            self.clock.advance(DEFAULT_STARTING_SWEEP_INTERVAL_SECONDS)
+            sweeper.refresh()
+            row = self.catalog.get("booting")
+            assert row is not None
+            self.assertEqual(row.control_state, "starting")
+
+        self.assertEqual((row.control_raw or {}).get("controlReadFailures"), 5)
+
+        # The bridge finally binds. Because the booting row never fell off the fast path, the very
+        # next 1s fast-path sweep -- still deep inside the 10s full-sweep blackout -- serves it ready.
+        # Reverting the guard leaves it "disconnected" here (it was evicted at failure #3, and only a
+        # full sweep ~10s away would revive it), so this promptly-ready assertion is the pin.
+        self.clock.advance(DEFAULT_STARTING_SWEEP_INTERVAL_SECONDS)
+        entries = sweeper.refresh()
+        row = self.catalog.get("booting")
+        assert row is not None
+        self.assertEqual(row.control_state, "ready")
+        self.assertEqual([entry.control_state for entry in entries], ["ready"])
 
 
 if __name__ == "__main__":

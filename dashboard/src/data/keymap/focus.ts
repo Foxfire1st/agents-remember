@@ -1,11 +1,12 @@
-// The cockpit focus model (260715-FEUI-L1 S4, design §5.3) — pure region logic. Regions carry a
+// The cockpit focus model (design §5.3) — pure region logic. Regions carry a
 // `data-region` marker; each region exposes ONE primary focus target (`data-focus-target`):
-// rail = the selected row (roving tabindex, L2), stage = the composer, inspector = the active
-// tab, statusline = the summary. F6 cycles forward, Shift+F6 backward; collapsed panels drop out
-// of the cycle. Esc from the composer lands on the stage HEADER (not the cycle target), and the
-// explicit Focus-terminal command routes INTO the PTY host.
+// rail = the selected row (roving tabindex), stage = the composer, inspector = the active
+// tab. F6 cycles forward, Shift+F6 backward; collapsed panels drop out of the cycle. Esc from
+// the composer lands on the stage HEADER (not the cycle target), and the explicit
+// Focus-terminal command routes INTO the PTY host. (The former `statusline` region left the
+// cycle when the StatusLine bar was removed to declutter.)
 
-export const FOCUS_REGIONS = ["rail", "stage", "inspector", "statusline"] as const;
+export const FOCUS_REGIONS = ["rail", "stage", "inspector"] as const;
 
 export type FocusRegion = (typeof FOCUS_REGIONS)[number];
 

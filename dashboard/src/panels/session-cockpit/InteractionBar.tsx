@@ -4,6 +4,7 @@ import {
   useEffect,
   useImperativeHandle,
   useRef,
+  useState,
   type RefObject,
 } from "react";
 import { Button } from "react-aria-components";
@@ -13,6 +14,8 @@ import {
   representPendingInteraction,
   retryStoredInteractionAnswer,
   submitInteractionAnswer,
+  type InteractionQuestion,
+  type PendingInteractionView,
 } from "../../data/interactionAnswer";
 import { sessionCockpitStore, useSessionCockpit } from "../../data/sessionCockpitStore";
 import type { OpenSession } from "../../data/sessions";
@@ -22,20 +25,29 @@ import {
   INTERACTION_ANSWERING,
   INTERACTION_COMPOSER_MODE,
   INTERACTION_HONESTY_HINT,
+  INTERACTION_MULTISELECT_CONFIRM,
+  INTERACTION_MULTISELECT_HINT,
   INTERACTION_NO_PROMPT_TEXT,
+  INTERACTION_QUESTION_RECORDED,
+  INTERACTION_QUESTIONS_PROGRESS,
 } from "./lifecycleCopy";
 
-// The InteractionBar (260715-FEUI-L6 R4, spec §1.2-4, design §7.3): the ONE interaction axis.
-// Sits directly ABOVE the composer — never replaces it — and appears only while the focused row
-// carries `controlPendingInteraction`. The landed gate-decision channel is the SOLE answer path
-// (data/interactionAnswer): on controlled sessions the PTY can NEVER answer — a terminal-typed
-// line queues an ordinary message, which is exactly what the honesty hint states. Kind-aware:
-// choices → buttons; free-text/confirm kinds → the composer becomes the answer input (routed
-// through the gate channel, visibly labeled); unrepresentable payloads say so instead of
-// rendering dead chrome. Round-trip states are store-backed (survive view switches): answering…
-// (disabled, in-flight) → verbatim error + retry, or answered — waiting for the agent
-// (poll-bounded, and the bar says so). The bar never steals focus on appearance; when it clears
-// while holding focus, focus returns to the element that had it before.
+// The InteractionBar (design §7.3; structured
+// decision items): the ONE interaction axis. Sits directly ABOVE the composer — never replaces it —
+// and appears only while the focused row carries `controlPendingInteraction`. Answer channels are
+// picked by the interaction's shape (data/interactionAnswer): structured AskUserQuestion pages and
+// allow/deny permissions POST the session-direct interaction-response route (no lifecycle needed);
+// legacy kinds keep the gate-decision fallback. On controlled sessions the
+// PTY can NEVER answer — a terminal-typed line queues an ordinary message, which is exactly what
+// the honesty hint states. Kind-aware: structured questions → one option GROUP PER QUESTION (never
+// the legacy flat concatenation), multiSelect toggles join into one answer per question, and the
+// interaction submits only once EVERY question has an answer (the backend's all-or-nothing
+// contract); other choices → buttons; free-text/confirm kinds → the composer becomes the answer
+// input (gate-routed, visibly labeled); unrepresentable payloads say so instead of rendering dead
+// chrome. Round-trip states are store-backed (survive view switches): answering… (disabled,
+// in-flight) → verbatim error + retry, or answered — waiting for the agent (poll-bounded, and the
+// bar says so). The bar never steals focus on appearance; when it clears while holding focus,
+// focus returns to the element that had it before.
 
 const bar = css({
   display: "grid",
@@ -78,6 +90,15 @@ const choiceButton = css({
   _hover: { background: "oklch(0.82 0.16 75 / 0.12)" },
   _focusVisible: { outline: "1px solid token(colors.amber)", outlineOffset: "1px" },
   _disabled: { opacity: 0.55, cursor: "default" },
+  // A recorded single-select answer / toggled multiSelect option — visibly held, still changeable
+  // until the all-or-nothing submit fires.
+  "&[data-selected='true']": { background: "oklch(0.82 0.16 75 / 0.2)" },
+});
+const questionBlock = css({
+  display: "grid",
+  gap: "0.25rem",
+  minWidth: "0",
+  paddingBlock: "0.15rem",
 });
 const hint = css({ color: "muted", fontSize: "0.66rem" });
 const statusRow = css({ display: "flex", alignItems: "baseline", gap: "0.45rem", minWidth: "0" });
@@ -86,6 +107,132 @@ const answeredText = css({ color: "mint" });
 
 export interface InteractionBarHandle {
   submitComposerAnswer(text: string, revision: number): void;
+}
+
+/**
+ * Structured AskUserQuestion pages: each question renders its header, text,
+ * and ITS OWN option group. Single-select options record on click (re-click changes the record
+ * while siblings are still open); multiSelect options toggle and join into ONE answer per
+ * question (", "-joined labels — the serialization claude's `_question_answers` accepts). The
+ * interaction submits exactly once, when EVERY question holds an answer (the direct route's
+ * all-or-nothing contract). Local state resets per interactionId via the parent's `key`.
+ */
+function QuestionsBody({
+  view,
+  disabled,
+  onSubmit,
+}: {
+  view: PendingInteractionView;
+  disabled: boolean;
+  onSubmit: (answers: Record<string, string>) => void;
+}) {
+  const [recorded, setRecorded] = useState<Record<string, string>>({});
+  const [toggles, setToggles] = useState<Record<string, string[]>>({});
+  const answeredCount = view.questions.filter(
+    (question) => recorded[question.text] !== undefined,
+  ).length;
+
+  const record = (question: InteractionQuestion, answer: string) => {
+    const next = { ...recorded, [question.text]: answer };
+    setRecorded(next);
+    if (view.questions.every((candidate) => next[candidate.text] !== undefined)) {
+      onSubmit(next);
+    }
+  };
+
+  const toggle = (question: InteractionQuestion, label: string) => {
+    setToggles((current) => {
+      const selected = current[question.text] ?? [];
+      return {
+        ...current,
+        [question.text]: selected.includes(label)
+          ? selected.filter((candidate) => candidate !== label)
+          : [...selected, label],
+      };
+    });
+  };
+
+  return (
+    <div className={css({ display: "grid", gap: "0.3rem", minWidth: "0" })} data-testid="interaction-bar-questions">
+      {view.questions.length > 1 ? (
+        <span className={hint} data-testid="interaction-bar-progress">
+          {INTERACTION_QUESTIONS_PROGRESS(answeredCount, view.questions.length)}
+        </span>
+      ) : null}
+      {view.questions.map((question) => {
+        const selected = toggles[question.text] ?? [];
+        const recordedAnswer = recorded[question.text];
+        return (
+          <div className={questionBlock} key={question.text} data-testid="interaction-bar-question">
+            <div className={headRow}>
+              {question.header ? (
+                <span className={kindChip} data-testid="interaction-bar-question-header">
+                  {question.header}
+                </span>
+              ) : null}
+              <span className={promptText} data-testid="interaction-bar-question-text">
+                {question.text}
+              </span>
+            </div>
+            <div className={choicesRow} data-testid="interaction-bar-question-options">
+              {question.options.map((option) =>
+                question.multiSelect ? (
+                  <button
+                    type="button"
+                    key={option.label}
+                    className={choiceButton}
+                    disabled={disabled}
+                    aria-pressed={selected.includes(option.label)}
+                    data-selected={selected.includes(option.label) ? "true" : undefined}
+                    onClick={() => toggle(question, option.label)}
+                    title={option.description}
+                    data-testid="interaction-bar-question-toggle"
+                  >
+                    {option.label}
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    key={option.label}
+                    className={choiceButton}
+                    disabled={disabled}
+                    aria-pressed={recordedAnswer === option.label}
+                    data-selected={recordedAnswer === option.label ? "true" : undefined}
+                    onClick={() => record(question, option.label)}
+                    title={option.description}
+                    data-testid="interaction-bar-question-option"
+                  >
+                    {option.label}
+                  </button>
+                ),
+              )}
+              {question.multiSelect ? (
+                <button
+                  type="button"
+                  className={choiceButton}
+                  disabled={disabled || selected.length === 0}
+                  onClick={() => record(question, selected.join(", "))}
+                  data-testid="interaction-bar-question-confirm"
+                >
+                  {INTERACTION_MULTISELECT_CONFIRM(selected.length)}
+                </button>
+              ) : null}
+            </div>
+            {question.multiSelect ? (
+              <span className={hint} data-testid="interaction-bar-multiselect-hint">
+                {INTERACTION_MULTISELECT_HINT}
+              </span>
+            ) : null}
+            {recordedAnswer !== undefined && answeredCount < view.questions.length ? (
+              <span className={hint} data-testid="interaction-bar-question-recorded">
+                {INTERACTION_QUESTION_RECORDED(recordedAnswer)}
+              </span>
+            ) : null}
+          </div>
+        );
+      })}
+    </div>
+  );
 }
 
 export const InteractionBar = forwardRef<
@@ -108,7 +255,7 @@ export const InteractionBar = forwardRef<
   // Clear a stale round-trip record when the interaction changed under it (a NEW question must
   // never inherit the previous answer's state). This includes a FOLLOWING unrepresentable
   // payload — `interactionId` is undefined there, and the old "answered — waiting" line must
-  // not render beside it (review finding 5).
+  // not render beside it.
   useEffect(() => {
     if (!answerState) return;
     if (answerState.interactionId !== interactionId) {
@@ -161,6 +308,12 @@ export const InteractionBar = forwardRef<
     });
   }, [interactionId, session]);
 
+  // Structured questions submit the ALL-OR-NOTHING answers map through the direct route.
+  const submitAnswers = useCallback((answers: Record<string, string>) => {
+    if (!interactionId) return;
+    void submitInteractionAnswer({ session, interactionId, answers });
+  }, [interactionId, session]);
+
   const answerFromComposer = useCallback((providedText?: string, providedRevision?: number) => {
     const current = sessionCockpitStore.getState().perSession[session.id]?.composer;
     const text = providedText ?? composerRef?.current?.getDraft() ?? current?.draft ?? "";
@@ -206,7 +359,11 @@ export const InteractionBar = forwardRef<
       <div role="alert" data-testid="interaction-bar-announce" className={css({ position: "absolute", width: "1px", height: "1px", overflow: "hidden", clipPath: "inset(50%)" })}>
         {representation.mode === "unrepresentable"
           ? `pending interaction from ${session.label}`
-          : `pending question from ${session.label}: ${representation.view.prompt || "(no prompt text)"}`}
+          : `pending question from ${session.label}: ${
+              representation.view.prompt ||
+              representation.view.questions[0]?.text ||
+              "(no prompt text)"
+            }`}
       </div>
       {representation.mode === "unrepresentable" ? (
         <div className={headRow}>
@@ -220,11 +377,22 @@ export const InteractionBar = forwardRef<
             <span className={kindChip} data-testid="interaction-bar-kind">
               {representation.view.kind}
             </span>
-            <span className={promptText} data-testid="interaction-bar-prompt">
-              {representation.view.prompt || INTERACTION_NO_PROMPT_TEXT}
-            </span>
+            {/* Structured questions render their OWN per-question text below — the legacy flat
+                `prompt` concatenation must never double as the question text. */}
+            {representation.mode !== "questions" ? (
+              <span className={promptText} data-testid="interaction-bar-prompt">
+                {representation.view.prompt || INTERACTION_NO_PROMPT_TEXT}
+              </span>
+            ) : null}
           </div>
-          {representation.mode === "choices" ? (
+          {representation.mode === "questions" ? (
+            <QuestionsBody
+              key={representation.view.interactionId}
+              view={representation.view}
+              disabled={disabled}
+              onSubmit={submitAnswers}
+            />
+          ) : representation.mode === "choices" || representation.mode === "permission" ? (
             <div className={choicesRow} data-testid="interaction-bar-choices">
               {representation.view.choices.map((choice) => (
                 <Button

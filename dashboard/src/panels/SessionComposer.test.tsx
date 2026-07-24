@@ -460,11 +460,23 @@ describe("SessionComposer (FEUI-L5)", () => {
     expect(status).not.toContain("queued · withdrawable");
   });
 
-  it("renders every client-known queued item as a 'yours' block + delivery row", () => {
+  it("renders every authority-confirmed queued item as a 'yours' block + delivery row", () => {
     const session = readySession("multi-queue");
     sessionStore.getState().hydrate([session]);
     for (const item of L5_MULTI_QUEUE_FIXTURE) {
       sessionCockpitStore.getState().enqueueSubmit(session.id, item);
+      // The withdrawable queue surface requires the authority lifecycle's own queued word.
+      sessionCockpitStore.getState().upsertSubmitRecord(session.id, {
+        ...startSubmitRecord({
+          requestId: item.requestId,
+          text: item.text,
+          expectedBridgeEpoch: item.expectedBridgeEpoch,
+          submittedRevision: 0,
+          at: item.queuedAt,
+        }),
+        phase: "queued",
+        serverLifecycleState: "queued",
+      });
     }
     const { getAllByTestId, getByTestId } = render(<SessionComposer session={session} />);
     expect(getByTestId("queue-preview").textContent).toContain("2 queued · yours");
@@ -472,6 +484,148 @@ describe("SessionComposer (FEUI-L5)", () => {
     expect(getAllByTestId("queue-preview-item")[1].textContent).toContain(
       "queued · withdrawable before dispatch",
     );
+  });
+
+  it("hides queue entries the authority has not confirmed pre-dispatch queued", () => {
+    const session = readySession("unconfirmed-queue");
+    sessionStore.getState().hydrate([session]);
+    sessionCockpitStore.getState().enqueueSubmit(session.id, L5_MULTI_QUEUE_FIXTURE[0]);
+    const { queryByTestId } = render(<SessionComposer session={session} />);
+    expect(queryByTestId("queue-preview")).toBeNull();
+  });
+
+  it("acknowledges a boot-deferred send honestly instead of echoing the gate line (260721 D3)", async () => {
+    const session = fromTerminalSessionInfo(
+      catalogRow({ id: "boot-defer", label: "boot-defer", controlState: "starting" }),
+    );
+    sessionStore.getState().hydrate([session]);
+    const ref = createRef<SessionComposerHandle>();
+    const { getByTestId } = render(<SessionComposer ref={ref} session={session} />);
+    act(() => sessionCockpitStore.getState().setComposerDraft(session.id, "hello claude"));
+    act(() => ref.current?.submit());
+    // The press registers: the status names the still-connecting control and the kept draft,
+    // while the standing gate line keeps the blocker reason — never a duplicate of it.
+    await waitFor(() =>
+      expect(getByTestId("session-composer-status").textContent).toContain(
+        "connecting… · composer draft unchanged",
+      ),
+    );
+    expect(getByTestId("session-composer-gate").textContent).toContain(
+      "native control is not ready yet",
+    );
+    // Nothing was submitted; the draft survives for the send that follows the connect.
+    expect(sessionCockpitStore.getState().perSession[session.id]?.composer.draft).toBe(
+      "hello claude",
+    );
+    expect(sessionCockpitStore.getState().perSession[session.id]?.submitHistory ?? []).toEqual([]);
+  });
+
+  it("keeps the server's reason on a hard block (failed control is not a connecting state)", async () => {
+    const session = fromTerminalSessionInfo(
+      catalogRow({ id: "hard-block", label: "hard-block", controlState: "failed" }),
+    );
+    sessionStore.getState().hydrate([session]);
+    const ref = createRef<SessionComposerHandle>();
+    const { getByTestId } = render(<SessionComposer ref={ref} session={session} />);
+    act(() => sessionCockpitStore.getState().setComposerDraft(session.id, "hello claude"));
+    act(() => ref.current?.submit());
+    await waitFor(() =>
+      expect(getByTestId("session-composer-status").textContent).toContain(
+        "native control failed — inspect the session evidence",
+      ),
+    );
+    expect(getByTestId("session-composer-status").textContent).not.toContain("connecting…");
+  });
+
+  it("shows no withdrawable claim on a bare queued receipt and settles delivering on the dispatching poll", async () => {
+    const session = readySession("queued-dispatch-grace");
+    sessionStore.getState().hydrate([session]);
+    let releaseStatus: () => void = () => {};
+    let statusState = "dispatching";
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.endsWith("/submission-authority")) {
+        return {
+          ok: true,
+          json: async () => ({ bridgeEpoch: "bridge-epoch-l5" }),
+        } as Response;
+      }
+      if (url.endsWith("/submission-status")) {
+        const body = JSON.parse(String(init?.body)) as { requestIds: string[] };
+        return new Promise<Response>((resolve) => {
+          releaseStatus = () =>
+            resolve({
+              ok: true,
+              json: async () => ({
+                bridgeEpoch: "bridge-epoch-l5",
+                submissions: body.requestIds.map((requestId) => ({
+                  requestId,
+                  outcome: "found",
+                  submission: {
+                    state: statusState,
+                    submittedAt: "2026-07-17T10:00:00Z",
+                    updatedAt: "2026-07-17T10:00:01Z",
+                    acceptedAt: null,
+                    withdrawable: false,
+                    detail: null,
+                  },
+                })),
+              }),
+            } as Response);
+        });
+      }
+      const body = JSON.parse(String(init?.body)) as { requestId: string };
+      return receipt(body.requestId, "queued");
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const { getByTestId, queryByTestId } = render(<SessionComposer session={session} />);
+    act(() => sessionCockpitStore.getState().setComposerDraft(session.id, "hello claude"));
+    fireEvent.click(getByTestId("session-composer-send"));
+
+    // Bare queued receipt: the draft is released (the draft-release commit point) but no withdrawable claim
+    // and no queue preview — under the dispatch grace the record is already dispatching-head,
+    // so the claim would be a lie on every send.
+    await waitFor(() =>
+      expect(getByTestId("session-composer-status").textContent).toContain("queued"),
+    );
+    const receiptStatus = getByTestId("session-composer-status").textContent ?? "";
+    expect(receiptStatus).toContain("draft released");
+    expect(receiptStatus).not.toContain("withdrawable");
+    expect(queryByTestId("queue-preview")).toBeNull();
+    expect(sessionCockpitStore.getState().perSession[session.id]?.composer.draft).toBe("");
+
+    // The first lifecycle poll reports dispatching: the composer settles on delivering… with
+    // the draft still cleared and no queue surface ever shown.
+    await waitFor(() =>
+      expect(
+        fetchMock.mock.calls.some(([url]) => String(url).endsWith("/submission-status")),
+      ).toBe(true),
+    );
+    act(() => releaseStatus());
+    await waitFor(() =>
+      expect(getByTestId("session-composer-status").textContent).toContain("delivering…"),
+    );
+    expect(queryByTestId("queue-preview")).toBeNull();
+    expect(sessionCockpitStore.getState().perSession[session.id]?.composer.draft).toBe("");
+    expect(sessionCockpitStore.getState().perSession[session.id]?.queue).toEqual([]);
+
+    // Dispatching is not terminal: polling continues, and the delivered upgrade on a later poll
+    // settles the composer on the server's terminal word instead of "delivering…" forever.
+    await waitFor(
+      () =>
+        expect(
+          fetchMock.mock.calls.filter(([url]) => String(url).endsWith("/submission-status")),
+        ).toHaveLength(2),
+      { timeout: 3_000 },
+    );
+    statusState = "delivered";
+    act(() => releaseStatus());
+    await waitFor(() =>
+      expect(getByTestId("session-composer-status").textContent).toContain(
+        "delivered · draft released",
+      ),
+    );
+    expect(queryByTestId("queue-preview")).toBeNull();
+    expect(sessionCockpitStore.getState().perSession[session.id]?.queue).toEqual([]);
   });
 
   it("ignores background receipt status beside an unrelated visible composer draft", () => {

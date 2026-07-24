@@ -1,5 +1,7 @@
 import { sessionCockpitStore, type WithdrawalState } from "./sessionCockpitStore";
 import {
+  enterEndgame,
+  lifecycleWatchState,
   projectSubmissionLifecycle,
   settleSubmissionObservation,
   submissionObservationSnapshot,
@@ -124,14 +126,22 @@ async function routeError(response: Response): Promise<SubmissionLifecycleRouteE
   return new SubmissionLifecycleRouteError(response.status, status, detail);
 }
 
+// A submit can stick on "delivering…" forever: a request against a half-dead socket
+// (observed live after daemon/proxy restarts) never resolves OR rejects, which silently killed
+// the status-polling loop — no retry was ever scheduled again. Every lifecycle request now
+// carries a hard timeout so a hung transport REJECTS into the existing bounded-backoff retry.
+const LIFECYCLE_REQUEST_TIMEOUT_MS = 15_000;
+
 async function jsonRequest(
   fetchImpl: FetchLike,
   path: string,
   init: RequestInit,
 ): Promise<unknown> {
   let response: Response;
+  const timeout = AbortSignal.timeout(LIFECYCLE_REQUEST_TIMEOUT_MS);
+  const signal = init.signal ? AbortSignal.any([init.signal, timeout]) : timeout;
   try {
-    response = await fetchImpl(path, init);
+    response = await fetchImpl(path, { ...init, signal });
   } catch (error) {
     throw new SubmissionLifecycleRouteError(
       null,
@@ -632,6 +642,20 @@ export async function pollSubmissionLifecycleOnce(
       expectedBridgeEpoch: pending.expectedBridgeEpoch,
     });
   }
+  // Guards the composer settling on "delivering…" forever: a record the authority
+  // reported dispatching leaves the queue, but its terminal word is still owed — keep polling it
+  // until a terminal lifecycle state lands or the bounded watch window expires, where the record
+  // settles honestly on the existing endgame boundary instead of spinning forever.
+  for (const record of cockpit?.submitHistory ?? []) {
+    if (targets.some((entry) => entry.requestId === record.requestId)) continue;
+    const watch = lifecycleWatchState(record, at);
+    if (watch === "inactive") continue;
+    if (watch === "expired") {
+      sessionCockpitStore.getState().upsertSubmitRecord(sessionId, enterEndgame(record, at));
+      continue;
+    }
+    targets.push({ requestId: record.requestId, expectedBridgeEpoch: record.expectedBridgeEpoch });
+  }
   const byEpoch = new Map<string, Array<{ requestId: string; expectedBridgeEpoch: string }>>();
   for (const entry of targets) {
     const group = byEpoch.get(entry.expectedBridgeEpoch) ?? [];
@@ -697,6 +721,11 @@ export async function pollSubmissionLifecycleOnce(
       .map((entry) => entry.requestId),
   );
   if (current?.withdrawal?.phase === "pending") remaining.add(current.withdrawal.requestId);
+  // A still-watched record keeps the poller alive after its queue entry dequeues; the watch ends
+  // only on the server's terminal word or the bounded window (already settled to endgame above).
+  for (const record of current?.submitHistory ?? []) {
+    if (lifecycleWatchState(record, at) === "active") remaining.add(record.requestId);
+  }
   return remaining.size;
 }
 

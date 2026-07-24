@@ -14,11 +14,13 @@ caller surfaces it, never overrides it.
 
 from __future__ import annotations
 
+import os
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
+import agents_remember
 from agents_remember.observer.events import now_iso
 from agents_remember.serving.harness_control_adapter import protocol_adapter_status
 from agents_remember.serving.harness_control_ipc import LocalControlEndpoint
@@ -278,6 +280,24 @@ def _resolved_pair(resolved_launch: ResolvedLaunch | None) -> tuple[str | None, 
     return resolved_launch.model_key, resolved_launch.effort
 
 
+def _runner_spawn_env(env: Mapping[str, str]) -> dict[str, str]:
+    """Spawn env for a harness-control runner with the daemon's own package root on PYTHONPATH.
+
+    The runner (``python -m agents_remember.serving.harness_control_runner``) is created through
+    the tmux *server* environment, which does not carry the daemon's PYTHONPATH -- a daemon running
+    worktree code would otherwise spawn runners that fall back to the installed main-checkout
+    package. Prepend the source root of the package this process actually imported
+    (``.../mcp/src`` in the ``src`` layout), preserving any PYTHONPATH the caller already seeded.
+    When the daemon runs the installed checkout this is the same root the runner resolves anyway,
+    so a production spawn is semantically unchanged.
+    """
+    source_root = str(Path(agents_remember.__file__).resolve().parent.parent)
+    seeded = dict(env)
+    existing = seeded.get("PYTHONPATH")
+    seeded["PYTHONPATH"] = f"{source_root}{os.pathsep}{existing}" if existing else source_root
+    return seeded
+
+
 def _session_command(
     *,
     session_id: str,
@@ -507,13 +527,22 @@ def _open_terminal_transaction(
             owner_session_id=owner,
         )
 
+    # A fresh harness spawn launches the control runner under the tmux *server* environment,
+    # which lacks the daemon's PYTHONPATH -- seed the daemon's own package source root so the
+    # runner imports the same agents_remember code. Plain terminal spawns keep their env
+    # byte-identical, and a legacy live session ignores env entirely.
+    runner_env = (
+        _runner_spawn_env(spawn_env)
+        if resolved_kind == "harness" and harness is not None and not legacy_running
+        else spawn_env
+    )
     opened = host.ensure(
         session_id,
         cwd=cwd,
         command=command,
         lifecycle_id=lifecycle_id,
         suspend_unsafe=resolved_kind == "harness",
-        env=spawn_env,
+        env=runner_env,
     )
     resolved_label = _open_label(
         label,

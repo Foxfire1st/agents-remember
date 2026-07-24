@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { fromTerminalSessionInfo, sessionStore } from "../../data/sessions";
 import { catalogRow } from "../../test/fixtures/catalogRows";
 import type { TaskDocNode } from "../../types/projection";
-import { ChatContextBar } from "./ChatContextBar";
+import { ChatContextBar, ChatSessionActions } from "./ChatContextBar";
 
 const LEAF_KEY = "agents-remember/260628_operations-integration/260628-L5";
 
@@ -33,22 +33,44 @@ afterEach(() => {
 });
 
 describe("canonical Chats duty bar", () => {
-  it("preserves the legacy existing-row lifecycle attachment as explicitly local state", () => {
-    const focused = seedTerminal();
-    const { getByTestId } = render(
+  it("keeps creation in the rail and selected-session actions in the stage", () => {
+    const rail = render(
       <ChatContextBar
-        focused={focused}
-        selectedLifecycleId="LC-1"
-        taskDocuments={[]}
         onLaunchChat={() => {}}
         onSessionOpened={() => {}}
       />,
     );
 
-    const button = getByTestId("chats-attach-lifecycle");
-    expect(button.textContent).toContain("Route locally");
-    fireEvent.click(button);
-    expect(sessionStore.getState().sessions[0]?.lifecycleId).toBe("LC-1");
+    expect(rail.getByTestId("chats-new-chat")).toBeTruthy();
+    expect(rail.queryByTestId("chats-browse-history")).toBeNull();
+    expect(rail.queryByTestId("chats-attach-leaf-picker")).toBeNull();
+    rail.unmount();
+
+    const focused = seedTerminal({ harness: "codex", controlState: "ready" });
+    const stage = render(
+      <ChatSessionActions
+        focused={focused}
+        taskDocuments={[leafDoc()]}
+        onBrowseHistory={() => {}}
+      />,
+    );
+
+    expect(stage.getByTestId("chats-browse-history")).toBeTruthy();
+    expect(stage.getByTestId("chats-attach-leaf-picker")).toBeTruthy();
+    expect(stage.queryByTestId("chats-new-chat")).toBeNull();
+  });
+
+  it("does not expose the legacy client-only lifecycle route in selected-session chrome", () => {
+    const focused = seedTerminal({ lifecycleId: undefined });
+    const { queryByTestId } = render(
+      <ChatSessionActions
+        focused={focused}
+        taskDocuments={[]}
+        onBrowseHistory={() => {}}
+      />,
+    );
+
+    expect(queryByTestId("chats-attach-lifecycle")).toBeNull();
   });
 
   it("moves a leaf only after server acceptance and broadcasts the authoritative change", async () => {
@@ -67,11 +89,10 @@ describe("canonical Chats duty bar", () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200 });
     vi.stubGlobal("fetch", fetchMock);
     const { getByTestId } = render(
-      <ChatContextBar
+      <ChatSessionActions
         focused={focused}
         taskDocuments={[leafDoc()]}
-        onLaunchChat={() => {}}
-        onSessionOpened={() => {}}
+        onBrowseHistory={() => {}}
       />,
     );
 
@@ -96,11 +117,10 @@ describe("canonical Chats duty bar", () => {
     const focused = seedTerminal();
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 409 }));
     const { getByTestId, findByRole } = render(
-      <ChatContextBar
+      <ChatSessionActions
         focused={focused}
         taskDocuments={[leafDoc()]}
-        onLaunchChat={() => {}}
-        onSessionOpened={() => {}}
+        onBrowseHistory={() => {}}
       />,
     );
 
@@ -132,7 +152,6 @@ describe("canonical Chats duty bar", () => {
     const { getByTestId } = render(
       <ChatContextBar
         selectedLifecycleId="LC-1"
-        taskDocuments={[]}
         onLaunchChat={() => {}}
         onSessionOpened={onSessionOpened}
       />,
@@ -153,7 +172,6 @@ describe("canonical Chats duty bar", () => {
     const onSessionOpened = vi.fn();
     const { getByTestId, findByTestId } = render(
       <ChatContextBar
-        taskDocuments={[]}
         onLaunchChat={() => {}}
         onSessionOpened={onSessionOpened}
       />,
@@ -189,7 +207,6 @@ describe("canonical Chats duty bar", () => {
     const onSessionOpened = vi.fn();
     const { getByTestId, findByTestId } = render(
       <ChatContextBar
-        taskDocuments={[]}
         onLaunchChat={() => {}}
         onSessionOpened={onSessionOpened}
       />,

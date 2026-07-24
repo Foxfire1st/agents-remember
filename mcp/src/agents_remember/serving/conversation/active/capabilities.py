@@ -6,17 +6,25 @@ fixture evidence through the production seam; a native shape whose contract has
 never been probed through a captured fixture is ``unverified``; a contract the
 harness cannot provide is ``unavailable``.
 
-THE CONTRACT IS THE ONLY GATE (developer ruling 2026-07-21, executed in
-260718-CHATS-L5F R4): no capability is gated, locked, or demoted by a
+THE CONTRACT IS THE ONLY GATE: no capability is gated, locked, or demoted by a
 version-string comparison. The runtime/helper version is informational metadata
 on the evidence record only. A capability demotes solely when its contract fails
 verification or has never been probed — never because an installed version drifts
 from a fixture's captured version (harnesses auto-update; a version predicate made
 the natively-succeeding claude surface unusable).
+
+``controls.interrupt`` is the one feature NOT declared here: the L3 control gate
+owns that verdict (claude/codex/pi interrupt = supported, runtime-fixture), and
+this view bridges it from ``control.capabilities.interrupt_capability_for`` so
+the state never gets a second hardcoded copy. Every other feature keeps the
+conservative pre-L2E posture below.
 """
 
 from __future__ import annotations
 
+from agents_remember.serving.conversation.control.capabilities import (
+    interrupt_capability_for,
+)
 from agents_remember.serving.conversation.models import (
     AttachmentCapabilities,
     AttachmentCapability,
@@ -99,7 +107,7 @@ def _no_attachments() -> AttachmentCapabilities:
     return AttachmentCapabilities(image=_none("image"), file=_none("file"), resource=_none("resource"))
 
 
-def _codex_capabilities() -> ConversationCapabilities:
+def _codex_capabilities(snapshot: AdapterSnapshot) -> ConversationCapabilities:
     live_evidence = _fixture_evidence(_CODEX_RUNTIME, _CODEX_FIXTURE)
     return ConversationCapabilities(
         live=LiveCapabilities(
@@ -154,11 +162,7 @@ def _codex_capabilities() -> ConversationCapabilities:
             ),
         ),
         controls=ControlCapabilities(
-            interrupt=_adapter(
-                "unverified",
-                "native turn/interrupt exists but no AR control seam; the L3 control leaf owns the gate",
-                _CODEX_RUNTIME,
-            ),
+            interrupt=interrupt_capability_for("codex", snapshot),
             steer=_unavailable("not an ordinary submit action"),
             follow_up=_unavailable("not an ordinary submit action"),
             attachments=_no_attachments(),
@@ -194,7 +198,7 @@ def _codex_capabilities() -> ConversationCapabilities:
     )
 
 
-def _claude_capabilities() -> ConversationCapabilities:
+def _claude_capabilities(snapshot: AdapterSnapshot) -> ConversationCapabilities:
     reason = (
         "frame contract not yet probed through a captured production fixture; unverified until the "
         "live stream-json seam is exercised against the running harness (never a version gate)"
@@ -222,7 +226,7 @@ def _claude_capabilities() -> ConversationCapabilities:
             tool_completeness=_gated("historical tool completeness awaits a probed native-library contract"),
         ),
         controls=ControlCapabilities(
-            interrupt=_gated("headless interrupt"),
+            interrupt=interrupt_capability_for("claude", snapshot),
             steer=_unavailable("not an ordinary submit action"),
             follow_up=_unavailable("not an ordinary submit action"),
             attachments=_no_attachments(),
@@ -238,7 +242,7 @@ def _claude_capabilities() -> ConversationCapabilities:
     )
 
 
-def _pi_capabilities() -> ConversationCapabilities:
+def _pi_capabilities(snapshot: AdapterSnapshot) -> ConversationCapabilities:
     live_evidence = _fixture_evidence(_PI_RUNTIME, _PI_FIXTURE, helper_version=_PI_HELPER)
     return ConversationCapabilities(
         live=LiveCapabilities(
@@ -293,11 +297,7 @@ def _pi_capabilities() -> ConversationCapabilities:
             ),
         ),
         controls=ControlCapabilities(
-            interrupt=_adapter(
-                "unverified",
-                "native rpc abort exists but no AR control seam; the L3 control leaf owns the gate",
-                _PI_RUNTIME,
-            ),
+            interrupt=interrupt_capability_for("pi", snapshot),
             steer=_unavailable("not an ordinary submit action"),
             follow_up=_unavailable("not an ordinary submit action"),
             attachments=_no_attachments(),
@@ -334,17 +334,19 @@ def _pi_capabilities() -> ConversationCapabilities:
 def capabilities_for(harness_id: HarnessId, snapshot: AdapterSnapshot) -> ConversationCapabilities:
     """Build the exact-session capability set.
 
-    The contract is the only gate (developer ruling 2026-07-21): the fixture-declared state stands
+    The contract is the only gate: the fixture-declared state stands
     on its own contract evidence and is never demoted by a version-string comparison against the
     observed runtime. The observed version rides the evidence record as informational metadata only.
+
+    ``controls.interrupt`` is bridged from the L3 control gate's single-source verdict
+    (``interrupt_capability_for``); the snapshot is forwarded, never used as a version predicate.
     """
 
-    del snapshot  # the observed version is no longer a gate; it is informational evidence
     if harness_id == "codex":
-        return _codex_capabilities()
+        return _codex_capabilities(snapshot)
     if harness_id == "claude":
-        return _claude_capabilities()
-    return _pi_capabilities()
+        return _claude_capabilities(snapshot)
+    return _pi_capabilities(snapshot)
 
 
 __all__ = ["capabilities_for"]

@@ -31,7 +31,6 @@ class CodeQualityCheckTests(unittest.TestCase):
                     coverage_json=root / "coverage.json",
                     threshold=30.0,
                     top=5,
-                    fail_on_crap_threshold=False,
                 ),
                 runner=fake_runner(commands, root / "coverage.json"),
                 printer=output.append,
@@ -63,7 +62,6 @@ class CodeQualityCheckTests(unittest.TestCase):
                     coverage_json=coverage_json,
                     threshold=30.0,
                     top=5,
-                    fail_on_crap_threshold=False,
                 ),
                 runner=fake_runner([], coverage_json, failing_step="ruff"),
                 printer=lambda message: None,
@@ -84,7 +82,6 @@ class CodeQualityCheckTests(unittest.TestCase):
                     coverage_json=root / "missing-coverage.json",
                     threshold=30.0,
                     top=5,
-                    fail_on_crap_threshold=False,
                 ),
                 runner=lambda name, command, cwd, env: check.StepResult(name, 0, command),
                 printer=lambda message: None,
@@ -92,13 +89,13 @@ class CodeQualityCheckTests(unittest.TestCase):
 
             self.assertEqual(exit_code, 1)
 
-    def test_crap_threshold_only_fails_when_requested(self) -> None:
+    def test_crap_threshold_fails_by_default(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             source = write_sample_source(root)
             coverage_json = root / "coverage.json"
 
-            report_only_code = check.run_quality_check(
+            exit_code = check.run_quality_check(
                 check.CheckConfig(
                     project_root=root,
                     source_paths=[source],
@@ -106,27 +103,35 @@ class CodeQualityCheckTests(unittest.TestCase):
                     coverage_json=coverage_json,
                     threshold=1.0,
                     top=5,
-                    fail_on_crap_threshold=False,
-                ),
-                runner=fake_runner([], coverage_json),
-                printer=lambda message: None,
-            )
-            gated_code = check.run_quality_check(
-                check.CheckConfig(
-                    project_root=root,
-                    source_paths=[source],
-                    test_paths=[root / "tests"],
-                    coverage_json=coverage_json,
-                    threshold=1.0,
-                    top=5,
-                    fail_on_crap_threshold=True,
                 ),
                 runner=fake_runner([], coverage_json),
                 printer=lambda message: None,
             )
 
-            self.assertEqual(report_only_code, 0)
-            self.assertEqual(gated_code, 1)
+            self.assertEqual(exit_code, 1)
+
+    def test_cli_has_no_report_only_or_strict_opt_in_mode(self) -> None:
+        parser = check.build_parser()
+
+        help_text = parser.format_help()
+
+        self.assertNotIn("report-only", help_text)
+        self.assertNotIn("fail-on-crap-threshold", help_text)
+        self.assertIn("mandatory CRAP threshold enforcement", help_text)
+
+    def test_repository_gates_use_default_strict_wrapper(self) -> None:
+        repository_root = Path(__file__).resolve().parents[2]
+        gate_files = [
+            repository_root / ".githooks" / "pre-commit",
+            repository_root / ".githooks" / "pre-push",
+            repository_root / ".github" / "workflows" / "quality-checks.yml",
+        ]
+
+        for gate_file in gate_files:
+            content = gate_file.read_text(encoding="utf-8")
+            with self.subTest(gate_file=gate_file):
+                self.assertIn("agents_remember.code_quality.check", content)
+                self.assertNotIn("fail-on-crap-threshold", content)
 
     def test_run_fixed_checks_threads_checkout_source_onto_pythonpath(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -149,7 +154,6 @@ class CodeQualityCheckTests(unittest.TestCase):
                         coverage_json=root / "coverage.json",
                         threshold=30.0,
                         top=5,
-                        fail_on_crap_threshold=False,
                     ),
                     root / "coverage.json",
                     runner=runner,

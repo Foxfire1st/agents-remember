@@ -51,11 +51,21 @@ export interface PageQuery {
   limit?: number;
 }
 
-// A page read yields the page, OR the server's typed error (threaded to the banner — §14.5, F15), OR
+// A page read yields the page, OR the server's typed error (threaded to the banner — §14.5), OR
 // a null-error transport drop. A read failure NEVER fabricates a page (§9.1).
 export type PageResult =
   | { ok: true; page: ConversationPage }
   | { ok: false; error: ConversationRouteError | null };
+
+// Hung-transport class (observed live): a request on a half-dead socket neither resolves
+// nor rejects, freezing hydrate/telemetry/interrupt flows in their pending phase forever. Every
+// conversation request carries a hard timeout so a hung transport becomes an ordinary rejection
+// the existing recovery paths (quiet retry, re-page, fail-loud) already know how to handle.
+const CONVERSATION_REQUEST_TIMEOUT_MS = 15_000;
+const withTimeout = (init: RequestInit): RequestInit => ({
+  ...init,
+  signal: AbortSignal.timeout(CONVERSATION_REQUEST_TIMEOUT_MS),
+});
 
 /** GET the native-hydrated active page, preserving the server's typed refusal reason on failure. */
 export async function fetchConversationPage(
@@ -70,7 +80,7 @@ export async function fetchConversationPage(
   if (query.limit !== undefined) params.push(`limit=${query.limit}`);
   const url = `${activeBase(base, sessionId)}?${params.join("&")}`;
   try {
-    const response = await fetchImpl(url, { headers: { Accept: "application/json" } });
+    const response = await fetchImpl(url, withTimeout({ headers: { Accept: "application/json" } }));
     if (!response.ok) {
       return { ok: false, error: asRouteError(await readJson(response), response.status) };
     }
@@ -89,7 +99,7 @@ export async function fetchConversationTelemetry(
 ): Promise<ConversationTelemetry | null> {
   const url = `${activeBase(base, sessionId)}/telemetry?${epochQuery(epoch)}`;
   try {
-    const response = await fetchImpl(url, { headers: { Accept: "application/json" } });
+    const response = await fetchImpl(url, withTimeout({ headers: { Accept: "application/json" } }));
     if (!response.ok) return null;
     return (await response.json()) as ConversationTelemetry;
   } catch {
@@ -129,11 +139,11 @@ async function postInterrupt(
 ): Promise<ControlResult<InterruptOperation>> {
   const url = `${activeBase(base, sessionId)}/${route}?${epochQuery(epoch)}`;
   try {
-    const response = await fetchImpl(url, {
+    const response = await fetchImpl(url, withTimeout({
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ turnId, requestId }),
-    });
+    }));
     return parseInterrupt(await readJson(response), response.status);
   } catch {
     return transportError();
@@ -143,7 +153,7 @@ async function postInterrupt(
 /**
  * Request one exact-turn interrupt with a caller-stable requestId (idempotent; a lost response is
  * reconciled under the SAME id, never retried under a fresh one — §9.5, invariant 27). For pi the
- * turnId names the active AR operation id, not a native turn id (L4-facing ruling 3); the caller
+ * turnId names the active AR operation id, not a native turn id; the caller
  * supplies whichever the harness uses.
  */
 export function requestInterrupt(

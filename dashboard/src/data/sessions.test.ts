@@ -93,7 +93,7 @@ function openedResponse(
   );
 }
 
-// The session registry store (slice 6e hardening) — the state that now survives a cockpit view
+// The session registry store — the state that now survives a cockpit view
 // switch. Reset it between cases since the store is module-level (the whole point).
 beforeEach(() => {
   sessionStore.setState({ sessions: [], activeId: null, count: 0 });
@@ -170,6 +170,66 @@ describe("sessionStore (6e hardening)", () => {
     expect(sessionStore.getState().activeId).toBe("live");
     expect(findSessionForLifecycle("LC1")?.id).toBe("live");
     expect(sessionStore.getState().count).toBe(2);
+  });
+
+  it("keeps state + row identity when a hydrate changes nothing (260721 F2)", () => {
+    sessionStore.getState().hydrate([
+      { id: "a", label: "Terminal 1", status: "running" },
+      {
+        id: "b",
+        label: "Claude Code 1",
+        status: "running",
+        controlPendingInteraction: { prompt: "continue?" },
+      },
+    ]);
+    const settled = sessionStore.getState();
+    const listener = vi.fn();
+    const unsubscribe = sessionStore.subscribe(listener);
+    try {
+      // The poll maps fresh objects from every payload — identical content, new references
+      // (incl. the nested controlPendingInteraction, which compares by content).
+      sessionStore.getState().hydrate([
+        { id: "a", label: "Terminal 1", status: "running" },
+        {
+          id: "b",
+          label: "Claude Code 1",
+          status: "running",
+          controlPendingInteraction: { prompt: "continue?" },
+        },
+      ]);
+      expect(listener).not.toHaveBeenCalled(); // a no-change set never notifies
+      expect(sessionStore.getState()).toBe(settled);
+    } finally {
+      unsubscribe();
+    }
+  });
+
+  it("replaces only the changed rows on a reconcile, keeping the rest referentially stable", () => {
+    sessionStore.getState().hydrate([
+      { id: "a", label: "Terminal 1", status: "running" },
+      { id: "b", label: "Claude Code 1", status: "running" },
+      { id: "c", label: "Codex 1", status: "running" },
+    ]);
+    const settled = sessionStore.getState();
+    sessionStore.getState().hydrate([
+      { id: "a", label: "Terminal 1", status: "running" },
+      { id: "b", label: "Claude Code 1", status: "running", turnState: "turn-ended" },
+      { id: "c", label: "Codex 1", status: "running" },
+    ]);
+    const next = sessionStore.getState();
+    expect(next).not.toBe(settled);
+    expect(next.sessions[0]).toBe(settled.sessions[0]);
+    expect(next.sessions[2]).toBe(settled.sessions[2]);
+    expect(next.sessions[1]).not.toBe(settled.sessions[1]);
+    expect(next.sessions[1]?.turnState).toBe("turn-ended");
+    expect(next.activeId).toBe(settled.activeId);
+  });
+
+  it("still reconciles a locally patched row back to the catalog content on the next beat", () => {
+    sessionStore.getState().hydrate([{ id: "a", label: "Terminal 1", status: "running" }]);
+    sessionStore.getState().patch("a", { turnState: "working" }); // a seat-event pre-apply
+    sessionStore.getState().hydrate([{ id: "a", label: "Terminal 1", status: "running" }]);
+    expect(sessionStore.getState().sessions[0]?.turnState).toBeUndefined();
   });
 
   it("does not route lifecycle injections to non-live sessions", () => {
@@ -627,7 +687,7 @@ describe("connection registry + deliverToSession (6f hardening)", () => {
       const done = pasteDraftToSession("draft-1", raw);
       await vi.advanceTimersByTimeAsync(0); // whenReady resolves → the draft paste goes out
       expect(conn.inputs).toEqual([bracketedPaste(sanitizeForInjection(raw))]);
-      conn.outputAt = 1; // the composer echoes the draft (reopened L6: delivery is confirmed, not assumed)
+      conn.outputAt = 1; // the composer echoes the draft (delivery is confirmed, not assumed)
       await vi.advanceTimersByTimeAsync(300);
       expect(await done).toBe("delivered");
 

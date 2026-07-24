@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sys
 import unittest
 from dataclasses import dataclass
@@ -13,6 +14,7 @@ sys.path.insert(0, str(MCP_SRC))
 
 from agents_remember.errors import HarnessControlClientError
 from agents_remember.serving.harness_control_client import (
+    SUBMIT_TIMEOUT_SECONDS,
     request_control,
     set_control_model,
     submit_control_prompt,
@@ -57,12 +59,30 @@ class _Socket:
         return b""
 
 
+class _SlowEchoSocket(_Socket):
+    """Answers only when the caller's socket timeout covers the bridge's replay-echo delay."""
+
+    def __init__(self, payload: bytes, *, delay_seconds: float) -> None:
+        super().__init__()
+        self.payload = payload
+        self.delay_seconds = delay_seconds
+        self.timeout: float | None = None
+
+    def settimeout(self, timeout: float) -> None:
+        self.timeout = timeout
+
+    def recv(self, _size: int) -> bytes:
+        if self.timeout is None or self.timeout < self.delay_seconds:
+            raise TimeoutError("timed out waiting for the replay echo")
+        return self.payload
+
+
 class HarnessControlClientRetrySafetyTests(unittest.TestCase):
     def test_refused_control_socket_yields_honest_note_and_unlinks_stale_socket(self) -> None:
-        # 260718-CHATS-L5F R6: a controlled runner that exited uncleanly leaves a stale socket that
+        # A controlled runner that exited uncleanly leaves a stale socket that
         # refuses (ECONNREFUSED). The client must render a designed lifecycle note WITHOUT the raw
         # "[Errno 111] Connection refused" surprise, and unlink the stale socket so the next attempt
-        # sees the absent (ENOENT) case cleanly. (developer image1 banner)
+        # sees the absent (ENOENT) case cleanly.
         import errno as _errno  # noqa: PLC0415
         import tempfile  # noqa: PLC0415
 
@@ -125,6 +145,52 @@ class HarnessControlClientRetrySafetyTests(unittest.TestCase):
             )
         self.assertEqual((receipt.request_id, receipt.acceptance), ("request-7", "unknown"))
         request.assert_called_once()
+
+    def test_submit_waits_for_a_replay_echo_beyond_the_control_default(self) -> None:
+        # The bridge answers a submit only after the harness CLI's replay echo
+        # (measured 2-10s live). A 2.0s submit timeout turned that accepted message into a spurious
+        # acceptance="unknown" + 120s reconcile loop; submit now waits up to SUBMIT_TIMEOUT_SECONDS.
+        socket = _SlowEchoSocket(
+            json.dumps(
+                {
+                    "ok": True,
+                    "result": {
+                        "requestId": "request-9",
+                        "acceptance": "immediate",
+                        "submittedAt": "2026-07-16T08:00:03+00:00",
+                        "acceptedAt": "2026-07-16T08:00:03+00:00",
+                        "vendorCorrelationId": "vendor-9",
+                    },
+                }
+            ).encode()
+            + b"\n",
+            delay_seconds=3.0,
+        )
+        with mock.patch(
+            "agents_remember.serving.harness_control_client.socket.socket",
+            return_value=socket,
+        ):
+            receipt = submit_control_prompt(
+                _Entry(),
+                "one whole message",
+                source="terminal",
+                request_id="request-9",
+            )
+        self.assertEqual((receipt.request_id, receipt.acceptance), ("request-9", "immediate"))
+        self.assertEqual(receipt.vendor_correlation_id, "vendor-9")
+        self.assertEqual(socket.timeout, SUBMIT_TIMEOUT_SECONDS)
+
+    def test_non_submit_actions_keep_the_fail_fast_control_default(self) -> None:
+        socket = _SlowEchoSocket(b"{}\n", delay_seconds=3.0)
+        with (
+            mock.patch(
+                "agents_remember.serving.harness_control_client.socket.socket",
+                return_value=socket,
+            ),
+            self.assertRaises(HarnessControlClientError),
+        ):
+            request_control(_Entry(), "snapshot")
+        self.assertEqual(socket.timeout, 2.0)
 
     def test_mismatched_receipt_stays_unknown_and_is_not_resent(self) -> None:
         with mock.patch(

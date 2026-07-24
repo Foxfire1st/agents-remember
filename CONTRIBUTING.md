@@ -59,12 +59,14 @@ the build on any finding — ruff (lint), Pyright (types), the full pytest suite
 and CRAP (complexity x coverage). Run the same gate locally before pushing:
 
 1. Install the dev environment once: `pip install -e "mcp[dev]"`
-2. Enable the shared pre-push hook once per clone: run `./setup-hooks.sh` (or `git config core.hooksPath .githooks`)
+2. Enable the shared commit and push hooks once per clone: run `./setup-hooks.sh` (or `git config core.hooksPath .githooks`)
 
-The hook (`.githooks/pre-push`) runs
-`python -m agents_remember.code_quality.check --fail-on-crap-threshold` and blocks
-the push on any finding. Use `git push --no-verify` only to bypass it
-intentionally; CI still enforces the same checks.
+Both `.githooks/pre-commit` and `.githooks/pre-push` run
+`python -m agents_remember.code_quality.check`, whose default command makes every
+CRAP score at or above the configured threshold a hard failure. Closeout runs
+that same strict wrapper before creating an Agents Remember code commit even
+when hooks are not configured. Use `--no-verify` only for an intentional local
+hook bypass; CI still enforces the same checks.
 
 ## Writing guidelines
 

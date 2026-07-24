@@ -18,15 +18,15 @@ import {
 } from "./lifecycleCopy";
 import { EndedSessionState } from "./EndedSessionState";
 
-// The PtySurface (260715-FEUI-L6 R1–R3, S1/S2): the session stage's terminal half. Wraps the
+// The PtySurface: the session stage's terminal half. Wraps the
 // EXISTING lazy Terminal.tsx — keep-alive (previously focused panes stay mounted, hidden with
 // display:none, exactly Chats' layer pattern so scrollback and the PTY winsize survive focus
 // switches) and the fit rules live in Terminal.tsx unchanged. TWO ARCHETYPES (design §1.4):
 // controlled sessions show the runner's line-log — no vendor TUI exists there, typed lines queue
 // as ordinary messages; legacy raw ('unsupported') sessions host the actual vendor TUI, and ONLY
-// those panes get client-side byte-stream harvesting (bell / title / OSC turn hints — R7).
+// those panes get client-side byte-stream harvesting (bell / title / OSC turn hints).
 //
-// Renderer decision (master OQ-B, measured — full record in the L6 worker report): the DOM
+// Renderer decision (measured): the DOM
 // renderer is the default. Measured on /dev/pty-bench (headless Chromium, 20 line-log
 // writes/s/pane, 10 s windows): DOM holds a locked 60 Hz frame budget at 1, 6, AND 12
 // concurrent panes (mean ~16.7 ms, zero >33 ms frames). WebGL in that environment runs on
@@ -54,30 +54,21 @@ const surface = css({
   flexDirection: "column",
   gap: "0.3rem",
 });
-const paneChrome = css({
-  display: "flex",
-  alignItems: "baseline",
-  gap: "0.5rem",
-  minWidth: "0",
-  fontSize: "0.66rem",
-  color: "muted",
-});
-const archetypeNote = css({
-  minWidth: "0",
-  overflow: "hidden",
-  textOverflow: "ellipsis",
-  whiteSpace: "nowrap",
-});
-// Reserved slot (R3, pane-freeze deferred spec fix 2): the "scrollback — paused" badge renders
+// Reserved slot: the "scrollback — paused" badge renders
 // here once the server exposes copy-mode state on the row. Slot kept, never faked.
-const badgeSlot = css({ flex: "none", display: "inline-flex", minWidth: "0" });
+// Corner-chip overlay inside the pane (the chrome bar it lived on is gone). `well`
+// background so it stays legible over vendor output; quiet until hover/focus.
 const srToggle = css({
+  position: "absolute",
+  top: "0.3rem",
+  right: "0.9rem",
+  zIndex: "2",
   font: "inherit",
   fontSize: "0.64rem",
-  marginLeft: "auto",
-  flex: "none",
   color: "muted",
-  background: "transparent",
+  background: "well",
+  opacity: "0.75",
+  _hover: { opacity: "1" },
   borderWidth: "1px",
   borderStyle: "solid",
   borderColor: "grid",
@@ -146,16 +137,25 @@ export function PtySurface({
   focused,
   onVisibleCols,
   readOnly = false,
+  hidden = false,
 }: {
   focused?: OpenSession;
-  /** The visible pane's REAL column count (R8: the ~80-col floor verified against real panes). */
+  /** The visible pane's REAL column count (the ~80-col floor verified against real panes). */
   onVisibleCols?: (cols: number | null) => void;
   /**
-   * L4: force read-only regardless of status. The structured Chats terminal-diagnostics drawer hosts
+   * Force read-only regardless of status. The structured Chats terminal-diagnostics drawer hosts
    * the controlled runner log with xterm input disabled — it is a diagnostic stream, never a
    * conversation input path (design §12.6).
    */
   readOnly?: boolean;
+  /**
+   * The owning stage keeps this surface MOUNTED but invisible while a harness seat has
+   * the stage (keptHidden: visibility + aria-hidden). The panes, sockets, and scrollback persist —
+   * but the hidden layer must drop every focus/zone affordance (data-kbzone, data-focus-target,
+   * the focus hand-off, the ended state's focus target) so the stage's keyboard/focus contract
+   * (rail-click, the Focus-terminal command) resolves to the VISIBLE layer only.
+   */
+  hidden?: boolean;
 }) {
   const sessions = useSessions((state) => state.sessions);
   const [screenReaderMode, setScreenReaderMode] = usePersistedFlag(
@@ -229,6 +229,10 @@ export function PtySurface({
             screenReaderMode={screenReaderMode}
             ariaLabel={paneAccessibleName(session)}
             keyEventFilter={reservedChordFilter}
+            // Codex and generic shell seats request no useful in-app drag gestures; tmux's outer
+            // mouse mode otherwise steals each drag into its private copy buffer and immediately
+            // cancels the highlight. Harnesses with their own mouse protocol keep native ownership.
+            plainTextSelection={session.kind === "terminal" || session.harness === "codex"}
             onSocketState={(state) => cockpit.setPtyWs(session.id, state)}
             onOutput={() => {
               const now = Date.now();
@@ -241,7 +245,7 @@ export function PtySurface({
               sessionCockpitStore.getState().recordPtyOutput(session.id, now);
             }}
             onResizeCols={visible ? (cols) => onVisibleCols?.(cols) : undefined}
-            // Byte-stream harvesting (R7): LEGACY RAW panes only — the vendor TUI is the only
+            // Byte-stream harvesting: LEGACY RAW panes only — the vendor TUI is the only
             // signal source those panes have. Controlled panes get none of this.
             hooks={
               controlled
@@ -270,16 +274,17 @@ export function PtySurface({
   return (
     <div
       className={surface}
-      data-kbzone={focusedInspectable ? "pty" : undefined}
+      data-kbzone={!hidden && focusedInspectable ? "pty" : undefined}
       data-focus-target={
-        focusedLanded || !focusedInspectable ? "true" : undefined
+        !hidden && (focusedLanded || !focusedInspectable) ? "true" : undefined
       }
       data-testid="pty-surface"
       tabIndex={-1}
       // The focus-terminal command targets `[data-kbzone="pty"]`; hand focus to the VISIBLE
-      // pane's terminal host (which delegates into xterm's textarea).
+      // pane's terminal host (which delegates into xterm's textarea). A hidden layer never
+      // delegates — it carries no zone marker either, so no command can land here.
       onFocus={(event) => {
-        if (!focusedInspectable || event.target !== event.currentTarget) return;
+        if (hidden || !focusedInspectable || event.target !== event.currentTarget) return;
         event.currentTarget
           .querySelector<HTMLElement>(
             '[data-pty-visible="true"] [data-testid="terminal-host"]',
@@ -287,47 +292,35 @@ export function PtySurface({
           ?.focus();
       }}
     >
-      {focused && focusedInspectable ? (
-        <div className={paneChrome} data-testid="pty-pane-chrome">
-          <span
-            className={archetypeNote}
-            data-testid="pty-archetype-note"
-            title={paneArchetypeCopy(focused)}
-          >
-            {paneArchetypeCopy(focused)}
-          </span>
-          <span
-            className={badgeSlot}
-            data-slot="scrollback-paused-badge"
-            data-testid="pty-scrollback-badge-slot"
-          >
-            {/* Reserved: "scrollback — paused" renders here when the pane-freeze fields land
-              server-side (260710 deferred spec, fix 2). Empty until then — never faked. */}
-          </span>
+      {/* Declutter: the pane-chrome BAR is gone — the
+          archetype fact lives in the Inspector + pane tooltip, and the screen-reader toggle
+          floats as a corner chip inside the pane so the bar's height returns to the terminal. */}
+      <div className={layers}>
+        {focused && focusedInspectable ? (
           <button
             type="button"
             className={srToggle}
             data-on={screenReaderMode ? "true" : "false"}
             aria-pressed={screenReaderMode}
-            title={SCREEN_READER_MODE_NOTE}
+            title={`${SCREEN_READER_MODE_NOTE} · ${paneArchetypeCopy(focused)}`}
             onClick={() => setScreenReaderMode(!screenReaderMode)}
             data-testid="pty-screen-reader-toggle"
           >
             screen reader: {screenReaderMode ? "on" : "off"}
           </button>
-        </div>
-      ) : null}
-      <div className={layers}>
+        ) : null}
         {sessions
           .filter((session) => mounted.includes(session.id))
           .map(paneFor)}
-        {focused && !focusedInspectable ? (
+        {/* The ended state carries a data-focus-target — render it only while the layer is
+            visible; a hidden layer must stay out of the stage's focus contract. */}
+        {!hidden && focused && !focusedInspectable ? (
           <EndedSessionState session={focused} />
         ) : null}
         {!focused ? (
           <div
             className={noFocusedSession}
-            data-kbzone="pty"
+            data-kbzone={hidden ? undefined : "pty"}
             data-testid="sessions-pty-placeholder"
             tabIndex={-1}
             aria-label="Terminal placeholder"

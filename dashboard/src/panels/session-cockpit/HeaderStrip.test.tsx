@@ -1,6 +1,6 @@
-// HeaderStrip anatomy + stage container (260715-FEUI-L2 S5, spec §1.2): identity → controls →
-// state → diagnostics; the ModelEffortControl slot (L4 fills it); freshness honesty; provenance
-// badges (R7); the reserved WorkingLine slot and the focus-handoff note on the stage.
+// HeaderStrip anatomy + stage container: identity → controls →
+// state → diagnostics; the ModelEffortControl slot; freshness honesty; the
+// one-plain-pair rule (no provenance duplication); the focus-handoff note on the stage.
 import { cleanup, render } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -14,13 +14,14 @@ const worker = fromTerminalSessionInfo(FLEET.find((row) => row.id === "worker-l4
 afterEach(cleanup);
 
 describe("HeaderStrip (R10)", () => {
-  it("renders the §1.2 anatomy in order: identity → controls → state → (leaf/seat) → diagnostics", () => {
+  it("renders the §1.2 anatomy in order: identity → controls → state → leaf → diagnostics", () => {
     const { getByTestId } = render(<HeaderStrip session={worker} cockpit={undefined} />);
     const strip = getByTestId("header-strip");
     const segments = [...strip.querySelectorAll("[data-header-segment]")].map((node) =>
       node.getAttribute("data-header-segment"),
     );
-    expect(segments).toEqual(["identity", "controls", "state", "leaf-seat", "diagnostics"]);
+    expect(segments).toEqual(["identity", "controls", "state", "leaf", "diagnostics"]);
+    expect(getByTestId("header-leaf").textContent).not.toContain("seat");
   });
 
   it("mounts the ModelEffortControl into the reserved slot (L4)", () => {
@@ -37,9 +38,20 @@ describe("HeaderStrip (R10)", () => {
     expect(getByTestId("header-dot").getAttribute("data-state")).toBe("working");
   });
 
+  it("keeps the neutral dot but omits the meaningless dash for an unclassified raw terminal", () => {
+    const terminal = fromTerminalSessionInfo(catalogRow({ id: "raw", kind: "terminal" }));
+    const { getByTestId, getByRole } = render(
+      <HeaderStrip session={terminal} cockpit={undefined} />,
+    );
+
+    expect(getByTestId("header-state").textContent).toBe("");
+    expect(getByTestId("header-dot").getAttribute("data-state")).toBe("unclassified");
+    expect(getByRole("img", { name: "state unavailable" })).toBeTruthy();
+  });
+
   it("freshness honesty (R15/RV-R3): the ws marker collapses when no pane reports a state, real state + quiet age when known, sweep bound in the tooltip", () => {
     const bare = render(<HeaderStrip session={worker} cockpit={undefined} />);
-    // RV/R3 — `ws —` on a seat with no pane is an em-dash placeholder; it collapses (is omitted)
+    // `ws —` on a seat with no pane is an em-dash placeholder; it collapses (is omitted)
     // rather than rendering a bare dash on every seat. The sweep-bound tooltip still explains freshness.
     expect(bare.getByTestId("header-diagnostics").textContent).not.toContain("ws —");
     expect(bare.getByTestId("header-diagnostics").textContent).not.toContain("quiet");
@@ -70,10 +82,7 @@ describe("HeaderStrip (R10)", () => {
     expect(live.getByTestId("header-diagnostics").textContent).toContain("quiet 3s");
   });
 
-  it("provenance badges (R7): the pair renders at the tier DERIVED from control state", () => {
-    // A purpose-built row (review finding 7 — not FLEET's worker-l4, whose harness/key pairing
-    // is an L2 fixture quirk): controlState 'ready' on the claude harness, where stream-json
-    // emits no launch-effort echo, so the pair's honest ceiling is 'model-validated'.
+  it("one plain pair (260723): the control carries model · effort; diagnostics never duplicate it", () => {
     const readyClaude = fromTerminalSessionInfo(
       catalogRow({
         id: "ready-claude",
@@ -85,30 +94,17 @@ describe("HeaderStrip (R10)", () => {
         spawnLevelSource: "default",
       }),
     );
-    const { getByTestId } = render(<HeaderStrip session={readyClaude} cockpit={undefined} />);
-    expect(getByTestId("header-provenance-model").textContent).toContain(
-      "claude-fable-5[1m] · max",
+    const { getByTestId, queryByTestId } = render(
+      <HeaderStrip session={readyClaude} cockpit={undefined} />,
     );
-    expect(getByTestId("header-provenance-model").textContent).toContain("(model-validated)");
-    const badge = getByTestId("header-provenance-model").querySelector("[data-evidence-tier]");
-    expect(badge?.getAttribute("data-evidence-tier")).toBe("model-validated");
+    // The pair reads plainly from the one control — no evidence badge, no tier word, no
+    // duplicated provenance chip in the diagnostics cluster.
+    expect(getByTestId("model-effort-trigger-model").textContent).toBe("claude-fable-5[1m]");
+    expect(getByTestId("model-effort-trigger-effort").textContent).toBe("max");
+    expect(queryByTestId("header-provenance-model")).toBeNull();
+    expect(getByTestId("header-strip").querySelector("[data-evidence-tier]")).toBeNull();
+    expect(getByTestId("header-diagnostics").textContent).not.toContain("model");
     expect(getByTestId("header-provenance-level").textContent).toContain("leaf (default)");
-  });
-
-  it("provenance badges (R7): a STARTING row renders the retained pair as requested/pending", () => {
-    const starting = fromTerminalSessionInfo(
-      catalogRow({
-        id: "starting-1",
-        harness: "claude",
-        resolvedModel: "sonnet",
-        resolvedEffort: "high",
-        controlState: "starting",
-      }),
-    );
-    const { getByTestId } = render(<HeaderStrip session={starting} cockpit={undefined} />);
-    expect(getByTestId("header-provenance-model").textContent).toContain("(requested)");
-    const badge = getByTestId("header-provenance-model").querySelector("[data-evidence-tier]");
-    expect(badge?.getAttribute("data-evidence-tier")).toBe("pending");
   });
 
   it("renders no provenance chips for a hand-opened session — absent, never invented", () => {
@@ -120,18 +116,17 @@ describe("HeaderStrip (R10)", () => {
 });
 
 describe("SessionStage container (R10)", () => {
-  it("reserves the WorkingLine slot directly under the header (rendered by L6)", () => {
-    const { getByTestId } = render(
+  it("reserves NO WorkingLine slot in the stage chrome (F-as: it lives between conversation and composer)", () => {
+    const { getByTestId, queryByTestId } = render(
       <SessionStage focused={worker} cockpit={undefined} handoff={null}>
         <div data-testid="surface-child" />
       </SessionStage>,
     );
-    const slot = getByTestId("stage-working-line-slot");
-    expect(slot.getAttribute("data-slot")).toBe("working-line");
-    const header = getByTestId("session-stage").querySelector("[data-stage-header]");
-    // The slot follows the header immediately (before the surface child).
-    expect(header && (header.compareDocumentPosition(slot) & 4)).toBe(4);
-    expect(slot.compareDocumentPosition(getByTestId("surface-child")) & 4).toBe(4);
+    // The turn theater docks where the eye waits for the next
+    // message — SessionsView renders the slot between the conversation and the composer;
+    // the stage's top chrome no longer owns one.
+    expect(queryByTestId("stage-working-line-slot")).toBeNull();
+    expect(getByTestId("surface-child")).not.toBeNull();
   });
 
   it("shows the focus-handoff note (F17) and the explained empty state (R9)", () => {

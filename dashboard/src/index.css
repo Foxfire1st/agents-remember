@@ -61,7 +61,10 @@
     inset: 0;
     z-index: 9999;
     pointer-events: none;
-    mix-blend-mode: multiply;
+    /* 260721 C1: NO mix-blend-mode. A full-page multiply blend forced a whole-screen re-raster on
+       every invalidated frame (each GSAP write / video frame / scroll). Plain alpha compositing
+       keeps the scanlines + vignette — they are translucent black over a dark theme, so the look
+       is ~unchanged — and lets the overlay sit on its own static compositor layer. */
     background:
       repeating-linear-gradient(0deg, oklch(0 0 0 / 0.18) 0 1px, transparent 1px 3px),
       radial-gradient(120% 120% at 50% 50%, transparent 70%, oklch(0 0 0 / 0.22) 100%);

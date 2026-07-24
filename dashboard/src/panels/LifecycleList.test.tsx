@@ -364,8 +364,8 @@ describe("LifecycleList task labels", () => {
   });
 
   it("admits an active leaf doc whose enclosure leafId differs from the doc id only by case (L10)", () => {
-    // The real series shape: enclosure leaf ids are lowercase directory names (260628-l7) while doc
-    // ids are uppercase (260628-L7) and the docPath stem is a numbered slug matching neither.
+    // The real series shape: enclosure leaf ids are lowercase directory names while doc
+    // ids are uppercase and the docPath stem is a numbered slug matching neither.
     seed(
       projection({
         lifecycles: [
@@ -460,7 +460,7 @@ describe("LifecycleList task labels", () => {
   });
 
   it("hides a reopened leaf (cleanup=reopened, no worktrees on disk) until worktree_start recreates them", () => {
-    // The tasks-surface visibility rule (L11): a leaf appears ONLY while a worktree physically
+    // The tasks-surface visibility rule: a leaf appears ONLY while a worktree physically
     // exists. A reopened contract is a reset awaiting restart — its worktrees are gone — so it
     // must NOT render as live work, even though its cleanup state is not completed/abandoned
     // (the proxy that cleanup=reopened outflanked).
@@ -580,7 +580,7 @@ describe("LifecycleList task labels", () => {
   });
 
   it("renders ONE task entry per enclosureId: a bound lifecycle annotates the doc row, never duplicates it", () => {
-    // The L9-reopen defect's second half (L11): the doc row and the live lifecycle's card both
+    // The reopen defect's second half: the doc row and the live lifecycle's card both
     // rendered for the same leaf. The identity rule is one row per enclosureId — the lifecycle
     // bound to the enclosure (by the contract's lifecycleId, or by its own enclosure anchor)
     // annotates the doc row with its state/gate/staleness instead of adding a card.
@@ -674,7 +674,7 @@ describe("LifecycleList task labels", () => {
 
   it("hides an abandoned enclosure from the active operations rows", () => {
     // worktree_abandon discards the worktrees and records cleanup=abandoned; the enclosure is
-    // history, not active work, so neither a lifecycle row nor a doc row may render for it (L11).
+    // history, not active work, so neither a lifecycle row nor a doc row may render for it.
     const onSelect = vi.fn();
     seed(
       projection({
@@ -784,7 +784,7 @@ describe("LifecycleList task labels", () => {
   });
 
   it("renders the orchestration tier above its commanded masters with the V4 treatment (L14)", () => {
-    // An orchestration task is a master doc carrying `orchestrates` (the owner data-model ruling).
+    // An orchestration task is a master doc carrying `orchestrates`.
     // It renders gold-tier at depth 0; a master it names nests one step with the purple tier; that
     // master's leaves keep today's rendering one step further; an uncommanded master is unchanged.
     const onSelect = vi.fn();
@@ -963,7 +963,7 @@ describe("LifecycleList task labels", () => {
   });
 
   it("renders NO orchestration row or insignia in a flat run (D3 regression)", () => {
-    // No doc carries `orchestrates` ⇒ the list is byte-identical to the pre-L14 rendering:
+    // No doc carries `orchestrates` ⇒ the list is byte-identical to the pre-tier rendering:
     // masters top-level, leaves one nested step, zero tier attributes, zero badges.
     const onSelect = vi.fn();
     seed(
@@ -1221,5 +1221,23 @@ describe("LifecycleList independent Operations signals", () => {
     act(() => hydrateTurn("working"));
 
     await waitFor(() => expect(getByTestId("chat-activity").textContent).toBe("working"));
+  });
+
+  it("freezes the rendered collection while its kept-alive rail is hidden, then catches up", async () => {
+    seedActivityProjection();
+    hydrateTurn("turn-ended");
+    const view = render(
+      <LifecycleList selectedId={null} onSelect={vi.fn()} active />,
+    );
+    expect(view.getByTestId("chat-activity").textContent).toBe("idle");
+
+    view.rerender(<LifecycleList selectedId={null} onSelect={vi.fn()} active={false} />);
+    act(() => hydrateTurn("working"));
+    expect(view.getByTestId("chat-activity").textContent).toBe("idle");
+
+    view.rerender(<LifecycleList selectedId={null} onSelect={vi.fn()} active />);
+    await waitFor(() =>
+      expect(view.getByTestId("chat-activity").textContent).toBe("working"),
+    );
   });
 });

@@ -1,6 +1,8 @@
 import { createContext } from "react";
 
 import { readHarnessCatalog, type HarnessInfo } from "./harnessCatalog";
+import { fetchWithTimeout } from "./fetchWithTimeout";
+import { shareInflight } from "./inflight";
 export type { HarnessInfo } from "./harnessCatalog";
 
 // The client half of Mode B2 (slice 6e): a thin WebSocket bridge to the 6d terminal host at
@@ -47,7 +49,7 @@ export interface ConnectTerminalOptions {
   socketFactory?: TerminalSocketFactory;
   /** Override the resolved `ws(s)://…` URL (tests). */
   url?: string;
-  /** Freshness honesty (260715-FEUI-L6 R15 wiring): `connected` on the WS handshake,
+  /** Freshness honesty: `connected` on the WS handshake,
    *  `reconnecting` when an explicit reattach starts, and `dropped` on a non-deliberate
    *  close/exit. A deliberate `dispose()` reports nothing — the pane is gone, not unhealthy. */
   onSocketState?: (state: "connected" | "reconnecting" | "dropped") => void;
@@ -108,7 +110,7 @@ const _delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeou
 
 const PASTE_SETTLE_MS = 250; // let the paste→pending-input widget render before submitting
 const CR_ECHO_SETTLE_MS = 250; // let the Enter's OWN echo land so it folds into the baseline, not a response
-const SUBMIT_RETRY_MS = 1800; // re-send Enter once on this cadence (tuned in S0 against a live harness)
+const SUBMIT_RETRY_MS = 1800; // re-send Enter once on this cadence (tuned against a live harness)
 const SUBMIT_TIMEOUT_MS = 9000; // give up confirming after this and surface an error, never silently
 
 /**
@@ -310,7 +312,7 @@ export function connectTerminal(
   };
 }
 
-// The catalog-row wire shape moved to types/terminalCatalog.ts (260715-FEUI-L2 R4: the cockpit
+// The catalog-row wire shape moved to types/terminalCatalog.ts (the cockpit
 // consumes the FULL `TerminalCatalogEntry.to_json()` shape). Re-exported here so existing
 // consumers keep their import site; `TerminalSessionInfo` is that full row.
 export type {
@@ -346,7 +348,7 @@ export async function fetchHarnesses(base = ""): Promise<HarnessInfo[]> {
 }
 
 /**
- * Same read, failure-distinguishing (260715-FEUI-L3): the launch flow must render a fetch
+ * Same read, failure-distinguishing: the launch flow must render a fetch
  * failure loudly rather than an empty (and therefore lying) harness list — `null` = failed.
  */
 export async function fetchHarnessesOrNull(base = ""): Promise<HarnessInfo[] | null> {
@@ -356,15 +358,32 @@ export async function fetchHarnessesOrNull(base = ""): Promise<HarnessInfo[] | n
   return null;
 }
 
+/**
+ * Hard bound for one terminal-catalog read (the live-wedge guard). The normal poll beat is
+ * milliseconds and boot contention ~1 s; 10 s lets a half-dead socket expire as ONE missed
+ * beat instead of wedging every beat that single-flights behind it.
+ */
+export const TERMINAL_CATALOG_REQUEST_TIMEOUT_MS = 10_000;
+
 export async function fetchTerminalSessionsOrNull(base = ""): Promise<TerminalCatalogRow[] | null> {
-  try {
-    const response = await fetch(`${base}/api/terminal/sessions`);
-    if (!response.ok) return null;
-    const body = (await response.json()) as { sessions?: TerminalCatalogRow[] };
-    return Array.isArray(body.sessions) ? body.sessions : [];
-  } catch {
-    return null;
-  }
+  // Boot hydrate + the 2500 ms poll beat can stack concurrent reads of the same catalog (and
+  // StrictMode doubles the boot hydrate): concurrent callers share one in-flight GET. Failure
+  // still resolves `null` for every caller; settle clears the slot so the next beat re-fires.
+  // The read is BOUNDED: a hung (half-dead) socket must expire as an ordinary `null` beat —
+  // unbounded, it wedges the single-flighted promise and the whole poll loop behind it.
+  return shareInflight(`terminal:sessions:${base}`, async () => {
+    try {
+      const response = await fetchWithTimeout(
+        `${base}/api/terminal/sessions`,
+        TERMINAL_CATALOG_REQUEST_TIMEOUT_MS,
+      );
+      if (!response.ok) return null;
+      const body = (await response.json()) as { sessions?: TerminalCatalogRow[] };
+      return Array.isArray(body.sessions) ? body.sessions : [];
+    } catch {
+      return null;
+    }
+  });
 }
 
 export async function fetchTerminalSessions(base = ""): Promise<TerminalCatalogRow[]> {

@@ -25,7 +25,7 @@ from agents_remember.serving.terminal_catalog import (
     TerminalLivenessEvidence,
 )
 from agents_remember.serving.terminal_paste import capture_pane as _default_capture_pane
-from agents_remember.serving.turn_state import classify_turn_state
+from agents_remember.serving.turn_state import TurnStateClassification, classify_turn_state
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +44,18 @@ DEFAULT_PANE_GONE_FAILURE_THRESHOLD = 1
 
 DEFAULT_LIVENESS_SWEEP_INTERVAL_SECONDS = 10.0
 """Minimum spacing between full catalog sweeps, independent of the dashboard projection tick."""
+
+DEFAULT_STARTING_SWEEP_INTERVAL_SECONDS = 1.0
+"""Minimum spacing between targeted control_state="starting" probes inside the full-sweep gap."""
+
+DEFAULT_CONTROL_READ_FAILURE_THRESHOLD = 3
+"""Consecutive bridge snapshot-read failures before a LIVE row may be marked disconnected.
+
+A read failure on a row whose tmux session just probed alive on this same sweep is ambiguous
+evidence -- a busy bridge losing the 2s read race during an active turn is indistinguishable from
+a dead one -- so, like the tmux command-failure threshold above, one failure never flips the row.
+This does NOT delay process-gone marking: a dead tmux session never reaches the snapshot read; it
+exit-marks through ``with_liveness_failure``'s pane-gone threshold on the same sweep."""
 
 
 @runtime_checkable
@@ -68,7 +80,7 @@ class TerminalCatalogLivenessConfig:
 class TerminalLivenessObservation:
     entry: TerminalCatalogEntry
     alive: bool
-    # Whether THIS observation transitioned ``entry.turn_state`` (260707-HFX-L8): the caller emits
+    # Whether THIS observation transitioned ``entry.turn_state``: the caller emits
     # the observer state-change event only when this is true, never on every sweep tick.
     turn_state_changed: bool = False
 
@@ -105,11 +117,12 @@ class TerminalCatalogLivenessSweeper:
         self._on_control_snapshot = on_control_snapshot
         self._lock = threading.Lock()
         self._last_sweep_at: datetime | None = None
+        self._last_starting_sweep_at: datetime | None = None
 
     def refresh(self) -> list[TerminalCatalogEntry]:
         moment = self._now()
         if self._rate_limited(moment):
-            return self._catalog.list()
+            return self._refresh_starting_rows(moment)
         if not self._lock.acquire(blocking=False):
             return self._catalog.list()
         try:
@@ -117,7 +130,7 @@ class TerminalCatalogLivenessSweeper:
             if self._rate_limited(moment):
                 return self._catalog.list()
             self._last_sweep_at = moment
-            # 260707-HFX2-L12 F1/CS-6 D2+D3: one disk read + one disk write for the whole sweep. The
+            # One disk read + one disk write for the whole sweep. The
             # per-entry probes' read-modify-writes and the terminated-row reclamation all hit the batch's
             # in-memory buffer; the single atomic commit lands on ``batch()`` exit. Without this each of
             # the n probes re-read and rewrote the full catalog file -- O(n^2) disk work per sweep.
@@ -134,6 +147,57 @@ class TerminalCatalogLivenessSweeper:
             return [observation.entry for observation in observations]
         finally:
             self._lock.release()
+
+    def _refresh_starting_rows(self, moment: datetime) -> list[TerminalCatalogEntry]:
+        """Targeted re-probe of starting harness rows while the full sweep is rate-limited.
+
+        A fresh chat's catalog row sits at control_state="starting" until a sweep
+        projects its first bridge snapshot, so the 10s full-sweep rate limit quantized the
+        starting -> ready flip to ~10.4s measured while the bridge was ready in ~4.6s -- and the
+        composer gate waits on catalog readiness. Inside the full-sweep blackout, re-probe only
+        running harness rows still marked "starting" (capped at 4) at most once per
+        DEFAULT_STARTING_SWEEP_INTERVAL_SECONDS, under the same non-overlapping lock and one batch
+        commit. Full-sweep cadence, compaction, and failure hysteresis are unchanged: the fast
+        path runs the same observe_terminal_liveness, so with_liveness_failure's minimum window
+        still gates exit marking.
+        """
+        if self._starting_rate_limited(moment):
+            return self._catalog.list()
+        entries = self._catalog.list()
+        starting = [
+            entry
+            for entry in entries
+            if entry.kind == "harness"
+            and entry.status == "running"
+            and entry.control_state == "starting"
+        ][:4]  # cap the fast-path batch so a starting-row burst stays bounded
+        if not starting:
+            return entries
+        if not self._lock.acquire(blocking=False):
+            return entries
+        try:
+            moment = self._now()
+            if self._starting_rate_limited(moment):
+                return self._catalog.list()
+            self._last_starting_sweep_at = moment
+            with self._catalog.batch():
+                observations = [
+                    self._observe_catalog_entry(entry, checked_at=moment) for entry in starting
+                ]
+            if self._on_turn_state_change is not None:
+                for observation in observations:
+                    if observation.turn_state_changed:
+                        self._on_turn_state_change(observation)
+            return self._catalog.list()
+        finally:
+            self._lock.release()
+
+    def _starting_rate_limited(self, moment: datetime) -> bool:
+        return (
+            self._last_starting_sweep_at is not None
+            and (moment - self._last_starting_sweep_at).total_seconds()
+            < DEFAULT_STARTING_SWEEP_INTERVAL_SECONDS
+        )
 
     def _rate_limited(self, moment: datetime) -> bool:
         return (
@@ -241,19 +305,13 @@ def _observe_alive(
     try:
         snapshot = snapshot_reader(entry)
     except HarnessControlError as exc:
-        projected = replace(
+        return _observe_control_read_failure(
+            catalog,
             entry,
-            control_state="disconnected",
-            control_activity="unknown",
-            control_acceptance="unknown",
-            control_raw={
-                **(entry.control_raw or {}),
-                "bridgeError": str(exc),
-                "paneDiagnostic": pane_diagnostic.state,
-            },
+            exc,
+            pane_diagnostic=pane_diagnostic,
+            checked_at=checked_at,
         )
-        catalog.upsert(projected)
-        return _record_adapter_turn_state(catalog, projected, "stale", checked_at)
     projected = project_control_snapshot(catalog, entry, snapshot)
     projected = replace(
         projected,
@@ -272,8 +330,71 @@ def _observe_alive(
             else None,
         )
     return _record_adapter_turn_state(
-        catalog, projected, snapshot_turn_state(snapshot), checked_at
+        catalog,
+        projected,
+        snapshot_turn_state(snapshot, previous=projected.turn_state),
+        checked_at,
     )
+
+
+def _observe_control_read_failure(
+    catalog: TerminalCatalog,
+    entry: TerminalCatalogEntry,
+    exc: HarnessControlError,
+    *,
+    pane_diagnostic: TurnStateClassification,
+    checked_at: datetime,
+) -> TerminalLivenessObservation:
+    """Hysteresis for one failed bridge snapshot read on a session that just probed ALIVE.
+
+    This row's tmux session probed alive on THIS sweep, so the failed read is
+    ambiguous -- a busy bridge losing the 2s snapshot race during an active working turn looks
+    identical to a dead one. Flipping ``control_state`` to "disconnected" (+ ``turn_state``
+    "stale") on the FIRST failure lied about provably-working seats, measured live twice, and the
+    frontend had to rank around the phantom. Mirror the tmux failure hysteresis instead: persist
+    a consecutive-failure count on the row (a daemon restart cannot erase it, same rationale as
+    ``liveness_failures``) and require DEFAULT_CONTROL_READ_FAILURE_THRESHOLD consecutive failed
+    reads before marking disconnected. Below the threshold the row keeps its last projected
+    control/turn state -- a failed read is the ABSENCE of evidence, not evidence of loss -- and no
+    turn-state observer event fires. The next successful read wipes the counter with the rest of
+    ``control_raw`` (``control_snapshot_entry`` reprojects it from the snapshot), so recovery
+    needs no special case. Exit marking is untouched: a dead tmux session never reaches this
+    path -- ``observe_terminal_liveness`` exit-marks it through ``with_liveness_failure``'s
+    pane-gone threshold on the same sweep.
+    """
+    raw = dict(entry.control_raw or {})
+    previous = raw.get("controlReadFailures")
+    failures = (previous if isinstance(previous, int) and not isinstance(previous, bool) else 0) + 1
+    # Only a row that has ALREADY projected a live bridge may be flipped to
+    # "disconnected" by the strike counter. A row still at control_state="starting" has never
+    # connected -- its failed reads are a bridge still booting (the control socket is not listening
+    # yet), the ABSENCE of a connection rather than the loss of one. The starting-row fast path selects on
+    # control_state=="starting", so rewriting a booting row to "disconnected" on the 3rd strike both
+    # lied ("disconnected" asserts a connection existed and dropped) AND evicted the row from the
+    # fast path mid-boot, stranding it on the 10s full-sweep cadence (measured: bind@12s served ready
+    # at 20.0s instead of 12.5s). Keep a booting row "starting" through however many read failures
+    # its boot takes so it rides the fast path until the bridge opens. The connected-row flip is untouched: a row
+    # that reached "ready"/"working" still flips after the threshold, and a dead tmux session never
+    # reaches this read -- it exit-marks on with_liveness_failure's pane-gone path on the same sweep.
+    disconnected = (
+        failures >= DEFAULT_CONTROL_READ_FAILURE_THRESHOLD and entry.control_state != "starting"
+    )
+    projected = replace(
+        entry,
+        control_state="disconnected" if disconnected else entry.control_state,
+        control_activity="unknown" if disconnected else entry.control_activity,
+        control_acceptance="unknown" if disconnected else entry.control_acceptance,
+        control_raw={
+            **raw,
+            "bridgeError": str(exc),
+            "controlReadFailures": failures,
+            "paneDiagnostic": pane_diagnostic.state,
+        },
+    )
+    catalog.upsert(projected)
+    if not disconnected:
+        return TerminalLivenessObservation(entry=projected, alive=True)
+    return _record_adapter_turn_state(catalog, projected, "stale", checked_at)
 
 
 def _observe_control_snapshot(
@@ -286,7 +407,7 @@ def _observe_control_snapshot(
 ) -> TerminalCatalogEntry:
     """Run the hosted-interaction synchronizer as a quarantined per-entry side effect.
 
-    260718-CHATS-L5 H1. The synchronizer is a downstream durable projection (agent-question gates
+    The synchronizer is a downstream durable projection (agent-question gates
     plus operator-inbox completion rows), NOT part of computing this row's liveness/control state --
     which is already committed by the ``catalog.upsert(projected)`` above. A single poisoned
     completion (e.g. an adapter terminal result whose ``vendorCorrelationId`` matches no accepted
@@ -297,7 +418,7 @@ def _observe_control_snapshot(
     let one row's side-effect failure break the catalog projection. This is availability hardening of
     a proven failure; it does not touch the completion-correlation contract that raised.
 
-    260718-CHATS-L5 F2: an orphan completion is the NORMAL steady state of every cockpit-driven
+    An orphan completion is the NORMAL steady state of every cockpit-driven
     hosted chat (a cockpit turn's terminal result carries a ``vendorCorrelationId`` that matches no
     operator-inbox row because it never was an inbox delivery), so the failure re-fires on EVERY
     ~10 s sweep, indefinitely. Log only on STATE CHANGE -- first occurrence / a changed error / heal
@@ -332,9 +453,14 @@ def _observe_control_snapshot(
 def _record_adapter_turn_state(
     catalog: TerminalCatalog,
     entry: TerminalCatalogEntry,
-    state: SeatTurnState,
+    state: SeatTurnState | None,
     checked_at: datetime,
 ) -> TerminalLivenessObservation:
+    # A None projection makes NO seat claim this sweep (a healthy
+    # boot or a fresh ready-idle chat) — the row keeps its last claim (or none) and no
+    # turn-state event fires, rather than stamping an alarming "stale"/"turn-ended".
+    if state is None:
+        return TerminalLivenessObservation(entry=entry, alive=True)
     previous_state = entry.turn_state
     updated = catalog.record_turn_state(entry.id, state, changed_at=checked_at.isoformat())
     resolved = updated or entry

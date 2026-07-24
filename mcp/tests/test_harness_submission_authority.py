@@ -37,6 +37,7 @@ from agents_remember.serving.harness_control_models import (
     SubmissionReceipt,
 )
 from agents_remember.serving.harness_submission_authority import (
+    DISPATCH_ACCEPTANCE_GRACE_SECONDS,
     HarnessSubmissionAuthority,
 )
 
@@ -175,6 +176,7 @@ def _authority(
     timeline_limit: int = 64,
     ledger_limit: int = 256,
     bridge_epoch: str = "epoch-1",
+    dispatch_grace_seconds: float = DISPATCH_ACCEPTANCE_GRACE_SECONDS,
 ) -> HarnessSubmissionAuthority:
     authority = HarnessSubmissionAuthority(
         adapter,
@@ -185,6 +187,7 @@ def _authority(
         set_snapshot=lambda value: setattr(adapter, "current", value),
         publish=lambda: None,
         bridge_epoch=bridge_epoch,
+        dispatch_grace_seconds=dispatch_grace_seconds,
     )
     authority.start()
     return authority
@@ -242,6 +245,49 @@ class HarnessSubmissionAuthorityTests(unittest.IsolatedAsyncioTestCase):
             assert authority.active_operation is not None
             await _complete(authority, authority.active_operation, 1)
         finally:
+            await authority.stop(forced=True)
+
+    async def test_slow_dispatch_evidence_returns_queued_on_grace_and_still_completes(self) -> None:
+        """Vendor evidence slower than the dispatch grace must not hold the submit response.
+
+        Claude's replay echo flushes with the turn's first output (~4.25s
+        measured live), so awaiting it held every dashboard submit POST for the full TTFT.
+        The submit answers "queued" on the grace while the record stays live, and the late
+        echo still mints the delivered upgrade through status.  Without the grace this test's
+        submit never returns (the adapter stays blocked) and the wait_for below fails.
+        """
+
+        adapter = _AuthorityAdapter()
+        adapter.block_submit = True
+        authority = _authority(adapter, dispatch_grace_seconds=0.05)
+        try:
+            receipt = await asyncio.wait_for(authority.submit(_prompt("grace")), 1)
+            self.assertEqual(receipt.acceptance, "queued")
+            self.assertIsNone(receipt.accepted_at)
+            assert receipt.detail is not None
+            self.assertIn("acceptance evidence is pending", receipt.detail)
+            active = authority.active_operation
+            self.assertIsNotNone(active)
+            assert active is not None
+            self.assertEqual(active.operation_id, "grace")
+            # The late echo still lands: releasing the adapter mints the delivered upgrade.
+            adapter.release_submit.set()
+            submission = None
+            for _ in range(10):
+                status = await authority.status("epoch-1", ("grace",), cockpit_only=True)
+                submission = status.submissions[0].submission
+                assert submission is not None
+                if submission.state == "delivered":
+                    break
+                await asyncio.sleep(0)
+            assert submission is not None
+            self.assertEqual(submission.state, "delivered")
+            self.assertEqual(submission.accepted_at, NOW)
+            self.assertFalse(submission.withdrawable)
+            assert authority.active_operation is not None
+            await _complete(authority, authority.active_operation, 1)
+        finally:
+            adapter.release_submit.set()
             await authority.stop(forced=True)
 
     async def test_dispatch_claim_wins_atomic_withdrawal_race(self) -> None:

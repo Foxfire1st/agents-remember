@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 import {
   Button,
   Dialog,
@@ -241,7 +241,7 @@ function successful(record: SubmitRecord): boolean {
   return record.phase === "accepted" || record.phase === "queued";
 }
 
-export function HighlightComposer({
+function HighlightComposerImpl({
   selectedLifecycleId,
   viewedLeafKey,
   leafChatActive = false,
@@ -694,3 +694,8 @@ export function HighlightComposer({
     </>
   );
 }
+
+// Memoized (tab-switch CPU): mounted once under the shell — the shell re-renders on every
+// view switch with unchanged props, and the memo gate skips this subtree then; its own store
+// subscriptions still drive its updates.
+export const HighlightComposer = memo(HighlightComposerImpl);

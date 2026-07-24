@@ -1,12 +1,12 @@
-"""Registered active conversation routes (260718-CHATS-L1).
+"""Registered active conversation routes.
 
-Two production wires behind the L0 composition: the authorized native-hydrated
+Two production wires behind the shared composition: the authorized native-hydrated
 page and the resumable SSE event stream. Every wire resolves the caller
-through the L0 authorization dependency, compares ``expectedBridgeEpoch``
+through the shared authorization dependency, compares ``expectedBridgeEpoch``
 against the live submission authority, and maps every typed refusal to the
 serving status idiom — pre-stream as typed HTTP errors, established-stream
 failures as one typed ``gap`` plus close. Raw 500s are never a routine
-refusal path (L0 reviewer obligation O4).
+refusal path.
 
 The SSE channel emits explicit wire frames over ``StreamingResponse`` (not
 generator routes): pre-stream validation must complete before any header is
@@ -190,6 +190,12 @@ async def _event_stream(
     subscription: ActiveSubscription,
 ) -> AsyncIterator[bytes]:
     try:
+        # Prime the stream with one SSE comment: the first body chunk makes
+        # GZipMiddleware flush http.response.start immediately, so a caught-up
+        # subscriber's headers arrive at connect instead of with the next
+        # mutation. EventSource ignores comment lines natively; this carries no
+        # cursor and no event field and disturbs neither replay nor gap order.
+        yield b": connected\n\n"
         for envelope in subscription.replay:
             yield _sse_frame(envelope.model_copy(update={"delivery": "resume-replay"}))
         while True:

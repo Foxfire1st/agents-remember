@@ -5,8 +5,8 @@ GitHub Releases (there is no `CHANGELOG.md`); the canonical tag is `mcp-vX.Y.Z`.
 
 ## Quality
 
-- [ ] `python -m agents_remember.code_quality.check --fail-on-crap-threshold` passes (Ruff, Pyright,
-      the full pytest suite, and CRAP).
+- [ ] `python -m agents_remember.code_quality.check` passes (Ruff, Pyright, the full pytest suite,
+      and mandatory CRAP threshold enforcement).
 - [ ] CI is green on the PR across the Python `3.11 / 3.12 / 3.13` matrix.
 
 ## Version sync (must all match)

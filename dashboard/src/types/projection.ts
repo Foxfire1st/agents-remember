@@ -1,7 +1,7 @@
 // TypeScript mirror of the served projection contract
 // (mcp/src/agents_remember/observer/projection.py). camelCase to match the wire form;
 // the server dumps with `exclude_none=True`, so `T | None` fields are omitted when null —
-// modelled here as optional (`?:`). `projection.py` is the source of truth (D7: codegen
+// modelled here as optional (`?:`). `projection.py` is the source of truth (codegen
 // from pydantic is deferred; keep these in lockstep by hand for now).
 
 export type State = "running" | "paused" | "blocked" | "completed" | "abandoned";
@@ -70,7 +70,7 @@ export interface EnclosureNode {
   closeoutStatus: string;
   integrationStatus: string;
   cleanup: string;
-  // Worktree-existence truth (L11): stat'ed server-side at snapshot time (never inferred from
+  // Worktree-existence truth: stat'ed server-side at snapshot time (never inferred from
   // cleanup state). The tasks surface renders a leaf ONLY while a worktree physically exists —
   // cleanup=reopened means contract-reset-awaiting-restart, not live work.
   codeWorktreeExists: boolean;
@@ -158,15 +158,15 @@ export interface LedgerNode {
   closeoutCount: number; // the FULL row total (the popover "+N more" footer derives from it)
   lastVerifiedCodeCommit: string;
   baseCodeCommit: string;
-  rows: LedgerRefNode[]; // newest window for the official coupler popover (5h)
+  rows: LedgerRefNode[]; // newest window for the official coupler popover
 }
 
-// One memory.md ledger row — a code→memory commit mapping (5h coupler popover). Full SHAs; the popover
+// One memory.md ledger row — a code→memory commit mapping for the coupler popover. Full SHAs; the popover
 // shortens them for display and highlights this enclosure's row.
 export interface LedgerRefNode {
   codeCommit: string;
   memoryCommit: string;
-  // best-effort per-side commit message + committer ISO date (5h Tier 2); omitted when the commit
+  // best-effort per-side commit message + committer ISO date; omitted when the commit
   // isn't in the local repo or the probe failed — the row falls back to the hash alone (never faked)
   codeSubject?: string;
   codeDate?: string;
@@ -244,8 +244,9 @@ export interface TaskDocNode {
   subTasks: TaskSubTaskRefNode[]; // master-only; empty for light/subTask
   sections: TaskSectionNode[]; // master render plan or non-master freeform sections
   masterLifecycleId?: string; // parent master's lifecycle (cross-series) → "↑ parent series" breadcrumb
-  // The orchestration-command relation (L14): non-empty only on a master doc that IS an orchestration
-  // task — the master task names it commands. Optional so projections persisted before L14 still parse.
+  // The orchestration-command relation: non-empty only on a master doc that IS an orchestration
+  // task — the master task names it commands. Optional so projections persisted before this field
+  // was added still parse.
   orchestrates?: string[];
 }
 
@@ -279,7 +280,7 @@ export interface AttentionItem {
   enclosure?: string;
   repoId?: string;
   providerId?: string;
-  signalTs?: string; // triggering-signal time — current-occurrence acknowledgement anchor (leaf-28 S5.2)
+  signalTs?: string; // triggering-signal time — current-occurrence acknowledgement anchor
 }
 
 export interface AgentPickupNode {
@@ -299,7 +300,7 @@ export interface AgentPickupNode {
   artifactPath?: string;
   deliveryState: "queued" | "no-hosted-session" | "delivered" | "unconfirmed" | string;
   deliveredToSession?: string;
-  /** Redelivery/escalation facts are omitted by persisted projections predating HFX2-L1/L4. */
+  /** Redelivery/escalation facts are omitted by persisted projections that predate those fields. */
   attemptCount?: number;
   lastAttemptAt?: string;
   nextAttemptAt?: string;
@@ -309,7 +310,7 @@ export interface AgentPickupNode {
   ttlSeconds: number;
 }
 
-// --- engine room process map (slice 5e) --------------------------------------
+// --- engine room process map -------------------------------------------------
 
 // The honesty axis: observed = checkout exists on disk; derived = recorded contract
 // field whose checkout is absent; planned = expected-but-not-yet; missing = unobservable;
@@ -357,13 +358,13 @@ export interface EngineProcessEdge {
   state: string; // nominal | running | blocked | failed | stale | skipped | complete | planned | refused | unknown
   label: string;
   detail?: string;
-  // 05o — refused-conduit flash polarity (T9B/T9C/T14C): amber = a reroute/fallback (CGC seed → reindex),
+  // Refused-conduit flash polarity: amber = a reroute/fallback (CGC seed → reindex),
   // red = a fault/conflict (GrepAI seed fault, integration conflict). Carried only on a `refused`-state edge
   // (the explicit reroute). A `failed`/`stale` seed/integration edge derives its polarity in the renderer.
   refusedPolarity?: "amber" | "red";
 }
 
-// One remote/PR participant in the successful-landing arc (slice 5h). `factState` is the honesty
+// One remote/PR participant in the successful-landing arc. `factState` is the honesty
 // axis (like CommitRefNode): observed = a live git/gh probe confirmed it; planned = expected but not
 // yet; missing = the probe could not run (e.g. gh absent). The cockpit never animates a planned PR
 // as a live one.
@@ -395,14 +396,14 @@ export interface EngineProcessNode {
   memorySource?: CommitRefNode;
   memoryWorktree?: CommitRefNode;
   ledgerPath?: string;
-  // The memory.md ledger window for the WORKTREE coupler popover (5h): newest rows mapping this
+  // The memory.md ledger window for the WORKTREE coupler popover: newest rows mapping this
   // worktree's code↔memory commits + the total count (for the "+N more in memory.md" footer).
   ledgerRows: LedgerRefNode[];
   ledgerRowCount: number;
   humanReviewStatus: string;
   closeoutStatus: string;
   integrationStatus: string;
-  integrationStrategy?: string; // ff-only | replay; absent until the integration decision is recorded (5h)
+  integrationStrategy?: string; // ff-only | replay; absent until the integration decision is recorded
   cleanup: string;
   setupState?: string; // running | stale | failed | failed-unchecked | ok | complete | prepared
   currentPhase?: string;
@@ -413,9 +414,9 @@ export interface EngineProcessNode {
   retryArgs?: Record<string, unknown>;
   providers: ProviderBootNode[];
   edges: EngineProcessEdge[];
-  landing?: LandingRefNode[]; // the successful-landing arc (slice 5h); absent in pre-5h/persisted projections, empty until closeout/integration
+  landing?: LandingRefNode[]; // the successful-landing arc; absent in persisted projections, empty until closeout/integration
   actions: ActionAvailability[];
-  nextAction?: string; // the lifecycle-guidance next operation (display/copy only until slice 06)
+  nextAction?: string; // the lifecycle-guidance next operation (display/copy only for now)
   summary: string;
   missingFacts: string[];
   sourceFiles: string[];
@@ -432,11 +433,11 @@ export interface Analytics {
   ledgers: LedgerNode[];
   taskDocuments: TaskDocNode[];
   series: SeriesNode[];
-  attentionQueue: AttentionItem[]; // derived surface — composed by the reducer (slice 05)
-  engineProcesses: EngineProcessNode[]; // derived surface — the Engine Room process map (slice 5e)
+  attentionQueue: AttentionItem[]; // derived surface — composed by the reducer
+  engineProcesses: EngineProcessNode[]; // derived surface — the Engine Room process map
 }
 
-// The boot-time serving stamp (260703-L15, serving/build_info.py): which build/process is
+// The boot-time serving stamp (serving/build_info.py): which build/process is
 // answering. Injected app-side onto /api/state and the SSE snapshot (NOT reducer truth, so it
 // is optional here and absent from persisted latest-state.json). `commit` is best-effort —
 // omitted when the server runs off-checkout (an installed wheel).
@@ -446,10 +447,12 @@ export interface ServingBuild {
   commit?: string;
   /** Fingerprint of the shipped dashboard build inputs; compared with the running JS bundle. */
   dashboardBuild?: string;
+  /** Present (true) when the serving checkout had uncommitted code at boot — rendered as `·dirty`. */
+  dirty?: boolean;
 }
 
-// The supervisor sweep's self-liveness tick (260707-HFX2-L2 R5, serving/supervisor_heartbeat.py):
-// "the watcher must be code AND watched" (#15). Injected app-side onto /api/state and the SSE
+// The supervisor sweep's self-liveness tick (serving/supervisor_heartbeat.py):
+// "the watcher must be code AND watched". Injected app-side onto /api/state and the SSE
 // snapshot at RESPONSE time (deliberately volatile — never gates the projection's ETag change
 // revision), so `lastTickAt`/`ageSeconds` are as-of-request, not as-of-last-projection-change.
 // `lastTickAt: null` means the supervisor has never ticked in this workspace (dashboard/supervisor

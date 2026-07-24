@@ -42,9 +42,9 @@ jobs:
 
       # Enforces ALL of: ruff (lint), Pyright (types), the full pytest suite, and
       # CRAP (complexity x coverage). The wrapper exits non-zero if ANY of them
-      # fail; --fail-on-crap-threshold adds CRAP as the fourth hard gate.
+      # fail; CRAP threshold enforcement is mandatory in the default command.
       - name: Run quality wrapper (ruff + Pyright + pytest + CRAP, enforcing)
-        run: python -m agents_remember.code_quality.check --fail-on-crap-threshold
+        run: python -m agents_remember.code_quality.check
 
   dashboard:
     name: Dashboard frontend rail

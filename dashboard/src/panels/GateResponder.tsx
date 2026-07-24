@@ -11,6 +11,7 @@ import { Button, Dialog, TextArea, TextField } from "react-aria-components";
 
 import { css, cx } from "../../styled-system/css";
 import { postGateDecision } from "../data/actions";
+import { readAdapterDecisionFailure } from "../data/interactionAnswer";
 import { postOperatorInbox } from "../data/operatorInbox";
 import {
   sessionStore,
@@ -155,8 +156,62 @@ const area = css({
 const footer = css({ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "0.5rem" });
 const statusNote = css({ color: "amber", fontSize: "0.7rem" });
 
+// A reopened hosted-interaction gate carries `packet.adapterDecisionFailure` — proof the operator's
+// last decision could not be applied. Without this the reopened gate looks identical to a
+// never-answered one (M6): the failure notice makes the reopen honest at a glance.
+const decisionFailureBox = css({
+  display: "grid",
+  gap: "0.25rem",
+  padding: "0.4rem 0.5rem",
+  borderWidth: "1px",
+  borderStyle: "solid",
+  borderColor: "alarm",
+  borderRadius: "2px",
+  background: "oklch(0.62 0.19 25 / 0.08)",
+  fontSize: "0.72rem",
+});
+const decisionFailureLead = css({ color: "alarm", fontWeight: 600 });
+const decisionFailureNote = css({
+  whiteSpace: "pre-wrap",
+  overflowWrap: "anywhere",
+  color: "ink",
+  paddingInline: "0.4rem",
+  paddingBlock: "0.3rem",
+  background: "bg",
+  borderLeftWidth: "2px",
+  borderLeftStyle: "solid",
+  borderLeftColor: "alarm",
+});
+const decisionFailureLine = css({ color: "muted" });
+
 function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max);
+}
+
+// The decided gate state, as an operator-facing noun for the failure lead. An unrecognized state
+// falls back to the raw word rather than a guess.
+const DECISION_NOUNS: Record<string, string> = {
+  approved: "approval",
+  rejected: "rejection",
+  "revision-requested": "revision request",
+  cancelled: "dismissal",
+};
+
+function decisionNoun(decision: string | undefined): string {
+  if (!decision) return "answer";
+  return DECISION_NOUNS[decision] ?? `${decision} decision`;
+}
+
+// hosted_interactions.py proves exactly two delivery certainties; each maps to honest copy and
+// NOTHING is asserted beyond them. "not-sent" = zero bytes reached the harness (safe to redo);
+// "unknown" = the harness may already hold the answer (redoing could answer it twice). Any other
+// word (a wire we did not author) is shown verbatim, never guessed into one of the two.
+function deliveryHonesty(delivery: string): string {
+  if (delivery === "not-sent") return "The harness never received it, so deciding again is safe.";
+  if (delivery === "unknown") {
+    return "The harness may already hold it — deciding again could answer the question twice.";
+  }
+  return `Delivery state: ${delivery}.`;
 }
 
 export function GateResponder({
@@ -179,6 +234,7 @@ export function GateResponder({
   const canAttachActive = Boolean(activeSession && !activeSession.lifecycleId);
   const fullRequest = useMemo(() => requestText(gateNode, ask), [gateNode, ask]);
   const diagnosticsText = useMemo(() => diagnosticText(gateNode, ask), [gateNode, ask]);
+  const decisionFailure = readAdapterDecisionFailure(gateNode?.packet);
   const [open, setOpen] = useState(false);
   const [mode, setMode] = useState<ResponseMode | null>(null);
   const [draft, setDraft] = useState("");
@@ -350,6 +406,29 @@ export function GateResponder({
           Respond
         </Button>
       </div>
+      {decisionFailure ? (
+        // Only a reopened gate carries this. State exactly what the packet proves — the prior answer
+        // and whether the harness may already hold it — never that it was applied.
+        <div className={decisionFailureBox} role="alert" data-testid="gate-decision-failure">
+          <span className={decisionFailureLead} data-testid="gate-decision-failure-lead">
+            Your previous {decisionNoun(decisionFailure.decision)} could not be applied.
+          </span>
+          {decisionFailure.decisionNote ? (
+            <span className={decisionFailureNote} data-testid="gate-decision-failure-answer">
+              {decisionFailure.decisionNote}
+            </span>
+          ) : null}
+          <span className={decisionFailureLine} data-testid="gate-decision-failure-delivery">
+            {deliveryHonesty(decisionFailure.delivery)}
+          </span>
+          {decisionFailure.reason ? (
+            <span className={decisionFailureLine} data-testid="gate-decision-failure-reason">
+              Reason: {decisionFailure.reason}
+            </span>
+          ) : null}
+          <span className={decisionFailureLine}>Use Respond to decide again.</span>
+        </div>
+      ) : null}
       {open ? (
         <Dialog aria-label="Respond to gate" className={panel} data-testid="gate-respond-dialog">
           <pre

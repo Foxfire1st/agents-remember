@@ -1,8 +1,8 @@
-// The Engine Room pod-stage bird's-eye (5g G1): the live EngineProcessNode rendered as the
+// The Engine Room pod-stage bird's-eye: the live EngineProcessNode rendered as the
 // two-world canvas from the design prototype (dashboard/public/_proto/podstage.html) — official
 // line (left) <-> worktree enclosure (right), podracer engine gauges, the warp coupler, and the
-// flow conduits. G1 is the STATIC frame (the nominal end-state); the boot/failure choreography
-// (draw-on, travelling packets, center-out fill, gates) is G2+. Geometry is ported from the
+// flow conduits. This is the STATIC frame (the nominal end-state); the boot/failure choreography
+// (draw-on, travelling packets, center-out fill, gates) is layered on separately. Geometry is ported from the
 // prototype's viewBox (0 0 1200 660). State always comes from the model (factState / runtimeState /
 // edge.state), never a class name alone — so the truth stays in the projection, not the render.
 
@@ -158,7 +158,7 @@ const POS = {
   memorySource: { x: COL_MAIN_CX - 90, y: 372, w: 180 },
   codeWorktree: { x: COL_WT_CX - 100, y: 250, w: 200 }, // = mockup w-code (worktree, right)
   memoryWorktree: { x: COL_WT_CX - 100, y: 372, w: 200 },
-  // The feat/fix source branch — the THIRD tier the worktree was actually branched off (5f §7.4). It
+  // The feat/fix source branch — the THIRD tier the worktree was actually branched off. It
   // lives in the GAP between main and the worktree and is shown only during landing (mockup feat-code /
   // feat-mem, w136), so the closeout reads main → feat → worktree, never main = feat.
   featCode: { x: COL_FEAT_CX - 68, y: 250, w: 136 },
@@ -177,7 +177,7 @@ const EDGE_GEOM: Record<string, readonly [number, number, number, number]> = {
   // main right edge (COL_MAIN_CX+90) → worktree left edge (COL_WT_CX-100): the intake lanes spanning the gap.
   "worktree-add": [COL_MAIN_CX + 90, 281, COL_WT_CX - 100, 281],
   "ledger-map": [COL_MAIN_CX + 90, 403, COL_WT_CX - 100, 403],
-  // Provider CLONE arrows (5f §7.2 "cloned-from, not re-indexed"): the worktree engines are SEEDED BY
+  // Provider CLONE arrows ("cloned-from, not re-indexed"): the worktree engines are SEEDED BY
   // CLONING the official-line engines — a fast copy of the index / vector DB — NOT rebuilt from the
   // worktree code. So the seed/clone flow runs official-provider -> worktree-provider, sweeping across
   // the whole stage (CGC arcs over the top, GrepAI under the bottom; see the clone-arc path in Conduit),
@@ -198,7 +198,7 @@ const EDGE_GEOM: Record<string, readonly [number, number, number, number]> = {
 };
 
 // The conduit path string for an edge — a straight line for settled lanes, the cross-stage BOW for the
-// provider clone arcs (CGC over the top / GrepAI under the bottom). Shared by Conduit and the 05o refused-
+// provider clone arcs (CGC over the top / GrepAI under the bottom). Shared by Conduit and the refused-
 // conduit flash overlay so the flash traces the EXACT same lane geometry (no duplicated arc maths).
 function conduitPathD(edge: EngineProcessEdge): string | null {
   const geom = EDGE_GEOM[edge.kind];
@@ -211,7 +211,7 @@ function conduitPathD(edge: EngineProcessEdge): string | null {
     : `M${x1} ${y1} L ${x2} ${y2}`;
 }
 
-// 05o refused-conduit flash polarity (T9B/T9C/T14C), read off the projection — NEVER a class alone. A
+// Refused-conduit flash polarity (T9B/T9C/T14C), read off the projection — NEVER a class alone. A
 // seed/integration lane that is `refused` carries its polarity explicitly (amber reroute / red fault); a
 // `failed` lane is a fault (red), a `stale` lane a reroute (amber). Any other kind/state → no flash.
 function refusedPolarityOf(edge: EngineProcessEdge): "amber" | "red" | null {
@@ -267,8 +267,8 @@ function BranchNode({ pos, label, refNode, landingIn = false, detaching = false,
   const maxChars = Math.max(8, Math.floor((pos.w - 20) / 7.4));
   const flags = `${refNode.dirty ? " · dirty" : ""}${refNode.behindSource ? ` · ${refNode.behindSource} behind` : ""}`;
   const full = `${label}: ${branch}${refNode.commit ? ` @ ${refNode.commit}` : ""}${flags}`;
-  // Motion owns the materialise/de-materialise (opacity + slide) + the landing-tier mount fade+lift (05f
-  // §8); GSAP/CSS never touch this group. A detaching worktree node drifts out on a slight delay so the
+  // Motion owns the materialise/de-materialise (opacity + slide) + the landing-tier mount fade+lift;
+  // GSAP/CSS never touch this group. A detaching worktree node drifts out on a slight delay so the
   // de-materialise reads engines → nodes → border. Under !animate it mounts at the end-state (initial=false),
   // so the count/presence tests stay synchronous; `landingIn` enters from above; `exit` lets a feat-tier
   // node leave (inside AnimatePresence) instead of blinking.
@@ -283,7 +283,7 @@ function BranchNode({ pos, label, refNode, landingIn = false, detaching = false,
       transition={{ duration: animate ? 0.5 : 0, ease: [0.2, 0.7, 0.2, 1], delay: detachDelay }}
     >
       <title>{full}</title>
-      {/* 05o T1B — a stale base node (local main behind upstream) reads DORMANT/pruned over its fact-state box.
+      {/* T1B — a stale base node (local main behind upstream) reads DORMANT/pruned over its fact-state box.
           NB: the local `cx` here is the node centre-x (a number) — it shadows Panda's `cx`, so combine by hand. */}
       <rect
         className={pruned ? `${svgNodeBox({ factState: refNode.factState })} ${prunedNode}` : svgNodeBox({ factState: refNode.factState })}
@@ -431,14 +431,14 @@ function EngineGauge({ at, label, runtime, reindex, present = true }: {
 // A commit short-sha for the ledger-coupler label (the two linked hashes it stands for).
 const short = (commit: string | null | undefined): string => (commit ? commit.slice(0, 8) : "—");
 
-// The commit's recorded wall-clock (5h Tier 2): "2026-06-18T18:19:48+02:00" -> "06-18 18:19". A plain
+// The commit's recorded wall-clock: "2026-06-18T18:19:48+02:00" -> "06-18 18:19". A plain
 // string slice — no Date/timezone conversion, so it is deterministic + screenshot-stable and shows the
 // committer's recorded offset, not the viewer's locale. Absent date -> empty cell (honest hash-only row).
 const compactDate = (iso: string | undefined): string =>
   iso && iso.length >= 16 ? iso.slice(5, 16).replace("T", " ") : "";
 
 // The warp coupler = the memory.md LEDGER link: the lookup-table row binding this side's code commit to
-// its memory commit across the two physically distinct repos (5h coupler-semantics fix; NOT the task
+// its memory commit across the two physically distinct repos (coupler-semantics fix; NOT the task
 // series contract). A drawn chain-link glyph + the two linked short-hashes as the label, and — when bound —
 // the warp-core surge (two hot bands born at the link, splitting up + down; ported from podstage.html).
 // Default-show the newest LEDGER_PREVIEW rows; "▾ show N more" expands in place to the full served window
@@ -446,7 +446,7 @@ const compactDate = (iso: string | undefined): string =>
 // full-history browser is the post-ship viewer (agents-remember#88).
 const LEDGER_PREVIEW = 8;
 
-// The ledger-popover content (5h): the memory.md lookup table the coupler stands for, with THIS enclosure's
+// The ledger-popover content: the memory.md lookup table the coupler stands for, with THIS enclosure's
 // row highlighted. Short SHAs for display (full pair in the row `title`). HTML inside a React-Aria Dialog.
 function LedgerTable({ rows, total, currentCode }: {
   rows: LedgerRefNode[];
@@ -521,7 +521,7 @@ function WarpCoupler({ x, bound, label, testid = "warp-coupler", rows, total = 0
   const triggerRef = useRef<SVGRectElement>(null);
   // the popover anchors to this invisible point HIGH in the scene (SVG coords → scales with the canvas),
   // not the coupler button, so it opens in its old upper position and grows DOWNWARD from there (the
-  // coupler button stays the click trigger). 5h Tier 2 feedback.
+  // coupler button stays the click trigger).
   const anchorRef = useRef<SVGRectElement>(null);
   const [open, setOpen] = useState(false);
   const ledgerRows = rows ?? [];
@@ -544,8 +544,11 @@ function WarpCoupler({ x, bound, label, testid = "warp-coupler", rows, total = 0
         <rect ref={anchorRef} x={x + 90} y={58} width={1} height={1} fill="none" pointerEvents="none" aria-hidden="true" />
         {bound ? (
           <>
-            <line className={warpSurge} data-fx="surge" data-dir="up" data-testid="warp-surge" x1={x} y1={cy - 4} x2={x} y2={cy + 4} />
-            <line className={warpSurge} data-fx="surge" data-dir="down" data-testid="warp-surge" x1={x} y1={cy - 4} x2={x} y2={cy + 4} />
+            {/* the surge bands render at FULL geometry; useEngineTimeline scales them from the link
+                point (scaleY + svgOrigin — transforms composite; the old y1/y2 attr tween re-rastered
+                the SVG every frame). data-dir picks which side of the link each band sits. */}
+            <line className={warpSurge} data-fx="surge" data-dir="up" data-testid="warp-surge" x1={x} y1={cy - 26} x2={x} y2={cy - 4} />
+            <line className={warpSurge} data-fx="surge" data-dir="down" data-testid="warp-surge" x1={x} y1={cy + 26} x2={x} y2={cy + 4} />
           </>
         ) : null}
         {/* the ledger link icon — a drawn chain-link (two interlocking rings), not the contract node */}
@@ -600,7 +603,7 @@ function WarpCoupler({ x, bound, label, testid = "warp-coupler", rows, total = 0
 
 function Conduit({ edge, strategy, retiring = false, ghosted = false }: { edge: EngineProcessEdge; strategy?: string; retiring?: boolean; ghosted?: boolean }) {
   // The conduit draw-on (strokeDashoffset 100 → 0) is owned by the GSAP timeline (useEngineTimeline),
-  // which selects every running lane via [data-draw='on'] and staggers them (05f §8). Motion owns this
+  // which selects every running lane via [data-draw='on'] and staggers them. Motion owns this
   // group's opacity; CSS is static. A planned → running cycle re-runs the hook (its signature folds in the
   // running edges) so the lane re-draws, while Motion fades it in. Under !animate nothing runs and the path
   // rests fully drawn (offset 0, the rendered end-state) — the presence tests stay synchronous.
@@ -608,7 +611,7 @@ function Conduit({ edge, strategy, retiring = false, ghosted = false }: { edge: 
   const geom = EDGE_GEOM[edge.kind];
   if (!geom) return null;
   const [x1, y1, x2, y2] = geom;
-  // 5k F7 — the integration return lane (worktree closeout commits → feat/source branch in the gap) is a
+  // The integration return lane (worktree closeout commits → feat/source branch in the gap) is a
   // plain straight connection like every other settled lane. `replay` (commits rebased onto a moved main)
   // vs a clean `ff-only` is NOT encodable as a line shape: a bent/bowed return lane read as an unexplained
   // triangle, never "around parallel work". The replay fact is recorded as data-strategy (for a future text
@@ -619,7 +622,7 @@ function Conduit({ edge, strategy, retiring = false, ghosted = false }: { edge: 
   // vector DB" beat). Transient: shown only while running, gone at idle (see the opacity below).
   const cloneArc = edge.kind === "cgc-seed" || edge.kind === "grepai-clone";
   const d = conduitPathD(edge) ?? `M${x1} ${y1} L ${x2} ${y2}`; // straight lane, or the clone BOW (shared helper)
-  // 5k F5 — at cleanup the worktree side de-materialises; fade every worktree conduit to 0 so the yellow
+  // At cleanup the worktree side de-materialises; fade every worktree conduit to 0 so the yellow
   // connector lines retract with the enclosure instead of dangling to the disposed nodes (the official line
   // keeps its own `officialWire` conduits, which are not in `node.edges`).
   const opacity = retiring ? 0 : cloneArc ? (edge.state === "running" ? 1 : 0) : edge.state === "planned" ? 0 : 1;
@@ -630,12 +633,12 @@ function Conduit({ edge, strategy, retiring = false, ghosted = false }: { edge: 
       data-state={edge.state}
       data-strategy={isReplay ? "replay" : undefined}
       data-ghosted={ghosted || undefined}
-      // 05o — a refused seed lane (T9C) carries its flash polarity for the topmost refused-conduit overlay
+      // A refused seed lane (T9C) carries its flash polarity for the topmost refused-conduit overlay
       data-refused-polarity={edge.refusedPolarity || undefined}
       // a `planned` lane is hidden during the main-only B0; the transient clone arrows show ONLY while the
       // clone is running (gone at idle); every other lane fades in as it activates. Motion eases the opacity
       // (instant under !animate, where it mounts at the end-state).
-      // 5o RETRACT VISIBILITY — clone arcs fade their GROUP to 0 when done; delay that fade so the GSAP
+      // RETRACT VISIBILITY — clone arcs fade their GROUP to 0 when done; delay that fade so the GSAP
       // tail-to-tip retract (0.45s) completes before the group turns transparent (mirrors spec's 0.32s
       // opacity delay on .flow-g.off: retract runs first, then opacity clears).
       initial={animate ? { opacity } : false}
@@ -643,11 +646,11 @@ function Conduit({ edge, strategy, retiring = false, ghosted = false }: { edge: 
       transition={{ duration: animate ? 0.45 : 0, delay: animate && cloneArc && opacity === 0 ? 0.45 : 0 }}
     >
       <path
-        // 05o — a gated memory lane is GHOSTED (dim + desaturate) on the inner <path>, NOT the motion.g, so
+        // A gated memory lane is GHOSTED (dim + desaturate) on the inner <path>, NOT the motion.g, so
         // the ghost never fights Motion's group opacity (a className opacity loses on a static frame).
         className={cx(flowConduit({ state: conduitState(edge.state) }), ghosted && ghostedLane)}
         d={d}
-        // GSAP DrawSVG draws this on when it goes running (data-draw='on') — 05n; the running conduit has no
+        // GSAP DrawSVG draws this on when it goes running (data-draw='on'); the running conduit has no
         // CSS dash (solid), so DrawSVG owns the stroke reveal. No pathLength: DrawSVG measures real length.
         data-draw={edge.state === "running" ? "on" : undefined}
         // arrow tip only on an ACTION (running flow); a nominal/static line is just a connection
@@ -668,7 +671,7 @@ function Conduit({ edge, strategy, retiring = false, ghosted = false }: { edge: 
   );
 }
 
-// --- failure overlays (5g G3) ------------------------------------------------
+// --- failure overlays ------------------------------------------------
 function isBlocked(node: EngineProcessNode): boolean {
   return (
     node.health === "blocked" ||
@@ -681,9 +684,9 @@ function truncate(value: string, max: number): string {
   return value.length > max ? `${value.slice(0, max - 1)}…` : value;
 }
 
-// 05o — every failure/alert overlay (gate, reason, attention, chips, STOP, the block pointer) ENTERS with a
+// Every failure/alert overlay (gate, reason, attention, chips, STOP, the block pointer) ENTERS with a
 // quick fade + subtle pop and EXITS the same way when the block clears (via AnimatePresence). The dashboard
-// never hard-pops state in (§8): Motion owns the enter/exit. Gated by `useShouldAnimate` → instant end-state
+// never hard-pops state in: Motion owns the enter/exit. Gated by `useShouldAnimate` → instant end-state
 // under effects-off so the snapshots stay deterministic. `transform-box: fill-box` scales from the element's
 // own centre (the `engineCharge` pattern), so the pop grows in place instead of sliding from the SVG origin.
 function alertProps(animate: boolean) {
@@ -697,7 +700,7 @@ function alertProps(animate: boolean) {
 }
 
 // Steady red gate over a blocked/failed lane — a human choice required, never the fault flicker (the
-// flicker is the engine, G4). Drawn at the blocked edge's midpoint.
+// flicker is the engine). Drawn at the blocked edge's midpoint.
 function Gate({ edge }: { edge: EngineProcessEdge }) {
   const geom = EDGE_GEOM[edge.kind];
   if (!geom) return null;
@@ -740,7 +743,7 @@ function ReasonBadge({ reason, cx, cy }: { reason: string; cx: number; cy: numbe
   );
 }
 
-// 05o — the block indicators anchored ON the checked repository node (not the connector lane): a steady
+// The block indicators anchored ON the checked repository node (not the connector lane): a steady
 // gate bar straddling the node's top edge + the reason badge above it, so the gate visibly "points at" the
 // repository being blocked (the stale code base / the unmappable memory base). Mirrors the prototype, where
 // the gate sits on the Code node, not the wire.
@@ -753,7 +756,7 @@ function NodeBlock({ cx, top, reason }: { cx: number; top: number; reason: strin
   );
 }
 
-// 05o T12B — the soft (cyan) "moved" remote indicator (podstage .imsg `moved`): a ▲ up-triangle + a pill
+// T12B — the soft (cyan) "moved" remote indicator (podstage .imsg `moved`): a ▲ up-triangle + a pill
 // announcing the UPSTREAM memory ref advanced (origin/mem-main moved ahead while the worktree holds local
 // commits). Anchors ON the memory worktree NODE (never the connector lane), paints in the TOPMOST overlay.
 // Mirrors ReasonBadge geometry but with the ▲ "moved" glyph (soft notification, not the alarm gate).
@@ -771,18 +774,18 @@ function MovedBadge({ cx, cy, text }: { cx: number; cy: number; text: string }) 
   );
 }
 
-// 05o T7B — the provider-plan block (podstage P4). The runtime setup config is missing, so the provider
+// T7B — the provider-plan block (podstage P4). The runtime setup config is missing, so the provider
 // engines never light. UNLIKE T1B/T3B this does NOT gate a repository node: the alarm bar sits BESIDE the
 // worktree CGC provider engine (podstage `gate(1004,150,w108)` — the barred provider runtime), and the reason
-// rides the TOP EDGE of the worktree enclosure as a header alert for the whole containment (dev directive),
+// rides the TOP EDGE of the worktree enclosure as a header alert for the whole containment,
 // not a node pointer. The two engine slots stay unlit; the dropout halos (rendered separately) mark them held.
 function ProviderBlock({ reason }: { reason: string }) {
   // enclosure box mirrors the dashed border / FleetingEnclosure (x = COL_WT_CX-126, y 76, right edge 1148).
   const enclosureCx = (COL_WT_CX - 126 + 1148) / 2;
   return (
     <g data-testid="provider-block">
-      {/* the alarm bar — a VERTICAL bar attached to the LEFT side of the top provider engine slot (dev
-          directive), not a horizontal bar across it and not on the code node; the provider runtime is barred
+      {/* the alarm bar — a VERTICAL bar attached to the LEFT side of the top provider engine slot,
+          not a horizontal bar across it and not on the code node; the provider runtime is barred
           so the engines never light. Right edge meets the engine's left edge (1057); full slot height. */}
       <rect
         className={gateBar}
@@ -793,7 +796,7 @@ function ProviderBlock({ reason }: { reason: string }) {
         rx={3}
         data-testid="gate"
       />
-      {/* the reason rides the enclosure's TOP edge (dev directive) — a containment header, not a node gate. */}
+      {/* the reason rides the enclosure's TOP edge — a containment header, not a node gate. */}
       <ReasonBadge reason={reason} cx={enclosureCx} cy={65} />
     </g>
   );
@@ -820,7 +823,7 @@ function RecoveryChips({ labels }: { labels: string[] }) {
   );
 }
 
-// 05o T1B — the FLEETING block enclosure (podstage `.fbox`): a born-blocked enclosure (stale-base /
+// T1B — the FLEETING block enclosure (podstage `.fbox`): a born-blocked enclosure (stale-base /
 // pre-contract) renders as the big red provisional box over the worktree footprint — the BLOCKED title +
 // reason centred + the recovery chips along the bottom — REPLACING the dashed-amber border. Motion fades it.
 function FleetingEnclosure({ summary, choices }: { summary: string; choices: string[] }) {
@@ -890,7 +893,7 @@ function TerminalStop({ edge }: { edge: EngineProcessEdge }) {
   );
 }
 
-// 05o refused-conduit flash (SHARED — T9B red fault / T9C amber reroute / T14C red conflict): a one-shot
+// refused-conduit flash (SHARED — T9B red fault / T9C amber reroute / T14C red conflict): a one-shot
 // GSAP flash (data-fx='refuse') along the EXACT lane geometry of the refused seed/return conduit — cyan →
 // white spark → its polarity colour → fade out. The polarity is chosen by the caller off the projection
 // (refusedPolarityOf), never hardcoded. Rests at opacity 0 (the cva base) so under effects=off it is
@@ -940,8 +943,8 @@ function LaneFlag({ x, y, w, h, label, tone, testid, visible = true, enter = fal
   );
 }
 
-// T13 — closeout train (5h H2): the known closeout order plays as a derived left-to-right strip on
-// closeout-pending (5f §9 allows deriving the fixed order). Each beat group sweeps in via `closeoutSweep`
+// T13 — closeout train: the known closeout order plays as a derived left-to-right strip on
+// closeout-pending (the order is fixed and known, so it can be derived rather than probed live). Each beat group sweeps in via `closeoutSweep`
 // with a per-beat delay; the global effects=off freeze settles it to the all-done strip. aria-hidden —
 // the derived order is observability, not live status (which stays in the diagnostics panel).
 const CLOSEOUT_BEATS = ["code", "onboard", "quality", "memory", "ledger"] as const;
@@ -974,7 +977,7 @@ function CloseoutTrain({ x, y }: { x: number; y: number }) {
   );
 }
 
-// --- 5h H3: remote/landing dock beyond the official line (T15 code PR+push, T16 carryover) ---------
+// --- remote/landing dock beyond the official line (T15 code PR+push, T16 carryover) ---------
 // Geometry copied from podstage.html (the mockup): the CODE remotes sit side-by-side at the TOP and
 // read RIGHT → LEFT — origin/feat (just pushed from the worktree, on the right) ▸ a PR merge-arrow ▸
 // origin/main (merged into the official line, on the left). The MEMORY remote (origin/mem-main) is
@@ -1092,7 +1095,7 @@ function RemoteStrip({ refs }: { refs: LandingRefNode[] }) {
   );
 }
 
-// The directional landing flows wiring the dock to the branch nodes. 5k F4 — these speak the cyan = ACTIVE /
+// The directional landing flows wiring the dock to the branch nodes. These speak the cyan = ACTIVE /
 // amber = SETTLED language: at most ONE flow is cyan at a time (the current transaction: push → pull →
 // carryover), with the chevron + a travelling MotionPath dot; the moment its step completes the flow drops
 // to a plain amber line (no chevron, no dot); steps not yet reached are hidden. The active flow advances by
@@ -1168,12 +1171,12 @@ export function EnclosureCanvas({ node, gateNode, workspaceEngines = [], officia
   const animate = useShouldAnimate();
   // GSAP owns the strokeDashoffset draw-ons ([data-draw='on']) + the repeating fx ([data-fx=…]) as one
   // gsap.context scoped to this <svg> root; Motion (below) owns opacity/transform/scaleY/fill + enter/exit;
-  // CSS is static (05f §8). The hook self-gates on useShouldAnimate (no context, no ticker, under effects=off).
+  // CSS is static. The hook self-gates on useShouldAnimate (no context, no ticker, under effects=off).
   const rootRef = useRef<SVGSVGElement>(null);
   useEngineTimeline(rootRef, node);
   const code = node.providers.find((p) => p.role === "code");
   const memory = node.providers.find((p) => p.role === "memory");
-  // 5o PREDICTIVE BOOT — the clone arrow draws toward the worktree engine for ~0.6s; the engine should
+  // PREDICTIVE BOOT — the clone arrow draws toward the worktree engine for ~0.6s; the engine should
   // start filling at the same moment the arrow begins drawing, not after the data says "indexing". When
   // cgc-seed / grepai-clone is running and the engine is still configured (not yet self-reported), treat
   // it as indexing so the fill animates in sync with the arrow and arrives when the arrow does.
@@ -1194,14 +1197,14 @@ export function EnclosureCanvas({ node, gateNode, workspaceEngines = [], officia
     node.codeWorktree.factState === "observed" || node.codeWorktree.factState === "derived";
   const memWtMaterialised =
     node.memoryWorktree?.factState === "observed" || node.memoryWorktree?.factState === "derived";
-  // 05o T3B/T1B — the pre-block verify sweeps, all read off the projection (never a class alone). `memChecking`
+  // T3B/T1B — the pre-block verify sweeps, all read off the projection (never a class alone). `memChecking`
   // (T3B): the memory side is verified (ledger-map running) before the ledger gate decides, while the memory
   // worktree is not yet on disk. `baseChecking` (T1B): the base/code side is preflighted (worktree-add running,
   // code worktree not yet on disk) — "is local main current with upstream?" — before the stale-base gate.
   // `scanAt` anchors the cyan scan ring at the lane under check (memory y=403 / code y=281, both on the gap
   // centre). `memGated`: the memory lane is held (no ledger map / a missing memory repo) → it ghosts while the
   // code lane stays solid. `baseStale`: local main is behind upstream and the start is blocked → the main code
-  // node reads pruned/dormant (the spec §3 pruned register).
+  // node reads pruned/dormant (the pruned register).
   const memChecking =
     node.edges.some((edge) => edge.kind === "ledger-map" && edge.state === "running") && !memWtMaterialised;
   const baseChecking =
@@ -1209,7 +1212,7 @@ export function EnclosureCanvas({ node, gateNode, workspaceEngines = [], officia
   const memGated =
     node.memoryWorktree?.factState === "missing" ||
     node.edges.some((edge) => edge.kind === "ledger-map" && edge.state === "blocked");
-  // 05o T7B — the provider-plan block: PRE-CONTRACT, but distinct from T1B/T3B (which gate a SOURCE lane).
+  // T7B — the provider-plan block: PRE-CONTRACT, but distinct from T1B/T3B (which gate a SOURCE lane).
   // Here BOTH worktrees already materialised (observed), NO provider boot nodes exist yet (engines unlit),
   // and the runtime setup config is missing → the alarm bar sits BESIDE the worktree provider engine (the
   // barred runtime, NOT the code node — see ProviderBlock) and the engines never light. Signal off the
@@ -1239,7 +1242,7 @@ export function EnclosureCanvas({ node, gateNode, workspaceEngines = [], officia
   // a stale-base block is the FLEETING (pre-contract) preflight case — `&& fleeting` keeps it distinct from a
   // live sync-needed block (which is also `behindSource > 0` but has a real worktree).
   const baseStale = (node.codeSource.behindSource ?? 0) > 0 && isBlocked(node) && fleeting;
-  // 05o — the verify/block indicators anchor ON the checked REPOSITORY node (its rectangle), never the
+  // The verify/block indicators anchor ON the checked REPOSITORY node (its rectangle), never the
   // connector lane: T1B points at the official-line CODE base (stale), T3B at the official-line MEMORY base
   // (no ledger map). `scanAt` centres the scan ring on that node; `blockNode` puts the steady gate at the
   // node's top edge + the reason badge above it, so the gate visibly points at the repository (the prototype).
@@ -1250,7 +1253,7 @@ export function EnclosureCanvas({ node, gateNode, workspaceEngines = [], officia
       : null;
   // the topmost scan ring lights for a source-lane verify (T1B/T3B) OR the provider-plan verify-at-engine (T7B)
   const scanCenter = scanAt ?? providerScanAt;
-  // 05o T12B — a LIVE memory sync block: the memory worktree is REAL but origin/mem-main MOVED ahead
+  // T12B — a LIVE memory sync block: the memory worktree is REAL but origin/mem-main MOVED ahead
   // (memorySource.behindSource > 0) while the worktree holds local commits. `memMoved` (the soft cyan ▲
   // notification) shows BEFORE the gate (running, not yet blocked — podstage Y1: imsg, no gate). `memSyncMoved`
   // is the escalated gate beat: the memory ledger-map lane is held STEADY while the CODE lane keeps advancing.
@@ -1275,7 +1278,7 @@ export function EnclosureCanvas({ node, gateNode, workspaceEngines = [], officia
       : memGated && isBlocked(node)
         ? { cx: COL_MAIN_CX, top: POS.memorySource.y } // T3B — the unmappable official-line MEMORY base
         : null;
-  // 05o T9B/T9C/T14C — the refused-conduit flash lanes (seed/integration edges that are failed/refused/stale).
+  // T9B/T9C/T14C — the refused-conduit flash lanes (seed/integration edges that are failed/refused/stale).
   // Polarity comes off the projection (refusedPolarityOf), never a class. Rendered topmost so the flash is
   // never covered; each path is a one-shot GSAP flash that rests at opacity 0 (absent) under effects=off.
   const refusedEdges = node.edges
@@ -1285,13 +1288,13 @@ export function EnclosureCanvas({ node, gateNode, workspaceEngines = [], officia
   // world); runtime derived like the OfficialStrip so the two surfaces always agree.
   const officialCode = workspaceEngines.find((engine) => engine.role === "code");
   const officialMemory = workspaceEngines.find((engine) => engine.role === "memory");
-  // failure overlays (5g G3) — `fleeting` is derived above (it gates `baseStale`).
+  // failure overlays — `fleeting` is derived above (it gates `baseStale`).
   // t14c — a terminal integration conflict draws a STOP (not the recoverable Gate) and no recovery chips.
   const terminal = node.phase === "integration-blocked";
   const terminalEdge = terminal
     ? node.edges.find((e) => e.kind === "integration" && e.state === "blocked")
     : undefined;
-  // blocked = STEADY gate (a choice required); failed/down = FAULT → the engine flickers, no gate (G4).
+  // blocked = STEADY gate (a choice required); failed/down = FAULT → the engine flickers, no gate.
   // The terminal-conflict integration edge is excluded — it renders as a STOP instead of a Gate.
   const gatedEdges = node.edges.filter((e) => e.state === "blocked" && e !== terminalEdge);
   const firstGated = gatedEdges.length ? EDGE_GEOM[gatedEdges[0].kind] : undefined;
@@ -1317,13 +1320,13 @@ export function EnclosureCanvas({ node, gateNode, workspaceEngines = [], officia
       ].filter((value): value is string => Boolean(value)),
     ),
   ];
-  // 5h H3 — show the landing dock only while the enclosure is actually retiring to the official line,
+  // Show the landing dock only while the enclosure is actually retiring to the official line,
   // and only the refs the probe could resolve: a `missing` ref (probe couldn't run, e.g. gh absent)
   // carries no signal and is dropped, never rendered as an "unknown" chip.
   const landingRefs = (node.landing ?? []).filter((ref) => ref.factState !== "missing");
   const showLanding =
     landingRefs.length > 0 && (LANDING_PHASES.has(node.phase) || Boolean(node.integrationStrategy));
-  // 5h H4 — cleanup teardown: a retiring enclosure (abandon OR a landed cleanup) keeps the historical
+  // Cleanup teardown: a retiring enclosure (abandon OR a landed cleanup) keeps the historical
   // contract chip; on a successful cleanup the "back into main" seam reads the resolved origin-main tip.
   const retiring = node.phase === "abandoned" || node.phase === "cleanup-pending";
   const cleanupTip =
@@ -1385,7 +1388,7 @@ export function EnclosureCanvas({ node, gateNode, workspaceEngines = [], officia
       {/* NB: the scan ring is NOT drawn here — it is centred ON a repository node, so it must paint in the
           topmost overlay layer (below), after the nodes, or the node's opaque rect would cover it. */}
 
-      {/* THREE-TIER (5f §7.4): the official line is the resolved integration/source branch from the
+      {/* THREE-TIER: the official line is the resolved integration/source branch from the
           projection. The worktree forks from it on the right; during landing, the source tier appears
           in the gap so the closeout path reads integration ◂ source ◂ worktree. */}
       <BranchNode pos={POS.codeSource} label="Integration line" refNode={node.codeSource} pruned={baseStale} />
@@ -1513,7 +1516,7 @@ export function EnclosureCanvas({ node, gateNode, workspaceEngines = [], officia
         />
       ) : null}
 
-      {/* 5h H2 — the landing arc: the closeout train (T13) on closeout-pending, and the official source
+      {/* The landing arc: the closeout train (T13) on closeout-pending, and the official source
           line advancing to its landing tip (T14). */}
       {/* The closeout train (T13) glides in when closeout starts and glides OUT when the phase advances
           to integration (instead of vanishing). Motion owns the enter/exit; `transition: none` opts the
@@ -1537,7 +1540,7 @@ export function EnclosureCanvas({ node, gateNode, workspaceEngines = [], officia
           </motion.g>
         ) : null}
       </AnimatePresence>
-      {/* 5h H3 — the remote/landing dock beyond the official line (copied from the mockup): code remotes
+      {/* The remote/landing dock beyond the official line (copied from the mockup): code remotes
           at the top (origin/feat ▸ PR ▸ origin/main, reading right→left), the memory remote mirrored to
           the bottom, wired to the branch nodes by the directional landing flows (push ↑ / pull ↓ /
           push-mem ↓). Shown only while the enclosure is landing, with `missing` probe refs dropped. */}
@@ -1546,7 +1549,7 @@ export function EnclosureCanvas({ node, gateNode, workspaceEngines = [], officia
           <motion.g
             key="landing-dock"
             initial={animate ? { opacity: 0 } : false}
-            // 5k F1 — retract the whole landing tier (origin chips + the push/pull/carry/push-mem flows) as
+            // Retract the whole landing tier (origin chips + the push/pull/carry/push-mem flows) as
             // the enclosure de-materialises: when `retiring` (cleanup-pending), fade the dock to 0 in sync
             // with the engines (parent opacity multiplies through the children) so the tier powers down with
             // them, instead of staying lit then hard-unmounting at the next beat.
@@ -1566,7 +1569,7 @@ export function EnclosureCanvas({ node, gateNode, workspaceEngines = [], officia
         </text>
       ) : null}
 
-      {/* failure overlays (5g G3): the big red `FleetingEnclosure` box (born-blocked, worktree footprint),
+      {/* failure overlays: the big red `FleetingEnclosure` box (born-blocked, worktree footprint),
           the alarm-parity attention badge, the terminal STOP, and the bottom recovery chips. ORDER MATTERS:
           these come first, then the verify/block POINTERS render LAST (below) so they are the topmost layer —
           a pointer is centred ON / sits ABOVE a repository node and must never be covered by it. */}
@@ -1575,7 +1578,7 @@ export function EnclosureCanvas({ node, gateNode, workspaceEngines = [], officia
           <FleetingEnclosure key="fleeting-enclosure" summary={node.summary} choices={recovery} />
         ) : null}
       </AnimatePresence>
-      {/* 05o refused-conduit flash (T9B red seed fault / T9C amber seed reroute / T14C red integrate
+      {/* refused-conduit flash (T9B red seed fault / T9C amber seed reroute / T14C red integrate
           conflict): a one-shot GSAP flash tracing the refused lane. NOT gated on `animate` — it rests at
           opacity 0 (the cva base) so it is present-but-absent under effects=off (the STOP/gate carries the
           settled state); GSAP plays the flash when effects are on. Rendered before the STOP so the steady
@@ -1608,7 +1611,7 @@ export function EnclosureCanvas({ node, gateNode, workspaceEngines = [], officia
           </motion.g>
         ) : null}
       </AnimatePresence>
-      {/* 05o T7B — the unlit-engine DROPOUT halo: a static alarm dashed outline over the two worktree engine
+      {/* T7B — the unlit-engine DROPOUT halo: a static alarm dashed outline over the two worktree engine
           footprints when the provider plan is blocked (the engines never light because the runtime config is
           missing). The engines themselves stay absent (no providers → faded out), so this is the only mark
           that the slot is HELD. Rendered before the scan/gate so the gate sits over it. */}
@@ -1623,7 +1626,7 @@ export function EnclosureCanvas({ node, gateNode, workspaceEngines = [], officia
       {/* TOPMOST LAYER — the verify scan ring (centred ON the checked repository node, or AT the worktree
           engine for the T7B provider-plan verify) and the block gate + reason badge (at the node's top edge).
           Rendered dead last so the node's opaque rect can never cover them; centring a pointer on a node and
-          painting it BEHIND the node defeats the pointer (05o fix). The scan group fades via Motion (opacity
+          painting it BEHIND the node defeats the pointer. The scan group fades via Motion (opacity
           only — its inner circle's r/opacity expand-fade is GSAP). */}
       <AnimatePresence>
         {scanCenter && animate ? (
@@ -1648,7 +1651,7 @@ export function EnclosureCanvas({ node, gateNode, workspaceEngines = [], officia
           </motion.g>
         ) : null}
       </AnimatePresence>
-      {/* 05o T12B — the soft cyan "moved ▲" badge: origin/mem-main advanced while the worktree holds local
+      {/* T12B — the soft cyan "moved ▲" badge: origin/mem-main advanced while the worktree holds local
           commits (the notification BEFORE the gate). Anchored ON the memory worktree node, painted last. */}
       <AnimatePresence>
         {movedAt ? (

@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { memo, useEffect, useState, type ReactNode } from "react";
 
 import { css, cva, cx } from "../../styled-system/css";
 import { type ChangeCounters, leafChangeset, masterChangeset, taskChangeset } from "../data/changeset";
@@ -114,7 +114,7 @@ const slice = css({
   borderLeftColor: "grid",
 });
 const sliceMeta = css({ color: "muted", fontSize: "0.72rem" });
-// 6g: a clickable sub-task row (drill-in) and the breadcrumb back from a slice to the series.
+// A clickable sub-task row (drill-in) and the breadcrumb back from a slice to the series.
 const sliceButton = css({
   display: "flex",
   justifyContent: "space-between",
@@ -135,7 +135,7 @@ const sliceButton = css({
   _hover: { background: "oklch(0.7 0.1 200 / 0.12)", borderLeftColor: "amber" },
   _focusVisible: { outline: "1px solid token(colors.amber)", outlineOffset: "1px" },
 });
-// 6g cross-master link: a row that jumps to a parallel/external series (amber "→"), distinct from
+// Cross-master link: a row that jumps to a parallel/external series (amber "→"), distinct from
 // the cyan in-series drill rows so leaving the current series reads as a deliberate hop.
 const crossButton = css({
   display: "flex",
@@ -322,7 +322,7 @@ const taskdocDecisionMeta = css({ fontSize: "0.76rem", color: "muted" });
 
 // The selected lifecycle: phase stepper, the canonical Gate Respond surface (durable gates only), the
 // task-document content (analytics.taskDocuments), the lifecycle → worktree → provider spine, and tokens.
-export function DetailPanel({
+function DetailPanelImpl({
   selectedId,
   onOpenLifecycle,
   onOpenChangeSet,
@@ -331,12 +331,12 @@ export function DetailPanel({
 }: {
   selectedId: string | null;
   onOpenLifecycle?: (id: string) => void;
-  // Open the Change-Set Viewer takeover: an enclosure scope, a series master, or a leaf view (L4a).
+  // Open the Change-Set Viewer takeover: an enclosure scope, a series master, or a leaf view.
   onOpenChangeSet?: (target: ChangeSetTarget) => void;
   onOpenNotes?: (target: NotesReaderTarget) => void;
   // Report the QUALIFIED LEAF ID of the leaf the panel is actually SHOWING — a drilled sub-task or a
-  // directly-opened leaf doc — so the rail chat + "attach to leaf" key by that leaf, not the master
-  // (L5 fix 1). `undefined` while only a master/series overview (or the empty state) is shown.
+  // directly-opened leaf doc — so the rail chat + "attach to leaf" key by that leaf, not the master.
+  // `undefined` while only a master/series overview (or the empty state) is shown.
   onViewLeaf?: (leafKey: string | undefined) => void;
 }) {
   const jump = onOpenLifecycle ?? (() => {});
@@ -389,7 +389,7 @@ export function DetailPanel({
 
   // The leaf the panel is actually SHOWING (a drilled sub-task or a directly-opened leaf doc), mirroring
   // the render branches below — a master/series overview shows no single leaf. Reported up so the rail
-  // chat + "attach to leaf" key by this leaf, never the master (L5 fix 1).
+  // chat + "attach to leaf" key by this leaf, never the master.
   const viewedLeafDoc = displayedLeafDoc({
     selection,
     allDocs,
@@ -710,8 +710,13 @@ export function DetailPanel({
   );
 }
 
-// A change-set entry button (L4): fetches its target's counters (enclosure scope, series master, or
-// a leaf view — L4a) and opens the Change-Set Viewer takeover. A failed fetch — e.g. a `working`
+// Memoized (tab-switch CPU): a keep-alive cockpit layer — the shell re-renders on every
+// view switch with unchanged props, and the memo gate skips this whole subtree then; the panel's
+// own store subscriptions still drive its updates.
+export const DetailPanel = memo(DetailPanelImpl);
+
+// A change-set entry button: fetches its target's counters (enclosure scope, series master, or
+// a leaf view) and opens the Change-Set Viewer takeover. A failed fetch — e.g. a `working`
 // view whose worktree is gone (404) — hides the counts but keeps the button; clicking still opens
 // the screen, which shows the error. Deps are the stable target ids, so the per-second projection
 // re-render does not re-fetch.
@@ -763,8 +768,8 @@ function ChangeSetButton({
 // and the leaf contract's parent/task name). Derived from any sibling doc's path.
 const dirName = (docPath: string): string => pathDir(docPath).split("/").filter(Boolean).pop() ?? "";
 
-// L4a: the change-set bar shown on a task-document READER (master or leaf), with identity taken from
-// the doc node — so it appears with NO active enclosure (closing the L4 gap, where the buttons only
+// The change-set bar shown on a task-document READER (master or leaf), with identity taken from
+// the doc node — so it appears with NO active enclosure (previously the change-set buttons only
 // lived on the live enclosure spine). A master gets the SERIES net button; a leaf gets COMMITTED
 // (always — its landed delta) plus WORKING (only while its enclosure is live — the uncommitted
 // delta). Liveness is read from the store here, so callers thread only `onOpen`.
@@ -816,7 +821,7 @@ function DocChangeSetBar({
   );
 }
 
-// Drill-in match key (6g): a SubTaskRef.file / a slice's docPath basename, minus extension. A
+// Drill-in match key: a SubTaskRef.file / a slice's docPath basename, minus extension. A
 // master's index row resolves to the slice doc whose slug equals the ref's file stem.
 const sliceSlug = (doc: TaskDocNode): string => stripExt(doc.docPath.split("/").pop() ?? "");
 const sliceForSlug = (sliceDocs: TaskDocNode[], slug: string): TaskDocNode | undefined =>
@@ -876,8 +881,8 @@ function displayedReaderDoc({
   return nonMaster.length === 1 ? nonMaster[0] : undefined;
 }
 
-// The leaf doc the panel renders a full reader for — the single source of the viewed-leaf key (L5
-// fix 1). Mirrors the DetailPanel render branches exactly: a drilled sub-task (openSlug), a directly
+// The leaf doc the panel renders a full reader for — the single source of the viewed-leaf key.
+// Mirrors the DetailPanel render branches exactly: a drilled sub-task (openSlug), a directly
 // opened leaf doc, or a lone slice; a master/series overview or the empty state yields undefined.
 function displayedLeafDoc({
   allDocs,
@@ -964,7 +969,7 @@ const masterDocWithSeriesTokens = (doc: TaskDocNode, seriesList: SeriesNode[]): 
   seriesTokenTotal: seriesList.find((seriesNode) => seriesNode.docPath === doc.docPath)?.seriesTokenTotal,
 });
 
-// The lifecycle's bound task documents (6g). A `master` (contract-paired, no lifecycleId of its
+// The lifecycle's bound task documents. A `master` (contract-paired, no lifecycleId of its
 // own) shows its overview + a clickable sub-task index; clicking a slice drills into its full
 // reader with a breadcrumb back. A master-less series lists clickable slices; a lone doc reads
 // directly. Sub-tasks never enter the sidebar — they are reached here, from the series.
@@ -1073,7 +1078,7 @@ function MasterOverview({
           onJump={onJump}
         />
       ))}
-      {/* L9: the series' coordination notes (design records, friction ledger, reports/) —
+      {/* The series' coordination notes (design records, friction ledger, reports/) —
           browsable from the master overview too, not only from a drilled leaf reader. */}
       {bodyState !== "loading" ? (
         <TaskNotes
@@ -1358,7 +1363,7 @@ function TaskReader({
           {section.body ? <Markdown>{section.body}</Markdown> : null}
         </Section>
       ))}
-      {/* L9: References moved into TaskNotes so a reference naming an existing notes/ file
+      {/* References moved into TaskNotes so a reference naming an existing notes/ file
           renders as an openable link into the series-notes view (plain text otherwise). */}
       {bodyState !== "loading" ? (
         <TaskNotes

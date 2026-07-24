@@ -16,7 +16,6 @@ import {
   type RailMasterSection,
   type RailModel,
 } from "../../data/railModel";
-import { humanizeDuration } from "../../data/conversation/format";
 import { turnHintWord, usePtyHarvest } from "../../data/ptyHarvest";
 import { useSessionCockpit } from "../../data/sessionCockpitStore";
 import { hasUnackedSetAttention } from "../../data/setChips";
@@ -31,12 +30,12 @@ import type { AgentPickupNode, TaskDocNode } from "../../types/projection";
 import { terminateConfirmCopy } from "./lifecycleCopy";
 import { StateDot } from "./StateDot";
 
-// The session rail (260715-FEUI-L2 S4): the ruled role-driven hierarchy (spec §1.6b) — flat
+// The session rail: the ruled role-driven hierarchy — flat
 // command spine, indented per-leaf clusters with the active seat on top, per-master completed
-// folders with master+sprint bulk end — plus the fleet-attention strip (R12), gate badges (R13),
-// the two-state brief column (R8), the poll-health banner (R15), and the bus-summary footer (R8).
+// folders with master+sprint bulk end — plus the fleet-attention strip, gate badges,
+// the two-state brief column, the poll-health banner, and the bus-summary footer.
 // The orchestration-tree (spawn-edge) view stays available as a palette/button toggle for
-// provenance inspection (R5).
+// provenance inspection.
 
 const railBody = css({
   display: "flex",
@@ -111,7 +110,7 @@ const sprintRow = css({
 const bulkButton = css({
   font: "inherit",
   fontSize: "0.62rem",
-  // R1/V12 — an action control never crushes into a letter column: it holds its intrinsic width and
+  // An action control never crushes into a letter column: it holds its intrinsic width and
   // its own line, so the flex row elides the long copy span (below), never the buttons.
   flex: "none",
   whiteSpace: "nowrap",
@@ -184,7 +183,7 @@ const leafCaption = css({
   fontSize: "0.62rem",
   color: "muted",
   letterSpacing: "0.04em",
-  // V26 — a long leaf id (`260715_#2067_react-data-testids-01`) truncates at the end with the full
+  // A long leaf id truncates at the end with the full
   // value on hover, never breaking mid-word down the narrow rail.
   display: "block",
   minWidth: "0",
@@ -209,7 +208,7 @@ const doneFold = css({
 const doneToggle = css({
   font: "inherit",
   fontSize: "0.7rem",
-  // R1/V12 — hold width + own line so the confirm/cancel controls never wrap letters vertically.
+  // Hold width + own line so the confirm/cancel controls never wrap letters vertically.
   flex: "none",
   whiteSpace: "nowrap",
   color: "muted",
@@ -230,7 +229,7 @@ const groupBox = css({
   flexShrink: 0,
 });
 const groupRows = css({ padding: "0.3rem", display: "grid", gap: "0.25rem" });
-// Row anatomy (RULED R6 / RV-2): a LABEL group (dot | role | title | markers | chip) and an ACTION
+// Row anatomy (RULED): a LABEL group (dot | role | title | markers | chip) and an ACTION
 // group (End, or the armed confirm/cancel). The row is `flex-wrap: wrap`: when the two groups cannot
 // share one line at a narrow rail, the ACTION group wraps whole to a second line — the actions stay
 // single-line and reachable at EVERY width down to the collapse threshold, never letter-wrapping,
@@ -273,7 +272,7 @@ const rowShell = css({
   paddingLeft: "0.5rem",
   cursor: "pointer",
   transition: "border-color 0.12s ease",
-  // R9 — the row gives approach feedback before the click that arms End (there was none).
+  // The row gives approach feedback before the click that arms End (there was none).
   _hover: { borderColor: "color-mix(in oklch, token(colors.amber) 45%, token(colors.grid))" },
   "&[data-selected='true']": { color: "amber", borderColor: "amber" },
   "&[data-attention-highlight='true']": { borderColor: "cyan" },
@@ -320,7 +319,7 @@ const roleChip = cva({
   },
 });
 const rowTitle = css({
-  // RV-2 — the flexible segment truly absorbs (min-width:0): it grows to show the label when there is
+  // The flexible segment truly absorbs (min-width:0): it grows to show the label when there is
   // room and elides to `…` when the rail is tight, so it never forces the row past the aside. The full
   // label stays in the row tooltip (railRowTooltip).
   flex: "1 1 auto",
@@ -359,8 +358,8 @@ const markerChip = cva({
 });
 const statusChip = cva({
   base: {
-    // R2 — the state chip shows its whole word when the rail has room (`turn-ended` ~72px < 7rem
-    // ceiling). RV-2: it is elidable (shrinks after the title yields) so it never forces the End
+    // The state chip shows its whole word when the rail has room (`turn-ended` ~72px < 7rem
+    // ceiling). It is elidable (shrinks after the title yields) so it never forces the End
     // action off the row — the whole word stays in the chip tooltip, and the state also lives in the
     // StateDot's accessible name. It is dropped entirely while the row is armed (the confirm copy
     // carries the state), so the confirm/cancel controls always fit inside the aside.
@@ -386,7 +385,7 @@ const statusChip = cva({
     },
   },
 });
-// R9 — a destructive control carries DEMOTED weight until the moment of consequence: muted by
+// A destructive control carries DEMOTED weight until the moment of consequence: muted by
 // default (red would be six alarms shouting from every row and diluting the danger signal), and it
 // warms to alarm only on hover / keyboard focus / the selected row — the approach that arms it.
 const endButton = css({
@@ -422,7 +421,7 @@ const treeToggleButton = css({
   font: "inherit",
   fontSize: "0.62rem",
   marginLeft: "auto",
-  // V12 — the toggle never wraps its own label (`rol/e vie/w`): it holds width + its own line.
+  // The toggle never wraps its own label (`rol/e vie/w`): it holds width + its own line.
   flexShrink: 0,
   whiteSpace: "nowrap",
   color: "muted",
@@ -454,25 +453,11 @@ const zeroState = css({
   borderColor: "grid",
   borderRadius: "2px",
 });
-const busFooter = css({
-  marginTop: "auto",
-  flexShrink: 0,
-  borderTopWidth: "1px",
-  borderTopStyle: "solid",
-  borderTopColor: "grid",
-  paddingTop: "0.4rem",
-  color: "muted",
-  fontSize: "0.7rem",
-  display: "grid",
-  gap: "0.12rem",
-  fontVariantNumeric: "tabular-nums",
-  "& b": { color: "amber", fontWeight: "400" },
-});
 
 const EMPTY_DOCS: TaskDocNode[] = [];
 const EMPTY_PICKUPS: AgentPickupNode[] = [];
 
-/** Terminate one seat (L6 R5: the detailed flow keeps the stop residual — data/sessionLifecycle). */
+/** Terminate one seat (the detailed flow keeps the stop residual — data/sessionLifecycle). */
 export async function endSession(session: OpenSession): Promise<void> {
   await endSessionDetailed(session);
 }
@@ -509,8 +494,12 @@ export function SessionRail({
   const setTreeView = useSessionCockpit(
     (state) => state.setOrchestrationTreeView,
   );
-  const pollHealth = useSessionCockpit((state) => state.pollHealth);
-  // L4 R6: unacknowledged set outcomes drive a per-row attention marker (the L2 slot).
+  // A healthy catalog beat updates only lastBeatAt every 2.5 s. This rail renders no beat-age
+  // value, so subscribe only to the two facts it actually shows; otherwise every successful poll
+  // reconstructs the full role hierarchy for an invisible timestamp.
+  const pollHealthy = useSessionCockpit((state) => state.pollHealth.healthy);
+  const pollMissedBeats = useSessionCockpit((state) => state.pollHealth.missedBeats);
+  // Unacknowledged set outcomes drive a per-row attention marker.
   const perSessionCockpit = useSessionCockpit((state) => state.perSession);
   const taskDocuments = useDashboard(
     (state) => state.analytics?.taskDocuments ?? EMPTY_DOCS,
@@ -519,26 +508,26 @@ export function SessionRail({
   const pickups = useDashboard(
     (state) => state.analytics?.agentPickups ?? EMPTY_PICKUPS,
   );
-  const heartbeat = useDashboard((state) => state.supervisorHeartbeat);
 
   const [openDoneFolders, setOpenDoneFolders] = useState<
     Record<string, boolean>
   >({});
   const [armedBulk, setArmedBulk] = useState<BulkTarget | null>(null);
-  // L6 R5: single-End arms an inline honest confirm naming session · leaf · state.
-  const [armedEnd, setArmedEnd] = useState<string | null>(null);
-  // A FAILED terminate POST (review finding 4): the confirm implied execution, so the failure
-  // renders verbatim with a retry — never a silent disarm. Distinct from stop residuals, which
-  // are informational facts about SUCCESSFUL terminations.
+  // Single-row End acts IMMEDIATELY — no armed inline confirm. The earlier armed confirm added a
+  // step for a single seat and its overlay glitched; only bulk end keeps a confirm, because it
+  // names multiple sessions at once.
+  // A FAILED terminate POST: the failure renders verbatim with a retry —
+  // never silent. Distinct from stop residuals, which are informational facts about
+  // SUCCESSFUL terminations.
   const [endFailure, setEndFailure] = useState<{
     sessionId: string;
     error: string;
   } | null>(null);
-  // L6 R7: legacy-raw harvest (bell markers + title/turn hints) — raw panes only ever write it.
+  // Legacy-raw harvest (bell markers + title/turn hints) — raw panes only ever write it.
   const harvestBySession = usePtyHarvest((state) => state.bySession);
   // The clicked attention CLASS, not a snapshot of ids: the highlighted set derives from the
   // LIVE rollup each render, so a ring expires the moment the seat's state resolves (a stale
-  // snapshot kept suggesting attention after it was gone — review finding 3).
+  // snapshot kept suggesting attention after it was gone).
   const [highlightKind, setHighlightKind] = useState<
     keyof AttentionRollup | null
   >(null);
@@ -599,7 +588,6 @@ export function SessionRail({
   };
 
   const executeEnd = async (session: OpenSession) => {
-    setArmedEnd(null);
     const outcome = await endSessionDetailed(session);
     if (!outcome.ok) {
       setEndFailure({
@@ -661,19 +649,18 @@ export function SessionRail({
     const gate = session.leafKey ? heldGates.get(session.leafKey) : undefined;
     const prompt = interactionPromptPreview(session.controlPendingInteraction);
     const selected = session.id === focusedSessionId;
-    // RV-2 — while the row is armed (or showing an end-failure) the status chip is dropped: the
-    // confirm copy already names the state, and dropping the chip guarantees the two controls fit
-    // inside the aside at every rail width.
-    const isArmed = armedEnd === session.id;
+    // While the row shows an end-failure the status chip is dropped: the failure copy
+    // already names the state, and dropping the chip guarantees the two controls fit inside
+    // the aside at every rail width.
     const hasEndFailure = endFailure?.sessionId === session.id;
-    const showChip = visual.chip !== undefined && !isArmed && !hasEndFailure;
+    const showChip = visual.chip !== undefined && !hasEndFailure;
     const chipTone =
       visual.key === "failed"
         ? "alarm"
         : visual.key === "awaiting-input" || visual.key === "waiting"
           ? "warn"
           : "muted";
-    // Harvested hints (R7) join the row TOOLTIP as clearly-labeled hints — never the grammar.
+    // Harvested hints join the row TOOLTIP as clearly-labeled hints — never the grammar.
     const harvest = harvestBySession[session.id];
     const hintParts = [
       harvest?.title ? `pty title: ${harvest.title}` : null,
@@ -712,7 +699,7 @@ export function SessionRail({
         }}
       >
         <div className={rowLabelGroup}>
-        {/* L4 R8: rail dots carry the state WORD as their accessible name — the dot is the
+        {/* Rail dots carry the state WORD as their accessible name — the dot is the
             truncation-surviving signal and must speak, not just color. */}
         <StateDot
           state={visual}
@@ -734,7 +721,7 @@ export function SessionRail({
         ) : null}
         <span className={rowTitle}>{session.label}</span>
         <span className={attentionSlot} data-slot="attention-marker">
-          {/* Legacy-raw bell (L6 R7): the vendor TUI rang — the ONLY attention signal a raw
+          {/* Legacy-raw bell: the vendor TUI rang — the ONLY attention signal a raw
               pane has. Cleared by focusing the seat. */}
           {harvest?.bellPending ? (
             <span
@@ -747,7 +734,7 @@ export function SessionRail({
               bell
             </span>
           ) : null}
-          {/* Two-state brief column (R8): marker present = brief pending; absent = none. */}
+          {/* Two-state brief column: marker present = brief pending; absent = none. */}
           {briefPending.has(session.id) ? (
             <span
               className={markerChip({ tone: "warn" })}
@@ -766,7 +753,7 @@ export function SessionRail({
               gate
             </span>
           ) : null}
-          {/* L7 F22: unacknowledged set outcomes (unsupported/clamp/unknown, pair failures) clear
+          {/* Unacknowledged set outcomes (unsupported/clamp/unknown, pair failures) clear
               only through the explicit `mark seen` action in the ledger or attention overlay. */}
           {hasUnackedSetAttention(perSessionCockpit[session.id]) ? (
             <span
@@ -783,7 +770,7 @@ export function SessionRail({
         {showChip ? (
           <span
             className={statusChip({ tone: chipTone })}
-            // Question triage (R16): the input? chip's tooltip carries the prompt preview.
+            // Question triage: the input? chip's tooltip carries the prompt preview.
             title={
               visual.key === "awaiting-input" && prompt ? prompt : visual.word
             }
@@ -794,9 +781,9 @@ export function SessionRail({
         ) : null}
         </div>
         {/* The End segment renders on EVERY row (ruled anatomy): live rows say "End", dormant
-            (landed) rows carry the mockup's compact ✕. Arming shows the honest confirm naming
-            session · leaf · state (L6 R5) before anything is killed. The ACTION group wraps below the
-            label group at narrow rails (RV-2) so confirm/cancel are always reachable + single-line. */}
+            (landed) rows carry a compact ✕. End acts IMMEDIATELY — no armed confirm. The ACTION
+            group wraps below the label group at narrow rails so the failure retry/dismiss are
+            always reachable + single-line. */}
         <div className={rowActionGroup}>
         {hasEndFailure ? (
           <span
@@ -828,37 +815,6 @@ export function SessionRail({
               dismiss
             </button>
           </span>
-        ) : isArmed ? (
-          <span
-            className={confirmRow}
-            data-testid={`rail-end-confirm-${session.id}`}
-          >
-            <span title={terminateConfirmCopy(session)}>
-              {terminateConfirmCopy(session)}
-            </span>
-            <button
-              type="button"
-              className={bulkButton}
-              onClick={(event) => {
-                event.stopPropagation();
-                void executeEnd(session);
-              }}
-              data-testid={`rail-end-execute-${session.id}`}
-            >
-              confirm
-            </button>
-            <button
-              type="button"
-              className={doneToggle}
-              onClick={(event) => {
-                event.stopPropagation();
-                setArmedEnd(null);
-              }}
-              data-testid={`rail-end-cancel-${session.id}`}
-            >
-              cancel
-            </button>
-          </span>
         ) : (
           <button
             type="button"
@@ -867,7 +823,7 @@ export function SessionRail({
             title={terminateConfirmCopy(session)}
             onClick={(event) => {
               event.stopPropagation();
-              setArmedEnd(session.id);
+              void executeEnd(session);
             }}
             data-testid={`rail-end-${session.id}`}
           >
@@ -1047,13 +1003,13 @@ export function SessionRail({
       data-virtualized={virtualized ? "true" : "false"}
       tabIndex={-1}
     >
-      {!pollHealth.healthy ? (
+      {!pollHealthy ? (
         <div
           className={staleBanner}
           data-testid="rail-poll-stale"
           role="status"
         >
-          catalog poll stale — {pollHealth.missedBeats} beats missed; rows may
+          catalog poll stale — {pollMissedBeats} beats missed; rows may
           be frozen
         </div>
       ) : null}
@@ -1093,7 +1049,7 @@ export function SessionRail({
           }
           data-testid="rail-tree-toggle"
         >
-          {/* R8 — reads as a view toggle (switch glyph), not a bare taxonomy noun. */}
+          {/* Reads as a view toggle (switch glyph), not a bare taxonomy noun. */}
           <span aria-hidden="true">⇄</span> {treeView ? "tree view" : "role view"}
         </button>
       </div>
@@ -1132,33 +1088,9 @@ export function SessionRail({
           ) : null}
         </>
       )}
-      <footer className={busFooter} data-testid="rail-bus-footer">
-        {/* Bus summary (R8): anchored numbers — pending vs redeliverable, heartbeat vs cutoff. */}
-        {heartbeat && heartbeat.lastTickAt !== null ? (
-          <>
-            {/* RV-4/R4 — the both-zero inbox collapses to a calm `inbox clear`; the anchored
-                pending/redeliverable pair renders only when there is something to anchor. */}
-            {heartbeat.pendingInboxCount === 0 && heartbeat.redeliverableInboxCount === 0 ? (
-              <span>inbox clear</span>
-            ) : (
-              <span>
-                inbox <b>{heartbeat.pendingInboxCount} pending</b> /{" "}
-                {heartbeat.redeliverableInboxCount} redeliverable
-              </span>
-            )}
-            <span title={`Turn-state freshness is bounded by the 10 s liveness sweep; the supervisor heartbeat is the bus liveness anchor. Raw age ${heartbeat.ageSeconds ?? "—"}s, stale cutoff ${heartbeat.staleCutoffSeconds}s.`}>
-              {/* R5/A4 — humanized, not `570724.69163s / 86400s`: the two-unit form reads as human time. */}
-              heartbeat{" "}
-              {heartbeat.ageSeconds !== null
-                ? humanizeDuration(heartbeat.ageSeconds * 1000)
-                : "—"}{" "}
-              / stale cutoff {humanizeDuration(heartbeat.staleCutoffSeconds * 1000)}
-            </span>
-          </>
-        ) : (
-          <span>inbox — · supervisor has not ticked in this workspace</span>
-        )}
-      </footer>
+      {/* To declutter, the rail bus footer is REMOVED — inbox counts and supervisor liveness
+          already live in the top bar (one authority per fact); the anchored detail stays in the
+          Inspector's BusPane. */}
     </div>
   );
 }

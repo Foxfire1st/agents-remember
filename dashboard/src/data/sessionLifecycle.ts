@@ -2,6 +2,7 @@ import { useStore } from "zustand";
 import { createStore } from "zustand/vanilla";
 
 import { hydrateTerminalSessionsFromCatalog } from "./catalogPoll";
+import { disconnectConversation } from "./conversation/store";
 import {
   notifySessionCatalogChanged,
   sessionStore,
@@ -12,7 +13,7 @@ import {
   type LandedCleanupResult,
 } from "./terminal";
 
-// Session lifecycle actions for the cockpit (260715-FEUI-L6 R5). Terminate keeps the server's
+// Session lifecycle actions for the cockpit. Terminate keeps the server's
 // WHOLE answer: the `/terminate` response may carry `controlStopDetail` (the graceful control
 // stop failed on an already-dead bridge — e.g. "control command queue is stopped"). That detail
 // is a STOP RESIDUAL: an informational fact about a session that terminated SUCCESSFULLY. It is
@@ -56,7 +57,7 @@ interface LifecycleNoticeState {
   sweptRetire: Record<string, true>;
   recordResidual: (residual: StopResidual) => void;
   dismissResidual: (sessionId: string, at: number) => void;
-  /** Review F1 (sev-3): capture `retireControlStopError` for EVERY row — focus-independent. */
+  /** Capture `retireControlStopError` for EVERY row — focus-independent. */
   sweepRetireResiduals: (sessions: readonly OpenSession[]) => void;
   recordCleanupOutcome: (outcome: LandedCleanupResult) => void;
   dismissCleanupOutcome: () => void;
@@ -123,7 +124,7 @@ export const useLifecycleNotices = <T>(
   selector: (state: LifecycleNoticeState) => T,
 ): T => useStore(lifecycleNoticeStore, selector);
 
-// ── The retire-residual sweep (review F1, sev-3) ────────────────────────────────────────────
+// ── The retire-residual sweep ───────────────────────────────────────────────────────────────
 // The catalog serves retired rows forever and every hydrate lands them in the sessionStore, but
 // they tombstone out of the rail — so a residual captured only on the FOCUSED seat's handoff
 // would silently drop for unfocused retirements (and on reload). This refcounted subscription
@@ -156,7 +157,7 @@ export interface TerminateOutcome {
   ok: boolean;
   /** Informational stop residual from the terminate response — the session IS terminated. */
   controlStopDetail?: string;
-  /** The POST failure, verbatim (review finding 4): the terminate did NOT happen. */
+  /** The POST failure, verbatim: the terminate did NOT happen. */
   error?: string;
 }
 
@@ -206,6 +207,9 @@ export async function endSessionDetailed(
   if (!outcome.ok) return outcome;
   sessionStore.getState().setStatus(session.id, "terminated");
   sessionStore.getState().close(session.id);
+  // Termination is the ACTIVE conversation disconnector now that focus switches keep
+  // projections warm — a dead seat must not hold a stream open until LRU pressure.
+  disconnectConversation(session.id);
   notifySessionCatalogChanged("terminate", session.id);
   if (outcome.controlStopDetail) {
     lifecycleNoticeStore.getState().recordResidual({
@@ -238,6 +242,7 @@ export async function endLandedDetailed(
   for (const id of result.closedSessions) {
     sessionStore.getState().setStatus(id, "terminated");
     sessionStore.getState().close(id);
+    disconnectConversation(id);
   }
   notifySessionCatalogChanged("terminate");
   lifecycleNoticeStore.getState().recordCleanupOutcome(result);

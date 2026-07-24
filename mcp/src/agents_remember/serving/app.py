@@ -8,14 +8,14 @@ Endpoints:
   ``provider`` / ``metrics`` / ``analytics`` and their ``*.removed`` markers) fanned out from
   the shared :class:`Projector`.
 * ``GET  /api/events``          -- the raw ``ar-observer-event/v1`` log, tailed with exact
-  byte-offset ``Last-Event-ID`` resume (slice 4b). A *separate* stream from ``/api/stream``:
+  byte-offset ``Last-Event-ID`` resume. A *separate* stream from ``/api/stream``:
   it resumes by byte offset, the state channel re-snapshots, so mixing them on one stream
   would be incoherent. The cockpit opens both (still well under the ~6 connections/origin cap).
 * ``POST /api/actions/{action}``-- the gate return-channel. Lifecycle transitions
   (``resume`` / ``integrate`` / ``cleanup``) are validated against the reducer's
-  ``ActionAvailability`` and acknowledged without mutation (slice 4b); gate-decision verbs
+  ``ActionAvailability`` and acknowledged without mutation; gate-decision verbs
   (``approve`` / ``reject`` / ``request-revision`` / ``cancel``) are recorded as
-  developer-attributed gate decisions (slice 6b), which server-side closeout enforcement
+  developer-attributed gate decisions, which server-side closeout enforcement
   makes binding. Routing maps :class:`ActionOutcome` onto the response; see ``serving/actions.py``.
 * ``POST /api/operator-inbox``  -- the external-chat gate response return channel. The
   dashboard writes a developer response to the append-only operator inbox when no hosted chat
@@ -27,7 +27,7 @@ cockpit for the developer's own machine; exposing it (an SSH tunnel, a reverse p
 unauthenticated reader the whole projection -- and the POST action surface -- so any multi-user
 or remote story is a deliberate later design with its own auth gate.
 
-The ``now`` / ``before_tick`` parameters are the sim seams (slice 4b): live serving leaves them
+The ``now`` / ``before_tick`` parameters are the sim seams: live serving leaves them
 at their defaults; ``cli.dashboard`` passes a replay clock + fixture feeder under ``--sim``.
 """
 
@@ -60,6 +60,7 @@ from fastapi import (
 from fastapi.responses import JSONResponse
 from fastapi.sse import EventSourceResponse, ServerSentEvent
 from pydantic import BaseModel, Field
+from starlette.middleware.gzip import GZipMiddleware
 
 from agents_remember.controlplane.attention_dismissals import (
     AttentionDismissalRecord,
@@ -106,6 +107,13 @@ from agents_remember.serving.harness_control_client import (
     submit_control_prompt,
 )
 from agents_remember.serving.harnesses import detect_harnesses
+from agents_remember.serving.heap_diag import (
+    heap_diag_loop,
+    malloc_trim_enabled,
+    malloc_trim_interval_seconds,
+    start_heap_tracing,
+    trim_malloc,
+)
 from agents_remember.serving.hosted_interactions import HostedInteractionSynchronizer
 from agents_remember.serving.leaf_ref_validation import resolve_catalog_leaf_key
 from agents_remember.serving.notes import register_notes_routes
@@ -157,6 +165,39 @@ def _encode(data: BaseModel | dict[str, Any]) -> Any:
     return data
 
 
+class _ProjectionBodyCache:
+    """One-entry memo of the dumped projection body for the published projection instance.
+
+    ``/api/state`` and the SSE boot snapshot serve the SAME ~1.3 MB
+    projection dump, previously re-walked by ``model_dump`` per request/subscriber (measured
+    13.7-16.5 ms per ``/api/state`` call). The projector swaps in a NEW projection instance
+    every tick (``Projector._published``), so keying the memo by instance identity refreshes
+    it every tick: serve freshness is exactly the former per-request dump semantics (ages as
+    of the last tick), while every request/subscriber landing within one tick shares a single
+    dump. Keying by the coarser ETag revision instead would freeze the volatile age fields
+    for ETag-less full GETs and SSE reconnects until the next content change. The volatile
+    tail is NOT cached: ``servingBuild``/``supervisorHeartbeat`` are injected per serve, so
+    callers must shallow-copy the returned dict and never mutate the memo itself. Holding the
+    instance in the entry makes the identity compare ABA-safe, and tuple assignment is
+    GIL-atomic, so no lock (the ``/api/state`` threadpool and the event loop can race
+    harmlessly: a concurrent miss just recomputes the same content).
+    """
+
+    def __init__(self) -> None:
+        self._entry: tuple[BaseModel, dict[str, Any]] | None = None
+
+    def body(self, projection: BaseModel) -> dict[str, Any]:
+        """``projection``'s wire dump (cached per instance; read-only for callers)."""
+        entry = self._entry
+        if entry is None or entry[0] is not projection:
+            entry = (projection, projection.model_dump(by_alias=True, exclude_none=True))
+            self._entry = entry
+        return entry[1]
+
+
+_projection_body_cache = _ProjectionBodyCache()
+
+
 def _if_none_match_matches(header: str | None, revision: str) -> bool:
     """RFC 7232 weak comparison of an ``If-None-Match`` header against our revision.
 
@@ -187,14 +228,20 @@ async def stream_events(
     """The SSE event sequence for one atomic projector subscription.
 
     Module-level (not a route closure) so it is unit-testable without an HTTP client.
-    ``build`` (the boot-time serving stamp, 260703-L15) rides the snapshot as
+    ``build`` (the boot-time serving stamp) rides the snapshot as
     ``servingBuild`` so the cockpit can render which process/commit is answering.
-    ``supervisor_heartbeat`` (260707-HFX2-L2 R5) rides as ``supervisorHeartbeat`` -- the tick age
+    ``supervisor_heartbeat`` rides as ``supervisorHeartbeat`` -- the tick age
     at connect time, so a stale supervisor is visible in the dashboard header at a glance.
     """
     async with contextlib.aclosing(projector.subscribe()) as subscription:
         async for seq, delta in subscription:
-            payload = _encode(delta.data)
+            if delta.event == "snapshot" and isinstance(delta.data, BaseModel):
+                # The boot snapshot is the same projection dump /api/state serves -- reuse the
+                # per-instance memo (copy before the volatile injections below) instead of
+                # re-dumping ~1.3 MB per subscriber.
+                payload = dict(_projection_body_cache.body(delta.data))
+            else:
+                payload = _encode(delta.data)
             if delta.event == "snapshot":
                 if build is not None:
                     payload["servingBuild"] = build.payload()
@@ -207,7 +254,7 @@ _TERMINAL_EXIT_FRAME = json.dumps({"type": "exit"})
 """The text frame sent to the browser once the PTY child exits (then the socket closes)."""
 
 _IMAGE_EXTS = frozenset({"png", "jpg", "jpeg", "gif", "webp"})
-"""Image extensions Claude Code's vision accepts (slice 6f). BMP/TIFF/SVG are rejected -- BMP is the
+"""Image extensions Claude Code's vision accepts. BMP/TIFF/SVG are rejected -- BMP is the
 documented WSL clipboard paste-failure root, and the others are not vision formats."""
 
 _MAX_IMAGE_BYTES = 5 * 1024 * 1024
@@ -234,7 +281,7 @@ def _looks_like_image(body: bytes, ext: str) -> bool:
 def _apply_terminal_input(host: TerminalHost, session: str, text: str) -> None:
     """Apply one client text frame to the session: a ``stdin`` write or a ``resize``.
 
-    Malformed frames and unknown types are ignored; the fixed-argv host (slice 6d) accepts
+    Malformed frames and unknown types are ignored; the fixed-argv host accepts
     only these two control shapes, never an arbitrary command, so the wire carries no
     spawn surface.
     """
@@ -346,8 +393,8 @@ DEFAULT_SHELL = "/bin/bash"
 class TerminalOpenRequest(BaseModel):
     """Body of ``POST /api/terminal/{session}``: which kind of session to spawn.
 
-    ``kind="terminal"`` spawns a shell (slice 6e-2a); ``kind="harness"`` spawns the supported TUI
-    harness named by ``harness`` (its id, e.g. ``"claude"`` -- slice 6e-2b). The server resolves the
+    ``kind="terminal"`` spawns a shell; ``kind="harness"`` spawns the supported TUI
+    harness named by ``harness`` (its id, e.g. ``"claude"``). The server resolves the
     command from the kind/harness id -- only ids are on the wire, never an argv -- so there is no
     command-injection surface.
     """
@@ -371,7 +418,7 @@ class TerminalAttachLeafRequest(BaseModel):
 
 
 class TerminalRetireRequest(BaseModel):
-    """Body of ``POST /api/terminal/{session}/retire`` (260707-HFX-L8): the retire authority check.
+    """Body of ``POST /api/terminal/{session}/retire``: the retire authority check.
 
     ``actor_session`` is the RETIRING seat's own catalog session id (self-declared, mirroring
     ``spawn_agent_session``'s ``spawned_by_session`` provenance -- there is no ambient "who am I"
@@ -390,7 +437,7 @@ class TerminalLandedCleanupRequest(BaseModel):
 
 
 class TerminalRenameRequest(BaseModel):
-    """Body of ``POST /api/terminal/{session}/rename`` (260707-HFX-L8, issue #4): the new display label."""
+    """Body of ``POST /api/terminal/{session}/rename``: the new display label."""
 
     label: str
 
@@ -495,7 +542,7 @@ def create_app(
     default; sim disables both unless explicitly set (replay must stay time-driven -- the sim
     feeder only writes *inside* a tick, so a change-gated loop would never wake). ``interval``
     is the fast-path projection cadence floor; ``heartbeat`` bounds quiet-world ``/api/state``
-    staleness (260712-PTS-L3, default ``DEFAULT_HEARTBEAT_SECONDS``). ``terminal_host``
+    staleness (default ``DEFAULT_HEARTBEAT_SECONDS``). ``terminal_host``
     defaults to a fresh :class:`TerminalHost` (the Mode B2 terminal backend); tests inject a
     fake to drive the WebSocket bridge without a real PTY.
     """
@@ -531,13 +578,13 @@ def create_app(
         ),
         on_control_snapshot=interaction_synchronizer.observe,
     )
-    # Resolved ONCE at boot (260703-L15): the stamp that makes a stale serving process visible.
+    # Resolved ONCE at boot: the stamp that makes a stale serving process visible.
     build = resolve_serving_build()
 
-    # Containment R4 (260707-HFX-L1): the serving daemon samples labeled provider
+    # The serving daemon samples labeled provider
     # containers on its own cadence (decoupled from the 1s projection tick) into
     # the central metrics store — the feed for provider_status, the statistics
-    # board, and the degradation protocol (260707-HFX-L7). Read-only + dockerless-safe.
+    # board, and the degradation protocol. Read-only + dockerless-safe.
     metrics_store = ProviderMetricsStore(config.coordination_root)
 
     async def metrics_loop() -> None:
@@ -548,16 +595,16 @@ def create_app(
                 )
                 await asyncio.to_thread(metrics_store.record, snapshot)
                 await asyncio.to_thread(evaluate_provider_degradation, config)
-                # F5: reclaim the append-only metrics log (O(1) stat unless past its byte budget).
+                # Reclaim the append-only metrics log (O(1) stat unless past its byte budget).
                 await asyncio.to_thread(metrics_store.compact)
             except Exception:
                 logger.exception("provider metrics sample failed; retrying next interval")
             await asyncio.sleep(DEFAULT_SAMPLE_INTERVAL_SECONDS)
 
-    # 260707-HFX2-L2 R1: the deterministic supervisor sweep -- its own decoupled cadence
+    # The deterministic supervisor sweep -- its own decoupled cadence
     # (default ~10s, settings-controlled), zero tokens, pure code. "The model is never the
     # polling layer": every predicate reads TerminalCatalog/OperatorInboxStore/
-    # ExpectationRowStore/the nudge log DIRECTLY (R3), never the projection.
+    # ExpectationRowStore/the nudge log DIRECTLY, never the projection.
     supervisor_heartbeat_store = SupervisorHeartbeatStore(observer_root(config))
 
     def _supervisor_context() -> SupervisorContext:
@@ -597,6 +644,19 @@ def create_app(
                 logger.exception("supervisor sweep failed; retrying next interval")
             await asyncio.sleep(settings.supervisor.interval_seconds)
 
+    async def malloc_trim_loop() -> None:
+        # Opt-in glibc arena reclaim. The steady RSS growth is allocator
+        # fragmentation from per-tick projection churn (gc object count is flat while RSS climbs);
+        # malloc_trim(0) returns the freed arena pages to the OS and holds RSS flat. Off unless
+        # AR_MALLOC_TRIM is set, glibc-only, and run off the event loop since it walks the arenas.
+        interval = malloc_trim_interval_seconds()
+        while True:
+            await asyncio.sleep(interval)
+            try:
+                await asyncio.to_thread(trim_malloc)
+            except Exception:
+                logger.exception("malloc_trim failed; retrying next interval")
+
     async def workspace_river_compaction_loop() -> None:
         while True:
             await asyncio.sleep(WORKSPACE_EVENT_COMPACT_INTERVAL_SECONDS)
@@ -609,7 +669,7 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
-        # F3/CS-6 D3: compact once before accepting clients, then keep compacting on a slow live
+        # Compact once before accepting clients, then keep compacting on a slow live
         # cadence. Workspace cursors are virtual (base offset + physical offset), and append/compact/read
         # share a cross-process lock, so this is cursor-safe while MCP and serving processes both write.
         await asyncio.to_thread(
@@ -620,6 +680,11 @@ def create_app(
         metrics_task = asyncio.create_task(metrics_loop())
         supervisor_task = asyncio.create_task(supervisor_loop())
         river_compaction_task = asyncio.create_task(workspace_river_compaction_loop())
+        # The heap-growth diagnostic only exists when AR_HEAP_DIAG is set (tracemalloc started here
+        # so the very first snapshot has a full trace history); otherwise there is no extra task at all.
+        heap_task = asyncio.create_task(heap_diag_loop()) if start_heap_tracing() else None
+        # Opt-in RSS bound (glibc arena reclaim), independent of the diagnostic above.
+        trim_task = asyncio.create_task(malloc_trim_loop()) if malloc_trim_enabled() else None
         try:
             yield
         finally:
@@ -627,6 +692,10 @@ def create_app(
             supervisor_task.cancel()
             metrics_task.cancel()
             task.cancel()
+            if heap_task is not None:
+                heap_task.cancel()
+            if trim_task is not None:
+                trim_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await river_compaction_task
             with contextlib.suppress(asyncio.CancelledError):
@@ -635,12 +704,24 @@ def create_app(
                 await metrics_task
             with contextlib.suppress(asyncio.CancelledError):
                 await task
+            if heap_task is not None:
+                with contextlib.suppress(asyncio.CancelledError):
+                    await heap_task
+            if trim_task is not None:
+                with contextlib.suppress(asyncio.CancelledError):
+                    await trim_task
             host.shutdown()
 
     app = FastAPI(title="Agents Remember dashboard", lifespan=lifespan)
+    # Gzip the multi-hundred-KB JSON bodies (/api/state ~1.3 MB, the files
+    # catalog) for the clients that negotiate it. compresslevel=6: on a ~1.3 MB JSON body it
+    # matches level 9's ratio for ~16% less CPU per serve. Starlette's responder excludes
+    # text/event-stream by content type, so the SSE channels (/api/stream, /api/events, the
+    # conversation event streams) keep streaming uncompressed and unbuffered (covered by test).
+    app.add_middleware(GZipMiddleware, compresslevel=6)
 
     def _supervisor_heartbeat_payload() -> dict[str, Any]:
-        # 260707-HFX2-L2 R5: the tick age at RESPONSE time (not the ETag-gated content revision --
+        # The tick age at RESPONSE time (not the ETag-gated content revision --
         # a heartbeat is deliberately volatile, the same "ages excluded" posture delta.py already
         # applies to other live ages, so it never busts the projection's change-gate revision).
         settings = load_agentic_settings(config.coordination_root)
@@ -666,7 +747,7 @@ def create_app(
     def api_state(
         if_none_match: Annotated[str | None, Header()] = None,
     ) -> Response:
-        # The change gate (260703-L15): the ETag is the projector's content revision, which only
+        # The change gate: the ETag is the projector's content revision, which only
         # advances when the stable projection form changes (volatile ages excluded -- delta.py).
         # An If-None-Match poll of an unchanged projection therefore costs a header exchange
         # instead of a ~780 KB dump+parse; when content DID change, the full fresh dump serves
@@ -679,7 +760,9 @@ def create_app(
         headers = {"ETag": etag, "Cache-Control": "no-cache"}
         if _if_none_match_matches(if_none_match, revision):
             return Response(status_code=304, headers=headers)
-        body = snapshot.model_dump(by_alias=True, exclude_none=True)
+        # The dump rides the per-instance memo; only the volatile tail
+        # (build stamp + at-response-time heartbeat) is computed per request, on a copy.
+        body = dict(_projection_body_cache.body(snapshot))
         body["servingBuild"] = build.payload()
         body["supervisorHeartbeat"] = _supervisor_heartbeat_payload()
         return JSONResponse(content=body, headers=headers)
@@ -732,7 +815,7 @@ def create_app(
             kind=request.kind,
         )
         if outcome.dismissal is not None:
-            # Leaf-28 S5.2: attention dismissals are current acknowledgements, not
+            # Attention dismissals are current acknowledgements, not
             # history. A gate-open item is consumed by deleting/cancelling the gate
             # itself, so it does not need an acknowledgement row after the source is gone.
             intent = outcome.dismissal
@@ -763,7 +846,7 @@ def create_app(
         if outcome.gate_decision is not None:
             # The one durable side effect: record the operator's gate decision as
             # developer-attributed -- un-forgeable vs. the agent's model-attributed
-            # path, and what server-side closeout enforcement (slice 6b) consumes.
+            # path, and what server-side closeout enforcement consumes.
             try:
                 if outcome.gate_decision.lifecycle_id is None:
                     if outcome.gate_decision.gate_id is None:
@@ -810,7 +893,7 @@ def create_app(
 
     @app.post("/api/operator-inbox")
     def api_operator_inbox(request: OperatorInboxPostRequest) -> Response:
-        # Task 10 external-chat path: a dashboard response with no hosted session is written to the
+        # External-chat path: a dashboard response with no hosted session is written to the
         # pull-based operator inbox. External agents read it through the MCP operator_inbox_poll /
         # operator_inbox_consume tools; this endpoint only owns the developer/dashboard write side.
         try:
@@ -850,9 +933,9 @@ def create_app(
 
     @app.websocket("/api/terminal/{session}")
     async def api_terminal(websocket: WebSocket, session: str) -> None:
-        # Mode B2 (slice 6d-2): bridge a live terminal-host session to xterm.js. Attach-only
-        # -- the session is opened out-of-band (the lifecycle-correlated launch is a later
-        # slice); an unknown id is refused with a private close code. Same localhost posture
+        # Mode B2: bridge a live terminal-host session to xterm.js. Attach-only
+        # -- the session is opened out-of-band (the lifecycle-correlated launch comes
+        # later); an unknown id is refused with a private close code. Same localhost posture
         # as the rest of the app (the host spawns a fixed argv, never a wire-supplied command).
         await websocket.accept()
         session_obj = _attach_terminal_session(
@@ -882,9 +965,9 @@ def create_app(
 
     @app.get("/api/harnesses")
     def api_harnesses() -> dict[str, Any]:
-        # The supported TUI harnesses + whether each is installed here (slice 6e-2b). The dashboard
+        # The supported TUI harnesses + whether each is installed here. The dashboard
         # renders a launch button per *detected* harness; the argv stays server-side (open via POST).
-        # 260703-L16: the EFFECTIVE registry (builtin merged with orchestration.harnesses in the
+        # The EFFECTIVE registry (builtin merged with orchestration.harnesses in the
         # GLOBAL agentic settings, per-use) -- settings-defined harnesses get buttons too. Repo-local
         # overrides are leaf-scoped dispatch material (the MCP spawn tool), not workspace buttons.
         registry = load_agentic_settings(config.coordination_root).harnesses
@@ -941,9 +1024,9 @@ def create_app(
 
     @app.post("/api/terminal/{session}")
     def api_terminal_open(session: str, request: TerminalOpenRequest) -> Response:
-        # Mode B2 opener (slice 6e-2a; harness kinds 6e-2b): the dashboard *spawns + owns* a
-        # session, then the WebSocket above attaches to it. L2 moves the leaf-claim + ensure + upsert
-        # composition into the shared `open_terminal_session` so this route and the agent-facing
+        # Mode B2 opener: the dashboard *spawns + owns* a
+        # session, then the WebSocket above attaches to it. The leaf-claim + ensure + upsert
+        # composition lives in the shared `open_terminal_session` so this route and the agent-facing
         # `spawn_agent_session` MCP tool spawn through ONE opener (no parallel spawn path).
         try:
             leaf_key = _resolve_request_leaf_key(config, request.leaf_key)
@@ -975,9 +1058,9 @@ def create_app(
             lifecycle_id=request.lifecycle_id,
             leaf_key=leaf_key,
             resolved_launch=resolved_launch,
-            # 260703-L16: resolve harness ids against the effective GLOBAL registry (builtin merged
+            # Resolve harness ids against the effective GLOBAL registry (builtin merged
             # with orchestration.harnesses) so dashboard launches and MCP dispatches agree on argv.
-            # Loaded only for harness-kind opens (review L16R-1): a malformed settings file must
+            # Loaded only for harness-kind opens: a malformed settings file must
             # fail the launches that USE it, never a plain scratch terminal.
             harnesses=(
                 load_agentic_settings(config.coordination_root).harnesses
@@ -1209,7 +1292,7 @@ def create_app(
 
     @app.post("/api/terminal/{session}/retire")
     def api_terminal_retire(session: str, request: TerminalRetireRequest) -> Response:
-        # 260707-HFX-L8 (issue #12): the server-authoritative retire surface. Never a zombie row --
+        # The server-authoritative retire surface. Never a zombie row --
         # a retire is the SAME terminal mark ``/terminate`` writes, plus retirement provenance
         # (who, why, when, which edge); transcripts are never touched. Authority is enforced here,
         # not trusted from the caller: owner-never-self-retires, a manager retires only its own
@@ -1277,8 +1360,8 @@ def create_app(
 
     @app.post("/api/terminal/{session}/rename")
     def api_terminal_rename(session: str, request: TerminalRenameRequest) -> Response:
-        # 260707-HFX-L8 (issue #4): post-spawn identity rename. Identity text ONLY -- spawn_role
-        # (the L6-immutable seat role) is never touched by a rename.
+        # Post-spawn identity rename. Identity text ONLY -- spawn_role
+        # (the immutable seat role) is never touched by a rename.
         entry = catalog.get(session)
         if entry is None or entry.status == "terminated":
             return JSONResponse(content={"status": "unknown-session"}, status_code=404)
@@ -1299,7 +1382,7 @@ def create_app(
     async def api_terminal_image(
         session: str, request: Request, file: Annotated[UploadFile, File()]
     ) -> Response:
-        # Slice 6f images: the terminal channel is text-only, so a pasted screenshot is carried by
+        # The terminal channel is text-only, so a pasted screenshot is carried by
         # saving it under the session's own cwd and injecting the on-disk path (Claude Code auto-attaches
         # an image path before the model runs). Same localhost posture as the rest of serving/; writes
         # ONLY under the session cwd, with a uuid basename (no traversal) and validated type (extension +
