@@ -805,6 +805,66 @@ class HarnessControlConformanceTests(unittest.IsolatedAsyncioTestCase):
         finally:
             await bridge.stop("forced")
 
+    async def test_parent_thread_tuple_entry_gets_the_operation_guard(self) -> None:
+        """Parent-ness is decided by the entry's thread, not by which slot carries it.
+
+        Concurrent parent pendings beyond the singular slot's oldest ride the plural
+        tuple (the adapter's per-thread pending map); a tuple entry whose threadId is
+        the session's vendor thread gets the active-operation guard exactly like the
+        singular slot, instead of being answered operation-free like an agent entry.
+        """
+
+        identity = _identity()
+        adapter = _FakeAdapter()
+        bridge = HarnessControlBridge(identity, adapter)
+        await bridge.start(_launch(identity))
+        try:
+            parent_second = PendingInteraction(
+                interaction_id="parent-approval-2",
+                kind="permission",
+                prompt="Allow the second parent command?",
+                created_at="2026-07-13T18:00:00+00:00",
+                choices=("allow", "deny"),
+                raw={"threadId": "vendor-session-1"},
+            )
+            agent_pending = PendingInteraction(
+                interaction_id="agent-approval-1",
+                kind="permission",
+                prompt="Allow the sub-agent command?",
+                created_at="2026-07-13T18:00:30+00:00",
+                choices=("allow", "deny"),
+                raw={"threadId": "agent-thread-1", "agentLabel": "agent agent-t"},
+            )
+            blocked = replace(
+                bridge.snapshot(),
+                pending_interactions=(parent_second, agent_pending),
+            )
+            adapter.emit(
+                AdapterEvent(1, "state", identity, agent_pending.created_at, snapshot=blocked)
+            )
+            await _settle_events()
+
+            # No active ordinary operation: the parent-thread tuple entry is guarded...
+            with self.assertRaises(HarnessInteractionNotPendingError):
+                await bridge.respond(
+                    InteractionResponse(
+                        interaction_id="parent-approval-2",
+                        response="allow",
+                        responded_at="2026-07-13T18:01:00+00:00",
+                    )
+                )
+            # ...while the agent entry still answers without one.
+            await bridge.respond(
+                InteractionResponse(
+                    interaction_id="agent-approval-1",
+                    response="allow",
+                    responded_at="2026-07-13T18:02:00+00:00",
+                )
+            )
+            self.assertIsNone(adapter.responses[-1].operation)
+        finally:
+            await bridge.stop("forced")
+
     def test_multiplexed_pending_interactions_serialize_through_every_surface(self) -> None:
         """The plural pending tuple survives snapshot/catalog/client wires."""
 

@@ -619,6 +619,8 @@ def evidence_frame_json(value: EvidenceFrame) -> dict[str, object]:
     }
     if value.native_method is not None:
         payload["nativeMethod"] = value.native_method
+    if value.thread_id is not None:
+        payload["threadId"] = value.thread_id
     return payload
 
 

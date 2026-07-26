@@ -865,6 +865,9 @@ def _evidence_page(result: object, *, expected_bridge_epoch: str | None) -> Evid
             not isinstance(native_method, str) or not native_method
         ):
             raise HarnessControlError("control evidence nativeMethod must be non-empty text or absent")
+        thread_id = raw_frame.get("threadId")
+        if thread_id is not None and (not isinstance(thread_id, str) or not thread_id):
+            raise HarnessControlError("control evidence threadId must be non-empty text or absent")
         frames.append(
             EvidenceFrame(
                 sequence=sequence,
@@ -872,6 +875,7 @@ def _evidence_page(result: object, *, expected_bridge_epoch: str | None) -> Evid
                 created_at=_required_text(raw_frame, "createdAt"),
                 raw=_object(raw_frame.get("raw")),
                 native_method=native_method,
+                thread_id=thread_id,
             )
         )
     if frames and latest < frames[-1].sequence:

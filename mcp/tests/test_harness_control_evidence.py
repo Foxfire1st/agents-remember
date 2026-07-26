@@ -646,6 +646,32 @@ class EvidenceIpcTests(unittest.IsolatedAsyncioTestCase):
                 await server.close()
                 await bridge.stop("forced")
 
+    async def test_evidence_thread_id_round_trips_over_ipc(self) -> None:
+        """The multiplexed demux key crosses the control socket: pre-L7 the evidence
+        frame JSON had no threadId, so a dashboard-side projector received every
+        frame as thread-less and bound all agent content to the parent conversation.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            identity = _identity("ipc-thread-id")
+            adapter = _EvidenceAdapter()
+            bridge, server, entry = await self._serve(adapter, identity, tmp)
+            try:
+                adapter.emit("state", {"n": 1, AR_EVIDENCE_KEY: {"n": 1, "threadId": "agent-thread-9"}})
+                adapter.emit("state", {"n": 2, AR_EVIDENCE_KEY: {"n": 2}})
+                await _settle()
+                descriptor = await asyncio.to_thread(read_submission_authority, entry)
+                page = await asyncio.to_thread(
+                    read_control_evidence,
+                    entry,
+                    expected_bridge_epoch=descriptor.bridge_epoch,
+                )
+                self.assertEqual(page.frames[0].thread_id, "agent-thread-9")
+                # Absent on parent frames: the pre-multiplex wire stays identical.
+                self.assertIsNone(page.frames[1].thread_id)
+            finally:
+                await server.close()
+                await bridge.stop("forced")
+
     async def test_cross_domain_coordinates_fail_typed(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             identity = _identity("ipc-domain")

@@ -619,6 +619,193 @@ class CodexAgentEngineTests(unittest.IsolatedAsyncioTestCase):
         by_id = {item.item_id: item for item in result.items}
         self.assertEqual(by_id["parent-approval"].phase, "unknown")
 
+    async def test_concurrent_parent_pendings_all_project_and_resolve_per_id(self) -> None:
+        """Concurrent parent pendings (the 2026-07-26 kill scenario's healthy form)."""
+        bridge = _MultiplexedBridge()
+        parent_first = PendingInteraction(
+            interaction_id="parent-approval-1",
+            kind="approval",
+            prompt="run ls?",
+            created_at=NOW,
+            raw={"threadId": PARENT},
+        )
+        parent_second = PendingInteraction(
+            interaction_id="parent-approval-2",
+            kind="approval",
+            prompt="run pwd?",
+            created_at=NOW,
+            raw={"threadId": PARENT},
+        )
+        agent_pending = PendingInteraction(
+            interaction_id="agent-approval",
+            kind="approval",
+            prompt="git status?",
+            created_at=NOW,
+            raw={"threadId": AGENT, "agentLabel": "/root/agent_one"},
+        )
+        # The singular slot carries the parent's OLDEST pending (back-compat).
+        bridge.snapshot = replace(
+            bridge.snapshot,
+            pending_interaction=parent_first,
+            pending_interactions=(parent_first, parent_second, agent_pending),
+            raw={"agentRegistry": {AGENT: {"status": "running", "agentPath": "/root/agent_one"}}},
+        )
+        projector = _projector(bridge)
+        result = await projector.page(before_ordinal=None, limit=50)
+        by_id = {item.item_id: item for item in result.items}
+
+        for interaction_id in ("parent-approval-1", "parent-approval-2", "agent-approval"):
+            self.assertIn(interaction_id, by_id)
+            self.assertEqual(by_id[interaction_id].lane, "interaction")
+            self.assertEqual(by_id[interaction_id].phase, "waiting")
+        # Parent-thread entries project plainly; the agent entry carries its identity.
+        self.assertIsNone(by_id["parent-approval-1"].agent)
+        self.assertIsNone(by_id["parent-approval-2"].agent)
+        assert by_id["agent-approval"].agent is not None
+        self.assertEqual(by_id["agent-approval"].agent.agent_id, AGENT)
+
+        # The second parent request settles while the others stay open.
+        bridge.snapshot = replace(
+            bridge.snapshot,
+            pending_interactions=(parent_first, agent_pending),
+        )
+        await projector.poll_once()
+        result = await projector.page(before_ordinal=None, limit=50)
+        by_id = {item.item_id: item for item in result.items}
+        self.assertEqual(by_id["parent-approval-2"].phase, "unknown")
+        self.assertEqual(by_id["parent-approval-1"].phase, "waiting")
+        self.assertEqual(by_id["agent-approval"].phase, "waiting")
+
+    async def test_parent_singular_rotation_resolves_evicted_and_keeps_rotated_live(self) -> None:
+        """A→B singular rotation: the evicted id settles; the rotated id stays live."""
+        bridge = _MultiplexedBridge()
+        parent_first = PendingInteraction(
+            interaction_id="parent-approval-1",
+            kind="approval",
+            prompt="run ls?",
+            created_at=NOW,
+            raw={"threadId": PARENT},
+        )
+        parent_second = PendingInteraction(
+            interaction_id="parent-approval-2",
+            kind="approval",
+            prompt="run pwd?",
+            created_at=NOW,
+            raw={"threadId": PARENT},
+        )
+        bridge.snapshot = replace(
+            bridge.snapshot,
+            pending_interaction=parent_first,
+            pending_interactions=(parent_first, parent_second),
+        )
+        projector = _projector(bridge)
+        result = await projector.page(before_ordinal=None, limit=50)
+        by_id = {item.item_id: item for item in result.items}
+        self.assertEqual(by_id["parent-approval-1"].phase, "waiting")
+        self.assertEqual(by_id["parent-approval-2"].phase, "waiting")
+
+        # The oldest is answered: the adapter rotates the singular slot to the
+        # next-oldest, which leaves the multiplexed tuple for the same id.
+        bridge.snapshot = replace(
+            bridge.snapshot,
+            pending_interaction=parent_second,
+            pending_interactions=(parent_second,),
+        )
+        await projector.poll_once()
+        result = await projector.page(before_ordinal=None, limit=50)
+        by_id = {item.item_id: item for item in result.items}
+        self.assertEqual(by_id["parent-approval-1"].phase, "unknown")
+        self.assertEqual(by_id["parent-approval-2"].phase, "waiting")
+
+        # The rotated request settles: both end resolved, none left waiting.
+        bridge.snapshot = replace(
+            bridge.snapshot, pending_interaction=None, pending_interactions=()
+        )
+        await projector.poll_once()
+        result = await projector.page(before_ordinal=None, limit=50)
+        by_id = {item.item_id: item for item in result.items}
+        self.assertEqual(by_id["parent-approval-1"].phase, "unknown")
+        self.assertEqual(by_id["parent-approval-2"].phase, "unknown")
+
+    async def test_page_backfills_agent_content_when_live_delivery_is_partial(self) -> None:
+        """The 2026-07-26 live-verification gap: roster/lifecycle crossed, content did not.
+
+        The vendor's auto-attach is best-effort — a fast agent outruns it and its
+        content events never reach the connection. The page's per-thread backfill
+        walks the agent's native history once, so the agent view is complete anyway.
+        """
+        bridge = _MultiplexedBridge()
+        _codex_turn(bridge, "turn-1")
+        # Only spawn + turn lifecycle for the agent crosses live; its content does not.
+        bridge.push_frame(
+            "codex-notification",
+            item_completed_params(
+                PARENT,
+                "turn-1",
+                collab_agent_tool_call_item(
+                    "collab-1",
+                    "spawnAgent",
+                    sender_thread_id=PARENT,
+                    receiver_thread_ids=[AGENT],
+                ),
+            ),
+            thread_id=PARENT,
+        )
+        bridge.push_frame(
+            "codex-notification",
+            turn_started_params(AGENT, "agent-turn-1"),
+            thread_id=AGENT,
+            native_method="turn/started",
+        )
+        bridge.push_frame(
+            "codex-notification",
+            turn_completed_params(AGENT, "agent-turn-1"),
+            thread_id=AGENT,
+            native_method="turn/completed",
+        )
+        # Native authority holds the agent's actual work (thread/read proven live).
+        bridge.agent_native_frames[AGENT] = [
+            NativeEvidenceFrame(
+                native_id="call-1",
+                native_parent_id="agent-turn-1",
+                native_type="subAgentActivity",
+                created_at=NOW,
+                raw={"id": "call-1", "type": "subAgentActivity", "kind": "interacted", "agentThreadId": "other-agent", "agentPath": "/root"},
+            ),
+            NativeEvidenceFrame(
+                native_id="msg-1",
+                native_parent_id="agent-turn-1",
+                native_type="agentMessage",
+                created_at=NOW,
+                raw={"id": "msg-1", "type": "agentMessage", "text": "agent work result"},
+            ),
+        ]
+        projector = _projector(bridge)
+        result = await projector.page(before_ordinal=None, limit=50)
+        by_id = {item.item_id: item for item in result.items}
+
+        # The agent's content is backfilled and attributed even though it never crossed live;
+        # native ids are thread-scoped so the forked copies cannot collide with the parent's.
+        scoped = f"{AGENT}:msg-1"
+        self.assertIn(scoped, by_id)
+        scoped_agent = by_id[scoped].agent
+        assert scoped_agent is not None
+        self.assertEqual(scoped_agent.agent_id, AGENT)
+        self.assertNotIn("msg-1", by_id)
+        # Roster + turn-result still present from the live channel; the walk minted
+        # no roster of its own (no duplicate for the referenced other agent).
+        self.assertIn(f"codex-agent-{AGENT}", by_id)
+        self.assertIn("turn-result:agent-turn-1", by_id)
+        self.assertNotIn("codex-agent-other-agent", by_id)
+        self.assertNotIn(f"{AGENT}:codex-agent-other-agent", by_id)
+
+        # The walk happens once per projector: the thread is marked walked, so a
+        # second page does not re-read it (store dedupe backstops regardless).
+        self.assertIn(AGENT, projector._agent_native_walked)
+        await projector.page(before_ordinal=None, limit=50)
+        by_id = {item.item_id: item for item in (await projector.page(before_ordinal=None, limit=50)).items}
+        self.assertIn(f"{AGENT}:msg-1", by_id)
+
     async def test_per_thread_twin_suppression_and_lazy_agent_native_walk(self) -> None:
         bridge = _MultiplexedBridge()
         _codex_turn(bridge, "turn-1")
@@ -649,11 +836,12 @@ class CodexAgentEngineTests(unittest.IsolatedAsyncioTestCase):
         await projector.refresh_agent_native(AGENT)
         result = await projector.page(before_ordinal=None, limit=50)
         ids = [item.item_id for item in result.items]
-        self.assertNotIn("item-1", ids, "the live-settled agent turn must not twin")
-        self.assertIn("item-0", ids, "genuine agent history must backfill")
+        self.assertNotIn(f"{AGENT}:item-1", ids, "the live-settled agent turn must not twin")
+        self.assertIn(f"{AGENT}:item-0", ids, "genuine agent history must backfill")
         by_id = {item.item_id: item for item in result.items}
-        assert by_id["item-0"].agent is not None
-        self.assertEqual(by_id["item-0"].agent.agent_id, AGENT)
+        item0_agent = by_id[f"{AGENT}:item-0"].agent
+        assert item0_agent is not None
+        self.assertEqual(item0_agent.agent_id, AGENT)
 
         # Bucket isolation: a PARENT native frame whose turn id collides with the
         # agent thread's live turn id is genuine parent history and survives.

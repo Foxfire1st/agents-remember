@@ -1076,11 +1076,21 @@ async def test_correlated_server_approval_and_elicitation_responses() -> None:
 
 @pytest.mark.anyio
 async def test_experimental_server_request_fails_instead_of_enabling_experimental_api() -> None:
+    """Experimental request types are declined (never enabled), and the bridge survives.
+
+    The decline contract is unchanged (respond_error -32601, no experimental API);
+    the failure contract deliberately changed: an unknown/experimental request
+    METHOD is vendor traffic and degrades to preserved evidence on any thread
+    instead of marking the bridge failed (multiplexed seats make new request
+    types routine).
+    """
+
     data = fixture()
     transport = FakeCodexTransport()
     prime_start(transport, data)
     adapter = make_adapter(transport)
     await adapter.start(launch())
+    events = adapter.subscribe()
     try:
         transport.emit(
             {
@@ -1089,9 +1099,15 @@ async def test_experimental_server_request_fails_instead_of_enabling_experimenta
                 "params": {"threadId": "thread-1"},
             }
         )
-        await settle()
-        assert (await adapter.snapshot()).control == "failed"
+        degraded: Mapping[str, object] | None = None
+        while degraded is None:
+            event = await asyncio.wait_for(anext(events), timeout=1.0)
+            if isinstance(event.raw.get("degraded"), str):
+                degraded = event.raw
+        assert degraded["codexMethod"] == "item/tool/requestUserInput"
         assert transport.server_errors[-1][0:2] == ("experimental-1", -32601)
+        assert (await adapter.snapshot()).control == "ready"
+        assert (await adapter.snapshot()).pending_interaction is None
     finally:
         await adapter.stop("forced")
 

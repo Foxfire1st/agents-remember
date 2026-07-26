@@ -110,13 +110,15 @@ function storeMeasurements(
 
 // Keys that mean "the operator is scrolling this feed" for the trusted-input restore cancel
 // (a programmatic clamp never carries input) — mirror of the feed's own keyboard scrolling.
-const OPERATOR_SCROLL_KEYS = new Set([
+// ArrowDown is deliberately ABSENT: on a non-empty roster the conversation surface hijacks it
+// into the agents line, so it is no longer a scroll key here — PageUp/PageDown, [/] and the
+// wheel remain the scroll paths. Exported for the surface keyboard-contract tests.
+export const OPERATOR_SCROLL_KEYS = new Set([
   "Home",
   "End",
   "PageUp",
   "PageDown",
   "ArrowUp",
-  "ArrowDown",
   " ",
   "[",
   "]",

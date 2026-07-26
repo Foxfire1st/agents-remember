@@ -21,6 +21,7 @@ from agents_remember.serving.codex_app_server_protocol import (
     CodexAppServerTransport,
     CodexStdioTransport,
     JsonObject,
+    RequestId,
 )
 from agents_remember.serving.codex_app_server_session import (
     CodexAppServerSession,
@@ -28,6 +29,7 @@ from agents_remember.serving.codex_app_server_session import (
     TransportFactory,
 )
 from agents_remember.serving.codex_app_server_state import (
+    STABLE_SERVER_REQUESTS,
     CodexServerInteraction,
     CodexSubmissionLedger,
     SubmissionEvidence,
@@ -76,6 +78,19 @@ Clock = Callable[[], str]
 
 THREAD_REGISTRY_LIMIT = 64
 ITEM_THREAD_INDEX_LIMIT = 1024
+PENDING_INTERACTIONS_PER_THREAD = 16
+ADAPTER_EVENT_QUEUE_LIMIT = 1024
+_LOAD_SHED_DELTA_METHODS = frozenset(
+    {
+        "item/agentMessage/delta",
+        "item/plan/delta",
+        "item/reasoning/summaryTextDelta",
+        "item/reasoning/summaryPartAdded",
+        "item/reasoning/textDelta",
+        "item/commandExecution/outputDelta",
+        "item/fileChange/patchUpdated",
+    }
+)
 
 
 @dataclass
@@ -101,7 +116,19 @@ class _ThreadState:
         default_factory=OrderedDict
     )
     unbound_completions: dict[str, JsonObject] = field(default_factory=dict)
-    pending_interaction: CodexServerInteraction | None = None
+    pending_interactions: OrderedDict[RequestId, CodexServerInteraction] = field(
+        default_factory=OrderedDict
+    )
+    """Concurrent server->client requests keyed by rpc id, exactly how the vendor
+    tracks them (the codex TUI keeps one app-global pending map keyed by approval
+    id): a second request while another is pending is normal traffic, never an
+    error."""
+
+    @property
+    def pending_interaction(self) -> CodexServerInteraction | None:
+        """The thread's oldest pending interaction (the pre-multiplex singular view)."""
+
+        return next(iter(self.pending_interactions.values()), None)
 
 
 class CodexAppServerAdapter:
@@ -118,7 +145,10 @@ class CodexAppServerAdapter:
         self._session = CodexAppServerSession(settings, transport_factory=transport_factory)
         self._clock = clock
         self._snapshot: AdapterSnapshot | None = None
-        self._events: asyncio.Queue[AdapterEvent | None] = asyncio.Queue(maxsize=256)
+        self._events: asyncio.Queue[AdapterEvent | None] = asyncio.Queue(
+            maxsize=ADAPTER_EVENT_QUEUE_LIMIT
+        )
+        self._dropped_events = 0
         self._processor: asyncio.Task[None] | None = None
         self._stopped = False
         self._threads: OrderedDict[str, _ThreadState] = OrderedDict()
@@ -262,6 +292,11 @@ class CodexAppServerAdapter:
             if event is None:
                 return
             yield event
+            # Consumer-side catch-up: after a flood the producer may go silent,
+            # so the shed accounting cannot wait for the next put — mint the notice
+            # as soon as the drained queue has room. Same monotonic sequence path,
+            # and dropped==0 makes it a no-op, so the notice itself never recurses.
+            self._emit_load_shed_notice_if_caught_up()
 
     def subscribe(self) -> AsyncIterator[AdapterEvent]:
         return self._event_stream()
@@ -368,13 +403,13 @@ class CodexAppServerAdapter:
         return result
 
     async def respond(self, response: InteractionResponse) -> None:
-        state = self._interaction_thread(response.interaction_id)
-        if state is None:
+        found = self._interaction_thread(response.interaction_id)
+        if found is None:
             raise CodexAppServerError(
                 "Codex interaction response does not match the pending request"
             )
-        pending = state.pending_interaction
-        assert pending is not None
+        state, rpc_id = found
+        pending = state.pending_interactions[rpc_id]
         if state.is_parent and (
             response.operation is None or response.operation != self._active_operation
         ):
@@ -382,7 +417,7 @@ class CodexAppServerAdapter:
         transport = self._require_transport()
         result = interaction_result(pending.method, response.response)
         await transport.respond(pending.rpc_id, result)
-        state.pending_interaction = None
+        del state.pending_interactions[rpc_id]
         if state.is_parent:
             self._snapshot = replace(
                 await self.snapshot(),
@@ -606,25 +641,30 @@ class CodexAppServerAdapter:
         except HarnessControlError as exc:
             await self._mark_failed(str(exc))
 
-    async def _degrade_agent_frame(self, message: JsonObject, exc: CodexAppServerError) -> bool:
+    async def _degrade_agent_frame(
+        self, message: JsonObject, exc: CodexAppServerError, *, force: bool = False
+    ) -> bool:
         """Degrade one malformed non-parent frame to preserved raw evidence.
 
         Mirrors the projector's UnmappableShape discipline: the bridge stays ready and the
         frame crosses unmodified with its failure noted, rather than failing the whole
         bridge. Only a well-formed FOREIGN threadId qualifies — a missing/parent threadId
-        re-raises exactly as before.
+        re-raises exactly as before, unless ``force`` is set (unknown server-request
+        METHODS degrade on any thread; a new vendor request type is traffic, not a
+        protocol violation).
         """
 
         params = message.get("params")
         if not isinstance(params, Mapping):
             return False
-        thread_id = params.get("threadId")
-        if (
-            not isinstance(thread_id, str)
-            or not thread_id
-            or thread_id == self._session.thread_id
-        ):
-            return False
+        if not force:
+            thread_id = params.get("threadId")
+            if (
+                not isinstance(thread_id, str)
+                or not thread_id
+                or thread_id == self._session.thread_id
+            ):
+                return False
         method = message.get("method")
         method_text = method if isinstance(method, str) else "unknown"
         await self._emit(
@@ -809,15 +849,33 @@ class CodexAppServerAdapter:
         request_id = message.get("id")
         try:
             interaction = parse_server_interaction(message, created_at=self._clock())
+        except CodexAppServerError as exc:
+            # Decide by METHOD first. An unknown/experimental server request METHOD is
+            # vendor traffic, never a bridge failure: answer it with decline semantics
+            # (the vendor maps an error response to decline) and cross it as degraded
+            # evidence, on ANY thread. A KNOWN stable method's malformed shape
+            # (rpc-id type, non-object params) is a protocol violation, not traffic:
+            # no decline-and-degrade — the loop's agent-degrade/parent-fail split
+            # applies unchanged.
+            method = message.get("method")
+            if isinstance(method, str) and method in STABLE_SERVER_REQUESTS:
+                raise
+            if isinstance(request_id, (str, int)) and not isinstance(request_id, bool):
+                await self._require_transport().respond_error(
+                    request_id,
+                    code=-32601,
+                    message=str(exc),
+                )
+            await self._degrade_agent_frame(message, exc, force=True)
+            return
+        try:
             state = self._thread_for(
                 required_object(message.get("params"), context="server request"),
                 context="Codex server request",
             )
-            if state.pending_interaction is not None:
-                raise CodexAppServerError(
-                    "Codex emitted multiple unresolved server requests on one thread"
-                )
         except CodexAppServerError as exc:
+            # Malformed thread identity: decline the request when it is answerable,
+            # then the loop's normal agent-degrade/parent-fail split applies.
             if isinstance(request_id, (str, int)) and not isinstance(request_id, bool):
                 await self._require_transport().respond_error(
                     request_id,
@@ -825,7 +883,31 @@ class CodexAppServerAdapter:
                     message=str(exc),
                 )
             raise
-        state.pending_interaction = interaction
+        if len(state.pending_interactions) >= PENDING_INTERACTIONS_PER_THREAD:
+            # Bounded map: the NEW request is declined + degraded, never a bridge
+            # failure and never a silent loss of an older unanswered one.
+            await self._require_transport().respond_error(
+                interaction.rpc_id,
+                code=-32601,
+                message="pending interaction map is full",
+            )
+            await self._emit(
+                "codex-notification",
+                raw={
+                    "codexMethod": interaction.method,
+                    AR_EVIDENCE_METHOD_KEY: interaction.method,
+                    AR_EVIDENCE_KEY: required_object(
+                        message.get("params"), context="server request"
+                    ),
+                    "degraded": "pending interaction map is full; the request was declined",
+                },
+            )
+            return
+        # Concurrent pendings are normal vendor traffic (the codex TUI keeps one
+        # app-global pending map keyed by approval id) — register, never raise.
+        # Vendor rpc-id REUSE overwrites the older pending, which then becomes
+        # honestly unanswerable later — a JSON-RPC violation the vendor owns.
+        state.pending_interactions[interaction.rpc_id] = interaction
         if state.is_parent:
             self._snapshot = replace(
                 await self.snapshot(),
@@ -840,42 +922,43 @@ class CodexAppServerAdapter:
     async def _handle_server_request_resolved(self, params: JsonObject) -> None:
         state = self._thread_for(params, context="serverRequest/resolved params")
         request_id = params.get("requestId")
-        pending = state.pending_interaction
-        if pending is not None and request_id == pending.rpc_id:
-            state.pending_interaction = None
-            if state.is_parent:
-                self._snapshot = replace(
-                    await self.snapshot(),
-                    activity="settling",
-                    acceptance="queued",
-                )
+        cleared = (
+            state.pending_interactions.pop(request_id, None)
+            if isinstance(request_id, (str, int)) and not isinstance(request_id, bool)
+            else None
+        )
+        if cleared is not None and state.is_parent:
+            self._snapshot = replace(
+                await self.snapshot(),
+                activity="settling",
+                acceptance="queued",
+            )
+        if cleared is not None:
             self._sync_pending_snapshot()
         await self._emit("state", raw={"codexMethod": "serverRequest/resolved"})
 
-    def _interaction_thread(self, interaction_id: str) -> _ThreadState | None:
-        """The thread whose pending interaction owns ``interaction_id`` (answers route by request id)."""
+    def _interaction_thread(self, interaction_id: str) -> tuple[_ThreadState, RequestId] | None:
+        """The (thread, rpc id) owning ``interaction_id`` (answers route by request id)."""
 
         for state in self._threads.values():
-            pending = state.pending_interaction
-            if pending is not None and pending.pending.interaction_id == interaction_id:
-                return state
+            for rpc_id, pending in state.pending_interactions.items():
+                if pending.pending.interaction_id == interaction_id:
+                    return state, rpc_id
         return None
 
     def _sync_pending_snapshot(self) -> None:
-        """Rebuild the multiplexed pending tuple; the singular slot stays the parent's."""
+        """Rebuild the multiplexed pending tuple; the singular slot stays the parent's oldest."""
 
         if self._snapshot is None:
             return
         parent = self._parent_state()
         pendings = []
         for state in self._threads.values():
-            pending = state.pending_interaction
-            if pending is None:
-                continue
-            raw = dict(pending.pending.raw)
-            if not state.is_parent:
-                raw["agentLabel"] = self._agent_label(state)
-            pendings.append(replace(pending.pending, raw=raw))
+            for pending in state.pending_interactions.values():
+                raw = dict(pending.pending.raw)
+                if not state.is_parent:
+                    raw["agentLabel"] = self._agent_label(state)
+                pendings.append(replace(pending.pending, raw=raw))
         self._snapshot = replace(
             self._snapshot,
             pending_interaction=parent.pending_interaction.pending
@@ -968,9 +1051,76 @@ class CodexAppServerAdapter:
             raw=dict(raw or {}),
             operation=operation,
         )
-        if self._events.full():
-            raise CodexAppServerError("Codex adapter event queue is full")
+        self._enqueue(event)
+
+    def _enqueue(self, event: AdapterEvent | None) -> None:
+        """Bounded queue with honest load-shedding: never raises, never silently drops.
+
+        A multiplexed seat's delta floods can outpace the consumer (the 2026-07-26
+        seat death: the queue-full raise killed the bridge, and content vanished
+        before it). On a full queue the oldest HIGH-VOLUME delta event sheds first
+        (structural events — turns, completions, interactions, failures, the close
+        sentinel — shed only when nothing else remains), every shed is counted, and
+        one load-shed notice crosses when the consumer catches up, so the projection
+        surfaces the loss instead of hiding it.
+        """
+
+        if event is None:
+            # The close sentinel terminates subscribers: the shed accounting must
+            # cross BEFORE it, never behind it — make room for notice + sentinel,
+            # mint, then offer. Every eviction lands in the notice's count.
+            while self._events.qsize() > self._events.maxsize - 2:
+                self._evict_for_space()
+            self._emit_load_shed_notice_if_caught_up()
+        while self._events.full():
+            self._evict_for_space()
         self._events.put_nowait(event)
+        self._emit_load_shed_notice_if_caught_up()
+
+    def _evict_for_space(self) -> None:
+        held: list[AdapterEvent | None] = []
+        while not self._events.empty():
+            held.append(self._events.get_nowait())
+        index = next(
+            (
+                position
+                for position, candidate in enumerate(held)
+                if candidate is not None
+                and candidate.raw.get("codexMethod") in _LOAD_SHED_DELTA_METHODS
+            ),
+            0,  # nothing sheddable: the oldest event overall
+        )
+        evicted = held.pop(index)
+        for candidate in held:
+            self._events.put_nowait(candidate)
+        if evicted is not None:
+            self._dropped_events += 1
+
+    def _emit_load_shed_notice_if_caught_up(self) -> None:
+        if self._dropped_events == 0 or self._events.full() or self._snapshot is None:
+            return
+        count, self._dropped_events = self._dropped_events, 0
+        launch = self._session.launch
+        assert launch is not None
+        self._event_sequence += 1
+        self._snapshot = replace(self._snapshot, last_event_sequence=self._event_sequence)
+        self._events.put_nowait(
+            AdapterEvent(
+                sequence=self._event_sequence,
+                kind="codex-notification",
+                identity=launch.identity,
+                created_at=self._clock(),
+                raw={
+                    "codexMethod": "ar/load-shed",
+                    AR_EVIDENCE_METHOD_KEY: "ar/load-shed",
+                    AR_EVIDENCE_KEY: {
+                        "droppedEvents": count,
+                        "reason": "the consumer fell behind; the oldest delta events were shed to keep the bridge live",
+                    },
+                    "degraded": f"{count} evidence events shed under load",
+                },
+            )
+        )
 
     def _turn_input(self, request: PromptRequest) -> list[JsonObject]:
         """Build the turn input blocks; verified local images ride as native paths."""
@@ -1223,5 +1373,4 @@ class CodexAppServerAdapter:
         return self._session.thread_id
 
     def _offer_event(self, event: AdapterEvent | None) -> None:
-        if not self._events.full():
-            self._events.put_nowait(event)
+        self._enqueue(event)

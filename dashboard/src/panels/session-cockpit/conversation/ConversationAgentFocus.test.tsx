@@ -1,8 +1,11 @@
-// ConversationSurface sub-agent focus: ArrowLeft/ArrowRight cycle
-// parent → agent 1 → … → agent N → parent, Escape returns to the parent, the timeline filters to
-// the focused lane (parent items + roster rows vs. one agent's items), and every switch is
-// announced politely. A stored focus naming an agent the roster no longer carries (an LRU-evicted,
-// rehydrated projection) recomputes to the parent — never re-applied blindly.
+// ConversationSurface sub-agent focus: ArrowDown ANYWHERE on the surface (feed article AND
+// scroll viewport) moves focus INTO the agents line and Enter opens the agent menu (the
+// primary path); ArrowUp from the line returns focus to the timeline; ArrowLeft/ArrowRight
+// cycle parent → agent 1 → … → agent N → parent as an additional path, Escape returns to the
+// parent, the timeline filters to the focused lane (parent items + roster rows vs. one agent's
+// items), and every switch is announced politely. A stored focus naming an agent the roster no
+// longer carries (an LRU-evicted, rehydrated projection) recomputes to the parent — never
+// re-applied blindly.
 
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -17,6 +20,7 @@ import type {
   ConversationStatus,
 } from "../../../data/conversation/types";
 import { ConversationSurface } from "./ConversationSurface";
+import { OPERATOR_SCROLL_KEYS } from "./ConversationTimeline";
 
 vi.mock("../../../data/announcer", () => ({
   announcePolite: vi.fn(),
@@ -137,14 +141,73 @@ describe("ConversationSurface agent focus", () => {
     vi.clearAllMocks();
   });
 
-  it("parent view shows parent items + roster rows; the agents area lists the roster", () => {
+  it("parent view shows parent items + roster rows; the agents area stays one compact line", () => {
     seed();
     render(surface());
 
     expect(articleIds().sort()).toEqual(["codex-agent-t-1", "parent-1", "parent-2"]);
-    expect(screen.getByTestId("conversation-agents-summary").textContent).toBe("1 agent · 1 running");
+    expect(screen.getByTestId("conversation-agents-line").textContent).toContain("1 agent · 1 running");
+    // The roster itself lives in the menu — the line never grows per-agent rows.
+    expect(screen.queryByTestId("conversation-agent-option")).toBeNull();
+    expect(screen.queryByTestId("conversation-agent-focus-note")).toBeNull();
+
+    fireEvent.keyDown(screen.getByTestId("conversation-agents-line"), { key: "Enter" });
     expect(screen.getByTestId("conversation-agent-label").textContent).toBe("scout");
-    expect(screen.queryByTestId("conversation-agent-focus-bar")).toBeNull();
+  });
+
+  it("ArrowDown from the timeline moves focus into the agents line; Enter opens the menu; Enter selects", () => {
+    seed();
+    render(surface());
+    const article = document.querySelector<HTMLElement>("[data-row-key='parent-1']");
+    expect(article).not.toBeNull();
+
+    fireEvent.keyDown(article as HTMLElement, { key: "ArrowDown" });
+    const line = screen.getByTestId("conversation-agents-line");
+    expect(document.activeElement).toBe(line);
+    // Focus moved — the view did NOT switch yet.
+    expect(activeConversationStore.getState().agentFocusBySession[SESSION_ID]).toBeUndefined();
+
+    fireEvent.keyDown(line, { key: "Enter" });
+    const menu = screen.getByTestId("conversation-agents-menu");
+    expect(document.activeElement).toBe(menu);
+    expect(announcePolite).not.toHaveBeenCalled();
+
+    fireEvent.keyDown(menu, { key: "Enter" }); // the only agent is the initial active option
+    expect(activeConversationStore.getState().agentFocusBySession[SESSION_ID]).toBe("t-1");
+    expect(announcePolite).toHaveBeenCalledWith("viewing scout");
+    expect(screen.queryByTestId("conversation-agents-menu")).toBeNull();
+    expect(document.activeElement).toBe(line);
+    // Agent view: the agent's own items — its roster row included — never the parent's.
+    expect(articleIds().sort()).toEqual(["agent-msg-1", "codex-agent-t-1"]);
+    expect(screen.getByTestId("conversation-agent-focus-note").textContent).toContain("scout");
+  });
+
+  it("ArrowDown from the scroll viewport ALSO moves focus into the agents line (uniform hijack)", () => {
+    seed();
+    render(surface());
+    // The viewport origin used to fall through to a native scroll; the hijack is uniform now.
+    fireEvent.keyDown(screen.getByTestId("conversation-viewport"), { key: "ArrowDown" });
+    expect(document.activeElement).toBe(screen.getByTestId("conversation-agents-line"));
+    expect(activeConversationStore.getState().agentFocusBySession[SESSION_ID]).toBeUndefined();
+  });
+
+  it("ArrowUp from the agents line returns focus to the timeline's tabbable row", () => {
+    seed();
+    render(surface());
+    const line = screen.getByTestId("conversation-agents-line");
+    const tabbableRow = document.querySelector<HTMLElement>("[data-conversation-item][tabindex='0']");
+    expect(tabbableRow).not.toBeNull();
+
+    fireEvent.keyDown(screen.getByTestId("conversation-viewport"), { key: "ArrowDown" });
+    expect(document.activeElement).toBe(line);
+    fireEvent.keyDown(line, { key: "ArrowUp" });
+    expect(document.activeElement).toBe(tabbableRow);
+  });
+
+  it("the feed no longer documents ArrowDown as a scroll key (PageDown/]/wheel remain)", () => {
+    expect(OPERATOR_SCROLL_KEYS.has("ArrowDown")).toBe(false);
+    expect(OPERATOR_SCROLL_KEYS.has("PageDown")).toBe(true);
+    expect(OPERATOR_SCROLL_KEYS.has("]")).toBe(true);
   });
 
   it("ArrowRight focuses the agent, filters the timeline, and announces; Escape returns", () => {
@@ -189,8 +252,8 @@ describe("ConversationSurface agent focus", () => {
   it("ignores the focus keys from interactive/editable targets", () => {
     seed();
     render(surface());
-    // A button (an agents-area row) owns its keys — arrows there must not cycle the focus.
-    fireEvent.keyDown(screen.getByTestId("conversation-agent-row"), { key: "ArrowRight" });
+    // A button (the agents line) owns its keys — arrows there must not cycle the focus.
+    fireEvent.keyDown(screen.getByTestId("conversation-agents-line"), { key: "ArrowRight" });
     expect(activeConversationStore.getState().agentFocusBySession[SESSION_ID]).toBeUndefined();
   });
 
@@ -199,7 +262,7 @@ describe("ConversationSurface agent focus", () => {
     seed();
     render(surface());
 
-    expect(screen.queryByTestId("conversation-agent-focus-bar")).toBeNull();
+    expect(screen.queryByTestId("conversation-agent-focus-note")).toBeNull();
     expect(articleIds().sort()).toEqual(["codex-agent-t-1", "parent-1", "parent-2"]);
   });
 

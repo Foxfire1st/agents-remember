@@ -55,13 +55,6 @@ const toggle = css({
   _hover: { color: "amber", borderColor: "amber" },
   _focusVisible: { outline: "1px solid token(colors.amber)", outlineOffset: "1px" },
 });
-const agentFocusBar = css({
-  flexShrink: 0,
-  display: "flex",
-  alignItems: "baseline",
-  gap: "0.5rem",
-  minWidth: "0",
-});
 const agentFocusNote = css({
   fontSize: "0.66rem",
   color: "muted",
@@ -71,10 +64,13 @@ const agentFocusNote = css({
   minWidth: "0",
 });
 
-// The surface-level agent focus keys (the Claude Code agents-view precedent):
-// ArrowLeft/ArrowRight cycle parent → agent 1 → … → agent N → parent; Escape returns to the
-// parent. Editable/interactive targets own their keys (the composer, buttons, labeled overflow
-// regions, code blocks) — the same exclusion discipline the feed's own navigation uses.
+// The surface-level agent focus keys (the Claude Code sub-agent navigation model):
+// ArrowDown ANYWHERE on the surface (feed article AND scroll viewport) moves focus INTO the
+// agents line when the roster is non-empty (the line owns Enter/menu from there; ArrowUp from
+// the line returns focus to the timeline); ArrowLeft/ArrowRight cycle parent → agent 1 → … →
+// agent N → parent as an additional path; Escape returns to the parent. Editable/interactive
+// targets own their keys (the composer, buttons, labeled overflow regions, code blocks) — the
+// same exclusion discipline the feed's own navigation uses.
 function ownsAgentFocusKeys(target: HTMLElement): boolean {
   if (
     target.tagName === "INPUT" ||
@@ -114,6 +110,7 @@ export function ConversationSurface({
   const lastTurnKey = useRef<string | null>(null);
   const lastProcessKey = useRef<string | null>(null);
   const lastStreamNoteRef = useRef<string | null>(null);
+  const surfaceRef = useRef<HTMLDivElement>(null);
   // The remembered position, re-read at every render so a re-show commit always carries the
   // latest scroll event's value (the map only changes via scrolls, which a hidden timeline never
   // sees — so the value read on the hide→show flip is exactly where the operator left it).
@@ -163,8 +160,20 @@ export function ConversationSurface({
   const onSurfaceKeyDown = useCallback(
     (event: React.KeyboardEvent<HTMLDivElement>) => {
       const key = event.key;
-      if (key !== "ArrowLeft" && key !== "ArrowRight" && key !== "Escape") return;
-      if (ownsAgentFocusKeys(event.target as HTMLElement)) return;
+      if (key !== "ArrowLeft" && key !== "ArrowRight" && key !== "Escape" && key !== "ArrowDown") {
+        return;
+      }
+      const target = event.target as HTMLElement;
+      if (ownsAgentFocusKeys(target)) return;
+      if (key === "ArrowDown") {
+        // Down from ANYWHERE on the surface (feed article OR scroll viewport — one uniform
+        // hijack) enters the agents line (the primary sub-agent path): the line owns
+        // Enter/menu from there. The feed keeps PageUp/PageDown scrolling and [/] row moves.
+        if (agents.length === 0) return;
+        event.preventDefault();
+        surfaceRef.current?.querySelector<HTMLElement>("[data-agents-line]")?.focus();
+        return;
+      }
       if (key === "Escape") {
         if (agentFocus === null) return;
         event.preventDefault();
@@ -251,7 +260,12 @@ export function ConversationSurface({
       : null;
 
   return (
-    <div className={surface} data-testid="conversation-surface" onKeyDown={onSurfaceKeyDown}>
+    <div
+      className={surface}
+      ref={surfaceRef}
+      data-testid="conversation-surface"
+      onKeyDown={onSurfaceKeyDown}
+    >
       <div className={toolbar}>
         <button
           type="button"
@@ -291,22 +305,9 @@ export function ConversationSurface({
         onRetry={onRetry}
         onShowDiagnostics={onShowDiagnostics}
       />
+      {/* The agents area owns the compact line — the count chip plus, in an agent view, the
+          viewing note + back-to-parent affordance (260718-CHATS-L7R R5). */}
       <AgentsArea agents={agents} focusedAgentId={agentFocus} onFocusAgent={applyAgentFocus} />
-      {agentFocus !== null ? (
-        <div className={agentFocusBar} data-testid="conversation-agent-focus-bar">
-          <button
-            type="button"
-            className={toggle}
-            onClick={() => applyAgentFocus(null)}
-            data-testid="conversation-back-to-parent"
-          >
-            ← back to parent conversation
-          </button>
-          <span className={agentFocusNote} data-testid="conversation-agent-focus-note">
-            viewing {focusedAgent?.label ?? "agent"}
-          </span>
-        </div>
-      ) : null}
       {/* The timeline well stays mounted for an empty conversation; its center becomes the
           product welcome surface until the first item arrives. */}
       <ConversationTimeline

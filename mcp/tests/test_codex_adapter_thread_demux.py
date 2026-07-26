@@ -28,6 +28,7 @@ from _agent_wire_fixtures import (
     turn_started_params,
 )
 from agents_remember.serving.codex_app_server_adapter import (
+    ADAPTER_EVENT_QUEUE_LIMIT,
     THREAD_REGISTRY_LIMIT,
     CodexAppServerAdapter,
 )
@@ -453,5 +454,366 @@ async def test_registry_full_degrades_and_settled_threads_evict() -> None:
         await eventually(lambda: "agent-after-evict" in adapter._threads)
         assert "agent-fill-0" not in adapter._threads
         assert live_snapshot(adapter).control == "ready"
+    finally:
+        await adapter.stop("forced")
+
+
+@pytest.mark.anyio
+async def test_concurrent_parent_server_requests_never_fail_the_bridge() -> None:
+    """The 2026-07-26 seat death: concurrent parent pendings are normal vendor traffic."""
+
+    data = fixture()
+    transport = FakeCodexTransport()
+    prime_start(transport, data)
+    adapter = make_adapter(transport)
+    await adapter.start(launch())
+    try:
+        # An active parent turn (the incident had the parent mid-turn with MCP calls).
+        transport.queue_response("turn/start", fixture_object(data, "turnStartResult"))
+        await adapter.submit(request("request-1"))
+        assert live_snapshot(adapter).activity == "running"
+
+        transport.emit(agent_approval("req-1", "thread-1", "turn-1"))
+        await eventually(lambda: live_snapshot(adapter).pending_interaction is not None)
+        # The second request on the SAME parent thread used to mark the bridge failed.
+        transport.emit(agent_approval("req-2", "thread-1", "turn-1"))
+        await eventually(lambda: len(live_snapshot(adapter).pending_interactions) == 2)
+        snap = live_snapshot(adapter)
+        assert snap.control == "ready"
+        assert snap.activity == "blocked"
+        # The singular slot carries the OLDEST parent pending for back-compat.
+        assert snap.pending_interaction is not None
+        assert snap.pending_interaction.interaction_id == snap.pending_interactions[0].interaction_id
+        assert {p.interaction_id for p in snap.pending_interactions} == {
+            snap.pending_interactions[0].interaction_id,
+            snap.pending_interactions[1].interaction_id,
+        }
+
+        # Each pending is answerable individually by request id (parent guard honored).
+        await adapter.respond(
+            InteractionResponse(
+                interaction_id=snap.pending_interactions[1].interaction_id,
+                response="accept",
+                responded_at="2026-07-14T12:04:00+00:00",
+                operation=adapter._active_operation,
+            )
+        )
+        assert transport.server_responses[-1] == ("req-2", {"decision": "accept"})
+        assert len(live_snapshot(adapter).pending_interactions) == 1
+        assert live_snapshot(adapter).control == "ready"
+
+        # The vendor settles the other one; resolution clears by rpc id.
+        transport.emit(server_request_resolved_notification("thread-1", "req-1"))
+        await eventually(lambda: len(live_snapshot(adapter).pending_interactions) == 0)
+        assert live_snapshot(adapter).pending_interaction is None
+        assert live_snapshot(adapter).control == "ready"
+    finally:
+        await adapter.stop("forced")
+
+
+@pytest.mark.anyio
+async def test_experimental_server_request_on_parent_degrades() -> None:
+    """An unknown/experimental request METHOD on the parent is declined + preserved, never fatal."""
+
+    data = fixture()
+    transport = FakeCodexTransport()
+    prime_start(transport, data)
+    adapter = make_adapter(transport)
+    await adapter.start(launch())
+    events = adapter.subscribe()
+    try:
+        transport.emit(
+            {
+                "id": "req-exp-1",
+                "method": "item/tool/requestUserInput",
+                "params": {"threadId": "thread-1", "turnId": "turn-1", "itemId": "i-1", "questions": []},
+            }
+        )
+        await eventually(lambda: bool(transport.server_errors))
+        assert transport.server_errors[0][0] == "req-exp-1"
+        assert transport.server_errors[0][1] == -32601
+        assert "experimental" in transport.server_errors[0][2]
+        # The bridge stays ready and the frame crossed as preserved evidence.
+        event = await next_event(events)
+        while event.raw.get("codexMethod") != "item/tool/requestUserInput":
+            event = await next_event(events)
+        assert live_snapshot(adapter).control == "ready"
+        assert live_snapshot(adapter).pending_interaction is None
+        assert live_snapshot(adapter).pending_interactions == ()
+    finally:
+        await adapter.stop("forced")
+
+
+@pytest.mark.anyio
+async def test_malformed_known_method_parent_request_fails_loud() -> None:
+    """A KNOWN stable method's malformed params on the parent keeps failing the bridge."""
+
+    data = fixture()
+    transport = FakeCodexTransport()
+    prime_start(transport, data)
+    adapter = make_adapter(transport)
+    await adapter.start(launch())
+    try:
+        transport.emit(
+            {
+                "id": "req-bad-shape",
+                "method": "item/commandExecution/requestApproval",
+                "params": "not-an-object",
+            }
+        )
+        await eventually(lambda: live_snapshot(adapter).control == "failed")
+        # Never declined-and-degraded: no error response, nothing outstanding.
+        assert transport.server_errors == []
+        assert live_snapshot(adapter).pending_interaction is None
+        assert live_snapshot(adapter).pending_interactions == ()
+    finally:
+        await adapter.stop("forced")
+
+
+@pytest.mark.anyio
+async def test_known_method_request_with_boolean_rpc_id_fails_loud() -> None:
+    """id=true on a KNOWN stable method: the bridge fails — no silent outstanding."""
+
+    data = fixture()
+    transport = FakeCodexTransport()
+    prime_start(transport, data)
+    adapter = make_adapter(transport)
+    await adapter.start(launch())
+    try:
+        transport.emit(
+            {
+                "id": True,
+                "method": "item/commandExecution/requestApproval",
+                "params": {
+                    "threadId": "thread-1",
+                    "turnId": "turn-1",
+                    "itemId": "item-1",
+                    "command": "ls",
+                },
+            }
+        )
+        await eventually(lambda: live_snapshot(adapter).control == "failed")
+        assert transport.server_errors == []
+        assert transport.server_responses == []
+        snap = live_snapshot(adapter)
+        assert snap.pending_interaction is None
+        assert snap.pending_interactions == ()
+    finally:
+        await adapter.stop("forced")
+
+
+@pytest.mark.anyio
+async def test_unknown_method_on_parent_degrades() -> None:
+    """A method outside the stable AND experimental sets is declined + degraded, never fatal."""
+
+    data = fixture()
+    transport = FakeCodexTransport()
+    prime_start(transport, data)
+    adapter = make_adapter(transport)
+    await adapter.start(launch())
+    events = adapter.subscribe()
+    try:
+        transport.emit(
+            {
+                "id": "req-unknown-1",
+                "method": "item/future/requestApproval",
+                "params": {"threadId": "thread-1", "turnId": "turn-1"},
+            }
+        )
+        await eventually(lambda: bool(transport.server_errors))
+        assert transport.server_errors[0][0] == "req-unknown-1"
+        assert transport.server_errors[0][1] == -32601
+        assert "unsupported" in transport.server_errors[0][2]
+        degraded: Mapping[str, object] | None = None
+        while degraded is None:
+            event = await next_event(events)
+            if isinstance(event.raw.get("degraded"), str):
+                degraded = event.raw
+        assert degraded["codexMethod"] == "item/future/requestApproval"
+        assert live_snapshot(adapter).control == "ready"
+    finally:
+        await adapter.stop("forced")
+
+
+@pytest.mark.anyio
+async def test_pending_map_overflow_declines_the_newest_request() -> None:
+    """The bounded map declines + degrades the newest request; older pendings stay intact."""
+
+    data = fixture()
+    transport = FakeCodexTransport()
+    prime_start(transport, data)
+    adapter = make_adapter(transport)
+    await adapter.start(launch())
+    events = adapter.subscribe()
+    try:
+        for index in range(16):
+            transport.emit(agent_approval(f"req-fill-{index}", "thread-1", "turn-1"))
+        await eventually(lambda: len(live_snapshot(adapter).pending_interactions) == 16)
+        transport.emit(agent_approval("req-overflow", "thread-1", "turn-1"))
+        await eventually(lambda: bool(transport.server_errors))
+        assert transport.server_errors[0][0] == "req-overflow"
+        assert "map is full" in transport.server_errors[0][2]
+        snap = live_snapshot(adapter)
+        assert snap.control == "ready"
+        assert len(snap.pending_interactions) == 16
+        assert snap.pending_interaction is not None
+
+        # The declined request crosses as DEGRADED evidence naming the map-full reason.
+        degraded: Mapping[str, object] | None = None
+        while degraded is None:
+            event = await next_event(events)
+            if isinstance(event.raw.get("degraded"), str):
+                degraded = event.raw
+        assert degraded["codexMethod"] == "item/commandExecution/requestApproval"
+        assert "map is full" in str(degraded["degraded"])
+        payload = degraded[AR_EVIDENCE_KEY]
+        assert isinstance(payload, dict)
+        assert payload["itemId"] == "req-overflow-item"
+    finally:
+        await adapter.stop("forced")
+
+
+@pytest.mark.anyio
+async def test_delta_flood_sheds_oldest_deltas_with_an_honest_notice() -> None:
+    """Queue pressure sheds high-volume deltas (never a queue-full kill), with accounting.
+
+    The 2026-07-26 seat death: a 3-agent delta flood hit the queue-full raise and
+    killed the bridge, and content vanished without a signal. Now every event is
+    sequenced, structural events outlive shed deltas, and one load-shed notice
+    crosses with the shed count once the consumer catches up.
+    """
+
+    data = fixture()
+    transport = FakeCodexTransport()
+    prime_start(transport, data)
+    adapter = make_adapter(transport)
+    await adapter.start(launch())
+    agents = ["flood-1", "flood-2", "flood-3"]
+    total_deltas = 0
+    try:
+        for thread in agents:
+            transport.emit(agent_turn_started(thread, f"{thread}-turn"))
+            transport.emit(agent_message_completed(thread, f"{thread}-turn", f"{thread}-msg", "done"))
+        for _ in range(500):
+            for thread in agents:
+                transport.emit(
+                    notification(
+                        "item/agentMessage/delta",
+                        agent_message_delta_params(thread, f"{thread}-turn", f"{thread}-msg", "x"),
+                    )
+                )
+            total_deltas += len(agents)
+        # Let the pump run without consuming: the queue fills and shedding engages.
+        await eventually(lambda: adapter._events.full() or adapter._event_sequence >= 6 + total_deltas)
+        assert live_snapshot(adapter).control == "ready"
+        assert adapter._event_sequence == 6 + total_deltas  # nothing un-sequenced, no raise
+
+        # Structural completions survived the shed; the shed count is accounted.
+        drained: list[AdapterEvent] = []
+        while not adapter._events.empty():
+            event = adapter._events.get_nowait()
+            if event is not None:
+                drained.append(event)
+        completions = [event for event in drained if event.kind == "transcript"]
+        assert len(completions) == len(agents)
+        assert adapter._dropped_events > 0
+
+        # Once the consumer catches up, one notice crosses with the shed count.
+        transport.emit(agent_status_changed("flood-1"))
+        notice: AdapterEvent | None = None
+        for _ in range(100):
+            await asyncio.sleep(0)
+            while not adapter._events.empty():
+                candidate = adapter._events.get_nowait()
+                if candidate is not None and candidate.raw.get("codexMethod") == "ar/load-shed":
+                    notice = candidate
+            if notice is not None:
+                break
+        assert notice is not None
+        payload = notice.raw[AR_EVIDENCE_KEY]
+        assert isinstance(payload, dict)
+        assert payload["droppedEvents"] > 0
+        assert live_snapshot(adapter).control == "ready"
+    finally:
+        await adapter.stop("forced")
+
+
+async def _flood_deltas(adapter: CodexAppServerAdapter, transport: FakeCodexTransport, thread: str) -> int:
+    """A pure-delta flood past the queue limit; returns the exact shed count."""
+
+    total = ADAPTER_EVENT_QUEUE_LIMIT + 76
+    for _ in range(total):
+        transport.emit(
+            notification(
+                "item/agentMessage/delta",
+                agent_message_delta_params(thread, f"{thread}-turn", f"{thread}-msg", "x"),
+            )
+        )
+    await eventually(lambda: adapter._event_sequence == total)
+    assert adapter._dropped_events == 76
+    return 76
+
+
+@pytest.mark.anyio
+async def test_load_shed_notice_crosses_on_consumer_drain_without_new_traffic() -> None:
+    """Flood → full drain → producer silent: the consumer side mints the notice."""
+
+    data = fixture()
+    transport = FakeCodexTransport()
+    prime_start(transport, data)
+    adapter = make_adapter(transport)
+    await adapter.start(launch())
+    try:
+        dropped = await _flood_deltas(adapter, transport, "flood-silent")
+
+        # No new producer events: the notice must cross purely off the consumer
+        # drain — it is the LAST event the subscriber sees, exactly counted.
+        seen: list[AdapterEvent] = []
+        events = adapter.subscribe()
+        while True:
+            event = await next_event(events)
+            seen.append(event)
+            if event.raw.get("codexMethod") == "ar/load-shed":
+                break
+        notice = seen[-1]
+        assert notice.raw.get("codexMethod") == "ar/load-shed"
+        payload = notice.raw[AR_EVIDENCE_KEY]
+        assert isinstance(payload, dict)
+        assert payload["droppedEvents"] == dropped
+        assert len(seen) == ADAPTER_EVENT_QUEUE_LIMIT + 1  # queue contents + notice
+        assert adapter._dropped_events == 0
+        assert live_snapshot(adapter).control == "ready"
+    finally:
+        await adapter.stop("forced")
+
+
+@pytest.mark.anyio
+async def test_load_shed_notice_precedes_the_close_sentinel_on_stop() -> None:
+    """Flood → drain → stop(): the notice mints BEFORE the sentinel, fully counted."""
+
+    data = fixture()
+    transport = FakeCodexTransport()
+    prime_start(transport, data)
+    adapter = make_adapter(transport)
+    await adapter.start(launch())
+    try:
+        dropped = await _flood_deltas(adapter, transport, "flood-stop")
+        # A synchronous drain leaves the residual shed accounting behind.
+        while not adapter._events.empty():
+            adapter._events.get_nowait()
+        assert adapter._dropped_events == dropped
+
+        await adapter.stop("forced")
+        # The subscriber sees the notice, then termination — the minted order ends
+        # with [ar/load-shed, close sentinel], never the other way around.
+        seen: list[AdapterEvent] = []
+        async for event in adapter.subscribe():
+            seen.append(event)
+        assert len(seen) == 1
+        assert seen[0].raw.get("codexMethod") == "ar/load-shed"
+        payload = seen[0].raw[AR_EVIDENCE_KEY]
+        assert isinstance(payload, dict)
+        assert payload["droppedEvents"] == dropped
+        assert adapter._dropped_events == 0
     finally:
         await adapter.stop("forced")

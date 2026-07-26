@@ -279,16 +279,27 @@ class HarnessSubmissionAuthority:
             snapshot_now = self._snapshot()
             pending = snapshot_now.pending_interaction
             active = self._records.get(self._active) if self._active is not None else None
-            # Parent-thread entries ride the singular slot; multiplexed sub-agent entries
-            # ride the plural tuple and own no parent
-            # operation, so the active-operation guard below is parent-only.
-            is_parent = (
+            # Parent-ness is decided by the entry's own thread, not by which slot
+            # carries it: concurrent parent pendings beyond the singular slot's
+            # oldest ride the plural tuple (the adapter keeps a per-thread pending
+            # map), so a tuple entry with the parent's threadId gets the
+            # active-operation guard exactly like the singular slot.
+            matched_entry = next(
+                (
+                    entry
+                    for entry in snapshot_now.pending_interactions
+                    if entry.interaction_id == response.interaction_id
+                ),
+                None,
+            )
+            singular_match = (
                 pending is not None and pending.interaction_id == response.interaction_id
             )
-            if not is_parent and not any(
-                entry.interaction_id == response.interaction_id
-                for entry in snapshot_now.pending_interactions
-            ):
+            is_parent = singular_match or (
+                matched_entry is not None
+                and matched_entry.raw.get("threadId") == snapshot_now.vendor_session_id
+            )
+            if not singular_match and matched_entry is None:
                 raise HarnessInteractionNotPendingError(
                     "interaction response does not match the pending interaction"
                 )
