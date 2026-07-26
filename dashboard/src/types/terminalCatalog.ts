@@ -66,6 +66,9 @@ export interface TerminalCatalogRow {
   controlAcceptance?: HarnessAcceptanceState;
   controlVendorSessionId?: string;
   controlPendingInteraction?: Record<string, unknown>;
+  // Multiplexed sub-agent pendings: additive; the singular slot
+  // above stays the parent-thread entry.
+  controlPendingInteractions?: Record<string, unknown>[];
   controlLastEventSequence?: number;
   controlRaw?: ControlRawDiagnostics;
   // Liveness probe evidence (hysteresis persisted server-side).

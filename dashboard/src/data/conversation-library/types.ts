@@ -30,12 +30,32 @@ export interface ConversationLibraryRow {
   safeNativeIdSuffix?: string | null;
   lastActivityAt?: string | null;
   capabilities: HistoryCapabilities;
+  /** Harness sub-agent conversations grouped under this row. Each child opens
+      through the exact same read/open path — its `conversationKey` is minted server-side. */
+  agents?: readonly ConversationLibraryAgentRow[];
+}
+
+/** One harness sub-agent conversation grouped under its parent library row. */
+export interface ConversationLibraryAgentRow {
+  conversationKey: LibraryConversationKey;
+  identityDigest: string;
+  title: string;
+  agentPath?: string | null;
+  nickname?: string | null;
+  role?: string | null;
+  model?: string | null;
+  joinKey?: string | null;
+  safeNativeIdSuffix?: string | null;
+  lastActivityAt?: string | null;
 }
 
 export interface ConversationLibraryPage {
   scope: { harnessId: HarnessId; canonicalProjectScope: string; queryDigest: string };
   rows: readonly ConversationLibraryRow[];
   nextCursor: LibraryListCursor | null;
+  /** Capability honesty: why sub-agent conversations are (partially)
+      unavailable on this page, when they are — the exact native reason, never silently absent. */
+  agentsNote?: string | null;
 }
 
 export interface HistoricalConversationPage {

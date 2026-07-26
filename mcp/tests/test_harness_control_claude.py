@@ -52,6 +52,8 @@ class _FakeClaudeTransport:
             self.frames.put_nowait(frame)
         self.writes: list[dict[str, object]] = []
         self.argv: tuple[str, ...] | None = None
+        self.start_argvs: list[tuple[str, ...]] = []
+        self.restart_frames: list[dict[str, object]] | None = None
         self.cwd: Path | None = None
         self.env: dict[str, str] | None = None
         self.stop_modes: list[ShutdownMode] = []
@@ -70,8 +72,16 @@ class _FakeClaudeTransport:
         cwd: Path,
         env: Mapping[str, str],
     ) -> None:
+        if self.start_argvs and self.restart_frames is not None:
+            # A scripted re-launch (the subagent-text floor probe stop/start): drain the
+            # stop sentinel and replay the scripted startup frames.
+            while not self.frames.empty():
+                self.frames.get_nowait()
+            for frame in self.restart_frames:
+                self.frames.put_nowait(frame)
         self.started = True
         self.argv = argv
+        self.start_argvs.append(argv)
         self.cwd = cwd
         self.env = dict(env)
 
@@ -421,6 +431,14 @@ class ClaudeStreamJsonAdapterTests(unittest.IsolatedAsyncioTestCase):
                 "--permission-prompt-tool",
             ):
                 self.assertIn(required, transport.argv)
+            # 2.1.210 is below the probed floor, so the flag
+            # is omitted fail-closed — one launch, no re-launch, and the exact reason.
+            self.assertNotIn("--forward-subagent-text", transport.argv)
+            self.assertEqual(len(transport.start_argvs), 1)
+            note = str(handshake.snapshot.raw["subagentTextForwarding"])
+            self.assertIn("unverified", note)
+            self.assertIn("2.1.210", note)
+            self.assertIn("2.1.220", note)
             self.assertNotIn("--mcp-config", transport.argv)
             self.assertNotIn("--strict-mcp-config", transport.argv)
             self.assertEqual(transport.env, _launch().env)
@@ -442,6 +460,50 @@ class ClaudeStreamJsonAdapterTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(advertised.models[1].effort_options, ())
             self.assertFalse(advertised.models[2].selectable)
             self.assertEqual(len(transport.writes), 3)
+        finally:
+            await adapter.stop("forced")
+
+    async def test_forward_subagent_text_relaunches_with_the_flag_at_or_above_the_floor(
+        self,
+    ) -> None:
+        """The floor-proven install probes
+        WITHOUT the flag, then re-launches WITH it behind the system/init capture."""
+
+        frames = _load_fixture("initialization.jsonl")
+        frames[1]["claude_code_version"] = "2.1.220"
+        transport = _FakeClaudeTransport(frames)
+        transport.restart_frames = _load_fixture("initialization.jsonl")
+        assert transport.restart_frames is not None
+        transport.restart_frames[1]["claude_code_version"] = "2.1.220"
+        adapter = _adapter(transport)
+
+        handshake = await adapter.start(_launch())
+        try:
+            self.assertEqual(handshake.snapshot.control, "ready")
+            # The probe launch omitted the flag; the proven re-launch carries it.
+            self.assertEqual(len(transport.start_argvs), 2)
+            self.assertNotIn("--forward-subagent-text", transport.start_argvs[0])
+            self.assertIn("--forward-subagent-text", transport.start_argvs[1])
+            note = str(handshake.snapshot.raw["subagentTextForwarding"])
+            self.assertIn("enabled", note)
+            self.assertIn("2.1.220", note)
+        finally:
+            await adapter.stop("forced")
+
+    async def test_forward_subagent_text_stays_fail_closed_on_an_unparseable_version(
+        self,
+    ) -> None:
+        frames = _load_fixture("initialization.jsonl")
+        frames[1]["claude_code_version"] = "dev-build"
+        transport = _FakeClaudeTransport(frames)
+        adapter = _adapter(transport)
+
+        handshake = await adapter.start(_launch())
+        try:
+            self.assertEqual(handshake.snapshot.control, "ready")
+            self.assertEqual(len(transport.start_argvs), 1)
+            self.assertNotIn("--forward-subagent-text", transport.start_argvs[0])
+            self.assertIn("unverified", str(handshake.snapshot.raw["subagentTextForwarding"]))
         finally:
             await adapter.stop("forced")
 

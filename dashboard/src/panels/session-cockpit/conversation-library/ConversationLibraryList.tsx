@@ -1,12 +1,18 @@
 // The native conversation list (design §4.4). Server-native cursor paging (never infinite local
 // indexing). Rows show a boundary-truncated title with the full value on hover (A5), the safe native
 // id suffix, a humanized last-activity age (A4), and the granular historical-completeness badge. A
-// row is selectable for preview only — selecting a row never opens or activates anything.
+// row is selectable for preview only — selecting a row never opens or activates anything. A row's
+// `agents` render as indented child rows that select/preview/open through the
+// exact same flow — the child's key is minted server-side; the page's `agentsNote` renders verbatim
+// when the server reports (partial) agent unavailability.
+
+import { Fragment } from "react";
 
 import { css } from "../../../../styled-system/css";
 import { harnessLabel, humanizeAge, truncateMiddle } from "../../../data/conversation/format";
 import type { HarnessId } from "../../../data/conversation/types";
 import type {
+  ConversationLibraryAgentRow,
   ConversationLibraryRow,
   LibraryConversationKey,
   LibraryListCursor,
@@ -63,10 +69,36 @@ const more = css({
   _focusVisible: { outline: "1px solid token(colors.amber)", outlineOffset: "1px" },
 });
 const emptyCopy = css({ fontSize: "0.72rem", color: "muted", padding: "0.4rem 0.2rem" });
+// Indented sub-agent child row: the same row grammar, nested under its parent.
+const agentChild = css({
+  marginInlineStart: "2ch",
+  borderStyle: "dashed",
+});
+const agentsNote = css({ fontSize: "0.64rem", color: "muted", padding: "0.2rem 0.2rem" });
 
 function completenessLabel(row: ConversationLibraryRow): string {
   const complete = row.capabilities.completeness.state === "supported";
   return complete ? "full history" : "partial history";
+}
+
+/**
+ * One agent child, promoted to the SAME row shape the select/preview/open flow already consumes:
+ * its key + identity digest are its own (server-minted); history capabilities are the harness's
+ * read-path capabilities, inherited from the parent row (the wire carries none per child).
+ */
+function agentChildRow(
+  parent: ConversationLibraryRow,
+  agent: ConversationLibraryAgentRow,
+): ConversationLibraryRow {
+  return {
+    conversationKey: agent.conversationKey,
+    identityDigest: agent.identityDigest,
+    title: agent.title,
+    safeNativeIdSuffix: agent.safeNativeIdSuffix,
+    lastActivityAt: agent.lastActivityAt,
+    capabilities: parent.capabilities,
+    agents: [],
+  };
 }
 
 export function ConversationLibraryList({
@@ -76,6 +108,7 @@ export function ConversationLibraryList({
   nextCursor,
   loading,
   error,
+  agentsNote: agentsNoteText,
   onSelect,
   onLoadMore,
 }: {
@@ -85,6 +118,8 @@ export function ConversationLibraryList({
   nextCursor: LibraryListCursor | null;
   loading: boolean;
   error?: string;
+  /** The page's sub-agent availability note, rendered verbatim when present. */
+  agentsNote?: string | null;
   onSelect: (row: ConversationLibraryRow) => void;
   onLoadMore: () => void;
 }) {
@@ -111,26 +146,54 @@ export function ConversationLibraryList({
   }
   return (
     <div className={list} data-testid="library-list">
+      {agentsNoteText != null && agentsNoteText !== "" ? (
+        <div className={agentsNote} data-testid="library-agents-note">
+          {agentsNoteText}
+        </div>
+      ) : null}
       {rows.map((entry) => (
-        <button
-          type="button"
-          key={entry.conversationKey}
-          className={row}
-          data-selected={entry.conversationKey === selectedKey ? "true" : "false"}
-          onClick={() => onSelect(entry)}
-          data-testid="library-row"
-        >
-          <span className={title} title={entry.title}>
-            {truncateMiddle(entry.title, 60)}
-          </span>
-          <span className={meta}>
-            <span className={badge}>{completenessLabel(entry)}</span>
-            {entry.safeNativeIdSuffix ? (
-              <span className={idSuffix}>…{entry.safeNativeIdSuffix}</span>
-            ) : null}
-            <span>{humanizeAge(entry.lastActivityAt)}</span>
-          </span>
-        </button>
+        <Fragment key={entry.conversationKey}>
+          <button
+            type="button"
+            className={row}
+            data-selected={entry.conversationKey === selectedKey ? "true" : "false"}
+            onClick={() => onSelect(entry)}
+            data-testid="library-row"
+          >
+            <span className={title} title={entry.title}>
+              {truncateMiddle(entry.title, 60)}
+            </span>
+            <span className={meta}>
+              <span className={badge}>{completenessLabel(entry)}</span>
+              {entry.safeNativeIdSuffix ? (
+                <span className={idSuffix}>…{entry.safeNativeIdSuffix}</span>
+              ) : null}
+              <span>{humanizeAge(entry.lastActivityAt)}</span>
+            </span>
+          </button>
+          {(entry.agents ?? []).map((agent) => (
+            <button
+              type="button"
+              key={agent.conversationKey}
+              className={`${row} ${agentChild}`}
+              data-selected={agent.conversationKey === selectedKey ? "true" : "false"}
+              onClick={() => onSelect(agentChildRow(entry, agent))}
+              data-testid="library-agent-row"
+            >
+              <span className={title} title={agent.title}>
+                {truncateMiddle(agent.title, 60)}
+              </span>
+              <span className={meta}>
+                <span className={badge}>agent</span>
+                {agent.role ? <span className={badge}>{agent.role}</span> : null}
+                {agent.safeNativeIdSuffix ? (
+                  <span className={idSuffix}>…{agent.safeNativeIdSuffix}</span>
+                ) : null}
+                <span>{humanizeAge(agent.lastActivityAt)}</span>
+              </span>
+            </button>
+          ))}
+        </Fragment>
       ))}
       {nextCursor !== null ? (
         <button type="button" className={more} onClick={onLoadMore} disabled={loading} data-testid="library-load-more">

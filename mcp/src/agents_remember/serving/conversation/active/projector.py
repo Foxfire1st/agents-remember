@@ -15,7 +15,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Literal
 from uuid import uuid4
 
@@ -46,6 +46,8 @@ from agents_remember.serving.conversation.models import (
     AuthorizationBinding,
     ChoiceOption,
     ChoicesBlock,
+    ConversationAgentRef,
+    ConversationAgentStatus,
     ConversationCorrelation,
     ConversationEventEnvelope,
     ConversationItem,
@@ -137,6 +139,23 @@ frame is always in-turn.
 
 _TURN_OPENING_LIFECYCLE_STATES = frozenset({"queued", "started"})
 """The pre-result half of the 2.1.216+ slash-command lifecycle; ``completed`` closes a settled turn."""
+
+
+_REGISTRY_AGENT_STATUS: dict[str, ConversationAgentStatus] = {
+    "registered": "registered",
+    "running": "running",
+    "started": "running",
+    "interacted": "running",
+    "active": "running",
+    "completed": "completed",
+    "failed": "failed",
+    "interrupted": "interrupted",
+}
+"""Adapter ``agentRegistry`` status vocabulary -> roster status.
+
+Anything outside the table (``unresolved``, ``idle``) stays ``unknown``: the registry
+entry exists but carries no honest lifecycle truth.
+"""
 
 
 def _opens_echo_turn_body(frame: EvidenceFrame) -> bool:
@@ -240,8 +259,15 @@ class ActiveSessionProjector:
         self._known_eviction_floor = 0
         # Turns/requests already carried by the live window, so the lazy
         # native-tip re-walk never re-projects them as disjoint-id native-history twins.
-        self._live_turn_ids: set[str] = set()
-        self._live_request_ids: set[str] = set()
+        # Keyed per thread: ``None`` is the parent bucket (byte-identical
+        # to the pre-multiplex flat sets); each agent thread gets its own so a parent native
+        # re-walk can never be suppressed by an agent thread's colliding turn id.
+        self._live_turn_ids: dict[str | None, set[str]] = {}
+        self._live_request_ids: dict[str | None, set[str]] = {}
+        # Agent threads that produced live-evidence items; only those are eligible for
+        # a lazy per-thread native re-walk (``refresh_agent_native``).
+        self._agent_threads_live: set[str] = set()
+        self._pending_agent_interaction_ids: set[str] = set()
 
     @property
     def generation(self) -> str:
@@ -379,6 +405,12 @@ class ActiveSessionProjector:
         # (the twin suppression only ever applies to turns this run has already observed live).
         self._live_turn_ids.clear()
         self._live_request_ids.clear()
+        self._agent_threads_live.clear()
+        self._pending_agent_interaction_ids.clear()
+        # Prime the snapshot BEFORE the evidence walk so multiplexed agent frames hydrate with
+        # the identity the adapter's agentRegistry already bound; the fresh
+        # read below still owns status/interaction authority.
+        self._snapshot = await asyncio.to_thread(self._read_snapshot, self._entry)
         if self._mapper.uses_native_pages:
             await self._walk_native_pages(preserve_cursor_on_failure=False)
         await self._poll_evidence()
@@ -415,6 +447,7 @@ class ActiveSessionProjector:
                     outputs = self._drop_live_settled_natives(
                         self._mapper.map_native_frame(frame, evidence_ref=ref),
                         live_native_turns,
+                        None,
                     )
                     self._apply_outputs(outputs, ref)
                     self._native_cursor = frame.native_id
@@ -437,6 +470,69 @@ class ActiveSessionProjector:
             return
         self._native_dirty = False
         await self._walk_native_pages(preserve_cursor_on_failure=True)
+
+    async def refresh_agent_native(self, thread_id: str) -> None:
+        """Lazily re-walk ONE agent thread's native history.
+
+        LATENT SEAM: no production caller
+        invokes this today — agent native history is already reachable through the
+        library open/read path (``thread/read`` on the agent thread), so the active
+        backfill is optional. Kept deliberately as a tested seam (see
+        ``test_conversation_projector_codex_agents.py``); do not delete.
+
+        The default re-walk stays parent-only: agent threads are paged only on
+        explicit request, through the wave-1 ``read_native_page(thread_id=...)``
+        channel, and only once the agent produced live-evidence items (the live
+        window then holds the fresh content; the native walk backfills earlier
+        history under the thread's own F1 twin-suppression bucket). Completeness
+        bookkeeping (``_native_complete``/``total_known``) stays parent-scoped —
+        an agent walk is additive and never widens the page's total assertion.
+        """
+
+        if (
+            not self._mapper.uses_native_pages
+            or self._mapper.eager_native_continuation
+            or thread_id == self._identity.vendor_conversation_id
+            or thread_id not in self._agent_threads_live
+        ):
+            return
+        await self._ensure_hydrated()
+        async with self._apply_lock:
+            await self._walk_agent_native_pages(thread_id)
+
+    async def _walk_agent_native_pages(self, thread_id: str) -> None:
+        """Full re-walk of one agent thread; idempotent through store dedupe + F1."""
+
+        live_native_turns: set[str] = set()
+        cursor: str | None = None
+        try:
+            while True:
+                page: NativeEvidencePage = await asyncio.to_thread(
+                    self._read_native_page,
+                    self._entry,
+                    cursor=cursor,
+                    limit=NATIVE_PAGE_LIMIT,
+                    expected_bridge_epoch=self._identity.bridge_epoch,
+                    thread_id=thread_id,
+                )
+                for frame in page.frames:
+                    # Agent threads can reuse the parent's positional native ids
+                    # (``item-N``), so the evidence handle is thread-scoped.
+                    ref = self._native_ref(f"{thread_id}:{frame.native_id}")
+                    outputs = self._drop_live_settled_natives(
+                        self._mapper.map_native_frame(frame, evidence_ref=ref),
+                        live_native_turns,
+                        thread_id,
+                    )
+                    outputs = [self._bind_agent(output, thread_id) for output in outputs]
+                    self._apply_outputs(outputs, ref)
+                    cursor = frame.native_id
+                if (page.next_cursor is None and not page.truncated) or not page.frames:
+                    break
+        except HarnessControlError:
+            # Fail closed exactly like the parent walk: the live window remains,
+            # honestly partial, and a later request can retry the walk.
+            return
 
     # -- poll channels ----------------------------------------------------
 
@@ -484,29 +580,45 @@ class ActiveSessionProjector:
         if self._mapper.uses_native_pages and not self._mapper.eager_native_continuation:
             # Lazy-native harness (codex): the live frame settles this turn under its live-id
             # namespace; remember it so the native-tip re-walk cannot mint a disjoint-id twin.
-            self._record_live_turn(outputs)
+            # Agent-thread frames record into their own bucket.
+            self._record_live_turn(outputs, self._frame_agent_thread(frame))
             self._native_dirty = True
         self._apply_outputs(outputs, ref)
 
-    def _record_live_turn(self, outputs: list[MapperOutput]) -> None:
+    def _frame_agent_thread(self, frame: EvidenceFrame) -> str | None:
+        """The agent thread one frame belongs to; ``None`` = the parent conversation.
+
+        The demux key is the frame's verbatim ``thread_id``; the parent is the
+        projection identity's ``vendor_conversation_id``. Frames without a thread
+        (or carrying the parent id) map to the parent bucket exactly as pre-multiplex.
+        """
+
+        thread_id = frame.thread_id
+        if thread_id is None or thread_id == self._identity.vendor_conversation_id:
+            return None
+        return thread_id
+
+    def _record_live_turn(self, outputs: list[MapperOutput], bucket: str | None) -> None:
         """Record the live turns/requests a native re-walk must not re-project as twins."""
 
+        live_turns = self._live_turn_ids.setdefault(bucket, set())
+        live_requests = self._live_request_ids.setdefault(bucket, set())
         for output in outputs:
             if isinstance(output, MappedItem):
                 if output.item.turn_id:
-                    self._live_turn_ids.add(output.item.turn_id)
+                    live_turns.add(output.item.turn_id)
                 if (
                     output.item.role == "user"
                     and output.item.correlation is not None
                     and output.item.correlation.request_id
                 ):
-                    self._live_request_ids.add(output.item.correlation.request_id)
+                    live_requests.add(output.item.correlation.request_id)
             elif isinstance(output, MappedTurnOutcome | MappedUnknownVendor):
                 if output.turn_id:
-                    self._live_turn_ids.add(output.turn_id)
+                    live_turns.add(output.turn_id)
 
     def _drop_live_settled_natives(
-        self, outputs: list[MapperOutput], live_native_turns: set[str]
+        self, outputs: list[MapperOutput], live_native_turns: set[str], bucket: str | None
     ) -> list[MapperOutput]:
         """Drop native-page outputs for turns already carried by the live window.
 
@@ -529,6 +641,8 @@ class ActiveSessionProjector:
         """
 
         kept: list[MapperOutput] = []
+        live_turn_ids = self._live_turn_ids.get(bucket, ())
+        live_request_ids = self._live_request_ids.get(bucket, ())
         for output in outputs:
             turn_id: str | None = None
             request_id: str | None = None
@@ -540,9 +654,9 @@ class ActiveSessionProjector:
                     is_user_input = True
             elif isinstance(output, MappedUnknownVendor):
                 turn_id = output.turn_id
-            live_by_turn = turn_id is not None and turn_id in self._live_turn_ids
+            live_by_turn = turn_id is not None and turn_id in live_turn_ids
             live_by_client = (
-                is_user_input and request_id is not None and request_id in self._live_request_ids
+                is_user_input and request_id is not None and request_id in live_request_ids
             )
             live_by_sibling = turn_id is not None and turn_id in live_native_turns
             if live_by_turn or live_by_client or live_by_sibling:
@@ -739,12 +853,21 @@ class ActiveSessionProjector:
                     created_at=frame.created_at,
                 )
             ]
+        outputs: list[MapperOutput]
         try:
-            return self._mapper.map_evidence_frame(frame, evidence_ref=evidence_ref)
+            outputs = self._mapper.map_evidence_frame(
+                frame,
+                evidence_ref=evidence_ref,
+                # The multiplexed demux context: the parent thread id is
+                # the projection identity's vendor conversation id.
+                parent_thread_id=self._identity.vendor_conversation_id,
+            )
         except UnmappableShape:
             # A malformed known shape becomes preserved unknown-vendor
-            # evidence; it never kills the stream and is never guessed.
-            fallback: list[MapperOutput] = [
+            # evidence; it never kills the stream and is never guessed. The agent
+            # binding below still applies: a malformed
+            # AGENT-thread frame's evidence belongs to the agent's view.
+            outputs = [
                 MappedUnknownVendor(
                     item_id=f"vendor-{self._identity.bridge_epoch[:12]}-{frame.sequence}",
                     vendor_type=f"{self._mapper.harness_id}:malformed",
@@ -753,7 +876,71 @@ class ActiveSessionProjector:
                     created_at=frame.created_at,
                 )
             ]
-            return fallback
+        agent_thread = self._frame_agent_thread(frame)
+        if agent_thread is not None:
+            outputs = [self._bind_agent(output, agent_thread) for output in outputs]
+        return outputs
+
+    def _agent_ref(self, thread_id: str) -> ConversationAgentRef:
+        """The agent identity the adapter's registry bound, or the honest bare id.
+
+        Reads the LAST polled snapshot's ``raw['agentRegistry']``:
+        ``agentPath``/status cross when the adapter bound them, and stay absent/
+        ``unknown`` when it did not — a ref is never fabricated from the thread id
+        alone beyond the id itself. The registry can lag the evidence stream by one
+        poll cycle; roster items carry their own frame-derived status regardless.
+        """
+
+        agent_path: str | None = None
+        status: ConversationAgentStatus = "unknown"
+        snapshot = self._snapshot
+        registry = snapshot.raw.get("agentRegistry") if snapshot is not None else None
+        if isinstance(registry, Mapping):
+            entry = registry.get(thread_id)
+            if isinstance(entry, Mapping):
+                path = entry.get("agentPath")
+                if isinstance(path, str) and path:
+                    agent_path = path
+                entry_status = entry.get("status")
+                if isinstance(entry_status, str):
+                    status = _REGISTRY_AGENT_STATUS.get(entry_status, "unknown")
+        return ConversationAgentRef(agent_id=thread_id, agent_path=agent_path, status=status)
+
+    def _bind_agent(self, output: MapperOutput, thread_id: str) -> MapperOutput:
+        """Attach the multiplexed agent ref to one mapped item.
+
+        Items the mapper already tagged (roster rows, agent turn-results) keep their
+        own evidence-bound ref; the registry only FILLS what that frame could not know
+        (``agent_path``, a still-``unknown`` status). Preserved unknown-vendor evidence
+        from the agent thread is tagged with the same ref.
+        Deltas and outcomes pass through — they carry no item payload of their own.
+        """
+
+        if isinstance(output, MappedUnknownVendor):
+            # A malformed AGENT-thread frame's preserved evidence belongs to the agent's
+            # view too — never the parent's.
+            self._agent_threads_live.add(thread_id)
+            if output.agent is not None:
+                return output
+            return replace(output, agent=self._agent_ref(thread_id))
+        if not isinstance(output, MappedItem):
+            return output
+        self._agent_threads_live.add(thread_id)
+        item = output.item
+        agent = item.agent
+        if agent is None:
+            return MappedItem(item=item.model_copy(update={"agent": self._agent_ref(thread_id)}))
+        registry_ref = self._agent_ref(thread_id)
+        updates: dict[str, object] = {}
+        if agent.agent_path is None and registry_ref.agent_path is not None:
+            updates["agent_path"] = registry_ref.agent_path
+        if agent.status == "unknown" and registry_ref.status != "unknown":
+            updates["status"] = registry_ref.status
+        if not updates:
+            return output
+        return MappedItem(
+            item=item.model_copy(update={"agent": agent.model_copy(update=updates)})
+        )
 
     async def _poll_native_continuation(self) -> None:
         if not self._mapper.eager_native_continuation:
@@ -819,18 +1006,72 @@ class ActiveSessionProjector:
     def _apply_interaction_transitions(self, snapshot: AdapterSnapshot) -> None:
         pending = snapshot.pending_interaction
         pending_id = pending.interaction_id if pending is not None else None
-        if pending_id == self._pending_interaction_id:
-            return
-        if pending is not None:
-            self._pending_interaction_id = pending_id
-            self._upsert_interaction(pending)
-            return
-        if self._pending_interaction_id is not None:
-            interaction_id = self._pending_interaction_id
-            self._pending_interaction_id = None
+        if pending_id != self._pending_interaction_id:
+            if pending is not None:
+                self._pending_interaction_id = pending_id
+                self._upsert_interaction(pending)
+            else:
+                interaction_id = self._pending_interaction_id
+                self._pending_interaction_id = None
+                if interaction_id is not None:
+                    self._resolve_interaction(interaction_id)
+        self._apply_agent_interaction_transitions(snapshot, parent_pending_id=pending_id)
+
+    def _apply_agent_interaction_transitions(
+        self, snapshot: AdapterSnapshot, *, parent_pending_id: str | None
+    ) -> None:
+        """Multiplexed pending interactions.
+
+        Each agent-thread server request in ``snapshot.pending_interactions`` becomes
+        an interaction-lane item labeled with its agent identity (``raw['threadId']``
+        + the adapter-bound ``raw['agentLabel']``); the singular-slot parent path
+        above stays exactly as today, and the parent's own tuple entry (same
+        interaction id) is never double-projected. Cleared interactions resolve per
+        id, mirroring the singular path.
+        """
+
+        current: dict[str, tuple[PendingInteraction, str]] = {}
+        for entry in snapshot.pending_interactions:
+            if entry.interaction_id == parent_pending_id:
+                continue
+            thread_id = entry.raw.get("threadId")
+            if (
+                not isinstance(thread_id, str)
+                or not thread_id
+                or thread_id == self._identity.vendor_conversation_id
+            ):
+                continue
+            current[entry.interaction_id] = (entry, thread_id)
+        for interaction_id, (entry, thread_id) in current.items():
+            if interaction_id in self._pending_agent_interaction_ids:
+                continue
+            self._pending_agent_interaction_ids.add(interaction_id)
+            self._upsert_interaction(
+                entry, agent=self._interaction_agent_ref(entry, thread_id)
+            )
+        for interaction_id in sorted(
+            self._pending_agent_interaction_ids - current.keys()
+        ):
+            self._pending_agent_interaction_ids.discard(interaction_id)
             self._resolve_interaction(interaction_id)
 
-    def _upsert_interaction(self, pending: PendingInteraction) -> None:
+    def _interaction_agent_ref(
+        self, entry: PendingInteraction, thread_id: str
+    ) -> ConversationAgentRef:
+        """The agent label for one multiplexed interaction item: registry identity + adapter label."""
+
+        registry_ref = self._agent_ref(thread_id)
+        label = entry.raw.get("agentLabel")
+        return ConversationAgentRef(
+            agent_id=thread_id,
+            agent_path=registry_ref.agent_path,
+            nickname=label if isinstance(label, str) and label else None,
+            status=registry_ref.status,
+        )
+
+    def _upsert_interaction(
+        self, pending: PendingInteraction, *, agent: ConversationAgentRef | None = None
+    ) -> None:
         blocks: list = [TextBlock(block_id="prompt", text=pending.prompt)]
         if pending.choices:
             blocks.append(
@@ -860,6 +1101,7 @@ class ActiveSessionProjector:
             phase="waiting",
             blocks=tuple(blocks),
             correlation=ConversationCorrelation(interaction_id=pending.interaction_id),
+            agent=agent,
             created_at=pending.created_at,
         )
         for mutation in self._store.apply_item(MappedItem(item=item)):
@@ -1079,6 +1321,8 @@ class ActiveSessionProjector:
         self._pending_frames.clear()
         self._live_turn_ids.clear()
         self._live_request_ids.clear()
+        self._agent_threads_live.clear()
+        self._pending_agent_interaction_ids.clear()
 
     # -- evidence refs -------------------------------------------------------
 

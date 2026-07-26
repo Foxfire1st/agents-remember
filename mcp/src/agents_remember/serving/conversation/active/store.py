@@ -127,9 +127,13 @@ class ProjectionStore:
         Tool-call items converge by scoped block-union: mappers legitimately
         emit partial-block tool items (an invocation first, its result later),
         so an upsert unions blocks by ``block_id`` — the candidate wins per
-        shared id and existing sibling blocks survive. Full-item re-maps
+        shared id and existing sibling blocks survive, and a late
+        ``streaming``-claiming tagging upsert never regresses a terminal phase
+. Full-item re-maps
         (codex) are identical under union. Other kinds keep whole-item
-        replacement semantics.
+        replacement semantics, with one retention exception: a roster notice's
+        ``final-message`` block survives later block-less lifecycle upserts
+.
         """
 
         candidate = mapped.item
@@ -147,9 +151,34 @@ class ProjectionStore:
             tail = self._flush_pending_deltas(item, authoritative_block_ids=mapper_authoritative)
             return [StoreMutation(kind="append-item", item=item), *tail]
         if existing.kind == candidate.kind == "tool-call":
-            candidate = candidate.model_copy(
-                update={"blocks": _union_blocks(existing.blocks, candidate.blocks)}
+            updates: dict[str, object] = {
+                "blocks": _union_blocks(existing.blocks, candidate.blocks)
+            }
+            # A late tagging upsert (claude task_started binds the agent identity onto
+            # the spawning tool call) hard-claims "streaming"; reordered evidence can
+            # land it AFTER the tool_result completed the item. Never regress a
+            # terminal phase.
+            if candidate.phase == "streaming" and existing.phase in {
+                "completed",
+                "failed",
+                "interrupted",
+            }:
+                updates["phase"] = existing.phase
+            candidate = candidate.model_copy(update=updates)
+        # Roster rows (codex sub-agent notices) upsert per lifecycle event, and most of
+        # those events (turn/started, turn/completed, status) know nothing about the
+        # agent's final message: retain the existing ``final-message`` block first-wins
+        # when the new upsert does not carry one instead of wiping it on whole-item replacement.
+        if existing.kind == candidate.kind == "notice" and not any(
+            block.block_id == "final-message" for block in candidate.blocks
+        ):
+            retained = tuple(
+                block for block in existing.blocks if block.block_id == "final-message"
             )
+            if retained:
+                candidate = candidate.model_copy(
+                    update={"blocks": (*candidate.blocks, *retained)}
+                )
         comparable_existing = existing.model_copy(
             update={field: None for field in _NORMALIZED_FIELDS}
         )
@@ -439,6 +468,7 @@ def unknown_vendor_item(mapped: MappedUnknownVendor, *, evidence_ref: str) -> Ma
                 reason="unknown vendor evidence preserved; semantics never guessed",
             ),
             role=mapped.role,
+            agent=mapped.agent,
             kind="unknown-vendor",
             phase="unknown",
             blocks=(

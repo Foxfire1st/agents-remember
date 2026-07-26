@@ -394,6 +394,8 @@ class HarnessControlServer:
             await self.bridge.native_page(
                 cursor=_optional_text(payload, "cursor"),
                 limit=max(1, limit),
+                # Additive multiplexed-thread selector; absent = parent thread.
+                thread_id=_optional_text(payload, "threadId"),
             )
         )
 

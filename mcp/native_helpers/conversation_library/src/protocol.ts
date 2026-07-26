@@ -48,6 +48,8 @@ export interface ReadRequest extends HelperRequestBase {
   canonicalProjectScope: string;
   cursor: string | null;
   limit: number;
+  /** Present only for a sub-agent transcript read. */
+  agentId?: string;
 }
 
 export interface ResolveResumeTargetRequest extends HelperRequestBase {
@@ -400,9 +402,13 @@ function validateOperationShape(value: Record<string, unknown>): HelperRequest {
       "canonicalProjectScope",
       "cursor",
       "limit",
+      "agentId",
     ]);
     requirePage(value);
-    return {
+    if (value.agentId !== undefined) {
+      requireText(value.agentId, "agentId");
+    }
+    const request: ReadRequest = {
       protocolVersion: PROTOCOL_VERSION,
       requestId: value.requestId as string,
       operation,
@@ -413,6 +419,10 @@ function validateOperationShape(value: Record<string, unknown>): HelperRequest {
       cursor: value.cursor as string | null,
       limit: value.limit as number,
     };
+    if (typeof value.agentId === "string") {
+      request.agentId = value.agentId;
+    }
+    return request;
   }
   requireExactKeys(value, [
     "protocolVersion",

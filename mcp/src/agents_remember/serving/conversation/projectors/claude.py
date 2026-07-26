@@ -14,13 +14,32 @@ record the adapter builds from the authority's own submission (original text,
 exact request id, replay message uuid) — never from a flattened projection of
 native assistant/tool semantics. Provenance is resolved independently through
 the submission-provenance batch.
+
+Sub-agents: inner frames of an Agent-tool sub-agent
+stream as ordinary assistant/user frames distinguished by
+``parent_tool_use_id`` (the spawning Agent tool_use id), carrying
+``subagent_type``/``task_description``; the lifecycle rides ``system`` frames
+``task_started``/``task_progress``/``task_notification`` whose ``task_id`` is
+the on-disk agent id (``subagents/agent-<task_id>.jsonl``, the .meta.json
+``toolUseId`` is the join key) plus ``background_tasks_changed`` carrying the
+running background-task set. All shapes probe-locked on the installed claude
+2.1.220 (2026-07-26 live stream-json probes, foreground and
+``run_in_background`` Agent calls). The ``task_id`` ↔ ``tool_use_id`` binding
+is cross-frame evidence held in one bounded session-keyed registry; it only
+ever ENRICHES the agent dimension from the harness's own task_* frames and
+never fabricates identity — an unbound frame keeps ``agent_id`` = the join key
+with status ``unknown``.
 """
 
 from __future__ import annotations
 
+from collections import OrderedDict
 from collections.abc import Callable, Mapping
+from dataclasses import dataclass
 
 from agents_remember.serving.conversation.models import (
+    ConversationAgentRef,
+    ConversationAgentStatus,
     ConversationContentBlock,
     ConversationCorrelation,
     ConversationItem,
@@ -33,6 +52,7 @@ from agents_remember.serving.conversation.models import (
     UnknownVendorBlock,
 )
 from agents_remember.serving.conversation.projectors.common import (
+    ItemPhase,
     MappedItem,
     MappedTurnOutcome,
     MappedUnknownVendor,
@@ -64,8 +84,135 @@ _CANCEL_REASONS = {"cancelled", "interrupted", "user_cancelled"}
 # command), so it never floods as unknown-vendor.
 _COMMAND_LIFECYCLE_STATES = frozenset({"queued", "started", "completed"})
 
+# -- Sub-agent identity binding ---------------------------
 
-def map_evidence_frame(frame: EvidenceFrame, *, evidence_ref: str) -> list[MapperOutput]:
+_MAX_AGENT_BINDING_SESSIONS = 128
+_MAX_AGENT_BINDINGS_PER_SESSION = 64
+
+# task_notification ``status`` vocabulary. The 2.1.220 probe carried ``completed``;
+# anything outside this table stays honest as ``unknown`` instead of being guessed.
+_NOTIFICATION_AGENT_STATUS: dict[str, ConversationAgentStatus] = {
+    "completed": "completed",
+    "failed": "failed",
+    "error": "failed",
+    "stopped": "interrupted",
+    "killed": "interrupted",
+    "cancelled": "interrupted",
+    "interrupted": "interrupted",
+}
+
+_NOTIFICATION_ITEM_PHASE: dict[ConversationAgentStatus, ItemPhase] = {
+    "completed": "completed",
+    "failed": "failed",
+    "interrupted": "interrupted",
+}
+
+
+@dataclass(frozen=True)
+class _AgentBinding:
+    """One bound sub-agent identity; later task_* evidence replaces it wholesale."""
+
+    task_id: str
+    join_key: str | None
+    subagent_type: str | None
+    description: str | None
+    status: ConversationAgentStatus
+
+
+class _AgentBindingRegistry:
+    """Bounded session-keyed task_id ↔ tool_use_id bindings from task_* evidence."""
+
+    def __init__(self) -> None:
+        self._sessions: OrderedDict[str, OrderedDict[str, _AgentBinding]] = OrderedDict()
+
+    def lookup(
+        self,
+        session_id: str,
+        *,
+        join_key: str | None = None,
+        task_id: str | None = None,
+    ) -> _AgentBinding | None:
+        bindings = self._sessions.get(session_id)
+        if bindings is None:
+            return None
+        if task_id is not None:
+            return bindings.get(task_id)
+        if join_key is not None:
+            for binding in bindings.values():
+                if binding.join_key == join_key:
+                    return binding
+        return None
+
+    def record(self, session_id: str, binding: _AgentBinding) -> None:
+        bindings = self._sessions.get(session_id)
+        if bindings is None:
+            if len(self._sessions) >= _MAX_AGENT_BINDING_SESSIONS:
+                self._sessions.popitem(last=False)
+            bindings = OrderedDict()
+            self._sessions[session_id] = bindings
+        else:
+            self._sessions.move_to_end(session_id)
+        if binding.task_id in bindings:
+            del bindings[binding.task_id]
+        elif len(bindings) >= _MAX_AGENT_BINDINGS_PER_SESSION:
+            bindings.popitem(last=False)
+        bindings[binding.task_id] = binding
+
+
+_AGENT_BINDINGS = _AgentBindingRegistry()
+
+
+def _session_key(raw: Mapping[str, object]) -> str:
+    # Every 2.1.220 stream frame carries the vendor session id. Id-less frames (older
+    # fixtures) share one bucket, which stays honest: bindings there are exactly what
+    # the stream itself evidenced, never cross-session guesses.
+    return optional_text(raw.get("session_id")) or ""
+
+
+def _sidechain_agent_ref(raw: Mapping[str, object]) -> ConversationAgentRef | None:
+    """The roster identity for a frame keyed by ``parent_tool_use_id``.
+
+    The bound agent id wins once task_* evidence bound the join key; before that the
+    join key itself is the honest id, with the frame's own ``subagent_type`` as role.
+    """
+
+    join_key = optional_text(raw.get("parent_tool_use_id"))
+    if join_key is None:
+        return None
+    role = optional_text(raw.get("subagent_type"))
+    binding = _AGENT_BINDINGS.lookup(_session_key(raw), join_key=join_key)
+    if binding is None:
+        return ConversationAgentRef(
+            agent_id=join_key, role=role, join_key=join_key, status="unknown"
+        )
+    return ConversationAgentRef(
+        agent_id=binding.task_id,
+        role=role or binding.subagent_type,
+        join_key=join_key,
+        status=binding.status,
+    )
+
+
+def _spawned_agent_ref(session_id: str, tool_use_id: str) -> ConversationAgentRef | None:
+    """The roster identity when a tool_result settles a spawning Agent call."""
+
+    binding = _AGENT_BINDINGS.lookup(session_id, join_key=tool_use_id)
+    if binding is None:
+        return None
+    return ConversationAgentRef(
+        agent_id=binding.task_id,
+        role=binding.subagent_type,
+        join_key=tool_use_id,
+        status=binding.status,
+    )
+
+
+def map_evidence_frame(
+    frame: EvidenceFrame,
+    *,
+    evidence_ref: str,
+    parent_thread_id: str | None = None,  # noqa: ARG001 - multiplexed-harness demux context; claude encodes sub-agent identity in-band (parent_tool_use_id)
+) -> list[MapperOutput]:
     """Map one full stream-json frame; unrecognized types stay preserved."""
 
     raw = frame.raw
@@ -77,8 +224,7 @@ def map_evidence_frame(frame: EvidenceFrame, *, evidence_ref: str) -> list[Mappe
     if frame_type == "user":
         return _map_tool_carrier(raw, created_at=frame.created_at, evidence_ref=evidence_ref)
     if frame_type == "system":
-        # api_retry/status feed the canonical status service via the snapshot.
-        return []
+        return _map_system(raw, created_at=frame.created_at, sequence=frame.sequence)
     if frame_type == "command_lifecycle":
         return _map_command_lifecycle(raw)
     if frame_type == "rate_limit_event":
@@ -111,6 +257,237 @@ def _map_command_lifecycle(raw: Mapping[str, object]) -> list[MapperOutput]:
             f"claude command_lifecycle.state {state!r} is not a documented lifecycle state"
         )
     return []
+
+
+def _map_system(
+    raw: Mapping[str, object],
+    *,
+    created_at: str | None,
+    sequence: int,
+) -> list[MapperOutput]:
+    """Map the agent-lifecycle system subtypes.
+
+    api_retry/status keep feeding the canonical status service via the snapshot, and
+    every other subtype observed on 2.1.220 (init, task_updated, hook_*, ...) keeps
+    dropping silently exactly as before. A MALFORMED task_* frame is vendor shape
+    drift: it degrades to preserved unknown-vendor (the string-content precedent —
+    a frame on every agent spawn must never kill the projection), never a guess.
+    """
+
+    subtype = optional_text(raw.get("subtype"))
+    mapper: Callable[[Mapping[str, object]], list[MapperOutput]] | None = None
+    if subtype in ("task_started", "task_progress", "task_notification"):
+        mapper = lambda frame: _map_task_lifecycle(subtype, frame, created_at=created_at)  # noqa: E731
+    elif subtype == "background_tasks_changed":
+        mapper = lambda frame: _map_background_tasks_changed(frame, created_at=created_at)  # noqa: E731
+    if mapper is None:
+        return []
+    try:
+        return mapper(raw)
+    except UnmappableShape:
+        return [
+            MappedUnknownVendor(
+                item_id=f"claude-event-{sequence}",
+                vendor_type=f"claude-system:{subtype}",
+                safe_summary=f"malformed claude {subtype} frame preserved",
+                created_at=created_at,
+            )
+        ]
+
+
+def _map_task_lifecycle(
+    subtype: str,
+    raw: Mapping[str, object],
+    *,
+    created_at: str | None,
+) -> list[MapperOutput]:
+    """One roster item per agent, upserted across started → progress → notification.
+
+    task_started additionally tags the spawning Agent tool-call item with the bound
+    roster identity: the 2.1.220 probes show task_started preceding the Agent
+    tool_result carrier in BOTH foreground and run_in_background ordering, so the
+    tool call is honestly still streaming here and the later tool_result upsert
+    settles it. task_updated ({task_id, patch:{status,...}}) duplicates the
+    notification's terminal signal without the join key and stays unmapped.
+    """
+
+    task_id = required_text(raw.get("task_id"), f"claude {subtype}.task_id")
+    session_id = _session_key(raw)
+    binding = _AGENT_BINDINGS.lookup(session_id, task_id=task_id)
+    tool_use_id = optional_text(raw.get("tool_use_id"))
+    join_key = tool_use_id or (binding.join_key if binding is not None else None)
+    subagent_type = optional_text(raw.get("subagent_type")) or (
+        binding.subagent_type if binding is not None else None
+    )
+    frame_description = optional_text(raw.get("description"))
+    description = frame_description or (binding.description if binding is not None else None)
+    usage_raw = raw.get("usage")
+    if usage_raw is not None and not isinstance(usage_raw, Mapping):
+        raise UnmappableShape(f"claude {subtype}.usage must be an object")
+    usage = usage_raw if isinstance(usage_raw, Mapping) else None
+    summary = optional_text(raw.get("summary"))
+    last_tool_name = optional_text(raw.get("last_tool_name"))
+    if subtype == "task_started":
+        # The binding authority: both ids are required evidence on this frame.
+        join_key = required_text(
+            raw.get("tool_use_id"), "claude task_started.tool_use_id"
+        )
+        agent_status: ConversationAgentStatus = "running"
+        phase: ItemPhase = "streaming"
+    elif subtype == "task_progress":
+        agent_status = "running"
+        phase = "streaming"
+    else:  # task_notification
+        status_text = required_text(raw.get("status"), "claude task_notification.status")
+        agent_status = _NOTIFICATION_AGENT_STATUS.get(status_text, "unknown")
+        phase = _NOTIFICATION_ITEM_PHASE.get(agent_status, "unknown")
+    _AGENT_BINDINGS.record(
+        session_id,
+        _AgentBinding(
+            task_id=task_id,
+            join_key=join_key,
+            subagent_type=subagent_type,
+            # task_started's description is the task's own; a progress frame's
+            # description is a transient activity label, so the record keeps the first.
+            description=(binding.description if binding is not None else None)
+            or frame_description,
+            status=agent_status,
+        ),
+    )
+    blocks: list[ConversationContentBlock] = []
+    if description:
+        blocks.append(TextBlock(block_id="description", text=description))
+    if summary:
+        blocks.append(TextBlock(block_id="summary", text=summary))
+    if usage is not None or last_tool_name is not None:
+        data: dict[str, object] = {}
+        if usage is not None:
+            data["usage"] = usage
+        if last_tool_name is not None:
+            data["lastToolName"] = last_tool_name
+        blocks.append(ToolOutputBlock(block_id="usage", data=data))
+    outputs: list[MapperOutput] = [
+        MappedItem(
+            item=ConversationItem(
+                item_id=f"claude-agent-{task_id}",
+                revision=1,
+                global_ordinal=1,
+                lane="harness",
+                source="harness-live",
+                provenance=harness_provenance(
+                    f"claude stream-json system/{subtype} frame", observed_at=created_at
+                ),
+                role="system",
+                kind="notice",
+                phase=phase,
+                blocks=tuple(blocks),
+                agent=ConversationAgentRef(
+                    agent_id=task_id,
+                    role=subagent_type,
+                    join_key=join_key,
+                    status=agent_status,
+                ),
+                created_at=created_at,
+            )
+        )
+    ]
+    if subtype == "task_started" and join_key is not None:
+        outputs.append(
+            MappedItem(
+                item=ConversationItem(
+                    item_id=join_key,
+                    revision=1,
+                    global_ordinal=1,
+                    lane="harness",
+                    source="harness-live",
+                    provenance=harness_provenance(
+                        "claude stream-json task_started frame (agent identity binding)",
+                        observed_at=created_at,
+                    ),
+                    role="tool",
+                    kind="tool-call",
+                    phase="streaming",
+                    # Block-union upsert: the tool_use/tool_result blocks the parent
+                    # timeline already minted survive untouched.
+                    blocks=(),
+                    correlation=ConversationCorrelation(tool_call_id=join_key),
+                    agent=ConversationAgentRef(
+                        agent_id=task_id,
+                        role=subagent_type,
+                        join_key=join_key,
+                        status="running",
+                    ),
+                    created_at=created_at,
+                )
+            )
+        )
+    return outputs
+
+
+def _map_background_tasks_changed(
+    raw: Mapping[str, object],
+    *,
+    created_at: str | None,
+) -> list[MapperOutput]:
+    """Roster reconciliation from the running background-task set.
+
+    Shape (2.1.220 probe): ``tasks`` is the FULL set of currently running background
+    tasks as ``{task_id, task_type, description}`` — no tool_use_id join, no status.
+    It can only honestly REGISTER a task the task_* evidence never bound (a replay
+    window that opened mid-agent); for already-bound tasks the task_* frames are the
+    richer authority and this frame mints nothing. An empty set asserts "nothing
+    running" without distinguishing completed from killed, so it reconciles nothing.
+    """
+
+    tasks = required_list(raw.get("tasks"), "claude background_tasks_changed.tasks")
+    session_id = _session_key(raw)
+    outputs: list[MapperOutput] = []
+    for position, entry in enumerate(tasks):
+        entry_object = required_object(
+            entry, f"claude background_tasks_changed.tasks[{position}]"
+        )
+        task_id = required_text(
+            entry_object.get("task_id"), "claude background_tasks_changed.task_id"
+        )
+        if _AGENT_BINDINGS.lookup(session_id, task_id=task_id) is not None:
+            continue
+        description = optional_text(entry_object.get("description"))
+        _AGENT_BINDINGS.record(
+            session_id,
+            _AgentBinding(
+                task_id=task_id,
+                join_key=None,
+                subagent_type=None,
+                description=description,
+                status="running",
+            ),
+        )
+        outputs.append(
+            MappedItem(
+                item=ConversationItem(
+                    item_id=f"claude-agent-{task_id}",
+                    revision=1,
+                    global_ordinal=1,
+                    lane="harness",
+                    source="harness-live",
+                    provenance=harness_provenance(
+                        "claude stream-json background_tasks_changed frame",
+                        observed_at=created_at,
+                    ),
+                    role="system",
+                    kind="notice",
+                    phase="streaming",
+                    blocks=(
+                        (TextBlock(block_id="description", text=description),)
+                        if description
+                        else ()
+                    ),
+                    agent=ConversationAgentRef(agent_id=task_id, status="running"),
+                    created_at=created_at,
+                )
+            )
+        )
+    return outputs
 
 
 def map_transcript_echo(
@@ -170,6 +547,7 @@ def _map_assistant(
     item_id = required_text(raw.get("uuid"), "claude assistant frame uuid")
     message = required_object(raw.get("message"), "claude assistant frame.message")
     content = required_list(message.get("content"), "claude assistant message.content")
+    agent = _sidechain_agent_ref(raw)
     outputs: list[MapperOutput] = []
     blocks: list = []
     for position, raw_block in enumerate(content):
@@ -195,6 +573,7 @@ def _map_assistant(
                     block,
                     parent_item_id=item_id,
                     created_at=created_at,
+                    agent=agent,
                 )
             )
         else:
@@ -223,6 +602,7 @@ def _map_assistant(
                     kind="message",
                     phase="completed",
                     blocks=tuple(blocks),
+                    agent=agent,
                     created_at=created_at,
                     evidence_ref=evidence_ref,
                 )
@@ -236,6 +616,7 @@ def _map_tool_use(
     *,
     parent_item_id: str,
     created_at: str | None,
+    agent: ConversationAgentRef | None = None,
 ) -> list[MapperOutput]:
     tool_id = required_text(block.get("id"), "claude tool_use id")
     name = required_text(block.get("name"), "claude tool_use name")
@@ -263,6 +644,7 @@ def _map_tool_use(
                     *_tool_mutation_diff_blocks(name, block.get("input")),
                 ),
                 correlation=ConversationCorrelation(tool_call_id=tool_id),
+                agent=agent,
                 created_at=created_at,
             )
         )
@@ -406,14 +788,34 @@ def _map_tool_carrier(
         ]
     if not isinstance(content, list):
         raise UnmappableShape("claude user frame content must be a list of blocks")
+    agent = _sidechain_agent_ref(raw)
+    session_id = _session_key(raw)
     outputs: list[MapperOutput] = []
+    sidechain_text_blocks: list[ConversationContentBlock] = []
     saw_tool_result = False
     for position, raw_block in enumerate(content):
         block = required_object(raw_block, "claude user content block")
         block_type = required_text(block.get("type"), "claude content block type")
         if block_type == "tool_result":
             saw_tool_result = True
-            outputs.append(_map_tool_result(block, created_at=created_at))
+            tool_use_id = optional_text(block.get("tool_use_id"))
+            block_agent = agent
+            if block_agent is None and tool_use_id is not None:
+                # A parent-timeline result settling a bound Agent call carries the
+                # roster identity the task_* evidence bound to that join key.
+                block_agent = _spawned_agent_ref(session_id, tool_use_id)
+            outputs.append(
+                _map_tool_result(block, created_at=created_at, agent=block_agent)
+            )
+        elif block_type == "text" and agent is not None:
+            # A sidechain user frame's text is the sub-agent's own input record (the
+            # 2.1.220 probe shows the task prompt echo as the first sidechain user
+            # frame); with --forward-subagent-text its replies cross too. Parent
+            # frames keep the unknown-vendor path below — user text there is only
+            # ever the replay echo, consumed via map_transcript_echo.
+            sidechain_text_blocks.append(
+                TextBlock(block_id=f"text-{position}", text=str(block.get("text") or ""))
+            )
         else:
             outputs.append(
                 MappedUnknownVendor(
@@ -423,6 +825,29 @@ def _map_tool_carrier(
                     created_at=created_at,
                 )
             )
+    if sidechain_text_blocks:
+        outputs.insert(
+            0,
+            MappedItem(
+                item=ConversationItem(
+                    item_id=required_text(raw.get("uuid"), "claude user frame uuid"),
+                    revision=1,
+                    global_ordinal=1,
+                    lane="harness",
+                    source="harness-live",
+                    provenance=harness_provenance(
+                        "claude stream-json sidechain user frame", observed_at=created_at
+                    ),
+                    role="user",
+                    kind="message",
+                    phase="completed",
+                    blocks=tuple(sidechain_text_blocks),
+                    agent=agent,
+                    created_at=created_at,
+                    evidence_ref=evidence_ref,
+                )
+            ),
+        )
     if not saw_tool_result and not outputs:
         raise UnmappableShape("claude user frame carried no mappable blocks")
     return outputs
@@ -432,6 +857,7 @@ def _map_tool_result(
     block: Mapping[str, object],
     *,
     created_at: str | None,
+    agent: ConversationAgentRef | None = None,
 ) -> MappedItem:
     tool_use_id = required_text(block.get("tool_use_id"), "claude tool_result tool_use_id")
     content = block.get("content")
@@ -464,6 +890,7 @@ def _map_tool_result(
                 ),
             ),
             correlation=ConversationCorrelation(tool_call_id=tool_use_id),
+            agent=agent,
             created_at=created_at,
         )
     )

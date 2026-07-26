@@ -8,6 +8,7 @@ import type { LifecycleProjection } from "../types/projection";
 import {
   answerPendingInteraction,
   findInteractionGate,
+  pendingInteractionAgentLabel,
   readAdapterDecisionFailure,
   representPendingInteraction,
   submitInteractionAnswer,
@@ -597,5 +598,23 @@ describe("submitInteractionAnswer — the session-direct route (L5I, no lifecycl
       expect(outcome.error).toContain("submission authority unavailable");
     }
     expect(posts).toHaveLength(0);
+  });
+});
+
+describe("pendingInteractionAgentLabel", () => {
+  it("reads the adapter-bound sub-agent label from raw.agentLabel only", () => {
+    expect(
+      pendingInteractionAgentLabel({
+        interactionId: "ix-1",
+        kind: "permission",
+        raw: { threadId: "t-1", agentLabel: "scout" },
+      }),
+    ).toBe("scout");
+    expect(pendingInteractionAgentLabel({ interactionId: "ix-1", raw: {} })).toBeUndefined();
+    expect(pendingInteractionAgentLabel({ interactionId: "ix-1" })).toBeUndefined();
+    expect(pendingInteractionAgentLabel(undefined)).toBeUndefined();
+    expect(
+      pendingInteractionAgentLabel({ interactionId: "ix-1", raw: { agentLabel: "  " } }),
+    ).toBeUndefined();
   });
 });

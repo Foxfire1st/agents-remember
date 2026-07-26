@@ -312,6 +312,32 @@ class ConversationCorrelation(WireModel):
     tool_call_id: str | None = None
 
 
+ConversationAgentStatus = Literal[
+    "registered", "running", "completed", "interrupted", "failed", "unknown"
+]
+
+
+class ConversationAgentRef(WireModel):
+    """The harness sub-agent one timeline item belongs to.
+
+    Additive and optional: absent means the parent conversation. Identity is
+    evidence-bound — codex ``agentThreadId`` (plus ``agentPath``/``nickname``/
+    ``role`` once collab evidence binds them), claude ``agentId``/
+    ``subagent_type`` joined through the spawning tool call (``join_key`` =
+    ``parent_tool_use_id``). Unresolved identity renders as ``agent <short-id>``,
+    never a fabricated name; ``status`` tracks the agent's own lifecycle, not
+    the item's phase.
+    """
+
+    agent_id: NonEmptyText
+    agent_path: str | None = None
+    nickname: str | None = None
+    role: str | None = None
+    join_key: str | None = None
+    parent_agent_id: str | None = None
+    status: ConversationAgentStatus = "unknown"
+
+
 class ConversationItem(WireModel):
     item_id: NonEmptyText
     revision: PositiveRevision
@@ -346,6 +372,7 @@ class ConversationItem(WireModel):
     ]
     blocks: tuple[ConversationContentBlock, ...]
     correlation: ConversationCorrelation | None = None
+    agent: ConversationAgentRef | None = None
     created_at: str | None = None
     updated_at: str | None = None
     evidence_ref: str | None = None
@@ -735,6 +762,28 @@ class ConversationPage(WireModel):
     capabilities: ConversationCapabilities
 
 
+class ConversationLibraryAgentRow(WireModel):
+    """One harness sub-agent conversation grouped under its parent library row.
+
+    Additive and evidence-bound: the agent opens through its own ``conversation_key`` exactly
+    like a top-level row. Identity fields are populated only from native evidence — codex
+    ``agentNickname``/``agentRole``/``source.subAgent.thread_spawn.agent_path``, claude the
+    ``.meta.json`` ``agentType``/``description``/``model`` (``join_key`` = ``toolUseId``). When
+    the wire carries none, ``title`` falls back to ``agent <short-id>``, never a fabricated name.
+    """
+
+    conversation_key: LibraryConversationKey
+    identity_digest: NonEmptyText
+    title: NonEmptyText
+    agent_path: str | None = None
+    nickname: str | None = None
+    role: str | None = None
+    model: str | None = None
+    join_key: str | None = None
+    safe_native_id_suffix: str | None = None
+    last_activity_at: str | None = None
+
+
 class ConversationLibraryRow(WireModel):
     conversation_key: LibraryConversationKey
     identity_digest: NonEmptyText
@@ -742,6 +791,7 @@ class ConversationLibraryRow(WireModel):
     safe_native_id_suffix: str | None = None
     last_activity_at: str | None = None
     capabilities: HistoryCapabilities
+    agents: tuple[ConversationLibraryAgentRow, ...] = ()
 
 
 class ConversationLibraryPageScope(WireModel):
@@ -754,6 +804,9 @@ class ConversationLibraryPage(WireModel):
     scope: ConversationLibraryPageScope
     rows: tuple[ConversationLibraryRow, ...]
     next_cursor: LibraryListCursor | None
+    # Capability honesty: why sub-agent conversations are (partially)
+    # unavailable on this page, when they are — the exact native reason, never silently absent.
+    agents_note: str | None = None
 
 
 class HistoricalConversationPage(WireModel):

@@ -133,6 +133,28 @@ export interface ConversationCorrelation {
   toolCallId?: string;
 }
 
+// ── Harness sub-agent identity ──────────────────────────────────────────────────────────────────
+// Additive: absent on an item means the parent conversation. Identity is evidence-bound — the
+// server populates nickname/role/agentPath only when collab/join evidence proved them; an
+// unresolved identity renders as `agent <short-id>`, never a fabricated name.
+export type ConversationAgentStatus =
+  | "registered"
+  | "running"
+  | "completed"
+  | "interrupted"
+  | "failed"
+  | "unknown";
+
+export interface ConversationAgentRef {
+  agentId: string;
+  agentPath?: string | null;
+  nickname?: string | null;
+  role?: string | null;
+  joinKey?: string | null;
+  parentAgentId?: string | null;
+  status: ConversationAgentStatus;
+}
+
 export interface ConversationItem {
   itemId: string;
   revision: number;
@@ -147,6 +169,7 @@ export interface ConversationItem {
   phase: ConversationItemPhase;
   blocks: ConversationContentBlock[];
   correlation?: ConversationCorrelation;
+  agent?: ConversationAgentRef | null;
   createdAt?: string;
   updatedAt?: string;
   evidenceRef?: string;

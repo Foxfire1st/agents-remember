@@ -48,8 +48,53 @@ class ClaudeSystemInitialization:
     commands: frozenset[str]
 
 
-def build_claude_stream_argv(argv: Sequence[str]) -> tuple[str, ...]:
-    """Preserve caller arguments and add only the documented stream transport flags."""
+# ``--forward-subagent-text``:
+# sub-agent text/thinking blocks cross the live stream instead of tool_use/
+# tool_result blocks only. Smoke-verified on the installed claude 2.1.220
+# (``claude --help`` lists it; the 2026-07-26 live probes streamed sidechain
+# text blocks with it).
+FORWARD_SUBAGENT_TEXT_FLAG = "--forward-subagent-text"
+# The capability floor: 2.1.220 is the only installed version
+# the flag was ever probed against, so it is the floor. NO version seam exists at argv-build
+# time — the installed version is captured only by ``system/init`` AFTER launch — so emission
+# stays behind that capture: the adapter launches WITHOUT the flag (fail-closed default) and
+# re-launches WITH it only when the captured version meets this floor; below it the flag is
+# omitted and the capability is marked unverified with the exact reason. A version gate is
+# justified HERE and nowhere else: the contract is argv-only, so it cannot be probed without
+# launching the flag itself.
+FORWARD_SUBAGENT_TEXT_FLOOR = (2, 1, 220)
+
+
+def claude_version_tuple(version: str) -> tuple[int, ...] | None:
+    """Parse ``major.minor.patch``; anything else is unproven (None), never guessed."""
+
+    parts = version.split(".")
+    if not parts or not all(part.isdigit() for part in parts):
+        return None
+    return tuple(int(part) for part in parts)
+
+
+def forward_subagent_text_supported(version: str | None) -> bool:
+    """The fail-closed floor verdict: unproven/unparseable versions never get the flag."""
+
+    if version is None:
+        return False
+    parsed = claude_version_tuple(version)
+    if parsed is None:
+        return False
+    return parsed >= FORWARD_SUBAGENT_TEXT_FLOOR
+
+
+def build_claude_stream_argv(
+    argv: Sequence[str], *, forward_subagent_text: bool = False
+) -> tuple[str, ...]:
+    """Preserve caller arguments and add only the documented stream transport flags.
+
+    ``forward_subagent_text`` is fail-closed: the flag is
+    emitted only when the caller proved the installed CLI meets
+    ``FORWARD_SUBAGENT_TEXT_FLOOR`` — never by default. A caller-supplied flag in
+    ``argv`` is preserved verbatim exactly like every other caller argument.
+    """
 
     if not argv or not argv[0]:
         raise HarnessControlError("Claude launch argv requires an executable")
@@ -59,7 +104,10 @@ def build_claude_stream_argv(argv: Sequence[str]) -> tuple[str, ...]:
     _require_option_value(result, "--permission-prompt-tool", "stdio")
     if "-p" not in result and "--print" not in result:
         result.append("-p")
-    for flag in ("--verbose", "--replay-user-messages"):
+    flags = ["--verbose", "--replay-user-messages"]
+    if forward_subagent_text:
+        flags.append(FORWARD_SUBAGENT_TEXT_FLAG)
+    for flag in flags:
         if flag not in result:
             result.append(flag)
     return tuple(result)

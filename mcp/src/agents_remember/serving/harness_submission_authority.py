@@ -276,21 +276,33 @@ class HarnessSubmissionAuthority:
     async def respond(self, response: InteractionResponse) -> AdapterSnapshot:
         self._require_accepting()
         async with self._lock:
-            pending = self._snapshot().pending_interaction
+            snapshot_now = self._snapshot()
+            pending = snapshot_now.pending_interaction
             active = self._records.get(self._active) if self._active is not None else None
-            if pending is None or pending.interaction_id != response.interaction_id:
+            # Parent-thread entries ride the singular slot; multiplexed sub-agent entries
+            # ride the plural tuple and own no parent
+            # operation, so the active-operation guard below is parent-only.
+            is_parent = (
+                pending is not None and pending.interaction_id == response.interaction_id
+            )
+            if not is_parent and not any(
+                entry.interaction_id == response.interaction_id
+                for entry in snapshot_now.pending_interactions
+            ):
                 raise HarnessInteractionNotPendingError(
                     "interaction response does not match the pending interaction"
                 )
-            if active is None or active.state not in {"dispatching", "delivered", "unknown"}:
-                raise HarnessInteractionNotPendingError(
-                    "interaction response has no active ordinary operation"
-                )
+            operation: ControlOperationRef | None = None
+            if is_parent:
+                if active is None or active.state not in {"dispatching", "delivered", "unknown"}:
+                    raise HarnessInteractionNotPendingError(
+                        "interaction response has no active ordinary operation"
+                    )
+                operation = active.ref
             if response.interaction_id in self._responded_interactions:
                 raise HarnessInteractionNotPendingError(
                     "interaction response was already submitted"
                 )
-            operation = active.ref
             self._responded_interactions.add(response.interaction_id)
         try:
             async with self._response_lane:

@@ -91,6 +91,13 @@ class _FakeCodexTransport:
         value = self.script[method]
         if callable(value):
             return value(params)  # type: ignore[return-value]
+        if method == "thread/list" and params.get("sourceKinds") not in (
+            None,
+            ["cli", "vscode", "exec", "appServer"],
+        ):
+            # The library's additive sub-agent fetch gets an empty page at
+            # this fake boundary; the agent-grouping suite owns the non-empty cases.
+            return {"data": [], "nextCursor": None}
         return value  # type: ignore[return-value]
 
     async def notify(self, method: str, params: Mapping[str, object]) -> None:

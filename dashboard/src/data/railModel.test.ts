@@ -345,4 +345,22 @@ describe("question triage (R16)", () => {
     );
     expect(waitingSeats([...fleet, second]).map((seat) => seat.id)).toEqual(["waiter-2", "worker-tui"]);
   });
+
+  it("lists a seat blocked SOLELY on a multiplexed sub-agent approval", () => {
+    const agentOnly = fromTerminalSessionInfo(
+      catalogRow({
+        id: "waiter-agent",
+        turnStateChangedAt: "2026-07-16T10:00:00Z",
+        controlPendingInteractions: [
+          {
+            interactionId: "ix_agent",
+            kind: "permission",
+            prompt: "Allow the sub-agent command?",
+            raw: { threadId: "agent-thread-1", agentLabel: "agent agent-t" },
+          },
+        ],
+      }),
+    );
+    expect(waitingSeats([agentOnly]).map((seat) => seat.id)).toEqual(["waiter-agent"]);
+  });
 });

@@ -44,6 +44,7 @@ from agents_remember.serving.conversation.models import (
     ConversationContentBlock,
     ConversationCorrelation,
     ConversationItem,
+    ConversationLibraryAgentRow,
     ConversationLibraryPage,
     ConversationLibraryPageScope,
     ConversationLibraryRow,
@@ -65,6 +66,15 @@ from agents_remember.serving.conversation.models import (
 )
 
 _Capabilities = Callable[[HarnessId], Awaitable[HistoryCapabilities]]
+
+# Sub-agent conversations: the library's own composite vendor id grammar,
+# ``<sessionId>/<agentId>``, minted only by this port (session ids and agent ids never contain
+# "/"). Opening an agent conversation reads ``subagents/agent-<agentId>.jsonl`` through the
+# locked helper; the ``.meta.json`` ``toolUseId`` is the join key to the spawning tool call.
+_AGENT_ID_SEPARATOR = "/"
+_AGENTS_UNAVAILABLE_NOTE = (
+    "sub-agent conversations are unavailable: the locked helper returned no sub-agent evidence"
+)
 
 
 class ClaudeConversationLibrary:
@@ -110,7 +120,7 @@ class ClaudeConversationLibrary:
                 "the native Claude catalog changed; the list cursor is reset"
             )
         capabilities = await self._capabilities(self.harness_id)
-        rows = self._rows(result, scope, generation=generation, capabilities=capabilities)
+        rows, agents_note = self._rows(result, scope, generation=generation, capabilities=capabilities)
         next_cursor = self._next_cursor(result, scope, generation)
         return ConversationLibraryPage(
             scope=ConversationLibraryPageScope(
@@ -120,6 +130,7 @@ class ClaudeConversationLibrary:
             ),
             rows=rows,
             next_cursor=next_cursor,
+            agents_note=agents_note,
         )
 
     async def read(
@@ -130,17 +141,17 @@ class ClaudeConversationLibrary:
         limit: int,
     ) -> HistoricalConversationPage:
         native_cursor, expected_generation = self._verify_read_position(before, ref)
-        result, _runtime, _helper = await self._helper.call(
-            "claude",
-            "read",
-            {
-                "vendorConversationId": ref.vendor_conversation_id,
-                "expectedIdentityDigest": ref.identity_digest,
-                "canonicalProjectScope": ref.project_scope,
-                "cursor": native_cursor,
-                "limit": limit,
-            },
-        )
+        session_id, agent_id = _split_agent_vendor_id(ref.vendor_conversation_id)
+        payload: dict[str, object] = {
+            "vendorConversationId": session_id,
+            "expectedIdentityDigest": ref.identity_digest,
+            "canonicalProjectScope": ref.project_scope,
+            "cursor": native_cursor,
+            "limit": limit,
+        }
+        if agent_id is not None:
+            payload["agentId"] = agent_id
+        result, _runtime, _helper = await self._helper.call("claude", "read", payload)
         generation = self._cursor_authority.catalog_generation(
             required_field(result, "signature", source="Claude helper")
         )
@@ -159,6 +170,11 @@ class ClaudeConversationLibrary:
         )
 
     async def resolve_resume_target(self, ref: NativeConversationRef) -> NativeResumeTarget:
+        _session_id, agent_id = _split_agent_vendor_id(ref.vendor_conversation_id)
+        if agent_id is not None:
+            raise LibraryStoreError(
+                "Claude sub-agent transcripts have no native resume target"
+            )
         result, _runtime, _helper = await self._helper.call(
             "claude",
             "resolve-resume-target",
@@ -223,14 +239,48 @@ class ClaudeConversationLibrary:
         *,
         generation: int,
         capabilities: HistoryCapabilities,
-    ) -> tuple[ConversationLibraryRow, ...]:
+    ) -> tuple[tuple[ConversationLibraryRow, ...], str | None]:
         rows_raw = result.get("rows")
         if not isinstance(rows_raw, list):
             raise LibraryStoreError("Claude helper list returned no rows")
-        return tuple(
+        rows = tuple(
             self._row(raw, scope, generation=generation, capabilities=capabilities)
             for raw in rows_raw
         )
+        # Capability honesty: a helper that predates sub-agent enumeration
+        # returns rows without the ``agents`` evidence key — visible, never silently absent.
+        # The response-level ``agentsEnumerated`` marker covers the EMPTY catalog too:
+        # over zero rows there is no row-level evidence either way, so only the marker
+        # proves the helper enumerates agents.
+        agents_unavailable = result.get("agentsEnumerated") is not True or any(
+            isinstance(raw, Mapping) and "agents" not in raw for raw in rows_raw
+        )
+        agents_note = _AGENTS_UNAVAILABLE_NOTE if agents_unavailable else None
+        # Nested sub-agents: a ``spawnDepth`` above 1 means the
+        # row's real parent is another sub-agent, which the flat per-session grouping cannot
+        # model — the row stays listed under the top-level session AND the note says so,
+        # never silently absent.
+        if not agents_unavailable:
+            nested = sum(
+                1
+                for raw in rows_raw
+                if isinstance(raw, Mapping) and isinstance(raw.get("agents"), list)
+                for item in raw["agents"]
+                if isinstance(item, Mapping)
+                and isinstance(item.get("spawnDepth"), int)
+                and not isinstance(item.get("spawnDepth"), bool)
+                and item["spawnDepth"] > 1
+            )
+            if nested:
+                nested_note = (
+                    f"{nested} nested sub-agent(s) (spawnDepth > 1) are shown flat under "
+                    "the top-level session; the library cannot group them under their "
+                    "parent sub-agent"
+                )
+                agents_note = (
+                    f"{agents_note}; {nested_note}" if agents_note else nested_note
+                )
+        return rows, agents_note
 
     def _next_cursor(
         self,
@@ -303,6 +353,13 @@ class ClaudeConversationLibrary:
         )
         title = _first_text(raw, "customTitle", "summary", "firstPrompt")
         last_modified = raw.get("lastModified")
+        agents_raw = raw.get("agents")
+        if agents_raw is not None and not isinstance(agents_raw, list):
+            raise LibraryStoreError("Claude helper row agents are not a list")
+        agents = tuple(
+            self._agent_row(item, session_id, scope, generation=generation)
+            for item in agents_raw or ()
+        )
         return ConversationLibraryRow(
             conversation_key=self._cursor_authority.mint_conversation_key(
                 scope,
@@ -317,7 +374,65 @@ class ClaudeConversationLibrary:
                 _iso_from_millis(last_modified) if isinstance(last_modified, int) else None
             ),
             capabilities=capabilities,
+            agents=agents,
         )
+
+    def _agent_row(
+        self,
+        raw: object,
+        session_id: str,
+        scope: ConversationLibraryScope,
+        *,
+        generation: int,
+    ) -> ConversationLibraryAgentRow:
+        """One sub-agent child row from the helper's ``.meta.json`` evidence.
+
+        Identity comes only from the native meta (``agentType``/``description``/``model``,
+        ``toolUseId`` as the join key); without it the title is the honest
+        ``agent <short-id>`` fallback, never a fabricated name.
+        """
+
+        if not isinstance(raw, Mapping):
+            raise LibraryStoreError("Claude helper agent row is not an object")
+        agent_id = required_field(raw, "agentId", source="Claude helper")
+        vendor_id = f"{session_id}{_AGENT_ID_SEPARATOR}{agent_id}"
+        digest = self._cursor_authority.identity_digest(
+            self.harness_id, vendor_id, scope.canonical_project_scope
+        )
+        description = raw.get("description")
+        agent_type = raw.get("agentType")
+        model = raw.get("model")
+        join_key = raw.get("toolUseId")
+        last_modified = raw.get("lastModified")
+        title = description if isinstance(description, str) and description.strip() else None
+        if title is None and isinstance(agent_type, str) and agent_type.strip():
+            title = agent_type
+        return ConversationLibraryAgentRow(
+            conversation_key=self._cursor_authority.mint_conversation_key(
+                scope,
+                vendor_conversation_id=vendor_id,
+                identity_digest=digest,
+                catalog_generation=generation,
+            ),
+            identity_digest=digest,
+            title=title or f"agent {agent_id[:8]}",
+            role=agent_type if isinstance(agent_type, str) and agent_type.strip() else None,
+            model=model if isinstance(model, str) and model.strip() else None,
+            join_key=join_key if isinstance(join_key, str) and join_key.strip() else None,
+            safe_native_id_suffix=agent_id[-6:],
+            last_activity_at=(
+                _iso_from_millis(last_modified) if isinstance(last_modified, int) else None
+            ),
+        )
+
+
+def _split_agent_vendor_id(vendor_id: str) -> tuple[str, str | None]:
+    """Split the library's composite ``<sessionId>/<agentId>`` grammar."""
+
+    session_id, separator, agent_id = vendor_id.partition(_AGENT_ID_SEPARATOR)
+    if separator and agent_id:
+        return session_id, agent_id
+    return session_id if separator else vendor_id, None
 
 
 def _record_base(raw: object) -> tuple[Mapping[str, object], str, str, dict[str, Any]]:

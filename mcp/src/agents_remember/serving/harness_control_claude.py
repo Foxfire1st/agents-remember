@@ -13,8 +13,10 @@ from agents_remember.errors import HarnessAdapterDisconnectedError, HarnessContr
 from agents_remember.serving.claude_stream_limits import ClaudeAdapterLimits
 from agents_remember.serving.claude_stream_protocol import (
     CLAUDE_STREAM_PROTOCOL,
+    FORWARD_SUBAGENT_TEXT_FLOOR,
     build_claude_discovery_argv,
     build_claude_stream_argv,
+    forward_subagent_text_supported,
     restore_pending_interaction,
 )
 from agents_remember.serving.claude_stream_startup import (
@@ -100,7 +102,14 @@ class ClaudeStreamJsonAdapter:
         self._validate_launch(launch)
         self._identity = launch.identity
         version: str | None = None
+        subagent_text_forwarded = False
         try:
+            # Fail-closed default: the first
+            # launch OMITS --forward-subagent-text because no version seam exists at
+            # argv-build time; only the system/init capture proves the floor. A proven
+            # install re-launches WITH the flag (an old CLI would have failed the flag at
+            # launch — loud, never silently degraded); an unproven/old install runs on
+            # without it and the snapshot marks the capability unverified.
             argv = build_claude_stream_argv(launch.argv)
             await self._transport.start(argv, cwd=launch.cwd, env=launch.env)
             self._transport_started = True
@@ -109,6 +118,16 @@ class ClaudeStreamJsonAdapter:
                 cwd=launch.cwd,
                 timeout_seconds=self._limits.startup_timeout_seconds,
             )
+            if forward_subagent_text_supported(system_init.version):
+                await self._transport.stop("forced")
+                argv = build_claude_stream_argv(launch.argv, forward_subagent_text=True)
+                await self._transport.start(argv, cwd=launch.cwd, env=launch.env)
+                control_init, system_init = await negotiate_claude_startup(
+                    self._transport,
+                    cwd=launch.cwd,
+                    timeout_seconds=self._limits.startup_timeout_seconds,
+                )
+                subagent_text_forwarded = True
             self._capabilities = await negotiate_claude_catalog(
                 self._transport,
                 current_model=system_init.model,
@@ -139,6 +158,16 @@ class ClaudeStreamJsonAdapter:
                 await self._transport.stop("forced")
                 self._transport_started = False
                 raise
+        floor_text = ".".join(str(part) for part in FORWARD_SUBAGENT_TEXT_FLOOR)
+        subagent_text_note = (
+            "enabled: --forward-subagent-text emitted after system/init proved "
+            f"claude {version} meets the probed floor {floor_text}"
+            if subagent_text_forwarded
+            else "unverified: system/init captured claude "
+            f"{version or 'unknown'} below the probed --forward-subagent-text floor "
+            f"{floor_text}; the flag was omitted (fail-closed) and sub-agent text "
+            "blocks do not cross the live stream"
+        )
         snapshot = AdapterSnapshot(
             identity=launch.identity,
             control="ready",
@@ -152,6 +181,10 @@ class ClaudeStreamJsonAdapter:
                 "permissionMode": system_init.permission_mode,
                 "supportedSessionCommands": sorted(supported_commands),
                 "transport": "stream-json",
+                # The launch-flag verdict:
+                # enabled only after system/init proved the floor; otherwise the exact
+                # fail-closed reason, never a silent omission.
+                "subagentTextForwarding": subagent_text_note,
                 "requestedLaunchModel": (
                     self._expected_launch.model_key if self._expected_launch is not None else None
                 ),

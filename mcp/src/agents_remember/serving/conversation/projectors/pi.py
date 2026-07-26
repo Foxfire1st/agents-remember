@@ -109,7 +109,12 @@ def map_native_frame(frame: NativeEvidenceFrame, *, evidence_ref: str) -> list[M
     ]
 
 
-def map_evidence_frame(frame: EvidenceFrame, *, evidence_ref: str) -> list[MapperOutput]:  # noqa: ARG001 - protocol keyword seam; refs are minted engine-side for this harness
+def map_evidence_frame(
+    frame: EvidenceFrame,
+    *,
+    evidence_ref: str,  # noqa: ARG001 - protocol keyword seam; refs are minted engine-side for this harness
+    parent_thread_id: str | None = None,  # noqa: ARG001 - multiplexed-harness demux context; pi carries no sub-agent threads
+) -> list[MapperOutput]:
     """Map one live RPC event; message records themselves mint from entries."""
 
     raw = frame.raw

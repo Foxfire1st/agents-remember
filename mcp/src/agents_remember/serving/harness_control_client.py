@@ -368,8 +368,13 @@ def read_control_native_page(
     cursor: str | None = None,
     limit: int = 200,
     expected_bridge_epoch: str | None = None,
+    thread_id: str | None = None,
 ) -> NativeEvidencePage:
-    """Page harness-native history; rejects adapter-sequence coordinates typed."""
+    """Page harness-native history; rejects adapter-sequence coordinates typed.
+
+    ``thread_id`` selects the native thread on multiplexed harnesses;
+    ``None`` reads the parent/session thread exactly as before.
+    """
 
     if isinstance(cursor, int) and not isinstance(cursor, bool):
         raise HarnessControlError(
@@ -381,6 +386,8 @@ def read_control_native_page(
     payload: dict[str, object] = {"limit": limit}
     if cursor is not None:
         payload["cursor"] = cursor
+    if thread_id is not None:
+        payload["threadId"] = thread_id
     result = request_control(
         entry,
         "evidence-native-page",
@@ -1090,6 +1097,25 @@ def _interaction_questions(raw: object) -> tuple[InteractionQuestion, ...]:
     return tuple(pages)
 
 
+def _pending_interaction(raw: object) -> PendingInteraction:
+    if not isinstance(raw, Mapping):
+        raise HarnessControlError("pending interaction must be an object")
+    choices_raw = raw.get("choices", [])
+    if not isinstance(choices_raw, list) or not all(
+        isinstance(choice, str) for choice in choices_raw
+    ):
+        raise HarnessControlError("pending interaction choices must be strings")
+    return PendingInteraction(
+        interaction_id=_required_text(raw, "interactionId"),
+        kind=_required_text(raw, "kind"),
+        prompt=_required_text(raw, "prompt"),
+        created_at=_required_text(raw, "createdAt"),
+        choices=tuple(choices_raw),
+        raw=_object(raw.get("raw")),
+        questions=_interaction_questions(raw.get("questions")),
+    )
+
+
 def _snapshot(raw: Mapping[str, object]) -> AdapterSnapshot:
     identity_raw = raw.get("identity")
     if not isinstance(identity_raw, Mapping):
@@ -1104,24 +1130,15 @@ def _snapshot(raw: Mapping[str, object]) -> AdapterSnapshot:
     if acceptance not in {"immediate", "queued", "rejected", "unknown", "unsupported"}:
         raise HarnessControlError("adapter snapshot has invalid acceptance state")
     pending_raw = raw.get("pendingInteraction")
-    pending = None
-    if pending_raw is not None:
-        if not isinstance(pending_raw, Mapping):
-            raise HarnessControlError("pending interaction must be an object")
-        choices_raw = pending_raw.get("choices", [])
-        if not isinstance(choices_raw, list) or not all(
-            isinstance(choice, str) for choice in choices_raw
-        ):
-            raise HarnessControlError("pending interaction choices must be strings")
-        pending = PendingInteraction(
-            interaction_id=_required_text(pending_raw, "interactionId"),
-            kind=_required_text(pending_raw, "kind"),
-            prompt=_required_text(pending_raw, "prompt"),
-            created_at=_required_text(pending_raw, "createdAt"),
-            choices=tuple(choices_raw),
-            raw=_object(pending_raw.get("raw")),
-            questions=_interaction_questions(pending_raw.get("questions")),
-        )
+    pending = None if pending_raw is None else _pending_interaction(pending_raw)
+    # Multiplexed sub-agent pendings: additive optional list;
+    # absent on pre-multiplex bridges.
+    pendings_raw = raw.get("pendingInteractions")
+    pendings: tuple[PendingInteraction, ...] = ()
+    if pendings_raw is not None:
+        if not isinstance(pendings_raw, list):
+            raise HarnessControlError("pending interactions must be a list")
+        pendings = tuple(_pending_interaction(item) for item in pendings_raw)
     sequence = raw.get("lastEventSequence", 0)
     if not isinstance(sequence, int) or isinstance(sequence, bool) or sequence < 0:
         raise HarnessControlError("adapter snapshot sequence must be a non-negative integer")
@@ -1132,6 +1149,7 @@ def _snapshot(raw: Mapping[str, object]) -> AdapterSnapshot:
         acceptance=cast(AcceptanceState, acceptance),
         vendor_session_id=_optional_text(raw, "vendorSessionId"),
         pending_interaction=pending,
+        pending_interactions=pendings,
         last_event_sequence=sequence,
         raw=_object(raw.get("raw")),
     )

@@ -18,6 +18,7 @@ import {
   L6_INTERACTION_CHOICES,
   L6_INTERACTION_FREETEXT,
   L6_INTERACTION_UNREPRESENTABLE,
+  L7_MULTIPLEXED_INTERACTIONS,
 } from "../../test/fixtures/catalogRows";
 import type { SessionComposerHandle } from "../SessionComposer";
 import { InteractionBar } from "./InteractionBar";
@@ -475,5 +476,46 @@ describe("structured questions (260718-CHATS-L5I)", () => {
     expect(bodies[0]?.answers).toEqual({
       "Which would you rather have as a pet?": "A talking cat",
     });
+  });
+});
+
+describe("multiplexed sub-agent approvals", () => {
+  const multiplexedSession = () => fromTerminalSessionInfo(L7_MULTIPLEXED_INTERACTIONS);
+
+  it("renders one bar per pending interaction — parent first, agent badged", () => {
+    const { getAllByTestId } = render(<InteractionBar session={multiplexedSession()} />);
+    const bars = getAllByTestId("interaction-bar");
+    expect(bars).toHaveLength(2);
+    const [parentBar, agentBar] = bars as [HTMLElement, HTMLElement];
+    expect(within(parentBar).queryByTestId("interaction-bar-agent")).toBeNull();
+    expect(within(parentBar).getByTestId("interaction-bar-prompt").textContent).toContain(
+      "parent command",
+    );
+    expect(within(agentBar).getByTestId("interaction-bar-agent").textContent).toBe(
+      "agent agent-t",
+    );
+    expect(within(agentBar).getByTestId("interaction-bar-prompt").textContent).toContain(
+      "sub-agent command",
+    );
+  });
+
+  it("answers the AGENT approval through the existing interaction-response channel", async () => {
+    const posts = stubDirectRoute();
+    const { getAllByTestId } = render(<InteractionBar session={multiplexedSession()} />);
+    const agentBar = getAllByTestId("interaction-bar")[1] as HTMLElement;
+    fireEvent.click(within(agentBar).getAllByTestId("interaction-bar-choice")[0] as HTMLElement);
+    await waitFor(() =>
+      expect(within(agentBar).queryByTestId("interaction-bar-answered")).not.toBeNull(),
+    );
+    expect(posts).toHaveLength(1);
+    expect(posts[0]?.body).toEqual({
+      interactionId: "ix_l7_agent",
+      expectedBridgeEpoch: "ep-1",
+      response: "allow",
+    });
+    // The parent's bar never inherited the agent's round-trip state.
+    const parentBar = getAllByTestId("interaction-bar")[0] as HTMLElement;
+    expect(within(parentBar).queryByTestId("interaction-bar-answered")).toBeNull();
+    expect(within(parentBar).queryByTestId("interaction-bar-inflight")).toBeNull();
   });
 });

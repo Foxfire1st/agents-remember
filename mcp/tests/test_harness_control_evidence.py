@@ -329,6 +329,31 @@ class _NativePageAdapter(_EvidenceAdapter):
         return self.page
 
 
+class _ThreadAwareNativePageAdapter(_NativePageAdapter):
+    """Multiplexed adapter accepting the additive per-thread selector.
+
+    Records the exact call shape so the IPC test proves ``thread_id`` is forwarded only
+    when the wire carries it — an absent ``threadId`` keeps the single-thread call.
+    """
+
+    def __init__(self, page: NativeEvidencePage) -> None:
+        super().__init__(page)
+        self.thread_calls: list[tuple[str | None, int, int, str | None]] = []
+
+    async def read_native_page(  # type: ignore[override] - additive multiplex kwarg
+        self,
+        *,
+        cursor: str | None,
+        limit: int,
+        byte_budget: int,
+        thread_id: str | None = None,
+    ) -> NativeEvidencePage:
+        self.thread_calls.append((cursor, limit, byte_budget, thread_id))
+        return await super().read_native_page(
+            cursor=cursor, limit=limit, byte_budget=byte_budget
+        )
+
+
 def _codex_item_event(sequence: int, item: Mapping[str, object]) -> tuple[str, dict[str, object]]:
     params = {"threadId": "thread-1", "turnId": "turn-1", "item": dict(item)}
     return (
@@ -698,6 +723,38 @@ class EvidenceIpcTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(page.next_cursor, "entry-2")
                 self.assertTrue(page.truncated)
                 self.assertEqual(adapter.calls[0][1], 200)
+            finally:
+                await server.close()
+                await bridge.stop("forced")
+
+    async def test_native_page_thread_id_is_additive_over_ipc(self) -> None:
+        # The evidence-native-page action carries an optional threadId
+        # end-to-end; absent keeps the exact single-thread adapter call, and non-text
+        # or empty selectors fail typed before any adapter call.
+        preset = NativeEvidencePage(
+            frames=(), next_cursor=None, truncated=False, bridge_epoch=""
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            identity = _identity("ipc-thread")
+            adapter = _ThreadAwareNativePageAdapter(preset)
+            bridge, server, entry = await self._serve(adapter, identity, tmp)
+            try:
+                page = await asyncio.to_thread(
+                    read_control_native_page, entry, thread_id="agent-thread-1"
+                )
+                self.assertEqual(page.frames, ())
+                self.assertEqual(adapter.thread_calls[-1][3], "agent-thread-1")
+
+                parent = await asyncio.to_thread(read_control_native_page, entry)
+                self.assertEqual(parent.frames, ())
+                # No threadId on the wire => the bridge keeps the single-thread call shape.
+                self.assertIsNone(adapter.thread_calls[-1][3])
+
+                with self.assertRaises(HarnessControlError):
+                    await asyncio.to_thread(
+                        read_control_native_page, entry, thread_id=""
+                    )
+                self.assertEqual(len(adapter.thread_calls), 2)
             finally:
                 await server.close()
                 await bridge.stop("forced")

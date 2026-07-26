@@ -116,6 +116,9 @@ class TerminalCatalogEntry:
     control_acceptance: AcceptanceState | None = None
     control_vendor_session_id: str | None = None
     control_pending_interaction: dict[str, object] | None = None
+    # Multiplexed sub-agent pendings: additive; the singular
+    # slot above stays the parent-thread entry exactly as before.
+    control_pending_interactions: list[dict[str, object]] | None = None
     control_last_event_sequence: int | None = None
     control_raw: dict[str, object] | None = None
     # Liveness probe state (260707-HFX-L5): consecutive failed probes are persisted so a daemon
@@ -195,6 +198,9 @@ class TerminalCatalogEntry:
             control_acceptance=_control_acceptance(data.get("controlAcceptance")),
             control_vendor_session_id=_optional_str(data, "controlVendorSessionId"),
             control_pending_interaction=_optional_object(data.get("controlPendingInteraction")),
+            control_pending_interactions=_optional_object_list(
+                data.get("controlPendingInteractions")
+            ),
             control_last_event_sequence=_optional_non_negative_int(
                 data.get("controlLastEventSequence")
             ),
@@ -262,6 +268,7 @@ class TerminalCatalogEntry:
                     "controlAcceptance": self.control_acceptance,
                     "controlVendorSessionId": self.control_vendor_session_id,
                     "controlPendingInteraction": self.control_pending_interaction,
+                    "controlPendingInteractions": self.control_pending_interactions,
                     "controlLastEventSequence": self.control_last_event_sequence,
                     "controlRaw": self.control_raw,
                     "livenessFirstFailedAt": self.liveness_first_failed_at,
@@ -859,6 +866,15 @@ def _optional_object(raw: object) -> dict[str, object] | None:
     if not isinstance(raw, dict) or not all(isinstance(key, str) for key in raw):
         return None
     return dict(raw)
+
+
+def _optional_object_list(raw: object) -> list[dict[str, object]] | None:
+    if not isinstance(raw, list):
+        return None
+    entries = [_optional_object(item) for item in raw]
+    if any(entry is None for entry in entries):
+        return None
+    return [entry for entry in entries if entry is not None]
 
 
 def _optional_non_negative_int(raw: object) -> int | None:

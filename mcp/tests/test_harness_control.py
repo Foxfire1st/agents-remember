@@ -27,6 +27,7 @@ from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
 from agents_remember.errors import (
     HarnessAdapterDisconnectedError,
     HarnessControlError,
+    HarnessInteractionNotPendingError,
     HarnessRequestConflictError,
 )
 from agents_remember.serving.harness_capabilities import CapabilitySnapshot, SetResult
@@ -36,6 +37,9 @@ from agents_remember.serving.harness_control_adapter import (
 )
 from agents_remember.serving.harness_control_api import register_harness_control_routes
 from agents_remember.serving.harness_control_bridge import HarnessControlBridge
+from agents_remember.serving.harness_control_client import (
+    _snapshot as parse_snapshot_wire,
+)
 from agents_remember.serving.harness_control_client import (
     read_control_capabilities,
     read_control_snapshot,
@@ -75,8 +79,11 @@ from agents_remember.serving.harness_control_models import (
     SubmissionReceipt,
     TerminalResult,
     TranscriptEntry,
+    pending_interaction_json,
+    snapshot_json,
 )
 from agents_remember.serving.harness_terminal_surface import HarnessTerminalSurface
+from agents_remember.serving.hosted_control_projection import control_snapshot_entry
 from agents_remember.serving.inbox_delivery import deliver_inbox_entry
 from agents_remember.serving.terminal import TerminalHost
 from agents_remember.serving.terminal_catalog import TerminalCatalog, TerminalCatalogEntry
@@ -210,6 +217,12 @@ class _FakeAdapter:
             activity="settling",
             acceptance="queued",
             pending_interaction=None,
+            # The answered multiplexed entry settles too.
+            pending_interactions=tuple(
+                entry
+                for entry in self.current.pending_interactions
+                if entry.interaction_id != response.interaction_id
+            ),
         )
 
     async def reconcile(self, request_id: str) -> ReconciliationResult:
@@ -357,6 +370,23 @@ def _launch(identity: ControlIdentity) -> LaunchSpec:
         cwd=Path("/workspace"),
         argv=("fake-harness", "protocol-mode"),
         env={"PRESERVE_INSTALLED_AUTH": "1"},
+    )
+
+
+def _catalog_entry(identity: ControlIdentity) -> TerminalCatalogEntry:
+    return TerminalCatalogEntry(
+        id=identity.ar_session_id,
+        label="control-test",
+        kind="harness",
+        harness="fake",
+        lifecycle_id=None,
+        cwd=Path("/workspace"),
+        tmux_name=identity.tmux_name,
+        command=("fake",),
+        created_at=identity.created_at,
+        last_attached_at=identity.created_at,
+        status="running",
+        leaf_key=None,
     )
 
 
@@ -718,6 +748,121 @@ class HarnessControlConformanceTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(adapter.responses[-1].operation, operation)
         finally:
             await bridge.stop("forced")
+
+    async def test_subagent_pending_interaction_responds_without_parent_operation(self) -> None:
+        """Multiplexed sub-agent approvals answer through the authority.
+
+        Agent entries ride the plural ``pending_interactions`` tuple and own no parent
+        operation, so the active-operation guard must not strand them; the response routes
+        to the adapter with no operation attached, and an unknown id is still refused.
+        """
+
+        identity = _identity()
+        adapter = _FakeAdapter()
+        bridge = HarnessControlBridge(identity, adapter)
+        await bridge.start(_launch(identity))
+        try:
+            agent_pending = PendingInteraction(
+                interaction_id="agent-approval-1",
+                kind="permission",
+                prompt="Allow the sub-agent command?",
+                created_at="2026-07-13T18:00:00+00:00",
+                choices=("allow", "deny"),
+                raw={"threadId": "agent-thread-1", "agentLabel": "agent agent-t"},
+            )
+            blocked = replace(
+                bridge.snapshot(),
+                pending_interactions=(agent_pending,),
+            )
+            adapter.emit(
+                AdapterEvent(1, "state", identity, agent_pending.created_at, snapshot=blocked)
+            )
+            await _settle_events()
+
+            # No ordinary operation was ever submitted: the guard is parent-only.
+            result = await bridge.respond(
+                InteractionResponse(
+                    interaction_id="agent-approval-1",
+                    response="allow",
+                    responded_at="2026-07-13T18:01:00+00:00",
+                )
+            )
+            self.assertEqual(result.pending_interactions, ())
+            self.assertIsNone(result.pending_interaction)
+            self.assertEqual(adapter.responses[-1].interaction_id, "agent-approval-1")
+            self.assertIsNone(adapter.responses[-1].operation)
+
+            with self.assertRaises(HarnessInteractionNotPendingError):
+                await bridge.respond(
+                    InteractionResponse(
+                        interaction_id="agent-approval-unknown",
+                        response="allow",
+                        responded_at="2026-07-13T18:02:00+00:00",
+                    )
+                )
+            # The refused response never reached the adapter.
+            self.assertEqual(len(adapter.responses), 1)
+        finally:
+            await bridge.stop("forced")
+
+    def test_multiplexed_pending_interactions_serialize_through_every_surface(self) -> None:
+        """The plural pending tuple survives snapshot/catalog/client wires."""
+
+        identity = _identity()
+        parent = PendingInteraction(
+            interaction_id="parent-question-1",
+            kind="question",
+            prompt="Parent asks",
+            created_at="2026-07-13T18:00:00+00:00",
+        )
+        agent = PendingInteraction(
+            interaction_id="agent-approval-1",
+            kind="permission",
+            prompt="Agent asks",
+            created_at="2026-07-13T18:00:30+00:00",
+            choices=("allow", "deny"),
+            raw={"threadId": "agent-thread-1", "agentLabel": "agent agent-t"},
+        )
+        snapshot = AdapterSnapshot(
+            identity=identity,
+            control="ready",
+            activity="blocked",
+            acceptance="queued",
+            pending_interaction=parent,
+            pending_interactions=(parent, agent),
+            raw={},
+        )
+
+        wire = snapshot_json(snapshot)
+        self.assertEqual(wire["pendingInteraction"], pending_interaction_json(parent))
+        self.assertEqual(
+            wire["pendingInteractions"],
+            [pending_interaction_json(parent), pending_interaction_json(agent)],
+        )
+
+        # The control client parses the additive field back (a pre-multiplex bridge omits it).
+        parsed = parse_snapshot_wire(wire)
+        self.assertEqual(parsed.pending_interactions, (parent, agent))
+        legacy = parse_snapshot_wire({key: value for key, value in wire.items() if key != "pendingInteractions"})
+        self.assertEqual(legacy.pending_interactions, ())
+
+        # The catalog projection + catalog row round-trip carry it too.
+        entry = _catalog_entry(identity)
+        projected = control_snapshot_entry(entry, snapshot)
+        self.assertIsNotNone(projected.control_pending_interactions)
+        assert projected.control_pending_interactions is not None
+        self.assertEqual(
+            [item["interactionId"] for item in projected.control_pending_interactions],
+            ["parent-question-1", "agent-approval-1"],
+        )
+        restored = TerminalCatalogEntry.from_json(projected.to_json())
+        self.assertEqual(
+            restored.control_pending_interactions, projected.control_pending_interactions
+        )
+        # An empty multiplex never writes the additive key.
+        empty = control_snapshot_entry(entry, replace(snapshot, pending_interactions=()))
+        self.assertIsNone(empty.control_pending_interactions)
+        self.assertNotIn("controlPendingInteractions", empty.to_json())
 
     async def test_disconnect_before_and_after_send_never_blindly_resends(self) -> None:
         identity = _identity()

@@ -407,3 +407,40 @@ export const L6_TERMINATE_RESPONSE_WITH_RESIDUAL = {
   tmuxName: "ar-l6-controlled",
   controlStopDetail: "control command queue is stopped",
 } as const;
+
+/** A multiplexed seat: the parent's singular pending slot PLUS the
+ *  additive plural list carrying the parent AND a sub-agent approval with its adapter-bound
+ *  label — the InteractionBar renders and answers one bar per pending interaction. */
+export const L7_MULTIPLEXED_INTERACTIONS: TerminalCatalogRow = catalogRow({
+  id: "l7-ix-multiplexed",
+  label: "worker-l7-multiplexed",
+  spawnRole: "worker",
+  seatRole: "worker",
+  controlState: "ready",
+  turnState: "awaiting-input",
+  turnStateChangedAt: "2026-07-26T09:02:00Z",
+  controlPendingInteraction: {
+    interactionId: "ix_l7_parent",
+    kind: "permission",
+    prompt: "Allow the parent command?",
+    choices: ["allow", "deny"],
+    questions: [],
+  },
+  controlPendingInteractions: [
+    {
+      interactionId: "ix_l7_parent",
+      kind: "permission",
+      prompt: "Allow the parent command?",
+      choices: ["allow", "deny"],
+      questions: [],
+    },
+    {
+      interactionId: "ix_l7_agent",
+      kind: "permission",
+      prompt: "Allow the sub-agent command?",
+      choices: ["allow", "deny"],
+      questions: [],
+      raw: { threadId: "agent-thread-1", agentLabel: "agent agent-t" },
+    },
+  ],
+});

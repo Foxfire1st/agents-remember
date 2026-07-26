@@ -34,6 +34,33 @@ describe("seatVisualState mapping (spec §2.4)", () => {
     ).toMatchObject({ key: "awaiting-input", pulse: false });
   });
 
+  it("a seat blocked SOLELY on a multiplexed sub-agent approval is awaiting-input", () => {
+    // Singular slot null, plural non-empty: the attention grammar must not go dark.
+    expect(
+      seatVisualState({
+        turnState: "working",
+        controlPendingInteractions: [
+          {
+            interactionId: "ix_agent",
+            kind: "permission",
+            prompt: "Allow the sub-agent command?",
+            raw: { threadId: "agent-thread-1", agentLabel: "agent agent-t" },
+          },
+        ],
+      }),
+    ).toMatchObject({ key: "awaiting-input", pulse: false });
+    // Both slots present: the parent presentation is unchanged.
+    expect(
+      seatVisualState({
+        turnState: "working",
+        controlPendingInteraction: { kind: "approval" },
+        controlPendingInteractions: [
+          { interactionId: "ix_agent", kind: "permission", prompt: "agent asks" },
+        ],
+      }),
+    ).toMatchObject({ key: "awaiting-input", pulse: false });
+  });
+
   it("waiting(reason) = STEADY muted-amber, reason rendered into word and chip", () => {
     const visual = seatVisualState({ turnState: "working", waitingReason: "ci run 8323" });
     expect(visual).toMatchObject({ key: "waiting", color: "mutedAmber", pulse: false });

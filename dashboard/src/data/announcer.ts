@@ -2,7 +2,7 @@ import { useStore } from "zustand";
 import { createStore } from "zustand/vanilla";
 
 import { sessionCockpitStore } from "./sessionCockpitStore";
-import { sessionStore, type OpenSession } from "./sessions";
+import { sessionHasPendingInteraction, sessionStore, type OpenSession } from "./sessions";
 import {
   sessionAwaitingInputAnnouncement,
   sessionFailedAnnouncement,
@@ -65,9 +65,12 @@ export function stateEntryAnnouncements(
       announcements.push(sessionFailedAnnouncement(session.label));
     } else if (key === "awaiting-input") {
       // L6's InteractionBar alert covers the focused seat's pending question — skip exactly
-      // that case so the same event is never announced twice.
+      // that case so the same event is never announced twice. The bar announces EVERY
+      // pending payload, multiplexed sub-agent entries included; the announcement wording
+      // stays seat-level ("awaiting input") and never claims
+      // the question is the parent's.
       const barAnnounces =
-        session.id === focusedSessionId && session.controlPendingInteraction !== undefined;
+        session.id === focusedSessionId && sessionHasPendingInteraction(session);
       if (!barAnnounces) announcements.push(sessionAwaitingInputAnnouncement(session.label));
     }
   }

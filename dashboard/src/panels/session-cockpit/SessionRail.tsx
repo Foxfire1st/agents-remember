@@ -1,7 +1,8 @@
 import { useMemo, useState, type ReactNode } from "react";
 
 import { css, cva } from "../../../styled-system/css";
-import { useSessions, type OpenSession } from "../../data/sessions";
+import { useSessions, sessionPendingInteractionPayload, type OpenSession } from "../../data/sessions";
+import { pendingInteractionAgentLabel } from "../../data/interactionAnswer";
 import {
   attentionZeroState,
   briefPendingSessionIds,
@@ -647,7 +648,12 @@ export function SessionRail({
     const visual = seatVisualState(session);
     const code = roleCode(session);
     const gate = session.leafKey ? heldGates.get(session.leafKey) : undefined;
-    const prompt = interactionPromptPreview(session.controlPendingInteraction);
+    const prompt = interactionPromptPreview(sessionPendingInteractionPayload(session));
+    // The preview names WHO asks when it is a multiplexed sub-agent approval —
+    // the tooltip never implies the parent is asking.
+    const agentLabel = pendingInteractionAgentLabel(sessionPendingInteractionPayload(session));
+    const promptTitled =
+      prompt !== undefined && agentLabel !== undefined ? `${agentLabel}: ${prompt}` : prompt;
     const selected = session.id === focusedSessionId;
     // While the row shows an end-failure the status chip is dropped: the failure copy
     // already names the state, and dropping the chip guarantees the two controls fit inside
@@ -772,7 +778,7 @@ export function SessionRail({
             className={statusChip({ tone: chipTone })}
             // Question triage: the input? chip's tooltip carries the prompt preview.
             title={
-              visual.key === "awaiting-input" && prompt ? prompt : visual.word
+              visual.key === "awaiting-input" && promptTitled ? promptTitled : visual.word
             }
             data-testid={`rail-status-${session.id}`}
           >

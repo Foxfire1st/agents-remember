@@ -183,11 +183,72 @@ export function representPendingInteraction(
   return choices.length > 0 ? { mode: "choices", view } : { mode: "composer", view };
 }
 
+/**
+ * The adapter-bound sub-agent label on a multiplexed pending interaction: the
+ * codex adapter binds `raw.agentLabel` when a sub-agent thread raises the request. Absent on the
+ * parent thread's singular slot — the bar badges WHO is asking only from this evidence, never a
+ * fabricated name.
+ */
+export function pendingInteractionAgentLabel(
+  raw: Record<string, unknown> | undefined,
+): string | undefined {
+  if (!raw) return undefined;
+  const rawField = raw.raw;
+  if (typeof rawField !== "object" || rawField === null) return undefined;
+  return text((rawField as Record<string, unknown>).agentLabel);
+}
+
+/**
+ * Every pending interaction payload on the row: the parent-thread
+ * singular slot first, then the multiplexed sub-agent entries from the additive plural
+ * `controlPendingInteractions`, de-duplicated by interactionId (L7 bridges carry the parent in
+ * both slots). Entries without an interactionId still render (the bar says why they cannot be
+ * answered) but never dedupe against each other.
+ */
+export function pendingInteractionPayloads(
+  session: OpenSession,
+): Record<string, unknown>[] {
+  const payloads: Record<string, unknown>[] = [];
+  if (session.controlPendingInteraction) payloads.push(session.controlPendingInteraction);
+  for (const entry of session.controlPendingInteractions ?? []) {
+    if (typeof entry !== "object" || entry === null) continue;
+    const payload = entry as Record<string, unknown>;
+    const id = text(payload.interactionId);
+    if (id !== undefined && payloads.some((existing) => text(existing.interactionId) === id)) {
+      continue;
+    }
+    payloads.push(payload);
+  }
+  return payloads;
+}
+
+/**
+ * The representation of ONE pending interaction by id, looked up across the singular slot AND
+ * the multiplexed sub-agent entries: answer-channel routing must see an agent
+ * permission/questions payload exactly like the parent's — routing against only the singular
+ * slot silently dropped agent answers into the legacy gate fallback.
+ */
+export function representSessionPendingInteraction(
+  session: OpenSession,
+  interactionId: string,
+): InteractionRepresentation | null {
+  for (const payload of pendingInteractionPayloads(session)) {
+    const representation = representPendingInteraction(payload);
+    if (
+      representation !== null &&
+      representation.mode !== "unrepresentable" &&
+      representation.view.interactionId === interactionId
+    ) {
+      return representation;
+    }
+  }
+  return null;
+}
+
 export interface InteractionGateRef {
   lifecycleId: string;
   gate: GateNode;
 }
-
 /**
  * The projected `agent-question` gate matching one (session, interaction) pair. The synchronizer
  * stamps `packet.adapterInteraction.{sessionId,interactionId}`; the gate rides its lifecycle's
@@ -467,7 +528,9 @@ export async function submitInteractionAnswer(args: {
     ...(args.answers ? { answers: args.answers } : {}),
     draftRevision: args.draftRevision,
   });
-  const representation = representPendingInteraction(args.session.controlPendingInteraction);
+  // Channel routing sees the multiplexed agent entries too —
+  // never only the parent's singular slot.
+  const representation = representSessionPendingInteraction(args.session, args.interactionId);
   let outcome: InteractionAnswerOutcome;
   if (args.answers) {
     if (

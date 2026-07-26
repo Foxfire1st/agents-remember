@@ -11,6 +11,8 @@ import { Button } from "react-aria-components";
 
 import { css } from "../../../styled-system/css";
 import {
+  pendingInteractionAgentLabel,
+  pendingInteractionPayloads,
   representPendingInteraction,
   retryStoredInteractionAnswer,
   submitInteractionAnswer,
@@ -34,7 +36,9 @@ import {
 
 // The InteractionBar (design §7.3; structured
 // decision items): the ONE interaction axis. Sits directly ABOVE the composer — never replaces it —
-// and appears only while the focused row carries `controlPendingInteraction`. Answer channels are
+// and appears only while the focused row carries `controlPendingInteraction` (or multiplexed
+// sub-agent entries in `controlPendingInteractions`, one bar per pending interaction). Answer
+// channels are
 // picked by the interaction's shape (data/interactionAnswer): structured AskUserQuestion pages and
 // allow/deny permissions POST the session-direct interaction-response route (no lifecycle needed);
 // legacy kinds keep the gate-decision fallback. On controlled sessions the
@@ -244,24 +248,71 @@ export const InteractionBar = forwardRef<
     composerRef?: RefObject<SessionComposerHandle | null>;
   }
 >(function InteractionBar({ session, composerRef }, forwardedRef) {
+  // Multiplexed sub-agent approvals: one bar per pending
+  // interaction — the parent's singular slot first, then the agent entries — each labeled
+  // with its adapter-bound agent badge and answered through the same channel.
+  const payloads = pendingInteractionPayloads(session);
+  const activeInteractionIds = payloads
+    .map((payload) =>
+      typeof payload.interactionId === "string" && payload.interactionId !== ""
+        ? payload.interactionId
+        : undefined,
+    )
+    .filter((id): id is string => id !== undefined);
+  if (payloads.length === 0) return null;
+  return (
+    <>
+      {payloads.map((payload, index) => (
+        <SingleInteractionBar
+          key={
+            typeof payload.interactionId === "string" && payload.interactionId !== ""
+              ? payload.interactionId
+              : `unidentified-${index}`
+          }
+          ref={index === 0 ? forwardedRef : undefined}
+          session={session}
+          interaction={payload}
+          activeInteractionIds={activeInteractionIds}
+          composerRef={composerRef}
+        />
+      ))}
+    </>
+  );
+});
+
+const SingleInteractionBar = forwardRef<
+  InteractionBarHandle,
+  {
+    session: OpenSession;
+    /** The ONE pending interaction payload this bar renders and answers. */
+    interaction: Record<string, unknown>;
+    /** Every interactionId currently pending on the session — a stored round-trip record is
+     *  stale only when its id is no longer among them (never when a SIBLING bar's id differs). */
+    activeInteractionIds: readonly string[];
+    composerRef?: RefObject<SessionComposerHandle | null>;
+  }
+>(function SingleInteractionBar(
+  { session, interaction, activeInteractionIds, composerRef },
+  forwardedRef,
+) {
   const answerState = useSessionCockpit(
     (state) => state.perSession[session.id]?.interactionAnswer,
   );
-  const representation = representPendingInteraction(session.controlPendingInteraction);
+  const representation = representPendingInteraction(interaction);
   const interactionId = representation && representation.mode !== "unrepresentable"
     ? representation.view.interactionId
     : undefined;
 
-  // Clear a stale round-trip record when the interaction changed under it (a NEW question must
-  // never inherit the previous answer's state). This includes a FOLLOWING unrepresentable
-  // payload — `interactionId` is undefined there, and the old "answered — waiting" line must
-  // not render beside it.
+  // Clear a stale round-trip record when its interaction is no longer pending (a NEW question
+  // must never inherit the previous answer's state). This includes a FOLLOWING unrepresentable
+  // payload — its id is absent from `activeInteractionIds`, and the old "answered — waiting"
+  // line must not render beside it. A sibling bar's different id is NOT staleness.
   useEffect(() => {
     if (!answerState) return;
-    if (answerState.interactionId !== interactionId) {
+    if (!activeInteractionIds.includes(answerState.interactionId)) {
       sessionCockpitStore.getState().setInteractionAnswer(session.id, undefined);
     }
-  }, [answerState, interactionId, session.id]);
+  }, [answerState, activeInteractionIds, session.id]);
 
   // Focus honesty: never steal focus on appearance; if the bar disappears while holding focus,
   // return it to the element focus came FROM (the invoker).
@@ -342,16 +393,26 @@ export const InteractionBar = forwardRef<
 
   if (!representation) return null;
 
-  const inflight = answerState?.inflight === true;
-  const answered = answerState?.answeredAt !== undefined;
+  // The round-trip record is per-session; with multiplexed bars it is THIS bar's status only
+  // when its interactionId matches — a sibling bar never inherits it.
+  const ownAnswerState =
+    answerState !== undefined && answerState.interactionId === interactionId
+      ? answerState
+      : undefined;
+  const inflight = ownAnswerState?.inflight === true;
+  const answered = ownAnswerState?.answeredAt !== undefined;
   const disabled = inflight || answered;
+  // A multiplexed sub-agent approval carries the adapter-bound label — badge WHO
+  // is asking. Absent on the parent's singular slot; never fabricated.
+  const agentBadge = pendingInteractionAgentLabel(interaction);
+  const asker = agentBadge !== undefined ? `${agentBadge} (${session.label})` : session.label;
 
   return (
     <div
       ref={rootRef}
       className={bar}
       role="group"
-      aria-label={`pending question from ${session.label}`}
+      aria-label={`pending question from ${asker}`}
       data-testid="interaction-bar"
     >
       {/* Assertive announce (design §7.3): the bar's appearance is poll-bounded — the live
@@ -377,6 +438,11 @@ export const InteractionBar = forwardRef<
             <span className={kindChip} data-testid="interaction-bar-kind">
               {representation.view.kind}
             </span>
+            {agentBadge !== undefined ? (
+              <span className={kindChip} data-testid="interaction-bar-agent">
+                {agentBadge}
+              </span>
+            ) : null}
             {/* Structured questions render their OWN per-question text below — the legacy flat
                 `prompt` concatenation must never double as the question text. */}
             {representation.mode !== "questions" ? (
@@ -423,14 +489,14 @@ export const InteractionBar = forwardRef<
           )}
         </>
       )}
-      {inflight || answerState?.error || answered ? (
+      {inflight || ownAnswerState?.error || answered ? (
         <div className={statusRow}>
           {inflight ? (
             <span data-testid="interaction-bar-inflight">{INTERACTION_ANSWERING}</span>
-          ) : answerState?.error ? (
+          ) : ownAnswerState?.error ? (
             <>
               <span className={errorText} role="alert" data-testid="interaction-bar-error">
-                {answerState.error}
+                {ownAnswerState.error}
               </span>
               <Button
                 className={choiceButton}

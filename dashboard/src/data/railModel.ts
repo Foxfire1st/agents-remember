@@ -1,5 +1,5 @@
 import type { AgentPickupNode, GateNode, LifecycleProjection, TaskDocNode } from "../types/projection";
-import { sessionSeatRole, type OpenSession } from "./sessions";
+import { sessionHasPendingInteraction, sessionSeatRole, type OpenSession } from "./sessions";
 import { seatVisualState } from "./stateGrammar";
 import { pathDir } from "./taskHierarchy";
 import { qualifiedLeafKey } from "./taskIdentity";
@@ -452,10 +452,10 @@ export function interactionPromptPreview(
   return candidate.length > maxLength ? `${candidate.slice(0, maxLength - 1)}…` : candidate;
 }
 
-/** All seats with a pending question, newest first (the palette's triage list). */
+/** All seats with a pending question — parent OR multiplexed sub-agent — newest first (the palette's triage list). */
 export function waitingSeats(sessions: OpenSession[]): OpenSession[] {
   return sessions
-    .filter((session) => isLive(session) && session.controlPendingInteraction)
+    .filter((session) => isLive(session) && sessionHasPendingInteraction(session))
     .sort((l, r) =>
       (r.turnStateChangedAt ?? r.createdAt ?? "").localeCompare(
         l.turnStateChangedAt ?? l.createdAt ?? "",

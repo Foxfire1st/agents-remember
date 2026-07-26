@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 from collections import OrderedDict
 from collections.abc import AsyncIterator, Callable, Mapping
-from dataclasses import replace
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from typing import Literal
 
@@ -74,6 +74,35 @@ from agents_remember.serving.harness_control_models import (
 
 Clock = Callable[[], str]
 
+THREAD_REGISTRY_LIMIT = 64
+ITEM_THREAD_INDEX_LIMIT = 1024
+
+
+@dataclass
+class _ThreadState:
+    """Per-thread demux state on one multiplexed app-server connection.
+
+    The codex app-server auto-attaches sub-agent thread listeners to the seat's
+    connection, so turn/item/approval traffic for many threads arrives interleaved.
+    The parent thread is the session thread (turn writes stay parent-only); any other
+    threadId is auto-registered from traffic with status ``unresolved`` until
+    parent-thread collab evidence (collabAgentToolCall/subAgentActivity) binds its
+    identity. Agent turns never carry a ControlOperationRef: turn/start writes are
+    parent-only, so agent completions record ``None`` as the operation.
+    """
+
+    thread_id: str
+    is_parent: bool
+    status: str
+    agent_path: str | None = None
+    active_turn_id: str | None = None
+    turn_operations: dict[str, ControlOperationRef] = field(default_factory=dict)
+    completed_turns: OrderedDict[str, ControlOperationRef | None] = field(
+        default_factory=OrderedDict
+    )
+    unbound_completions: dict[str, JsonObject] = field(default_factory=dict)
+    pending_interaction: CodexServerInteraction | None = None
+
 
 class CodexAppServerAdapter:
     """One stable app-server connection/thread with exact request and turn correlation."""
@@ -92,15 +121,12 @@ class CodexAppServerAdapter:
         self._events: asyncio.Queue[AdapterEvent | None] = asyncio.Queue(maxsize=256)
         self._processor: asyncio.Task[None] | None = None
         self._stopped = False
-        self._active_turn_id: str | None = None
-        self._pending_interaction: CodexServerInteraction | None = None
+        self._threads: OrderedDict[str, _ThreadState] = OrderedDict()
+        self._item_threads: OrderedDict[str, str] = OrderedDict()
         self._submissions = CodexSubmissionLedger(settings.submission_limit)
         self._fresh_turn_required = False
         self._pending_operation: ControlOperationRef | None = None
         self._active_operation: ControlOperationRef | None = None
-        self._turn_operations: dict[str, ControlOperationRef] = {}
-        self._unbound_completions: dict[str, JsonObject] = {}
-        self._completed_turns: OrderedDict[str, ControlOperationRef] = OrderedDict()
         self._completed_turn_limit = settings.submission_limit
         self._event_sequence = 0
         self._transcript_sequence = 0
@@ -115,6 +141,7 @@ class CodexAppServerAdapter:
             launch,
             resume_thread_id=self._settings.resume_thread_id,
         )
+        self._parent_state()
         self._snapshot = replace(
             snapshot,
             acceptance=self._busy_acceptance(snapshot.activity, snapshot.acceptance),
@@ -241,10 +268,11 @@ class CodexAppServerAdapter:
 
     async def preflight_operation(self, operation: ControlOperationRef) -> None:
         self._require_ready()
+        parent = self._parent_state()
         if (
-            self._active_turn_id is not None
+            parent.active_turn_id is not None
             or self._pending_operation is not None
-            or self._pending_interaction is not None
+            or parent.pending_interaction is not None
         ):
             raise HarnessAdapterBusyError(f"Codex is not idle at {operation.kind} preflight")
 
@@ -253,7 +281,8 @@ class CodexAppServerAdapter:
         operation = request.operation
         if operation is None or operation.kind != "prompt":
             raise CodexAppServerError("Codex submit requires an exact prompt operation ref")
-        if self._active_turn_id is not None or self._pending_operation is not None:
+        parent = self._parent_state()
+        if parent.active_turn_id is not None or self._pending_operation is not None:
             raise HarnessAdapterBusyError("Codex already has an active ordinary operation")
         evidence = self._submissions.reserve(
             request,
@@ -303,7 +332,7 @@ class CodexAppServerAdapter:
         """
 
         del expected_operation_id
-        active = self._active_turn_id
+        active = self._parent_state().active_turn_id
         if active is None:
             raise CodexAppServerError("no active Codex turn to interrupt")
         if turn_id is not None and turn_id != active:
@@ -339,24 +368,29 @@ class CodexAppServerAdapter:
         return result
 
     async def respond(self, response: InteractionResponse) -> None:
-        pending = self._pending_interaction
-        if pending is None or response.interaction_id != pending.pending.interaction_id:
+        state = self._interaction_thread(response.interaction_id)
+        if state is None:
             raise CodexAppServerError(
                 "Codex interaction response does not match the pending request"
             )
-        if response.operation is None or response.operation != self._active_operation:
+        pending = state.pending_interaction
+        assert pending is not None
+        if state.is_parent and (
+            response.operation is None or response.operation != self._active_operation
+        ):
             raise CodexAppServerError("Codex response does not match the active operation")
         transport = self._require_transport()
         result = interaction_result(pending.method, response.response)
         await transport.respond(pending.rpc_id, result)
-        self._pending_interaction = None
-        self._snapshot = replace(
-            await self.snapshot(),
-            activity="settling",
-            acceptance="queued",
-            pending_interaction=None,
-            raw={**(await self.snapshot()).raw, "resolvedServerRequest": pending.method},
-        )
+        state.pending_interaction = None
+        if state.is_parent:
+            self._snapshot = replace(
+                await self.snapshot(),
+                activity="settling",
+                acceptance="queued",
+                raw={**(await self.snapshot()).raw, "resolvedServerRequest": pending.method},
+            )
+        self._sync_pending_snapshot()
 
     async def reconcile(self, request_id: str) -> ReconciliationResult:
         evidence = self._submissions.get(request_id)
@@ -404,19 +438,26 @@ class CodexAppServerAdapter:
         cursor: str | None,
         limit: int,
         byte_budget: int,
+        thread_id: str | None = None,
     ) -> NativeEvidencePage:
-        """Page the live thread through ``thread/read``; the native read stays the authority."""
+        """Page the live thread through ``thread/read``; the native read stays the authority.
+
+        ``thread_id`` selects the thread to read: ``None`` reads the
+        parent/session thread exactly as before, an explicit id reads that (sub-agent)
+        thread — the app-server serves ``thread/read`` for every multiplexed thread.
+        """
 
         if (await self.snapshot()).control == "disconnected":
             await self._reconnect()
+        requested_thread_id = thread_id if thread_id is not None else self._require_thread_id()
         transport = self._require_transport()
         result = await transport.request(
             "thread/read",
-            {"threadId": self._require_thread_id(), "includeTurns": True},
+            {"threadId": requested_thread_id, "includeTurns": True},
         )
         thread = required_object(result.get("thread"), context="thread/read response.thread")
-        thread_id = required_text(thread, "id", context="thread/read response.thread")
-        if thread_id != self._require_thread_id():
+        returned_thread_id = required_text(thread, "id", context="thread/read response.thread")
+        if returned_thread_id != requested_thread_id:
             raise CodexAppServerError("thread/read returned a different Codex thread id")
         frames = native_evidence_frames_from_thread(thread)
         try:
@@ -485,22 +526,23 @@ class CodexAppServerAdapter:
             ) from exc
         turn = parse_turn(result, context="turn/start response")
         turn_id = required_text(turn, "id", context="turn/start response.turn")
+        parent = self._parent_state()
         buffered: JsonObject | None = None
-        if self._unbound_completions:
-            buffered_turn_id, buffered = next(iter(self._unbound_completions.items()))
-            self._unbound_completions.clear()
+        if parent.unbound_completions:
+            buffered_turn_id, buffered = next(iter(parent.unbound_completions.items()))
+            parent.unbound_completions.clear()
             if buffered_turn_id != turn_id:
                 raise CodexAppServerError(
                     "buffered turn/completed id does not match the turn/start response"
                 )
-        if turn_id in self._completed_turns:
+        if turn_id in parent.completed_turns:
             raise CodexAppServerError("turn/start reused a retained terminal turn id")
         evidence.turn_id = turn_id
-        self._turn_operations[turn_id] = operation
+        parent.turn_operations[turn_id] = operation
         status = required_text(turn, "status", context="turn/start response.turn")
         if status in {"failed", "interrupted"}:
             evidence.state = "rejected"
-            self._remember_completed_turn(turn_id, operation)
+            self._remember_completed_turn(parent, turn_id, operation)
             self._fresh_turn_required = self._session.has_pending_settings
             self._refresh_capability_snapshot()
             return SubmissionReceipt(
@@ -520,7 +562,7 @@ class CodexAppServerAdapter:
         self._fresh_turn_required = self._session.has_pending_settings
         self._refresh_capability_snapshot()
         if status == "inProgress":
-            self._active_turn_id = turn_id
+            parent.active_turn_id = turn_id
             self._active_operation = operation
             await self._set_activity("running", turn_id=turn_id)
         completion_emitted = False
@@ -529,7 +571,7 @@ class CodexAppServerAdapter:
             completion_emitted = True
         terminal_completion = status != "inProgress" and not completion_emitted
         if terminal_completion:
-            self._remember_completed_turn(turn_id, operation)
+            self._remember_completed_turn(parent, turn_id, operation)
         raw: JsonObject = {
             "method": "turn/start",
             "clientUserMessageId": evidence.request.request_id,
@@ -549,13 +591,52 @@ class CodexAppServerAdapter:
     async def _run_messages(self, transport: CodexAppServerTransport) -> None:
         try:
             async for message in transport.messages():
-                await self._handle_message(message)
+                try:
+                    await self._handle_message(message)
+                except CodexAppServerError as exc:
+                    # Parent-thread shape errors keep failing the bridge (that contract is
+                    # load-bearing); a malformed SUB-AGENT frame degrades to raw evidence
+                    # instead of killing it.
+                    if not await self._degrade_agent_frame(message, exc):
+                        raise
         except asyncio.CancelledError:
             raise
         except HarnessAdapterDisconnectedError as exc:
             await self._mark_disconnected(str(exc))
         except HarnessControlError as exc:
             await self._mark_failed(str(exc))
+
+    async def _degrade_agent_frame(self, message: JsonObject, exc: CodexAppServerError) -> bool:
+        """Degrade one malformed non-parent frame to preserved raw evidence.
+
+        Mirrors the projector's UnmappableShape discipline: the bridge stays ready and the
+        frame crosses unmodified with its failure noted, rather than failing the whole
+        bridge. Only a well-formed FOREIGN threadId qualifies — a missing/parent threadId
+        re-raises exactly as before.
+        """
+
+        params = message.get("params")
+        if not isinstance(params, Mapping):
+            return False
+        thread_id = params.get("threadId")
+        if (
+            not isinstance(thread_id, str)
+            or not thread_id
+            or thread_id == self._session.thread_id
+        ):
+            return False
+        method = message.get("method")
+        method_text = method if isinstance(method, str) else "unknown"
+        await self._emit(
+            "codex-notification",
+            raw={
+                "codexMethod": method_text,
+                AR_EVIDENCE_METHOD_KEY: method_text,
+                AR_EVIDENCE_KEY: dict(params),
+                "degraded": str(exc),
+            },
+        )
+        return True
 
     async def _handle_message(self, message: JsonObject) -> None:
         method = required_text(message, "method", context="Codex app-server message")
@@ -564,22 +645,36 @@ class CodexAppServerAdapter:
             return
         params = required_object(message.get("params"), context=f"{method} params")
         if method == "thread/status/changed":
-            self._validate_thread(params)
+            state = self._thread_for(params, context="thread/status/changed params")
             activity, acceptance = activity_from_thread_status(
                 required_object(params.get("status"), context="thread/status/changed status")
             )
-            self._snapshot = replace(
-                await self.snapshot(),
-                activity=activity,
-                acceptance=self._busy_acceptance(activity, acceptance),
+            if state.is_parent:
+                self._snapshot = replace(
+                    await self.snapshot(),
+                    activity=activity,
+                    acceptance=self._busy_acceptance(activity, acceptance),
+                )
+                await self._emit("state", raw={"codexMethod": method, AR_EVIDENCE_KEY: params})
+                return
+            # A sub-agent thread's status never moves the parent-scoped activity;
+            # it is registry + raw evidence only.
+            state.status = required_text(
+                required_object(params.get("status"), context="thread/status/changed status"),
+                "type",
+                context="thread/status/changed status",
             )
-            await self._emit("state", raw={"codexMethod": method, AR_EVIDENCE_KEY: params})
+            await self._emit_notification(method, params)
             return
         if method == "turn/started":
-            self._validate_thread(params)
+            state = self._thread_for(params, context="turn/started params")
             turn = parse_turn(params, context="turn/started params")
-            self._active_turn_id = required_text(turn, "id", context="turn/started turn")
-            await self._set_activity("running", turn_id=self._active_turn_id)
+            turn_id = required_text(turn, "id", context="turn/started turn")
+            state.active_turn_id = turn_id
+            if state.is_parent:
+                await self._set_activity("running", turn_id=turn_id)
+                return
+            await self._emit_notification(method, params)
             return
         if method == "turn/completed":
             await self._handle_turn_completed(params)
@@ -591,33 +686,63 @@ class CodexAppServerAdapter:
             await self._handle_server_request_resolved(params)
             return
         if method == "thread/settings/updated":
-            self._handle_settings_updated(params)
-            await self._emit("state", raw={"codexMethod": method, AR_EVIDENCE_KEY: params})
+            state = self._thread_for(params, context="thread/settings/updated params")
+            if state.is_parent:
+                self._handle_settings_updated(params)
+                await self._emit("state", raw={"codexMethod": method, AR_EVIDENCE_KEY: params})
+                return
+            await self._emit_notification(method, params)
             return
+        # Generic vendor evidence: auto-register a well-formed foreign thread without
+        # ever failing on malformed threadIds — those cross as raw evidence exactly as
+        # they did before the demux existed.
+        thread_id = params.get("threadId")
+        if isinstance(thread_id, str) and thread_id:
+            self._thread_for(params, context=f"{method} params")
+        self._learn_item_thread(params)
+        await self._emit_notification(method, params)
+
+    async def _emit_notification(self, method: str, params: JsonObject) -> None:
+        """Emit raw vendor evidence for one notification, routing deltas by item.
+
+        Delta frames (``item/.../delta``, ``patchUpdated``) can lack a usable ``threadId``;
+        the item→thread index learned from item/started and item/completed supplies the
+        demux key. A delta for an unknown item crosses unmodified — the bridge degrades a
+        missing threadId to the parent/None path, and no thread is ever invented here.
+        """
+
         await self._emit(
             "codex-notification",
             raw={
                 "codexMethod": method,
                 AR_EVIDENCE_METHOD_KEY: method,
-                AR_EVIDENCE_KEY: params,
+                AR_EVIDENCE_KEY: self._route_delta_params(method, params),
             },
         )
 
     async def _handle_turn_completed(self, params: JsonObject) -> None:
-        self._validate_thread(params)
+        state = self._thread_for(params, context="turn/completed params")
         turn = parse_turn(params, context="turn/completed params")
         turn_id = required_text(turn, "id", context="turn/completed turn")
-        if turn_id in self._completed_turns:
+        if turn_id in state.completed_turns:
             return
-        operation = self._turn_operations.get(turn_id)
+        if not state.is_parent:
+            # Agent turns carry no operation (turn/start writes are parent-only); the
+            # completion is per-thread bookkeeping plus raw evidence, never settlement.
+            if state.active_turn_id == turn_id:
+                state.active_turn_id = None
+            self._remember_completed_turn(state, turn_id, None)
+            await self._emit_notification("turn/completed", params)
+            return
+        operation = state.turn_operations.get(turn_id)
         if operation is None:
             # Codex can deliver the notification before the turn/start response binds its turn id
             # to the pending operation. Keep only that one exact raw completion until binding.
-            if self._pending_operation is None or self._unbound_completions:
+            if self._pending_operation is None or state.unbound_completions:
                 raise CodexAppServerError("turn/completed has no bindable pending operation")
-            self._unbound_completions[turn_id] = params
+            state.unbound_completions[turn_id] = params
             return
-        if self._active_turn_id is not None and turn_id != self._active_turn_id:
+        if state.active_turn_id is not None and turn_id != state.active_turn_id:
             raise CodexAppServerError("turn/completed does not match the active Codex turn")
         if self._active_operation is not None and operation != self._active_operation:
             raise CodexAppServerError("turn/completed does not match the active operation")
@@ -635,9 +760,9 @@ class CodexAppServerAdapter:
         for evidence in self._submissions.values():
             if evidence.turn_id == turn_id:
                 evidence.state = "completed"
-        self._active_turn_id = None
+        state.active_turn_id = None
         self._active_operation = None
-        self._remember_completed_turn(turn_id, operation)
+        self._remember_completed_turn(state, turn_id, operation)
         self._snapshot = replace(
             await self.snapshot(),
             activity="idle",
@@ -651,9 +776,11 @@ class CodexAppServerAdapter:
         )
 
     async def _handle_item_completed(self, params: JsonObject) -> None:
-        self._validate_thread(params)
+        state = self._thread_for(params, context="item/completed params")
         turn_id = required_text(params, "turnId", context="item/completed params")
         item = required_object(params.get("item"), context="item/completed params.item")
+        self._learn_item_thread(params)
+        self._learn_collab_identity(item)
         self._transcript_sequence += 1
         transcript = transcript_from_item(
             item,
@@ -663,15 +790,15 @@ class CodexAppServerAdapter:
         )
         if transcript is None:
             self._transcript_sequence -= 1
-            await self._emit(
-                "codex-notification",
-                raw={
-                    "codexMethod": "item/completed",
-                    AR_EVIDENCE_METHOD_KEY: "item/completed",
-                    AR_EVIDENCE_KEY: params,
-                },
-            )
+            await self._emit_notification("item/completed", params)
             return
+        if not state.is_parent:
+            # Downstream conversation demux keys on the native thread id.
+            # Deliberate asymmetry: AGENT entries carry
+            # ``threadId`` here; PARENT entries deliberately carry none — the pre-multiplex
+            # parent transcript shape stays byte-identical, and the demux reads a
+            # missing threadId as the parent.
+            transcript = replace(transcript, raw={**transcript.raw, "threadId": state.thread_id})
         await self._emit(
             "transcript",
             transcript=(transcript,),
@@ -682,9 +809,14 @@ class CodexAppServerAdapter:
         request_id = message.get("id")
         try:
             interaction = parse_server_interaction(message, created_at=self._clock())
-            self._validate_thread(required_object(message.get("params"), context="server request"))
-            if self._pending_interaction is not None:
-                raise CodexAppServerError("Codex emitted multiple unresolved server requests")
+            state = self._thread_for(
+                required_object(message.get("params"), context="server request"),
+                context="Codex server request",
+            )
+            if state.pending_interaction is not None:
+                raise CodexAppServerError(
+                    "Codex emitted multiple unresolved server requests on one thread"
+                )
         except CodexAppServerError as exc:
             if isinstance(request_id, (str, int)) and not isinstance(request_id, bool):
                 await self._require_transport().respond_error(
@@ -693,31 +825,66 @@ class CodexAppServerAdapter:
                     message=str(exc),
                 )
             raise
-        self._pending_interaction = interaction
-        self._snapshot = replace(
-            await self.snapshot(),
-            activity="blocked",
-            acceptance="queued",
-            pending_interaction=interaction.pending,
-        )
+        state.pending_interaction = interaction
+        if state.is_parent:
+            self._snapshot = replace(
+                await self.snapshot(),
+                activity="blocked",
+                acceptance="queued",
+            )
+        # A sub-agent approval never moves the parent-scoped activity; it lands in
+        # the multiplexed pending_interactions tuple only.
+        self._sync_pending_snapshot()
         await self._emit("state", raw={"codexMethod": interaction.method})
 
     async def _handle_server_request_resolved(self, params: JsonObject) -> None:
-        self._validate_thread(params)
+        state = self._thread_for(params, context="serverRequest/resolved params")
         request_id = params.get("requestId")
-        pending = self._pending_interaction
+        pending = state.pending_interaction
         if pending is not None and request_id == pending.rpc_id:
-            self._pending_interaction = None
-            self._snapshot = replace(
-                await self.snapshot(),
-                activity="settling",
-                acceptance="queued",
-                pending_interaction=None,
-            )
+            state.pending_interaction = None
+            if state.is_parent:
+                self._snapshot = replace(
+                    await self.snapshot(),
+                    activity="settling",
+                    acceptance="queued",
+                )
+            self._sync_pending_snapshot()
         await self._emit("state", raw={"codexMethod": "serverRequest/resolved"})
 
+    def _interaction_thread(self, interaction_id: str) -> _ThreadState | None:
+        """The thread whose pending interaction owns ``interaction_id`` (answers route by request id)."""
+
+        for state in self._threads.values():
+            pending = state.pending_interaction
+            if pending is not None and pending.pending.interaction_id == interaction_id:
+                return state
+        return None
+
+    def _sync_pending_snapshot(self) -> None:
+        """Rebuild the multiplexed pending tuple; the singular slot stays the parent's."""
+
+        if self._snapshot is None:
+            return
+        parent = self._parent_state()
+        pendings = []
+        for state in self._threads.values():
+            pending = state.pending_interaction
+            if pending is None:
+                continue
+            raw = dict(pending.pending.raw)
+            if not state.is_parent:
+                raw["agentLabel"] = self._agent_label(state)
+            pendings.append(replace(pending.pending, raw=raw))
+        self._snapshot = replace(
+            self._snapshot,
+            pending_interaction=parent.pending_interaction.pending
+            if parent.pending_interaction is not None
+            else None,
+            pending_interactions=tuple(pendings),
+        )
+
     def _handle_settings_updated(self, params: JsonObject) -> None:
-        self._validate_thread(params)
         settings = required_object(
             params.get("threadSettings"), context="thread/settings/updated threadSettings"
         )
@@ -833,27 +1000,195 @@ class CodexAppServerAdapter:
     def _guard_turn_start(self, operation: ControlOperationRef) -> None:
         """Final synchronous guard executed under the transport write lock."""
 
+        parent = self._parent_state()
         if (
             self._pending_operation != operation
-            or self._active_turn_id is not None
+            or parent.active_turn_id is not None
             or self._active_operation is not None
-            or self._pending_interaction is not None
+            or parent.pending_interaction is not None
         ):
             raise HarnessAdapterBusyError("Codex became busy before the guarded turn/start write")
 
-    def _remember_completed_turn(self, turn_id: str, operation: ControlOperationRef) -> None:
+    def _remember_completed_turn(
+        self,
+        state: _ThreadState,
+        turn_id: str,
+        operation: ControlOperationRef | None,
+    ) -> None:
         """Release live correlation and retain only the bounded terminal duplicate window."""
 
-        self._turn_operations.pop(turn_id, None)
-        self._completed_turns[turn_id] = operation
-        self._completed_turns.move_to_end(turn_id)
-        while len(self._completed_turns) > self._completed_turn_limit:
-            self._completed_turns.popitem(last=False)
+        state.turn_operations.pop(turn_id, None)
+        state.completed_turns[turn_id] = operation
+        state.completed_turns.move_to_end(turn_id)
+        while len(state.completed_turns) > self._completed_turn_limit:
+            state.completed_turns.popitem(last=False)
 
-    def _validate_thread(self, params: Mapping[str, object]) -> None:
-        thread_id = required_text(params, "threadId", context="Codex notification")
-        if thread_id != self._session.thread_id:
-            raise CodexAppServerError("Codex message belongs to a different thread")
+    def _parent_state(self) -> _ThreadState:
+        """The session/parent thread's demux state, registered on first use."""
+
+        thread_id = self._require_thread_id()
+        state = self._threads.get(thread_id)
+        if state is None:
+            state = _ThreadState(thread_id=thread_id, is_parent=True, status="active")
+            self._threads[thread_id] = state
+        elif not state.is_parent:
+            state.is_parent = True
+        return state
+
+    # Parent-thread views kept for the white-box correlation tests.
+    @property
+    def _active_turn_id(self) -> str | None:
+        return self._parent_state().active_turn_id
+
+    @property
+    def _turn_operations(self) -> dict[str, ControlOperationRef]:
+        return self._parent_state().turn_operations
+
+    @property
+    def _unbound_completions(self) -> dict[str, JsonObject]:
+        return self._parent_state().unbound_completions
+
+    @property
+    def _completed_turns(self) -> OrderedDict[str, ControlOperationRef | None]:
+        return self._parent_state().completed_turns
+
+    def _thread_for(self, params: Mapping[str, object], *, context: str) -> _ThreadState:
+        """Demux one notification to its thread state.
+
+        A missing/non-text ``threadId`` is a shape error and fails closed exactly as the
+        old ``_validate_thread`` did; a well-formed foreign threadId is never an error —
+        it auto-registers as an ``unresolved`` agent thread until collab evidence binds
+        its identity.
+        """
+
+        thread_id = required_text(params, "threadId", context=context)
+        state = self._threads.get(thread_id)
+        if state is not None:
+            self._threads.move_to_end(thread_id)
+            return state
+        if thread_id == self._session.thread_id:
+            return self._parent_state()
+        if len(self._threads) >= THREAD_REGISTRY_LIMIT:
+            # Evict the oldest settled/unresolved agent thread first: an actively-turning agent or one holding a pending approval is
+            # never evicted. When nothing is evictable this raises, and the message loop
+            # degrades the frame to raw evidence instead of failing the bridge.
+            evictable = next(
+                (
+                    key
+                    for key, entry in self._threads.items()
+                    if not entry.is_parent
+                    and entry.pending_interaction is None
+                    and entry.active_turn_id is None
+                ),
+                None,
+            )
+            if evictable is None:
+                raise CodexAppServerError("Codex thread registry is full")
+            del self._threads[evictable]
+        state = _ThreadState(thread_id=thread_id, is_parent=False, status="unresolved")
+        self._threads[thread_id] = state
+        self._publish_agent_registry()
+        return state
+
+    def _agent_label(self, state: _ThreadState) -> str:
+        """The bound identity evidence for one agent thread, or the fallback label."""
+
+        if state.agent_path is not None:
+            return state.agent_path
+        return f"agent {state.thread_id[:8]}"
+
+    def _learn_item_thread(self, params: Mapping[str, object]) -> None:
+        """Learn the item→thread demux index from item traffic; malformed shapes are skipped."""
+
+        thread_id = params.get("threadId")
+        item = params.get("item")
+        if not isinstance(thread_id, str) or not thread_id or not isinstance(item, Mapping):
+            return
+        item_id = item.get("id")
+        if not isinstance(item_id, str) or not item_id:
+            return
+        self._item_threads[item_id] = thread_id
+        self._item_threads.move_to_end(item_id)
+        while len(self._item_threads) > ITEM_THREAD_INDEX_LIMIT:
+            self._item_threads.popitem(last=False)
+
+    def _route_delta_params(self, method: str, params: JsonObject) -> JsonObject:
+        """Bind a delta frame's thread from the item index when the frame itself lacks it."""
+
+        thread_id = params.get("threadId")
+        if isinstance(thread_id, str) and thread_id:
+            return params
+        if "/delta" not in method and not method.endswith("patchUpdated"):
+            return params
+        item_id = params.get("itemId")
+        if not isinstance(item_id, str):
+            return params
+        bound = self._item_threads.get(item_id)
+        if bound is None:
+            return params
+        return {**params, "threadId": bound}
+
+    def _learn_collab_identity(self, item: Mapping[str, object]) -> None:
+        """Bind agent identity from collab items.
+
+        Parent-thread items model the collaboration itself: ``collabAgentToolCall``
+        carries ``receiverThreadIds``/``agentsStates`` and ``subAgentActivity`` carries
+        ``agentThreadId`` + ``agentPath``. Well-formed entries bind the registry;
+        anything else is left as raw evidence for the projector.
+        """
+
+        item_type = item.get("type")
+        learned = False
+        if item_type == "subAgentActivity":
+            agent_thread_id = item.get("agentThreadId")
+            if isinstance(agent_thread_id, str) and agent_thread_id:
+                state = self._threads.get(agent_thread_id) or self._thread_for(
+                    {"threadId": agent_thread_id}, context="subAgentActivity item"
+                )
+                agent_path = item.get("agentPath")
+                if isinstance(agent_path, str) and agent_path:
+                    state.agent_path = agent_path
+                kind = item.get("kind")
+                if isinstance(kind, str) and kind:
+                    state.status = kind
+                learned = True
+        elif item_type == "collabAgentToolCall":
+            receivers = item.get("receiverThreadIds")
+            if isinstance(receivers, list):
+                for receiver in receivers:
+                    if isinstance(receiver, str) and receiver:
+                        self._thread_for({"threadId": receiver}, context="collabAgentToolCall item")
+                        learned = True
+            agents_states = item.get("agentsStates")
+            if isinstance(agents_states, Mapping):
+                for agent_thread_id, agent_state in agents_states.items():
+                    state = self._threads.get(agent_thread_id)
+                    if state is None or not isinstance(agent_state, Mapping):
+                        continue
+                    status = agent_state.get("status")
+                    if isinstance(status, str) and status:
+                        state.status = status
+                        learned = True
+        if learned:
+            self._publish_agent_registry()
+
+    def _publish_agent_registry(self) -> None:
+        """Publish the bounded agent registry into snapshot.raw for the serving projector."""
+
+        if self._snapshot is None:
+            return
+        registry: JsonObject = {}
+        for thread_id, state in self._threads.items():
+            if state.is_parent:
+                continue
+            entry: JsonObject = {"status": state.status}
+            if state.agent_path is not None:
+                entry["agentPath"] = state.agent_path
+            registry[thread_id] = entry
+        self._snapshot = replace(
+            self._snapshot,
+            raw={**self._snapshot.raw, "agentRegistry": registry},
+        )
 
     def _refresh_capability_snapshot(self) -> None:
         if self._snapshot is None:

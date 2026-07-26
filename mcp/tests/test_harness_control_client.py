@@ -15,6 +15,7 @@ sys.path.insert(0, str(MCP_SRC))
 from agents_remember.errors import HarnessControlClientError
 from agents_remember.serving.harness_control_client import (
     SUBMIT_TIMEOUT_SECONDS,
+    read_control_native_page,
     request_control,
     set_control_model,
     submit_control_prompt,
@@ -226,6 +227,35 @@ class HarnessControlClientRetrySafetyTests(unittest.TestCase):
             (False, "unknown", "model-b"),
         )
         request.assert_called_once()
+
+    def test_native_page_serializes_thread_id_only_when_set(self) -> None:
+        # The threadId field is additive on evidence-native-page — serialized only
+        # when set, so a pre-multiplex consumer sees the byte-identical single-thread request.
+        canned = {
+            "frames": [],
+            "nextCursor": None,
+            "truncated": False,
+            "bridgeEpoch": "epoch-1",
+        }
+        with mock.patch(
+            "agents_remember.serving.harness_control_client.request_control",
+            return_value=canned,
+        ) as request:
+            page = read_control_native_page(_Entry(), thread_id="agent-thread-1")
+        self.assertEqual(page.bridge_epoch, "epoch-1")
+        self.assertEqual(request.call_args.args[1], "evidence-native-page")
+        self.assertEqual(
+            request.call_args.args[2], {"limit": 200, "threadId": "agent-thread-1"}
+        )
+
+        with mock.patch(
+            "agents_remember.serving.harness_control_client.request_control",
+            return_value=canned,
+        ) as request:
+            read_control_native_page(_Entry(), cursor="entry-2")
+        self.assertEqual(
+            request.call_args.args[2], {"limit": 200, "cursor": "entry-2"}
+        )
 
 
 if __name__ == "__main__":

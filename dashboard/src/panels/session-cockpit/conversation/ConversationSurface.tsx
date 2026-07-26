@@ -9,6 +9,13 @@ import { useCallback, useEffect, useMemo, useRef } from "react";
 import { css } from "../../../../styled-system/css";
 import { announceAssertive, announcePolite } from "../../../data/announcer";
 import {
+  cycleAgentFocus,
+  deriveAgents,
+  effectiveAgentFocus,
+  filterItemsForFocus,
+} from "../../../data/conversation/agents";
+import {
+  activeConversationStore,
   loadOlderConversation,
   readConversationScroll,
   rememberConversationScroll,
@@ -17,6 +24,7 @@ import {
 } from "../../../data/conversation/store";
 import { thinkingPreferenceStore, useHideThinking } from "../../../data/conversation/thinkingPreference";
 import type { ConversationItem } from "../../../data/conversation/types";
+import { AgentsArea } from "./AgentsArea";
 import { AmbientTelemetry } from "./AmbientTelemetry";
 import { CapabilityReason } from "./primitives";
 import { ConversationReconnect } from "./ConversationReconnect";
@@ -47,6 +55,37 @@ const toggle = css({
   _hover: { color: "amber", borderColor: "amber" },
   _focusVisible: { outline: "1px solid token(colors.amber)", outlineOffset: "1px" },
 });
+const agentFocusBar = css({
+  flexShrink: 0,
+  display: "flex",
+  alignItems: "baseline",
+  gap: "0.5rem",
+  minWidth: "0",
+});
+const agentFocusNote = css({
+  fontSize: "0.66rem",
+  color: "muted",
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
+  minWidth: "0",
+});
+
+// The surface-level agent focus keys (the Claude Code agents-view precedent):
+// ArrowLeft/ArrowRight cycle parent → agent 1 → … → agent N → parent; Escape returns to the
+// parent. Editable/interactive targets own their keys (the composer, buttons, labeled overflow
+// regions, code blocks) — the same exclusion discipline the feed's own navigation uses.
+function ownsAgentFocusKeys(target: HTMLElement): boolean {
+  if (
+    target.tagName === "INPUT" ||
+    target.tagName === "TEXTAREA" ||
+    target.tagName === "SELECT" ||
+    target.isContentEditable
+  ) {
+    return true;
+  }
+  return target.closest("button, a, pre, [role='group'], .cm-editor") !== null;
+}
 
 export function ConversationSurface({
   sessionId,
@@ -90,6 +129,59 @@ export function ConversationSurface({
         ? []
         : projection.orderedItemIds.map((id) => projection.itemsById[id]),
     [projection],
+  );
+
+  // ── Sub-agent focus ──────────────────────────────────────────────────────────────────────────
+  // The stored focus survives LRU eviction by design; it is NEVER applied blindly — the effective
+  // focus is recomputed against the live roster, so a rehydrated projection without that agent
+  // honestly falls back to the parent conversation.
+  const storedAgentFocus = useActiveConversation((state) => state.agentFocusBySession[sessionId]);
+  const agents = useMemo(() => deriveAgents(items), [items]);
+  const agentFocus = effectiveAgentFocus(storedAgentFocus, agents);
+  const focusedAgent = agentFocus === null ? undefined : agents.find((a) => a.agentId === agentFocus);
+  const focusedItems = useMemo(
+    () => filterItemsForFocus(items, agentFocus),
+    [items, agentFocus],
+  );
+
+  const applyAgentFocus = useCallback(
+    (next: string | null) => {
+      activeConversationStore.getState().setAgentFocus(sessionId, next);
+      // The switch is polite and keyed to the operator's own action; a hidden keep-alive surface
+      // never voices it (the surface's announcer discipline).
+      if (!visible) return;
+      if (next === null) {
+        announcePolite("viewing parent conversation");
+      } else {
+        const label = agents.find((agent) => agent.agentId === next)?.label ?? "agent";
+        announcePolite(`viewing ${label}`);
+      }
+    },
+    [agents, sessionId, visible],
+  );
+
+  const onSurfaceKeyDown = useCallback(
+    (event: React.KeyboardEvent<HTMLDivElement>) => {
+      const key = event.key;
+      if (key !== "ArrowLeft" && key !== "ArrowRight" && key !== "Escape") return;
+      if (ownsAgentFocusKeys(event.target as HTMLElement)) return;
+      if (key === "Escape") {
+        if (agentFocus === null) return;
+        event.preventDefault();
+        applyAgentFocus(null);
+        return;
+      }
+      if (agents.length === 0) return;
+      event.preventDefault();
+      applyAgentFocus(
+        cycleAgentFocus(
+          agentFocus,
+          agents.map((agent) => agent.agentId),
+          key === "ArrowRight" ? 1 : -1,
+        ),
+      );
+    },
+    [agentFocus, agents, applyAgentFocus],
   );
 
   // Announcers key on (state + revision) and are suppressed for non-live delivery (hydration/replay).
@@ -159,7 +251,7 @@ export function ConversationSurface({
       : null;
 
   return (
-    <div className={surface} data-testid="conversation-surface">
+    <div className={surface} data-testid="conversation-surface" onKeyDown={onSurfaceKeyDown}>
       <div className={toolbar}>
         <button
           type="button"
@@ -199,19 +291,39 @@ export function ConversationSurface({
         onRetry={onRetry}
         onShowDiagnostics={onShowDiagnostics}
       />
+      <AgentsArea agents={agents} focusedAgentId={agentFocus} onFocusAgent={applyAgentFocus} />
+      {agentFocus !== null ? (
+        <div className={agentFocusBar} data-testid="conversation-agent-focus-bar">
+          <button
+            type="button"
+            className={toggle}
+            onClick={() => applyAgentFocus(null)}
+            data-testid="conversation-back-to-parent"
+          >
+            ← back to parent conversation
+          </button>
+          <span className={agentFocusNote} data-testid="conversation-agent-focus-note">
+            viewing {focusedAgent?.label ?? "agent"}
+          </span>
+        </div>
+      ) : null}
       {/* The timeline well stays mounted for an empty conversation; its center becomes the
           product welcome surface until the first item arrives. */}
       <ConversationTimeline
-        items={items}
-        totalItems={projection.totalItems}
+        items={focusedItems}
+        totalItems={agentFocus === null ? projection.totalItems : undefined}
         hasOlder={projection.hasOlder}
         busy={projection.stream === "connecting" || projection.stream === "gap"}
         emptyNote={
-          items.length === 0 && projection.stream === "live"
-            ? <ConversationWelcome
-                harness={projection.identity.harnessId}
-                processState={projection.status?.process.state}
-              />
+          focusedItems.length === 0 && projection.stream === "live"
+            ? agentFocus === null
+              ? <ConversationWelcome
+                  harness={projection.identity.harnessId}
+                  processState={projection.status?.process.state}
+                />
+              : <span className={agentFocusNote} data-testid="conversation-agent-empty">
+                  no evidence from {focusedAgent?.label ?? "this agent"} yet
+                </span>
             : undefined
         }
         onLoadOlder={() => void loadOlderConversation(sessionId)}

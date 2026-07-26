@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from typing import Literal
 
 from agents_remember.serving.conversation.models import (
+    ConversationAgentRef,
     ConversationItem,
     ConversationRole,
     ProvenanceEvidence,
@@ -89,6 +90,9 @@ class MappedUnknownVendor:
     created_at: str | None = None
     parent_item_id: str | None = None
     role: ConversationRole = "system"
+    # The multiplexed agent the frame demuxed to: a malformed AGENT-thread frame's preserved evidence belongs to that
+    # agent's view, never the parent's. None = the parent conversation.
+    agent: ConversationAgentRef | None = None
 
 
 MapperOutput = MappedItem | MappedBlockDelta | MappedTurnOutcome | MappedUnknownVendor

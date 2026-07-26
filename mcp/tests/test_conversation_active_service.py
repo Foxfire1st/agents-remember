@@ -931,6 +931,79 @@ class ToolConvergenceTests(unittest.TestCase):
         self.assertEqual(blocks["output"].text, "total 0")
         self.assertEqual(item.phase, "completed")
 
+    def test_reordered_task_started_tagging_never_regresses_a_terminal_phase(self) -> None:
+        """Reordered evidence — the Agent
+        tool_result settles the call BEFORE task_started binds the agent identity —
+        keeps the terminal phase while the agent ref still lands."""
+
+        session = "vendor-1"
+        tool_id = "toolu_agent_1"
+        frames = [
+            {
+                "type": "assistant",
+                "uuid": "uuid-spawn",
+                "session_id": session,
+                "parent_tool_use_id": None,
+                "message": {
+                    "role": "assistant",
+                    "content": [
+                        {
+                            "type": "tool_use",
+                            "id": tool_id,
+                            "name": "Agent",
+                            "input": {
+                                "description": "probe",
+                                "subagent_type": "Explore",
+                                "run_in_background": False,
+                                "prompt": "read probe.txt",
+                            },
+                        }
+                    ],
+                },
+            },
+            {
+                "type": "user",
+                "uuid": "uuid-spawn-result",
+                "session_id": session,
+                "parent_tool_use_id": None,
+                "message": {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": tool_id,
+                            "content": [{"type": "text", "text": "The word is: probe"}],
+                        }
+                    ],
+                },
+            },
+            # The reordered binder: task_started arrives AFTER the tool_result.
+            {
+                "type": "system",
+                "subtype": "task_started",
+                "task_id": "task-1",
+                "tool_use_id": tool_id,
+                "description": "probe",
+                "subagent_type": "Explore",
+                "task_type": "local_agent",
+                "prompt": "read probe.txt",
+                "uuid": "uuid-started",
+                "session_id": session,
+            },
+        ]
+        store = ProjectionStore()
+        for sequence, raw in enumerate(frames, start=1):
+            for output in claude.map_evidence_frame(
+                EvidenceFrame(sequence=sequence, kind="state", created_at=NOW, raw=raw),
+                evidence_ref=f"ref-{sequence}",
+            ):
+                if isinstance(output, MappedItem):
+                    store.apply_item(output)
+        item = next(item for item in store.items() if item.item_id == tool_id)
+        self.assertEqual(item.phase, "completed")
+        assert item.agent is not None
+        self.assertEqual(item.agent.agent_id, "task-1")
+
     def test_pi_live_start_update_end_keeps_input_through_every_step(self) -> None:
         store = ProjectionStore()
         start = pi.map_evidence_frame(
@@ -1785,8 +1858,8 @@ class DormantReleaseTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertTrue(projector._closed)
         self.assertEqual(projector._store.page(before_ordinal=None, limit=50, total_known=True).items, ())
-        self.assertEqual(projector._live_turn_ids, set())
-        self.assertEqual(projector._live_request_ids, set())
+        self.assertEqual(projector._live_turn_ids, {})
+        self.assertEqual(projector._live_request_ids, {})
         self.assertEqual(projector._retention, [])
         # The retired shell no longer matches its identity, so a re-access re-creates it.
         self.assertFalse(projector.matches(_identity("codex")))

@@ -41,10 +41,16 @@ export interface ActiveConversationState {
   bySession: Record<string, ActiveConversationProjection>;
   /** The server's typed reason for a failed page/reconnect, threaded to the banner (§14.5). */
   errorBySession: Record<string, ConversationRouteError | null>;
+  /** The operator's timeline focus per session: absent = the parent
+      conversation; an agentId = that sub-agent's lane. Deliberately NOT inside `bySession`: it
+      survives LRU eviction with the keep-warm runtime, and the surface recomputes it against the
+      rehydrated projection's roster (effectiveAgentFocus) instead of re-applying it blindly. */
+  agentFocusBySession: Record<string, string>;
   touchOrder: string[];
   applyPage: (sessionId: string, page: ConversationPage, mode: "initial" | "older") => void;
   ingestEvent: (sessionId: string, envelope: ConversationEventEnvelope) => void;
   setStreamPhase: (sessionId: string, phase: ActiveConversationProjection["stream"]) => void;
+  setAgentFocus: (sessionId: string, agentId: string | null) => void;
   failStream: (sessionId: string, error: ConversationRouteError | null) => void;
   evict: (sessionId: string) => void;
   reset: () => void;
@@ -57,6 +63,7 @@ function touch(order: string[], sessionId: string): string[] {
 export const activeConversationStore = createStore<ActiveConversationState>((set) => ({
   bySession: {},
   errorBySession: {},
+  agentFocusBySession: {},
   touchOrder: [],
 
   applyPage: (sessionId, page, mode) =>
@@ -90,6 +97,17 @@ export const activeConversationStore = createStore<ActiveConversationState>((set
       return { bySession: { ...state.bySession, [sessionId]: { ...current, stream: phase } } };
     }),
 
+  // null clears the focus (back to the parent conversation). The entry is keyed OUTSIDE the
+  // projection so an LRU eviction keeps the operator's place; the surface revalidates it against
+  // the next roster instead of trusting it.
+  setAgentFocus: (sessionId, agentId) =>
+    set((state) => {
+      const agentFocusBySession = { ...state.agentFocusBySession };
+      if (agentId === null) delete agentFocusBySession[sessionId];
+      else agentFocusBySession[sessionId] = agentId;
+      return { agentFocusBySession };
+    }),
+
   // Record a typed failure reason and mark the projection (when present) projection-failed. When no
   // projection exists yet (first-connect failure) the error alone lets the surface render the reason.
   failStream: (sessionId, error) =>
@@ -112,7 +130,7 @@ export const activeConversationStore = createStore<ActiveConversationState>((set
 
   reset: () => {
     scrollMemoryBySession.clear();
-    set({ bySession: {}, errorBySession: {}, touchOrder: [] });
+    set({ bySession: {}, errorBySession: {}, agentFocusBySession: {}, touchOrder: [] });
   },
 }));
 

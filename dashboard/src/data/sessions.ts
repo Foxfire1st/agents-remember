@@ -71,6 +71,7 @@ export interface OpenSession {
   controlAcceptance?: HarnessAcceptanceState;
   controlVendorSessionId?: string;
   controlPendingInteraction?: Record<string, unknown>;
+  controlPendingInteractions?: Record<string, unknown>[];
   controlLastEventSequence?: number;
   controlRaw?: Record<string, unknown>;
   // Liveness probe evidence, mirrored for the freshness surfaces.
@@ -445,6 +446,31 @@ export function findSessionForLifecycle(lifecycleId: string): OpenSession | unde
 }
 
 /**
+ * ANY pending interaction on the seat: the parent's
+ * singular slot OR a multiplexed sub-agent entry. Every attention surface (rail badge,
+ * announcer, visual grammar, question triage) derives from this — never from the singular
+ * slot alone, or a seat blocked SOLELY on a sub-agent approval goes dark.
+ */
+export function sessionHasPendingInteraction(
+  session: Pick<OpenSession, "controlPendingInteraction" | "controlPendingInteractions">,
+): boolean {
+  return (
+    session.controlPendingInteraction !== undefined ||
+    (session.controlPendingInteractions ?? []).length > 0
+  );
+}
+
+/**
+ * The payload attention chrome previews: the parent's singular slot first,
+ * else the first multiplexed sub-agent entry.
+ */
+export function sessionPendingInteractionPayload(
+  session: Pick<OpenSession, "controlPendingInteraction" | "controlPendingInteractions">,
+): Record<string, unknown> | undefined {
+  return session.controlPendingInteraction ?? session.controlPendingInteractions?.[0];
+}
+
+/**
  * The single LIVE session bound to `leafKey` (mirrors {@link findSessionForLifecycle}). Pass `role`
  * to find the leaf's chat vs. its terminal independently — a leaf can hold one of each.
  */
@@ -493,6 +519,9 @@ export function fromTerminalSessionInfo(info: TerminalSessionInfo): OpenSession 
     ...(info.controlVendorSessionId ? { controlVendorSessionId: info.controlVendorSessionId } : {}),
     ...(info.controlPendingInteraction
       ? { controlPendingInteraction: info.controlPendingInteraction }
+      : {}),
+    ...(info.controlPendingInteractions
+      ? { controlPendingInteractions: info.controlPendingInteractions }
       : {}),
     ...(info.controlLastEventSequence !== undefined
       ? { controlLastEventSequence: info.controlLastEventSequence }

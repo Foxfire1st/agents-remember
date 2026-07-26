@@ -48,6 +48,7 @@ from agents_remember.serving.conversation.library.scope import query_digest
 from agents_remember.serving.conversation.models import (
     AuthorizationBinding,
     ConversationItem,
+    ConversationLibraryAgentRow,
     ConversationLibraryPage,
     ConversationLibraryPageScope,
     ConversationLibraryRow,
@@ -66,7 +67,23 @@ from agents_remember.serving.harnesses import Harness
 _CLIENT_NAME = "agents_remember"
 _CLIENT_VERSION = "3.0.0"
 _SOURCE_KINDS = ("cli", "vscode", "exec", "appServer")
-"""Top-level native conversations; sub-agent threads belong to their parent's history."""
+"""Top-level native conversations; sub-agent threads group under their parent's row."""
+_AGENT_SOURCE_KINDS = (
+    "subAgent",
+    "subAgentReview",
+    "subAgentCompact",
+    "subAgentThreadSpawn",
+    "subAgentOther",
+)
+"""Sub-agent thread kinds. PROVEN, not guessed: the vendored codex main
+``ThreadSourceKind`` enum (app-server-protocol/src/protocol/v2/thread.rs, serde camelCase) and a
+live probe of the installed codex 0.145.0 app-server (2026-07-26) agree — the server's own
+-32600 error names exactly these variants, and ``sourceKinds: ["subAgent"]`` returns agent
+threads. The vendor ``parentThreadId``/``ancestorThreadId`` list filters are experimental-gated
+(``thread/list.parentThreadId requires experimentalApi capability`` on 0.145.0), so grouping is
+client-side over the ``parentThreadId`` every thread/list row carries."""
+_AGENT_LIST_LIMIT = 100
+"""One native page of sub-agent threads per list call; a continuation cursor means truncated."""
 _LIST_GENERATION_PROBE_LIMIT = 100
 _TEXT_BLOCK_CAP = 8192
 _Capabilities = Callable[[HarnessId], Awaitable[HistoryCapabilities]]
@@ -165,12 +182,13 @@ class _AppServer:
         cursor: str | None,
         limit: int,
         scope: str | None,
+        kinds: tuple[str, ...] = _SOURCE_KINDS,
     ) -> JsonObject:
         transport = self._require_transport()
         params: JsonObject = {
             "cursor": cursor,
             "limit": limit,
-            "sourceKinds": list(_SOURCE_KINDS),
+            "sourceKinds": list(kinds),
         }
         if scope is not None:
             params["cwd"] = scope
@@ -178,6 +196,30 @@ class _AppServer:
             return await transport.request("thread/list", params)
         except CodexAppServerError as exc:
             raise LibraryStoreError(f"Codex thread/list failed closed: {exc}") from exc
+
+    async def thread_list_agents(self, *, limit: int, scope: str | None) -> JsonObject:
+        """One sub-agent thread page.
+
+        Unlike :meth:`thread_list`, a native RPC refusal (e.g. an app-server that predates the
+        sub-agent source kinds) propagates as the typed :class:`CodexAppServerRpcError` so the
+        library can degrade to an exact ``agents_note`` instead of failing the whole listing.
+        Transport-level failures still fail closed as store errors.
+        """
+
+        transport = self._require_transport()
+        params: JsonObject = {
+            "cursor": None,
+            "limit": limit,
+            "sourceKinds": list(_AGENT_SOURCE_KINDS),
+        }
+        if scope is not None:
+            params["cwd"] = scope
+        try:
+            return await transport.request("thread/list", params)
+        except CodexAppServerRpcError:
+            raise
+        except CodexAppServerError as exc:
+            raise LibraryStoreError(f"Codex sub-agent thread/list failed closed: {exc}") from exc
 
     async def thread_read(self, thread_id: str, *, include_turns: bool) -> JsonObject:
         transport = self._require_transport()
@@ -238,7 +280,10 @@ class CodexConversationLibrary:
     ) -> ConversationLibraryPage:
         native_cursor, expected_generation = self._verify_list_position(cursor, scope)
         async with self._connect(scope) as server:
-            generation = await self._list_generation(server, scope)
+            agent_data, agents_note = await self._agent_page(server, scope)
+            generation = await self._list_generation(
+                server, scope, agent_data=agent_data, agents_note=agents_note
+            )
             if expected_generation is not None and expected_generation != generation:
                 raise CatalogGenerationError(
                     "the native Codex catalog changed; the list cursor is reset"
@@ -247,9 +292,23 @@ class CodexConversationLibrary:
                 cursor=native_cursor, limit=limit, scope=scope.canonical_project_scope
             )
         capabilities = await self._capabilities(self.harness_id)
+        agents = self._agent_rows(agent_data, scope, generation=generation)
         rows, next_native = self._rows(
-            page, scope, generation=generation, capabilities=capabilities
+            page, scope, generation=generation, capabilities=capabilities, agents=agents
         )
+        # Nested sub-agents: an agent row whose
+        # parent is ITSELF an agent thread can never group under a visible top-level row on
+        # any page — name the count honestly instead of leaving it silently absent. A depth-1
+        # agent whose parent merely pages outside this window still groups on its parent's
+        # own page, exactly as before.
+        agent_own_ids = {raw.get("id") for raw in agent_data}
+        nested = sum(1 for parent_id, _row in agents if parent_id in agent_own_ids)
+        if nested:
+            nested_note = (
+                f"{nested} nested sub-agent conversation(s) spawned by another sub-agent "
+                "cannot be grouped under a visible parent and are not shown"
+            )
+            agents_note = f"{agents_note}; {nested_note}" if agents_note else nested_note
         next_cursor = (
             self._cursor_authority.mint_list_cursor(
                 scope, catalog_generation=generation, native_cursor=next_native
@@ -265,6 +324,7 @@ class CodexConversationLibrary:
             ),
             rows=rows,
             next_cursor=next_cursor,
+            agents_note=agents_note,
         )
 
     async def read(
@@ -366,6 +426,9 @@ class CodexConversationLibrary:
         self,
         server: _AppServer,
         scope: ConversationLibraryScope,
+        *,
+        agent_data: tuple[Mapping[str, object], ...],
+        agents_note: str | None,
     ) -> int:
         probe = await server.thread_list(
             cursor=None,
@@ -383,8 +446,111 @@ class CodexConversationLibrary:
         except CodexAppServerError as exc:
             raise _shape_error(exc) from exc
         has_more = probe.get("nextCursor") is not None
-        signature = f"codex:list:{scope.canonical_project_scope}:{ids}:{has_more}"
+        try:
+            agent_ids = [
+                required_text(row, "id", context="thread/list sub-agent row")
+                for row in agent_data
+            ]
+        except CodexAppServerError as exc:
+            raise _shape_error(exc) from exc
+        signature = (
+            f"codex:list:{scope.canonical_project_scope}:{ids}:{has_more}"
+            f":{agent_ids}:{agents_note!r}"
+        )
         return self._cursor_authority.catalog_generation(signature)
+
+    async def _agent_page(
+        self,
+        server: _AppServer,
+        scope: ConversationLibraryScope,
+    ) -> tuple[tuple[Mapping[str, object], ...], str | None]:
+        """One sub-agent thread page; an unproven install degrades to an exact note."""
+
+        try:
+            page = await server.thread_list_agents(
+                limit=_AGENT_LIST_LIMIT, scope=scope.canonical_project_scope
+            )
+        except CodexAppServerRpcError as exc:
+            return (), f"sub-agent conversations are unavailable on this Codex install: {exc}"
+        try:
+            data = required_list(page, "data", context="thread/list sub-agent response")
+            rows = tuple(
+                required_object(raw, context="thread/list sub-agent row") for raw in data
+            )
+        except CodexAppServerError as exc:
+            raise _shape_error(exc) from exc
+        if page.get("nextCursor") is not None:
+            return rows, (
+                "sub-agent listing truncated at the native fetch cap "
+                f"({_AGENT_LIST_LIMIT}); some sub-agent conversations are not shown"
+            )
+        return rows, None
+
+    def _agent_rows(
+        self,
+        agent_data: tuple[Mapping[str, object], ...],
+        scope: ConversationLibraryScope,
+        *,
+        generation: int,
+    ) -> tuple[tuple[str, ConversationLibraryAgentRow], ...]:
+        try:
+            return tuple(
+                self._agent_row(raw, scope, generation=generation) for raw in agent_data
+            )
+        except CodexAppServerError as exc:
+            raise _shape_error(exc) from exc
+
+    def _agent_row(
+        self,
+        row: Mapping[str, object],
+        scope: ConversationLibraryScope,
+        *,
+        generation: int,
+    ) -> tuple[str, ConversationLibraryAgentRow]:
+        """One sub-agent row keyed by its parent's thread id.
+
+        Identity is evidence-bound: the row-level ``agentNickname``/``agentRole`` win, then the
+        ``source.subAgent.thread_spawn`` spawn record, then the honest ``agent <short-id>``
+        fallback. A row without a textual ``parentThreadId`` is not groupable and fails closed.
+        """
+
+        thread_id = required_text(row, "id", context="thread/list sub-agent row")
+        parent_id = required_text(row, "parentThreadId", context="thread/list sub-agent row")
+        nickname = _optional_text(row.get("agentNickname"))
+        role = _optional_text(row.get("agentRole"))
+        agent_path: str | None = None
+        source = row.get("source")
+        if isinstance(source, Mapping):
+            spawn = source.get("subAgent")
+            if isinstance(spawn, Mapping):
+                record = spawn.get("thread_spawn")
+                if isinstance(record, Mapping):
+                    agent_path = _optional_text(record.get("agent_path"))
+                    nickname = nickname or _optional_text(record.get("agent_nickname"))
+                    role = role or _optional_text(record.get("agent_role"))
+        title = nickname or role or agent_path or f"agent {thread_id[:8]}"
+        digest = self._cursor_authority.identity_digest(
+            self.harness_id, thread_id, scope.canonical_project_scope
+        )
+        try:
+            last_activity = iso_from_epoch(row.get("updatedAt"), fallback="")
+        except (CodexAppServerError, OSError, OverflowError, ValueError) as exc:
+            raise _shape_error(exc) from exc
+        return parent_id, ConversationLibraryAgentRow(
+            conversation_key=self._cursor_authority.mint_conversation_key(
+                scope,
+                vendor_conversation_id=thread_id,
+                identity_digest=digest,
+                catalog_generation=generation,
+            ),
+            identity_digest=digest,
+            title=title,
+            agent_path=agent_path,
+            nickname=nickname,
+            role=role,
+            safe_native_id_suffix=thread_id[-6:],
+            last_activity_at=last_activity or None,
+        )
 
     def _read_generation(
         self,
@@ -403,6 +569,7 @@ class CodexConversationLibrary:
         *,
         generation: int,
         capabilities: HistoryCapabilities,
+        agents: tuple[tuple[str, ConversationLibraryAgentRow], ...] = (),
     ) -> tuple[tuple[ConversationLibraryRow, ...], str | None]:
         try:
             data = required_list(page, "data", context="thread/list response")
@@ -412,6 +579,7 @@ class CodexConversationLibrary:
                     scope,
                     generation=generation,
                     capabilities=capabilities,
+                    agents=agents,
                 )
                 for raw in data
             )
@@ -429,6 +597,7 @@ class CodexConversationLibrary:
         *,
         generation: int,
         capabilities: HistoryCapabilities,
+        agents: tuple[tuple[str, ConversationLibraryAgentRow], ...] = (),
     ) -> ConversationLibraryRow:
         thread_id = required_text(row, "id", context="thread/list row")
         preview = row.get("preview")
@@ -454,6 +623,9 @@ class CodexConversationLibrary:
             safe_native_id_suffix=thread_id[-6:],
             last_activity_at=last_activity,
             capabilities=capabilities,
+            # Sub-agent children group under their parent's row; an agent whose parent pages
+            # outside this window appears on its parent's own page.
+            agents=tuple(agent for parent_id, agent in agents if parent_id == thread_id),
         )
 
     @staticmethod
@@ -489,6 +661,10 @@ def _shape_error(exc: Exception) -> LibraryStoreError:
     """Shape/range-skewed native payloads fail as typed store errors, never raw 500s (F3/F4)."""
 
     return LibraryStoreError(f"Codex native payload failed shape validation: {exc}")
+
+
+def _optional_text(value: object) -> str | None:
+    return value if isinstance(value, str) and value.strip() else None
 
 
 def _window(

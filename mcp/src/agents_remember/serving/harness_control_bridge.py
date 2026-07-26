@@ -212,8 +212,14 @@ class HarnessControlBridge:
         cursor: str | None,
         limit: int,
         byte_budget: int = EVIDENCE_PAGE_BYTE_BUDGET,
+        thread_id: str | None = None,
     ) -> NativeEvidencePage:
-        """Page harness-native history through the adapter's own read seam; bridge-stamped epoch."""
+        """Page harness-native history through the adapter's own read seam; bridge-stamped epoch.
+
+        ``thread_id`` is additive: when set, adapters that multiplex
+        threads (codex) read that thread; it is forwarded only when present so
+        single-thread adapters keep their exact signature.
+        """
 
         self._require_running()
         adapter = self._adapter
@@ -222,11 +228,27 @@ class HarnessControlBridge:
                 f"{type(adapter).__name__} does not support native evidence pages; "
                 "only the live stream/replay evidence buffer is available for this session"
             )
-        page = await adapter.read_native_page(
-            cursor=cursor,
-            limit=max(1, min(MAX_NATIVE_EVIDENCE_PAGE, limit)),
-            byte_budget=byte_budget,
-        )
+        read_limit = max(1, min(MAX_NATIVE_EVIDENCE_PAGE, limit))
+        if thread_id is None:
+            page = await adapter.read_native_page(
+                cursor=cursor,
+                limit=read_limit,
+                byte_budget=byte_budget,
+            )
+        else:
+            # Multiplexed adapters (codex) accept the additive thread selector; the
+            # NativePageReader protocol stays the single-thread shape.
+            try:
+                page = await adapter.read_native_page(
+                    cursor=cursor,
+                    limit=read_limit,
+                    byte_budget=byte_budget,
+                    thread_id=thread_id,  # type: ignore[call-arg] - additive codex kwarg
+                )
+            except TypeError as exc:
+                raise HarnessControlError(
+                    f"{type(adapter).__name__} does not support per-thread native pages"
+                ) from exc
         if page.bridge_epoch:
             raise HarnessControlError("native evidence adapter must not mint the bridge epoch")
         return replace(page, bridge_epoch=self._command_queue.bridge_epoch)
@@ -521,6 +543,20 @@ class HarnessControlBridge:
             raw={key: value for key, value in event.raw.items() if key not in stripped},
         )
 
+    @staticmethod
+    def _evidence_thread_id(payload: Mapping[str, object]) -> str | None:
+        """The demux key for multiplexed harness streams.
+
+        Codex notification params carry ``threadId`` verbatim; it crosses as-is
+        (parent frames carry the parent thread's id). Consumers that know the
+        session thread (the projector's identity) treat ``None`` or the parent
+        id as the parent conversation; anything malformed (non-text) degrades
+        to ``None`` = parent rather than being guessed.
+        """
+
+        thread_id = payload.get("threadId")
+        return thread_id if isinstance(thread_id, str) and thread_id else None
+
     def _append_evidence(
         self,
         sequence: int,
@@ -542,6 +578,7 @@ class HarnessControlBridge:
                 created_at=created_at,
                 raw=clip_evidence_payload(payload, max_bytes=self._evidence_frame_bytes),
                 native_method=native_method,
+                thread_id=self._evidence_thread_id(payload),
             )
         )
 

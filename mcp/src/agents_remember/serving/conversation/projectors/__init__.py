@@ -41,6 +41,7 @@ class HarnessProjector(Protocol):
         frame: EvidenceFrame,
         *,
         evidence_ref: str,
+        parent_thread_id: str | None = None,
     ) -> list[MapperOutput]: ...
 
     def map_transcript_echo(

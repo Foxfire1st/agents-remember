@@ -34,6 +34,9 @@ export interface LibraryListView {
   rows: ConversationLibraryRow[];
   nextCursor: LibraryListCursor | null;
   canonicalProjectScope?: string;
+  /** The page's sub-agent availability note — the exact native reason when
+      agent conversations are (partially) unavailable, rendered verbatim, never silently absent. */
+  agentsNote?: string | null;
   loading: boolean;
   error?: string;
 }
@@ -106,6 +109,7 @@ export async function loadLibraryList(
     rows: appending ? (previous?.rows ?? []) : [],
     nextCursor: previous?.nextCursor ?? null,
     canonicalProjectScope: previous?.canonicalProjectScope,
+    agentsNote: previous?.agentsNote ?? null,
     loading: true,
     error: undefined,
   });
@@ -117,6 +121,7 @@ export async function loadLibraryList(
       cwd: query.cwd,
       rows: appending ? (previous?.rows ?? []) : [],
       nextCursor: appending ? (previous?.nextCursor ?? null) : null,
+      agentsNote: previous?.agentsNote ?? null,
       loading: false,
       error: "history unavailable for this harness",
     });
@@ -129,6 +134,8 @@ export async function loadLibraryList(
     rows: merged,
     nextCursor: page.nextCursor,
     canonicalProjectScope: page.scope.canonicalProjectScope,
+    // The freshest page's note wins (it describes the query's current agent availability).
+    agentsNote: page.agentsNote ?? null,
     loading: false,
   });
 }

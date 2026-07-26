@@ -1,4 +1,4 @@
-import type { OpenSession } from "./sessions";
+import { sessionHasPendingInteraction, type OpenSession } from "./sessions";
 
 // THE one seat-state grammar (260715-FEUI-L2 R14, spec §2.4 — RULED 2026-07-16): rail rows, the
 // HeaderStrip, and the StatusLine all read this mapping, so the same seat can never show two
@@ -73,7 +73,11 @@ const VISUALS: Record<SeatStateKey, SeatVisualState> = {
 /** The seat facts the grammar reads — a subset of OpenSession so fixtures stay tiny. */
 export type SeatStateInput = Pick<
   OpenSession,
-  "status" | "controlState" | "controlPendingInteraction" | "turnState"
+  | "status"
+  | "controlState"
+  | "controlPendingInteraction"
+  | "controlPendingInteractions"
+  | "turnState"
 > & {
   /** Declared external wait (AEO `waiting(reason)`) — reserved input, no producer yet. */
   waitingReason?: string;
@@ -99,7 +103,9 @@ export function seatVisualState(input: SeatStateInput): SeatVisualState {
   if (input.status === "terminated") return VISUALS.retired;
   if (input.status === "exited") return VISUALS.exited;
   if (input.controlState === "failed") return VISUALS.failed;
-  if (input.controlPendingInteraction || input.turnState === "awaiting-input") {
+  // A multiplexed sub-agent approval counts as pending too:
+  // a seat blocked SOLELY on an agent approval is awaiting input, never dark.
+  if (sessionHasPendingInteraction(input) || input.turnState === "awaiting-input") {
     return VISUALS["awaiting-input"];
   }
   if (input.waitingReason !== undefined) {

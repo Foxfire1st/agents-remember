@@ -44,6 +44,13 @@ def control_snapshot_entry(
         control_acceptance=snapshot.acceptance,
         control_vendor_session_id=snapshot.vendor_session_id,
         control_pending_interaction=pending_interaction_json(snapshot.pending_interaction),
+        # Multiplexed sub-agent pendings: additive; the singular
+        # slot above stays the parent-thread entry exactly as before.
+        control_pending_interactions=[
+            wire for pending in snapshot.pending_interactions
+            if (wire := pending_interaction_json(pending)) is not None
+        ]
+        or None,
         control_last_event_sequence=snapshot.last_event_sequence,
         control_raw=dict(snapshot.raw),
     )

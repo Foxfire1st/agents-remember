@@ -223,6 +223,16 @@ class AdapterSnapshot:
     acceptance: AcceptanceState
     vendor_session_id: str | None = None
     pending_interaction: PendingInteraction | None = None
+    pending_interactions: tuple[PendingInteraction, ...] = ()
+    """Multiplexed pending interactions across threads.
+
+    Codex sub-agent threads raise their own server->client requests (approvals);
+    each entry carries its thread identity in ``raw['threadId']`` plus the agent
+    label evidence the adapter could bind. The singular ``pending_interaction``
+    stays the parent-thread slot for back-compat; consumers that understand the
+    multiplexed form read this tuple.
+    """
+
     last_event_sequence: int = 0
     raw: Mapping[str, object] = field(default_factory=dict)
 
@@ -458,6 +468,15 @@ class EvidenceFrame:
     discriminator inside ``raw`` (as Claude and Pi do with the frame ``type``).
     """
 
+    thread_id: str | None = None
+    """The native thread this frame belongs to when the harness multiplexes.
+
+    Codex auto-attaches sub-agent thread listeners to the seat's connection, so one evidence
+    stream carries many threads; ``thread_id`` is the demux key (``None`` = the parent/session
+    thread, matching pre-multiplex behavior). Claude encodes its sidechain join key
+    (``parent_tool_use_id``) inside ``raw`` instead.
+    """
+
 
 @dataclass(frozen=True)
 class EvidencePage:
@@ -581,6 +600,11 @@ def snapshot_json(value: AdapterSnapshot) -> dict[str, object]:
         "acceptance": value.acceptance,
         "vendorSessionId": value.vendor_session_id,
         "pendingInteraction": pending_interaction_json(value.pending_interaction),
+        # Multiplexed sub-agent pendings: additive; the singular
+        # slot above stays the parent-thread entry exactly as before.
+        "pendingInteractions": [
+            pending_interaction_json(pending) for pending in value.pending_interactions
+        ],
         "lastEventSequence": value.last_event_sequence,
         "raw": dict(value.raw),
     }

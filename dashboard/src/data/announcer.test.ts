@@ -116,6 +116,30 @@ describe("stateEntryAnnouncements (pure transition detector)", () => {
     ]);
   });
 
+  it("announces a seat blocked SOLELY on a sub-agent approval — never claiming the parent asks", () => {
+    const before = new Map([["a", "working"]]);
+    const withAgentBar = [
+      seat("a", {
+        turnState: "working",
+        controlPendingInteractions: [
+          {
+            interactionId: "ix_agent",
+            kind: "permission",
+            prompt: "Allow the sub-agent command?",
+            raw: { threadId: "agent-thread-1", agentLabel: "agent agent-t" },
+          },
+        ],
+      }),
+    ];
+    // Unfocused: the region speaks with the seat-level wording ("awaiting input") —
+    // it never says the question is the parent's.
+    expect(stateEntryAnnouncements(before, withAgentBar, "other").announcements).toEqual([
+      sessionAwaitingInputAnnouncement("a"),
+    ]);
+    // Focused: the InteractionBar announces the agent bar itself; the region stays silent.
+    expect(stateEntryAnnouncements(before, withAgentBar, "a").announcements).toEqual([]);
+  });
+
   it("no announcement without a transition (steady failed stays silent)", () => {
     const before = new Map([["a", "failed"]]);
     const sessions = [seat("a", { controlState: "failed" })];

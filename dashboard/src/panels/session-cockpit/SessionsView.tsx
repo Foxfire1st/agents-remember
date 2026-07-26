@@ -72,7 +72,8 @@ import {
   stageBelowPtyFloor,
 } from "../../data/sessionLayout";
 import { useActiveConversation } from "../../data/conversation/store";
-import { useSessions } from "../../data/sessions";
+import { pendingInteractionAgentLabel } from "../../data/interactionAnswer";
+import { sessionPendingInteractionPayload, useSessions } from "../../data/sessions";
 import { shortId } from "../../data/conversation/format";
 import { useDashboard } from "../../data/store";
 import type { AgentPickupNode, TaskDocNode } from "../../types/projection";
@@ -641,10 +642,13 @@ function SessionsViewImpl({
       );
     }
     for (const seat of waitingSeats(sessions)) {
-      const preview = interactionPromptPreview(
-        seat.controlPendingInteraction,
-        60,
-      );
+      // Parent's singular slot first, else the first sub-agent entry; the title names WHO
+      // asks when the payload carries the adapter-bound agent label.
+      const payload = sessionPendingInteractionPayload(seat);
+      const rawPreview = interactionPromptPreview(payload, 60);
+      const asker = pendingInteractionAgentLabel(payload);
+      const preview =
+        rawPreview !== undefined && asker !== undefined ? `${asker}: ${rawPreview}` : rawPreview;
       disposers.push(
         registry.register({
           id: `triage.${seat.id}`,

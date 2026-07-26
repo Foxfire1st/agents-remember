@@ -141,6 +141,7 @@ export function ConversationLibrarySurface({
             nextCursor={list?.nextCursor ?? null}
             loading={list?.loading ?? false}
             error={list?.error}
+            agentsNote={list?.agentsNote}
             onSelect={(row) => void loadLibraryPreview(harnessId, row.conversationKey, deps)}
             onLoadMore={() =>
               void loadLibraryList(harnessId, { cwd, cursor: list?.nextCursor ?? undefined }, deps)

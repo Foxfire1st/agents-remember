@@ -458,6 +458,11 @@ def register_harness_control_routes(
                 "activity": snapshot.activity,
                 "acceptance": snapshot.acceptance,
                 "pendingInteraction": pending_interaction_json(snapshot.pending_interaction),
+                # Multiplexed sub-agent pendings: additive.
+                "pendingInteractions": [
+                    pending_interaction_json(pending)
+                    for pending in snapshot.pending_interactions
+                ],
             },
             status_code=200,
         )
