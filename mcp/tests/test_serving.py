@@ -551,7 +551,13 @@ class StateEtagTests(unittest.TestCase):
     ) -> TestClient:
         patcher = mock.patch(
             "agents_remember.serving.projector.project_and_write",
-            side_effect=lambda config, *, now, provider_refresher=None, landing_state=None: held[0],
+            side_effect=lambda config,
+            *,
+            now,
+            provider_refresher=None,
+            landing_state=None,
+            input_state=None,
+            refresh=None: held[0],
         )
         patcher.start()
         self.addCleanup(patcher.stop)
@@ -632,7 +638,13 @@ class ProjectionBodyCacheTests(unittest.TestCase):
     ) -> TestClient:
         patcher = mock.patch(
             "agents_remember.serving.projector.project_and_write",
-            side_effect=lambda config, *, now, provider_refresher=None, landing_state=None: held[0],
+            side_effect=lambda config,
+            *,
+            now,
+            provider_refresher=None,
+            landing_state=None,
+            input_state=None,
+            refresh=None: held[0],
         )
         patcher.start()
         self.addCleanup(patcher.stop)
@@ -755,7 +767,13 @@ class GzipMiddlewareTests(unittest.TestCase):
     def _client_with_held_projection(self, held: list[WorkspaceProjection]) -> TestClient:
         patcher = mock.patch(
             "agents_remember.serving.projector.project_and_write",
-            side_effect=lambda config, *, now, provider_refresher=None, landing_state=None: held[0],
+            side_effect=lambda config,
+            *,
+            now,
+            provider_refresher=None,
+            landing_state=None,
+            input_state=None,
+            refresh=None: held[0],
         )
         patcher.start()
         self.addCleanup(patcher.stop)
@@ -803,7 +821,13 @@ class GzipSseFlowTests(unittest.IsolatedAsyncioTestCase):
         held = [_projection(lifecycles=(_lifecycle("L1"),))]
         patcher = mock.patch(
             "agents_remember.serving.projector.project_and_write",
-            side_effect=lambda config, *, now, provider_refresher=None, landing_state=None: held[0],
+            side_effect=lambda config,
+            *,
+            now,
+            provider_refresher=None,
+            landing_state=None,
+            input_state=None,
+            refresh=None: held[0],
         )
         patcher.start()
         self.addCleanup(patcher.stop)

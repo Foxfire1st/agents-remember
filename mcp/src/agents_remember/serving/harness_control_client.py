@@ -23,6 +23,8 @@ from agents_remember.errors import (
     HarnessControlError,
     HarnessInteractionNotPendingError,
     HarnessRequestConflictError,
+    NativeHistoryLimitExceeded,
+    NativeHistoryUnavailable,
 )
 from agents_remember.serving.harness_capabilities import (
     CapabilitySnapshot,
@@ -579,6 +581,17 @@ def _decode_control_response(response: bytes) -> object:
             raise HarnessRequestConflictError(detail)
         if raw.get("status") == "interaction-not-pending":
             raise HarnessInteractionNotPendingError(detail)
+        if raw.get("status") == "native-history-limit-exceeded":
+            raise NativeHistoryLimitExceeded(
+                detail,
+                actual_bytes=_required_non_negative_int(raw, "actualBytes"),
+                limit_bytes=_required_non_negative_int(raw, "limitBytes"),
+            )
+        if raw.get("status") == "native-history-unavailable":
+            raise NativeHistoryUnavailable(
+                detail,
+                code=_required_text(raw, "code"),
+            )
         raise HarnessControlError(detail)
     return raw.get("result")
 
@@ -861,10 +874,10 @@ def _evidence_page(result: object, *, expected_bridge_epoch: str | None) -> Evid
             raise HarnessControlError("control evidence frames must increase monotonically")
         previous = sequence
         native_method = raw_frame.get("nativeMethod")
-        if native_method is not None and (
-            not isinstance(native_method, str) or not native_method
-        ):
-            raise HarnessControlError("control evidence nativeMethod must be non-empty text or absent")
+        if native_method is not None and (not isinstance(native_method, str) or not native_method):
+            raise HarnessControlError(
+                "control evidence nativeMethod must be non-empty text or absent"
+            )
         thread_id = raw_frame.get("threadId")
         if thread_id is not None and (not isinstance(thread_id, str) or not thread_id):
             raise HarnessControlError("control evidence threadId must be non-empty text or absent")
@@ -925,10 +938,6 @@ def _native_evidence_frames(
         frames.append(frame)
     if next_cursor is not None and not frames:
         raise HarnessControlError("control native evidence empty page cannot carry a continuation")
-    if next_cursor is not None and next_cursor != frames[-1].native_id:
-        raise HarnessControlError(
-            "control native evidence nextCursor does not continue its last frame"
-        )
     return tuple(frames)
 
 

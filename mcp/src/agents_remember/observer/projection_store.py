@@ -23,8 +23,6 @@ from typing import TYPE_CHECKING, Any, Protocol
 
 from agents_remember.controlplane.attention_dismissals import AttentionDismissalStore
 from agents_remember.observer.contract_snapshot import ContractSnapshotCache
-from agents_remember.observer.drift_snapshots import prune_orphaned_drift_snapshots
-from agents_remember.observer.event_retention import prune_expired_lifecycle_event_logs
 from agents_remember.observer.events import Event
 from agents_remember.observer.lifecycle_state import TERMINAL_STATES
 from agents_remember.observer.paths import observer_root
@@ -36,32 +34,18 @@ from agents_remember.observer.projection import (
     WorkspaceProjection,
     task_documents_body_bytes,
 )
+from agents_remember.observer.projection_inputs import (
+    ProjectionInputState,
+    ProjectionRefresh,
+)
 from agents_remember.observer.reducer import project_workspace
 from agents_remember.observer.snapshots import (
-    read_agent_pickups,
-    read_drift_snapshots,
-    read_enclosures,
-    read_engine_process_facts,
-    read_expectation_rows,
-    read_gates,
     read_ledger,
-    read_providers,
     read_route_coverage,
-    read_series_documents,
-    read_setup_progress_nodes,
-    read_setup_summaries,
     read_sidecar_staleness,
-    read_start_progress_entries,
-    read_task_documents,
-    read_tool_reports,
 )
 from agents_remember.observer.store import EventStore
 from agents_remember.observer.ulid import new_ulid
-from agents_remember.observer.worktree_provider_admission import (
-    active_enclosure_worktree_groups,
-    admitted_worktree_groups,
-    series_retained_lifecycle_ids,
-)
 from agents_remember.providers.status import refresh_current_provider_state
 
 if TYPE_CHECKING:
@@ -209,64 +193,49 @@ def project_and_write(
     now: datetime | None = None,
     provider_refresher: ProviderStateRefresh | None = None,
     landing_state: LandingStateReader | None = None,
+    input_state: ProjectionInputState | None = None,
+    refresh: ProjectionRefresh | None = None,
 ) -> WorkspaceProjection:
     """Read logs + structural + analytical snapshots, reduce the tree, write it atomically."""
     moment = now or datetime.now(UTC)
     root = observer_root(config)
-    coordination_root = config.coordination_root
-    # ONE contract pass per tick -- the snapshot is built here on the projection
-    # worker thread and handed (immutable) to read_enclosures, drift-snapshot pruning, and
-    # read_engine_process_facts below, replacing their three independent walk+parse passes.
-    contract_snapshot = _contract_snapshot_cache.build(coordination_root / "tasks")
-    # Read the durable enclosures FIRST so retention is enclosure-aware: a not-yet-retired master
-    # series protects every one of its leaves' event logs from the inactivity TTL (a running durable
-    # task must never lose its history just because it has been a while since its last lifecycle event).
-    enclosures = read_enclosures(coordination_root, contracts=contract_snapshot)
-    prune_expired_lifecycle_event_logs(
-        root,
-        now=moment,
-        protected_lifecycle_ids=series_retained_lifecycle_ids(enclosures, now=moment),
-    )
-    lifecycle_logs = read_lifecycle_logs(root)
-    sidecar_staleness, route_coverage, ledgers = _gather_repo_surfaces_cached(config, moment)
-    provider_groups = admitted_worktree_groups(enclosures, lifecycle_logs, now=moment)
-    engine_groups = active_enclosure_worktree_groups(enclosures, lifecycle_logs, now=moment)
-    prune_orphaned_drift_snapshots(config, contracts=contract_snapshot)
     if provider_refresher is not None:
         provider_refresher.maybe_refresh(config, now=moment)
+    state = input_state or ProjectionInputState(contract_cache=_contract_snapshot_cache)
+    inputs = state.read(
+        config,
+        observer_root=root,
+        now=moment,
+        refresh=refresh or ProjectionRefresh.full(),
+        landing_state=landing_state,
+        lifecycle_reader=read_lifecycle_logs,
+        repo_surface_reader=_gather_repo_surfaces_cached,
+    )
     attention_store = AttentionDismissalStore(root)
     projection = project_workspace(
-        lifecycle_logs,
-        enclosures=enclosures,
-        providers=read_providers(config, now=moment, active_worktree_groups=provider_groups),
+        inputs.lifecycle_logs,
+        enclosures=inputs.enclosures,
+        providers=inputs.providers,
         now=moment,
-        drift_snapshots=read_drift_snapshots(coordination_root, now=moment),
-        sidecar_staleness=sidecar_staleness,
-        setup_summaries=read_setup_summaries(coordination_root, now=moment),
-        setup_progress=read_setup_progress_nodes(
-            coordination_root, now=moment, active_worktree_groups=provider_groups
-        ),
-        route_coverage=route_coverage,
-        tool_reports=read_tool_reports(coordination_root, now=moment),
-        agent_pickups=read_agent_pickups(coordination_root, now=moment),
-        expectation_rows=read_expectation_rows(coordination_root, now=moment),
-        ledgers=ledgers,
-        task_documents=read_task_documents(coordination_root, enclosures=enclosures, now=moment),
-        series=read_series_documents(coordination_root, now=moment),
-        engine_process_facts=read_engine_process_facts(
-            coordination_root,
-            active_worktree_groups=engine_groups,
-            now=moment,
-            landing_state=landing_state,
-            contracts=contract_snapshot,
-        ),
-        engine_start_progress=read_start_progress_entries(coordination_root, now=moment),
-        gates=read_gates(coordination_root, now=moment),
-        attention_dismissals=attention_store.current(),
+        drift_snapshots=inputs.drift_snapshots,
+        sidecar_staleness=inputs.sidecar_staleness,
+        setup_summaries=inputs.setup_summaries,
+        setup_progress=inputs.setup_progress,
+        route_coverage=inputs.route_coverage,
+        tool_reports=inputs.tool_reports,
+        agent_pickups=inputs.agent_pickups,
+        expectation_rows=inputs.expectation_rows,
+        ledgers=inputs.ledgers,
+        task_documents=inputs.task_documents,
+        series=inputs.series,
+        engine_process_facts=inputs.engine_process_facts,
+        engine_start_progress=inputs.engine_start_progress,
+        gates=inputs.gates,
+        attention_dismissals=inputs.attention_dismissals,
         # The Topology constellation filters its tree on this active set — the same
         # active-enclosure admission the Engine Room's engine_process_facts use, so both
         # views share one definition of "active" rather than diverging.
-        active_worktree_groups=sorted(engine_groups),
+        active_worktree_groups=inputs.active_worktree_groups,
     )
     attention_store.prune_lifecycles(
         {lifecycle.id for lifecycle in projection.lifecycles if lifecycle.state not in TERMINAL_STATES}

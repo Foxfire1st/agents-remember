@@ -38,10 +38,10 @@ def test_root_composes_three_owned_child_routers() -> None:
     assert active_router.prefix == "/api/terminal/{ar_session_id}/conversation"
     assert library_router.prefix == "/api/harnesses/{harness_id}/conversations"
     assert control_router.prefix == "/api/terminal/{ar_session_id}"
-    # 260718-CHATS-L1 filled the active shell with exactly its two owned
-    # production routes, L2 filled the library shell with its five owned
-    # routes (pinned below), and L3 filled the control shell with its
-    # seventeen owned routes (pinned below).
+    # 260718-CHATS-L1 filled the active shell with its owned production
+    # routes, L2 filled the library shell with its five owned routes (pinned
+    # below), and L3 filled the control shell with its seventeen owned routes
+    # (pinned below).
     active_paths = {
         (route.path, tuple(sorted(route.methods or ())))
         for route in active_router.routes
@@ -50,6 +50,10 @@ def test_root_composes_three_owned_child_routers() -> None:
     assert active_paths == {
         ("/api/terminal/{ar_session_id}/conversation", ("GET",)),
         ("/api/terminal/{ar_session_id}/conversation/events", ("GET",)),
+        (
+            "/api/terminal/{ar_session_id}/conversation/agents/{agent_id}/history",
+            ("POST",),
+        ),
     }
     control_paths = {
         (tuple(sorted(route.methods or ())), route.path)
@@ -107,9 +111,9 @@ def test_global_registration_has_one_stable_inclusion_seam() -> None:
     harness_api = (
         REPO_ROOT / "mcp" / "src" / "agents_remember" / "serving" / "harness_control_api.py"
     ).read_text(encoding="utf-8")
-    app_source = (
-        REPO_ROOT / "mcp" / "src" / "agents_remember" / "serving" / "app.py"
-    ).read_text(encoding="utf-8")
+    app_source = (REPO_ROOT / "mcp" / "src" / "agents_remember" / "serving" / "app.py").read_text(
+        encoding="utf-8"
+    )
 
     # L0 one-time composition binding: the single registration call now carries the
     # immutable ConversationRuntime authority; still exactly one call and no other seam.
@@ -129,10 +133,7 @@ def test_helper_package_and_lock_select_only_the_exact_repository_dependencies()
     }
     assert lock["packages"][""]["dependencies"] == package["dependencies"]
     assert lock["packages"]["node_modules/@anthropic-ai/claude-agent-sdk"]["version"] == "0.3.207"
-    assert (
-        lock["packages"]["node_modules/@earendil-works/pi-coding-agent"]["version"]
-        == "0.80.7"
-    )
+    assert lock["packages"]["node_modules/@earendil-works/pi-coding-agent"]["version"] == "0.80.7"
 
 
 def test_helper_runtime_source_has_no_incidental_module_resolution() -> None:
@@ -170,7 +171,11 @@ def test_installed_runtime_fixtures_are_allowlisted_evidence_not_enablement() ->
         raw = json.loads((FIXTURE_ROOT / filename).read_text(encoding="utf-8"))
         fixture = RuntimeFixtureEvidence.model_validate(raw)
         loaded[filename] = fixture
-        assert (fixture.harness_id, fixture.runtime_version, fixture.helper_version) == version_tuple
+        assert (
+            fixture.harness_id,
+            fixture.runtime_version,
+            fixture.helper_version,
+        ) == version_tuple
         assert fixture.enables_capabilities is False
         assert fixture.redaction_policy == "allowlist-v1"
         assert any(observation.result == "observed" for observation in fixture.observations)

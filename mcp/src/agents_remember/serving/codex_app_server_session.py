@@ -236,10 +236,7 @@ class CodexAppServerSession:
         return bool(
             desired is not None
             and effective is not None
-            and (
-                desired.model != effective.model
-                or self.desired_effort != self.effective_effort
-            )
+            and (desired.model != effective.model or self.desired_effort != self.effective_effort)
         )
 
     def accept_settings_selection(
@@ -290,7 +287,7 @@ class CodexAppServerSession:
         return {
             "protocol": protocol,
             "codexCliVersion": self.cli_version,
-            "experimentalApi": False,
+            "experimentalApi": True,
             "model": model.model if model else None,
             "desiredModel": self.desired_model.model if self.desired_model else None,
             "advertisedReasoningEfforts": list(model.supported_efforts) if model else [],
@@ -348,7 +345,9 @@ class CodexAppServerSession:
                     "title": self.settings.client_title,
                     "version": self.settings.client_version,
                 },
-                "capabilities": {"experimentalApi": False},
+                # History capability is contract-probed after initialization. Opting in makes
+                # bounded history RPCs callable where present; no version string is authority.
+                "capabilities": {"experimentalApi": True},
             },
         )
         cli_version, evidence = validate_initialize_response(

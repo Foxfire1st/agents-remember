@@ -18,6 +18,7 @@ from agents_remember.serving.conversation.active.projector import (
     ActiveSessionProjector,
     EvidenceTimelineRegressed,
     ZipperEvidenceEvicted,
+    mutation_stream,
 )
 from agents_remember.serving.conversation.active.store import ProjectionStore
 from agents_remember.serving.conversation.models import (
@@ -751,7 +752,7 @@ class ClaudeEngineTests(unittest.IsolatedAsyncioTestCase):
             "with nothing pending the window is complete and its total is known",
         )
         # Force the pend to persist: a fresh frame with its echo still absent.
-        projector._pending_frames.append(
+        projector._echo.pending_frames.append(
             EvidenceFrame(
                 sequence=99,
                 kind="state",
@@ -1329,7 +1330,7 @@ class HydrationBaselineStatusTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(queue.empty())
         self.assertEqual(projector.retained_after(0), ())
         # The baseline is marked delivered: a later semantic change still emits.
-        self.assertEqual(projector._status_revision_emitted, page.status.revision)
+        self.assertEqual(projector._coordinator.status_revision_emitted, page.status.revision)
 
     async def test_first_poll_emits_status_only_when_semantic_state_changes(self) -> None:
         # Boot-timing variant: the status moves between page and first poll. The
@@ -1365,7 +1366,7 @@ class OverflowGapTests(unittest.IsolatedAsyncioTestCase):
         _codex_turn(bridge, "turn-1")
         projector = _projector(bridge)
         await projector.page(before_ordinal=None, limit=50)
-        with mock.patch.object(projector_module, "SUBSCRIBER_QUEUE_LIMIT", 4):
+        with mock.patch.object(mutation_stream, "SUBSCRIBER_QUEUE_LIMIT", 4):
             queue = projector.subscribe()
             for index in range(6):
                 bridge.push_evidence(
@@ -1852,15 +1853,20 @@ class DormantReleaseTests(unittest.IsolatedAsyncioTestCase):
         projector = _projector(bridge)
         result = await projector.page(before_ordinal=None, limit=50)
         self.assertGreater(len(result.items), 0)
-        self.assertGreater(len(projector._live_turn_ids), 0)
+        self.assertGreater(len(projector._native.live_turn_ids), 0)
 
         projector._release_dormant_state()
 
         self.assertTrue(projector._closed)
-        self.assertEqual(projector._store.page(before_ordinal=None, limit=50, total_known=True).items, ())
-        self.assertEqual(projector._live_turn_ids, {})
-        self.assertEqual(projector._live_request_ids, {})
-        self.assertEqual(projector._retention, [])
+        self.assertEqual(
+            projector._stream.store.page(
+                before_ordinal=None, limit=50, total_known=True
+            ).items,
+            (),
+        )
+        self.assertEqual(projector._native.live_turn_ids, {})
+        self.assertEqual(projector._native.live_request_ids, {})
+        self.assertEqual(projector._stream.retention, [])
         # The retired shell no longer matches its identity, so a re-access re-creates it.
         self.assertFalse(projector.matches(_identity("codex")))
 

@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import cast
 
 import pytest
+from _agent_wire_fixtures import turn_completed_params, turn_started_params
 from agents_remember.errors import (
     CodexAppServerError,
     HarnessAdapterBusyError,
@@ -167,8 +168,7 @@ def add_model(
             "isDefault": False,
             "defaultReasoningEffort": default_effort,
             "supportedReasoningEfforts": [
-                {"reasoningEffort": effort, "description": effort.title()}
-                for effort in efforts
+                {"reasoningEffort": effort, "description": effort.title()} for effort in efforts
             ],
         }
     )
@@ -312,7 +312,7 @@ async def test_handshake_uses_stable_protocol_and_exposes_effort_menu() -> None:
             "thread/start",
         ]
         initialize_params = transport.requests[0][1]
-        assert initialize_params["capabilities"] == {"experimentalApi": False}
+        assert initialize_params["capabilities"] == {"experimentalApi": True}
         thread_params = transport.requests[2][1]
         assert thread_params["config"] == {
             "feature_flag": True,
@@ -663,8 +663,9 @@ async def test_codex_terminal_correlation_is_bounded_across_many_synchronous_tur
 
 
 @pytest.mark.anyio
-async def test_early_codex_completion_releases_live_correlation_and_late_duplicate_is_inert(
-) -> None:
+async def test_early_codex_completion_releases_live_correlation_and_late_duplicate_is_inert() -> (
+    None
+):
     data = fixture()
     transport = BlockingTurnStartTransport()
     prime_start(transport, data)
@@ -1075,14 +1076,15 @@ async def test_correlated_server_approval_and_elicitation_responses() -> None:
 
 
 @pytest.mark.anyio
-async def test_experimental_server_request_fails_instead_of_enabling_experimental_api() -> None:
-    """Experimental request types are declined (never enabled), and the bridge survives.
+async def test_unknown_server_request_is_declined_while_experimental_history_stays_enabled() -> (
+    None
+):
+    """One unknown server request is declined, and the bridge survives.
 
-    The decline contract is unchanged (respond_error -32601, no experimental API);
-    the failure contract deliberately changed: an unknown/experimental request
-    METHOD is vendor traffic and degrades to preserved evidence on any thread
-    instead of marking the bridge failed (multiplexed seats make new request
-    types routine).
+    Enabling the experimental client capability is required to probe bounded
+    history methods. It does not mean every experimental server-to-client
+    request is supported: this unknown METHOD still receives exact -32601 and
+    degrades to preserved evidence instead of marking the bridge failed.
     """
 
     data = fixture()
@@ -1167,6 +1169,69 @@ async def test_reconnect_resumes_reads_and_reconciles_without_resend() -> None:
             "thread/read",
         ]
         assert (await adapter.snapshot()).control == "ready"
+    finally:
+        await adapter.stop("forced")
+
+
+@pytest.mark.anyio
+async def test_child_terminal_registry_survives_stale_status_and_reconnect() -> None:
+    """A completed child stays terminal until an explicit later turn starts."""
+
+    data = fixture()
+    first = FakeCodexTransport()
+    prime_start(first, data)
+    second = FakeCodexTransport()
+    prime_start(second, data, resume=True)
+    transports = deque([first, second])
+    adapter = CodexAppServerAdapter(
+        CodexAppServerSettings(model="gpt-5.6-sol", reasoning_effort="xhigh"),
+        transport_factory=transports.popleft,
+        clock=lambda: "2026-07-14T12:05:00+00:00",
+    )
+    await adapter.start(launch())
+    child = "agent-registry-1"
+    try:
+        first.emit(
+            {
+                "method": "turn/started",
+                "params": turn_started_params(child, "child-turn-1"),
+            }
+        )
+        first.emit(
+            {
+                "method": "turn/completed",
+                "params": turn_completed_params(child, "child-turn-1"),
+            }
+        )
+        first.emit(
+            {
+                "method": "thread/status/changed",
+                "params": {"threadId": child, "status": {"type": "idle"}},
+            }
+        )
+        await settle()
+        assert (
+            fixture_object((await adapter.snapshot()).raw, "agentRegistry", child)["status"]
+            == "completed"
+        )
+
+        await adapter._reconnect()
+        assert (
+            fixture_object((await adapter.snapshot()).raw, "agentRegistry", child)["status"]
+            == "completed"
+        )
+
+        second.emit(
+            {
+                "method": "turn/started",
+                "params": turn_started_params(child, "child-turn-2"),
+            }
+        )
+        await settle()
+        assert (
+            fixture_object((await adapter.snapshot()).raw, "agentRegistry", child)["status"]
+            == "running"
+        )
     finally:
         await adapter.stop("forced")
 

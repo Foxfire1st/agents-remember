@@ -16,6 +16,7 @@ import {
 } from "../../../data/conversation/agents";
 import {
   activeConversationStore,
+  hydrateAgentConversation,
   loadOlderConversation,
   readConversationScroll,
   rememberConversationScroll,
@@ -62,6 +63,19 @@ const agentFocusNote = css({
   textOverflow: "ellipsis",
   whiteSpace: "nowrap",
   minWidth: "0",
+});
+const agentHistoryError = css({
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "space-between",
+  gap: "0.5rem",
+  padding: "0.35rem 0.5rem",
+  borderWidth: "1px",
+  borderStyle: "solid",
+  borderColor: "red.700",
+  borderRadius: "2px",
+  color: "red.300",
+  fontSize: "0.66rem",
 });
 
 // The surface-level agent focus keys (the Claude Code sub-agent navigation model):
@@ -136,6 +150,11 @@ export function ConversationSurface({
   const agents = useMemo(() => deriveAgents(items), [items]);
   const agentFocus = effectiveAgentFocus(storedAgentFocus, agents);
   const focusedAgent = agentFocus === null ? undefined : agents.find((a) => a.agentId === agentFocus);
+  const agentHistoryState = useActiveConversation((state) =>
+    agentFocus === null
+      ? undefined
+      : state.agentHistoryBySession[sessionId]?.[agentFocus],
+  );
   const focusedItems = useMemo(
     () => filterItemsForFocus(items, agentFocus),
     [items, agentFocus],
@@ -156,6 +175,14 @@ export function ConversationSurface({
     },
     [agents, sessionId, visible],
   );
+
+  // Focus can already exist when a rehydrated page or remounted keep-warm surface arrives. Drive
+  // acquisition from the validated effective focus, not only from click handlers; the runtime
+  // singleflight makes event selection + remount converge on exactly one POST.
+  useEffect(() => {
+    if (agentFocus === null) return;
+    void hydrateAgentConversation(sessionId, agentFocus);
+  }, [agentFocus, projection?.identity.bridgeEpoch, sessionId]);
 
   const onSurfaceKeyDown = useCallback(
     (event: React.KeyboardEvent<HTMLDivElement>) => {
@@ -308,6 +335,23 @@ export function ConversationSurface({
       {/* The agents area owns the compact line — the count chip plus, in an agent view, the
           viewing note + back-to-parent affordance (260718-CHATS-L7R R5). */}
       <AgentsArea agents={agents} focusedAgentId={agentFocus} onFocusAgent={applyAgentFocus} />
+      {agentFocus !== null && agentHistoryState?.phase === "failed" ? (
+        <div
+          className={agentHistoryError}
+          role="status"
+          data-testid="conversation-agent-history-error"
+        >
+          <span>{agentHistoryState.error.detail}</span>
+          <button
+            type="button"
+            className={toggle}
+            onClick={() => void hydrateAgentConversation(sessionId, agentFocus)}
+            data-testid="conversation-agent-history-retry"
+          >
+            retry child
+          </button>
+        </div>
+      ) : null}
       {/* The timeline well stays mounted for an empty conversation; its center becomes the
           product welcome surface until the first item arrives. */}
       <ConversationTimeline

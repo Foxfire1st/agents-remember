@@ -16,7 +16,11 @@ from agents_remember.errors import (
 from agents_remember.serving.harness_control_models import LaunchSpec, ShutdownMode
 
 CODEX_APP_SERVER_PROTOCOL = "codex-app-server"
-DEFAULT_MAX_MESSAGE_BYTES = 4 * 1024 * 1024
+# Compatibility precedent: Codex's remote app-server client accepts 128 MiB WebSocket
+# messages/frames. This is an emergency framing fuse for malformed/runaway JSONL only;
+# native-history acquisition imposes its own source paging and output budgets.
+CODEX_REMOTE_COMPATIBILITY_CEILING_BYTES = 128 << 20
+DEFAULT_MAX_MESSAGE_BYTES = CODEX_REMOTE_COMPATIBILITY_CEILING_BYTES
 
 JsonObject = dict[str, object]
 RequestId = str | int
@@ -220,9 +224,13 @@ class CodexStdioTransport:
                     if not self._closing:
                         self._disconnect("Codex app-server stdout closed")
                     return
-                if len(line) > self._max_message_bytes:
+                # The fuse is a JSON payload bound. JSONL's one record delimiter is framing,
+                # not payload: exactly 128 MiB plus its required newline is valid; the first
+                # payload byte beyond the fuse is fatal to this shared transport.
+                payload = line[:-1] if line.endswith(b"\n") else line
+                if len(payload) > self._max_message_bytes:
                     raise CodexAppServerError("Codex app-server message exceeded the byte limit")
-                message = self._decode(line)
+                message = self._decode(payload)
                 if "method" in message:
                     self._offer_event(message)
                 else:
@@ -249,11 +257,7 @@ class CodexStdioTransport:
 
     def _resolve_response(self, message: JsonObject) -> None:
         response_id = message.get("id")
-        if (
-            not isinstance(response_id, int)
-            or isinstance(response_id, bool)
-            or response_id < 1
-        ):
+        if not isinstance(response_id, int) or isinstance(response_id, bool) or response_id < 1:
             raise CodexAppServerError("Codex app-server response has an invalid request id")
         pending = self._pending.pop(response_id, None)
         if pending is None:

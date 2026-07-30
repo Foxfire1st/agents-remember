@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import AsyncIterator, Callable, Mapping
-from copy import deepcopy
 from typing import cast
 
 import pytest
@@ -145,7 +144,7 @@ async def test_spawned_subagent_traffic_never_fails_the_bridge() -> None:
         for index, thread_id in enumerate(agents):
             state = adapter._threads[thread_id]
             assert not state.is_parent
-            assert state.status == "active"
+            assert state.status == "completed"
             assert state.active_turn_id is None
             assert list(state.completed_turns) == [f"agent-turn-{index}"]
         assert adapter._parent_state().active_turn_id is None
@@ -200,9 +199,7 @@ async def test_subagent_approval_is_multiplexed_and_answered_by_request_id() -> 
         # A server-settled sub-agent request clears per thread without respond().
         transport.emit(agent_approval("agent-approval-2", "agent-thread-2", "agent-turn-1"))
         await eventually(lambda: len(live_snapshot(adapter).pending_interactions) == 1)
-        transport.emit(
-            server_request_resolved_notification("agent-thread-2", "agent-approval-2")
-        )
+        transport.emit(server_request_resolved_notification("agent-thread-2", "agent-approval-2"))
         await eventually(lambda: len(live_snapshot(adapter).pending_interactions) == 0)
         assert live_snapshot(adapter).control == "ready"
         assert live_snapshot(adapter).pending_interaction is None
@@ -318,11 +315,14 @@ async def test_read_native_page_reads_the_requested_agent_thread() -> None:
     data = fixture()
     transport = FakeCodexTransport()
     prime_start(transport, data)
-    agent_thread = deepcopy(fixture_object(data, "threadStartResult", "thread"))
-    agent_thread["id"] = "agent-thread-1"
-    transport.queue_response("thread/read", {"thread": agent_thread})
-    parent_thread = deepcopy(fixture_object(data, "threadStartResult", "thread"))
-    transport.queue_response("thread/read", {"thread": parent_thread})
+    transport.queue_response(
+        "thread/items/list",
+        {"data": [], "nextCursor": None, "backwardsCursor": None},
+    )
+    transport.queue_response(
+        "thread/items/list",
+        {"data": [], "nextCursor": None, "backwardsCursor": None},
+    )
     adapter = make_adapter(transport)
     await adapter.start(launch())
     try:
@@ -333,15 +333,15 @@ async def test_read_native_page_reads_the_requested_agent_thread() -> None:
             thread_id="agent-thread-1",
         )
         assert transport.requests[-1] == (
-            "thread/read",
-            {"threadId": "agent-thread-1", "includeTurns": True},
+            "thread/items/list",
+            {"threadId": "agent-thread-1", "limit": 1, "sortDirection": "asc"},
         )
         assert agent_page.frames == ()
 
         await adapter.read_native_page(cursor=None, limit=10, byte_budget=4096)
         assert transport.requests[-1] == (
-            "thread/read",
-            {"threadId": "thread-1", "includeTurns": True},
+            "thread/items/list",
+            {"threadId": "thread-1", "limit": 1, "sortDirection": "asc"},
         )
     finally:
         await adapter.stop("forced")
@@ -449,7 +449,9 @@ async def test_registry_full_degrades_and_settled_threads_evict() -> None:
 
         # Once an agent's turn completes, that settled thread IS evicted to make room.
         transport.emit(agent_turn_completed("agent-fill-0", "agent-fill-turn-0"))
-        await eventually(lambda: "agent-fill-turn-0" in adapter._threads["agent-fill-0"].completed_turns)
+        await eventually(
+            lambda: "agent-fill-turn-0" in adapter._threads["agent-fill-0"].completed_turns
+        )
         transport.emit(agent_turn_started("agent-after-evict", "agent-after-evict-turn"))
         await eventually(lambda: "agent-after-evict" in adapter._threads)
         assert "agent-fill-0" not in adapter._threads
@@ -483,7 +485,9 @@ async def test_concurrent_parent_server_requests_never_fail_the_bridge() -> None
         assert snap.activity == "blocked"
         # The singular slot carries the OLDEST parent pending for back-compat.
         assert snap.pending_interaction is not None
-        assert snap.pending_interaction.interaction_id == snap.pending_interactions[0].interaction_id
+        assert (
+            snap.pending_interaction.interaction_id == snap.pending_interactions[0].interaction_id
+        )
         assert {p.interaction_id for p in snap.pending_interactions} == {
             snap.pending_interactions[0].interaction_id,
             snap.pending_interactions[1].interaction_id,
@@ -526,7 +530,12 @@ async def test_experimental_server_request_on_parent_degrades() -> None:
             {
                 "id": "req-exp-1",
                 "method": "item/tool/requestUserInput",
-                "params": {"threadId": "thread-1", "turnId": "turn-1", "itemId": "i-1", "questions": []},
+                "params": {
+                    "threadId": "thread-1",
+                    "turnId": "turn-1",
+                    "itemId": "i-1",
+                    "questions": [],
+                },
             }
         )
         await eventually(lambda: bool(transport.server_errors))
@@ -693,7 +702,9 @@ async def test_delta_flood_sheds_oldest_deltas_with_an_honest_notice() -> None:
     try:
         for thread in agents:
             transport.emit(agent_turn_started(thread, f"{thread}-turn"))
-            transport.emit(agent_message_completed(thread, f"{thread}-turn", f"{thread}-msg", "done"))
+            transport.emit(
+                agent_message_completed(thread, f"{thread}-turn", f"{thread}-msg", "done")
+            )
         for _ in range(500):
             for thread in agents:
                 transport.emit(
@@ -704,7 +715,9 @@ async def test_delta_flood_sheds_oldest_deltas_with_an_honest_notice() -> None:
                 )
             total_deltas += len(agents)
         # Let the pump run without consuming: the queue fills and shedding engages.
-        await eventually(lambda: adapter._events.full() or adapter._event_sequence >= 6 + total_deltas)
+        await eventually(
+            lambda: adapter._events.full() or adapter._event_sequence >= 6 + total_deltas
+        )
         assert live_snapshot(adapter).control == "ready"
         assert adapter._event_sequence == 6 + total_deltas  # nothing un-sequenced, no raise
 
@@ -738,7 +751,9 @@ async def test_delta_flood_sheds_oldest_deltas_with_an_honest_notice() -> None:
         await adapter.stop("forced")
 
 
-async def _flood_deltas(adapter: CodexAppServerAdapter, transport: FakeCodexTransport, thread: str) -> int:
+async def _flood_deltas(
+    adapter: CodexAppServerAdapter, transport: FakeCodexTransport, thread: str
+) -> int:
     """A pure-delta flood past the queue limit; returns the exact shed count."""
 
     total = ADAPTER_EVENT_QUEUE_LIMIT + 76

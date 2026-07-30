@@ -16,6 +16,11 @@ from agents_remember.errors import (
     HarnessAdapterDisconnectedError,
     HarnessControlError,
 )
+from agents_remember.serving.codex_agent_lifecycle import (
+    completed_turn_status,
+    merge_agent_status,
+)
+from agents_remember.serving.codex_app_server_history import CodexNativeHistoryReader
 from agents_remember.serving.codex_app_server_protocol import (
     CODEX_APP_SERVER_PROTOCOL,
     CodexAppServerTransport,
@@ -38,7 +43,6 @@ from agents_remember.serving.codex_app_server_state import (
     interaction_result,
     iso_from_epoch,
     iso_from_millis,
-    native_evidence_frames_from_thread,
     parse_server_interaction,
     parse_turn,
     required_object,
@@ -71,7 +75,6 @@ from agents_remember.serving.harness_control_models import (
     SubmissionReceipt,
     TranscriptEntry,
     read_asset_bytes,
-    window_native_evidence_page,
 )
 
 Clock = Callable[[], str]
@@ -143,6 +146,7 @@ class CodexAppServerAdapter:
     ) -> None:
         self._settings = settings
         self._session = CodexAppServerSession(settings, transport_factory=transport_factory)
+        self._native_history = CodexNativeHistoryReader()
         self._clock = clock
         self._snapshot: AdapterSnapshot | None = None
         self._events: asyncio.Queue[AdapterEvent | None] = asyncio.Queue(
@@ -475,35 +479,25 @@ class CodexAppServerAdapter:
         byte_budget: int,
         thread_id: str | None = None,
     ) -> NativeEvidencePage:
-        """Page the live thread through ``thread/read``; the native read stays the authority.
+        """Page native history through the probed bounded contract or explicit legacy path.
 
         ``thread_id`` selects the thread to read: ``None`` reads the
         parent/session thread exactly as before, an explicit id reads that (sub-agent)
-        thread — the app-server serves ``thread/read`` for every multiplexed thread.
+        thread. The dedicated history reader owns source paging, opaque continuation,
+        item/byte limits, and method-unavailable-only legacy compatibility.
         """
 
         if (await self.snapshot()).control == "disconnected":
             await self._reconnect()
         requested_thread_id = thread_id if thread_id is not None else self._require_thread_id()
         transport = self._require_transport()
-        result = await transport.request(
-            "thread/read",
-            {"threadId": requested_thread_id, "includeTurns": True},
+        return await self._native_history.read_page(
+            transport,
+            thread_id=requested_thread_id,
+            cursor=cursor,
+            limit=limit,
+            byte_budget=byte_budget,
         )
-        thread = required_object(result.get("thread"), context="thread/read response.thread")
-        returned_thread_id = required_text(thread, "id", context="thread/read response.thread")
-        if returned_thread_id != requested_thread_id:
-            raise CodexAppServerError("thread/read returned a different Codex thread id")
-        frames = native_evidence_frames_from_thread(thread)
-        try:
-            return window_native_evidence_page(
-                frames,
-                cursor=cursor,
-                limit=limit,
-                byte_budget=byte_budget,
-            )
-        except HarnessControlError as exc:
-            raise CodexAppServerError(f"Codex native evidence page failed: {exc}") from exc
 
     async def stop(self, mode: ShutdownMode) -> None:
         if self._stopped:
@@ -699,11 +693,13 @@ class CodexAppServerAdapter:
                 return
             # A sub-agent thread's status never moves the parent-scoped activity;
             # it is registry + raw evidence only.
-            state.status = required_text(
+            candidate_status = required_text(
                 required_object(params.get("status"), context="thread/status/changed status"),
                 "type",
                 context="thread/status/changed status",
             )
+            state.status = merge_agent_status(state.status, candidate_status)
+            self._publish_agent_registry()
             await self._emit_notification(method, params)
             return
         if method == "turn/started":
@@ -714,6 +710,10 @@ class CodexAppServerAdapter:
             if state.is_parent:
                 await self._set_activity("running", turn_id=turn_id)
                 return
+            state.status = merge_agent_status(
+                state.status, "running", explicit_turn_start=True
+            )
+            self._publish_agent_registry()
             await self._emit_notification(method, params)
             return
         if method == "turn/completed":
@@ -771,7 +771,9 @@ class CodexAppServerAdapter:
             # completion is per-thread bookkeeping plus raw evidence, never settlement.
             if state.active_turn_id == turn_id:
                 state.active_turn_id = None
+            state.status = completed_turn_status(turn.get("status"))
             self._remember_completed_turn(state, turn_id, None)
+            self._publish_agent_registry()
             await self._emit_notification("turn/completed", params)
             return
         operation = state.turn_operations.get(turn_id)
@@ -986,10 +988,12 @@ class CodexAppServerAdapter:
         launch = self._session.launch
         assert launch is not None
         snapshot = await self._session.connect(launch, resume_thread_id=thread_id)
+        self._native_history.reset_probe()
         self._snapshot = replace(
             snapshot,
             acceptance=self._busy_acceptance(snapshot.activity, snapshot.acceptance),
         )
+        self._publish_agent_registry()
         self._processor = asyncio.create_task(self._run_messages(self._require_transport()))
         await self._emit("state", raw={"codexMethod": "thread/resume", "reconnected": True})
 
@@ -1300,7 +1304,7 @@ class CodexAppServerAdapter:
                     state.agent_path = agent_path
                 kind = item.get("kind")
                 if isinstance(kind, str) and kind:
-                    state.status = kind
+                    state.status = merge_agent_status(state.status, kind)
                 learned = True
         elif item_type == "collabAgentToolCall":
             receivers = item.get("receiverThreadIds")
@@ -1317,7 +1321,7 @@ class CodexAppServerAdapter:
                         continue
                     status = agent_state.get("status")
                     if isinstance(status, str) and status:
-                        state.status = status
+                        state.status = merge_agent_status(state.status, status)
                         learned = True
         if learned:
             self._publish_agent_registry()

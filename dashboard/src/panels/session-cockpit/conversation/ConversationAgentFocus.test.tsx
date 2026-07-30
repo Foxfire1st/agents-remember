@@ -7,16 +7,24 @@
 // longer carries (an LRU-evicted, rehydrated projection) recomputes to the parent — never
 // re-applied blindly.
 
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { announceAssertive, announcePolite } from "../../../data/announcer";
 import type { ActiveConversationProjection } from "../../../data/conversation/reducer";
 import { emptyProjection } from "../../../data/conversation/reducer";
-import { activeConversationStore } from "../../../data/conversation/store";
+import {
+  activeConversationStore,
+  connectConversation,
+  disconnectConversation,
+} from "../../../data/conversation/store";
+import type { EventSourceCtor } from "../../../data/conversation/stream";
 import type {
   ActiveConversationRef,
+  ActiveEventCursor,
+  ConversationCapabilities,
   ConversationItem,
+  ConversationPage,
   ConversationStatus,
 } from "../../../data/conversation/types";
 import { ConversationSurface } from "./ConversationSurface";
@@ -104,6 +112,39 @@ function seed(items: ConversationItem[] = ALL_ITEMS): void {
   }));
 }
 
+const FakeEventSource = class {
+  addEventListener(): void {}
+  close(): void {}
+} as unknown as EventSourceCtor;
+
+function initialPage(): ConversationPage {
+  return {
+    identity: identity(),
+    items: [],
+    page: { olderCursor: null, hasOlder: false },
+    eventCursor: "evt-0" as ActiveEventCursor,
+    hydrationId: "h",
+    status: status(),
+    capabilities: {} as ConversationCapabilities,
+  };
+}
+
+function connectRuntime(
+  post: () => Promise<Response>,
+  calls: Array<{ method: string; url: string }>,
+): void {
+  const fetchImpl = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const method = init?.method ?? "GET";
+    calls.push({ method, url: String(input) });
+    if (method === "POST") return post();
+    return { ok: true, status: 200, json: async () => initialPage() } as Response;
+  }) as typeof fetch;
+  connectConversation(SESSION_ID, "e1", {
+    fetchImpl,
+    eventSourceCtor: FakeEventSource,
+  });
+}
+
 function surface() {
   return <ConversationSurface sessionId={SESSION_ID} onRetry={() => {}} onShowDiagnostics={() => {}} />;
 }
@@ -137,6 +178,7 @@ describe("ConversationSurface agent focus", () => {
     delete proto.clientHeight;
     delete proto.scrollTo;
     cleanup();
+    disconnectConversation(SESSION_ID);
     activeConversationStore.getState().reset();
     vi.clearAllMocks();
   });
@@ -264,6 +306,102 @@ describe("ConversationSurface agent focus", () => {
 
     expect(screen.queryByTestId("conversation-agent-focus-note")).toBeNull();
     expect(articleIds().sort()).toEqual(["codex-agent-t-1", "parent-1", "parent-2"]);
+  });
+
+  it("hydrates a valid persisted focus once after page/remount and never hydrates a stale focus", async () => {
+    const calls: Array<{ method: string; url: string }> = [];
+    connectRuntime(
+      async () =>
+        ({
+          ok: true,
+          status: 200,
+          json: async () => ({ status: "hydrated", agentId: "t-1" }),
+        }) as Response,
+      calls,
+    );
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    activeConversationStore.getState().setAgentFocus(SESSION_ID, "t-1");
+    seed();
+
+    const mounted = render(surface());
+    await waitFor(() => {
+      expect(calls.filter((call) => call.method === "POST")).toHaveLength(1);
+    });
+    mounted.unmount();
+    render(surface());
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(calls.filter((call) => call.method === "POST")).toHaveLength(1);
+
+    cleanup();
+    disconnectConversation(SESSION_ID);
+    activeConversationStore.getState().reset();
+    const staleCalls: Array<{ method: string; url: string }> = [];
+    connectRuntime(
+      async () =>
+        ({
+          ok: true,
+          status: 200,
+          json: async () => ({ status: "hydrated", agentId: "evicted-agent" }),
+        }) as Response,
+      staleCalls,
+    );
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    activeConversationStore.getState().setAgentFocus(SESSION_ID, "evicted-agent");
+    seed();
+    render(surface());
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(staleCalls.filter((call) => call.method === "POST")).toHaveLength(0);
+  });
+
+  it("renders a child-scoped history failure with retry while the parent projection remains live", async () => {
+    const calls: Array<{ method: string; url: string }> = [];
+    let failing = true;
+    connectRuntime(
+      async () =>
+        failing
+          ? ({
+              ok: false,
+              status: 503,
+              json: async () => ({
+                status: "history-unavailable",
+                detail: "selected child bridge unavailable",
+              }),
+            } as Response)
+          : ({
+              ok: true,
+              status: 200,
+              json: async () => ({ status: "hydrated", agentId: "t-1" }),
+            } as Response),
+      calls,
+    );
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    activeConversationStore.getState().setAgentFocus(SESSION_ID, "t-1");
+    seed();
+    render(surface());
+
+    expect(
+      (await screen.findByTestId("conversation-agent-history-error")).textContent,
+    ).toContain("selected child bridge unavailable");
+    expect(activeConversationStore.getState().bySession[SESSION_ID]?.stream).toBe("live");
+    expect(activeConversationStore.getState().errorBySession[SESSION_ID]).toBeUndefined();
+
+    failing = false;
+    fireEvent.click(screen.getByTestId("conversation-agent-history-retry"));
+    await waitFor(() => {
+      expect(screen.queryByTestId("conversation-agent-history-error")).toBeNull();
+    });
+    expect(calls.filter((call) => call.method === "POST")).toHaveLength(2);
+    expect(activeConversationStore.getState().bySession[SESSION_ID]?.stream).toBe("live");
   });
 
   it("never voices a focus switch from a hidden keep-alive surface", () => {

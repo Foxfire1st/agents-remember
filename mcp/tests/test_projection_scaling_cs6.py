@@ -34,6 +34,7 @@ from agents_remember.observer.paths import observer_logs_root
 from agents_remember.observer.projection import (
     TASK_DOCUMENTS_PAYLOAD_BUDGET_BYTES,
     Analytics,
+    EngineProcessFacts,
     TaskDocNode,
     WorkspaceProjection,
     task_documents_body_bytes,
@@ -47,6 +48,7 @@ from agents_remember.observer.snapshots import (
     read_series_documents,
     read_task_document_body,
     read_task_documents,
+    refresh_engine_process_landing,
 )
 from agents_remember.observer.store import EventStore
 from agents_remember.worktrees.task_resolver import ENCLOSURES_DIR, SERIES_CONTRACT_FILENAME
@@ -179,6 +181,65 @@ class GitStatusCacheTests(unittest.TestCase):
 
 class LandingProjectionHotPathTests(unittest.TestCase):
     """Remote landing observation must not serialize the recurring projection reader."""
+
+    def test_heartbeat_refresh_replaces_only_landing_rows(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            coordination_root = Path(tmp)
+            contract = default_contract(
+                task_name="landing-heartbeat",
+                repo_name="repo",
+                workflow_kind="light",
+                memory_mode="disabled",
+                coordination_root=coordination_root,
+                code_repo_path=coordination_root / "repo",
+                code_source_branch="main",
+                code_work_branch="ar/landing",
+                code_base_commit="base",
+                worktree_name="landing-heartbeat",
+            )
+            contract.contract_path.parent.mkdir(parents=True, exist_ok=True)
+            write_contract(contract.contract_path, contract)
+            snapshot = contract_snapshot.build_contract_snapshot(
+                coordination_root / "tasks"
+            )
+            original = EngineProcessFacts(
+                contract={"contract_path": contract.contract_path.as_posix()},
+                guidance={"phase": "work"},
+                status={
+                    "code_worktree_dirty": False,
+                    "landing": [{"ref": "old", "staleSeconds": 15.0}],
+                },
+            )
+
+            class PublishedLanding:
+                def __init__(self) -> None:
+                    self.seen: tuple[WorktreeContract, datetime] | None = None
+
+                def current(
+                    self, contract: WorktreeContract, *, now: datetime
+                ) -> list[dict[str, object]] | None:
+                    self.seen = contract, now
+                    return [{"ref": "origin/main", "staleSeconds": 1.0}]
+
+            landing_state = PublishedLanding()
+            refreshed = refresh_engine_process_landing(
+                [original],
+                now=NOW,
+                landing_state=landing_state,
+                contracts=snapshot,
+            )
+
+            self.assertEqual(refreshed[0].contract, original.contract)
+            self.assertEqual(refreshed[0].guidance, original.guidance)
+            status = refreshed[0].status
+            self.assertIsNotNone(status)
+            assert status is not None
+            self.assertEqual(status["code_worktree_dirty"], False)
+            self.assertEqual(
+                status["landing"],
+                [{"ref": "origin/main", "staleSeconds": 1.0}],
+            )
+            self.assertEqual(landing_state.seen, (contract, NOW))
 
     def test_slow_remote_landing_probes_do_not_block_engine_facts(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

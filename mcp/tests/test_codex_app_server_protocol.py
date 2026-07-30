@@ -6,7 +6,10 @@ from pathlib import Path
 
 import pytest
 from agents_remember.errors import CodexAppServerError
-from agents_remember.serving.codex_app_server_protocol import CodexStdioTransport
+from agents_remember.serving.codex_app_server_protocol import (
+    CODEX_REMOTE_COMPATIBILITY_CEILING_BYTES,
+    CodexStdioTransport,
+)
 from agents_remember.serving.codex_app_server_state import (
     activity_from_thread_status,
     parse_thread_open_response,
@@ -87,6 +90,148 @@ async def test_stdio_transport_fails_oversized_stream_message_loudly(tmp_path: P
     try:
         with pytest.raises(CodexAppServerError, match="stream limit"):
             await anext(messages)
+    finally:
+        await transport.stop("forced")
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("payload_bytes", [1 << 20, 4 << 20, 4_846_576])
+async def test_stdio_transport_accepts_increasing_valid_messages_below_codex_fuse(
+    tmp_path: Path,
+    payload_bytes: int,
+) -> None:
+    script = f"""
+import json
+import sys
+
+request = json.loads(sys.stdin.readline())
+prefix = '{{"id":' + str(request["id"]) + ',"result":{{"payload":"'
+suffix = '"}}}}'
+content_size = {payload_bytes} - len(prefix.encode()) - len(suffix.encode())
+sys.stdout.write(prefix + ("x" * content_size) + suffix + "\\n")
+sys.stdout.flush()
+"""
+    transport = CodexStdioTransport()
+    await transport.start(launch(tmp_path, script))
+    try:
+        result = await transport.request("large", {})
+        payload = result["payload"]
+        assert isinstance(payload, str)
+        assert len(payload.encode()) < payload_bytes
+    finally:
+        await transport.stop("forced")
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(("payload_bytes", "accepted"), [(4096, True), (4097, False)])
+async def test_stdio_transport_fuse_counts_json_payload_but_not_its_newline(
+    tmp_path: Path,
+    payload_bytes: int,
+    accepted: bool,
+) -> None:
+    script = f"""
+import json
+import sys
+
+request = json.loads(sys.stdin.readline())
+prefix = '{{"id":' + str(request["id"]) + ',"result":{{"payload":"'
+suffix = '"}}}}'
+content_size = {payload_bytes} - len(prefix.encode()) - len(suffix.encode())
+sys.stdout.write(prefix + ("x" * content_size) + suffix + "\\n")
+sys.stdout.flush()
+sys.stdin.read()
+"""
+    transport = CodexStdioTransport(max_message_bytes=4096)
+    await transport.start(launch(tmp_path, script))
+    try:
+        if accepted:
+            assert isinstance((await transport.request("boundary", {}))["payload"], str)
+        else:
+            with pytest.raises(CodexAppServerError, match=r"(stream|byte) limit"):
+                await transport.request("boundary", {})
+    finally:
+        await transport.stop("forced")
+
+
+def test_default_transport_fuse_matches_codex_remote_compatibility_precedent() -> None:
+    assert CODEX_REMOTE_COMPATIBILITY_CEILING_BYTES == 128 << 20
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("payload_bytes", "accepted"),
+    [
+        (CODEX_REMOTE_COMPATIBILITY_CEILING_BYTES, True),
+        (CODEX_REMOTE_COMPATIBILITY_CEILING_BYTES + 1, False),
+    ],
+)
+async def test_default_fuse_accepts_exactly_128_mib_payload_plus_newline_and_rejects_one_more(
+    tmp_path: Path,
+    payload_bytes: int,
+    accepted: bool,
+) -> None:
+    script = f"""
+import json
+import sys
+
+request = json.loads(sys.stdin.readline())
+prefix = '{{"id":' + str(request["id"]) + ',"result":{{"payload":"'
+suffix = '"}}}}'
+content_size = {payload_bytes} - len(prefix.encode()) - len(suffix.encode())
+sys.stdout.write(prefix + ("x" * content_size) + suffix + "\\n")
+sys.stdout.flush()
+sys.stdin.read()
+"""
+    transport = CodexStdioTransport()
+    await transport.start(launch(tmp_path, script))
+    try:
+        if accepted:
+            result = await transport.request("exact-default-boundary", {})
+            payload = result["payload"]
+            assert isinstance(payload, str)
+            assert len(payload) == payload_bytes - len('{"id":1,"result":{"payload":"') - len('"}}')
+        else:
+            with pytest.raises(CodexAppServerError, match=r"(stream|byte) limit"):
+                await transport.request("one-byte-over-default-boundary", {})
+    finally:
+        await transport.stop("forced")
+
+
+@pytest.mark.anyio
+async def test_above_fuse_is_one_explicit_shared_transport_fatal(
+    tmp_path: Path,
+) -> None:
+    script = """
+import json
+import sys
+
+first = json.loads(sys.stdin.readline())
+second = json.loads(sys.stdin.readline())
+prefix = '{"id":' + str(first["id"]) + ',"result":{"payload":"'
+suffix = '"}}'
+content_size = 4097 - len(prefix.encode()) - len(suffix.encode())
+sys.stdout.write(prefix + ("x" * content_size) + suffix + "\\n")
+sys.stdout.flush()
+sys.stdin.read()
+"""
+    transport = CodexStdioTransport(max_message_bytes=4096)
+    await transport.start(launch(tmp_path, script))
+    messages = transport.messages()
+    try:
+        first = asyncio.create_task(transport.request("first-pending", {}))
+        second = asyncio.create_task(transport.request("second-pending", {}))
+        first_error, second_error = await asyncio.gather(
+            first,
+            second,
+            return_exceptions=True,
+        )
+        with pytest.raises(CodexAppServerError) as event_info:
+            await anext(messages)
+        event_error = event_info.value
+        assert isinstance(first_error, CodexAppServerError)
+        assert first_error is second_error
+        assert first_error is event_error
+        assert "limit" in str(first_error)
     finally:
         await transport.stop("forced")
 

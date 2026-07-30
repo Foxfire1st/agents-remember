@@ -23,12 +23,14 @@ from pathlib import Path
 from unittest import mock
 
 from agents_remember.mcp.config import McpRuntimeConfig
+from agents_remember.observer.projection_inputs import ProjectionDomain
 from agents_remember.serving import change_watcher as change_watcher_module
 from agents_remember.serving.change_watcher import (
     ChangePacer,
     ProjectionInputWatcher,
     WakeTarget,
     is_projection_input_event,
+    projection_domains_for_paths,
     projection_input_roots,
 )
 from agents_remember.serving.projector import Projector
@@ -133,6 +135,37 @@ class InputEventFilterTests(unittest.TestCase):
         self.assertTrue(is_projection_input_event("/c/logs/observer/lifecycles/L1/events.jsonl"))
 
 
+class ProjectionDomainMappingTests(unittest.TestCase):
+    def test_paths_map_to_their_reader_domains_and_coalesce(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_tmp:
+            tmp = Path(raw_tmp)
+            paths = {
+                str(tmp / "tasks" / "repo" / "leaf.json"),
+                str(tmp / "logs" / "observer" / "lifecycles" / "L1" / "events.jsonl"),
+                str(tmp / "logs" / "observer" / "workspace" / "gates.jsonl"),
+            }
+            self.assertEqual(
+                projection_domains_for_paths(_config(tmp), paths),
+                frozenset(
+                    {
+                        ProjectionDomain.TASKS,
+                        ProjectionDomain.LIFECYCLES,
+                        ProjectionDomain.WORKSPACE,
+                    }
+                ),
+            )
+
+    def test_unknown_accepted_path_fails_open_to_every_domain(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_tmp:
+            tmp = Path(raw_tmp)
+            self.assertEqual(
+                projection_domains_for_paths(
+                    _config(tmp), {str(tmp / "unexpected" / "input.json")}
+                ),
+                frozenset(ProjectionDomain),
+            )
+
+
 class ChangePacerDeadlineTests(unittest.TestCase):
     """The pure scheduling core, driven with synthetic monotonic instants."""
 
@@ -201,9 +234,9 @@ class _FakeWatcher:
         finally:
             self.stopped.set()
 
-    def emit(self) -> None:
+    def emit(self, domain: ProjectionDomain = ProjectionDomain.TASKS) -> None:
         assert self.pacer is not None
-        self.pacer.notify_change()
+        self.pacer.notify_change(frozenset({domain}))
 
 
 class _CrashingWatcher:
@@ -270,6 +303,7 @@ class AdaptiveProjectorTests(unittest.IsolatedAsyncioTestCase):
         await self._wait_for(lambda: projector.projection_count > baseline, timeout=2.0)
         latency = time.monotonic() - emitted_at
         self.assertEqual(projector.last_wake_reason, "change")
+        self.assertEqual(projector.last_invalidated_domains, frozenset({"tasks"}))
         # debounce (clamped to interval=0.02) + one projection + generous CI slack.
         self.assertLess(latency, 1.0)
 
@@ -334,7 +368,11 @@ class AdaptiveProjectorTests(unittest.IsolatedAsyncioTestCase):
                 self.health: list[bool] = []
                 self.changes = 0
 
-            def notify_change(self) -> None:
+            def notify_change(
+                self,
+                domains: frozenset[ProjectionDomain] = frozenset(ProjectionDomain),
+            ) -> None:
+                _ = domains
                 self.changes += 1
 
             def set_watcher_healthy(self, healthy: bool) -> None:
@@ -428,6 +466,7 @@ class RealWatchfilesIntegrationTests(unittest.IsolatedAsyncioTestCase):
                 "a write under tasks/ did not wake the projector within 5s",
             )
             self.assertEqual(projector.last_wake_reason, "change")
+            self.assertEqual(projector.last_invalidated_domains, frozenset({"tasks"}))
         finally:
             task.cancel()
             with contextlib.suppress(asyncio.CancelledError):

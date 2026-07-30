@@ -10,15 +10,17 @@ the projection identity's ``vendor_conversation_id`` — and every agent frame
 carries its verbatim ``threadId`` demux key. Intentionally malformed shapes (the
 unknown-vendor degrade cases) stay inline where they are asserted.
 
-``refresh_agent_native`` coverage below pins a LATENT SEAM: no production caller invokes it — agent native history is reachable
-through the library open/read path (``thread/read`` on the agent thread) — so the seam
-stays tested here rather than deleted.
+``refresh_agent_native`` is the selected-child production seam. Ordinary parent paging
+hydrates roster/live evidence only; agent focus explicitly requests one child's native backfill.
 """
 
 from __future__ import annotations
 
+import asyncio
+import threading
 import unittest
 from dataclasses import replace
+from unittest import mock
 
 from _agent_wire_fixtures import (
     agent_message_delta_params,
@@ -31,6 +33,7 @@ from _agent_wire_fixtures import (
     turn_completed_params,
     turn_started_params,
 )
+from agents_remember.errors import NativeHistoryUnavailable
 from agents_remember.serving.conversation.active.projector import ActiveSessionProjector
 from agents_remember.serving.conversation.models import (
     ConversationItem,
@@ -177,9 +180,7 @@ class CodexCollabMapperTests(unittest.TestCase):
         self.assertEqual(call.agent.status, "running")
 
         # Multiple receivers: the call addresses several agents, so it stays a parent item.
-        outputs = _collab_frame(
-            _collab_item("collab-3", "wait", receivers=[AGENT, "agent-t-2"])
-        )
+        outputs = _collab_frame(_collab_item("collab-3", "wait", receivers=[AGENT, "agent-t-2"]))
         call = next(item for item in _items(outputs) if item.item_id == "collab-3")
         self.assertIsNone(call.agent)
 
@@ -228,7 +229,12 @@ class CodexCollabMapperTests(unittest.TestCase):
     def test_unknown_collab_shapes_degrade_to_preserved_unknown_vendor(self) -> None:
         cases = (
             {"id": "c-1", "type": "collabAgentToolCall"},
-            {"id": "c-2", "type": "collabAgentToolCall", "tool": "wait", "receiverThreadIds": "nope"},
+            {
+                "id": "c-2",
+                "type": "collabAgentToolCall",
+                "tool": "wait",
+                "receiverThreadIds": "nope",
+            },
             {"id": "c-3", "type": "collabAgentToolCall", "tool": "wait", "agentsStates": ["nope"]},
             {"id": "c-4", "type": "subAgentActivity", "kind": "started"},
             {"id": "c-5", "type": "subAgentActivity", "agentThreadId": AGENT},
@@ -244,22 +250,23 @@ class CodexCollabMapperTests(unittest.TestCase):
                 self.assertEqual(unknown.vendor_type, f"codex:{item['type']}")
 
     def test_thread_started_mints_registration_only_for_a_proven_non_parent(self) -> None:
-        outputs = _map(
-            {"thread": {"id": "agent-t-9"}}, native_method="thread/started"
-        )
+        outputs = _map({"thread": {"id": "agent-t-9"}}, native_method="thread/started")
         (roster,) = _items(outputs)
         self.assertEqual(roster.item_id, "codex-agent-agent-t-9")
         assert roster.agent is not None
         self.assertEqual(roster.agent.status, "registered")
 
         # Seat boot/resume is not a timeline event.
-        self.assertEqual(
-            _map({"thread": {"id": PARENT}}, native_method="thread/started"), []
-        )
+        self.assertEqual(_map({"thread": {"id": PARENT}}, native_method="thread/started"), [])
         # Without the parent context the shape alone cannot distinguish: stay silent.
         self.assertEqual(
             codex.map_evidence_frame(
-                _evidence(1, "codex-notification", {"thread": {"id": "agent-t-9"}}, native_method="thread/started"),
+                _evidence(
+                    1,
+                    "codex-notification",
+                    {"thread": {"id": "agent-t-9"}},
+                    native_method="thread/started",
+                ),
                 evidence_ref=REF,
             ),
             [],
@@ -332,6 +339,10 @@ class _MultiplexedBridge(_ScriptedBridge):
     def __init__(self) -> None:
         super().__init__()
         self.agent_native_frames: dict[str, list[NativeEvidenceFrame]] = {}
+        self.agent_native_errors: dict[str, NativeHistoryUnavailable] = {}
+        self.agent_native_reads: list[str] = []
+        self.agent_native_started: dict[str, threading.Event] = {}
+        self.agent_native_release: dict[str, threading.Event] = {}
 
     def push_frame(
         self,
@@ -370,6 +381,16 @@ class _MultiplexedBridge(_ScriptedBridge):
                 byte_budget=byte_budget,
                 expected_bridge_epoch=expected_bridge_epoch,
             )
+        self.agent_native_reads.append(thread_id)
+        started = self.agent_native_started.get(thread_id)
+        if started is not None:
+            started.set()
+        release = self.agent_native_release.get(thread_id)
+        if release is not None and not release.wait(timeout=2):
+            raise AssertionError(f"timed out waiting to release {thread_id}")
+        error = self.agent_native_errors.get(thread_id)
+        if error is not None:
+            raise error
         frames = self.agent_native_frames.get(thread_id, [])
         start = 0
         if cursor is not None:
@@ -405,7 +426,9 @@ def _projector(bridge: _MultiplexedBridge) -> ActiveSessionProjector:
     )
 
 
-def _agent_turn_frames(bridge: _MultiplexedBridge, thread_id: str, turn_id: str, item_id: str) -> None:
+def _agent_turn_frames(
+    bridge: _MultiplexedBridge, thread_id: str, turn_id: str, item_id: str
+) -> None:
     bridge.push_frame(
         "codex-notification",
         turn_started_params(thread_id, turn_id),
@@ -436,6 +459,97 @@ def _agent_turn_frames(bridge: _MultiplexedBridge, thread_id: str, turn_id: str,
 
 
 class CodexAgentEngineTests(unittest.IsolatedAsyncioTestCase):
+    async def test_two_wave_roster_rehydrates_exactly_without_root_or_status_regression(
+        self,
+    ) -> None:
+        """Six historical starts reconcile against the persistent live registry."""
+
+        wave_one = [f"wave-one-{index}" for index in range(3)]
+        wave_two = [f"wave-two-{index}" for index in range(3)]
+        children = [*wave_one, *wave_two]
+        bridge = _MultiplexedBridge()
+        bridge.native_frames.extend(
+            NativeEvidenceFrame(
+                native_id=f"spawn-{index}",
+                native_parent_id="parent-turn",
+                native_type="subAgentActivity",
+                created_at=NOW,
+                raw=sub_agent_activity_item(
+                    f"spawn-{index}",
+                    kind="started",
+                    agent_thread_id=child,
+                    agent_path=f"/root/{child}",
+                ),
+            )
+            for index, child in enumerate(children)
+        )
+        bridge.snapshot = replace(
+            bridge.snapshot,
+            raw={
+                "agentRegistry": {
+                    child: {
+                        "status": "completed" if child in wave_one else "running",
+                        "agentPath": f"/root/{child}",
+                    }
+                    for child in children
+                }
+            },
+        )
+        projector = _projector(bridge)
+        initial = await projector.page(before_ordinal=None, limit=100)
+        initial_roster = {
+            item.agent.agent_id: item.agent.status
+            for item in initial.items
+            if item.item_id.startswith("codex-agent-") and item.agent is not None
+        }
+        self.assertEqual(
+            initial_roster,
+            {
+                **{child: "completed" for child in wave_one},
+                **{child: "running" for child in wave_two},
+            },
+        )
+        self.assertNotIn("root", initial_roster)
+
+        for index, child in enumerate(wave_two):
+            bridge.push_frame(
+                "codex-notification",
+                turn_completed_params(child, f"wave-two-turn-{index}"),
+                thread_id=child,
+                native_method="turn/completed",
+            )
+        bridge.snapshot = replace(
+            bridge.snapshot,
+            raw={
+                "agentRegistry": {
+                    child: {"status": "completed", "agentPath": f"/root/{child}"}
+                    for child in children
+                }
+            },
+        )
+        await projector.poll_once()
+        settled = await projector.page(before_ordinal=None, limit=100)
+        settled_roster = {
+            item.agent.agent_id: item.agent.status
+            for item in settled.items
+            if item.item_id.startswith("codex-agent-") and item.agent is not None
+        }
+        self.assertEqual(settled_roster, {child: "completed" for child in children})
+
+        # A fresh backend projector has only persisted starts plus the persistent
+        # adapter snapshot. It must reconstruct the same six terminal seats.
+        reloaded = _projector(bridge)
+        restarted_page = await reloaded.page(before_ordinal=None, limit=100)
+        restarted_roster = {
+            item.agent.agent_id: item.agent.status
+            for item in restarted_page.items
+            if item.item_id.startswith("codex-agent-") and item.agent is not None
+        }
+        self.assertEqual(restarted_roster, {child: "completed" for child in children})
+        self.assertNotIn("root", restarted_roster)
+        await projector.close()
+        await reloaded.close()
+
     async def test_incident_stream_multiplexes_into_one_projection(self) -> None:
         """The 2026-07-24 incident shape: collab spawn, then interleaved agent + parent traffic."""
 
@@ -601,9 +715,7 @@ class CodexAgentEngineTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(agent_item.agent.agent_path, "/root/agent_one")
 
         # The agent request clears while the parent's stays open: resolve per id.
-        bridge.snapshot = replace(
-            bridge.snapshot, pending_interactions=(parent_pending,)
-        )
+        bridge.snapshot = replace(bridge.snapshot, pending_interactions=(parent_pending,))
         await projector.poll_once()
         result = await projector.page(before_ordinal=None, limit=50)
         by_id = {item.item_id: item for item in result.items}
@@ -727,12 +839,12 @@ class CodexAgentEngineTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(by_id["parent-approval-1"].phase, "unknown")
         self.assertEqual(by_id["parent-approval-2"].phase, "unknown")
 
-    async def test_page_backfills_agent_content_when_live_delivery_is_partial(self) -> None:
+    async def test_selected_agent_backfills_content_when_live_delivery_is_partial(self) -> None:
         """The 2026-07-26 live-verification gap: roster/lifecycle crossed, content did not.
 
         The vendor's auto-attach is best-effort — a fast agent outruns it and its
-        content events never reach the connection. The page's per-thread backfill
-        walks the agent's native history once, so the agent view is complete anyway.
+        content events never reach the connection. Parent paging stays metadata-first;
+        selecting the agent walks only that native history.
         """
         bridge = _MultiplexedBridge()
         _codex_turn(bridge, "turn-1")
@@ -770,7 +882,13 @@ class CodexAgentEngineTests(unittest.IsolatedAsyncioTestCase):
                 native_parent_id="agent-turn-1",
                 native_type="subAgentActivity",
                 created_at=NOW,
-                raw={"id": "call-1", "type": "subAgentActivity", "kind": "interacted", "agentThreadId": "other-agent", "agentPath": "/root"},
+                raw={
+                    "id": "call-1",
+                    "type": "subAgentActivity",
+                    "kind": "interacted",
+                    "agentThreadId": "other-agent",
+                    "agentPath": "/root",
+                },
             ),
             NativeEvidenceFrame(
                 native_id="msg-1",
@@ -784,9 +902,18 @@ class CodexAgentEngineTests(unittest.IsolatedAsyncioTestCase):
         result = await projector.page(before_ordinal=None, limit=50)
         by_id = {item.item_id: item for item in result.items}
 
-        # The agent's content is backfilled and attributed even though it never crossed live;
-        # native ids are thread-scoped so the forked copies cannot collide with the parent's.
+        # Parent paging establishes the roster but does not hydrate every discovered child.
         scoped = f"{AGENT}:msg-1"
+        self.assertNotIn(scoped, by_id)
+        self.assertEqual(bridge.agent_native_reads, [])
+
+        hydration = await projector.refresh_agent_native(AGENT)
+        self.assertEqual(hydration.status, "hydrated")
+        result = await projector.page(before_ordinal=None, limit=50)
+        by_id = {item.item_id: item for item in result.items}
+
+        # The selected agent's content is backfilled and attributed even though it never crossed live;
+        # native ids are thread-scoped so the forked copies cannot collide with the parent's.
         self.assertIn(scoped, by_id)
         scoped_agent = by_id[scoped].agent
         assert scoped_agent is not None
@@ -799,12 +926,248 @@ class CodexAgentEngineTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("codex-agent-other-agent", by_id)
         self.assertNotIn(f"{AGENT}:codex-agent-other-agent", by_id)
 
-        # The walk happens once per projector: the thread is marked walked, so a
-        # second page does not re-read it (store dedupe backstops regardless).
-        self.assertIn(AGENT, projector._agent_native_walked)
+        # The selected walk happens once per projector; ordinary pages never re-read it.
+        self.assertIn(AGENT, projector._child_history.walked)
         await projector.page(before_ordinal=None, limit=50)
-        by_id = {item.item_id: item for item in (await projector.page(before_ordinal=None, limit=50)).items}
+        by_id = {
+            item.item_id: item
+            for item in (await projector.page(before_ordinal=None, limit=50)).items
+        }
         self.assertIn(f"{AGENT}:msg-1", by_id)
+        self.assertEqual(bridge.agent_native_reads, [AGENT])
+
+    async def test_second_wave_child_failure_is_local_and_siblings_hydrate_on_selection(
+        self,
+    ) -> None:
+        bridge = _MultiplexedBridge()
+        _codex_turn(bridge, "turn-parent")
+        children = ("agent-wave1", "agent-wave2-bad", "agent-wave2-good")
+        for index, child in enumerate(children, start=1):
+            _agent_turn_frames(bridge, child, f"agent-turn-{index}", f"agent-live-{index}")
+        bridge.agent_native_frames["agent-wave1"] = [
+            NativeEvidenceFrame(
+                native_id="history-wave1",
+                native_parent_id="older-wave1",
+                native_type="agentMessage",
+                created_at=NOW,
+                raw={"id": "history-wave1", "type": "agentMessage", "text": "wave one history"},
+            )
+        ]
+        bridge.agent_native_errors["agent-wave2-bad"] = NativeHistoryUnavailable(
+            "child history page exceeded its bounded acquisition contract",
+            code="bounded-rpc-failed",
+        )
+        bridge.agent_native_frames["agent-wave2-good"] = [
+            NativeEvidenceFrame(
+                native_id="history-wave2-good",
+                native_parent_id="older-wave2-good",
+                native_type="agentMessage",
+                created_at=NOW,
+                raw={
+                    "id": "history-wave2-good",
+                    "type": "agentMessage",
+                    "text": "wave two sibling history",
+                },
+            )
+        ]
+        projector = _projector(bridge)
+
+        initial = await projector.page(before_ordinal=None, limit=100)
+        initial_ids = {item.item_id for item in initial.items}
+        self.assertIn("turn-parent-agent", initial_ids)
+        self.assertEqual(bridge.agent_native_reads, [])
+
+        bad = await projector.refresh_agent_native("agent-wave2-bad")
+        self.assertEqual(bad.status, "unavailable")
+        self.assertEqual(bad.code, "bounded-rpc-failed")
+        after_bad = await projector.page(before_ordinal=None, limit=100)
+        after_bad_ids = {item.item_id for item in after_bad.items}
+        self.assertIn("agent-history:agent-wave2-bad", after_bad_ids)
+        self.assertIn("turn-parent-agent", after_bad_ids)
+
+        wave1 = await projector.refresh_agent_native("agent-wave1")
+        good = await projector.refresh_agent_native("agent-wave2-good")
+        self.assertEqual(wave1.status, "hydrated")
+        self.assertEqual(good.status, "hydrated")
+        final = await projector.page(before_ordinal=None, limit=100)
+        final_ids = {item.item_id for item in final.items}
+        self.assertIn("agent-wave1:history-wave1", final_ids)
+        self.assertIn("agent-wave2-good:history-wave2-good", final_ids)
+        self.assertIn("agent-history:agent-wave2-bad", final_ids)
+        self.assertIn("turn-parent-agent", final_ids)
+        self.assertEqual(
+            bridge.agent_native_reads,
+            ["agent-wave2-bad", "agent-wave1", "agent-wave2-good"],
+        )
+
+    async def test_same_child_concurrent_hydration_is_singleflight(self) -> None:
+        bridge = _MultiplexedBridge()
+        _codex_turn(bridge, "turn-parent")
+        _agent_turn_frames(bridge, AGENT, "agent-turn-1", "agent-live-1")
+        bridge.agent_native_frames[AGENT] = [
+            NativeEvidenceFrame(
+                native_id="history-one",
+                native_parent_id="agent-turn-0",
+                native_type="agentMessage",
+                created_at=NOW,
+                raw={
+                    "id": "history-one",
+                    "type": "agentMessage",
+                    "text": "one shared acquisition",
+                },
+            )
+        ]
+        started = bridge.agent_native_started[AGENT] = threading.Event()
+        release = bridge.agent_native_release[AGENT] = threading.Event()
+        projector = _projector(bridge)
+        await projector.page(before_ordinal=None, limit=50)
+
+        first = asyncio.create_task(projector.refresh_agent_native(AGENT))
+        self.assertTrue(await asyncio.to_thread(started.wait, 1))
+        second = asyncio.create_task(projector.refresh_agent_native(AGENT))
+        await asyncio.sleep(0)
+        release.set()
+        outcomes = await asyncio.gather(first, second)
+
+        self.assertEqual([outcome.status for outcome in outcomes], ["hydrated", "hydrated"])
+        self.assertEqual(bridge.agent_native_reads, [AGENT])
+        result = await projector.page(before_ordinal=None, limit=50)
+        self.assertIn(f"{AGENT}:history-one", {item.item_id for item in result.items})
+
+    async def test_slow_child_does_not_block_parent_poll_or_sibling_hydration(self) -> None:
+        slow = "agent-slow"
+        sibling = "agent-sibling"
+        bridge = _MultiplexedBridge()
+        _codex_turn(bridge, "turn-parent")
+        _agent_turn_frames(bridge, slow, "agent-turn-slow", "slow-live")
+        _agent_turn_frames(bridge, sibling, "agent-turn-sibling", "sibling-live")
+        bridge.agent_native_frames[slow] = [
+            NativeEvidenceFrame(
+                native_id="slow-history",
+                native_parent_id="slow-old",
+                native_type="agentMessage",
+                created_at=NOW,
+                raw={
+                    "id": "slow-history",
+                    "type": "agentMessage",
+                    "text": "slow child result",
+                },
+            )
+        ]
+        bridge.agent_native_frames[sibling] = [
+            NativeEvidenceFrame(
+                native_id="sibling-history",
+                native_parent_id="sibling-old",
+                native_type="agentMessage",
+                created_at=NOW,
+                raw={
+                    "id": "sibling-history",
+                    "type": "agentMessage",
+                    "text": "sibling result",
+                },
+            )
+        ]
+        started = bridge.agent_native_started[slow] = threading.Event()
+        release = bridge.agent_native_release[slow] = threading.Event()
+        projector = _projector(bridge)
+        await projector.page(before_ordinal=None, limit=100)
+
+        slow_task = asyncio.create_task(projector.refresh_agent_native(slow))
+        self.assertTrue(await asyncio.to_thread(started.wait, 1))
+        bridge.push_frame(
+            "codex-notification",
+            item_completed_params(
+                PARENT,
+                "turn-parent",
+                agent_message_item("parent-during-slow-child", "parent stayed live"),
+            ),
+            thread_id=PARENT,
+        )
+
+        sibling_result, _ = await asyncio.wait_for(
+            asyncio.gather(projector.refresh_agent_native(sibling), projector.poll_once()),
+            timeout=1,
+        )
+        self.assertEqual(sibling_result.status, "hydrated")
+        during_slow = await projector.page(before_ordinal=None, limit=100)
+        during_slow_ids = {item.item_id for item in during_slow.items}
+        self.assertIn("parent-during-slow-child", during_slow_ids)
+        self.assertIn(f"{sibling}:sibling-history", during_slow_ids)
+        self.assertNotIn(f"{slow}:slow-history", during_slow_ids)
+
+        release.set()
+        self.assertEqual((await slow_task).status, "hydrated")
+        self.assertCountEqual(bridge.agent_native_reads, [slow, sibling])
+
+    async def test_selected_child_singleflight_registry_has_a_visible_hard_cap(self) -> None:
+        slow = "agent-slow"
+        sibling = "agent-capacity-refused"
+        bridge = _MultiplexedBridge()
+        _codex_turn(bridge, "turn-parent")
+        _agent_turn_frames(bridge, slow, "agent-turn-slow", "slow-live")
+        _agent_turn_frames(bridge, sibling, "agent-turn-sibling", "sibling-live")
+        started = bridge.agent_native_started[slow] = threading.Event()
+        release = bridge.agent_native_release[slow] = threading.Event()
+        projector = _projector(bridge)
+        await projector.page(before_ordinal=None, limit=100)
+
+        with mock.patch(
+            "agents_remember.serving.conversation.active.projector.child_history.MAX_AGENT_NATIVE_INFLIGHT",
+            1,
+        ):
+            slow_task = asyncio.create_task(projector.refresh_agent_native(slow))
+            self.assertTrue(await asyncio.to_thread(started.wait, 1))
+            refused = await projector.refresh_agent_native(sibling)
+            self.assertEqual(refused.status, "unavailable")
+            self.assertEqual(refused.code, "child-history-capacity")
+            self.assertNotIn(sibling, bridge.agent_native_reads)
+            release.set()
+            self.assertEqual((await slow_task).status, "hydrated")
+
+    async def test_unavailable_child_retry_recovers_same_item_at_revision_two(self) -> None:
+        bridge = _MultiplexedBridge()
+        _codex_turn(bridge, "turn-parent")
+        _agent_turn_frames(bridge, AGENT, "agent-turn-1", "agent-live-1")
+        bridge.agent_native_errors[AGENT] = NativeHistoryUnavailable(
+            "temporary child read failure",
+            code="temporary-child-read",
+        )
+        projector = _projector(bridge)
+        await projector.page(before_ordinal=None, limit=50)
+
+        failed = await projector.refresh_agent_native(AGENT)
+        self.assertEqual(failed.status, "unavailable")
+        failed_page = await projector.page(before_ordinal=None, limit=50)
+        failed_item = next(
+            item for item in failed_page.items if item.item_id == f"agent-history:{AGENT}"
+        )
+        self.assertEqual(failed_item.revision, 1)
+        self.assertEqual(failed_item.phase, "failed")
+
+        del bridge.agent_native_errors[AGENT]
+        bridge.agent_native_frames[AGENT] = [
+            NativeEvidenceFrame(
+                native_id="recovered-history",
+                native_parent_id="agent-turn-0",
+                native_type="agentMessage",
+                created_at=NOW,
+                raw={
+                    "id": "recovered-history",
+                    "type": "agentMessage",
+                    "text": "retry worked",
+                },
+            )
+        ]
+        recovered = await projector.refresh_agent_native(AGENT)
+        self.assertEqual(recovered.status, "hydrated")
+        recovered_page = await projector.page(before_ordinal=None, limit=50)
+        recovered_item = next(
+            item for item in recovered_page.items if item.item_id == f"agent-history:{AGENT}"
+        )
+        self.assertEqual(recovered_item.revision, 2)
+        self.assertEqual(recovered_item.phase, "completed")
+        self.assertIn(f"{AGENT}:recovered-history", {item.item_id for item in recovered_page.items})
+        self.assertEqual(bridge.agent_native_reads, [AGENT, AGENT])
 
     async def test_per_thread_twin_suppression_and_lazy_agent_native_walk(self) -> None:
         bridge = _MultiplexedBridge()

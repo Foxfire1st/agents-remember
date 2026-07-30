@@ -19,7 +19,7 @@ import contextlib
 import hashlib
 import json
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -81,6 +81,7 @@ from agents_remember.observer.provider_nodes import (
     workspace_provider_nodes,
     worktree_provider_node,
 )
+from agents_remember.observer.task_document_cache import TaskDocumentPayloadCache
 from agents_remember.observer.timeutil import age_seconds
 from agents_remember.providers.context import ContextProviderError
 from agents_remember.providers.current_state import current_state_path
@@ -127,14 +128,12 @@ WORKTREE_PROVIDER_INSPECT_SECONDS = 5
 GATE_COMPACT_TTL_SECONDS = 30.0
 _last_gate_compact: dict[str, datetime] = {}
 
-# 260707-HFX2-L12 F10: the tasks tree is walked + every task JSON parsed by BOTH read_task_documents
-# and read_series_documents each 1s tick (2x rglob + 2x parse of the whole, growing corpus). This TTL
-# cache holds ONE parsed sweep of the task-document payloads, shared by both readers, so a tick pays
-# for one walk+parse (and only every few seconds). Keyed by tasks-root.
-TASK_DOC_CACHE_TTL_SECONDS = 3.0
+# Task and series readers share one stat-identity parse cache. Runtime-only
+# watcher changes still trigger a projection, but unchanged task JSON is never
+# reparsed merely because wall-clock time passed.
 TASK_DOCUMENT_SUMMARY_LIMIT = 250
 SERIES_DOCUMENT_SUMMARY_LIMIT = 250
-_task_doc_cache: dict[str, tuple[datetime, list[tuple[Path, dict[str, object]]]]] = {}
+_task_doc_cache = TaskDocumentPayloadCache()
 
 # 260707-HFX2-L12 F11: status_payload() shells out to git per leaf; without a cache the projection
 # fires O(active-leaf) git subprocesses every tick. Git state changes slowly, so this TTL cache lets
@@ -155,25 +154,24 @@ class _TaskDocumentLifecycleMaps:
 def _iter_task_document_payloads(
     tasks_root: Path, *, now: datetime | None
 ) -> list[tuple[Path, dict[str, object]]]:
-    """Shared, TTL-cached ``(path, payload)`` list of task-document JSONs under ``tasks_root``.
+    """Shared ``(path, payload)`` list with per-file invalidation.
 
-    Removes the per-tick double walk+parse (F10): both task and series readers pull from this one
-    parsed sweep. ``now=None`` bypasses the cache (fresh walk) for non-projection callers/tests.
+    ``now=None`` preserves the standalone fresh-read contract. Projection
+    callers enumerate the live set each tick, reuse only unchanged stat
+    identities, parse changed/new files, and prune deleted paths.
     """
-    if now is not None:
-        key = str(tasks_root)
-        cached = _task_doc_cache.get(key)
-        if cached is not None and 0 <= (now - cached[0]).total_seconds() < TASK_DOC_CACHE_TTL_SECONDS:
-            return cached[1]
-    docs: list[tuple[Path, dict[str, object]]] = []
-    for path in _iter_task_json(tasks_root):
-        payload = _read_json(path)
-        if payload is None or payload.get("schema") != TASK_DOCUMENT_SCHEMA:
-            continue
-        docs.append((path, payload))
-    if now is not None:
-        _task_doc_cache[str(tasks_root)] = (now, docs)
-    return docs
+
+    paths = _iter_task_json(tasks_root)
+    docs = (
+        [(path, payload) for path in paths if (payload := _read_json(path)) is not None]
+        if now is None
+        else _task_doc_cache.payloads(tasks_root, paths, read_payload=_read_json)
+    )
+    return [
+        (path, payload)
+        for path, payload in docs
+        if payload.get("schema") == TASK_DOCUMENT_SCHEMA
+    ]
 
 
 def _bounded_task_document_payloads(
@@ -694,6 +692,52 @@ def read_engine_process_facts(
         for stale in [key for key in _status_payload_cache if key not in seen_status_keys]:
             _status_payload_cache.pop(stale, None)
     return facts
+
+
+def refresh_engine_process_landing(
+    facts: list[EngineProcessFacts],
+    *,
+    now: datetime,
+    landing_state: LandingStateReader | None,
+    contracts: ContractSnapshot,
+) -> list[EngineProcessFacts]:
+    """Refresh only the background-published landing tail of retained Engine Room facts.
+
+    A heartbeat changes landing ages and may publish a new remote observation, but it does
+    not change contract, guidance, local Git status, or ledger facts. Reusing those retained
+    inputs avoids rerunning the Git-backed full Engine Room reader on every heartbeat while
+    preserving the volatile landing truth on the same cadence.
+    """
+    contracts_by_path = {
+        path.as_posix(): contract for path, contract in contracts.contracts.items()
+    }
+    refreshed: list[EngineProcessFacts] = []
+    for fact in facts:
+        status = fact.status
+        contract_path = str(fact.contract.get("contract_path", ""))
+        contract = contracts_by_path.get(contract_path)
+        if status is None or contract is None:
+            refreshed.append(fact)
+            continue
+        try:
+            landing = (
+                landing_state.current(contract, now=now)
+                if landing_state is not None
+                else unobserved_landing_refs(contract)
+            )
+        except Exception:
+            logger.warning(
+                "landing snapshot merge failed for %s; using retained local status",
+                contract_path,
+                exc_info=True,
+            )
+            refreshed.append(fact)
+            continue
+        next_status = {key: value for key, value in status.items() if key != "landing"}
+        if landing is not None:
+            next_status["landing"] = landing
+        refreshed.append(replace(fact, status=next_status))
+    return refreshed
 
 
 def _safe_status_payload(

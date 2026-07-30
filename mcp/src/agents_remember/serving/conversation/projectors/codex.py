@@ -848,10 +848,15 @@ def _map_sub_agent_activity(
     if kind is None or agent_thread_id is None:
         return None
     agent_path = optional_text(item.get("agentPath"))
+    status = _COLLAB_AGENT_STATUS.get(kind, "unknown")
+    if not live and status in {"registered", "running"}:
+        # A persisted spawn/start proves historical existence, not current liveness.
+        # The adapter's live registry may overlay a current status during hydration.
+        status = "unknown"
     return [
         _roster_item(
             agent_thread_id,
-            status=_COLLAB_AGENT_STATUS.get(kind, "unknown"),
+            status=status,
             agent_path=agent_path,
             created_at=created_at,
             origin=f"{origin} subAgentActivity roster",

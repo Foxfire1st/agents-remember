@@ -120,7 +120,11 @@ function buildFx(q: gsap.utils.SelectorFunc): void {
     // (effects off) the bands stay invisible via the warpSurge class (opacity 0), unchanged.
     gsap.fromTo(
       band,
-      { scaleY: 0, svgOrigin: `${band.getAttribute("x1") ?? 0} 342`, opacity: 0.9 },
+      {
+        scaleY: 0,
+        svgOrigin: `${band.getAttribute("x1") ?? 0} 342`,
+        opacity: 0.9,
+      },
       { scaleY: 1, opacity: 0, duration: 1.6, repeat: -1, ease: "power2.out", delay: i * 0.1 },
     );
   });
@@ -164,6 +168,7 @@ function buildFx(q: gsap.utils.SelectorFunc): void {
 export function useEngineTimeline(
   rootRef: React.RefObject<SVGSVGElement | null>,
   node: EngineProcessNode,
+  fxRootRef?: React.RefObject<SVGSVGElement | null>,
 ): void {
   const animate = useShouldAnimate();
   const visible = useElementVisible(rootRef);
@@ -172,7 +177,14 @@ export function useEngineTimeline(
   useLayoutEffect(() => {
     const root = rootRef.current;
     if (!root || !animate) return;
-    const q = gsap.utils.selector(root);
+    const baseSelector = gsap.utils.selector(root);
+    const fxSelector = fxRootRef?.current
+      ? gsap.utils.selector(fxRootRef.current)
+      : null;
+    const q = ((selector: string) => [
+      ...baseSelector(selector),
+      ...(fxSelector?.(selector) ?? []),
+    ]) as gsap.utils.SelectorFunc;
 
     // RETRACT — tail-to-tip erase on departing lanes. ctx.revert() from the PREVIOUS cycle
     // already ran (it's the cleanup) and stripped DrawSVG's inline dash, so departing lanes are back
@@ -222,7 +234,7 @@ export function useEngineTimeline(
     };
     // signature folds in node.phase + worktreeGroup + the draw/fx state; listing it alone keeps the
     // dependency set honest (the effect re-runs exactly when the choreography inputs change).
-  }, [rootRef, animate, signature, node.worktreeGroup]);
+  }, [rootRef, fxRootRef, animate, signature, node.worktreeGroup]);
   // Off-screen pause: while the room's cockpit layer is display:none the canvas doesn't
   // intersect — pause every tween the context recorded (the gsap-idiomatic scoped ticker sleep; gsap
   // 3.15's Context has no paused() of its own) and resume on re-show, WITHOUT a revert/rebuild so the
@@ -231,5 +243,5 @@ export function useEngineTimeline(
   useLayoutEffect(() => {
     if (!ctxRef.current) return;
     for (const tween of ctxRef.current.getTweens() as gsap.core.Tween[]) tween.paused(!visible);
-  }, [rootRef, animate, signature, node.worktreeGroup, visible]);
+  }, [rootRef, fxRootRef, animate, signature, node.worktreeGroup, visible]);
 }

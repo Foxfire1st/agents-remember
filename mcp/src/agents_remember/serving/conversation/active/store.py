@@ -47,6 +47,8 @@ _SOURCE_AUTHORITY: dict[
 }
 
 _NORMALIZED_FIELDS = ("revision", "global_ordinal", "created_at", "updated_at", "provenance")
+_TERMINAL_AGENT_STATUS = frozenset({"completed", "failed", "interrupted"})
+_ROSTER_PREFIXES = ("codex-agent-", "claude-agent-")
 
 
 def _preserved_input_authority(existing: ConversationItem) -> dict[str, object]:
@@ -70,6 +72,41 @@ def _preserved_input_authority(existing: ConversationItem) -> dict[str, object]:
         preserved["lane"] = existing.lane
         preserved["source"] = existing.source
     return preserved
+
+
+def _reconcile_roster_upsert(
+    existing: ConversationItem, candidate: ConversationItem
+) -> ConversationItem:
+    """Keep terminal truth over an unqualified historical non-terminal replay."""
+
+    roster_pair = (
+        existing.kind == candidate.kind == "notice"
+        and existing.role == candidate.role == "system"
+        and existing.agent is not None
+        and candidate.agent is not None
+        and existing.item_id.startswith(_ROSTER_PREFIXES)
+        and candidate.item_id.startswith(_ROSTER_PREFIXES)
+    )
+    if (
+        not roster_pair
+        or existing.agent is None
+        or candidate.agent is None
+        or existing.agent.status not in _TERMINAL_AGENT_STATUS
+        or candidate.agent.status in _TERMINAL_AGENT_STATUS
+        or candidate.source != "native-history"
+    ):
+        return candidate
+    return candidate.model_copy(
+        update={
+            "agent": candidate.agent.model_copy(
+                update={
+                    "status": existing.agent.status,
+                    "agent_path": candidate.agent.agent_path or existing.agent.agent_path,
+                }
+            ),
+            "phase": existing.phase,
+        }
+    )
 
 
 @dataclass(frozen=True)
@@ -150,6 +187,7 @@ class ProjectionStore:
             self._track_provenance(item)
             tail = self._flush_pending_deltas(item, authoritative_block_ids=mapper_authoritative)
             return [StoreMutation(kind="append-item", item=item), *tail]
+        candidate = _reconcile_roster_upsert(existing, candidate)
         if existing.kind == candidate.kind == "tool-call":
             updates: dict[str, object] = {
                 "blocks": _union_blocks(existing.blocks, candidate.blocks)

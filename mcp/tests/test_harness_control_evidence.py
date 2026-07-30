@@ -349,9 +349,7 @@ class _ThreadAwareNativePageAdapter(_NativePageAdapter):
         thread_id: str | None = None,
     ) -> NativeEvidencePage:
         self.thread_calls.append((cursor, limit, byte_budget, thread_id))
-        return await super().read_native_page(
-            cursor=cursor, limit=limit, byte_budget=byte_budget
-        )
+        return await super().read_native_page(cursor=cursor, limit=limit, byte_budget=byte_budget)
 
 
 def _codex_item_event(sequence: int, item: Mapping[str, object]) -> tuple[str, dict[str, object]]:
@@ -471,9 +469,7 @@ class EvidenceBufferTests(unittest.IsolatedAsyncioTestCase):
             restored = _evidence_page(
                 evidence_page_json(page), expected_bridge_epoch=page.bridge_epoch
             )
-            self.assertEqual(
-                restored.frames[0].native_method, "mcpServer/startupStatus/updated"
-            )
+            self.assertEqual(restored.frames[0].native_method, "mcpServer/startupStatus/updated")
         finally:
             await bridge.stop("forced")
 
@@ -656,7 +652,9 @@ class EvidenceIpcTests(unittest.IsolatedAsyncioTestCase):
             adapter = _EvidenceAdapter()
             bridge, server, entry = await self._serve(adapter, identity, tmp)
             try:
-                adapter.emit("state", {"n": 1, AR_EVIDENCE_KEY: {"n": 1, "threadId": "agent-thread-9"}})
+                adapter.emit(
+                    "state", {"n": 1, AR_EVIDENCE_KEY: {"n": 1, "threadId": "agent-thread-9"}}
+                )
                 adapter.emit("state", {"n": 2, AR_EVIDENCE_KEY: {"n": 2}})
                 await _settle()
                 descriptor = await asyncio.to_thread(read_submission_authority, entry)
@@ -757,9 +755,7 @@ class EvidenceIpcTests(unittest.IsolatedAsyncioTestCase):
         # The evidence-native-page action carries an optional threadId
         # end-to-end; absent keeps the exact single-thread adapter call, and non-text
         # or empty selectors fail typed before any adapter call.
-        preset = NativeEvidencePage(
-            frames=(), next_cursor=None, truncated=False, bridge_epoch=""
-        )
+        preset = NativeEvidencePage(frames=(), next_cursor=None, truncated=False, bridge_epoch="")
         with tempfile.TemporaryDirectory() as tmp:
             identity = _identity("ipc-thread")
             adapter = _ThreadAwareNativePageAdapter(preset)
@@ -777,9 +773,7 @@ class EvidenceIpcTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIsNone(adapter.thread_calls[-1][3])
 
                 with self.assertRaises(HarnessControlError):
-                    await asyncio.to_thread(
-                        read_control_native_page, entry, thread_id=""
-                    )
+                    await asyncio.to_thread(read_control_native_page, entry, thread_id="")
                 self.assertEqual(len(adapter.thread_calls), 2)
             finally:
                 await server.close()
@@ -989,6 +983,19 @@ def _thread_read_result(items: Sequence[Mapping[str, object]], *, turn_id: str =
     }
 
 
+def _thread_item_page(
+    item: Mapping[str, object],
+    *,
+    next_cursor: str | None,
+    turn_id: str = "turn-1",
+):
+    return {
+        "data": [{"turnId": turn_id, "item": dict(item)}],
+        "nextCursor": next_cursor,
+        "backwardsCursor": None,
+    }
+
+
 class CodexEvidenceTests(unittest.IsolatedAsyncioTestCase):
     async def test_dropped_item_and_token_usage_frames_reach_evidence_with_native_ids(self) -> None:
         transport = _FakeCodexTransport()
@@ -1052,8 +1059,12 @@ class CodexEvidenceTests(unittest.IsolatedAsyncioTestCase):
                 start=1,
             )
         ]
-        for _ in range(4):
-            transport.queue("thread/read", _thread_read_result(items))
+        for index, item in enumerate(items):
+            next_cursor = f"source-{index + 1}" if index + 1 < len(items) else None
+            transport.queue(
+                "thread/items/list",
+                _thread_item_page(item, next_cursor=next_cursor),
+            )
         adapter = _codex_adapter(transport)
         await adapter.start(_launch(_identity("codex-page"), harness_id="codex"))
         try:
@@ -1061,11 +1072,14 @@ class CodexEvidenceTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual([f.native_id for f in first.frames], ["item-1", "item-2"])
             self.assertEqual(first.frames[1].native_type, "reasoning")
             self.assertEqual(first.frames[1].native_parent_id, "turn-1")
-            self.assertEqual(first.next_cursor, "item-2")
+            self.assertIsNotNone(first.next_cursor)
+            first_cursor = first.next_cursor
+            assert first_cursor is not None
+            self.assertTrue(first_cursor.startswith("ar-cnh1."))
             self.assertTrue(first.truncated)
             self.assertEqual(first.bridge_epoch, "")
             second = await adapter.read_native_page(
-                cursor=first.next_cursor, limit=2, byte_budget=48 * 1024
+                cursor=first_cursor, limit=2, byte_budget=48 * 1024
             )
             self.assertEqual([f.native_id for f in second.frames], ["item-3", "item-4"])
             third = await adapter.read_native_page(
@@ -1087,7 +1101,14 @@ class CodexEvidenceTests(unittest.IsolatedAsyncioTestCase):
         transport = _FakeCodexTransport()
         _prime_codex_start(transport)
         duplicate = {"id": "item-1", "type": "userMessage", "text": "dup"}
-        transport.queue("thread/read", _thread_read_result([duplicate, duplicate]))
+        transport.queue(
+            "thread/items/list",
+            _thread_item_page(duplicate, next_cursor="source-1"),
+        )
+        transport.queue(
+            "thread/items/list",
+            _thread_item_page(duplicate, next_cursor=None),
+        )
         adapter = _codex_adapter(transport)
         await adapter.start(_launch(_identity("codex-dup"), harness_id="codex"))
         try:
@@ -1101,10 +1122,19 @@ class CodexEvidenceTests(unittest.IsolatedAsyncioTestCase):
         _prime_codex_start(transport)
         items = [
             {"id": "item-big", "type": "agentMessage", "text": "z" * 65536},
-            {"id": "item-next", "type": "userMessage", "text": "next"},
+            {"id": "item-next", "type": "userMessage", "text": "n" * 65536},
         ]
-        transport.queue("thread/read", _thread_read_result(items))
-        transport.queue("thread/read", _thread_read_result(items))
+        transport.queue(
+            "thread/items/list",
+            _thread_item_page(items[0], next_cursor="source-1"),
+        )
+        transport.queue(
+            "thread/items/list",
+            _thread_item_page(items[1], next_cursor=None),
+        )
+        # The first page observes item-next but cannot fit it after the clipped
+        # large item. The reader-owned opaque continuation retains that unconsumed
+        # frame; resuming must not request or decode the source page again.
         adapter = _codex_adapter(transport)
         await adapter.start(_launch(_identity("codex-clip"), harness_id="codex"))
         try:
@@ -1121,11 +1151,16 @@ class CodexEvidenceTests(unittest.IsolatedAsyncioTestCase):
             self.assertLess(len(text), 4096)
             # Continuation from the last returned frame never overlaps and never gaps.
             chained = [f.native_id for f in page.frames]
-            cursor = page.next_cursor or chained[-1]
+            cursor = page.next_cursor
+            self.assertIsNotNone(cursor)
             rest = await adapter.read_native_page(cursor=cursor, limit=10, byte_budget=1024)
             self.assertFalse({f.native_id for f in rest.frames} & set(chained))
             self.assertEqual(
                 chained + [f.native_id for f in rest.frames], ["item-big", "item-next"]
+            )
+            self.assertEqual(
+                [method for method, _params in transport.requests].count("thread/items/list"),
+                2,
             )
         finally:
             await adapter.stop("forced")
@@ -1717,9 +1752,7 @@ class ClipHelperTests(unittest.TestCase):
             }
         }
         clipped = _obj(clip_evidence_payload(params, max_bytes=512))
-        self.assertEqual(
-            set(clipped), {"arEvidenceTruncated", "originalBytes", "preview", "turn"}
-        )
+        self.assertEqual(set(clipped), {"arEvidenceTruncated", "originalBytes", "preview", "turn"})
         self.assertEqual(clipped["turn"], {"id": "turn-oversized-1", "status": "interrupted"})
         self.assertEqual(set(_obj(clipped["turn"])), {"id", "status"})
         serialized = json.dumps(clipped, ensure_ascii=False, separators=(",", ":"))
@@ -1745,7 +1778,9 @@ class ClipHelperTests(unittest.TestCase):
                 max_bytes=256,
             )
         )
-        self.assertEqual(set(no_reason), {"arEvidenceTruncated", "originalBytes", "preview", "type"})
+        self.assertEqual(
+            set(no_reason), {"arEvidenceTruncated", "originalBytes", "preview", "type"}
+        )
         self.assertEqual(no_reason["type"], "message_end")
         self.assertNotIn("message", no_reason)
 
@@ -1950,7 +1985,9 @@ class EvidenceTruncationSettlementIpcTests(unittest.IsolatedAsyncioTestCase):
                 await server.close()
                 await bridge.stop("forced")
 
-    async def test_oversized_codex_turn_completed_identity_survives_to_settlement_read(self) -> None:
+    async def test_oversized_codex_turn_completed_identity_survives_to_settlement_read(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             identity = _identity("l3e-codex")
             adapter = _EvidenceAdapter()

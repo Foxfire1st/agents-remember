@@ -142,11 +142,15 @@ class _FakeAdapter:
     def advertise(self) -> CapabilitySnapshot:
         return CapabilitySnapshot(models=(), selected_model_key=None, selected_effort=None)
 
-    async def set_model(self, model_key: str, *, operation: ControlOperationRef | None = None) -> SetResult:
+    async def set_model(
+        self, model_key: str, *, operation: ControlOperationRef | None = None
+    ) -> SetResult:
         del model_key, operation
         raise AssertionError("unused")
 
-    async def set_effort(self, effort: str, *, operation: ControlOperationRef | None = None) -> SetResult:
+    async def set_effort(
+        self, effort: str, *, operation: ControlOperationRef | None = None
+    ) -> SetResult:
         del effort, operation
         raise AssertionError("unused")
 
@@ -513,10 +517,22 @@ class ProductionRouteTests(unittest.IsolatedAsyncioTestCase):
         interrupt = page["capabilities"]["controls"]["interrupt"]
         self.assertEqual(interrupt["state"], "supported")
         self.assertEqual(interrupt["evidenceTier"], "runtime-fixture")
-        self.assertEqual(
-            interrupt["evidence"]["fixtureId"], "codex-0.144.5-installed-20260718"
-        )
+        self.assertEqual(interrupt["evidence"]["fixtureId"], "codex-0.144.5-installed-20260718")
         self.assertEqual(page["capabilities"]["controls"]["steer"]["state"], "unavailable")
+
+    async def test_agent_history_route_targets_one_selected_child_without_replacing_parent(
+        self,
+    ) -> None:
+        await self._page()
+        response = await self.client.post(
+            "/api/terminal/ar-api-1/conversation/agents/agent-1/history",
+            params={"expectedBridgeEpoch": self.epoch},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.json(),
+            {"status": "not-eligible", "agentId": "agent-1"},
+        )
 
     async def test_page_user_item_provenance_via_real_authority(self) -> None:
         await self._drive_codex_turn(client_id="req-page-1")
@@ -612,7 +628,8 @@ class ProductionRouteTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.json()["status"], "cursor-authorization")
         page_cursor = mint_page_cursor(service.secret, OPERATOR, foreign_identity, ordinal=1)
         response = await self.client.get(
-            self._events_path(), params={"expectedBridgeEpoch": self.epoch, "after": str(page_cursor)}
+            self._events_path(),
+            params={"expectedBridgeEpoch": self.epoch, "after": str(page_cursor)},
         )
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.json()["status"], "cursor-invalid")
@@ -660,6 +677,7 @@ class ProductionRouteTests(unittest.IsolatedAsyncioTestCase):
         ) as response:
             self.assertEqual(response.status_code, 200)
             await self._drive_codex_turn("turn-2")
+
             async def _collect() -> str:
                 collected = ""
                 async for chunk in response.aiter_text():
@@ -667,6 +685,7 @@ class ProductionRouteTests(unittest.IsolatedAsyncioTestCase):
                     if "turn-2-agent" in collected:
                         return collected
                 return collected
+
             frames_text = await asyncio.wait_for(_collect(), timeout=20.0)
         frames = _sse_frames(frames_text)
         self.assertTrue(all(frame["id"].startswith("ar-aec1.") for frame in frames))
@@ -690,6 +709,7 @@ class ProductionRouteTests(unittest.IsolatedAsyncioTestCase):
             headers={"Last-Event-ID": page["eventCursor"]},
         ) as response:
             self.assertEqual(response.status_code, 200)
+
             async def _collect() -> str:
                 collected = ""
                 async for chunk in response.aiter_text():
@@ -697,6 +717,7 @@ class ProductionRouteTests(unittest.IsolatedAsyncioTestCase):
                     if "turn-2-agent" in collected:
                         return collected
                 return collected
+
             frames_text = await asyncio.wait_for(_collect(), timeout=20.0)
         frames = _sse_frames(frames_text)
         deliveries = {json.loads(frame["data"])["delivery"] for frame in frames}
@@ -892,7 +913,13 @@ class ProductionRouteTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn(page["status"]["turn"]["state"], {"ready", "working", "waiting", "settling"})
 
     def test_no_pty_runner_log_or_fixture_production_authority(self) -> None:
-        root = Path(__file__).resolve().parents[1] / "src" / "agents_remember" / "serving" / "conversation"
+        root = (
+            Path(__file__).resolve().parents[1]
+            / "src"
+            / "agents_remember"
+            / "serving"
+            / "conversation"
+        )
         forbidden = (
             "PtySurface",
             "tmux_pane",
@@ -945,7 +972,12 @@ class PiProductionRouteTests(unittest.IsolatedAsyncioTestCase):
                         "role": "assistant",
                         "content": [
                             {"type": "text", "text": "hi"},
-                            {"type": "toolCall", "id": "tc-1", "name": "bash", "arguments": {"command": "ls"}},
+                            {
+                                "type": "toolCall",
+                                "id": "tc-1",
+                                "name": "bash",
+                                "arguments": {"command": "ls"},
+                            },
                         ],
                         "stopReason": "toolUse",
                         "timestamp": 2,

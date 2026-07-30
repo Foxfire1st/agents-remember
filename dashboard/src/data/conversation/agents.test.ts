@@ -66,6 +66,29 @@ describe("isAgentRosterItem", () => {
       isAgentRosterItem(item({ itemId: "n-2", kind: "notice", agent: agent({ agentId: "t-1" }) })),
     ).toBe(false);
   });
+
+  it("does not count child history or rebound system notices as roster seats", () => {
+    expect(
+      isAgentRosterItem(
+        item({
+          itemId: "agent-history:t-1",
+          role: "system",
+          kind: "notice",
+          agent: agent({ agentId: "t-1" }),
+        }),
+      ),
+    ).toBe(false);
+    expect(
+      isAgentRosterItem(
+        item({
+          itemId: "t-1:parent-system-notice",
+          role: "system",
+          kind: "notice",
+          agent: agent({ agentId: "root" }),
+        }),
+      ),
+    ).toBe(false);
+  });
 });
 
 describe("agentLabel", () => {

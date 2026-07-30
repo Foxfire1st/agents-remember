@@ -12,6 +12,7 @@ import { AnimatePresence, motion } from "motion/react";
 
 import { useEngineTimeline } from "./useEngineTimeline";
 import { useShouldAnimate } from "./useShouldAnimate";
+import { EngineFxOverlay } from "./EngineFxOverlay";
 import type {
   CommitRefNode,
   EngineProcessEdge,
@@ -381,7 +382,15 @@ function EngineGauge({ at, label, runtime, reindex, present = true }: {
         rx={5}
       />
       {reindex ? (
-        <rect className={engineReindexCharge} data-fx="reindex" x={2} y={2} width={ENGINE.w - 4} height={ENGINE.h - 4} rx={3} />
+        <rect
+          className={engineReindexCharge}
+          visibility={animate ? "hidden" : undefined}
+          x={2}
+          y={2}
+          width={ENGINE.w - 4}
+          height={ENGINE.h - 4}
+          rx={3}
+        />
       ) : (
         <motion.rect
           className={engineCharge({ runtimeState: runtime })}
@@ -547,8 +556,8 @@ function WarpCoupler({ x, bound, label, testid = "warp-coupler", rows, total = 0
             {/* the surge bands render at FULL geometry; useEngineTimeline scales them from the link
                 point (scaleY + svgOrigin — transforms composite; the old y1/y2 attr tween re-rastered
                 the SVG every frame). data-dir picks which side of the link each band sits. */}
-            <line className={warpSurge} data-fx="surge" data-dir="up" data-testid="warp-surge" x1={x} y1={cy - 26} x2={x} y2={cy - 4} />
-            <line className={warpSurge} data-fx="surge" data-dir="down" data-testid="warp-surge" x1={x} y1={cy + 26} x2={x} y2={cy + 4} />
+            <line className={warpSurge} data-dir="up" data-testid="warp-surge" x1={x} y1={cy - 26} x2={x} y2={cy - 4} />
+            <line className={warpSurge} data-dir="down" data-testid="warp-surge" x1={x} y1={cy + 26} x2={x} y2={cy + 4} />
           </>
         ) : null}
         {/* the ledger link icon — a drawn chain-link (two interlocking rings), not the contract node */}
@@ -720,10 +729,17 @@ function Gate({ edge }: { edge: EngineProcessEdge }) {
 }
 
 // Alarm parity — a blocked/fault state raises this (breathing, not the fault flicker).
-function Attention() {
+function Attention({ hidden }: { hidden: boolean }) {
   return (
-    <g data-testid="attention">
-      <rect className={attnBadge} data-fx="breath" x={958} y={10} width={172} height={24} rx={5} />
+    <g data-testid="attention" visibility={hidden ? "hidden" : undefined}>
+      <rect
+        className={attnBadge}
+        x={958}
+        y={10}
+        width={172}
+        height={24}
+        rx={5}
+      />
       <text className={attnText} x={1044} y={26} textAnchor="middle">⚠ ATTENTION</text>
     </g>
   );
@@ -1173,7 +1189,8 @@ export function EnclosureCanvas({ node, gateNode, workspaceEngines = [], officia
   // gsap.context scoped to this <svg> root; Motion (below) owns opacity/transform/scaleY/fill + enter/exit;
   // CSS is static. The hook self-gates on useShouldAnimate (no context, no ticker, under effects=off).
   const rootRef = useRef<SVGSVGElement>(null);
-  useEngineTimeline(rootRef, node);
+  const fxRootRef = useRef<SVGSVGElement>(null);
+  useEngineTimeline(rootRef, node, fxRootRef);
   const code = node.providers.find((p) => p.role === "code");
   const memory = node.providers.find((p) => p.role === "memory");
   // PREDICTIVE BOOT — the clone arrow draws toward the worktree engine for ~0.6s; the engine should
@@ -1334,7 +1351,8 @@ export function EnclosureCanvas({ node, gateNode, workspaceEngines = [], officia
       ? node.landing?.find((ref) => ref.kind === "origin-main" && ref.factState !== "missing")
       : undefined;
   return (
-    <svg
+    <>
+      <svg
       ref={rootRef}
       className={sceneSvg}
       viewBox="0 0 1200 660"
@@ -1600,7 +1618,7 @@ export function EnclosureCanvas({ node, gateNode, workspaceEngines = [], officia
       <AnimatePresence>
         {isBlocked(node) ? (
           <motion.g key="attention" {...alertProps(animate)}>
-            <Attention />
+            <Attention hidden={animate} />
           </motion.g>
         ) : null}
       </AnimatePresence>
@@ -1660,6 +1678,24 @@ export function EnclosureCanvas({ node, gateNode, workspaceEngines = [], officia
           </motion.g>
         ) : null}
       </AnimatePresence>
-    </svg>
+      </svg>
+      {animate ? (
+        <EngineFxOverlay
+          ref={fxRootRef}
+          attention={isBlocked(node)}
+          engineHeight={ENGINE.h}
+          engineWidth={ENGINE.w}
+          reindexAt={node.seedFallback && code ? ENGINE.cgc : undefined}
+          surgeXs={
+            hasMemory
+              ? [
+                  OFFICIAL_COUPLER_X,
+                  ...(memWtMaterialised ? [COUPLER_X] : []),
+                ]
+              : []
+          }
+        />
+      ) : null}
+    </>
   );
 }

@@ -10,9 +10,11 @@ import type {
   ConversationItem,
 } from "./types";
 
-/** Roster detection (the wire shape): a system notice carrying an agent ref. */
+/** Roster detection: only the backend's explicit one-row-per-agent identities. */
 export function isAgentRosterItem(item: ConversationItem): boolean {
-  return item.kind === "notice" && item.role === "system" && item.agent != null;
+  const rosterIdentity =
+    item.itemId.startsWith("codex-agent-") || item.itemId.startsWith("claude-agent-");
+  return rosterIdentity && item.kind === "notice" && item.role === "system" && item.agent != null;
 }
 
 /** The short-id fallback fragment: the first 8 chars of the native agent id. */

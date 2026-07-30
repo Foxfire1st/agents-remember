@@ -2607,7 +2607,7 @@ class ProjectAndWriteAnalyticsTests(unittest.TestCase):
                 return_value=([], [], []),
             ) as gather,
             mock.patch(
-                "agents_remember.observer.projection_store.read_providers",
+                "agents_remember.observer.projection_inputs.read_providers",
                 return_value=[],
             ) as providers,
         ):

@@ -107,6 +107,96 @@ export async function fetchConversationTelemetry(
   }
 }
 
+export type AgentHistoryStatus =
+  | "hydrated"
+  | "already-hydrated"
+  | "unavailable"
+  | "not-eligible";
+
+export interface AgentHistoryOutcome {
+  status: AgentHistoryStatus;
+  agentId: string;
+  detail?: string;
+  code?: string;
+}
+
+export type AgentHistoryResult =
+  | { ok: true; outcome: AgentHistoryOutcome }
+  | { ok: false; error: ConversationRouteError };
+
+function parseAgentHistory(
+  body: unknown,
+  httpStatus: number,
+): AgentHistoryResult {
+  if (body !== null && typeof body === "object") {
+    const record = body as {
+      status?: unknown;
+      agentId?: unknown;
+      detail?: unknown;
+      code?: unknown;
+    };
+    if (
+      (record.status === "hydrated" ||
+        record.status === "already-hydrated" ||
+        record.status === "unavailable" ||
+        record.status === "not-eligible") &&
+      typeof record.agentId === "string"
+    ) {
+      return {
+        ok: true,
+        outcome: {
+          status: record.status,
+          agentId: record.agentId,
+          ...(typeof record.detail === "string" ? { detail: record.detail } : {}),
+          ...(typeof record.code === "string" ? { code: record.code } : {}),
+        },
+      };
+    }
+  }
+  return {
+    ok: false,
+    error: {
+      status: "invalid-response",
+      detail: "selected child history returned an invalid response",
+      httpStatus,
+    },
+  };
+}
+
+function agentHistoryTransportError(error: unknown): ConversationRouteError {
+  const name =
+    error !== null && typeof error === "object" && "name" in error
+      ? String((error as { name?: unknown }).name)
+      : "";
+  const timedOut = name === "TimeoutError" || name === "AbortError";
+  return {
+    status: "transport",
+    detail: timedOut ? "selected child history request timed out" : "network",
+    httpStatus: 0,
+  };
+}
+
+/** Ask the active projector to backfill only the operator-selected child conversation. */
+export async function requestAgentHistory(
+  sessionId: string,
+  epoch: string,
+  agentId: string,
+  base = "",
+  fetchImpl: FetchLike = fetch,
+): Promise<AgentHistoryResult> {
+  const url = `${activeBase(base, sessionId)}/agents/${encodeURIComponent(agentId)}/history?${epochQuery(epoch)}`;
+  try {
+    const response = await fetchImpl(url, withTimeout({ method: "POST" }));
+    const body = await readJson(response);
+    if (!response.ok) {
+      return { ok: false, error: asRouteError(body, response.status) };
+    }
+    return parseAgentHistory(body, response.status);
+  } catch (error) {
+    return { ok: false, error: agentHistoryTransportError(error) };
+  }
+}
+
 export type ControlResult<T> =
   | { ok: true; operation: T }
   | { ok: false; error: ConversationRouteError };

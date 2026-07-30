@@ -608,6 +608,20 @@ export const sceneSvg = css({
   overflow: "visible",
 });
 
+// Repeating transforms live in a sparse sibling SVG aligned to the structural scene's 1200×660
+// viewBox. Chromium still lays out the animated SVG, but no longer relays out the text-heavy scene.
+// Reusing the original SVG recipes preserves the exact paint and layering of each moving primitive.
+export const fxOverlaySvg = css({
+  position: "absolute",
+  inset: "0",
+  zIndex: "2",
+  display: "block",
+  width: "100%",
+  height: "100%",
+  overflow: "visible",
+  pointerEvents: "none",
+});
+
 export const worldLabel = css({
   fill: "token(colors.muted)",
   fontSize: "14px",

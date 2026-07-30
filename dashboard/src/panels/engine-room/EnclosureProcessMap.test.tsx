@@ -69,6 +69,24 @@ describe("EnclosureCanvas — GSAP gate (05f §8.4 — no ticker under effects=o
     expect(spy).toHaveBeenCalled();
     spy.mockRestore();
   });
+
+  it("isolates repeating transforms from the text-heavy structural SVG", () => {
+    document.documentElement.removeAttribute("data-effects");
+    const { getByTestId } = render(
+      <EnclosureProcessMap
+        node={nodeFrom("engine-cgc-fallback")}
+        workspaceEngines={WORKSPACE_ENGINES}
+      />,
+    );
+    const structural = getByTestId("enclosure-canvas");
+    const effects = getByTestId("engine-fx-overlay");
+
+    expect(structural.querySelector("[data-fx='surge']")).toBeNull();
+    expect(structural.querySelector("[data-fx='reindex']")).toBeNull();
+    expect(structural.querySelector("[data-fx='breath']")).toBeNull();
+    expect(effects.querySelectorAll("[data-fx='surge']").length).toBeGreaterThanOrEqual(2);
+    expect(effects.querySelector("[data-fx='reindex']")).not.toBeNull();
+  });
 });
 
 describe("EnclosureCanvas — landing arc (5h H2)", () => {

@@ -1,14 +1,4 @@
-"""Active conversation serving authority (260718-CHATS-L1, R1/R4).
-
-The app-scoped service behind the active routes: one per installed
-:class:`ConversationRuntime`, holding the cursor secret and the bounded set of
-live session projectors. It resolves the exact session, verifies the expected
-bridge epoch against the live authority on every wire, assembles atomic
-page+eventCursor responses, and performs every pre-stream cursor check before
-an SSE response exists. Projectors are reconstructable: an evicted or expired
-projector rehydrates from native authority and establishes a new cursor
-generation, so stale event cursors reset loudly instead of mixing sequences.
-"""
+"""App-scoped active conversation authority and bounded projector registry."""
 
 from __future__ import annotations
 
@@ -19,6 +9,7 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 
 from agents_remember.errors import HarnessBridgeEpochMismatchError
+from agents_remember.serving.conversation.active.agent_history import AgentHistoryHydration
 from agents_remember.serving.conversation.active.capabilities import capabilities_for
 from agents_remember.serving.conversation.active.cursor import (
     CursorResetRequiredError,
@@ -71,6 +62,9 @@ class ActiveConversationService:
         self._secret = os.urandom(32)
         self._projectors: dict[str, ActiveSessionProjector] = {}
         self._projector_lru: list[str] = []
+        self._session_locks: weakref.WeakValueDictionary[str, asyncio.Lock] = (
+            weakref.WeakValueDictionary()
+        )
 
     @property
     def secret(self) -> bytes:
@@ -123,9 +117,6 @@ class ActiveConversationService:
                 "event cursor predates the retained event window",
                 reason="retention-overflow",
             )
-        # Attach + replay snapshot with no await between them: the poll task
-        # cannot interleave, so replay and live delivery neither gap nor
-        # duplicate an envelope.
         queue = projector.subscribe()
         replay = projector.retained_after(decoded.sequence)
         return ActiveSubscription(
@@ -134,6 +125,23 @@ class ActiveConversationService:
             replay=replay,
         )
 
+    async def hydrate_agent_history(
+        self,
+        authorization: AuthorizationBinding,
+        ar_session_id: str,
+        *,
+        expected_bridge_epoch: str,
+        agent_id: str,
+    ) -> AgentHistoryHydration:
+        """Hydrate only the operator-selected child; parent paging stays metadata-first."""
+
+        projector, _identity = await self._projector_for(
+            authorization,
+            ar_session_id,
+            expected_bridge_epoch=expected_bridge_epoch,
+        )
+        return await projector.refresh_agent_native(agent_id)
+
     async def close(self) -> None:
         for projector in tuple(self._projectors.values()):
             await projector.close()
@@ -141,13 +149,7 @@ class ActiveConversationService:
         self._projector_lru.clear()
 
     async def release_session(self, ar_session_id: str) -> None:
-        """De-register and close one session's projector when the session ends (260718-CHATS-L5F R5).
-
-        Without this the projector self-idles after its consumer TTL but stays REGISTERED, holding a
-        dead session's full ProjectionStore items, L5 live-turn/request id-sets, and up to the
-        retained SSE envelopes until 32-LRU eviction — the tombstone-projector leak. Called on the
-        terminate/retire authority; de-registering here releases the whole projection immediately.
-        """
+        """De-register and close one ended session's projector."""
 
         projector = self._projectors.pop(ar_session_id, None)
         self._lru_drop(ar_session_id)
@@ -161,9 +163,27 @@ class ActiveConversationService:
         *,
         expected_bridge_epoch: str,
     ) -> tuple[ActiveSessionProjector, ActiveConversationRef]:
+        lock = self._session_locks.get(ar_session_id)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._session_locks[ar_session_id] = lock
+        async with lock:
+            return await self._projector_for_locked(
+                authorization,
+                ar_session_id,
+                expected_bridge_epoch=expected_bridge_epoch,
+            )
+
+    async def _projector_for_locked(
+        self,
+        authorization: AuthorizationBinding,
+        ar_session_id: str,
+        *,
+        expected_bridge_epoch: str,
+    ) -> tuple[ActiveSessionProjector, ActiveConversationRef]:
+        """Resolve/create one session projector without duplicate replacement races."""
+
         entry = resolve_running_entry(self._runtime, ar_session_id)
-        # Blocking sync IPC reads never run on the event loop; every read
-        # below this line is offloaded so the daemon stays responsive.
         actual_epoch = await asyncio.to_thread(current_bridge_epoch, entry)
         if actual_epoch != expected_bridge_epoch:
             raise HarnessBridgeEpochMismatchError(expected_bridge_epoch, actual_epoch)
@@ -172,10 +192,7 @@ class ActiveConversationService:
             entry, secret=self._secret, bridge_epoch=actual_epoch, snapshot=snapshot
         )
         projector = self._projectors.get(ar_session_id)
-        if (
-            projector is not None
-            and projector.matches(identity)
-        ):
+        if projector is not None and projector.matches(identity):
             self._lru_touch(ar_session_id)
             return projector, identity
         if projector is not None:
@@ -217,9 +234,7 @@ class ActiveConversationService:
         result: PageResult,
     ) -> ConversationPage:
         older_cursor = (
-            mint_page_cursor(
-                self._secret, authorization, identity, ordinal=result.older_ordinal
-            )
+            mint_page_cursor(self._secret, authorization, identity, ordinal=result.older_ordinal)
             if result.older_ordinal is not None
             else None
         )
@@ -274,8 +289,4 @@ def active_conversation_service(runtime: ConversationRuntime) -> ActiveConversat
     return service
 
 
-__all__ = [
-    "ActiveConversationService",
-    "ActiveSubscription",
-    "active_conversation_service",
-]
+__all__ = ["ActiveConversationService", "ActiveSubscription", "active_conversation_service"]

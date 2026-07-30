@@ -21,7 +21,7 @@ import json
 from collections.abc import AsyncIterator
 from typing import Annotated
 
-from fastapi import APIRouter, Header, Query, Request, Response
+from fastapi import APIRouter, Header, Path, Query, Request, Response
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from agents_remember.errors import (
@@ -150,6 +150,43 @@ async def conversation_page(
     return JSONResponse(content=page.model_dump(mode="json", by_alias=True, exclude_none=True))
 
 
+@router.post("/agents/{agent_id}/history")
+async def hydrate_agent_history(
+    ar_session_id: str,
+    agent_id: Annotated[str, Path(min_length=1)],
+    expected_bridge_epoch: Annotated[str, Query(alias="expectedBridgeEpoch", min_length=1)],
+    request: Request,
+) -> JSONResponse:
+    """Backfill one selected child; typed child failures remain successful local outcomes."""
+
+    try:
+        runtime = get_conversation_runtime(request)
+        authorization = resolve_conversation_authorization(request)
+        result = await active_conversation_service(runtime).hydrate_agent_history(
+            authorization,
+            ar_session_id,
+            expected_bridge_epoch=expected_bridge_epoch,
+            agent_id=agent_id,
+        )
+    except (
+        AuthorityError,
+        ConversationCompositionError,
+        HarnessBridgeEpochMismatchError,
+        HarnessControlError,
+        ConversationCursorError,
+        SessionResolutionError,
+    ) as exc:
+        return _map_typed_error(exc)
+    return JSONResponse(
+        content={
+            "status": result.status,
+            "agentId": result.thread_id,
+            **({"detail": result.detail} if result.detail is not None else {}),
+            **({"code": result.code} if result.code is not None else {}),
+        }
+    )
+
+
 @router.get("/events")
 async def conversation_events(
     ar_session_id: str,
@@ -217,8 +254,7 @@ def _sse_frame(envelope: ConversationEventEnvelope) -> bytes:
         separators=(",", ":"),
     )
     return (
-        f"event: conversation\ndata: {payload}\nretry: {SSE_RETRY_MS}\n"
-        f"id: {envelope.cursor}\n\n"
+        f"event: conversation\ndata: {payload}\nretry: {SSE_RETRY_MS}\nid: {envelope.cursor}\n\n"
     ).encode()
 
 

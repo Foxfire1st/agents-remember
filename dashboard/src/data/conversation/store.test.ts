@@ -1,9 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
+  AGENT_HISTORY_CHILD_LIMIT,
   activeConversationStore,
   connectConversation,
   disconnectConversation,
+  hydrateAgentConversation,
   LRU_LIMIT,
   touchConversation,
 } from "./store";
@@ -61,6 +63,191 @@ afterEach(() => {
 });
 
 describe("activeConversationStore orchestration (F4 keep-alive / LRU, F15 error threading)", () => {
+  it("requests native history only for the selected child on the warm session", async () => {
+    const calls: Array<{ url: string; method: string }> = [];
+    const fetchImpl = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = init?.method ?? "GET";
+      calls.push({ url, method });
+      if (method === "POST") {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ status: "hydrated", agentId: "agent/a" }),
+        } as Response;
+      }
+      return { ok: true, status: 200, json: async () => page("s1") } as Response;
+    }) as typeof fetch;
+    connectConversation("s1", "e1", { fetchImpl, eventSourceCtor: FakeEventSource });
+    await flush();
+
+    const result = await hydrateAgentConversation("s1", "agent/a");
+
+    expect(result).toEqual({
+      ok: true,
+      outcome: { status: "hydrated", agentId: "agent/a" },
+    });
+    const selected = calls.find((call) => call.method === "POST");
+    expect(selected?.url).toBe(
+      "/api/terminal/s1/conversation/agents/agent%2Fa/history?expectedBridgeEpoch=e1",
+    );
+    expect(calls.filter((call) => call.method === "POST")).toHaveLength(1);
+    expect(activeConversationStore.getState().agentHistoryBySession.s1?.["agent/a"]).toEqual({
+      phase: "ready",
+      outcome: { status: "hydrated", agentId: "agent/a" },
+    });
+  });
+
+  it("singleflights concurrent requests for the same selected child", async () => {
+    let releasePost: ((response: Response) => void) | undefined;
+    const pendingPost = new Promise<Response>((resolve) => {
+      releasePost = resolve;
+    });
+    let postCalls = 0;
+    const fetchImpl = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+      if ((init?.method ?? "GET") === "POST") {
+        postCalls += 1;
+        return pendingPost;
+      }
+      return { ok: true, status: 200, json: async () => page("s1") } as Response;
+    }) as typeof fetch;
+    connectConversation("s1", "e1", { fetchImpl, eventSourceCtor: FakeEventSource });
+    await flush();
+
+    const first = hydrateAgentConversation("s1", "agent-one");
+    const second = hydrateAgentConversation("s1", "agent-one");
+    expect(postCalls).toBe(1);
+    releasePost?.({
+      ok: true,
+      status: 200,
+      json: async () => ({ status: "hydrated", agentId: "agent-one" }),
+    } as Response);
+
+    expect(await Promise.all([first, second])).toEqual([
+      { ok: true, outcome: { status: "hydrated", agentId: "agent-one" } },
+      { ok: true, outcome: { status: "hydrated", agentId: "agent-one" } },
+    ]);
+    expect(postCalls).toBe(1);
+  });
+
+  it("bounds concurrent and retained selected-child bookkeeping per session", async () => {
+    let releasePosts: (() => void) | undefined;
+    const postGate = new Promise<void>((resolve) => {
+      releasePosts = resolve;
+    });
+    let postCalls = 0;
+    const fetchImpl = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      if ((init?.method ?? "GET") !== "POST") {
+        return { ok: true, status: 200, json: async () => page("s1") } as Response;
+      }
+      postCalls += 1;
+      await postGate;
+      const encoded = String(input).split("/agents/")[1]?.split("/history")[0] ?? "";
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          status: "hydrated",
+          agentId: decodeURIComponent(encoded),
+        }),
+      } as Response;
+    }) as typeof fetch;
+    connectConversation("s1", "e1", { fetchImpl, eventSourceCtor: FakeEventSource });
+    await flush();
+
+    const accepted = Array.from(
+      { length: AGENT_HISTORY_CHILD_LIMIT },
+      (_unused, index) => hydrateAgentConversation("s1", `agent-${index}`),
+    );
+    const refused = await hydrateAgentConversation(
+      "s1",
+      `agent-${AGENT_HISTORY_CHILD_LIMIT}`,
+    );
+    expect(refused).toMatchObject({
+      ok: false,
+      error: { status: "local-resource-limit" },
+    });
+    expect(postCalls).toBe(AGENT_HISTORY_CHILD_LIMIT);
+    expect(
+      Object.keys(activeConversationStore.getState().agentHistoryBySession.s1 ?? {}),
+    ).toHaveLength(AGENT_HISTORY_CHILD_LIMIT);
+
+    releasePosts?.();
+    await Promise.all(accepted);
+    expect(
+      Object.keys(activeConversationStore.getState().agentHistoryBySession.s1 ?? {}),
+    ).toHaveLength(AGENT_HISTORY_CHILD_LIMIT);
+  });
+
+  it.each([
+    {
+      label: "non-2xx",
+      post: async () =>
+        ({
+          ok: false,
+          status: 503,
+          json: async () => ({ status: "history-offline", detail: "child bridge unavailable" }),
+        }) as Response,
+      detail: "child bridge unavailable",
+      status: "history-offline",
+    },
+    {
+      label: "network",
+      post: async () => {
+        throw new TypeError("fetch failed");
+      },
+      detail: "network",
+      status: "transport",
+    },
+    {
+      label: "timeout",
+      post: async () => {
+        throw new DOMException("request expired", "TimeoutError");
+      },
+      detail: "selected child history request timed out",
+      status: "transport",
+    },
+  ])(
+    "keeps a $label failure child-scoped and retryable while the parent stream stays live",
+    async ({ post, detail, status }) => {
+      let fail = true;
+      const fetchImpl = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+        if ((init?.method ?? "GET") !== "POST") {
+          return { ok: true, status: 200, json: async () => page("s1") } as Response;
+        }
+        if (fail) return post();
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ status: "hydrated", agentId: "agent-one" }),
+        } as Response;
+      }) as typeof fetch;
+      connectConversation("s1", "e1", { fetchImpl, eventSourceCtor: FakeEventSource });
+      await flush();
+      activeConversationStore.getState().setStreamPhase("s1", "live");
+
+      const failed = await hydrateAgentConversation("s1", "agent-one");
+      expect(failed?.ok).toBe(false);
+      expect(activeConversationStore.getState().agentHistoryBySession.s1?.["agent-one"])
+        .toMatchObject({
+          phase: "failed",
+          error: { status, detail },
+        });
+      expect(activeConversationStore.getState().bySession.s1?.stream).toBe("live");
+      expect(activeConversationStore.getState().errorBySession.s1).toBeUndefined();
+
+      fail = false;
+      const recovered = await hydrateAgentConversation("s1", "agent-one");
+      expect(recovered).toEqual({
+        ok: true,
+        outcome: { status: "hydrated", agentId: "agent-one" },
+      });
+      expect(activeConversationStore.getState().agentHistoryBySession.s1?.["agent-one"])
+        .toMatchObject({ phase: "ready" });
+      expect(activeConversationStore.getState().bySession.s1?.stream).toBe("live");
+    },
+  );
+
   it("keeps an unfocused session's projection across disconnect (keep-alive) and rehydrates on refocus", async () => {
     connectConversation("s1", "e1", { fetchImpl: okFetch("s1"), eventSourceCtor: FakeEventSource });
     await flush();

@@ -17,6 +17,8 @@ from agents_remember.errors import (
     HarnessControlError,
     HarnessInteractionNotPendingError,
     HarnessRequestConflictError,
+    NativeHistoryLimitExceeded,
+    NativeHistoryUnavailable,
 )
 from agents_remember.serving.harness_capabilities import (
     capability_snapshot_json,
@@ -544,6 +546,17 @@ def _error_response(error: Exception) -> dict[str, object]:
         response["status"] = "request-id-conflict"
     elif isinstance(error, HarnessInteractionNotPendingError):
         response["status"] = "interaction-not-pending"
+    elif isinstance(error, NativeHistoryLimitExceeded):
+        response.update(
+            {
+                "status": "native-history-limit-exceeded",
+                "code": error.code,
+                "actualBytes": error.actual_bytes,
+                "limitBytes": error.limit_bytes,
+            }
+        )
+    elif isinstance(error, NativeHistoryUnavailable):
+        response.update({"status": "native-history-unavailable", "code": error.code})
     return response
 
 
@@ -559,6 +572,15 @@ def _raise_control_response_error(raw: Mapping[str, object]) -> None:
         raise HarnessRequestConflictError(detail)
     if status == "interaction-not-pending":
         raise HarnessInteractionNotPendingError(detail)
+    if status == "native-history-limit-exceeded":
+        raise NativeHistoryLimitExceeded(
+            detail,
+            actual_bytes=_required_non_negative_int(raw, "actualBytes"),
+            limit_bytes=_required_non_negative_int(raw, "limitBytes"),
+        )
+    if status == "native-history-unavailable":
+        code = _required_text(raw, "code")
+        raise NativeHistoryUnavailable(detail, code=code)
     raise HarnessControlError(detail)
 
 
@@ -567,3 +589,9 @@ def _optional_non_negative_int(raw: Mapping[str, object], key: str, *, default: 
     if not isinstance(value, int) or isinstance(value, bool) or value < 0:
         raise HarnessControlError(f"control payload {key} must be a non-negative integer")
     return value
+
+
+def _required_non_negative_int(raw: Mapping[str, object], key: str) -> int:
+    if key not in raw:
+        raise HarnessControlError(f"control payload requires {key}")
+    return _optional_non_negative_int(raw, key, default=0)

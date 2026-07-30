@@ -119,3 +119,26 @@ class CodexAppServerRpcError(CodexAppServerError):
         super().__init__(f"Codex app-server {method} failed ({code}): {message}")
         self.method = method
         self.code = code
+
+
+class NativeHistoryUnavailable(CodexAppServerError):
+    """One native-history read is unavailable without invalidating the shared adapter."""
+
+    def __init__(self, detail: str, *, code: str = "unavailable") -> None:
+        super().__init__(detail)
+        self.code = code
+
+
+class NativeHistoryLimitExceeded(NativeHistoryUnavailable):
+    """One native-history unit crossed its explicit bounded-materialization contract."""
+
+    def __init__(
+        self,
+        detail: str,
+        *,
+        actual_bytes: int,
+        limit_bytes: int,
+    ) -> None:
+        super().__init__(detail, code="materialization-limit")
+        self.actual_bytes = actual_bytes
+        self.limit_bytes = limit_bytes

@@ -14,6 +14,9 @@ import { createStore } from "zustand/vanilla";
 
 import {
   fetchConversationPage,
+  requestAgentHistory,
+  type AgentHistoryOutcome,
+  type AgentHistoryResult,
   type FetchLike,
   type PageResult,
 } from "./client";
@@ -36,6 +39,15 @@ import type {
 // Exported so the React keep-alive pool (ChatsStageBody) bounds its mounted surfaces by the
 // SAME limit — a surface is never kept alive for a session the data layer has already evicted.
 export const LRU_LIMIT = 6;
+// A normal surface can focus only one child at a time, but the exported orchestration function is
+// callable by multiple mounted consumers. Bound its per-session bookkeeping so an abandoned or
+// hostile caller cannot turn selected-child hydration into an unbounded browser store.
+export const AGENT_HISTORY_CHILD_LIMIT = 64;
+
+export type AgentHistoryLoadState =
+  | { phase: "loading" }
+  | { phase: "ready"; outcome: AgentHistoryOutcome }
+  | { phase: "failed"; error: ConversationRouteError; code?: string };
 
 export interface ActiveConversationState {
   bySession: Record<string, ActiveConversationProjection>;
@@ -46,11 +58,19 @@ export interface ActiveConversationState {
       survives LRU eviction with the keep-warm runtime, and the surface recomputes it against the
       rehydrated projection's roster (effectiveAgentFocus) instead of re-applying it blindly. */
   agentFocusBySession: Record<string, string>;
+  /** Selected-child acquisition state is scoped by session + child. It never changes the parent
+      stream phase: a failed child backfill is visible and retryable without poisoning live view. */
+  agentHistoryBySession: Record<string, Record<string, AgentHistoryLoadState>>;
   touchOrder: string[];
   applyPage: (sessionId: string, page: ConversationPage, mode: "initial" | "older") => void;
   ingestEvent: (sessionId: string, envelope: ConversationEventEnvelope) => void;
   setStreamPhase: (sessionId: string, phase: ActiveConversationProjection["stream"]) => void;
   setAgentFocus: (sessionId: string, agentId: string | null) => void;
+  setAgentHistoryState: (
+    sessionId: string,
+    agentId: string,
+    state: AgentHistoryLoadState | null,
+  ) => void;
   failStream: (sessionId: string, error: ConversationRouteError | null) => void;
   evict: (sessionId: string) => void;
   reset: () => void;
@@ -64,6 +84,7 @@ export const activeConversationStore = createStore<ActiveConversationState>((set
   bySession: {},
   errorBySession: {},
   agentFocusBySession: {},
+  agentHistoryBySession: {},
   touchOrder: [],
 
   applyPage: (sessionId, page, mode) =>
@@ -108,6 +129,22 @@ export const activeConversationStore = createStore<ActiveConversationState>((set
       return { agentFocusBySession };
     }),
 
+  setAgentHistoryState: (sessionId, agentId, next) =>
+    set((state) => {
+      const sessionState = { ...(state.agentHistoryBySession[sessionId] ?? {}) };
+      delete sessionState[agentId];
+      if (next !== null) sessionState[agentId] = next;
+      while (Object.keys(sessionState).length > AGENT_HISTORY_CHILD_LIMIT) {
+        const oldest = Object.keys(sessionState)[0];
+        if (oldest === undefined) break;
+        delete sessionState[oldest];
+      }
+      const agentHistoryBySession = { ...state.agentHistoryBySession };
+      if (Object.keys(sessionState).length === 0) delete agentHistoryBySession[sessionId];
+      else agentHistoryBySession[sessionId] = sessionState;
+      return { agentHistoryBySession };
+    }),
+
   // Record a typed failure reason and mark the projection (when present) projection-failed. When no
   // projection exists yet (first-connect failure) the error alone lets the surface render the reason.
   failStream: (sessionId, error) =>
@@ -130,7 +167,13 @@ export const activeConversationStore = createStore<ActiveConversationState>((set
 
   reset: () => {
     scrollMemoryBySession.clear();
-    set({ bySession: {}, errorBySession: {}, agentFocusBySession: {}, touchOrder: [] });
+    set({
+      bySession: {},
+      errorBySession: {},
+      agentFocusBySession: {},
+      agentHistoryBySession: {},
+      touchOrder: [],
+    });
   },
 }));
 
@@ -153,6 +196,10 @@ interface SessionRuntime {
   openFailures: number;
   /** Dead-stream re-pages since the last successful open (bounds the recover loop). */
   streamRecoveries: number;
+  /** One external read per child at a time. HTTP timeout of one caller must not duplicate work. */
+  agentHistoryInFlight: Map<string, Promise<AgentHistoryResult>>;
+  /** Successful selected-child walks are projector-local and need no repeat within this runtime. */
+  agentHistoryHydrated: Map<string, true>;
 }
 
 const runtimeBySession = new Map<string, SessionRuntime>();
@@ -369,8 +416,15 @@ export function connectConversation(
     disposed: false,
     openFailures: 0,
     streamRecoveries: 0,
+    agentHistoryInFlight: new Map(),
+    agentHistoryHydrated: new Map(),
   };
   runtimeBySession.set(sessionId, runtime);
+  activeConversationStore.setState((state) => {
+    const agentHistoryBySession = { ...state.agentHistoryBySession };
+    delete agentHistoryBySession[sessionId];
+    return { agentHistoryBySession };
+  });
   enforceLru(sessionId);
   void hydrateAndStream(sessionId, runtime, options.limit);
 }
@@ -381,6 +435,11 @@ export function disconnectConversation(sessionId: string): void {
   runtime.disposed = true;
   runtime.controller?.stop();
   runtimeBySession.delete(sessionId);
+  activeConversationStore.setState((state) => {
+    const agentHistoryBySession = { ...state.agentHistoryBySession };
+    delete agentHistoryBySession[sessionId];
+    return { agentHistoryBySession };
+  });
   // The scroll memory dies with the projection — a rehydrated session opens at the latest
   // (the first-open contract), never at a pixel offset measured against dropped content.
   scrollMemoryBySession.delete(sessionId);
@@ -406,6 +465,101 @@ export function touchConversation(sessionId: string): void {
     touchOrder: touch(state.touchOrder, sessionId),
   }));
   enforceLru(sessionId);
+}
+
+/** Trigger selected/on-demand child history without replacing the parent page or live stream. */
+export async function hydrateAgentConversation(
+  sessionId: string,
+  agentId: string,
+): Promise<AgentHistoryResult | null> {
+  const runtime = runtimeBySession.get(sessionId);
+  if (runtime === undefined || runtime.disposed) return null;
+  if (runtime.agentHistoryHydrated.delete(agentId)) {
+    runtime.agentHistoryHydrated.set(agentId, true);
+    return {
+      ok: true,
+      outcome: { status: "already-hydrated", agentId },
+    };
+  }
+  const existing = runtime.agentHistoryInFlight.get(agentId);
+  if (existing !== undefined) return existing;
+  if (runtime.agentHistoryInFlight.size >= AGENT_HISTORY_CHILD_LIMIT) {
+    const result: AgentHistoryResult = {
+      ok: false,
+      error: {
+        status: "local-resource-limit",
+        detail: "too many selected child history requests are already in progress",
+        httpStatus: 0,
+      },
+    };
+    activeConversationStore
+      .getState()
+      .setAgentHistoryState(sessionId, agentId, {
+        phase: "failed",
+        error: result.error,
+      });
+    return result;
+  }
+
+  activeConversationStore
+    .getState()
+    .setAgentHistoryState(sessionId, agentId, { phase: "loading" });
+  const request = (async (): Promise<AgentHistoryResult> => {
+    try {
+      const result = await requestAgentHistory(
+        sessionId,
+        runtime.epoch,
+        agentId,
+        runtime.base,
+        runtime.fetchImpl,
+      );
+      if (runtime.disposed || runtimeBySession.get(sessionId) !== runtime) return result;
+      if (
+        result.ok &&
+        (result.outcome.status === "hydrated" ||
+          result.outcome.status === "already-hydrated")
+      ) {
+        runtime.agentHistoryHydrated.delete(agentId);
+        runtime.agentHistoryHydrated.set(agentId, true);
+        if (runtime.agentHistoryHydrated.size > AGENT_HISTORY_CHILD_LIMIT) {
+          const oldest = runtime.agentHistoryHydrated.keys().next().value;
+          if (oldest !== undefined) runtime.agentHistoryHydrated.delete(oldest);
+        }
+        activeConversationStore
+          .getState()
+          .setAgentHistoryState(sessionId, agentId, {
+            phase: "ready",
+            outcome: result.outcome,
+          });
+      } else if (result.ok) {
+        activeConversationStore
+          .getState()
+          .setAgentHistoryState(sessionId, agentId, {
+            phase: "failed",
+            error: {
+              status: result.outcome.status,
+              detail:
+                result.outcome.detail ??
+                "selected child history is unavailable; retry the child to try again",
+              httpStatus: 200,
+            },
+            ...(result.outcome.code !== undefined ? { code: result.outcome.code } : {}),
+          });
+      } else {
+        activeConversationStore
+          .getState()
+          .setAgentHistoryState(sessionId, agentId, {
+            phase: "failed",
+            error: result.error,
+          });
+      }
+      return result;
+    } finally {
+      runtime.agentHistoryInFlight.delete(agentId);
+    }
+  })();
+  runtime.agentHistoryInFlight.set(agentId, request);
+  return request;
 }
 
 // ── Keep-warm scroll memory ─────────────────────────────────────────────

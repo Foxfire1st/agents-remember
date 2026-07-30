@@ -12,9 +12,10 @@ one projection per ``interval``; ``--interval`` keeps meaning the fast-path cade
 or on a slow ``heartbeat`` when nothing changed, so a quiet daemon idles near zero CPU.
 Freshness bounds: change -> SSE delta within debounce + projection time (plus the interval
 floor when busy); ``/api/state`` staleness and time-derived field resolution are bounded
-by the heartbeat. Without a watcher (sim replay, existing tests) the loop keeps the exact
-fixed-interval behaviour, and a failed watcher degrades back to it loudly (fail-open).
-The tick body itself is byte-identical either way -- see ``serving/change_watcher.py``.
+by the heartbeat. The live path retains fixed-slot reader-domain snapshots and invalidates
+only the domains named by the watcher. Without a watcher (sim replay, existing tests) the
+loop keeps the exact fixed-interval full-refresh behaviour, and a failed watcher degrades
+back to it loudly (fail-open).
 
 Two seams keep this generic across live and sim (slice 4b): ``now`` is the clock the
 tick projects at (a replay clock under sim, wall-clock UTC live), and ``before_tick`` is
@@ -40,6 +41,10 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
+from agents_remember.observer.projection_inputs import (
+    ProjectionInputState,
+    ProjectionRefresh,
+)
 from agents_remember.observer.projection_store import project_and_write
 from agents_remember.serving.change_watcher import DEFAULT_HEARTBEAT_SECONDS, ChangePacer
 from agents_remember.serving.delta import (
@@ -118,10 +123,12 @@ class Projector:
             if change_watcher is not None
             else None
         )
+        self._input_state = ProjectionInputState() if change_watcher is not None else None
         # Instrumentation (R7 tests + ops): successful projections since run() started,
         # and why the last tick woke ("change" | "heartbeat" | "interval").
         self.projection_count = 0
         self.last_wake_reason: str | None = None
+        self.last_invalidated_domains: frozenset[str] = frozenset()
         # (seq, projection) publish as ONE tuple: /api/state runs in a threadpool, so pairing
         # them via two attributes could tear (a bumped seq read against the previous snapshot
         # would hand a poller a stale body under a fresh ETag).
@@ -139,7 +146,11 @@ class Projector:
         server still starts and serves ``503`` from ``/api/state`` until a tick succeeds.
         """
         try:
-            first = await asyncio.to_thread(self._tick_sync, self._now())
+            first = await asyncio.to_thread(
+                self._tick_sync,
+                self._now(),
+                ProjectionRefresh.full() if self._input_state is not None else None,
+            )
         except Exception:
             logger.exception("initial projection failed; the tick loop will retry")
             return
@@ -167,10 +178,21 @@ class Projector:
             while True:
                 if self._pacer is None:
                     await asyncio.sleep(self._interval)
+                    refresh = None
                 else:
-                    self.last_wake_reason = await self._pacer.wait()
+                    wake = await self._pacer.wait()
+                    self.last_wake_reason = wake.reason
+                    self.last_invalidated_domains = frozenset(
+                        domain.value for domain in wake.domains
+                    )
+                    if wake.reason == "change":
+                        refresh = ProjectionRefresh.change(wake.domains)
+                    elif wake.reason == "heartbeat":
+                        refresh = ProjectionRefresh.heartbeat()
+                    else:
+                        refresh = ProjectionRefresh.full()
                 try:
-                    current = await asyncio.to_thread(self._tick_sync, self._now())
+                    current = await asyncio.to_thread(self._tick_sync, self._now(), refresh)
                 except Exception:
                     logger.exception("projection tick failed; retrying next interval")
                     continue
@@ -193,7 +215,9 @@ class Projector:
             )
         self._pacer.set_watcher_healthy(False)
 
-    def _tick_sync(self, moment: datetime) -> WorkspaceProjection:
+    def _tick_sync(
+        self, moment: datetime, refresh: ProjectionRefresh | None = None
+    ) -> WorkspaceProjection:
         """Run the optional pre-tick hook, then project at ``moment`` (off the loop thread)."""
         if self._before_tick is not None:
             self._before_tick(moment)
@@ -202,6 +226,8 @@ class Projector:
             now=moment,
             provider_refresher=self._provider_refresher,
             landing_state=self._landing_refresher,
+            input_state=self._input_state,
+            refresh=refresh,
         )
 
     def _publish_projection(self, current: WorkspaceProjection) -> None:
