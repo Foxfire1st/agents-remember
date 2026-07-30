@@ -15,6 +15,7 @@ sys.path.insert(0, str(MCP_SRC))
 from agents_remember.serving.harness_control_claude import ClaudeStreamJsonAdapter
 from agents_remember.serving.harness_control_models import (
     ControlIdentity,
+    ControlOperationRef,
     LaunchSpec,
     PromptRequest,
 )
@@ -59,6 +60,12 @@ class ClaudeStreamJsonLiveSmoke(unittest.IsolatedAsyncioTestCase):
                         source="terminal",
                         text="/cost",
                         submitted_at="2026-07-14T00:00:00+00:00",
+                        operation=ControlOperationRef(
+                            bridge_epoch="claude-stream-smoke-epoch",
+                            sequence=1,
+                            operation_id="claude-stream-smoke-operation",
+                            kind="prompt",
+                        ),
                     )
                 ),
                 timeout=120,

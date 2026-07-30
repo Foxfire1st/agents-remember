@@ -78,6 +78,72 @@ class _SlowEchoSocket(_Socket):
         return self.payload
 
 
+class _WholeWriteSocket(_Socket):
+    """Accepts the whole request in one ``send``, then behaves like a peer that already closed.
+
+    This is the ordinary production shape: the server answers a small request and closes with our
+    bytes drained, so by the time the caller would write a remainder the peer is gone and any write
+    raises EPIPE. ``sendall`` here fails unconditionally to prove it is never reached.
+    """
+
+    def __init__(self, payload: bytes) -> None:
+        super().__init__()
+        self.payload = payload
+        self.sendall_calls = 0
+
+    def send(self, data: bytes) -> int:
+        return len(data)
+
+    def sendall(self, _data: bytes) -> None:
+        self.sendall_calls += 1
+        raise BrokenPipeError(32, "Broken pipe")
+
+    def recv(self, _size: int) -> bytes:
+        return self.payload
+
+
+class HarnessControlWriteCompletionTests(unittest.TestCase):
+    def test_a_fully_accepted_request_never_issues_a_remainder_write(self) -> None:
+        # A one-send request left an EMPTY remainder, and `sendall` is a do-while over its buffer, so
+        # it still issued a zero-length send. Once the server had answered and closed with the request
+        # drained, that pointless write raised EPIPE and the client reported the completed exchange as
+        # a may_have_sent disconnect — surfacing as an intermittent broken pipe under load.
+        socket = _WholeWriteSocket(
+            json.dumps({"ok": True, "result": {"snapshot": "ready"}}).encode() + b"\n"
+        )
+        with mock.patch(
+            "agents_remember.serving.harness_control_client.socket.socket",
+            return_value=socket,
+        ):
+            result = request_control(_Entry(), "snapshot")
+        self.assertEqual(socket.sendall_calls, 0)
+        self.assertEqual(result, {"snapshot": "ready"})
+
+    def test_a_partially_accepted_request_still_writes_its_remainder(self) -> None:
+        class _PartialWriteSocket(_Socket):
+            def __init__(self) -> None:
+                super().__init__()
+                self.remainders: list[bytes] = []
+
+            def send(self, _data: bytes) -> int:
+                return 1
+
+            def sendall(self, data: bytes) -> None:
+                self.remainders.append(data)
+
+            def recv(self, _size: int) -> bytes:
+                return json.dumps({"ok": True, "result": {"snapshot": "ready"}}).encode() + b"\n"
+
+        socket = _PartialWriteSocket()
+        with mock.patch(
+            "agents_remember.serving.harness_control_client.socket.socket",
+            return_value=socket,
+        ):
+            request_control(_Entry(), "snapshot")
+        self.assertEqual(len(socket.remainders), 1)
+        self.assertTrue(socket.remainders[0])
+
+
 class HarnessControlClientRetrySafetyTests(unittest.TestCase):
     def test_refused_control_socket_yields_honest_note_and_unlinks_stale_socket(self) -> None:
         # A controlled runner that exited uncleanly leaves a stale socket that

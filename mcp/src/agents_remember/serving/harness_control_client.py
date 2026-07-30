@@ -545,7 +545,14 @@ def _exchange_control(endpoint: Path, encoded: bytes, *, timeout_seconds: float)
             if first_write <= 0:
                 raise OSError("control socket accepted no request bytes")
             bytes_handed = True
-            client.sendall(encoded[first_write:])
+            remainder = encoded[first_write:]
+            if remainder:
+                # Only write what is actually left. ``sendall`` is a do-while over the buffer, so an
+                # empty remainder still issues one zero-length send; once the server has answered and
+                # closed with our request drained the peer is gone, and that pointless write raises
+                # EPIPE — reporting a disconnect (may_have_sent=True, forcing reconciliation) for an
+                # exchange the server in fact completed.
+                client.sendall(remainder)
             return _read_line(client)
         except (HarnessControlError, OSError, TimeoutError) as exc:
             stage = (

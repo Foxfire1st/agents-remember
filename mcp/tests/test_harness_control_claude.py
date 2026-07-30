@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
+import shutil
 import sys
+import tempfile
 import unittest
 from collections.abc import Callable, Mapping
 from itertools import count
@@ -14,6 +17,7 @@ MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
 from agents_remember.errors import HarnessControlError
+from agents_remember.serving.claude_stream_transport import ClaudeSubprocessTransport
 from agents_remember.serving.harness_capabilities import SetResult
 from agents_remember.serving.harness_control_bridge import HarnessControlBridge
 from agents_remember.serving.harness_control_claude import (
@@ -39,6 +43,7 @@ SESSION_ID = "11111111-1111-4111-8111-111111111111"
 FIRST_CORRELATION = "22222222-2222-4222-8222-222222222222"
 NOW = "2026-07-14T10:00:00+00:00"
 _OPERATION_SEQUENCE = count(1)
+_STUB_EFFORTS = ["low", "medium", "high"]
 
 
 def _load_fixture(name: str) -> list[dict[str, object]]:
@@ -1779,6 +1784,134 @@ async def _wait_for_snapshot_raw(bridge: HarnessControlBridge, key: str, expecte
             return
         await asyncio.sleep(0)
     raise AssertionError(f"bridge snapshot raw {key!r} never became {expected!r}")
+
+
+# A stream-json speaker that reports a version at the forwarding floor, so the adapter takes its
+# probe/relaunch branch. It logs each launch argv, which is how the relaunch flag is proven.
+_STUB_CLAUDE_SOURCE = '''
+import json, os, sys
+
+with open(os.environ["AR_STUB_CLAUDE_ARGV_LOG"], "a") as handle:
+    handle.write(json.dumps(sys.argv[1:]) + "\\n")
+
+SESSION = "33333333-3333-4333-8333-333333333333"
+MODELS = [
+    {
+        "value": "default",
+        "displayName": "Default",
+        "description": "the configured default",
+        "resolvedModel": "claude-stub-5",
+        "supportsEffort": True,
+        "supportedEffortLevels": ["low", "medium", "high"],
+    },
+    {
+        "value": "sonnet",
+        "displayName": "Sonnet",
+        "description": "a faster peer",
+        "supportsEffort": False,
+        "supportedEffortLevels": [],
+    },
+]
+
+
+def emit(frame):
+    sys.stdout.write(json.dumps(frame) + "\\n")
+    sys.stdout.flush()
+
+
+while True:
+    line = sys.stdin.readline()
+    if not line:
+        break
+    frame = json.loads(line)
+    if frame.get("type") == "control_request":
+        subtype = frame["request"]["subtype"]
+        payload = {"commands": []} if subtype == "initialize" else {"models": MODELS}
+        emit(
+            {
+                "type": "control_response",
+                "response": {
+                    "request_id": frame["request_id"],
+                    "subtype": "success",
+                    "response": payload,
+                },
+            }
+        )
+    elif frame.get("type") == "user":
+        emit(
+            {
+                "type": "system",
+                "subtype": "init",
+                "session_id": SESSION,
+                "claude_code_version": "2.1.220",
+                "cwd": os.getcwd(),
+                "model": "claude-stub-5",
+                "permissionMode": "auto",
+                "tools": [],
+                "slash_commands": [],
+            }
+        )
+        emit(
+            {
+                "type": "result",
+                "session_id": SESSION,
+                "subtype": "success",
+                "is_error": False,
+            }
+        )
+'''
+
+
+class ClaudeProductionTransportRelaunchTests(unittest.IsolatedAsyncioTestCase):
+    """Drive the adapter over the REAL subprocess transport, which the fake above cannot do.
+
+    ``_FakeClaudeTransport`` tolerates a second ``start`` on the same object, so it proved the
+    relaunch argv while hiding that the production transport kept its terminated process and
+    refused its own probe relaunch as already started.
+    """
+
+    async def test_probe_relaunch_over_the_real_transport_reaches_control_ready(self) -> None:
+        workspace = Path(tempfile.mkdtemp(prefix="ar-claude-relaunch-"))
+        self.addCleanup(shutil.rmtree, workspace, True)
+        stub = workspace / "stub_claude.py"
+        stub.write_text(_STUB_CLAUDE_SOURCE)
+        argv_log = workspace / "argv.jsonl"
+
+        adapter = ClaudeStreamJsonAdapter(
+            transport_factory=ClaudeSubprocessTransport,
+            clock=lambda: NOW,
+            correlation_factory=lambda: FIRST_CORRELATION,
+        )
+        handshake = await adapter.start(
+            LaunchSpec(
+                identity=_identity(),
+                harness_id="claude",
+                cwd=workspace,
+                argv=(sys.executable, str(stub)),
+                env={
+                    "PATH": os.environ.get("PATH", ""),
+                    "AR_STUB_CLAUDE_ARGV_LOG": str(argv_log),
+                },
+            )
+        )
+        try:
+            self.assertEqual(handshake.snapshot.control, "ready")
+            self.assertEqual(handshake.snapshot.raw["claudeCodeVersion"], "2.1.220")
+
+            launches = [json.loads(line) for line in argv_log.read_text().splitlines()]
+            self.assertEqual(len(launches), 2, "the floor probe must stop and relaunch once")
+            self.assertNotIn("--forward-subagent-text", launches[0])
+            self.assertIn("--forward-subagent-text", launches[1])
+
+            # Control readiness is what makes the dashboard's model/effort surface selectable.
+            capabilities = adapter.advertise()
+            self.assertEqual(capabilities.selected_model_key, "default")
+            selected = next(
+                item for item in capabilities.models if item.key == capabilities.selected_model_key
+            )
+            self.assertEqual([option.key for option in selected.effort_options], _STUB_EFFORTS)
+        finally:
+            await adapter.stop("forced")
 
 
 if __name__ == "__main__":

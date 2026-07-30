@@ -150,6 +150,11 @@ class ClaudeSubprocessTransport:
                 process.kill()
                 await process.wait()
         await self._finish_stderr_task()
+        # Release ownership only now that termination and the stderr drain are complete: the adapter
+        # probes the version floor by stopping and relaunching this same transport, and a retained
+        # terminated process would make that second start refuse itself as already started.
+        self._process = None
+        self._stderr_task = None
 
     def _require_process(self) -> asyncio.subprocess.Process:
         if self._process is None:

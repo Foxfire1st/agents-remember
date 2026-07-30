@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+import os
+import sys
 import unittest
+from pathlib import Path
 from typing import cast
 
 from agents_remember.errors import (
@@ -13,6 +16,11 @@ from agents_remember.serving.claude_stream_transport import (
     MAX_CLAUDE_FRAME_BYTES,
     ClaudeSubprocessTransport,
 )
+
+# A stand-in for Claude Code: it stays alive until stdin closes, so a graceful stop ends it the
+# same way the real launch does and a forced stop must kill it.
+_STDIN_WAIT_ARGV = (sys.executable, "-c", "import sys; sys.stdin.read()")
+_LAUNCH_ENV = {"PATH": os.environ.get("PATH", "")}
 
 
 class _Reader:
@@ -225,6 +233,41 @@ class ClaudeStreamTransportTests(unittest.IsolatedAsyncioTestCase):
         forced = _transport(forced_process)
         await forced.stop("forced")
         self.assertEqual((forced_process.kills, forced_process.waits), (1, 1))
+
+
+class ClaudeSubprocessTransportLifecycleTests(unittest.IsolatedAsyncioTestCase):
+    """Own a real subprocess: the fakes above assign ``_process`` and never exercise ``start``."""
+
+    async def test_a_completed_stop_releases_ownership_so_the_same_transport_restarts(
+        self,
+    ) -> None:
+        # The adapter's --forward-subagent-text probe stops and relaunches the SAME transport
+        # object, so a completed stop must release the process and stderr-drain ownership it took.
+        transport = ClaudeSubprocessTransport()
+        await transport.start(_STDIN_WAIT_ARGV, cwd=Path.cwd(), env=_LAUNCH_ENV)
+
+        await transport.stop("forced")
+        self.assertIsNone(transport.returncode)
+        self.assertIsNone(transport._process)
+        self.assertIsNone(transport._stderr_task)
+        # Ownership is released, not merely nulled: the not-started guard governs again.
+        with self.assertRaisesRegex(HarnessControlError, "not started"):
+            await transport.read_frame()
+
+        await transport.start(_STDIN_WAIT_ARGV, cwd=Path.cwd(), env=_LAUNCH_ENV)
+        self.assertIsNone(transport.returncode)
+        await transport.stop("graceful")
+        self.assertIsNone(transport._process)
+        self.assertIsNone(transport._stderr_task)
+
+    async def test_start_still_refuses_while_a_process_is_owned(self) -> None:
+        transport = ClaudeSubprocessTransport()
+        await transport.start(_STDIN_WAIT_ARGV, cwd=Path.cwd(), env=_LAUNCH_ENV)
+        try:
+            with self.assertRaisesRegex(HarnessControlError, "already started"):
+                await transport.start(_STDIN_WAIT_ARGV, cwd=Path.cwd(), env=_LAUNCH_ENV)
+        finally:
+            await transport.stop("forced")
 
 
 if __name__ == "__main__":
