@@ -107,9 +107,7 @@ class ProjectionMutationStream:
     def emit_status(self, status: ConversationStatus) -> None:
         self.emit(StoreMutation(kind="status"), status=status)
 
-    def emit(
-        self, mutation: StoreMutation, *, status: ConversationStatus | None = None
-    ) -> None:
+    def emit(self, mutation: StoreMutation, *, status: ConversationStatus | None = None) -> None:
         public = _conversation_mutation(mutation, status=status)
         if public is not None:
             self._publish(self._mint_envelope(public))

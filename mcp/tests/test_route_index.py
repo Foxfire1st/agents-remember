@@ -209,12 +209,8 @@ class RouteIndexTests(unittest.TestCase):
             )
             (code_root / "README.md").write_text("# Repo\n", encoding="utf-8")
             (code_root / "src" / "app").mkdir(parents=True)
-            (code_root / "src" / "app" / "service.py").write_text(
-                "SERVICE = 1\n", encoding="utf-8"
-            )
-            (code_root / "src" / "app" / "missing.py").write_text(
-                "MISSING = 1\n", encoding="utf-8"
-            )
+            (code_root / "src" / "app" / "service.py").write_text("SERVICE = 1\n", encoding="utf-8")
+            (code_root / "src" / "app" / "missing.py").write_text("MISSING = 1\n", encoding="utf-8")
             (code_root / "src" / "generated").mkdir(parents=True)
             (code_root / "src" / "generated" / "tracked.py").write_text(
                 "GENERATED = 1\n", encoding="utf-8"
@@ -476,13 +472,9 @@ class RouteIndexTests(unittest.TestCase):
             template.mkdir()
             (template / "overview.md").write_text("# Repo\n", encoding="utf-8")
             (template / "hidden").mkdir()
-            (template / "hidden" / "sparse.py.md").write_text(
-                "# sparse.py\n", encoding="utf-8"
-            )
+            (template / "hidden" / "sparse.py.md").write_text("# sparse.py\n", encoding="utf-8")
             (template / "kept").mkdir()
-            (template / "kept" / "visible.py.md").write_text(
-                "# visible.py\n", encoding="utf-8"
-            )
+            (template / "kept" / "visible.py.md").write_text("# visible.py\n", encoding="utf-8")
             regular_onboarding = root / "regular-onboarding"
             sparse_onboarding = root / "sparse-onboarding"
             shutil.copytree(template, regular_onboarding)
@@ -512,9 +504,7 @@ class RouteIndexTests(unittest.TestCase):
                 route_index_bytes(regular_onboarding),
                 route_index_bytes(sparse_onboarding),
             )
-            sparse_index = json.loads(
-                route_index_bytes(sparse_onboarding)["overview.index.json"]
-            )
+            sparse_index = json.loads(route_index_bytes(sparse_onboarding)["overview.index.json"])
             self.assertEqual(
                 sparse_index["coveredFiles"],
                 ["hidden/sparse.py", "kept/visible.py"],
@@ -537,9 +527,7 @@ class RouteIndexTests(unittest.TestCase):
                 storage=settings,
             )
             self.assertEqual(deletion.written, 1)
-            deletion_index = json.loads(
-                route_index_bytes(sparse_onboarding)["overview.index.json"]
-            )
+            deletion_index = json.loads(route_index_bytes(sparse_onboarding)["overview.index.json"])
             self.assertEqual(deletion_index["coverageCounts"]["sourceFilesInScope"], 1)
             self.assertEqual(deletion_index["coveredFiles"], ["hidden/sparse.py"])
             self.assertEqual(deletion_index["coverageCounts"]["fileSidecars"], 1)
@@ -659,12 +647,15 @@ class RouteIndexTests(unittest.TestCase):
                     stderr="selector conflict\n",
                 ),
             ]
-            with patch(
-                "agents_remember.kernel.route_index_census.run_git",
-                side_effect=results,
-            ), self.assertRaisesRegex(
-                RouteIndexCensusError,
-                "git diff-files deletion census failed: selector conflict",
+            with (
+                patch(
+                    "agents_remember.kernel.route_index_census.run_git",
+                    side_effect=results,
+                ),
+                self.assertRaisesRegex(
+                    RouteIndexCensusError,
+                    "git diff-files deletion census failed: selector conflict",
+                ),
             ):
                 route_index_source_files(
                     code_root=code_root,
@@ -682,13 +673,16 @@ class RouteIndexTests(unittest.TestCase):
                 stderr="",
             )
 
-            with patch(
-                "agents_remember.kernel.route_index_census.run_git",
-                side_effect=OSError("git executable unavailable"),
-            ), self.assertRaisesRegex(
-                AuthorityError,
-                "repository authority probe failed: git executable unavailable",
-            ) as root_error:
+            with (
+                patch(
+                    "agents_remember.kernel.route_index_census.run_git",
+                    side_effect=OSError("git executable unavailable"),
+                ),
+                self.assertRaisesRegex(
+                    AuthorityError,
+                    "repository authority probe failed: git executable unavailable",
+                ) as root_error,
+            ):
                 route_index_source_files(
                     code_root=code_root,
                     storage=storage_settings(),
@@ -696,16 +690,19 @@ class RouteIndexTests(unittest.TestCase):
                 )
             self.assertIsInstance(root_error.exception.__cause__, OSError)
 
-            with patch(
-                "agents_remember.kernel.route_index_census.run_git",
-                side_effect=[
-                    root_success,
-                    subprocess.TimeoutExpired(cmd=["git", "diff-files"], timeout=5),
-                ],
-            ), self.assertRaisesRegex(
-                RouteIndexCensusError,
-                "git diff-files deletion census failed:.*timed out",
-            ) as timeout_error:
+            with (
+                patch(
+                    "agents_remember.kernel.route_index_census.run_git",
+                    side_effect=[
+                        root_success,
+                        subprocess.TimeoutExpired(cmd=["git", "diff-files"], timeout=5),
+                    ],
+                ),
+                self.assertRaisesRegex(
+                    RouteIndexCensusError,
+                    "git diff-files deletion census failed:.*timed out",
+                ) as timeout_error,
+            ):
                 route_index_source_files(
                     code_root=code_root,
                     storage=storage_settings(),
@@ -713,13 +710,16 @@ class RouteIndexTests(unittest.TestCase):
                 )
             self.assertIsInstance(timeout_error.exception.__cause__, subprocess.TimeoutExpired)
 
-            with patch(
-                "agents_remember.kernel.route_index_census.run_git",
-                side_effect=[root_success, OSError("index unreadable")],
-            ), self.assertRaisesRegex(
-                RouteIndexCensusError,
-                "git diff-files deletion census failed: index unreadable",
-            ) as census_error:
+            with (
+                patch(
+                    "agents_remember.kernel.route_index_census.run_git",
+                    side_effect=[root_success, OSError("index unreadable")],
+                ),
+                self.assertRaisesRegex(
+                    RouteIndexCensusError,
+                    "git diff-files deletion census failed: index unreadable",
+                ) as census_error,
+            ):
                 route_index_source_files(
                     code_root=code_root,
                     storage=storage_settings(),
@@ -742,10 +742,13 @@ class RouteIndexTests(unittest.TestCase):
                     raise PermissionError("candidate metadata denied")
                 return original_lstat(path)
 
-            with patch.object(Path, "lstat", fail_candidate_lstat), self.assertRaisesRegex(
-                RouteIndexCensusError,
-                "candidate.py.*candidate metadata denied",
-            ) as captured:
+            with (
+                patch.object(Path, "lstat", fail_candidate_lstat),
+                self.assertRaisesRegex(
+                    RouteIndexCensusError,
+                    "candidate.py.*candidate metadata denied",
+                ) as captured,
+            ):
                 route_index_source_files(
                     code_root=code_root,
                     storage=storage_settings(),
@@ -773,9 +776,7 @@ class RouteIndexTests(unittest.TestCase):
             expected = os.fsdecode(raw_relative)
             (onboarding_root / "src").mkdir(parents=True)
             (onboarding_root / "overview.md").write_text("# Repo\n", encoding="utf-8")
-            (onboarding_root / f"{expected}.md").write_text(
-                "# non-utf8.py\n", encoding="utf-8"
-            )
+            (onboarding_root / f"{expected}.md").write_text("# non-utf8.py\n", encoding="utf-8")
             settings = storage_settings(
                 includes=["src/**"],
                 include_file_types=[".py"],

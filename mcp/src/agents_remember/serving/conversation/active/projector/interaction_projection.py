@@ -93,17 +93,14 @@ class InteractionProjection:
     def _upsert(
         self, pending: PendingInteraction, *, agent: ConversationAgentRef | None = None
     ) -> None:
-        blocks: list[TextBlock | ChoicesBlock] = [
-            TextBlock(block_id="prompt", text=pending.prompt)
-        ]
+        blocks: list[TextBlock | ChoicesBlock] = [TextBlock(block_id="prompt", text=pending.prompt)]
         if pending.choices:
             blocks.append(
                 ChoicesBlock(
                     block_id="choices",
                     interaction_id=pending.interaction_id,
                     options=tuple(
-                        ChoiceOption(option_id=choice, label=choice)
-                        for choice in pending.choices
+                        ChoiceOption(option_id=choice, label=choice) for choice in pending.choices
                     ),
                 )
             )

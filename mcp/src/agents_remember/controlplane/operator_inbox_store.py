@@ -457,8 +457,7 @@ class OperatorInboxStore:
         tmp = path.with_name(f"{path.name}.tmp")
         tmp.write_text(
             "\n".join(
-                record.model_dump_json(by_alias=True, exclude_none=True)
-                for record in records
+                record.model_dump_json(by_alias=True, exclude_none=True) for record in records
             )
             + "\n",
             encoding="utf-8",

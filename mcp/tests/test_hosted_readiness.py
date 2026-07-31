@@ -184,9 +184,7 @@ def test_exact_identity_change_during_adapter_read_is_unknown(catalog: TerminalC
         catalog.upsert(replace(current, created_at="2026-07-12T11:00:00+00:00"))
         return _snapshot(current)
 
-    result = hosted_session_readiness(
-        catalog, _Host(), session_id="target", snapshot_reader=read
-    )
+    result = hosted_session_readiness(catalog, _Host(), session_id="target", snapshot_reader=read)
     assert result.status == "unknown-session"
     assert "identity changed" in (result.detail or "")
 

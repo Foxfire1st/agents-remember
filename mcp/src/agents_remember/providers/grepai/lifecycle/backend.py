@@ -352,12 +352,16 @@ def grepai_backend_remove_mismatched_container(
         timeout=args.timeout,
     )
     if result["returncode"] != 0:
-        return inspect_data, result, {
-            "provider": "grepai",
-            "action": "backend-start",
-            "ok": False,
-            "command": result,
-        }
+        return (
+            inspect_data,
+            result,
+            {
+                "provider": "grepai",
+                "action": "backend-start",
+                "ok": False,
+                "command": result,
+            },
+        )
     return None, result, None
 
 
@@ -484,7 +488,9 @@ def grepai_backend_create_start_result(
             compose=grepai_compose_summary(render),
             migration=migration,
         )
-    up_result = run_compose(render, command_args, cwd=layout.coordination_root, timeout=args.timeout)
+    up_result = run_compose(
+        render, command_args, cwd=layout.coordination_root, timeout=args.timeout
+    )
     if up_result["returncode"] != 0:
         return {
             "provider": "grepai",
@@ -506,7 +512,9 @@ def grepai_backend_create_start_result(
         status="running",
         postgres_host=backend["postgresHost"],
         postgres_port=postgres_port,
-        image_digest=docker_repo_digest(backend["image"], cwd=layout.coordination_root, timeout=args.timeout),
+        image_digest=docker_repo_digest(
+            backend["image"], cwd=layout.coordination_root, timeout=args.timeout
+        ),
         container_id=str(inspect_data.get("Id", "")) if inspect_data else None,
     )
     write_json(layout.backend_state_file, backend_state)

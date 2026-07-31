@@ -86,7 +86,5 @@ class MemoryCarryoverApplyResponse(FlexibleToolResponse):
     )
     reportPath: str | None = Field(
         default=None,
-        description=(
-            "Temp report file holding the full candidate and carried records."
-        ),
+        description=("Temp report file holding the full candidate and carried records."),
     )

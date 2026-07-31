@@ -262,7 +262,9 @@ class WorktreeProviderAdmissionTests(unittest.TestCase):
             ],
         ]
 
-        self.assertEqual(active_enclosure_worktree_groups(enclosures, logs, now=FRESH), {"close-ar"})
+        self.assertEqual(
+            active_enclosure_worktree_groups(enclosures, logs, now=FRESH), {"close-ar"}
+        )
 
     def test_active_group_survives_a_pruned_lifecycle_log(self) -> None:
         # The regression: a running worktree (cleanup pending) whose lifecycle event log was retired for
@@ -286,7 +288,13 @@ class SeriesRetentionTests(unittest.TestCase):
     """`series_retained_lifecycle_ids`: a master series' events survive until the series is retired."""
 
     def _leaf(
-        self, lifecycle_id: str, master: str, cleanup: str, *, enclosure: str = "/c.md", repo: str = "r"
+        self,
+        lifecycle_id: str,
+        master: str,
+        cleanup: str,
+        *,
+        enclosure: str = "/c.md",
+        repo: str = "r",
     ) -> EnclosureNode:
         return _enclosure(
             lifecycleId=lifecycle_id,
@@ -1541,7 +1549,9 @@ class TokenSeriesTests(unittest.TestCase):
         self.assertEqual(len(series), TOKEN_SERIES_MAX)
         # The newest window is exact: the last TOKEN_SERIES_RECENT cumulative values.
         recent = [sample.cumulative for sample in series[-TOKEN_SERIES_RECENT:]]
-        self.assertEqual(recent, [10 * n for n in range(count - TOKEN_SERIES_RECENT + 1, count + 1)])
+        self.assertEqual(
+            recent, [10 * n for n in range(count - TOKEN_SERIES_RECENT + 1, count + 1)]
+        )
         # The thinned history keeps the first sample and stays monotonic (a decimated
         # cumulative series must still read as a fuel gauge).
         self.assertEqual(series[0].cumulative, 10)
@@ -1708,7 +1718,9 @@ class AttentionQueueTests(unittest.TestCase):
             {item.kind for item in proj.analytics.attentionQueue},
             {"actionable-drift", "failed-setup"},
         )
-        drift = next(item for item in proj.analytics.attentionQueue if item.kind == "actionable-drift")
+        drift = next(
+            item for item in proj.analytics.attentionQueue if item.kind == "actionable-drift"
+        )
         self.assertEqual(drift.id, "actionable-drift:repo-a:main")
         self.assertEqual(drift.title, "2 actionable drift in repo-a")
         self.assertEqual(drift.signalTs, "2026-06-13T18:00:00+00:00")
@@ -1882,7 +1894,9 @@ class AttentionDismissalTests(unittest.TestCase):
         # item despite an older dismissal -- a dismissal acknowledges THIS occurrence only.
         re_log = [
             _started(lifecycle_id="LC1"),
-            _event("lifecycle.awaiting-developer", lifecycle_id="LC1", ts=self.AWAIT_TS, summary="1"),
+            _event(
+                "lifecycle.awaiting-developer", lifecycle_id="LC1", ts=self.AWAIT_TS, summary="1"
+            ),
             _event("lifecycle.resumed", lifecycle_id="LC1", ts="2026-06-13T18:00:07+00:00"),
             _event(
                 "lifecycle.awaiting-developer",
@@ -1902,6 +1916,7 @@ class AttentionDismissalTests(unittest.TestCase):
         )
         kinds = [i.kind for i in queue]
         self.assertIn("awaiting-developer", kinds)  # :08 signal supersedes the :06 dismissal
+
 
 class GateProjectionTests(unittest.TestCase):
     """Slice 6c: durable gates materialize onto the lifecycle + the attention queue."""
@@ -1997,15 +2012,11 @@ class GateProjectionTests(unittest.TestCase):
         lane_items = [i for i in proj.analytics.attentionQueue if i.lane == "lifecycle"]
         self.assertEqual(len(lane_items), 1)
         self.assertEqual(lane_items[0].kind, "gate-open")
-        self.assertEqual(
-            [i for i in proj.analytics.attentionQueue if i.kind == "blocked-gate"], []
-        )
+        self.assertEqual([i for i in proj.analytics.attentionQueue if i.kind == "blocked-gate"], [])
 
     def test_bare_block_without_gate_still_yields_blocked_gate(self) -> None:
         # PARK, not delete: a bare block() with no GateRecord still raises blocked-gate.
-        proj = project_workspace(
-            [self._blocked_log()], enclosures=[], providers=[], now=FRESH
-        )
+        proj = project_workspace([self._blocked_log()], enclosures=[], providers=[], now=FRESH)
         kinds = [i.kind for i in proj.analytics.attentionQueue]
         self.assertEqual(kinds, ["blocked-gate"])
 
@@ -2585,9 +2596,7 @@ class ProjectAndWriteAnalyticsTests(unittest.TestCase):
             # REPO_SURFACE_REFRESH_TTL_SECONDS is 120s: a second
             # read 10s after the fill still hits the cache; only a read past the 120s TTL refreshes.
             one = _gather_repo_surfaces_cached(config, FRESH)
-            two = _gather_repo_surfaces_cached(
-                config, datetime(2026, 6, 13, 18, 0, 40, tzinfo=UTC)
-            )
+            two = _gather_repo_surfaces_cached(config, datetime(2026, 6, 13, 18, 0, 40, tzinfo=UTC))
             three = _gather_repo_surfaces_cached(
                 config, datetime(2026, 6, 13, 18, 2, 31, tzinfo=UTC)
             )
@@ -3303,7 +3312,10 @@ class EngineProcessTests(unittest.TestCase):
             [],
         )[0]
         self.assertEqual(
-            [(provider.role, provider.runtimeState, provider.factState) for provider in node.providers],
+            [
+                (provider.role, provider.runtimeState, provider.factState)
+                for provider in node.providers
+            ],
             [("code", "missing", "missing"), ("memory", "missing", "missing")],
         )
         states = {edge.kind: edge.state for edge in node.edges}
@@ -3364,7 +3376,9 @@ class EngineProcessTests(unittest.TestCase):
             worktreeGroup="260610-grp",
         )
         node = build_engine_processes([facts], [], [prov], [])[0]
-        self.assertEqual([p.id for p in node.providers], ["cgc@260610-grp", "missing-memory@260610-grp"])
+        self.assertEqual(
+            [p.id for p in node.providers], ["cgc@260610-grp", "missing-memory@260610-grp"]
+        )
         self.assertEqual(node.providers[1].factState, "missing")
 
     def test_actions_reuse_precomputed_enclosure_actions(self) -> None:

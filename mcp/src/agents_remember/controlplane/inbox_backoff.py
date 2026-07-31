@@ -26,7 +26,9 @@ BACKOFF_SCHEDULE_SECONDS: tuple[float, ...] = (30.0, 60.0, 300.0, 900.0, 3600.0,
 MIN_REDELIVERY_INTERVAL_SECONDS = 900.0
 DEFAULT_RATE_LIMIT_SECONDS = MIN_REDELIVERY_INTERVAL_SECONDS
 
-_REDELIVERABLE_DELIVERY_STATES = frozenset({"queued", "no-hosted-session", "delivered", "unconfirmed"})
+_REDELIVERABLE_DELIVERY_STATES = frozenset(
+    {"queued", "no-hosted-session", "delivered", "unconfirmed"}
+)
 """Every deliveryState is redeliverable while the row is pending -- 'delivered' is never terminal
 (R1: pasted != perceived), so a delivered-but-unacked row still schedules a nudge."""
 
@@ -46,9 +48,7 @@ def require_redelivery_floor_seconds(
     if rate_limit_seconds is None:
         return DEFAULT_RATE_LIMIT_SECONDS
     if rate_limit_seconds < MIN_REDELIVERY_INTERVAL_SECONDS:
-        raise ValueError(
-            f"{owner} must be at least {MIN_REDELIVERY_INTERVAL_SECONDS:g} seconds"
-        )
+        raise ValueError(f"{owner} must be at least {MIN_REDELIVERY_INTERVAL_SECONDS:g} seconds")
     return rate_limit_seconds
 
 

@@ -28,7 +28,9 @@ def repository_ids(workspace_root: Path, repos: list[str]) -> list[str]:
     ordered: list[str] = []
     for repo_id in repos:
         if not repo_id or any(separator in repo_id for separator in ("/", "\\")):
-            raise SystemExit(f"repository id must be a folder name under workspace root: {repo_id!r}")
+            raise SystemExit(
+                f"repository id must be a folder name under workspace root: {repo_id!r}"
+            )
         repo_root = workspace_root / repo_id
         if not repo_root.is_dir():
             raise SystemExit(f"repository root does not exist for {repo_id!r}: {repo_root}")
@@ -45,13 +47,17 @@ def replace_text(path: Path, replacements: dict[str, str]) -> None:
     path.write_text(text, encoding="utf-8", newline="\n")
 
 
-def write_context_file(template_path: Path, target_path: Path, replacements: dict[str, str]) -> None:
+def write_context_file(
+    template_path: Path, target_path: Path, replacements: dict[str, str]
+) -> None:
     text = template_path.read_text(encoding="utf-8")
     for old, new in replacements.items():
         text = text.replace(old, new)
     template_path.write_text(text, encoding="utf-8", newline="\n")
     if target_path.exists() and target_path.read_text(encoding="utf-8") != text:
-        raise SystemExit(f"{target_path} already exists with different content; merge it manually before rerunning")
+        raise SystemExit(
+            f"{target_path} already exists with different content; merge it manually before rerunning"
+        )
     target_path.write_text(text, encoding="utf-8", newline="\n")
 
 

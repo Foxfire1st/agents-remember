@@ -422,9 +422,7 @@ def _merge_integrated_commits(
     if external:
         assert contract.memory_repo_path is not None
         memory_head_before = head_commit(contract.memory_repo_path)
-        if not is_ancestor(
-            contract.memory_repo_path, memory_head_before, integrated_ledger_commit
-        ):
+        if not is_ancestor(contract.memory_repo_path, memory_head_before, integrated_ledger_commit):
             raise RuntimeError(
                 "integrated memory ledger commit is not a fast-forward from the current memory branch"
             )

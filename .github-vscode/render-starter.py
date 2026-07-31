@@ -42,7 +42,9 @@ def repository_ids(workspace_root: Path, repos: list[str]) -> list[str]:
     ordered: list[str] = []
     for repo_id in repos:
         if not repo_id or any(separator in repo_id for separator in ("/", "\\")):
-            raise SystemExit(f"repository id must be a folder name under workspace root: {repo_id!r}")
+            raise SystemExit(
+                f"repository id must be a folder name under workspace root: {repo_id!r}"
+            )
         repo_root = workspace_root / repo_id
         if not repo_root.is_dir():
             raise SystemExit(f"repository root does not exist for {repo_id!r}: {repo_root}")
@@ -75,7 +77,9 @@ def hook_script_path(workspace_root: Path) -> Path:
 
 def render_hooks(path: Path, workspace_root: Path) -> None:
     data = json.loads(path.read_text(encoding="utf-8"))
-    rendered = command_string([str(Path(sys.executable).resolve()), hook_script_path(workspace_root).as_posix()])
+    rendered = command_string(
+        [str(Path(sys.executable).resolve()), hook_script_path(workspace_root).as_posix()]
+    )
     hook = data["hooks"]["SessionStart"][0]
     hook["command"] = rendered
     system = platform.system().lower()
@@ -114,7 +118,9 @@ def validate(script_root: Path, vscode_dir: Path) -> None:
 
 def render(script_root: Path, workspace_root: Path, repos: list[str]) -> None:
     vscode_dir = vscode_root(workspace_root)
-    replace_text(script_root / "copilot-instructions.md", {PATH_PLACEHOLDER: workspace_root.as_posix()})
+    replace_text(
+        script_root / "copilot-instructions.md", {PATH_PLACEHOLDER: workspace_root.as_posix()}
+    )
     render_hooks(script_root / "hooks" / "agents-remember-session-start.json", workspace_root)
     replace_text(vscode_dir / "mcp.json", {PATH_PLACEHOLDER: workspace_root.as_posix()})
     render_settings(vscode_dir / "mcp" / "agents-remember-settings.json", workspace_root, repos)

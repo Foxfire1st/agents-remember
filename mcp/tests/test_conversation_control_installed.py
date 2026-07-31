@@ -65,9 +65,7 @@ LONG_PROMPT = "Write a 600-word essay about the ocean. Start writing immediately
 
 
 def _identity(session: str) -> ControlIdentity:
-    return ControlIdentity(
-        ar_session_id=session, tmux_name=f"ar-{session}", created_at=NOW
-    )
+    return ControlIdentity(ar_session_id=session, tmux_name=f"ar-{session}", created_at=NOW)
 
 
 def _version_of(executable: str) -> str:
@@ -98,7 +96,9 @@ class _ControlledEntry:
 class _LiveHarness:
     """Real adapter + bridge + IPC + catalog + composition + uvicorn wire."""
 
-    def __init__(self, root: Path, identity: ControlIdentity, adapter: object, harness: str) -> None:
+    def __init__(
+        self, root: Path, identity: ControlIdentity, adapter: object, harness: str
+    ) -> None:
         self.identity = identity
         self.adapter = adapter
         self.bridge = HarnessControlBridge(identity, adapter)  # type: ignore[arg-type]
@@ -147,7 +147,9 @@ class _LiveHarness:
         ).bridge_epoch
         self._auth_patcher.start()
         self._uvicorn = uvicorn.Server(
-            uvicorn.Config(self.app, host="127.0.0.1", port=0, log_level="warning", access_log=False)
+            uvicorn.Config(
+                self.app, host="127.0.0.1", port=0, log_level="warning", access_log=False
+            )
         )
         self._uvicorn_task = asyncio.create_task(self._uvicorn.serve())
         while not self._uvicorn.started:
@@ -200,9 +202,7 @@ class CodexInstalledControlApiTests(unittest.IsolatedAsyncioTestCase):
             self.skipTest("installed codex executable is unavailable")
         version = _version_of(executable).removeprefix("codex-cli ")
         if version != CODEX_PINNED:
-            self.skipTest(
-                f"installed codex {version} does not match pinned {CODEX_PINNED}"
-            )
+            self.skipTest(f"installed codex {version} does not match pinned {CODEX_PINNED}")
         self.executable = executable
 
     async def test_live_interrupt_settlement_queue_recovery_assets_and_telemetry(self) -> None:
@@ -308,7 +308,10 @@ class CodexInstalledControlApiTests(unittest.IsolatedAsyncioTestCase):
                 staged = await harness.client.post(
                     f"/api/terminal/{session}/conversation/attachments",
                     params=harness.params(),
-                    data={"requestId": "l3-codex-asset", "metadata": json.dumps([{"kind": "image"}])},
+                    data={
+                        "requestId": "l3-codex-asset",
+                        "metadata": json.dumps([{"kind": "image"}]),
+                    },
                     files=[("assets", ("dot.png", TINY_PNG, "image/png"))],
                 )
                 self.assertEqual(staged.status_code, 200, staged.text)
@@ -426,7 +429,9 @@ class CodexInstalledControlApiTests(unittest.IsolatedAsyncioTestCase):
                 )
                 first = await _user_twins(marker)
                 self.assertEqual(
-                    len(first), 1, f"turn 1 user message must project once, got {len(first)}: {first}"
+                    len(first),
+                    1,
+                    f"turn 1 user message must project once, got {len(first)}: {first}",
                 )
 
                 # 2/2: a second settled turn must also project its user message exactly once, and the
@@ -443,14 +448,20 @@ class CodexInstalledControlApiTests(unittest.IsolatedAsyncioTestCase):
                 )
                 second = await _user_twins(marker2)
                 self.assertEqual(
-                    len(second), 1, f"turn 2 user message must project once, got {len(second)}: {second}"
+                    len(second),
+                    1,
+                    f"turn 2 user message must project once, got {len(second)}: {second}",
                 )
                 page = await harness.client.get(
                     f"/api/terminal/{session}/conversation", params=harness.params()
                 )
-                still_first = [item for item in page.json().get("items", []) if _carries(item, marker)]
+                still_first = [
+                    item for item in page.json().get("items", []) if _carries(item, marker)
+                ]
                 self.assertEqual(
-                    len(still_first), 1, "the first settled turn must stay single across later refreshes"
+                    len(still_first),
+                    1,
+                    "the first settled turn must stay single across later refreshes",
                 )
             finally:
                 await harness.stop()
@@ -540,9 +551,7 @@ class ClaudeInstalledHonestyTests(unittest.TestCase):
             ).read_text()
         )
         rows = [
-            row
-            for row in fixture["observations"]
-            if row["operation"].startswith("control-plane/")
+            row for row in fixture["observations"] if row["operation"].startswith("control-plane/")
         ]
         if version != "2.1.211":
             self.assertTrue(rows)

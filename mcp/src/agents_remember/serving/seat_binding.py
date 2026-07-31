@@ -27,9 +27,7 @@ def _clean(role: str | None) -> str | None:
     return cleaned or None
 
 
-def migrated_seat_role(
-    *, persisted: str | None, spawn_role: str | None, kind: str
-) -> str:
+def migrated_seat_role(*, persisted: str | None, spawn_role: str | None, kind: str) -> str:
     """Resolve a catalog row's binding role, including the one-time legacy fallback."""
 
     if kind == "terminal":

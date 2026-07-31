@@ -88,8 +88,14 @@ def recover_attachment_refs(
     )
     return tuple(
         attachment_recovery_ref(
-            service, authorization, ar_session_id, epoch, identity,
-            withdraw_request_id, asset, expires_at,
+            service,
+            authorization,
+            ar_session_id,
+            epoch,
+            identity,
+            withdraw_request_id,
+            asset,
+            expires_at,
         )
         for asset in recoverable
     )

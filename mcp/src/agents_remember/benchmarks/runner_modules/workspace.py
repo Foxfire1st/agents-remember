@@ -231,9 +231,7 @@ def prepare_case(
     provider_ids: tuple[str, ...] = (),
     allowed_provider_ids: tuple[str, ...] | None = None,
 ) -> None:
-    provider_ids = filter_benchmark_provider_ids(
-        case.case_id, provider_ids, allowed_provider_ids
-    )
+    provider_ids = filter_benchmark_provider_ids(case.case_id, provider_ids, allowed_provider_ids)
     repository = case.repository
     root = workspace_root(benchmarks_root, case)
     source_only_root = source_only_workspace_root(benchmarks_root, case)

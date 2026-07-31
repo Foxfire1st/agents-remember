@@ -314,9 +314,7 @@ class HarnessSubmissionAuthorityTests(unittest.IsolatedAsyncioTestCase):
             submit_task = asyncio.create_task(authority.submit(_prompt("withdraw-preflight")))
             await asyncio.wait_for(adapter.preflight_started.wait(), 1)
 
-            withdrawn = await authority.withdraw(
-                "epoch-1", "withdraw-preflight", cockpit_only=True
-            )
+            withdrawn = await authority.withdraw("epoch-1", "withdraw-preflight", cockpit_only=True)
             self.assertEqual((withdrawn.outcome, withdrawn.state), ("withdrawn", "withdrawn"))
             receipt = await asyncio.wait_for(submit_task, 1)
             self.assertEqual(receipt.acceptance, "rejected")
@@ -325,9 +323,7 @@ class HarnessSubmissionAuthorityTests(unittest.IsolatedAsyncioTestCase):
             await asyncio.sleep(0)
             await asyncio.sleep(0)
             self.assertEqual(adapter.submissions, [])
-            status = await authority.status(
-                "epoch-1", ("withdraw-preflight",), cockpit_only=True
-            )
+            status = await authority.status("epoch-1", ("withdraw-preflight",), cockpit_only=True)
             submission = status.submissions[0].submission
             self.assertIsNotNone(submission)
             assert submission is not None
@@ -458,9 +454,7 @@ class HarnessSubmissionAuthorityTests(unittest.IsolatedAsyncioTestCase):
             adapter.release_preflight = asyncio.Event()
             evictor_task = asyncio.create_task(authority.submit(_prompt("withdrawn-evictor")))
             await asyncio.wait_for(adapter.preflight_started.wait(), 1)
-            withdrawn = await authority.withdraw(
-                "epoch-1", "withdrawn-evictor", cockpit_only=True
-            )
+            withdrawn = await authority.withdraw("epoch-1", "withdrawn-evictor", cockpit_only=True)
             self.assertEqual(withdrawn.outcome, "withdrawn")
             self.assertEqual((await evictor_task).acceptance, "rejected")
             adapter.block_preflight = False
@@ -581,16 +575,12 @@ class HarnessSubmissionAuthorityTests(unittest.IsolatedAsyncioTestCase):
             receipt = await authority.submit(_prompt("preflight-busy"))
             self.assertEqual(receipt.acceptance, "queued")
             self.assertEqual(adapter.submissions, [])
-            status = await authority.status(
-                "epoch-1", ("preflight-busy",), cockpit_only=True
-            )
+            status = await authority.status("epoch-1", ("preflight-busy",), cockpit_only=True)
             submission = status.submissions[0].submission
             self.assertIsNotNone(submission)
             assert submission is not None
             self.assertEqual(submission.state, "queued")
-            withdrawn = await authority.withdraw(
-                "epoch-1", "preflight-busy", cockpit_only=True
-            )
+            withdrawn = await authority.withdraw("epoch-1", "preflight-busy", cockpit_only=True)
             self.assertEqual((withdrawn.outcome, withdrawn.state), ("withdrawn", "withdrawn"))
         finally:
             await authority.stop(forced=True)

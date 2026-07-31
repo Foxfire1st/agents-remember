@@ -100,9 +100,7 @@ def _select_current_model(
         (model for model in resolved if requested_key is not None and model.key == requested_key),
         None,
     )
-    selected = (
-        exact or requested or next((model for model in resolved if model.is_default), None)
-    )
+    selected = exact or requested or next((model for model in resolved if model.is_default), None)
     if selected is None and len(resolved) == 1:
         selected = resolved[0]
     if selected is None:

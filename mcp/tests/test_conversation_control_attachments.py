@@ -44,7 +44,9 @@ def _png(name: str = "dot.png", alt: str | None = None, data: bytes = TINY_PNG):
     )
 
 
-def _submit_body(request_id: str, epoch: str, receipt, text: str = "describe this") -> ConversationSubmitRequest:
+def _submit_body(
+    request_id: str, epoch: str, receipt, text: str = "describe this"
+) -> ConversationSubmitRequest:
     return ConversationSubmitRequest(
         expected_bridge_epoch=epoch,
         request_id=request_id,
@@ -121,12 +123,20 @@ class AttachmentStageTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(OperationRejectedError):
             await self._stage(
                 "at-3",
-                [attachments.StagedUpload(kind="image", name="note.txt", mime_type="text/plain", alt=None, data=b"hi")],
+                [
+                    attachments.StagedUpload(
+                        kind="image", name="note.txt", mime_type="text/plain", alt=None, data=b"hi"
+                    )
+                ],
             )
         with self.assertRaises(OperationRejectedError):
             await self._stage("at-4", [_png() for _ in range(5)])
         oversized = attachments.StagedUpload(
-            kind="image", name="big.png", mime_type="image/png", alt=None, data=b"\x00" * (5 * 1024 * 1024 + 1)
+            kind="image",
+            name="big.png",
+            mime_type="image/png",
+            alt=None,
+            data=b"\x00" * (5 * 1024 * 1024 + 1),
         )
         with self.assertRaises(OperationRejectedError):
             await self._stage("at-5", [oversized])
@@ -205,9 +215,16 @@ class AttachmentSubmitTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_double_use_of_one_asset_is_typed(self) -> None:
         receipt = await self._stage_and_receipt("at-s3")
-        await attachments.submit(self.service, OPERATOR, SESSION, body=_submit_body("at-s3", self.epoch, receipt))
+        await attachments.submit(
+            self.service, OPERATOR, SESSION, body=_submit_body("at-s3", self.epoch, receipt)
+        )
         with self.assertRaises(OperationConflictError):
-            await attachments.submit(self.service, OPERATOR, SESSION, body=_submit_body("at-s3", self.epoch, receipt, text="again"))
+            await attachments.submit(
+                self.service,
+                OPERATOR,
+                SESSION,
+                body=_submit_body("at-s3", self.epoch, receipt, text="again"),
+            )
         self.assertEqual(len(self.adapter.submit_requests), 1)
 
 
@@ -236,7 +253,12 @@ class AttachmentRebindTests(unittest.IsolatedAsyncioTestCase):
             kind_capabilities=self.caps,
             uploads=[_png()],
         )
-        await attachments.submit(self.service, OPERATOR, SESSION, body=_submit_body("at-r1", self.epoch, staged.receipts[0]))
+        await attachments.submit(
+            self.service,
+            OPERATOR,
+            SESSION,
+            body=_submit_body("at-r1", self.epoch, staged.receipts[0]),
+        )
         await attachments.submit(
             self.service,
             OPERATOR,
@@ -338,9 +360,7 @@ class AttachmentRebindTests(unittest.IsolatedAsyncioTestCase):
             if asyncio.get_running_loop().time() > deadline:
                 self.fail("the resubmitted prompt never dispatched")
             await asyncio.sleep(0.05)
-        self.assertEqual(
-            self.adapter.submit_requests[-1].assets[0].asset_id, new_receipt.asset_id
-        )
+        self.assertEqual(self.adapter.submit_requests[-1].assets[0].asset_id, new_receipt.asset_id)
 
     async def test_ack_keep_current_draft_deletes_recoverable_bytes(self) -> None:
         _staged, response = await self._withdraw_with_asset()

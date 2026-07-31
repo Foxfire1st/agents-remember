@@ -239,9 +239,7 @@ class ClaudeAgentLifecycleTests(unittest.TestCase):
         self.assertEqual(roster.agent.role, "Explore")
         self.assertEqual(roster.agent.status, "running")
         description = next(
-            b
-            for b in roster.blocks
-            if isinstance(b, TextBlock) and b.block_id == "description"
+            b for b in roster.blocks if isinstance(b, TextBlock) and b.block_id == "description"
         )
         self.assertEqual(description.text, "probe")
         tagged = next(item for item in started_items if item.item_id == AGENT_TOOL_ID)
@@ -307,9 +305,7 @@ class ClaudeAgentLifecycleTests(unittest.TestCase):
         # keeps the roster row whole across the replacement upsert.
         self.assertEqual(final_roster.agent.role, "Explore")
         summary_block = next(
-            b
-            for b in final_roster.blocks
-            if isinstance(b, TextBlock) and b.block_id == "summary"
+            b for b in final_roster.blocks if isinstance(b, TextBlock) and b.block_id == "summary"
         )
         self.assertEqual(summary_block.text, "The word is: probe")
         description = next(
@@ -414,9 +410,7 @@ class ClaudeAgentLifecycleTests(unittest.TestCase):
         frame = {
             "type": "system",
             "subtype": "background_tasks_changed",
-            "tasks": [
-                {"task_id": TASK_ID, "task_type": "local_agent", "description": "bg-probe"}
-            ],
+            "tasks": [{"task_id": TASK_ID, "task_type": "local_agent", "description": "bg-probe"}],
             "uuid": "uuid-bg",
             "session_id": session,
         }

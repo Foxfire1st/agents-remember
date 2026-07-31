@@ -49,9 +49,7 @@ def prune_orphaned_drift_snapshots(
     configured_repositories = {
         scope.path.name for scope in config.repositories.values() if scope.path.name
     }
-    active_worktrees = _active_worktree_snapshot_keys(
-        config.coordination_root, contracts=contracts
-    )
+    active_worktrees = _active_worktree_snapshot_keys(config.coordination_root, contracts=contracts)
     removed: list[dict[str, object]] = []
     kept = 0
     skipped = 0

@@ -265,9 +265,7 @@ def lifecycle_gate_payload(
         # wait=false gate could only ever fail open at the enforcement rung.
         # Validate-then-mutate: refuse BEFORE the expire-sweep and append below, so a
         # refused raise persists no orphan open gate and expires no sibling.
-        policy = (
-            config.orchestration.gate_policy if config is not None else DEFAULT_GATE_POLICY
-        )
+        policy = config.orchestration.gate_policy if config is not None else DEFAULT_GATE_POLICY
         if gate_kind not in SEAM_GATE_KINDS:
             raise ValueError(
                 f"lifecycle_gate wait=false is reserved for delegated seam kinds; "
@@ -399,9 +397,7 @@ def gate_decide_payload(
     if gate is None:
         raise KeyError(f"no gate {gate_id!r} on lifecycle {lifecycle_id!r}")
     if decided_via == "cli" and decision != "cancel":
-        policy = (
-            config.orchestration.gate_policy if config is not None else DEFAULT_GATE_POLICY
-        )
+        policy = config.orchestration.gate_policy if config is not None else DEFAULT_GATE_POLICY
         if policy.rule_for(gate.kind).delegated_role is not None:
             raise ValueError(
                 f"{gate.kind} is delegated by the active gate policy; pass deciding_role "
@@ -420,11 +416,7 @@ def gate_decide_payload(
         evidence_refs=evidence,
     )
     if decided_via == "orchestration":
-        policy = (
-            config.orchestration.gate_policy
-            if config is not None
-            else DEFAULT_GATE_POLICY
-        )
+        policy = config.orchestration.gate_policy if config is not None else DEFAULT_GATE_POLICY
         failure = delegated_decision_failure_reason(updated, policy)
         if failure is not None:
             raise ValueError(f"gate decision rejected by delegation policy: {failure}")
@@ -491,9 +483,7 @@ def gate_decide_for_lifecycle(
     if expected_gate_id is not None and gate.id != expected_gate_id:
         expected = current.get(expected_gate_id)
         state = expected.state if expected is not None else "missing"
-        raise KeyError(
-            f"gate {expected_gate_id!r} is {state}; current open gate is {gate.id!r}"
-        )
+        raise KeyError(f"gate {expected_gate_id!r} is {state}; current open gate is {gate.id!r}")
     return gate_decide_payload(
         config,
         gate_id=gate.id,
@@ -587,8 +577,7 @@ def gate_response_wait_payload(
             entries = [
                 entry
                 for entry in inbox_store.list_pending(lifecycle_id=lifecycle_id, agent_id=agent_id)
-                if entry.gateId == gate_id
-                or (allow_ungated_entries and entry.gateId is None)
+                if entry.gateId == gate_id or (allow_ungated_entries and entry.gateId is None)
             ]
         if gate.state != "open" or entries:
             payload = _tool_payload(

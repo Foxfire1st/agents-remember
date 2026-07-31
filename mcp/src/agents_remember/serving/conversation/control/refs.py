@@ -80,11 +80,11 @@ class OperationIdentity:
         self.sequence = sequence
 
     def __eq__(self, other: object) -> bool:
-        return (
-            isinstance(other, OperationIdentity)
-            and (self.kind, self.operation_id, self.sequence)
-            == (other.kind, other.operation_id, other.sequence)
-        )
+        return isinstance(other, OperationIdentity) and (
+            self.kind,
+            self.operation_id,
+            self.sequence,
+        ) == (other.kind, other.operation_id, other.sequence)
 
     def __hash__(self) -> int:
         return hash((self.kind, self.operation_id, self.sequence))

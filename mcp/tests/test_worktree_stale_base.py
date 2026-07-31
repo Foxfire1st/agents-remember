@@ -134,9 +134,7 @@ class StaleBasePreflightTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             code_repo = make_repo(root / "repo-a")
-            memory_repo, memory_other = make_clone_pair(
-                root / "mem", name="ar-repo-a"
-            )
+            memory_repo, memory_other = make_clone_pair(root / "mem", name="ar-repo-a")
             commit_file(memory_other, "onboarding-note.md", "newer official memory")
             git(memory_other, "push", "origin", "HEAD")
             contract = make_contract(root, code_repo, memory_repo=memory_repo)
@@ -187,8 +185,11 @@ class MemorySourceBranchTemplateTests(unittest.TestCase):
             memory_repo = make_repo(root / "mem-repo")
             base = git(memory_repo, "rev-parse", "HEAD")
             contract = make_contract(
-                root, make_repo(root / "repo-a"), memory_repo=memory_repo,
-                source_branch="fix/new-task", memory_base_commit=base,
+                root,
+                make_repo(root / "repo-a"),
+                memory_repo=memory_repo,
+                source_branch="fix/new-task",
+                memory_base_commit=base,
             )
 
             state = _ensure_memory_source_branch(contract, dry_run=True)
@@ -203,7 +204,9 @@ class MemorySourceBranchTemplateTests(unittest.TestCase):
             memory_repo = make_repo(root / "mem-repo")
             branch = git(memory_repo, "branch", "--show-current")
             contract = make_contract(
-                root, make_repo(root / "repo-a"), memory_repo=memory_repo,
+                root,
+                make_repo(root / "repo-a"),
+                memory_repo=memory_repo,
                 source_branch=branch,
             )
 
@@ -270,9 +273,7 @@ def commit_file(repo: Path, name: str, content: str) -> None:
 
 
 def git(repo: Path, *args: str) -> str:
-    result = subprocess.run(
-        ["git", *args], cwd=repo, text=True, capture_output=True, check=False
-    )
+    result = subprocess.run(["git", *args], cwd=repo, text=True, capture_output=True, check=False)
     if result.returncode != 0:
         raise AssertionError(result.stderr or result.stdout)
     return result.stdout.strip()

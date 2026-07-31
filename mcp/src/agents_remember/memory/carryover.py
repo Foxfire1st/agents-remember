@@ -422,12 +422,8 @@ def _memory_only_evidence(
             "source content changed between the branch verification commit and the "
             "official ref; model re-review required",
         )
-    base_blob = (
-        blob_at_ref(official_memory, mem_base, f"onboarding/{rel}") if mem_base else None
-    )
-    official_text = (
-        official_file.read_text(encoding="utf-8") if official_file.exists() else None
-    )
+    base_blob = blob_at_ref(official_memory, mem_base, f"onboarding/{rel}") if mem_base else None
+    official_text = official_file.read_text(encoding="utf-8") if official_file.exists() else None
     if mem_base is None or base_blob != official_text:
         return (
             "official-memory-moved",
@@ -463,9 +459,7 @@ def memory_only_doc_candidates(
     source_onboarding = source_memory / "onboarding"
     if not source_onboarding.is_dir():
         return []
-    route_by_rel = {
-        rel: route for route, rel in discover_route_overviews(source_onboarding)
-    }
+    route_by_rel = {rel: route for route, rel in discover_route_overviews(source_onboarding)}
     mem_base = memory_merge_base(official_memory, source_memory)
     candidates: list[CarryoverCandidate] = []
     for branch_doc in sorted(source_onboarding.rglob("*.md")):
@@ -522,9 +516,9 @@ def entity_catalog_candidate(
         return None
     official_catalog = official_memory / "onboarding" / ENTITY_CATALOG_REL
     official_exists = official_catalog.exists()
-    if official_exists and official_catalog.read_text(
+    if official_exists and official_catalog.read_text(encoding="utf-8") == branch_catalog.read_text(
         encoding="utf-8"
-    ) == branch_catalog.read_text(encoding="utf-8"):
+    ):
         return None
     return CarryoverCandidate(
         source_path=ENTITY_CATALOG_KEY,
@@ -711,7 +705,9 @@ def _validate_entity_fingerprints(
     rows = parse_entity_fingerprint_rows(catalog)
     for row in rows:
         if row.algorithm != GIT_BLOB_SET_ALGORITHM:
-            errors.append({"entity": row.entity, "reason": f"unsupported algorithm {row.algorithm!r}"})
+            errors.append(
+                {"entity": row.entity, "reason": f"unsupported algorithm {row.algorithm!r}"}
+            )
             continue
         try:
             computed = compute_git_blob_set_fingerprint(

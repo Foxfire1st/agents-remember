@@ -41,7 +41,9 @@ def repository_ids(workspace_root: Path, repos: list[str]) -> list[str]:
     ordered: list[str] = []
     for repo_id in repos:
         if not repo_id or any(separator in repo_id for separator in ("/", "\\")):
-            raise SystemExit(f"repository id must be a folder name under workspace root: {repo_id!r}")
+            raise SystemExit(
+                f"repository id must be a folder name under workspace root: {repo_id!r}"
+            )
         repo_root = workspace_root / repo_id
         if not repo_root.is_dir():
             raise SystemExit(f"repository root does not exist for {repo_id!r}: {repo_root}")
@@ -73,7 +75,10 @@ def validate(script_root: Path) -> None:
     for relative in TARGET_FILES:
         path = script_root / relative
         text = path.read_text(encoding="utf-8")
-        if any(marker in text for marker in (PATH_PLACEHOLDER, REPO_PLACEHOLDER, HOOK_COMMAND_PLACEHOLDER)):
+        if any(
+            marker in text
+            for marker in (PATH_PLACEHOLDER, REPO_PLACEHOLDER, HOOK_COMMAND_PLACEHOLDER)
+        ):
             unresolved.append(path.as_posix())
     if unresolved:
         joined = "\n".join(unresolved)

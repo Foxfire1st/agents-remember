@@ -231,9 +231,7 @@ class SeatParityTests(unittest.TestCase):
             seat_turn_state_for(ProcessEvidence(state="disconnected"), "waiting"),
             "awaiting-input",
         )
-        self.assertEqual(
-            seat_turn_state_for(ProcessEvidence(state="disconnected"), None), "stale"
-        )
+        self.assertEqual(seat_turn_state_for(ProcessEvidence(state="disconnected"), None), "stale")
         self.assertEqual(
             seat_turn_state_for(ProcessEvidence(state="connected"), "needs-input"),
             "awaiting-input",
@@ -242,14 +240,10 @@ class SeatParityTests(unittest.TestCase):
         # stateless (fresh) reads make no claim.
         self.assertIsNone(seat_turn_state_for(ProcessEvidence(state="connected"), "ready"))
         self.assertEqual(
-            seat_turn_state_for(
-                ProcessEvidence(state="connected"), "ready", previous="working"
-            ),
+            seat_turn_state_for(ProcessEvidence(state="connected"), "ready", previous="working"),
             "turn-ended",
         )
-        self.assertEqual(
-            seat_turn_state_for(ProcessEvidence(state="starting"), "ready"), "stale"
-        )
+        self.assertEqual(seat_turn_state_for(ProcessEvidence(state="starting"), "ready"), "stale")
         self.assertEqual(
             seat_turn_state_for(ProcessEvidence(state="connected"), "interrupted"),
             "turn-ended",
@@ -371,9 +365,7 @@ class _Clock:
         return self.moment
 
     def advance(self, *, seconds: float) -> None:
-        self.moment = (
-            datetime.fromisoformat(self.moment) + timedelta(seconds=seconds)
-        ).isoformat()
+        self.moment = (datetime.fromisoformat(self.moment) + timedelta(seconds=seconds)).isoformat()
 
 
 class FreshnessTests(unittest.TestCase):

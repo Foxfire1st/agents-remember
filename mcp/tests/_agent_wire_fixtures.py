@@ -194,6 +194,4 @@ def command_execution_approval_request(
 def server_request_resolved_notification(thread_id: str, request_id: str) -> JsonObject:
     """A ``serverRequest/resolved`` notification envelope."""
 
-    return notification(
-        "serverRequest/resolved", {"threadId": thread_id, "requestId": request_id}
-    )
+    return notification("serverRequest/resolved", {"threadId": thread_id, "requestId": request_id})

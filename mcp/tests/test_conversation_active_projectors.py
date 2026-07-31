@@ -30,7 +30,9 @@ NOW = "2026-07-19T08:00:00+00:00"
 REF = "ar-ev:epoch:1"
 
 
-def _native(native_id: str, native_type: str, raw: dict, parent: str | None = None) -> NativeEvidenceFrame:
+def _native(
+    native_id: str, native_type: str, raw: dict, parent: str | None = None
+) -> NativeEvidenceFrame:
     return NativeEvidenceFrame(
         native_id=native_id,
         native_parent_id=parent,
@@ -108,7 +110,9 @@ class CodexMapperTests(unittest.TestCase):
 
     def test_native_agent_message_is_markdown_assistant(self) -> None:
         outputs = codex.map_native_frame(
-            _native("item-2", "agentMessage", {"id": "item-2", "type": "agentMessage", "text": "**hi**"}),
+            _native(
+                "item-2", "agentMessage", {"id": "item-2", "type": "agentMessage", "text": "**hi**"}
+            ),
             evidence_ref=REF,
         )
         (item,) = _items(outputs)
@@ -170,7 +174,13 @@ class CodexMapperTests(unittest.TestCase):
                     "id": "item-5",
                     "type": "fileChange",
                     "status": "completed",
-                    "changes": [{"path": "a.py", "kind": {"type": "update", "move_path": None}, "diff": "@@-1+1@@"}],
+                    "changes": [
+                        {
+                            "path": "a.py",
+                            "kind": {"type": "update", "move_path": None},
+                            "diff": "@@-1+1@@",
+                        }
+                    ],
                 },
             ),
             evidence_ref=REF,
@@ -202,7 +212,9 @@ class CodexMapperTests(unittest.TestCase):
 
     def test_unknown_native_item_type_is_unknown_vendor_with_native_id(self) -> None:
         outputs = codex.map_native_frame(
-            _native("item-7", "collabAgentToolCall", {"id": "item-7", "type": "collabAgentToolCall"}),
+            _native(
+                "item-7", "collabAgentToolCall", {"id": "item-7", "type": "collabAgentToolCall"}
+            ),
             evidence_ref=REF,
         )
         (unknown,) = [o for o in outputs if isinstance(o, MappedUnknownVendor)]
@@ -247,7 +259,13 @@ class CodexMapperTests(unittest.TestCase):
             _evidence(
                 1,
                 "codex-notification",
-                {"threadId": "t", "turnId": "turn-1", "itemId": "item-3", "delta": "x", "summaryIndex": 1},
+                {
+                    "threadId": "t",
+                    "turnId": "turn-1",
+                    "itemId": "item-3",
+                    "delta": "x",
+                    "summaryIndex": 1,
+                },
             ),
             evidence_ref=REF,
         )
@@ -349,9 +367,7 @@ class CodexMapperTests(unittest.TestCase):
                 _evidence(sequence, "codex-notification", params, native_method=method),
                 evidence_ref=REF,
             )
-            self.assertEqual(
-                outputs, [], f"{method} must mint no item (got {outputs!r})"
-            )
+            self.assertEqual(outputs, [], f"{method} must mint no item (got {outputs!r})")
 
     def test_item_notification_still_maps_when_method_is_carried(self) -> None:
         # The carried method never suppresses a real item notification.
@@ -431,7 +447,12 @@ class ClaudeMapperTests(unittest.TestCase):
                         "content": [
                             {"type": "text", "text": "answer"},
                             {"type": "thinking", "thinking": "hmm"},
-                            {"type": "tool_use", "id": "toolu_1", "name": "Bash", "input": {"command": "ls"}},
+                            {
+                                "type": "tool_use",
+                                "id": "toolu_1",
+                                "name": "Bash",
+                                "input": {"command": "ls"},
+                            },
                         ],
                     },
                 },
@@ -496,10 +517,7 @@ class ClaudeMapperTests(unittest.TestCase):
                 self.assertEqual(input_block.data, tool_input)
                 diffs = [block for block in item.blocks if isinstance(block, DiffBlock)]
                 self.assertEqual(
-                    [
-                        (diff.block_id, diff.path, diff.old_text, diff.new_text)
-                        for diff in diffs
-                    ],
+                    [(diff.block_id, diff.path, diff.old_text, diff.new_text) for diff in diffs],
                     list(expected),
                 )
 
@@ -535,7 +553,12 @@ class ClaudeMapperTests(unittest.TestCase):
                     "message": {
                         "role": "user",
                         "content": [
-                            {"type": "tool_result", "tool_use_id": "toolu_1", "content": [{"type": "text", "text": "out"}], "is_error": False}
+                            {
+                                "type": "tool_result",
+                                "tool_use_id": "toolu_1",
+                                "content": [{"type": "text", "text": "out"}],
+                                "is_error": False,
+                            }
                         ],
                     },
                 },
@@ -562,9 +585,7 @@ class ClaudeMapperTests(unittest.TestCase):
             }
             if reason is not None:
                 frame["terminal_reason"] = reason
-            outputs = claude.map_evidence_frame(
-                _evidence(3, "completed", frame), evidence_ref=REF
-            )
+            outputs = claude.map_evidence_frame(_evidence(3, "completed", frame), evidence_ref=REF)
             outcomes = [o for o in outputs if isinstance(o, MappedTurnOutcome)]
             self.assertEqual(outcomes[0].outcome, expected)
             items = _items(outputs)
@@ -589,9 +610,7 @@ class ClaudeMapperTests(unittest.TestCase):
                 "terminal_reason": None if stamp == "completed" else "aborted_streaming",
                 "arTerminalOutcome": stamp,
             }
-            outputs = claude.map_evidence_frame(
-                _evidence(3, "completed", frame), evidence_ref=REF
-            )
+            outputs = claude.map_evidence_frame(_evidence(3, "completed", frame), evidence_ref=REF)
             outcomes = [o for o in outputs if isinstance(o, MappedTurnOutcome)]
             self.assertEqual((stamp, outcomes[0].outcome), (stamp, expected))
             items = _items(outputs)
@@ -724,7 +743,12 @@ class PiMapperTests(unittest.TestCase):
                         "content": [
                             {"type": "text", "text": "ok"},
                             {"type": "thinking", "thinking": "plan"},
-                            {"type": "toolCall", "id": "tc-1", "name": "bash", "arguments": {"command": "ls"}},
+                            {
+                                "type": "toolCall",
+                                "id": "tc-1",
+                                "name": "bash",
+                                "arguments": {"command": "ls"},
+                            },
                         ],
                         "stopReason": "toolUse",
                         "timestamp": 2,
@@ -820,7 +844,11 @@ class PiMapperTests(unittest.TestCase):
 
     def test_unknown_entry_type_preserved_with_native_id(self) -> None:
         outputs = pi.map_native_frame(
-            _native("entry-7", "branch_summary", {"id": "entry-7", "type": "branch_summary", "fromId": "e", "summary": "s"}),
+            _native(
+                "entry-7",
+                "branch_summary",
+                {"id": "entry-7", "type": "branch_summary", "fromId": "e", "summary": "s"},
+            ),
             evidence_ref=REF,
         )
         (unknown,) = [o for o in outputs if isinstance(o, MappedUnknownVendor)]
@@ -829,7 +857,16 @@ class PiMapperTests(unittest.TestCase):
 
     def test_live_tool_execution_upserts_by_tool_call_id(self) -> None:
         start = pi.map_evidence_frame(
-            _evidence(1, "pi:tool_execution_start", {"type": "tool_execution_start", "toolCallId": "tc-9", "toolName": "bash", "args": {"command": "ls"}}),
+            _evidence(
+                1,
+                "pi:tool_execution_start",
+                {
+                    "type": "tool_execution_start",
+                    "toolCallId": "tc-9",
+                    "toolName": "bash",
+                    "args": {"command": "ls"},
+                },
+            ),
             evidence_ref=REF,
         )
         (item,) = _items(start)
@@ -837,7 +874,17 @@ class PiMapperTests(unittest.TestCase):
         self.assertEqual(item.phase, "streaming")
         self.assertIsInstance(item.blocks[0], ToolInputBlock)
         end = pi.map_evidence_frame(
-            _evidence(2, "pi:tool_execution_end", {"type": "tool_execution_end", "toolCallId": "tc-9", "toolName": "bash", "result": {"content": []}, "isError": True}),
+            _evidence(
+                2,
+                "pi:tool_execution_end",
+                {
+                    "type": "tool_execution_end",
+                    "toolCallId": "tc-9",
+                    "toolName": "bash",
+                    "result": {"content": []},
+                    "isError": True,
+                },
+            ),
             evidence_ref=REF,
         )
         (item2,) = _items(end)

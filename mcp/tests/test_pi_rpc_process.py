@@ -62,7 +62,7 @@ for line in sys.stdin:
 
     async def test_malformed_stdout_fails_transport_without_reclassification(self) -> None:
         transport = PiRpcSubprocess()
-        await transport.start(_child_launch('print("{\\\"type\\\":]", flush=True)'))
+        await transport.start(_child_launch('print("{\\"type\\":]", flush=True)'))
         try:
             with self.assertRaisesRegex(HarnessControlError, "malformed Pi RPC JSONL frame"):
                 await anext(transport.events())

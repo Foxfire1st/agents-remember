@@ -34,9 +34,7 @@ class SeedTargetRuntimeRootTests(unittest.TestCase):
         )
         with (
             mock.patch.object(seed_module, "load_settings", return_value=isolated_settings) as ls,
-            mock.patch.object(
-                seed_module, "_seed_runtime_root", return_value=instance_root
-            ) as srr,
+            mock.patch.object(seed_module, "_seed_runtime_root", return_value=instance_root) as srr,
         ):
             result = _seed_target_runtime_root(args, {"_workspace": True}, "repo")
         self.assertEqual(result, instance_root)
@@ -55,7 +53,9 @@ class SeedTargetRuntimeRootTests(unittest.TestCase):
         )
         with (
             mock.patch.object(seed_module, "load_settings", return_value=None),
-            mock.patch.object(seed_module, "_seed_runtime_root", return_value={"skip": True}) as srr,
+            mock.patch.object(
+                seed_module, "_seed_runtime_root", return_value={"skip": True}
+            ) as srr,
         ):
             result = _seed_target_runtime_root(args, {"_workspace": True}, "repo")
         self.assertEqual(result, {"skip": True})

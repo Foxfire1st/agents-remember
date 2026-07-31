@@ -183,9 +183,7 @@ async def interrupt_status(
         },
     )
     if record.fingerprint != fingerprint:
-        raise OperationConflictError(
-            f"interrupt request id {request_id!r} names a different tuple"
-        )
+        raise OperationConflictError(f"interrupt request id {request_id!r} names a different tuple")
     channel.interrupts.move_to_end(request_id)
     if record.settlement == "pending":
         async with service.session_lock(ar_session_id):
@@ -427,14 +425,20 @@ async def _pi_terminal_outcome(
 ) -> tuple[Settlement, str] | None:
     """Settle from the exact operation's settle plus its stopReason evidence."""
 
-    items = await service.read_full_timeline(
-        entry, expected_bridge_epoch=record.bridge_epoch
-    )
+    items = await service.read_full_timeline(entry, expected_bridge_epoch=record.bridge_epoch)
     row = next(
-        (item for item in items if item.kind == "prompt" and item.operation_id == record.operation_id),
+        (
+            item
+            for item in items
+            if item.kind == "prompt" and item.operation_id == record.operation_id
+        ),
         None,
     )
-    if record.operation_id is None or row is None or row.state in {"queued", "dispatching", "unknown"}:
+    if (
+        record.operation_id is None
+        or row is None
+        or row.state in {"queued", "dispatching", "unknown"}
+    ):
         return None
     stop_reason = await _pi_stop_reason(entry, record)
     if stop_reason is None:
@@ -490,7 +494,9 @@ def _store(channel: ControlChannel, record: InterruptRecord) -> None:
         channel.interrupts.pop(victim if victim is not None else next(iter(channel.interrupts)))
 
 
-def _projection(ar_session_id: str, bridge_epoch: str, record: InterruptRecord) -> InterruptOperation:
+def _projection(
+    ar_session_id: str, bridge_epoch: str, record: InterruptRecord
+) -> InterruptOperation:
     del ar_session_id  # the wire model carries no session field; identity is route-scoped
     return InterruptOperation(
         request_id=record.request_id,

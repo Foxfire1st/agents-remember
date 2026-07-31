@@ -59,7 +59,9 @@ class HostedInteractionSynchronizer:
     def _sync_interaction(
         self, entry: TerminalCatalogEntry, interaction: PendingInteraction | None
     ) -> None:
-        matching = self._interaction_gate(entry.id, interaction.interaction_id if interaction else None)
+        matching = self._interaction_gate(
+            entry.id, interaction.interaction_id if interaction else None
+        )
         if interaction is None:
             if matching is not None and matching.state == "open":
                 self._gates.append(expire_gate(matching, now=now_iso()))
@@ -93,9 +95,7 @@ class HostedInteractionSynchronizer:
                         }
                     },
                     required_decision=(
-                        list(interaction.choices)
-                        if interaction.choices
-                        else ["approve", "reject"]
+                        list(interaction.choices) if interaction.choices else ["approve", "reject"]
                     ),
                 )
             )
@@ -205,16 +205,12 @@ class HostedInteractionSynchronizer:
         )
         stamped = gate.model_copy(
             update={
-                "packet": _with_delivery_failure(
-                    gate, exc, delivery=delivery, attempts=attempts
-                )
+                "packet": _with_delivery_failure(gate, exc, delivery=delivery, attempts=attempts)
             }
         )
         self._gates.append(reopen_gate(stamped, now=now_iso()))
 
-    def _interaction_gate(
-        self, session_id: str, interaction_id: str | None
-    ) -> GateRecord | None:
+    def _interaction_gate(self, session_id: str, interaction_id: str | None) -> GateRecord | None:
         if interaction_id is None:
             return next(
                 (
@@ -297,8 +293,7 @@ def _request_id_from_vendor_correlation(
     if len(matches) > 1:
         matched_ids = ", ".join(sorted(row.id for row in matches))
         raise HarnessControlError(
-            "adapter terminal result vendor correlation matches multiple inbox rows: "
-            f"{matched_ids}"
+            f"adapter terminal result vendor correlation matches multiple inbox rows: {matched_ids}"
         )
     matched = matches[0]
     if matched.adapterDeliveryState not in {"accepted", "completed"}:

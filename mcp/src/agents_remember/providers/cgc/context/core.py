@@ -125,6 +125,7 @@ class CgcRuntimeLayout:
         }
         return env
 
+
 def cgc_runtime_layout(
     *,
     coordination_root: Path,

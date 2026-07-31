@@ -109,9 +109,7 @@ def ensure_dir(path: Path, summary: InstallSummary, dry_run: bool) -> None:
         summary.created_dirs += 1
 
 
-def seed_agentic_settings(
-    coordination_root: Path, summary: InstallSummary, dry_run: bool
-) -> None:
+def seed_agentic_settings(coordination_root: Path, summary: InstallSummary, dry_run: bool) -> None:
     """Seed the GLOBAL agentic settings file, copy-if-missing (260703-L13).
 
     ``<coordinationRoot>/system/settings.json`` is user-owned coordinator state

@@ -116,9 +116,7 @@ def _observe_exact_session(
     try:
         snapshot = snapshot_reader(entry)
     except HarnessControlError as exc:
-        return HostedReadinessResult(
-            "not-ready", session_id, entry=entry, detail=str(exc)
-        )
+        return HostedReadinessResult("not-ready", session_id, entry=entry, detail=str(exc))
 
     current = catalog.get(session_id)
     if current is None or hosted_session_identity(current) != hosted_session_identity(entry):

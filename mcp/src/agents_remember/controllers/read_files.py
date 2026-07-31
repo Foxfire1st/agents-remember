@@ -144,17 +144,13 @@ def _parse_file_request(entry: dict[str, Any]) -> _FileRequest:
         start = source.get("startLine")
         end = source.get("endLine")
         if not isinstance(start, int) or not isinstance(end, int):
-            raise AuthorityError(
-                f"source range for {path!r} needs integer startLine and endLine"
-            )
+            raise AuthorityError(f"source range for {path!r} needs integer startLine and endLine")
         if start < 1:
             raise AuthorityError(f"startLine for {path!r} must be >= 1")
         if end < 1:
             raise AuthorityError(f"endLine for {path!r} must be >= 1")
         if end < start:
-            raise AuthorityError(
-                f"endLine for {path!r} must be >= startLine (got {start}..{end})"
-            )
+            raise AuthorityError(f"endLine for {path!r} must be >= startLine (got {start}..{end})")
         return _FileRequest(path, False, start, end, onboarding_requested)
     raise AuthorityError(f"source for {path!r} must be 'full' or {{startLine, endLine}}")
 
@@ -196,9 +192,7 @@ def _read_source(source_path: Path, request: _FileRequest) -> tuple[str | None, 
         if request.full:
             text = filesystem.read_text(source_path)
         else:
-            text = filesystem.read_text_range(
-                source_path, request.start_line, request.end_line
-            )
+            text = filesystem.read_text_range(source_path, request.start_line, request.end_line)
     except (UnicodeDecodeError, ValueError, OSError):
         # Non-decodable, malformed range, or unreadable-but-present file: degrade
         # to source-omitted (matching _sidecar_body / _repo_overview) so one bad
@@ -219,9 +213,7 @@ def _resolve_onboarding(
     if not request.onboarding_requested:
         return "not_requested", None, False
 
-    storage_mode = resolve_storage_for_source(
-        rel, context.storage, context.code_repository_name
-    )
+    storage_mode = resolve_storage_for_source(rel, context.storage, context.code_repository_name)
     if storage_mode == "disabled":
         return "disabled", None, True
     if storage_mode not in _SIDECAR_STORAGE_MODES:
@@ -318,9 +310,7 @@ def _repo_overview(context: CoordinationContext) -> dict[str, Any] | None:
     return {"path": ROUTE_OVERVIEW_NAME, "overview": text, "_hash": _content_hash(text)}
 
 
-def _governing_route_overviews(
-    context: CoordinationContext, rel: str
-) -> list[dict[str, Any]]:
+def _governing_route_overviews(context: CoordinationContext, rel: str) -> list[dict[str, Any]]:
     """The governing route-overview chain for ``rel`` (nearest folder first).
 
     Reads each governing route's ``overview.md`` directly; the repo-root

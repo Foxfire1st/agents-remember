@@ -99,8 +99,12 @@ class ProviderLifecycleRenderTests(unittest.TestCase):
         self.assertNotIn("\\u256d", stdout.getvalue())
 
     def test_compose_auto_ports_render_with_empty_published_port(self) -> None:
-        self.assertEqual(lifecycle.yaml_port_mapping("127.0.0.1", "auto", 11434), '"127.0.0.1::11434"')
-        self.assertEqual(lifecycle.yaml_port_mapping("127.0.0.1", 5432, 5432), '"127.0.0.1:5432:5432"')
+        self.assertEqual(
+            lifecycle.yaml_port_mapping("127.0.0.1", "auto", 11434), '"127.0.0.1::11434"'
+        )
+        self.assertEqual(
+            lifecycle.yaml_port_mapping("127.0.0.1", 5432, 5432), '"127.0.0.1:5432:5432"'
+        )
 
 
 class ProviderComposeMemoryCapTests(unittest.TestCase):
@@ -574,8 +578,18 @@ class ProviderLifecycleParserTests(unittest.TestCase):
             layout = layouts[0]
 
             cases = [
-                ({"returncode": 0, "stdout": "count(f)\n10472\nCached execution: 1", "stderr": ""}, "indexed"),
-                ({"returncode": 0, "stdout": "count(f)\n0\nCached execution: 0", "stderr": ""}, "empty"),
+                (
+                    {
+                        "returncode": 0,
+                        "stdout": "count(f)\n10472\nCached execution: 1",
+                        "stderr": "",
+                    },
+                    "indexed",
+                ),
+                (
+                    {"returncode": 0, "stdout": "count(f)\n0\nCached execution: 0", "stderr": ""},
+                    "empty",
+                ),
                 (
                     {
                         "returncode": 0,
@@ -592,7 +606,10 @@ class ProviderLifecycleParserTests(unittest.TestCase):
                     },
                     "backend-unreachable",
                 ),
-                ({"returncode": 1, "stdout": "", "stderr": "no such container"}, "backend-unreachable"),
+                (
+                    {"returncode": 1, "stdout": "", "stderr": "no such container"},
+                    "backend-unreachable",
+                ),
             ]
             for result, expected in cases:
                 with mock.patch.object(installation, "run_command", return_value=result):
@@ -1284,9 +1301,7 @@ class LifecycleSettingsPathTests(unittest.TestCase):
                     }
                 },
             )
-            path, enabled = lifecycle.context_provider_enabled(
-                settings_path, "grepai-memory"
-            )
+            path, enabled = lifecycle.context_provider_enabled(settings_path, "grepai-memory")
         self.assertEqual(path, settings_path)
         self.assertTrue(enabled)
 

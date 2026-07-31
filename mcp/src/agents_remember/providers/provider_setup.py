@@ -105,9 +105,7 @@ class ProviderSetupRequest:
                 source_coordination_root=_resolve_optional_path(
                     self.grepai_seed.source_coordination_root
                 ),
-                source_settings_path=_resolve_optional_path(
-                    self.grepai_seed.source_settings_path
-                ),
+                source_settings_path=_resolve_optional_path(self.grepai_seed.source_settings_path),
                 project_id=self.grepai_seed.project_id,
                 target_memory_root=_resolve_optional_path(self.grepai_seed.target_memory_root),
             ),
@@ -115,9 +113,7 @@ class ProviderSetupRequest:
                 runtime_root=_resolve_optional_path(self.grepai_isolated.runtime_root),
                 settings_path=_resolve_optional_path(self.grepai_isolated.settings_path),
                 project_id=self.grepai_isolated.project_id,
-                target_memory_root=_resolve_optional_path(
-                    self.grepai_isolated.target_memory_root
-                ),
+                target_memory_root=_resolve_optional_path(self.grepai_isolated.target_memory_root),
                 allow_missing_roots=self.grepai_isolated.allow_missing_roots,
             ),
         )
@@ -339,9 +335,7 @@ def _seed_catchup_results(
     return [payload]
 
 
-def _cgc_watcher_container_name(
-    args: argparse.Namespace, settings: dict[str, Any]
-) -> str | None:
+def _cgc_watcher_container_name(args: argparse.Namespace, settings: dict[str, Any]) -> str | None:
     provider = provider_settings(settings, cgc_setup.CGC_PROVIDER_ID)
     repo_id = getattr(args, "cgc_seed_repo_id", None)
     if not isinstance(provider, dict) or not repo_id:
@@ -594,15 +588,13 @@ def write_isolated_provider_settings(
 
 
 def _isolated_provider_settings_path(args: argparse.Namespace) -> Path:
-    explicit = (
-        getattr(args, "grepai_isolated_settings_path", None)
-        or getattr(args, "cgc_isolated_settings_path", None)
+    explicit = getattr(args, "grepai_isolated_settings_path", None) or getattr(
+        args, "cgc_isolated_settings_path", None
     )
     if explicit is not None:
         return explicit
-    root = (
-        getattr(args, "grepai_isolated_runtime_root", None)
-        or getattr(args, "cgc_isolated_runtime_root", None)
+    root = getattr(args, "grepai_isolated_runtime_root", None) or getattr(
+        args, "cgc_isolated_runtime_root", None
     )
     if root is None:
         raise RuntimeError("isolated provider settings require an isolated runtime root")

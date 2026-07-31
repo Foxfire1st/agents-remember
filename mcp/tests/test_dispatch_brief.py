@@ -144,9 +144,7 @@ def test_rejected_adapter_receipt_keeps_same_row_pending(tmp_path: Path) -> None
     catalog = TerminalCatalog(tmp_path / "logs" / "dashboard" / "terminal-sessions.json")
     target = _target(tmp_path)
     catalog.upsert(target)
-    posted, _submit, paster = _post(
-        tmp_path, entry=target, catalog=catalog, acceptance="rejected"
-    )
+    posted, _submit, paster = _post(tmp_path, entry=target, catalog=catalog, acceptance="rejected")
     assert posted["deliveryState"] == "unconfirmed"
     assert posted["adapterDeliveryState"] == "rejected"
     assert posted["state"] == "pending"
@@ -177,16 +175,17 @@ def test_ambiguous_redelivery_reconciles_without_resubmitting(tmp_path: Path) ->
     )
     store.append(entry)
     paster = _NoRawPaster()
-    with mock.patch(
-        "agents_remember.serving.inbox_delivery.reconcile_control_prompt",
-        return_value=ReconciliationResult(
-            request_id="dispatch-1",
-            state="accepted",
-            reconciled_at=NOW,
+    with (
+        mock.patch(
+            "agents_remember.serving.inbox_delivery.reconcile_control_prompt",
+            return_value=ReconciliationResult(
+                request_id="dispatch-1",
+                state="accepted",
+                reconciled_at=NOW,
+            ),
         ),
-    ), mock.patch(
-        "agents_remember.serving.inbox_delivery.submit_control_prompt"
-    ) as submit_prompt:
+        mock.patch("agents_remember.serving.inbox_delivery.submit_control_prompt") as submit_prompt,
+    ):
         delivered = deliver_inbox_entry(
             store=store,
             catalog=catalog,

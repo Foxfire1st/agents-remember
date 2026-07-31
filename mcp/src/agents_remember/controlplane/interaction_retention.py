@@ -53,9 +53,7 @@ def gate_keep_ids(
     for record in records:
         latest[record.id] = record
     return {
-        gate.id
-        for gate in latest.values()
-        if _keep_gate(gate, now=now, ttl_seconds=ttl_seconds)
+        gate.id for gate in latest.values() if _keep_gate(gate, now=now, ttl_seconds=ttl_seconds)
     }
 
 
@@ -104,9 +102,7 @@ def _keep_gate(gate: GateRecord, *, now: datetime, ttl_seconds: float) -> bool:
     return age is None or age <= ttl_seconds
 
 
-def _keep_inbox_entry(
-    entry: OperatorInboxEntry, *, now: datetime, ttl_seconds: float
-) -> bool:
+def _keep_inbox_entry(entry: OperatorInboxEntry, *, now: datetime, ttl_seconds: float) -> bool:
     """Ruled invariant (developer, 2026-07-09): system health outranks every row, pending
     included. A pending/unacked row is kept only within :data:`INBOX_PENDING_TTL_SECONDS`;
     consumed rows keep the shorter audit window; ladder-resolved rows drop immediately. This

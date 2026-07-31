@@ -67,9 +67,7 @@ class LifecycleSettingsDerivationTests(unittest.TestCase):
         # L12: per-repo managed exclusions ride the generated roots so the materialized
         # .cgcignore excludes the committed dashboard bundle from watch/index work.
         ar_root = next(r for r in cgc["roots"] if r["repoId"] == "agents-remember")
-        self.assertEqual(
-            ar_root["cgcignorePatterns"], ["mcp/src/agents_remember/package_data/"]
-        )
+        self.assertEqual(ar_root["cgcignorePatterns"], ["mcp/src/agents_remember/package_data/"])
 
 
 class McpConfigTests(unittest.TestCase):
@@ -577,16 +575,12 @@ class RetirementSettingsTests(unittest.TestCase):
         self.assertTrue(config.retirement.auto_land_on_finalize)
 
     def test_parses_both_flags_explicitly_off(self) -> None:
-        config = self._load(
-            {"autoLandOnIntegration": False, "autoLandOnFinalize": False}
-        )
+        config = self._load({"autoLandOnIntegration": False, "autoLandOnFinalize": False})
         self.assertFalse(config.retirement.auto_land_on_integration)
         self.assertFalse(config.retirement.auto_land_on_finalize)
 
     def test_parses_legacy_auto_retire_flags_as_aliases(self) -> None:
-        config = self._load(
-            {"autoRetireOnIntegration": False, "autoRetireOnFinalize": False}
-        )
+        config = self._load({"autoRetireOnIntegration": False, "autoRetireOnFinalize": False})
         self.assertFalse(config.retirement.auto_land_on_integration)
         self.assertFalse(config.retirement.auto_land_on_finalize)
 
@@ -652,9 +646,7 @@ class OrchestrationSettingsTests(unittest.TestCase):
         with warnings.catch_warnings(record=True) as caught:
             warnings.simplefilter("always")
             config = self._load(
-                global_orchestration={
-                    "gateDelegation": {"policy": "manager-decides-leaf-gates"}
-                }
+                global_orchestration={"gateDelegation": {"policy": "manager-decides-leaf-gates"}}
             )
 
         policy = config.orchestration.gate_policy
@@ -664,9 +656,7 @@ class OrchestrationSettingsTests(unittest.TestCase):
         self.assertEqual(caught, [])
 
     def test_authority_gate_delegation_is_legacy_fallback_with_warning(self) -> None:
-        with self.assertWarnsRegex(
-            UserWarning, "moved to the global agentic settings file"
-        ):
+        with self.assertWarnsRegex(UserWarning, "moved to the global agentic settings file"):
             config = self._load(
                 authority={"gateDelegation": {"policy": "manager-decides-leaf-gates"}}
             )
@@ -682,9 +672,7 @@ class OrchestrationSettingsTests(unittest.TestCase):
             )
 
         # The global (all-human) value wins over the shadowed authority value.
-        self.assertIsNone(
-            config.orchestration.gate_policy.rule_for("plan-approval").delegated_role
-        )
+        self.assertIsNone(config.orchestration.gate_policy.rule_for("plan-approval").delegated_role)
 
     def test_loops_in_authority_file_is_rejected_naming_the_new_home(self) -> None:
         with self.assertRaisesRegex(
@@ -750,9 +738,7 @@ class OrchestrationSettingsTests(unittest.TestCase):
     def test_human_pinned_kind_in_legacy_authority_fallback_still_fails(self) -> None:
         with self.assertRaisesRegex(ConfigError, "human-pinned"):
             self._load(
-                authority={
-                    "gateDelegation": {"kinds": {"push-approval": {"role": "manager"}}}
-                }
+                authority={"gateDelegation": {"kinds": {"push-approval": {"role": "manager"}}}}
             )
 
     def test_malformed_global_agentic_file_fails_boot_naming_the_file(self) -> None:

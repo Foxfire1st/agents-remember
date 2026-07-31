@@ -221,7 +221,10 @@ def _isolated_grepai_backend(
             "dataRoot": "<backendRuntimeRoot>/data",
             "image": "pgvector/pgvector:pg16",
             "imageLockFile": (
-                args.coordination_root / "providers" / "requirements" / "grepai-postgres-docker.lock"
+                args.coordination_root
+                / "providers"
+                / "requirements"
+                / "grepai-postgres-docker.lock"
             ).as_posix(),
             "containerName": scoped_name("ar-grepai-postgres", instance_id),
             "postgres": {

@@ -134,9 +134,7 @@ def compact_carryover_payload(full: dict[str, Any], report_path: str) -> dict[st
         decisions.setdefault(str(candidate.get("decision")), []).append(
             str(candidate.get("source_path"))
         )
-    compact["decisions"] = {
-        decision: _capped_paths(paths) for decision, paths in decisions.items()
-    }
+    compact["decisions"] = {decision: _capped_paths(paths) for decision, paths in decisions.items()}
     if "carried" in full:
         compact["carriedPaths"] = _capped_paths(
             [str(candidate.get("source_path")) for candidate in full["carried"]]

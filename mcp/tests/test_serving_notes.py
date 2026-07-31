@@ -81,8 +81,9 @@ class NotesRouteTests(unittest.TestCase):
         )
         by_path = {entry["path"]: entry for entry in body["notes"]}
         self.assertEqual(by_path["friction-ledger.md"]["language"], "markdown")
-        self.assertEqual(by_path["reports/260703-L1-worker-report.md"]["name"],
-                         "260703-L1-worker-report.md")
+        self.assertEqual(
+            by_path["reports/260703-L1-worker-report.md"]["name"], "260703-L1-worker-report.md"
+        )
         self.assertFalse(body["truncated"])
 
     def test_list_depth_cap_prunes_and_reports_truncated(self) -> None:

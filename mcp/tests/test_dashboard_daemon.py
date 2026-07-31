@@ -123,12 +123,7 @@ class ProbeTests(unittest.TestCase):
 
 def _spawn_sleeper(*, ignore_term: bool) -> subprocess.Popen[bytes]:
     handler = "signal.signal(signal.SIGTERM, signal.SIG_IGN)\n" if ignore_term else ""
-    code = (
-        "import signal, sys, time\n"
-        f"{handler}"
-        "print('ready', flush=True)\n"
-        "time.sleep(60)\n"
-    )
+    code = f"import signal, sys, time\n{handler}print('ready', flush=True)\ntime.sleep(60)\n"
     process = subprocess.Popen([sys.executable, "-c", code], stdout=subprocess.PIPE)
     assert process.stdout is not None
     process.stdout.readline()  # handler installed before anyone signals
@@ -187,7 +182,9 @@ class SpawnTests(unittest.TestCase):
             with mock.patch.object(daemon.subprocess, "Popen", return_value=fake) as popen:
                 state = daemon.spawn(config, host="127.0.0.1", port=9100, version="9.9.9")
             command = popen.call_args.args[0]
-            self.assertEqual(command[:4], [sys.executable, "-m", "agents_remember.cli", "dashboard"])
+            self.assertEqual(
+                command[:4], [sys.executable, "-m", "agents_remember.cli", "dashboard"]
+            )
             self.assertIn("--config", command)
             self.assertEqual(command[command.index("--config") + 1], str(config.config_path))
             self.assertEqual(command[command.index("--port") + 1], "9100")
@@ -389,12 +386,12 @@ def _write_settings(root: Path, *, dashboard: dict | None = None) -> Path:
 
 class CliDaemonDispatchTests(unittest.TestCase):
     def _run(self, root: Path, *flags: str) -> tuple[int, str]:
-        settings = _write_settings(root) if not (root / "settings.json").exists() else (
-            root / "settings.json"
+        settings = (
+            _write_settings(root)
+            if not (root / "settings.json").exists()
+            else (root / "settings.json")
         )
-        args = cli_main.build_parser().parse_args(
-            ["dashboard", "--config", str(settings), *flags]
-        )
+        args = cli_main.build_parser().parse_args(["dashboard", "--config", str(settings), *flags])
         stdout = io.StringIO()
         with contextlib.redirect_stdout(stdout):
             code = cli_dashboard.run(args)

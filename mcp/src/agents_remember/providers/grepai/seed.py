@@ -78,7 +78,9 @@ def grepai_seed_source_extra_args(
     source_coordination_root: Path,
     target_coordination_root: Path,
 ) -> list[str]:
-    path = grepai_seed_source_settings_path(args, source_coordination_root, target_coordination_root)
+    path = grepai_seed_source_settings_path(
+        args, source_coordination_root, target_coordination_root
+    )
     return ["--from-settings", path.as_posix()] if path is not None else []
 
 
@@ -98,7 +100,9 @@ def grepai_clone_bundle(args: Any, target_settings: dict[str, Any]) -> dict[str,
     return _clone_success_payload(context, source_start, target_start, clone)
 
 
-def _resolve_clone_context(args: Any, target_settings: dict[str, Any]) -> GrepaiCloneContext | dict[str, Any]:
+def _resolve_clone_context(
+    args: Any, target_settings: dict[str, Any]
+) -> GrepaiCloneContext | dict[str, Any]:
     # Benchmarks are hermetic: a benchmark-scoped target must never clone from another
     # stack. This is what stopped the benchmark from starting the live workspace backend
     # as a clone source and cascading a full re-embed across main + every worktree.

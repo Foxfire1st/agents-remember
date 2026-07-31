@@ -108,9 +108,7 @@ class DockerContainerHealthTests(unittest.TestCase):
 
 class DockerContainerStateSummaryTests(unittest.TestCase):
     def test_running_container_summary_includes_uptime_and_health(self) -> None:
-        started = (datetime.now(UTC) - timedelta(seconds=90)).strftime(
-            "%Y-%m-%dT%H:%M:%S.000000Z"
-        )
+        started = (datetime.now(UTC) - timedelta(seconds=90)).strftime("%Y-%m-%dT%H:%M:%S.000000Z")
         inspect = {
             "State": {
                 "Status": "running",

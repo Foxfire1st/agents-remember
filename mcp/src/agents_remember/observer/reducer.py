@@ -635,9 +635,7 @@ def build_attention_queue(
     return items
 
 
-def _is_dismissed(
-    item: AttentionItem, dismissals: dict[str, AttentionDismissalRecord]
-) -> bool:
+def _is_dismissed(item: AttentionItem, dismissals: dict[str, AttentionDismissalRecord]) -> bool:
     """True when a lifecycle acknowledgement still suppresses this item (leaf-28 S5.2).
 
     A dismissal holds while it is at or after the item's triggering ``signalTs``;
@@ -674,6 +672,7 @@ def _signal_after(signal_ts: str | None, dismissed_at: str) -> bool:
     if dismissed.tzinfo is None:
         dismissed = dismissed.replace(tzinfo=UTC)
     return signal > dismissed
+
 
 def _await_summary(ask: dict[str, Any] | None) -> str | None:
     """The developer-facing summary an awaiting-developer turn-end carried."""
@@ -774,9 +773,7 @@ def _gate_node(gate: GateRecord) -> GateNode:
         state=gate.state,
         decidedBy=gate.decidedBy,
         decidedVia=gate.decidedVia,
-        evidenceRefs=[
-            ref.model_dump(mode="json", exclude_none=True) for ref in gate.evidenceRefs
-        ],
+        evidenceRefs=[ref.model_dump(mode="json", exclude_none=True) for ref in gate.evidenceRefs],
         decisions=sorted(DECISION_STATES) if gate.state == "open" else [],
         packet=gate.packet,
         ts=gate.ts,

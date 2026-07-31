@@ -228,4 +228,3 @@ def create_initial_ledger(
         sort_order="newest-first",
         rows=[LedgerRow(code_commit, memory_commit)],
     )
-

@@ -84,7 +84,14 @@ class BranchFreshness(StrictResponseModel):
     ahead: int | None = None
     behind: int | None = None
     state: Literal[
-        "current", "behind", "ahead", "diverged", "no-upstream", "no-branch", "unknown", "unavailable"
+        "current",
+        "behind",
+        "ahead",
+        "diverged",
+        "no-upstream",
+        "no-branch",
+        "unknown",
+        "unavailable",
     ]
     error: str | None = None
 

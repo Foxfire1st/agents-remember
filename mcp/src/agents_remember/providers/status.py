@@ -195,7 +195,11 @@ def _provider_status_projection(
     # ok also reflects graph/workspace content, so both must hold for a green
     # global summary.
     raw_ok = status.get("ok")
-    ok = bool(aggregated.get("ok")) if raw_ok is None else bool(raw_ok) and bool(aggregated.get("ok"))
+    ok = (
+        bool(aggregated.get("ok"))
+        if raw_ok is None
+        else bool(raw_ok) and bool(aggregated.get("ok"))
+    )
     providers_map = aggregated.get("providers", {})
     partial = status.get("partial", False) or (
         not ok
@@ -291,9 +295,7 @@ def _cgc_watchers_map(state: dict[str, Any]) -> dict[str, dict[str, Any]]:
     if not isinstance(watchers, dict):
         return {}
     return {
-        str(repo_id): watcher
-        for repo_id, watcher in watchers.items()
-        if isinstance(watcher, dict)
+        str(repo_id): watcher for repo_id, watcher in watchers.items() if isinstance(watcher, dict)
     }
 
 

@@ -119,9 +119,7 @@ def test_active_interrupt_follows_a_changed_control_gate_verdict(
         state="unverified",
         reason="control probe regressed; verdict withdrawn pending a new fixture",
         evidence_tier="adapter",
-        evidence=CapabilityEvidence(
-            runtime_version="0.0.0", observed_at="2026-07-22T00:00:00Z"
-        ),
+        evidence=CapabilityEvidence(runtime_version="0.0.0", observed_at="2026-07-22T00:00:00Z"),
     )
     original = control_capabilities_for(harness, _snapshot())
     demoted = ControlCapabilities(

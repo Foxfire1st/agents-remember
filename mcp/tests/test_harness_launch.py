@@ -213,9 +213,7 @@ def test_select_current_model_prefers_requested_alias_over_default_collapse() ->
     assert _select_current_model(models, "claude-opus-4-8[1m]").key == "default"
     # The requested alias wins when its resolved model matches the echoed resolution.
     assert (
-        _select_current_model(
-            models, "claude-opus-4-8[1m]", requested_key="opus[1m]"
-        ).key
+        _select_current_model(models, "claude-opus-4-8[1m]", requested_key="opus[1m]").key
         == "opus[1m]"
     )
 

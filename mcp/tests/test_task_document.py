@@ -196,9 +196,7 @@ class SchemaTests(unittest.TestCase):
         master = _master(orchestrates=["260706_management-repo", "260707_settings-page"])
         again = TaskDocument.model_validate(master.model_dump(by_alias=True))
         self.assertEqual(again, master)
-        self.assertEqual(
-            again.orchestrates, ["260706_management-repo", "260707_settings-page"]
-        )
+        self.assertEqual(again.orchestrates, ["260706_management-repo", "260707_settings-page"])
         # A leaf/light doc never commands masters.
         with self.assertRaises(ValidationError):
             _doc(orchestrates=["260706_management-repo"])

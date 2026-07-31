@@ -824,9 +824,7 @@ class SettingsDefinedHarnessTests(unittest.TestCase):
         self.assertEqual(runner.argv, ("claude", "--continue"))
         self.assertEqual(
             runner.resolved_launch,
-            ResolvedLaunch(
-                "claude", "claude-fable-5", "max", self.config.workspace_root
-            ),
+            ResolvedLaunch("claude", "claude-fable-5", "max", self.config.workspace_root),
         )
 
     def test_vocab_less_settings_harness_refuses_effort_with_guidance(self) -> None:

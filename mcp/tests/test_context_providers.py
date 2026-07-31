@@ -146,9 +146,7 @@ class ContextProviderLayoutTests(unittest.TestCase):
                 code_repo_root=root / "repos" / "My App",
             )
 
-            self.assertEqual(
-                layout.container_runtime_root, to_container_path(layout.runtime_root)
-            )
+            self.assertEqual(layout.container_runtime_root, to_container_path(layout.runtime_root))
             self.assertEqual(
                 layout.container_code_repo_root, to_container_path(layout.code_repo_root)
             )
@@ -171,9 +169,7 @@ class ContextProviderLayoutTests(unittest.TestCase):
             # Path-valued entries are driveless POSIX paths inside the container.
             self.assertNotIn(":", container_env["HOME"])
             self.assertNotIn(":", container_env["LOG_FILE_PATH"])
-            self.assertEqual(
-                container_env["HOME"], to_container_path(layout.run_root / "home")
-            )
+            self.assertEqual(container_env["HOME"], to_container_path(layout.run_root / "home"))
             # Host-only Windows variables must not be injected into a Linux container.
             for key in ("USERPROFILE", "APPDATA", "LOCALAPPDATA"):
                 self.assertNotIn(key, container_env)
@@ -523,9 +519,7 @@ class ContextProviderLayoutTests(unittest.TestCase):
 
             self.assertEqual(first[0]["projectId"], "ar-my-app")
             self.assertEqual(second, [])
-            self.assertEqual(
-                (memory_root / ".gitignore").read_text(encoding="utf-8"), ".grepai/\n"
-            )
+            self.assertEqual((memory_root / ".gitignore").read_text(encoding="utf-8"), ".grepai/\n")
 
     def test_grepai_workspace_config_is_provider_owned_and_names_projects(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

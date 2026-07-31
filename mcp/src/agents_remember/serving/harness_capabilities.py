@@ -215,9 +215,7 @@ def config_option_json(value: SessionConfigOption) -> dict[str, object]:
 
 def set_result_json(value: SetResult) -> dict[str, object]:
     if value.acceptance not in SET_ACCEPTANCE_VALUES:
-        raise ValueError(
-            f"adapter set result has unsupported acceptance {value.acceptance!r}"
-        )
+        raise ValueError(f"adapter set result has unsupported acceptance {value.acceptance!r}")
     return {
         "ok": value.ok,
         "acceptance": value.acceptance,

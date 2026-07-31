@@ -207,12 +207,16 @@ def cgc_repo_state(result: dict[str, Any]) -> dict[str, Any]:
     process = result.get("process")
     process = process if isinstance(process, dict) else {}
     container_state = process.get("containerState")
-    container = normalize_container_state(container_state if isinstance(container_state, dict) else {})
+    container = normalize_container_state(
+        container_state if isinstance(container_state, dict) else {}
+    )
     # A restarting (crash-looping) container reports Running=true between
     # restarts but is not a live watcher.
     watcher_up = process.get("alive") is True and container["containerState"] != "restarting"
     indexing_state = str(result.get("indexingState") or "unknown")
-    state = "ready" if result.get("ok") and watcher_up else ("failed" if not watcher_up else "degraded")
+    state = (
+        "ready" if result.get("ok") and watcher_up else ("failed" if not watcher_up else "degraded")
+    )
     if state == "ready" and indexing_state in {"empty", "backend-unreachable"}:
         # A live watcher over an empty or unreachable graph serves no queries;
         # readiness must reflect graph content, not container liveness. An

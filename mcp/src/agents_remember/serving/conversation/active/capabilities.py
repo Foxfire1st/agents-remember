@@ -104,7 +104,9 @@ def _no_attachments() -> AttachmentCapabilities:
             description="required",
         )
 
-    return AttachmentCapabilities(image=_none("image"), file=_none("file"), resource=_none("resource"))
+    return AttachmentCapabilities(
+        image=_none("image"), file=_none("file"), resource=_none("resource")
+    )
 
 
 def _codex_capabilities(snapshot: AdapterSnapshot) -> ConversationCapabilities:
@@ -214,7 +216,9 @@ def _claude_capabilities(snapshot: AdapterSnapshot) -> ConversationCapabilities:
             tools=_gated("tool_use/tool_result blocks"),
             diffs=_gated("tool diffs"),
             interactions=_gated("stdio permission and question interactions"),
-            completeness=_gated("live-window completeness; claude has no native page (stream/replay-only)"),
+            completeness=_gated(
+                "live-window completeness; claude has no native page (stream/replay-only)"
+            ),
         ),
         history=HistoryCapabilities(
             list=_unavailable("dormant session listing is the L2 native-library leaf"),
@@ -223,7 +227,9 @@ def _claude_capabilities(snapshot: AdapterSnapshot) -> ConversationCapabilities:
             ),
             resume=_unavailable("exact resume/open is the L2 native-library leaf"),
             completeness=_gated("history completeness awaits a probed native-library contract"),
-            tool_completeness=_gated("historical tool completeness awaits a probed native-library contract"),
+            tool_completeness=_gated(
+                "historical tool completeness awaits a probed native-library contract"
+            ),
         ),
         controls=ControlCapabilities(
             interrupt=interrupt_capability_for("claude", snapshot),
@@ -321,7 +327,9 @@ def _pi_capabilities(snapshot: AdapterSnapshot) -> ConversationCapabilities:
                 "session cost stats are schema-documented but not fixture-observed",
                 _PI_RUNTIME,
             ),
-            rate_limit=_unavailable("pi exposes no native rate-limit window contract on this surface"),
+            rate_limit=_unavailable(
+                "pi exposes no native rate-limit window contract on this surface"
+            ),
             compaction=_adapter(
                 "unverified",
                 "compaction events are schema-documented but not fixture-observed",

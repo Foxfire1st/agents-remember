@@ -127,7 +127,8 @@ def replace_records(path: Path, records: list[OrchestrationNudgeRecord]) -> None
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
     tmp.write_text(
-        "\n".join(record.model_dump_json(by_alias=True, exclude_none=True) for record in records) + "\n",
+        "\n".join(record.model_dump_json(by_alias=True, exclude_none=True) for record in records)
+        + "\n",
         encoding="utf-8",
     )
     os.replace(tmp, path)

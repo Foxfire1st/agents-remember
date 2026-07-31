@@ -162,9 +162,7 @@ class ConfirmedGonePolicyTests(unittest.TestCase):
             "decision-ruling",
             "dispatch-brief",
         )
-        rows = {
-            f"kind-{kind}": _inbox_entry(f"kind-{kind}", kind=kind) for kind in protected
-        }
+        rows = {f"kind-{kind}": _inbox_entry(f"kind-{kind}", kind=kind) for kind in protected}
         rows["subjectless"] = _inbox_entry("subjectless", subject=None)
         rows["model"] = _inbox_entry("model", created_by="model")
         plan = plan_confirmed_gone_reclamation(
@@ -190,7 +188,9 @@ class ReconcileAndCompactTests(unittest.TestCase):
             now=(NOW + timedelta(seconds=1)).isoformat(),
             reason=CONFIRMED_GONE_REASON,
         )
-        self.store.append(pending.model_copy(update={"ts": (NOW + timedelta(seconds=2)).isoformat()}))
+        self.store.append(
+            pending.model_copy(update={"ts": (NOW + timedelta(seconds=2)).isoformat()})
+        )
 
         _removed, current, resolved = self.store.reconcile_and_compact(
             now=NOW + timedelta(seconds=3),

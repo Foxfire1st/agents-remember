@@ -199,13 +199,18 @@ def grepai_watcher_start_prerequisites(
     image = grepai_runner_image_build(args, runner=runner)
     if network_result.get("ok") and image.get("ok"):
         return layout, network_result, image, None
-    return layout, network_result, image, {
-        "provider": "grepai",
-        "action": "watcher-start",
-        "ok": False,
-        "network": network_result,
-        "image": image,
-    }
+    return (
+        layout,
+        network_result,
+        image,
+        {
+            "provider": "grepai",
+            "action": "watcher-start",
+            "ok": False,
+            "network": network_result,
+            "image": image,
+        },
+    )
 
 
 def grepai_watcher_dry_run_start_result(
@@ -280,7 +285,9 @@ def grepai_watcher_create_start_result(
             image=image,
             commands=[compose_plan(render, command_args, cwd=layout.coordination_root)],
         )
-    up_result = run_compose(render, command_args, cwd=layout.coordination_root, timeout=args.timeout)
+    up_result = run_compose(
+        render, command_args, cwd=layout.coordination_root, timeout=args.timeout
+    )
     inspect_data = docker_inspect_container(
         runner["containerName"], cwd=layout.coordination_root, timeout=args.timeout
     )

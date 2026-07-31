@@ -273,7 +273,9 @@ class ProviderDegradationEvaluatorTests(unittest.TestCase):
             delivery_attempts.append(kwargs)
             return kwargs["entry"]
 
-        with patch("agents_remember.providers.degradation.deliver_inbox_entry", side_effect=deliver_entry):
+        with patch(
+            "agents_remember.providers.degradation.deliver_inbox_entry", side_effect=deliver_entry
+        ):
             result = evaluate_provider_degradation(
                 self.config,
                 stop_provider_stacks=stop_provider_stacks,
@@ -304,7 +306,9 @@ class ProviderDegradationEvaluatorTests(unittest.TestCase):
 
         inbox_entries = OperatorInboxStore(observer_root(self.config)).current().values()
         self.assertEqual({entry.messageKind for entry in inbox_entries}, {"degradation-alert"})
-        self.assertEqual({entry.agentId for entry in inbox_entries}, {"orchestrator-1", "manager-1"})
+        self.assertEqual(
+            {entry.agentId for entry in inbox_entries}, {"orchestrator-1", "manager-1"}
+        )
         self.assertEqual(len(delivery_attempts), 2)
         self.assertEqual(
             {attempt["entry"].agentId for attempt in delivery_attempts},
@@ -343,7 +347,9 @@ class ProviderDegradationEvaluatorTests(unittest.TestCase):
         )
         self.assertEqual(state_payload["state"], "critical")
         inbox_entries = OperatorInboxStore(observer_root(self.config)).current().values()
-        self.assertEqual({entry.recipientRole for entry in inbox_entries}, {"orchestrator", "manager"})
+        self.assertEqual(
+            {entry.recipientRole for entry in inbox_entries}, {"orchestrator", "manager"}
+        )
 
     def test_recovery_transition_survives_restart_and_posts_role_addressed_all_clear(self) -> None:
         record_memory_sample(self.config, name="grepai-1", ratio=0.80)
@@ -364,7 +370,9 @@ class ProviderDegradationEvaluatorTests(unittest.TestCase):
         event_rows = read_event_rows(self.config)
         self.assertEqual([row["to"] for row in event_rows], ["degraded", "healthy"])
         inbox_entries = list(OperatorInboxStore(observer_root(self.config)).current().values())
-        self.assertEqual({entry.recipientRole for entry in inbox_entries}, {"orchestrator", "manager"})
+        self.assertEqual(
+            {entry.recipientRole for entry in inbox_entries}, {"orchestrator", "manager"}
+        )
         self.assertEqual({entry.agentId for entry in inbox_entries}, {None})
 
 

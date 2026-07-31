@@ -543,9 +543,7 @@ def start_result(args: WorktreeArgs) -> WorktreeCommandResult:
         # follow THIS enclosure's fresh lifecycle. First starts are a no-op (the
         # doc is authored afterwards, stamped by task_doc against the contract).
         if contract.kind == "leaf" and contract.leaf_id and contract.lifecycle_id:
-            restamp_leaf_doc_lifecycle(
-                contract.task_root, contract.leaf_id, contract.lifecycle_id
-            )
+            restamp_leaf_doc_lifecycle(contract.task_root, contract.leaf_id, contract.lifecycle_id)
     provider_state = run_or_launch_provider_setup(context, contract, args, provider_plan)
     if provider_state["state"] == "blocked":
         return _blocked_provider_start_result(
@@ -1073,9 +1071,9 @@ def _reconcile_missing_mapping(
     )
     advanced = replace(
         contract,
-            memory_base_commit=memory_base_for_source(
-                contract.memory_repo_path, contract.memory_source_branch
-            ),
+        memory_base_commit=memory_base_for_source(
+            contract.memory_repo_path, contract.memory_source_branch
+        ),
     )
     return advanced, updated
 

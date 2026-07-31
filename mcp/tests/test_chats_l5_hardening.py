@@ -370,7 +370,9 @@ def test_h2_unresolved_user_item_stays_honest_unknown_input(tmp_path: Path) -> N
     store = ProjectionStore()
     store.apply_item(MappedItem(_unknown_input_user_item("turn-9-user", "req-turn-9", "hello")))
     store.apply_provenance("req-turn-9", None)  # not-found -> stays honest
-    store.apply_item(MappedItem(_unknown_input_user_item("turn-9-user", "req-turn-9", "hello world")))
+    store.apply_item(
+        MappedItem(_unknown_input_user_item("turn-9-user", "req-turn-9", "hello world"))
+    )
 
     item = store.items()[0]
     assert item.lane == "unknown-input"

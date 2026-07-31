@@ -312,7 +312,9 @@ _TELEMETRY = {
 }
 
 
-def control_capabilities_for(harness_id: HarnessId, snapshot: AdapterSnapshot) -> ControlCapabilities:
+def control_capabilities_for(
+    harness_id: HarnessId, snapshot: AdapterSnapshot
+) -> ControlCapabilities:
     """Build the exact-session control capability set.
 
     The contract is the only gate: the fixture-declared state is never

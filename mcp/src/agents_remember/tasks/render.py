@@ -94,7 +94,9 @@ def _header_lines(doc: TaskDocument) -> list[str]:
         lines.append(f"**Master:** `{doc.master}`")
     if doc.orchestrates:  # the orchestration-command relation (L14); master-only by schema
         lines.append("**Orchestrates:** " + ", ".join(f"`{name}`" for name in doc.orchestrates))
-    lines += [f"**{note.label}:** {note.value}" for note in doc.headerNotes]  # extra header lines (R4)
+    lines += [
+        f"**{note.label}:** {note.value}" for note in doc.headerNotes
+    ]  # extra header lines (R4)
     return lines
 
 

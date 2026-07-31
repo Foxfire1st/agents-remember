@@ -168,9 +168,7 @@ def _iter_task_document_payloads(
         else _task_doc_cache.payloads(tasks_root, paths, read_payload=_read_json)
     )
     return [
-        (path, payload)
-        for path, payload in docs
-        if payload.get("schema") == TASK_DOCUMENT_SCHEMA
+        (path, payload) for path, payload in docs if payload.get("schema") == TASK_DOCUMENT_SCHEMA
     ]
 
 
@@ -265,7 +263,9 @@ def _worktree_providers(
     nodes: list[ProviderNode] = []
     for record in records:
         settings_key = record["settingsKey"]
-        runtime_specs = runtime_specs_by_path.get(str(settings_key), {}) if settings_key is not None else {}
+        runtime_specs = (
+            runtime_specs_by_path.get(str(settings_key), {}) if settings_key is not None else {}
+        )
         for provider in record["providers"]:
             provider_id = str(provider)
             nodes.append(
@@ -544,9 +544,7 @@ def read_gates(coordination_root: Path, *, now: datetime | None = None) -> list[
             if now is None:
                 gates.extend(store.current(lifecycle_id).values())
             else:
-                gates.extend(
-                    store.compact_current(lifecycle_id, now=now, rewrite=prune).values()
-                )
+                gates.extend(store.compact_current(lifecycle_id, now=now, rewrite=prune).values())
     return gates
 
 

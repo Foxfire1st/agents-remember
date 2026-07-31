@@ -352,17 +352,20 @@ class ConversationStatusService:
         self._process = classification.process
         if terminal is not None:
             state = self._terminal_turn_state(terminal)
-            return self._set_turn(
-                state,
-                turn_id=terminal.turn_id or self._turn.turn_id,
-                strength="exact",
-                reason="native turn settlement observed on the evidence stream",
-                now=now,
-                terminal_outcome=ConversationTurnOutcome(
-                    state=terminal.outcome,
-                    stop_reason=terminal.stop_reason,
-                ),
-            ) or changed
+            return (
+                self._set_turn(
+                    state,
+                    turn_id=terminal.turn_id or self._turn.turn_id,
+                    strength="exact",
+                    reason="native turn settlement observed on the evidence stream",
+                    now=now,
+                    terminal_outcome=ConversationTurnOutcome(
+                        state=terminal.outcome,
+                        stop_reason=terminal.stop_reason,
+                    ),
+                )
+                or changed
+            )
         if classification.turn is not None:
             mapped = CANONICAL_TURN_STATE_BY_EVIDENCE[classification.turn.evidence]
             prior_outcome = self._turn.terminal_outcome
@@ -373,15 +376,18 @@ class ConversationStatusService:
                 and prior_outcome.state == "completed"
                 else None
             )
-            return self._set_turn(
-                mapped,
-                turn_id=classification.turn.turn_id,
-                strength=classification.turn.strength,
-                reason=classification.turn.reason,
-                now=now,
-                waiting=self._waiting_for(classification.turn),
-                terminal_outcome=outcome,
-            ) or changed
+            return (
+                self._set_turn(
+                    mapped,
+                    turn_id=classification.turn.turn_id,
+                    strength=classification.turn.strength,
+                    reason=classification.turn.reason,
+                    now=now,
+                    waiting=self._waiting_for(classification.turn),
+                    terminal_outcome=outcome,
+                )
+                or changed
+            )
         return changed
 
     def _set_turn(

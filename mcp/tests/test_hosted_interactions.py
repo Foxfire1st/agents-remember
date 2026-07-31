@@ -248,9 +248,7 @@ def _decided_gate(
     """Raise the interaction gate and decide it, returning the freshly decided snapshot."""
     synchronizer.observe(entry, _snapshot(entry))
     gate = next(
-        candidate
-        for candidate in store.current("L1").values()
-        if candidate.state == "open"
+        candidate for candidate in store.current("L1").values() if candidate.state == "open"
     )
     decided = decide_gate(
         gate,
@@ -402,9 +400,7 @@ def test_disappeared_interaction_expires_the_current_open_gate(tmp_path: Path) -
             now=NOW,
         )
     )
-    with mock.patch(
-        "agents_remember.serving.hosted_interactions.respond_control_interaction"
-    ):
+    with mock.patch("agents_remember.serving.hosted_interactions.respond_control_interaction"):
         synchronizer.observe(entry, first)
     assert store.current("L1")[first_gate.id].state == "applied"
 
@@ -622,6 +618,4 @@ def test_null_request_id_completion_rejects_ambiguous_vendor_correlation(
                 acceptance="queued",
             ),
         )
-    assert {
-        row.adapterDeliveryState for row in inbox.current().values()
-    } == {"accepted"}
+    assert {row.adapterDeliveryState for row in inbox.current().values()} == {"accepted"}

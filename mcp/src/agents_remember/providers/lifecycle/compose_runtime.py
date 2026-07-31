@@ -102,9 +102,7 @@ def yaml_port_mapping(host: Any, host_port: Any, container_port: Any) -> str:
 
 def yaml_environment(env: dict[str, Any], *, indent: int = 6) -> str:
     prefix = " " * indent
-    return "\n".join(
-        f"{prefix}{key}: {yaml_scalar(value)}" for key, value in sorted(env.items())
-    )
+    return "\n".join(f"{prefix}{key}: {yaml_scalar(value)}" for key, value in sorted(env.items()))
 
 
 def yaml_labels(labels: dict[str, Any], *, indent: int = 6) -> str:
@@ -114,7 +112,9 @@ def yaml_labels(labels: dict[str, Any], *, indent: int = 6) -> str:
     )
 
 
-def required_ownership_labels(provider_settings: dict[str, Any], provider_id: str) -> dict[str, str]:
+def required_ownership_labels(
+    provider_settings: dict[str, Any], provider_id: str
+) -> dict[str, str]:
     instance = provider_settings.get("instance")
     if not isinstance(instance, dict):
         raise ContextProviderError(f"{provider_id} settings must include instance.labels")
@@ -154,9 +154,7 @@ def container_compose_project(inspect_data: dict[str, Any] | None) -> str | None
     return str(project) if project else None
 
 
-def container_managed_by_project(
-    inspect_data: dict[str, Any] | None, project_name: str
-) -> bool:
+def container_managed_by_project(inspect_data: dict[str, Any] | None, project_name: str) -> bool:
     return inspect_data is not None and container_compose_project(inspect_data) == project_name
 
 

@@ -126,7 +126,11 @@ def read_lifecycle_logs(root: Path) -> list[list[Event]]:
         key = str(path)
         seen.add(key)
         cached = _lifecycle_log_cache.get(key)
-        if cached is not None and cached.mtime_ns == stat.st_mtime_ns and cached.size == stat.st_size:
+        if (
+            cached is not None
+            and cached.mtime_ns == stat.st_mtime_ns
+            and cached.size == stat.st_size
+        ):
             log_events = cached.log_events
         else:
             log_events = store.read_log(entry.name)
@@ -178,7 +182,9 @@ class ProviderStateRefresher:
         try:
             self._refresh(config, checked_at=now)
         except Exception:
-            logger.warning("provider current-state refresh failed; using last snapshot", exc_info=True)
+            logger.warning(
+                "provider current-state refresh failed; using last snapshot", exc_info=True
+            )
 
 
 class ProviderStateRefresh(Protocol):
@@ -238,7 +244,11 @@ def project_and_write(
         active_worktree_groups=inputs.active_worktree_groups,
     )
     attention_store.prune_lifecycles(
-        {lifecycle.id for lifecycle in projection.lifecycles if lifecycle.state not in TERMINAL_STATES}
+        {
+            lifecycle.id
+            for lifecycle in projection.lifecycles
+            if lifecycle.state not in TERMINAL_STATES
+        }
     )
     _warn_if_task_documents_payload_over_budget(projection, now=moment)
     write_projection(root, projection)

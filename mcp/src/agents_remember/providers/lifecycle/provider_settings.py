@@ -41,9 +41,7 @@ def cgc_settings_from_file(settings_path: Path | None) -> tuple[Path, dict[str, 
     return path, provider
 
 
-def context_provider_enabled(
-    settings_path: Path | None, provider_id: str
-) -> tuple[Path, bool]:
+def context_provider_enabled(settings_path: Path | None, provider_id: str) -> tuple[Path, bool]:
     path = require_lifecycle_settings_path(settings_path)
     data = read_json(path)
     return path, provider_enabled(data, provider_id)

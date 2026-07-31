@@ -595,9 +595,7 @@ async def _parse_uploads(
 ) -> list[attachments.StagedUpload]:
     metas = _parse_metadata_array(metadata)
     if len(metas) not in {0, len(assets)}:
-        raise OperationRejectedError(
-            "attachment metadata must describe every uploaded file"
-        )
+        raise OperationRejectedError("attachment metadata must describe every uploaded file")
     uploads: list[attachments.StagedUpload] = []
     for position, upload in enumerate(assets):
         meta = metas[position] if metas else {}
@@ -613,13 +611,9 @@ def _parse_metadata_array(metadata: str | None) -> list[dict[str, object]]:
     try:
         parsed = json.loads(metadata)
     except json.JSONDecodeError as exc:
-        raise OperationRejectedError(
-            "attachment metadata must be a JSON array"
-        ) from exc
+        raise OperationRejectedError("attachment metadata must be a JSON array") from exc
     if not isinstance(parsed, list) or not all(isinstance(item, dict) for item in parsed):
-        raise OperationRejectedError(
-            "attachment metadata must be a JSON array of objects"
-        )
+        raise OperationRejectedError("attachment metadata must be a JSON array of objects")
     return parsed
 
 
@@ -630,9 +624,7 @@ async def _upload_for(
 
     kind = meta.get("kind")
     if kind not in {"image", "file", "resource"}:
-        raise OperationRejectedError(
-            "each staged asset requires its attachment kind"
-        )
+        raise OperationRejectedError("each staged asset requires its attachment kind")
     name = meta.get("name")
     if not isinstance(name, str) or not name:
         name = upload.filename or f"asset-{position + 1}"

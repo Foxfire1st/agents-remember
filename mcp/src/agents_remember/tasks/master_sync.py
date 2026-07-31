@@ -40,7 +40,9 @@ def plan_master_sync(task_root: Path, leaf: TaskDocument) -> MasterSyncPlan:
     try:
         master = read_task_doc(master_json_path)
     except (OSError, ValidationError, ValueError) as exc:
-        raise MasterSyncError(f"cannot read parent master task document: {master_json_path}") from exc
+        raise MasterSyncError(
+            f"cannot read parent master task document: {master_json_path}"
+        ) from exc
     if master.kind != "master":
         raise MasterSyncError(f"parent task document is not a master: {master_json_path}")
 

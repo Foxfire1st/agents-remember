@@ -266,9 +266,7 @@ async def submit(
         operation.submit_receipt = receipt
         operation.operation_ref = operation_ref
         operation.revision += 1
-    _store_submit_artifacts(
-        channel, body, fingerprint, answer, receipt, text, asset_records
-    )
+    _store_submit_artifacts(channel, body, fingerprint, answer, receipt, text, asset_records)
     return answer
 
 
@@ -320,9 +318,7 @@ def _store_submit_artifacts(
     channel.journal[body.request_id] = JournalEntry(
         request_id=body.request_id,
         text=text,
-        content_digest=payload_digest(
-            text, tuple(record.reference() for record in asset_records)
-        ),
+        content_digest=payload_digest(text, tuple(record.reference() for record in asset_records)),
         draft_revision=body.draft_revision,
         asset_ids=tuple(record.asset_id for record in asset_records),
         submitted_at=receipt.submitted_at,
@@ -604,7 +600,9 @@ async def _mint_queue_ref(
         authorization,
         ar_session_id=ar_session_id,
         bridge_epoch=epoch,
-        identity=OperationIdentity(kind=row.kind, operation_id=row.operation_id, sequence=row.sequence),
+        identity=OperationIdentity(
+            kind=row.kind, operation_id=row.operation_id, sequence=row.sequence
+        ),
     )
 
 
@@ -653,12 +651,6 @@ def _timeline_transition(
     if operation.phase in {"queued", "dispatching", "accepted"}:
         return "accepted", "accepted"
     return None
-
-
-
-
-
-
 
 
 def _rebind_target(
@@ -737,11 +729,6 @@ def _delete_operation_bytes(operation: AttachmentOperation) -> None:
         asset.spool_path.unlink(missing_ok=True)
     if root is not None and root.is_dir() and not any(root.iterdir()):
         root.rmdir()
-
-
-
-
-
 
 
 def _receipt(

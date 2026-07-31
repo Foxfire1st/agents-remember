@@ -438,9 +438,7 @@ class CodexConversationLibrary:
         try:
             data = required_list(probe, "data", context="thread/list generation probe")
             ids = [
-                required_text(
-                    required_object(row, context="thread/list row"), "id", context="row"
-                )
+                required_text(required_object(row, context="thread/list row"), "id", context="row")
                 for row in data
             ]
         except CodexAppServerError as exc:
@@ -448,8 +446,7 @@ class CodexConversationLibrary:
         has_more = probe.get("nextCursor") is not None
         try:
             agent_ids = [
-                required_text(row, "id", context="thread/list sub-agent row")
-                for row in agent_data
+                required_text(row, "id", context="thread/list sub-agent row") for row in agent_data
             ]
         except CodexAppServerError as exc:
             raise _shape_error(exc) from exc
@@ -474,9 +471,7 @@ class CodexConversationLibrary:
             return (), f"sub-agent conversations are unavailable on this Codex install: {exc}"
         try:
             data = required_list(page, "data", context="thread/list sub-agent response")
-            rows = tuple(
-                required_object(raw, context="thread/list sub-agent row") for raw in data
-            )
+            rows = tuple(required_object(raw, context="thread/list sub-agent row") for raw in data)
         except CodexAppServerError as exc:
             raise _shape_error(exc) from exc
         if page.get("nextCursor") is not None:
@@ -494,9 +489,7 @@ class CodexConversationLibrary:
         generation: int,
     ) -> tuple[tuple[str, ConversationLibraryAgentRow], ...]:
         try:
-            return tuple(
-                self._agent_row(raw, scope, generation=generation) for raw in agent_data
-            )
+            return tuple(self._agent_row(raw, scope, generation=generation) for raw in agent_data)
         except CodexAppServerError as exc:
             raise _shape_error(exc) from exc
 

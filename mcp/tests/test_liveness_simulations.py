@@ -152,7 +152,13 @@ class _LivenessSimulationCase(unittest.TestCase):
         self.event_store = EventStore(self.observer_root)
         self.heartbeat_store = SupervisorHeartbeatStore(self.observer_root)
 
-    def _ctx(self, *, host: TerminalHost | None = None, paster: TerminalPaster | None = None, **overrides: object) -> SupervisorContext:
+    def _ctx(
+        self,
+        *,
+        host: TerminalHost | None = None,
+        paster: TerminalPaster | None = None,
+        **overrides: object,
+    ) -> SupervisorContext:
         base: dict[str, object] = dict(
             catalog=self.catalog,
             host=host if host is not None else cast(TerminalHost, _FakeHost()),
@@ -175,7 +181,9 @@ class _LivenessSimulationCase(unittest.TestCase):
     def _events(self) -> list[str]:
         return [event.kind for event in self.event_store.read(None)]
 
-    def _run_until(self, ctx: SupervisorContext, predicate, *, start: datetime, max_ticks: int = 12) -> datetime:
+    def _run_until(
+        self, ctx: SupervisorContext, predicate, *, start: datetime, max_ticks: int = 12
+    ) -> datetime:
         """Advance in escalation-rung-sized steps (2 min) until ``predicate()`` is True, or fail."""
         now = start
         for _ in range(max_ticks):
@@ -183,7 +191,9 @@ class _LivenessSimulationCase(unittest.TestCase):
             if predicate():
                 return now
             now += timedelta(minutes=2)
-        self.fail(f"predicate did not converge within {max_ticks} ticks (last now={now.isoformat()})")
+        self.fail(
+            f"predicate did not converge within {max_ticks} ticks (last now={now.isoformat()})"
+        )
 
 
 class NeverBriefedSeatTests(_LivenessSimulationCase):
@@ -449,9 +459,13 @@ class DeadManagerLiveWorkersTests(_LivenessSimulationCase):
         retired = self.catalog.get("manager-1")
         assert retired is not None
         self.assertEqual(retired.status, "terminated")
-        respawn_events = [e for e in self.event_store.read(None) if e.kind == "orchestration.supervisor.respawn"]
+        respawn_events = [
+            e for e in self.event_store.read(None) if e.kind == "orchestration.supervisor.respawn"
+        ]
         self.assertEqual(len(respawn_events), 1)
-        self.assertEqual(sorted(respawn_events[0].data["orphanedWorkers"]), ["worker-1", "worker-2"])
+        self.assertEqual(
+            sorted(respawn_events[0].data["orphanedWorkers"]), ["worker-1", "worker-2"]
+        )
 
         # The respawn directive is the existing mechanism that creates/wakes a successor. Model
         # that successor appearing before the next reconciliation tick; leaf signals must now
@@ -471,7 +485,9 @@ class DeadManagerLiveWorkersTests(_LivenessSimulationCase):
         session_ids = sorted(f.session_id for f in dead_upstream if f.session_id is not None)
         self.assertEqual(session_ids, ["worker-1", "worker-2"])
         manager_events = [
-            e for e in self.event_store.read(None) if e.kind == "orchestration.supervisor.dead-upstream"
+            e
+            for e in self.event_store.read(None)
+            if e.kind == "orchestration.supervisor.dead-upstream"
         ]
         self.assertEqual(len(manager_events), 2)
         self.assertTrue(all(e.data["managerAgentId"] == "manager-2" for e in manager_events))
@@ -502,16 +518,22 @@ class KilledSupervisorDaemonTests(_LivenessSimulationCase):
         # observer_root/store this ctx's own heartbeat_store writes to.
         stale_at = NOW + timedelta(minutes=10)
         self.assertIsNone(
-            supervisor_staleness_banner(self.observer_root, now=NOW + timedelta(seconds=60), stale_cutoff_seconds=120.0)
+            supervisor_staleness_banner(
+                self.observer_root, now=NOW + timedelta(seconds=60), stale_cutoff_seconds=120.0
+            )
         )
-        banner = supervisor_staleness_banner(self.observer_root, now=stale_at, stale_cutoff_seconds=120.0)
+        banner = supervisor_staleness_banner(
+            self.observer_root, now=stale_at, stale_cutoff_seconds=120.0
+        )
         self.assertIsNotNone(banner)
         assert banner is not None
         self.assertIn("supervisor stale", banner)
 
     def test_a_heartbeat_that_never_ticked_is_deliberately_silent(self) -> None:
         # No sweep has ever run in this repo -- "no row yet" must not read as "daemon down".
-        banner = supervisor_staleness_banner(self.observer_root, now=NOW, stale_cutoff_seconds=120.0)
+        banner = supervisor_staleness_banner(
+            self.observer_root, now=NOW, stale_cutoff_seconds=120.0
+        )
         self.assertIsNone(banner)
 
 
@@ -521,7 +543,11 @@ class CodexQuotaModalTests(_LivenessSimulationCase):
     def test_quota_modal_never_becomes_delivery_authority(self) -> None:
         self.catalog.upsert(replace(_entry("manager-1"), spawn_role="manager"))
         self.catalog.upsert(
-            replace(_entry("worker-1", kind="harness"), spawn_role="worker", spawned_by_session="manager-1")
+            replace(
+                _entry("worker-1", kind="harness"),
+                spawn_role="worker",
+                spawned_by_session="manager-1",
+            )
         )
         entry = create_operator_inbox_entry(
             entry_id="e1",
@@ -596,7 +622,12 @@ class FalseDeadSeatHysteresisTests(_LivenessSimulationCase):
         result = run_supervisor_sweep(ctx, now=NOW + timedelta(seconds=45))
         self.assertEqual([f for f in result.findings if f.kind == "seat-liveness"], [])
         self.assertEqual(
-            [a for a in result.actions if a.action == "signal-emit" and a.finding.kind == "seat-liveness"], []
+            [
+                a
+                for a in result.actions
+                if a.action == "signal-emit" and a.finding.kind == "seat-liveness"
+            ],
+            [],
         )
 
         # No respawn/escalation event of any kind was ever logged for this seat across the flicker.

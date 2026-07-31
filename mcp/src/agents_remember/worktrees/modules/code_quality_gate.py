@@ -16,9 +16,7 @@ GATE_ENFORCED = "enforced"
 GATE_NO_CODE_COMMIT = "no-code-commit"
 GATE_WRAPPER_UNAVAILABLE = "wrapper-unavailable"
 
-QualityRunner = Callable[
-    [list[str], Path, Mapping[str, str]], subprocess.CompletedProcess[str]
-]
+QualityRunner = Callable[[list[str], Path, Mapping[str, str]], subprocess.CompletedProcess[str]]
 
 
 def quality_wrapper_path(code_worktree: Path) -> Path:
@@ -36,9 +34,7 @@ def requires_strict_code_quality(code_worktree: Path, *, code_would_commit: bool
     return code_would_commit and quality_wrapper_path(code_worktree).is_file()
 
 
-def code_quality_gate_preview(
-    code_worktree: Path, *, code_would_commit: bool
-) -> dict[str, object]:
+def code_quality_gate_preview(code_worktree: Path, *, code_would_commit: bool) -> dict[str, object]:
     """Report which of the three gate states this closeout is in.
 
     A consuming repository that carries no wrapper reaches ``wrapper-unavailable``,

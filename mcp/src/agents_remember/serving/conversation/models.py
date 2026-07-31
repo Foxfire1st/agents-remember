@@ -44,13 +44,9 @@ ConversationSource = Literal[
 ]
 ConversationRole = Literal["user", "assistant", "system", "tool"]
 ProvenanceStrength = Literal["exact", "correlated", "native-only", "unknown"]
-ProvenanceProducer = Literal[
-    "operator", "agent-bus", "controlled-terminal", "harness", "system"
-]
+ProvenanceProducer = Literal["operator", "agent-bus", "controlled-terminal", "harness", "system"]
 CapabilityState = Literal["supported", "partial", "unavailable", "unverified"]
-AccessibleLabelProvenance = Literal[
-    "supplied-description", "filename-mime-fallback"
-]
+AccessibleLabelProvenance = Literal["supplied-description", "filename-mime-fallback"]
 NonEmptyText = Annotated[str, Field(min_length=1)]
 PositiveRevision = Annotated[int, Field(ge=1)]
 PositiveOrdinal = Annotated[int, Field(ge=1)]
@@ -430,9 +426,7 @@ class ConversationItem(WireModel):
         return self
 
 
-ConversationProcessState = Literal[
-    "starting", "connected", "disconnected", "exited", "failed"
-]
+ConversationProcessState = Literal["starting", "connected", "disconnected", "exited", "failed"]
 ConversationTurnState = Literal[
     "ready",
     "working",
@@ -456,9 +450,7 @@ CanonicalStatusEvidence = Literal[
     "turn-failed",
 ]
 
-CANONICAL_TURN_STATE_BY_EVIDENCE: Mapping[
-    CanonicalStatusEvidence, ConversationTurnState
-] = {
+CANONICAL_TURN_STATE_BY_EVIDENCE: Mapping[CanonicalStatusEvidence, ConversationTurnState] = {
     "settled-dispatchable": "ready",
     "active-native-turn": "working",
     "declared-external-wait": "waiting",
@@ -521,9 +513,7 @@ class ConversationTurnStatus(WireModel):
 
     @model_validator(mode="after")
     def require_terminal_evidence(self) -> ConversationTurnStatus:
-        allowed_outcomes: Mapping[
-            ConversationTurnState, frozenset[str | None]
-        ] = {
+        allowed_outcomes: Mapping[ConversationTurnState, frozenset[str | None]] = {
             "ready": frozenset({None, "completed"}),
             "working": frozenset({None}),
             "waiting": frozenset({None}),
@@ -829,9 +819,7 @@ class OpenConversationOperation(WireModel):
         "timeout-unknown": frozenset({"launching", "catalog-wait", "unknown"}),
         "request-conflict": frozenset({"failed"}),
     }
-    _failure_rollbacks: ClassVar[
-        Mapping[tuple[str, str, bool], frozenset[str]]
-    ] = {
+    _failure_rollbacks: ClassVar[Mapping[tuple[str, str, bool], frozenset[str]]] = {
         ("launch-failed", "failed", False): frozenset({"not-needed"}),
         ("launch-failed", "retiring", True): frozenset({"retire-pending"}),
         ("launch-failed", "failed", True): frozenset({"retired", "retire-failed"}),
@@ -941,12 +929,8 @@ class InterruptOperation(WireModel):
     def require_coherent_acknowledgement_and_settlement(self) -> InterruptOperation:
         allowed_settlements: Mapping[str, frozenset[str]] = {
             "requested": frozenset({"pending"}),
-            "accepted": frozenset(
-                {"pending", "interrupted", "already-settled", "failed"}
-            ),
-            "unknown": frozenset(
-                {"pending", "interrupted", "already-settled", "failed"}
-            ),
+            "accepted": frozenset({"pending", "interrupted", "already-settled", "failed"}),
+            "unknown": frozenset({"pending", "interrupted", "already-settled", "failed"}),
             "rejected": frozenset({"failed"}),
         }
         if self.settlement not in allowed_settlements[self.acknowledgement]:
@@ -1078,9 +1062,7 @@ class WithdrawalOperationProjection(WireModel):
         "not-found",
         "request-conflict",
     ]
-    recovery_state: Literal[
-        "none", "recovery-unacknowledged", "acknowledged", "expired"
-    ]
+    recovery_state: Literal["none", "recovery-unacknowledged", "acknowledged", "expired"]
     recovery_expires_at: str | None = None
 
     @model_validator(mode="after")
@@ -1092,10 +1074,7 @@ class WithdrawalOperationProjection(WireModel):
 
     @model_validator(mode="after")
     def require_coherent_recovery_expiry(self) -> WithdrawalOperationProjection:
-        if (
-            self.recovery_state == "recovery-unacknowledged"
-            and self.recovery_expires_at is None
-        ):
+        if self.recovery_state == "recovery-unacknowledged" and self.recovery_expires_at is None:
             raise ValueError("unacknowledged recovery requires expiry")
         if self.recovery_state == "none" and self.recovery_expires_at is not None:
             raise ValueError("non-recovery withdrawal cannot carry recovery expiry")
@@ -1179,9 +1158,7 @@ class AttachmentOperationProjection(WireModel):
         "expired",
         "unknown",
     ]
-    outcome: Literal[
-        "pending", "accepted", "rejected", "withdrawn", "failed", "expired", "unknown"
-    ]
+    outcome: Literal["pending", "accepted", "rejected", "withdrawn", "failed", "expired", "unknown"]
     asset_ids: tuple[str, ...]
     recovery_expires_at: str | None = None
 

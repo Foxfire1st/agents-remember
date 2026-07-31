@@ -173,12 +173,7 @@ def _isolated_cgc_backend(
     backend.update(
         {
             "runtimeRoot": (
-                isolated_root
-                / "providers"
-                / "data"
-                / "codegraphcontext"
-                / instance_id
-                / "falkordb"
+                isolated_root / "providers" / "data" / "codegraphcontext" / instance_id / "falkordb"
             ).as_posix(),
             "dataRoot": "<backendRuntimeRoot>/data",
             "imageLockFile": (
@@ -195,10 +190,7 @@ def _isolated_cgc_backend(
 
 
 def _isolated_cgc_container_name(args: Any, instance_id: str, repo_id: str) -> str:
-    return (
-        args.cgc_isolated_container_name
-        or scoped_name("ar-cgc-falkordb", instance_id, repo_id)
-    )
+    return args.cgc_isolated_container_name or scoped_name("ar-cgc-falkordb", instance_id, repo_id)
 
 
 def write_isolated_cgc_settings(
@@ -264,9 +256,7 @@ def _seed_failure_reason(seed: dict[str, Any]) -> str:
     return f"seed failed at {stage}" if stage else "seed failed"
 
 
-def _refresh_after_seed(
-    args: Any, seed: dict[str, Any], progress: SetupProgress
-) -> dict[str, Any]:
+def _refresh_after_seed(args: Any, seed: dict[str, Any], progress: SetupProgress) -> dict[str, Any]:
     if seed.get("ok"):
         return {
             "ok": True,

@@ -170,7 +170,7 @@ class ResolverCliTests(unittest.TestCase):
                         code_base_commit=head,
                         task_root=task_root,
                     ),
-            )
+                )
 
             with self.assertRaisesRegex(TaskResolutionError, "multiple active tasks"):
                 resolve_active_task_root(

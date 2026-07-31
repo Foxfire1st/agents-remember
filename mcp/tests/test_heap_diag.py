@@ -30,9 +30,7 @@ class HeapDiagFlagTests(unittest.TestCase):
         self.assertEqual(
             heap_diag.heap_diag_interval_seconds({}), heap_diag.DEFAULT_INTERVAL_SECONDS
         )
-        self.assertEqual(
-            heap_diag.heap_diag_interval_seconds({"AR_HEAP_DIAG_INTERVAL": "5"}), 5.0
-        )
+        self.assertEqual(heap_diag.heap_diag_interval_seconds({"AR_HEAP_DIAG_INTERVAL": "5"}), 5.0)
 
     def test_interval_ignores_garbage_and_nonpositive(self) -> None:
         for bad in ("abc", "0", "-3"):

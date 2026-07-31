@@ -343,7 +343,9 @@ class ControlApiTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(projection.status_code, 200)
         body = projection.json()
-        self.assertEqual(body["usage"]["value"], {"inputTokens": 61, "outputTokens": 41, "cachedTokens": 11})
+        self.assertEqual(
+            body["usage"]["value"], {"inputTokens": 61, "outputTokens": 41, "cachedTokens": 11}
+        )
         self.assertEqual(body["usage"]["unit"], "tokens")
         self.assertEqual(body["usage"]["precision"], "exact")
         self.assertNotIn("cost", body)

@@ -50,9 +50,7 @@ def _settings() -> dict:
                         "network": {"name": "ar-grepai-memory-projects-demo-ar"},
                     },
                     "backend": {"containerName": "ar-grepai-postgres-projects-demo-ar"},
-                    "embedder": {
-                        "backend": {"containerName": "ar-grepai-ollama-projects-demo-ar"}
-                    },
+                    "embedder": {"backend": {"containerName": "ar-grepai-ollama-projects-demo-ar"}},
                     "roots": [{"projectId": "agents-remember"}],
                 },
             }
@@ -179,9 +177,7 @@ class AbandonBranchSafetyTests(unittest.TestCase):
         self.assertEqual(result["reason"], "unmerged")
         self.assertTrue(result["unmergedCommits"])
         # the branch is preserved (commits not lost)
-        self.assertIn(
-            "ar/work", git(self.repo, "branch", "--list", "ar/work")
-        )
+        self.assertIn("ar/work", git(self.repo, "branch", "--list", "ar/work"))
 
     def test_force_discards_unmerged_branch(self) -> None:
         result = _abandon_branch(self.repo, "ar/work", "main", dry_run=False, force=True)

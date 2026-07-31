@@ -62,13 +62,21 @@ class SyncFixture:
         assert self.contract.memory_worktree is not None
         git(
             self.code_repo,
-            "worktree", "add", "-b", self.contract.code_work_branch,
-            str(self.contract.code_worktree), "main",
+            "worktree",
+            "add",
+            "-b",
+            self.contract.code_work_branch,
+            str(self.contract.code_worktree),
+            "main",
         )
         git(
             self.memory_repo,
-            "worktree", "add", "-b", self.contract.memory_work_branch,
-            str(self.contract.memory_worktree), "main",
+            "worktree",
+            "add",
+            "-b",
+            self.contract.memory_work_branch,
+            str(self.contract.memory_worktree),
+            "main",
         )
         write_contract(self.contract.contract_path, self.contract)
 
@@ -103,13 +111,9 @@ class WorktreeSyncTests(unittest.TestCase):
             self.assertEqual(result.payload["state"], "synced")
             self.assertEqual(section(result.payload, "code")["state"], "merged")
             self.assertEqual(section(result.payload, "memory")["state"], "fast-forwarded")
-            self.assertEqual(
-                git(fixture.contract.code_worktree, "rev-parse", "HEAD"), code_tip
-            )
+            self.assertEqual(git(fixture.contract.code_worktree, "rev-parse", "HEAD"), code_tip)
             assert fixture.contract.memory_worktree is not None
-            self.assertEqual(
-                git(fixture.contract.memory_worktree, "rev-parse", "HEAD"), memory_tip
-            )
+            self.assertEqual(git(fixture.contract.memory_worktree, "rev-parse", "HEAD"), memory_tip)
             reloaded = load_contract(fixture.contract.contract_path)
             self.assertEqual(reloaded.code_base_commit, code_tip)
             self.assertEqual(reloaded.memory_base_commit, memory_tip)
@@ -255,9 +259,7 @@ def commit_file(repo: Path, name: str, content: str) -> None:
 
 
 def git(repo: Path, *args: str) -> str:
-    result = subprocess.run(
-        ["git", *args], cwd=repo, text=True, capture_output=True, check=False
-    )
+    result = subprocess.run(["git", *args], cwd=repo, text=True, capture_output=True, check=False)
     if result.returncode != 0:
         raise AssertionError(result.stderr or result.stdout)
     return result.stdout.strip()

@@ -321,9 +321,7 @@ def grepai_run_docker(
         raise ValueError(action) from error
 
 
-def grepai_install_version(
-    args: argparse.Namespace, requirements_file: Path
-) -> tuple[Path, str]:
+def grepai_install_version(args: argparse.Namespace, requirements_file: Path) -> tuple[Path, str]:
     if args.dry_run and not requirements_file.exists():
         return requirements_file, GREPAI_PIN.split("==", 1)[1]
     resolved = ensure_grepai_requirements_file(args.coordination_root)

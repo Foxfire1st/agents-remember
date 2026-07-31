@@ -61,8 +61,7 @@ class SubprocessHygieneTests(unittest.TestCase):
             msg=(
                 "subprocess call sites inherit the parent's stdin — under the "
                 "stdio MCP transport that is the protocol pipe (see GitHub #49). "
-                "Pass stdin=subprocess.DEVNULL or input=...: "
-                + ", ".join(offenders)
+                "Pass stdin=subprocess.DEVNULL or input=...: " + ", ".join(offenders)
             ),
         )
 

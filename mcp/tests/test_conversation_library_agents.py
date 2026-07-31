@@ -210,9 +210,7 @@ AGENT_PAGE = {
             "agentNickname": None,
             "agentRole": None,
             "source": {
-                "subAgent": {
-                    "thread_spawn": {"parent_thread_id": "thr_parent000001", "depth": 1}
-                }
+                "subAgent": {"thread_spawn": {"parent_thread_id": "thr_parent000001", "depth": 1}}
             },
         },
         {
@@ -307,9 +305,7 @@ class CodexLibraryAgentTests(unittest.IsolatedAsyncioTestCase):
 
         # The agent key mints the agent's own native identity, so opening it reads the
         # agent thread — the key round-trips to the agent thread id, not the parent's.
-        binding, vendor = library._cursor_authority.verify_conversation_key(
-            named.conversation_key
-        )
+        binding, vendor = library._cursor_authority.verify_conversation_key(named.conversation_key)
         assert vendor == "thr_agent00000001"
         assert binding.identity_digest == named.identity_digest
 
@@ -505,9 +501,7 @@ class ClaudeLibraryAgentTests(unittest.IsolatedAsyncioTestCase):
         assert fallback.title == "agent bf000000"
         assert fallback.role is None and fallback.join_key is None
         # The agent key round-trips to the composite <sessionId>/<agentId> vendor id.
-        _binding, vendor = library._cursor_authority.verify_conversation_key(
-            named.conversation_key
-        )
+        _binding, vendor = library._cursor_authority.verify_conversation_key(named.conversation_key)
         assert vendor == "sess-abcdef123456/ae798f6d07aa5c82a"
 
     async def test_helper_without_agent_evidence_is_visibly_unavailable(self) -> None:
@@ -571,9 +565,7 @@ class ClaudeLibraryAgentTests(unittest.IsolatedAsyncioTestCase):
         row-level ``agents`` key to inspect — the missing response marker degrades to
         the honest note instead of looking like an empty agent catalog."""
 
-        library = self._library(
-            {"list": {"signature": "sig-list", "rows": [], "nextCursor": None}}
-        )
+        library = self._library({"list": {"signature": "sig-list", "rows": [], "nextCursor": None}})
         scope = _scope(self.tmp, "claude")
         page = await library.list(scope, cursor=None, limit=25)
         assert page.rows == ()

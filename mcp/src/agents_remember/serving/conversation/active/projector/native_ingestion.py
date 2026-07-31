@@ -128,9 +128,7 @@ class NativeEvidenceIngestion:
         self.native_dirty = False
         await self.walk_parent_history(preserve_cursor_on_failure=True)
 
-    async def poll_evidence(
-        self, echo_buffer: EchoEvidenceBuffer, *, hydrated: bool
-    ) -> None:
+    async def poll_evidence(self, echo_buffer: EchoEvidenceBuffer, *, hydrated: bool) -> None:
         while True:
             page: EvidencePage = await asyncio.to_thread(
                 self._read_evidence,
@@ -154,9 +152,7 @@ class NativeEvidenceIngestion:
                 raise ZipperEvidenceEvicted(
                     "evidence window evicted frames; the echo zipper's turn order is not provable"
                 )
-            self.known_eviction_floor = max(
-                self.known_eviction_floor, page.evicted_before_sequence
-            )
+            self.known_eviction_floor = max(self.known_eviction_floor, page.evicted_before_sequence)
             for frame in page.frames:
                 self._consume_frame(frame, echo_buffer)
                 self.evidence_after = frame.sequence
@@ -175,9 +171,7 @@ class NativeEvidenceIngestion:
             self.native_dirty = True
         self._stream.apply_outputs(outputs, ref)
 
-    def map_evidence_frame(
-        self, frame: EvidenceFrame, evidence_ref: str
-    ) -> list[MapperOutput]:
+    def map_evidence_frame(self, frame: EvidenceFrame, evidence_ref: str) -> list[MapperOutput]:
         if frame.raw.get("arEvidenceTruncated") is True:
             frame_type = frame.raw.get("type")
             original_bytes = frame.raw.get("originalBytes")

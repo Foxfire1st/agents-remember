@@ -822,7 +822,10 @@ def task_documents_body_bytes(docs: list[TaskDocNode]) -> int:
         total += sum(len(item) for item in doc.references)
         total += sum(len(section.heading) + len(section.body) for section in doc.sections)
         total += sum(
-            len(example.distinctChange) + len(example.why) + len(example.snippet) + len(example.title)
+            len(example.distinctChange)
+            + len(example.why)
+            + len(example.snippet)
+            + len(example.title)
             for example in doc.codeExamples
         )
         total += sum(len(decision.decision) + len(decision.rationale) for decision in doc.decisions)

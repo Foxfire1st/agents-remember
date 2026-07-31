@@ -66,9 +66,7 @@ DEFAULT_GATE_POLICY = GatePolicy()
 
 def coerce_decision_role(raw: str) -> DecisionRole:
     if raw not in DECISION_ROLES:
-        raise ValueError(
-            f"unknown decision role {raw!r}; expected one of {list(DECISION_ROLES)}"
-        )
+        raise ValueError(f"unknown decision role {raw!r}; expected one of {list(DECISION_ROLES)}")
     return cast(DecisionRole, raw)
 
 

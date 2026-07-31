@@ -81,9 +81,7 @@ class TaskDocumentPayloadCache:
         return len(self._roots.get(str(tasks_root), ()))
 
 
-def _cached(
-    entry: _PayloadEntry | None, stat: os.stat_result | None
-) -> Payload | None:
+def _cached(entry: _PayloadEntry | None, stat: os.stat_result | None) -> Payload | None:
     if (
         entry is None
         or stat is None

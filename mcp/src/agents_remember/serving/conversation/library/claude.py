@@ -120,7 +120,9 @@ class ClaudeConversationLibrary:
                 "the native Claude catalog changed; the list cursor is reset"
             )
         capabilities = await self._capabilities(self.harness_id)
-        rows, agents_note = self._rows(result, scope, generation=generation, capabilities=capabilities)
+        rows, agents_note = self._rows(
+            result, scope, generation=generation, capabilities=capabilities
+        )
         next_cursor = self._next_cursor(result, scope, generation)
         return ConversationLibraryPage(
             scope=ConversationLibraryPageScope(
@@ -172,9 +174,7 @@ class ClaudeConversationLibrary:
     async def resolve_resume_target(self, ref: NativeConversationRef) -> NativeResumeTarget:
         _session_id, agent_id = _split_agent_vendor_id(ref.vendor_conversation_id)
         if agent_id is not None:
-            raise LibraryStoreError(
-                "Claude sub-agent transcripts have no native resume target"
-            )
+            raise LibraryStoreError("Claude sub-agent transcripts have no native resume target")
         result, _runtime, _helper = await self._helper.call(
             "claude",
             "resolve-resume-target",
@@ -277,9 +277,7 @@ class ClaudeConversationLibrary:
                     "the top-level session; the library cannot group them under their "
                     "parent sub-agent"
                 )
-                agents_note = (
-                    f"{agents_note}; {nested_note}" if agents_note else nested_note
-                )
+                agents_note = f"{agents_note}; {nested_note}" if agents_note else nested_note
         return rows, agents_note
 
     def _next_cursor(

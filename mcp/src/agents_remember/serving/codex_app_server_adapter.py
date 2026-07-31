@@ -710,9 +710,7 @@ class CodexAppServerAdapter:
             if state.is_parent:
                 await self._set_activity("running", turn_id=turn_id)
                 return
-            state.status = merge_agent_status(
-                state.status, "running", explicit_turn_start=True
-            )
+            state.status = merge_agent_status(state.status, "running", explicit_turn_start=True)
             self._publish_agent_registry()
             await self._emit_notification(method, params)
             return

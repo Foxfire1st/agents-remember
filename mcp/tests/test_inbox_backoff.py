@@ -74,15 +74,11 @@ class DueAndRateLimitTests(unittest.TestCase):
         self.assertTrue(is_due(entry, now=datetime.fromisoformat(T1)))
 
     def test_a_row_not_yet_at_its_next_attempt_is_not_due(self) -> None:
-        entry = _entry().model_copy(
-            update={"nextAttemptAt": "2026-06-23T10:10:00+00:00"}
-        )
+        entry = _entry().model_copy(update={"nextAttemptAt": "2026-06-23T10:10:00+00:00"})
         self.assertFalse(is_due(entry, now=datetime.fromisoformat(T1)))
 
     def test_a_row_past_its_next_attempt_is_due(self) -> None:
-        entry = _entry().model_copy(
-            update={"nextAttemptAt": "2026-06-23T09:00:00+00:00"}
-        )
+        entry = _entry().model_copy(update={"nextAttemptAt": "2026-06-23T09:00:00+00:00"})
         self.assertTrue(is_due(entry, now=datetime.fromisoformat(T1)))
 
     def test_consumed_rows_are_never_due(self) -> None:
@@ -96,12 +92,16 @@ class DueAndRateLimitTests(unittest.TestCase):
     def test_a_recent_attempt_is_rate_limited(self) -> None:
         entry = _entry().model_copy(update={"lastAttemptAt": T1})
         now = datetime.fromisoformat("2026-06-23T10:00:10+00:00")
-        self.assertTrue(is_rate_limited(entry, now=now, rate_limit_seconds=DEFAULT_RATE_LIMIT_SECONDS))
+        self.assertTrue(
+            is_rate_limited(entry, now=now, rate_limit_seconds=DEFAULT_RATE_LIMIT_SECONDS)
+        )
 
     def test_an_attempt_outside_the_rate_limit_window_is_not_limited(self) -> None:
         entry = _entry().model_copy(update={"lastAttemptAt": T1})
         now = datetime.fromisoformat("2026-06-23T10:16:00+00:00")
-        self.assertFalse(is_rate_limited(entry, now=now, rate_limit_seconds=DEFAULT_RATE_LIMIT_SECONDS))
+        self.assertFalse(
+            is_rate_limited(entry, now=now, rate_limit_seconds=DEFAULT_RATE_LIMIT_SECONDS)
+        )
 
     def test_rate_limit_rejects_a_sub_floor_override(self) -> None:
         entry = _entry().model_copy(update={"lastAttemptAt": T1})

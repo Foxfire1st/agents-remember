@@ -82,7 +82,9 @@ class AgentAuthority:
 
         self.live_threads.add(thread_id)
         if isinstance(output, MappedUnknownVendor):
-            return output if output.agent is not None else replace(output, agent=self.ref(thread_id))
+            return (
+                output if output.agent is not None else replace(output, agent=self.ref(thread_id))
+            )
         if not isinstance(output, MappedItem):
             return output
         item = output.item

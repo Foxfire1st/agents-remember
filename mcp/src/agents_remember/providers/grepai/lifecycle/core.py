@@ -41,7 +41,9 @@ from agents_remember.providers.lifecycle.provider_settings import (
 )
 
 
-def grepai_layout_from_args(args: argparse.Namespace) -> tuple[Path, dict[str, Any], GrepaiRuntimeLayout]:
+def grepai_layout_from_args(
+    args: argparse.Namespace,
+) -> tuple[Path, dict[str, Any], GrepaiRuntimeLayout]:
     settings_path, provider_settings = grepai_settings_from_file(
         getattr(args, "from_settings", None)
     )
@@ -175,9 +177,7 @@ def grepai_runner_build_root(runner: dict[str, Any], base_variables: dict[str, s
     ).resolve()
 
 
-def grepai_runner_image_lock_file(
-    runner: dict[str, Any], base_variables: dict[str, str]
-) -> Path:
+def grepai_runner_image_lock_file(runner: dict[str, Any], base_variables: dict[str, str]) -> Path:
     template = str(
         runner.get(
             "imageLockFile",
@@ -266,7 +266,9 @@ def grepai_root_container_path(project_id: str, runner: dict[str, Any]) -> str:
     return f"{runner['rootsMount'].rstrip('/')}/{project_id}"
 
 
-def grepai_container_project_paths(layout: GrepaiRuntimeLayout, runner: dict[str, Any]) -> dict[str, str]:
+def grepai_container_project_paths(
+    layout: GrepaiRuntimeLayout, runner: dict[str, Any]
+) -> dict[str, str]:
     return {
         root.project_id: grepai_root_container_path(root.project_id, runner)
         for root in layout.roots
@@ -304,7 +306,9 @@ def grepai_container_embedder_settings(
     return settings
 
 
-def grepai_backend_settings(provider_settings: dict[str, Any], layout: GrepaiRuntimeLayout) -> dict[str, Any]:
+def grepai_backend_settings(
+    provider_settings: dict[str, Any], layout: GrepaiRuntimeLayout
+) -> dict[str, Any]:
     backend_settings = grepai_backend_settings_dict(provider_settings)
     ports = dict_value(backend_settings.get("ports"))
     postgres_port = dict_value(ports.get("postgres"))
@@ -345,13 +349,17 @@ def concrete_grepai_backend_image(backend_settings: dict[str, Any]) -> str:
     )
 
 
-def grepai_backend_image_lock_path(layout: GrepaiRuntimeLayout, backend_settings: dict[str, Any]) -> Path:
+def grepai_backend_image_lock_path(
+    layout: GrepaiRuntimeLayout, backend_settings: dict[str, Any]
+) -> Path:
     image_lock_file = backend_settings.get("imageLockFile")
     if not image_lock_file:
         return (
             layout.coordination_root / "providers" / "requirements" / "grepai-postgres-docker.lock"
         )
-    return Path(expand_template(str(image_lock_file), grepai_backend_template_vars(layout))).resolve()
+    return Path(
+        expand_template(str(image_lock_file), grepai_backend_template_vars(layout))
+    ).resolve()
 
 
 def grepai_backend_template_vars(layout: GrepaiRuntimeLayout) -> dict[str, str]:

@@ -171,13 +171,13 @@ def _fetch_source_upstreams(contract: WorktreeContract) -> dict[str, object]:
             results[side] = {"state": "no-upstream"}
             continue
         error = fetch_remote(repo, upstream.partition("/")[0])
-        results[side] = {"state": "fetched"} if error is None else {"state": "failed", "error": error}
+        results[side] = (
+            {"state": "fetched"} if error is None else {"state": "failed", "error": error}
+        )
     return results
 
 
-def _consistent_pair_block(
-    contract: WorktreeContract, code_tip: str
-) -> dict[str, object] | None:
+def _consistent_pair_block(contract: WorktreeContract, code_tip: str) -> dict[str, object] | None:
     """The new code tip must be ledger-mapped at the official memory tip."""
     assert contract.memory_repo_path is not None
     ledger_blob = run_git(

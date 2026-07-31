@@ -903,7 +903,9 @@ class HarnessControlConformanceTests(unittest.IsolatedAsyncioTestCase):
         # The control client parses the additive field back (a pre-multiplex bridge omits it).
         parsed = parse_snapshot_wire(wire)
         self.assertEqual(parsed.pending_interactions, (parent, agent))
-        legacy = parse_snapshot_wire({key: value for key, value in wire.items() if key != "pendingInteractions"})
+        legacy = parse_snapshot_wire(
+            {key: value for key, value in wire.items() if key != "pendingInteractions"}
+        )
         self.assertEqual(legacy.pending_interactions, ())
 
         # The catalog projection + catalog row round-trip carry it too.

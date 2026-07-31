@@ -32,7 +32,9 @@ class _Paster:
         self.capture = capture
         self.calls: list[str] = []
 
-    def paste(self, _tmux: str, text: str, *, submit: bool = False, accepted=None, **_kwargs: object) -> PasteResult:
+    def paste(
+        self, _tmux: str, text: str, *, submit: bool = False, accepted=None, **_kwargs: object
+    ) -> PasteResult:
         self.calls.append(text)
         if self.fail:
             return PasteResult(delivered=True, submitted=False, capture=self.capture)

@@ -199,7 +199,9 @@ def reload_provider_authority(config: McpRuntimeConfig) -> ProviderAuthority:
     return ProviderAuthority(providers=providers, source_path=path)
 
 
-def require_provider_launch_authority(config: McpRuntimeConfig, *, operation: str) -> McpRuntimeConfig:
+def require_provider_launch_authority(
+    config: McpRuntimeConfig, *, operation: str
+) -> McpRuntimeConfig:
     """Gate a provider-launching operation on the on-disk authority (fail-closed).
 
     Returns the boot config with the live providers map applied; raises
@@ -499,9 +501,7 @@ def parse_orchestration_settings(
         raise ConfigError(str(error)) from error
     if agentic.gate_delegation_configured:
         if legacy is not None:
-            _warn_legacy_gate_delegation(
-                config_path, coordination_root, shadowed=True
-            )
+            _warn_legacy_gate_delegation(config_path, coordination_root, shadowed=True)
         return OrchestrationSettings(
             gate_policy=agentic.gate_policy,
             require_reviewer_verdict_at_seams=agentic.require_reviewer_verdict_at_seams,

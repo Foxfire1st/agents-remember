@@ -152,7 +152,9 @@ class LifecycleFinalizeTests(unittest.TestCase):
         leaf_json, master_json = self._docs(contract)
         blocked = WorktreeCommandResult(2, {"state": "blocked", "summary": "cleanup refused"})
 
-        with patch("agents_remember.worktrees.modules.finalize.cleanup_result", return_value=blocked):
+        with patch(
+            "agents_remember.worktrees.modules.finalize.cleanup_result", return_value=blocked
+        ):
             result = finalize_result(
                 FinalizeArgs(
                     contract_path=contract.contract_path,

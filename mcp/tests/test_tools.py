@@ -148,10 +148,7 @@ class McpToolTests(unittest.TestCase):
             config = load_config(path)
 
             server = create_server(config)
-            tools = {
-                tool.name: tool.description or ""
-                for tool in asyncio.run(server.list_tools())
-            }
+            tools = {tool.name: tool.description or "" for tool in asyncio.run(server.list_tools())}
 
             self.assertIn("mandatory CRAP enforcement", tools["worktree_closeout_preview"])
             self.assertIn("before the code commit", tools["worktree_closeout_preview"])

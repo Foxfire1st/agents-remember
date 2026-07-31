@@ -73,9 +73,7 @@ class CompactContentShimTests(unittest.TestCase):
 
     @staticmethod
     async def _call_ping(server):
-        async with create_connected_server_and_client_session(
-            server._mcp_server
-        ) as client:
+        async with create_connected_server_and_client_session(server._mcp_server) as client:
             return await client.call_tool("ping", {})
 
 

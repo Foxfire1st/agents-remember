@@ -274,7 +274,9 @@ def display_path(path: Path, project_root: Path) -> str:
         return path.as_posix()
 
 
-def render_table(scores: list[FunctionScore], project_root: Path, threshold: float, top: int) -> str:
+def render_table(
+    scores: list[FunctionScore], project_root: Path, threshold: float, top: int
+) -> str:
     selected = scores[:top] if top > 0 else scores
     rollups = rollup_by_file(scores, threshold)
     lines = [
@@ -324,8 +326,7 @@ def render_json(scores: list[FunctionScore], project_root: Path, threshold: floa
         "threshold": threshold,
         "functions": [score_to_mapping(score, project_root) for score in scores],
         "files": [
-            rollup_to_mapping(rollup, project_root)
-            for rollup in rollup_by_file(scores, threshold)
+            rollup_to_mapping(rollup, project_root) for rollup in rollup_by_file(scores, threshold)
         ],
     }
     return json.dumps(payload, indent=2)

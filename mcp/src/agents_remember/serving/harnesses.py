@@ -40,6 +40,7 @@ Which = Callable[[str], str | None]
 """A :func:`shutil.which`-shaped lookup: a command name -> its resolved path, or ``None`` if absent."""
 EffortValidation = Literal["enumerated", "non-empty"]
 
+
 @dataclass(frozen=True)
 class Harness:
     """One supported TUI harness: a stable ``id``, a display ``name``, the ``command`` to detect on

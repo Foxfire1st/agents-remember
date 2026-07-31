@@ -349,14 +349,22 @@ async def _drive_withdrawal(
     row = await _live_row(service, entry, epoch, identity)
     if row is None or row.source != "cockpit":
         return _settled_failure(
-            epoch, identity, operation_ref, fingerprint, withdraw_request_id,
+            epoch,
+            identity,
+            operation_ref,
+            fingerprint,
+            withdraw_request_id,
             outcome="not-found",
             detail="the operation is not a retained cockpit queue row",
         )
     if row.state != "queued":
         outcome = "already-dispatching" if row.state == "dispatching" else "delivery-unknown"
         return _settled_failure(
-            epoch, identity, operation_ref, fingerprint, withdraw_request_id,
+            epoch,
+            identity,
+            operation_ref,
+            fingerprint,
+            withdraw_request_id,
             outcome=outcome,
             detail=f"the queue row is already {row.state}",
         )
@@ -369,7 +377,11 @@ async def _drive_withdrawal(
         )
     except HarnessBridgeEpochMismatchError:
         return _settled_failure(
-            epoch, identity, operation_ref, fingerprint, withdraw_request_id,
+            epoch,
+            identity,
+            operation_ref,
+            fingerprint,
+            withdraw_request_id,
             outcome="epoch-mismatch",
             detail="the bridge epoch flipped while the withdrawal crossed",
         )
@@ -382,8 +394,16 @@ async def _drive_withdrawal(
     except HarnessControlError as exc:
         raise ControlUnavailableError(str(exc)) from exc
     return _apply_withdrawal_result(
-        service, authorization, channel, ar_session_id, epoch, identity,
-        fingerprint, withdraw_request_id, result, operation_ref=operation_ref,
+        service,
+        authorization,
+        channel,
+        ar_session_id,
+        epoch,
+        identity,
+        fingerprint,
+        withdraw_request_id,
+        result,
+        operation_ref=operation_ref,
     )
 
 
@@ -434,7 +454,11 @@ def _failure_for_result(
 
     if result.outcome == "not-found":
         return _settled_failure(
-            epoch, identity, operation_ref, fingerprint, withdraw_request_id,
+            epoch,
+            identity,
+            operation_ref,
+            fingerprint,
+            withdraw_request_id,
             outcome="not-found",
             detail=result.detail or "submission is not retained for this cockpit authority",
         )
@@ -446,7 +470,11 @@ def _failure_for_result(
     elif result.state == "unknown":
         outcome = "delivery-unknown"
     return _settled_failure(
-        epoch, identity, operation_ref, fingerprint, withdraw_request_id,
+        epoch,
+        identity,
+        operation_ref,
+        fingerprint,
+        withdraw_request_id,
         outcome=outcome,
         detail=result.detail or f"submission is already {result.state}",
     )
@@ -482,8 +510,14 @@ def _build_withdrawn_record(
         withdraw_request_id=withdraw_request_id,
     )
     attachment_refs = recovery_assembly.recover_attachment_refs(
-        service, authorization, channel, ar_session_id, epoch, identity,
-        withdraw_request_id, expires_at,
+        service,
+        authorization,
+        channel,
+        ar_session_id,
+        epoch,
+        identity,
+        withdraw_request_id,
+        expires_at,
     )
     recovery_state: RecoveryState = (
         "recovery-unacknowledged" if (text is not None or attachment_refs) else "none"
@@ -529,10 +563,6 @@ def _build_withdrawn_record(
             ),
         )
     return record
-
-
-
-
 
 
 def _settled_failure(
@@ -674,7 +704,6 @@ async def _live_row(
     )
 
 
-
 def sweep_recoveries(service: ConversationControlService, channel: ControlChannel) -> None:
     """Expire unacknowledged recoveries past their lease and reclaim content (D3)."""
 
@@ -738,10 +767,10 @@ def _replay_response(
     """Idempotent replay: same outcome/revision; bodies stay disposed post-ack."""
 
     response = record.response
-    if (
-        isinstance(response, WithdrawnQueueResponse)
-        and record.recovery_state in {"acknowledged", "expired"}
-    ):
+    if isinstance(response, WithdrawnQueueResponse) and record.recovery_state in {
+        "acknowledged",
+        "expired",
+    }:
         return WithdrawnQueueResponse(
             withdraw_request_id=response.withdraw_request_id,
             request_fingerprint=response.request_fingerprint,

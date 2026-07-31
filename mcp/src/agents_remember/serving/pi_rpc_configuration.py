@@ -88,9 +88,7 @@ class PiRpcConfiguration:
             detail="Pi correlated set_model success with exact get_state model readback",
         )
 
-    async def set_effort(
-        self, effort: str, *, before_write: WriteGuard | None = None
-    ) -> SetResult:
+    async def set_effort(self, effort: str, *, before_write: WriteGuard | None = None) -> SetResult:
         capabilities = self._capabilities()
         selected = next(
             (

@@ -47,9 +47,7 @@ def _write_cgc_settings(root: Path) -> tuple[Path, Path]:
                 "providers": {
                     "codegraphcontext-code": {
                         "enabled": True,
-                        "instance": _provider_instance(
-                            "codegraphcontext-code", coordination_root
-                        ),
+                        "instance": _provider_instance("codegraphcontext-code", coordination_root),
                         "runtimeRoot": "<coordination_root>/providers/runners/codegraphcontext",
                         "instanceRootTemplate": "<runtimeRoot>/<repoId>",
                         "requirementsFile": (
@@ -172,9 +170,7 @@ class CgcInstallPreflightTests(unittest.TestCase):
             layout = cgc_layout_from_args(args)
             _, commands = cgc_install_commands(args, layout)
 
-            results, early_result, backend_result = cgc_install_preflight(
-                args, layout, commands
-            )
+            results, early_result, backend_result = cgc_install_preflight(args, layout, commands)
 
         self.assertEqual(results, [])
         self.assertIsNone(backend_result)

@@ -21,9 +21,32 @@ def test_claude_log_binding_and_command_evidence(tmp_path: Path) -> None:
     _write(
         path,
         [
-            {"type": "user", "cwd": str(cwd), "promptId": prompt, "message": {"role": "user", "content": "<command-name>/effort</command-name>\n<command-args>ultracode</command-args>"}},
-            {"type": "user", "cwd": str(cwd), "promptId": prompt, "message": {"role": "user", "content": "<local-command-stdout>Set effort level to ultracode</local-command-stdout>"}},
-            {"type": "user", "cwd": str(cwd), "message": {"role": "user", "content": "[Agents Remember delivery:brief id=E1]\n\nwork"}},
+            {
+                "type": "user",
+                "cwd": str(cwd),
+                "promptId": prompt,
+                "message": {
+                    "role": "user",
+                    "content": "<command-name>/effort</command-name>\n<command-args>ultracode</command-args>",
+                },
+            },
+            {
+                "type": "user",
+                "cwd": str(cwd),
+                "promptId": prompt,
+                "message": {
+                    "role": "user",
+                    "content": "<local-command-stdout>Set effort level to ultracode</local-command-stdout>",
+                },
+            },
+            {
+                "type": "user",
+                "cwd": str(cwd),
+                "message": {
+                    "role": "user",
+                    "content": "[Agents Remember delivery:brief id=E1]\n\nwork",
+                },
+            },
         ],
     )
     log = HarnessSessionLog(
@@ -48,8 +71,22 @@ def test_claude_errored_command_is_not_success(tmp_path: Path) -> None:
     _write(
         path,
         [
-            {"type": "user", "cwd": str(cwd), "message": {"role": "user", "content": "<command-name>/effort</command-name>\n<command-args>ultracode</command-args>"}},
-            {"type": "user", "cwd": str(cwd), "message": {"role": "user", "content": "<local-command-stdout>Invalid argument: ultracode. Valid options are: low, high</local-command-stdout>"}},
+            {
+                "type": "user",
+                "cwd": str(cwd),
+                "message": {
+                    "role": "user",
+                    "content": "<command-name>/effort</command-name>\n<command-args>ultracode</command-args>",
+                },
+            },
+            {
+                "type": "user",
+                "cwd": str(cwd),
+                "message": {
+                    "role": "user",
+                    "content": "<local-command-stdout>Invalid argument: ultracode. Valid options are: low, high</local-command-stdout>",
+                },
+            },
         ],
     )
     log = HarnessSessionLog(
@@ -75,7 +112,19 @@ def test_codex_message_binds_only_matching_cwd(tmp_path: Path) -> None:
         path,
         [
             {"type": "session_meta", "payload": {"cwd": str(cwd)}},
-            {"type": "response_item", "payload": {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "[Agents Remember delivery:brief id=E2]\n\nwork"}]}},
+            {
+                "type": "response_item",
+                "payload": {
+                    "type": "message",
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "input_text",
+                            "text": "[Agents Remember delivery:brief id=E2]\n\nwork",
+                        }
+                    ],
+                },
+            },
         ],
     )
     log = HarnessSessionLog(
@@ -117,7 +166,14 @@ def test_partial_trailing_jsonl_record_is_ignored_until_complete(tmp_path: Path)
         path,
         [
             {"type": "session_meta", "payload": {"cwd": str(cwd)}},
-            {"type": "response_item", "payload": {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "id=E3"}]}},
+            {
+                "type": "response_item",
+                "payload": {
+                    "type": "message",
+                    "role": "user",
+                    "content": [{"type": "input_text", "text": "id=E3"}],
+                },
+            },
         ],
     )
     assert log.message_present("E3")

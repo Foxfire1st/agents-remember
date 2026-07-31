@@ -99,9 +99,7 @@ class LaunchProviderSetupTests(unittest.TestCase):
                 progress.phase_done({"ok": True, "provider": "grepai", "action": "install"})
                 return {"ok": True, "state": "ok", "resultCounts": {"total": 1, "ok": 1}}
 
-            _, result, state_files = self._launch(
-                root, runner, settings_cleanup=settings
-            )
+            _, result, state_files = self._launch(root, runner, settings_cleanup=settings)
 
             self.assertEqual(result["state"], "starting")
             self.assertIn("progressFile", result)
@@ -110,9 +108,7 @@ class LaunchProviderSetupTests(unittest.TestCase):
             assert progress is not None
             self.assertEqual(progress["state"], "ok")
             self.assertEqual(progress["repoName"], "repo-a")
-            self.assertEqual(
-                progress["summary"]["providerStateFile"], state_files[0].as_posix()
-            )
+            self.assertEqual(progress["summary"]["providerStateFile"], state_files[0].as_posix())
             self.assertFalse(settings.exists(), "thread owns the settings unlink")
 
     def test_failed_payload_finishes_failed_without_state_file(self) -> None:
@@ -137,9 +133,7 @@ class LaunchProviderSetupTests(unittest.TestCase):
             def runner(request, progress):
                 raise RuntimeError("docker exploded")
 
-            _, result, state_files = self._launch(
-                root, runner, settings_cleanup=settings
-            )
+            _, result, state_files = self._launch(root, runner, settings_cleanup=settings)
             progress = read_setup_progress(Path(result["progressFile"]))
             assert progress is not None
             self.assertEqual(progress["state"], "failed")
@@ -161,9 +155,7 @@ class ProviderSetupStatusTests(unittest.TestCase):
             state_file = contract.worktree_group / "provider-runtime" / "provider-state.json"
             state_file.parent.mkdir(parents=True, exist_ok=True)
             state_file.write_text("{}", encoding="utf-8")
-            self.assertEqual(
-                provider_async.provider_setup_status(contract), {"state": "prepared"}
-            )
+            self.assertEqual(provider_async.provider_setup_status(contract), {"state": "prepared"})
 
     def test_failed_progress_carries_retry_args(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -218,9 +210,7 @@ class StartOrderingTests(unittest.TestCase):
             args = WorktreeArgs(task_name="async-task", worktree_name="async-task")
             with (
                 mock.patch.object(worktree_start, "resolve_context", return_value=context),
-                mock.patch.object(
-                    worktree_start, "build_start_contract", return_value=contract
-                ),
+                mock.patch.object(worktree_start, "build_start_contract", return_value=contract),
                 mock.patch.object(worktree_start, "ensure_worktree", return_value="created"),
                 mock.patch.object(
                     worktree_start,
@@ -296,9 +286,7 @@ class StartOrderingTests(unittest.TestCase):
                     worktree_start.run_or_launch_provider_setup(
                         Namespace(), contract, args, {"state": "enabled", "paths": paths}
                     )
-                self.assertEqual(
-                    launch_mock.call_args.kwargs["settings_cleanup"], expected_cleanup
-                )
+                self.assertEqual(launch_mock.call_args.kwargs["settings_cleanup"], expected_cleanup)
 
 
 class RetryProviderSetupTests(unittest.TestCase):
@@ -315,9 +303,7 @@ class RetryProviderSetupTests(unittest.TestCase):
             with mock.patch.object(
                 worktree_start.provider_async, "provider_setup_running", return_value=True
             ):
-                result = worktree_start._retry_provider_setup_result(
-                    Namespace(), contract, args
-                )
+                result = worktree_start._retry_provider_setup_result(Namespace(), contract, args)
             self.assertEqual(result.returncode, 2)
             self.assertEqual(result.payload["state"], "blocked")
             self.assertEqual(result.payload["nextTool"], "worktree_status")
@@ -343,9 +329,7 @@ class RetryProviderSetupTests(unittest.TestCase):
                     return_value={"state": "starting", "progressFile": "x"},
                 ),
             ):
-                result = worktree_start._retry_provider_setup_result(
-                    Namespace(), contract, args
-                )
+                result = worktree_start._retry_provider_setup_result(Namespace(), contract, args)
             self.assertEqual(result.returncode, 0)
             self.assertEqual(result.payload["state"], "provider-setup-retried")
             providers = cast(dict[str, Any], result.payload["providers"])
@@ -372,9 +356,7 @@ class TeardownGuardTests(unittest.TestCase):
                 result = worktree_cleanup.cleanup_result(args)
             self.assertEqual(result.returncode, 2)
             self.assertEqual(result.payload["state"], "blocked")
-            self.assertIn(
-                "Provider setup is still running", cast(str, result.payload["summary"])
-            )
+            self.assertIn("Provider setup is still running", cast(str, result.payload["summary"]))
 
     def test_abandon_blocks_without_force_while_setup_running(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

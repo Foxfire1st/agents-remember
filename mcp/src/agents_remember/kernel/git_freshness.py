@@ -90,7 +90,12 @@ def _read_branch_freshness(
         current = run_git(root, ["branch", "--show-current"])
         if current.returncode != 0:
             return BranchFreshness(
-                "", None, False, None, None, "unavailable",
+                "",
+                None,
+                False,
+                None,
+                None,
+                "unavailable",
                 (current.stderr or "git branch --show-current failed").strip(),
             )
         branch = current.stdout.strip()
@@ -101,16 +106,21 @@ def _read_branch_freshness(
     if upstream is None:
         return BranchFreshness(branch, None, False, None, None, "no-upstream")
 
-    fetch_error = fetch_remote(root, upstream.partition("/")[0], timeout=fetch_timeout) if fetch else None
+    fetch_error = (
+        fetch_remote(root, upstream.partition("/")[0], timeout=fetch_timeout) if fetch else None
+    )
     counts = ahead_behind(root, branch, upstream)
     ahead, behind = counts if counts is not None else (None, None)
     if fetch_error or counts is None:
         error = fetch_error or f"could not count {branch}...{upstream}"
         return BranchFreshness(branch, upstream, False, ahead, behind, "unknown", error)
     state = (
-        "current" if ahead == 0 and behind == 0
-        else "behind" if ahead == 0
-        else "ahead" if behind == 0
+        "current"
+        if ahead == 0 and behind == 0
+        else "behind"
+        if ahead == 0
+        else "ahead"
+        if behind == 0
         else "diverged"
     )
     return BranchFreshness(branch, upstream, fetch, ahead, behind, state)

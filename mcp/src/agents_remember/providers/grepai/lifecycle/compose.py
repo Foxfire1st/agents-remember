@@ -72,9 +72,7 @@ def grepai_compose_render(
             f"{embedder['dataRoot'].as_posix()}:{embedder['dataDestination']}"
         ),
         "RUNNER_IMAGE": yaml_scalar(runner["image"]),
-        "RUNNER_BUILD_CONTEXT": yaml_scalar(
-            provider_asset_path("docker", "grepai").as_posix()
-        ),
+        "RUNNER_BUILD_CONTEXT": yaml_scalar(provider_asset_path("docker", "grepai").as_posix()),
         "GREPAI_VERSION": yaml_scalar(runner["version"]),
         "GREPAI_ARCH": yaml_scalar(runner["releaseArch"]),
         "WATCHER_CONTAINER_NAME": yaml_scalar(runner["containerName"]),
@@ -84,9 +82,7 @@ def grepai_compose_render(
         "WATCHER_RUNTIME_VOLUME": yaml_scalar(
             f"{layout.runtime_root.as_posix()}:{runner['runtimeMount']}"
         ),
-        "WATCHER_LOGS_VOLUME": yaml_scalar(
-            f"{layout.logs_root.as_posix()}:{runner['logsMount']}"
-        ),
+        "WATCHER_LOGS_VOLUME": yaml_scalar(f"{layout.logs_root.as_posix()}:{runner['logsMount']}"),
         "WATCHER_ROOT_VOLUMES": root_volumes,
         "WORKSPACE_NAME": yaml_scalar(layout.workspace_name),
         "LOGS_MOUNT": yaml_scalar(runner["logsMount"]),

@@ -135,9 +135,7 @@ class OperatorInboxRecordTests(unittest.TestCase):
         )
         roundtrip = legacy.model_dump(by_alias=True, exclude_none=True)
         self.assertEqual(roundtrip["adapterDeliveryState"], "queued")
-        self.assertEqual(
-            roundtrip["adapterDeliveryDetail"], "accepted by exact adapter request"
-        )
+        self.assertEqual(roundtrip["adapterDeliveryDetail"], "accepted by exact adapter request")
 
         with self.assertRaisesRegex(ValidationError, "unsupported fields: futureEvidence"):
             LegacyOperatorInboxEntry.model_validate({**payload, "futureEvidence": True})
@@ -280,8 +278,7 @@ class OperatorInboxStoreTests(unittest.TestCase):
         assert delivered.nextAttemptAt is not None
         self.assertGreaterEqual(
             (
-                datetime.fromisoformat(delivered.nextAttemptAt)
-                - datetime.fromisoformat(T2)
+                datetime.fromisoformat(delivered.nextAttemptAt) - datetime.fromisoformat(T2)
             ).total_seconds(),
             900.0,
         )
@@ -428,7 +425,9 @@ class OperatorInboxStoreTests(unittest.TestCase):
 
     def test_compaction_still_prunes_a_stale_consumed_row(self) -> None:
         self.store.append(self._entry("A"))
-        self.store.consume("A", now="2020-01-01T00:00:00+00:00", consumed_by="model", consumed_via="cli")
+        self.store.consume(
+            "A", now="2020-01-01T00:00:00+00:00", consumed_by="model", consumed_via="cli"
+        )
         removed = self.store.compact(now=datetime.now(UTC))
         self.assertGreater(removed, 0)
         self.assertEqual(self.store.read(), [])
@@ -775,9 +774,13 @@ class OperatorInboxDeliveryTests(unittest.TestCase):
                 accepted_at=T1,
             )
 
-        with mock.patch(
-            "agents_remember.serving.inbox_delivery.submit_control_prompt", side_effect=in_flight
-        ), ThreadPoolExecutor(max_workers=1) as executor:
+        with (
+            mock.patch(
+                "agents_remember.serving.inbox_delivery.submit_control_prompt",
+                side_effect=in_flight,
+            ),
+            ThreadPoolExecutor(max_workers=1) as executor,
+        ):
             delivery = executor.submit(
                 deliver_inbox_entry,
                 store=self.store,
@@ -811,9 +814,7 @@ class OperatorInboxDeliveryTests(unittest.TestCase):
             [],
         )
         self.assertEqual(
-            self.store.list_redeliverable(
-                now=datetime.fromisoformat("2026-06-24T10:05:00+00:00")
-            ),
+            self.store.list_redeliverable(now=datetime.fromisoformat("2026-06-24T10:05:00+00:00")),
             [],
         )
 

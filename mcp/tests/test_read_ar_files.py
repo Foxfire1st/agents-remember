@@ -130,9 +130,7 @@ def _write_overview(onboarding_root: Path, route: str, text: str) -> None:
     path.write_text(text, encoding="utf-8")
 
 
-def _write_route_index(
-    onboarding_root: Path, route: str, *, covered: list[str]
-) -> None:
+def _write_route_index(onboarding_root: Path, route: str, *, covered: list[str]) -> None:
     rel = "overview.index.json" if route == "" else f"{route}/overview.index.json"
     scope = "**" if route == "" else f"{route}/**"
     path = onboarding_root / rel
@@ -210,9 +208,7 @@ class ControllerStatusTests(unittest.TestCase):
             coordination_root=self.config.coordination_root,
             storage_mode=storage_mode,
         )
-        return read_ar_files_tool(
-            self.config, repo_id=REPO, files=files, _context=ctx
-        )
+        return read_ar_files_tool(self.config, repo_id=REPO, files=files, _context=ctx)
 
     def test_found_when_sidecar_present_and_covered(self) -> None:
         _write_sidecar(self.onb, "pkg/mod.py", "Body of mod.")
@@ -410,9 +406,7 @@ class FrontDoorDedupTests(unittest.TestCase):
             storage_mode="repo-sidecar",
         )
         reset_ambient()
-        amb = AmbientLifecycle(
-            EventStore(observer_root(self.config)), heartbeat_seconds=3600
-        )
+        amb = AmbientLifecycle(EventStore(observer_root(self.config)), heartbeat_seconds=3600)
         amb.start(fleeting=True)
         install_ambient(amb)
         self.amb = amb
@@ -498,9 +492,7 @@ class ServedLedgerAndEventTests(unittest.TestCase):
         reset_ambient()
 
     def _read(self, files):
-        return read_ar_files_tool(
-            self.config, repo_id=REPO, files=files, _context=self.ctx
-        )
+        return read_ar_files_tool(self.config, repo_id=REPO, files=files, _context=self.ctx)
 
     def test_served_jsonl_records_pieces(self) -> None:
         self._read([{"path": "pkg/mod.py"}])
@@ -555,7 +547,7 @@ class ServedLedgerAndEventTests(unittest.TestCase):
                     "source": "SECRET SOURCE CONTENT",
                     "onboarding": "SECRET ONBOARDING",
                 }
-            ]
+            ],
         )
         events = self.store.read(self.lifecycle_id)
         packet = next(e for e in events if e.kind == "read.packet")

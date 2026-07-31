@@ -176,7 +176,9 @@ def _read_source_lines(
             size = 0
         physical_start = min(max(virtual_start - base, 0), size)
         lines, physical_end = _read_lines_from(path, physical_start)
-        return [(record, base + offset_after) for record, offset_after in lines], base + physical_end
+        return [
+            (record, base + offset_after) for record, offset_after in lines
+        ], base + physical_end
 
 
 def _is_heartbeat_event(payload: dict[str, object]) -> bool:
@@ -262,9 +264,7 @@ async def stream_raw_events(
             # ServerSentEvent JSON-encodes whatever it is given (the state channel passes dicts),
             # so emit the object parsed and validated by ``read_new_events`` -- passing the
             # pre-serialized JSONL string would double-encode the wire (`data: "{...}"`).
-            yield ServerSentEvent(
-                data=event.payload, event="event", id=event.cursor, retry=2000
-            )
+            yield ServerSentEvent(data=event.payload, event="event", id=event.cursor, retry=2000)
         if events:
             # More backlog may remain; drain it promptly but yield to the loop between chunks.
             await asyncio.sleep(0)

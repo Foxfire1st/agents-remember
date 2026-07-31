@@ -112,13 +112,13 @@ class EchoIngestion:
             if frame.raw.get("type") == "result"
         ]
         trailing_start = result_indexes[-1] + 1 if result_indexes else 0
-        trailing_open = any(_opens_turn_body(frame) for frame in self.pending_frames[trailing_start:])
+        trailing_open = any(
+            _opens_turn_body(frame) for frame in self.pending_frames[trailing_start:]
+        )
         body_count = len(result_indexes) + (1 if trailing_open else 0)
         if echo_count <= body_count:
             flushed = 0
-            while self.pending_frames and (
-                flushed < body_count - echo_count or echo_count == 0
-            ):
+            while self.pending_frames and (flushed < body_count - echo_count or echo_count == 0):
                 frame = self.pending_frames.pop(0)
                 self._apply_frame(frame)
                 if frame.raw.get("type") == "result":

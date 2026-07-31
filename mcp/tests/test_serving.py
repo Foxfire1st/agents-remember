@@ -182,9 +182,12 @@ class DeltaTests(unittest.TestCase):
 
     def test_unchanged_yields_no_deltas(self) -> None:
         prev = _projection(lifecycles=(_lifecycle("L1"),), providers=(_provider("p"),))
-        self.assertEqual(diff_projection(prev, _projection(
-            lifecycles=(_lifecycle("L1"),), providers=(_provider("p"),)
-        )), [])
+        self.assertEqual(
+            diff_projection(
+                prev, _projection(lifecycles=(_lifecycle("L1"),), providers=(_provider("p"),))
+            ),
+            [],
+        )
 
     def test_lifecycle_added(self) -> None:
         deltas = diff_projection(_projection(), _projection(lifecycles=(_lifecycle("L1"),)))
@@ -233,9 +236,7 @@ class DeltaTests(unittest.TestCase):
         self.assertEqual(deltas, [DeltaEvent("analytics", cur_analytics)])
 
     def test_removals_are_sorted_for_determinism(self) -> None:
-        prev = _projection(
-            lifecycles=(_lifecycle("L2"), _lifecycle("L1"), _lifecycle("L3"))
-        )
+        prev = _projection(lifecycles=(_lifecycle("L2"), _lifecycle("L1"), _lifecycle("L3")))
         deltas = diff_projection(prev, _projection())
         self.assertEqual(
             [d.data for d in deltas],
@@ -254,8 +255,13 @@ class DeltaTests(unittest.TestCase):
     def test_volatile_only_analytics_change_yields_no_deltas(self) -> None:
         def doc(age: float) -> TaskDocNode:
             return TaskDocNode(
-                id="t", repository="r", title="T", status="planning", kind="light",
-                docPath="/t.json", ageSeconds=age,
+                id="t",
+                repository="r",
+                title="T",
+                status="planning",
+                kind="light",
+                docPath="/t.json",
+                ageSeconds=age,
             )
 
         prev = _projection(analytics=Analytics(taskDocuments=[doc(1.0)]))
@@ -574,13 +580,9 @@ class StateEtagTests(unittest.TestCase):
     ) -> TestClient:
         patcher = mock.patch(
             "agents_remember.serving.projector.project_and_write",
-            side_effect=lambda config,
-            *,
-            now,
-            provider_refresher=None,
-            landing_state=None,
-            input_state=None,
-            refresh=None: held[0],
+            side_effect=lambda config, *, now, provider_refresher=None, landing_state=None, input_state=None, refresh=None: (
+                held[0]
+            ),
         )
         patcher.start()
         self.addCleanup(patcher.stop)
@@ -661,13 +663,9 @@ class ProjectionBodyCacheTests(unittest.TestCase):
     ) -> TestClient:
         patcher = mock.patch(
             "agents_remember.serving.projector.project_and_write",
-            side_effect=lambda config,
-            *,
-            now,
-            provider_refresher=None,
-            landing_state=None,
-            input_state=None,
-            refresh=None: held[0],
+            side_effect=lambda config, *, now, provider_refresher=None, landing_state=None, input_state=None, refresh=None: (
+                held[0]
+            ),
         )
         patcher.start()
         self.addCleanup(patcher.stop)
@@ -790,13 +788,9 @@ class GzipMiddlewareTests(unittest.TestCase):
     def _client_with_held_projection(self, held: list[WorkspaceProjection]) -> TestClient:
         patcher = mock.patch(
             "agents_remember.serving.projector.project_and_write",
-            side_effect=lambda config,
-            *,
-            now,
-            provider_refresher=None,
-            landing_state=None,
-            input_state=None,
-            refresh=None: held[0],
+            side_effect=lambda config, *, now, provider_refresher=None, landing_state=None, input_state=None, refresh=None: (
+                held[0]
+            ),
         )
         patcher.start()
         self.addCleanup(patcher.stop)
@@ -844,13 +838,9 @@ class GzipSseFlowTests(unittest.IsolatedAsyncioTestCase):
         held = [_projection(lifecycles=(_lifecycle("L1"),))]
         patcher = mock.patch(
             "agents_remember.serving.projector.project_and_write",
-            side_effect=lambda config,
-            *,
-            now,
-            provider_refresher=None,
-            landing_state=None,
-            input_state=None,
-            refresh=None: held[0],
+            side_effect=lambda config, *, now, provider_refresher=None, landing_state=None, input_state=None, refresh=None: (
+                held[0]
+            ),
         )
         patcher.start()
         self.addCleanup(patcher.stop)
@@ -1126,7 +1116,9 @@ class ActionGateTests(unittest.TestCase):
     def test_api_action_approve_records_developer_decision(self) -> None:
         store = GateStore(observer_logs_root(self.tmp))
         store.append(
-            create_gate(kind="closeout-approval", lifecycle_id="L1", gate_id="G1", now=_FRESH_GATE_TS)
+            create_gate(
+                kind="closeout-approval", lifecycle_id="L1", gate_id="G1", now=_FRESH_GATE_TS
+            )
         )
         app = create_app(_config(self.tmp), interval=100)
         with TestClient(app) as client:
@@ -1632,7 +1624,9 @@ class RawEventTests(unittest.TestCase):
     def test_reads_new_lines_then_nothing(self) -> None:
         self._append("L1", '{"a":1}', '{"a":2}')
         events, offsets = read_new_events(self.root, {})
-        self.assertEqual([(e.source, e.data) for e in events], [("L1", '{"a":1}'), ("L1", '{"a":2}')])
+        self.assertEqual(
+            [(e.source, e.data) for e in events], [("L1", '{"a":1}'), ("L1", '{"a":2}')]
+        )
         again, offsets_again = read_new_events(self.root, offsets)
         self.assertEqual(again, [])
         self.assertEqual(offsets_again, offsets)
@@ -1732,7 +1726,9 @@ class RawEventTests(unittest.TestCase):
                 outcome="completed",
             ),
         )
-        self._append("active", self._event_line("active-1", "lifecycle.started", "2026-06-14T11:00:00+00:00"))
+        self._append(
+            "active", self._event_line("active-1", "lifecycle.started", "2026-06-14T11:00:00+00:00")
+        )
         self._append(
             "recent",
             self._event_line("recent-1", "lifecycle.started", "2026-06-14T11:00:00+00:00"),
@@ -1848,7 +1844,9 @@ class RawEventTests(unittest.TestCase):
         self._append(
             "L1",
             *(
-                self._event_line(f"L1-{index}", "tool.completed", "2026-06-14T11:00:00+00:00", n=index)
+                self._event_line(
+                    f"L1-{index}", "tool.completed", "2026-06-14T11:00:00+00:00", n=index
+                )
                 for index in range(10)
             ),
         )
@@ -1865,10 +1863,16 @@ class RawEventTests(unittest.TestCase):
         now = datetime(2026, 6, 14, 12, 0, tzinfo=UTC)
         dead = self._append(
             "dead",
-            self._event_line("dead-1", "lifecycle.started", "2026-06-14T09:00:00+00:00", fleeting=True),
-            self._event_line("dead-2", "lifecycle.promoted", "2026-06-14T09:01:00+00:00", scope="r"),
+            self._event_line(
+                "dead-1", "lifecycle.started", "2026-06-14T09:00:00+00:00", fleeting=True
+            ),
+            self._event_line(
+                "dead-2", "lifecycle.promoted", "2026-06-14T09:01:00+00:00", scope="r"
+            ),
             self._event_line("dead-3", "tool.completed", "2026-06-14T10:30:00+00:00", tool="x"),
-            self._event_line("dead-hb", "lifecycle.heartbeat", "2026-06-14T11:50:00+00:00", state="running"),
+            self._event_line(
+                "dead-hb", "lifecycle.heartbeat", "2026-06-14T11:50:00+00:00", state="running"
+            ),
         )
         removed = prune_expired_lifecycle_event_logs(self.root, now=now)
         self.assertEqual(removed, [dead])
@@ -1878,8 +1882,12 @@ class RawEventTests(unittest.TestCase):
         now = datetime(2026, 6, 14, 12, 0, tzinfo=UTC)
         fleet = self._append(
             "fleet",
-            self._event_line("fleet-1", "lifecycle.started", "2026-06-14T10:00:00+00:00", fleeting=True),
-            self._event_line("fleet-hb", "lifecycle.heartbeat", "2026-06-14T11:55:00+00:00", state="running"),
+            self._event_line(
+                "fleet-1", "lifecycle.started", "2026-06-14T10:00:00+00:00", fleeting=True
+            ),
+            self._event_line(
+                "fleet-hb", "lifecycle.heartbeat", "2026-06-14T11:55:00+00:00", state="running"
+            ),
         )
         # Only real activity is the start at 10:00 (2h ago); the recent heartbeat is ignored.
         self.assertEqual(prune_expired_lifecycle_event_logs(self.root, now=now), [fleet])
@@ -1891,13 +1899,17 @@ class RawEventTests(unittest.TestCase):
         now = datetime(2026, 6, 14, 12, 0, tzinfo=UTC)
         kept = self._append(
             "keepme",
-            self._event_line("k-1", "lifecycle.started", "2026-06-14T09:00:00+00:00", fleeting=True),
+            self._event_line(
+                "k-1", "lifecycle.started", "2026-06-14T09:00:00+00:00", fleeting=True
+            ),
             self._event_line("k-2", "lifecycle.promoted", "2026-06-14T09:01:00+00:00", scope="r"),
             self._event_line("k-3", "tool.completed", "2026-06-14T10:00:00+00:00", tool="x"),
         )
         # Protected -> not pruned even though last real activity (10:00) is 2h ago, past the TTL.
         self.assertEqual(
-            prune_expired_lifecycle_event_logs(self.root, now=now, protected_lifecycle_ids={"keepme"}),
+            prune_expired_lifecycle_event_logs(
+                self.root, now=now, protected_lifecycle_ids={"keepme"}
+            ),
             [],
         )
         self.assertTrue(kept.exists())
@@ -1909,8 +1921,12 @@ class RawEventTests(unittest.TestCase):
         now = datetime(2026, 6, 14, 12, 0, tzinfo=UTC)
         alive = self._append(
             "alive",
-            self._event_line("alive-1", "lifecycle.started", "2026-06-14T09:00:00+00:00", fleeting=True),
-            self._event_line("alive-2", "lifecycle.promoted", "2026-06-14T09:01:00+00:00", scope="r"),
+            self._event_line(
+                "alive-1", "lifecycle.started", "2026-06-14T09:00:00+00:00", fleeting=True
+            ),
+            self._event_line(
+                "alive-2", "lifecycle.promoted", "2026-06-14T09:01:00+00:00", scope="r"
+            ),
             self._event_line("alive-3", "tool.completed", "2026-06-14T11:50:00+00:00", tool="x"),
         )
         self.assertEqual(prune_expired_lifecycle_event_logs(self.root, now=now), [])
@@ -1921,9 +1937,13 @@ class RawEventTests(unittest.TestCase):
         # Active (recent activity) but with history older than the 1h replay window.
         self._append(
             "long",
-            self._event_line("long-start", "lifecycle.started", "2026-06-14T08:00:00+00:00", fleeting=False),
+            self._event_line(
+                "long-start", "lifecycle.started", "2026-06-14T08:00:00+00:00", fleeting=False
+            ),
             self._event_line("long-old", "tool.completed", "2026-06-14T09:00:00+00:00", tool="x"),
-            self._event_line("long-recent", "tool.completed", "2026-06-14T11:50:00+00:00", tool="x"),
+            self._event_line(
+                "long-recent", "tool.completed", "2026-06-14T11:50:00+00:00", tool="x"
+            ),
         )
         offsets = initial_event_offsets(self.root, now=now)
         events, _ = read_new_events(self.root, offsets)
@@ -1996,7 +2016,12 @@ class StreamRawEventsTests(unittest.IsolatedAsyncioTestCase):
             "\n".join(
                 [
                     json.dumps(
-                        {"id": "hb", "ts": ts, "kind": "lifecycle.heartbeat", "data": {"state": "running"}}
+                        {
+                            "id": "hb",
+                            "ts": ts,
+                            "kind": "lifecycle.heartbeat",
+                            "data": {"state": "running"},
+                        }
                     ),
                     json.dumps(
                         {"id": "real", "ts": ts, "kind": "tool.completed", "data": {"tool": "ping"}}
@@ -2155,10 +2180,14 @@ class ActionTests(unittest.TestCase):
         self.assertEqual(outcome.status_code, 409)
         self.assertEqual(outcome.body["status"], "disabled")
         self.assertEqual(outcome.body["detail"], "lifecycle is not blocked")
-        self.assertEqual(outcome.body["nextSafeAction"], "resume becomes safe once the gate is resolved")
+        self.assertEqual(
+            outcome.body["nextSafeAction"], "resume becomes safe once the gate is resolved"
+        )
 
     def test_unknown_action_is_conflict(self) -> None:
-        outcome = evaluate_action(self._projection(), "frobnicate", "L1", actor="developer", now=_TS)
+        outcome = evaluate_action(
+            self._projection(), "frobnicate", "L1", actor="developer", now=_TS
+        )
         self.assertEqual(outcome.status_code, 409)
         self.assertEqual(outcome.body["status"], "unavailable")
 

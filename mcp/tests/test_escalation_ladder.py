@@ -123,9 +123,7 @@ class NextStepTests(unittest.TestCase):
     def test_rung_two_skip_levels_to_owners_owner(self) -> None:
         self.catalog.upsert(_catalog_entry("orchestrator-1", spawn_role="orchestrator"))
         self.catalog.upsert(
-            _catalog_entry(
-                "manager-1", spawn_role="manager", spawned_by_session="orchestrator-1"
-            )
+            _catalog_entry("manager-1", spawn_role="manager", spawned_by_session="orchestrator-1")
         )
         self.catalog.upsert(
             _catalog_entry("worker-1", spawn_role="worker", spawned_by_session="manager-1")
@@ -144,7 +142,9 @@ class NextStepTests(unittest.TestCase):
         self.catalog.upsert(
             _catalog_entry("manager-1", spawn_role="manager", spawned_by_session="orchestrator-1")
         )
-        entry = _entry(agent_id="manager-1", recipient_role="manager").model_copy(update={"rung": 1})
+        entry = _entry(agent_id="manager-1", recipient_role="manager").model_copy(
+            update={"rung": 1}
+        )
         step = next_step(self.catalog, entry)
         self.assertEqual(step.rung, MAX_RUNG)
         self.assertEqual(step.action, "architect-attention")
@@ -202,9 +202,7 @@ class SeatSuspectTests(unittest.TestCase):
 
     def test_recently_stale_is_not_yet_suspect(self) -> None:
         self.catalog.upsert(
-            _catalog_entry(
-                "worker-1", turn_state="stale", turn_state_changed_at=NOW.isoformat()
-            )
+            _catalog_entry("worker-1", turn_state="stale", turn_state_changed_at=NOW.isoformat())
         )
         self.assertFalse(seat_is_suspect(self.catalog, "worker-1", now=NOW, stale_seconds=60.0))
 
@@ -223,9 +221,7 @@ class SeatSuspectTests(unittest.TestCase):
                 turn_state_changed_at=(NOW - timedelta(hours=6)).isoformat(),
             )
         )
-        self.assertFalse(
-            seat_is_suspect(self.catalog, "architect-1", now=NOW, stale_seconds=60.0)
-        )
+        self.assertFalse(seat_is_suspect(self.catalog, "architect-1", now=NOW, stale_seconds=60.0))
 
 
 class OrphanPolicyTests(unittest.TestCase):

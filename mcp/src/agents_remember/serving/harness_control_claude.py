@@ -133,9 +133,7 @@ class ClaudeStreamJsonAdapter:
                 current_model=system_init.model,
                 timeout_seconds=self._limits.startup_timeout_seconds,
                 requested_key=(
-                    self._expected_launch.model_key
-                    if self._expected_launch is not None
-                    else None
+                    self._expected_launch.model_key if self._expected_launch is not None else None
                 ),
             )
             version = system_init.version

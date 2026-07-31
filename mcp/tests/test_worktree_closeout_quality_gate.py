@@ -40,37 +40,27 @@ class CodeQualityGateTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             worktree = _checkout_with_wrapper(Path(tmp))
 
-            preview = code_quality_gate.code_quality_gate_preview(
-                worktree, code_would_commit=True
-            )
+            preview = code_quality_gate.code_quality_gate_preview(worktree, code_would_commit=True)
 
             self.assertTrue(preview["required"])
             self.assertEqual(preview["status"], code_quality_gate.GATE_ENFORCED)
-            self.assertEqual(
-                preview["command"], "python -m agents_remember.code_quality.check"
-            )
+            self.assertEqual(preview["command"], "python -m agents_remember.code_quality.check")
             self.assertIn("before the code commit", str(preview["reason"]))
             self.assertTrue(
-                code_quality_gate.requires_strict_code_quality(
-                    worktree, code_would_commit=True
-                )
+                code_quality_gate.requires_strict_code_quality(worktree, code_would_commit=True)
             )
 
     def test_preview_reports_no_code_commit_when_nothing_would_commit(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             worktree = _checkout_with_wrapper(Path(tmp))
 
-            preview = code_quality_gate.code_quality_gate_preview(
-                worktree, code_would_commit=False
-            )
+            preview = code_quality_gate.code_quality_gate_preview(worktree, code_would_commit=False)
 
             self.assertFalse(preview["required"])
             self.assertEqual(preview["status"], code_quality_gate.GATE_NO_CODE_COMMIT)
             self.assertEqual(preview["command"], "")
             self.assertFalse(
-                code_quality_gate.requires_strict_code_quality(
-                    worktree, code_would_commit=False
-                )
+                code_quality_gate.requires_strict_code_quality(worktree, code_would_commit=False)
             )
 
     def test_preview_reports_missing_wrapper_instead_of_skipping_silently(self) -> None:
@@ -82,12 +72,8 @@ class CodeQualityGateTests(unittest.TestCase):
             )
 
             self.assertFalse(preview["required"])
-            self.assertEqual(
-                preview["status"], code_quality_gate.GATE_WRAPPER_UNAVAILABLE
-            )
-            self.assertIn(
-                code_quality_gate.QUALITY_WRAPPER.as_posix(), str(preview["reason"])
-            )
+            self.assertEqual(preview["status"], code_quality_gate.GATE_WRAPPER_UNAVAILABLE)
+            self.assertIn(code_quality_gate.QUALITY_WRAPPER.as_posix(), str(preview["reason"]))
             self.assertIn("not quality-checked", str(preview["reason"]))
             self.assertFalse(
                 code_quality_gate.requires_strict_code_quality(
@@ -99,9 +85,7 @@ class CodeQualityGateTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             worktree = Path(tmp)
 
-            with self.assertRaisesRegex(
-                RuntimeError, "project-owned wrapper is missing"
-            ):
+            with self.assertRaisesRegex(RuntimeError, "project-owned wrapper is missing"):
                 code_quality_gate.run_strict_code_quality_gate(worktree)
 
     def test_gate_runs_current_worktree_source_with_default_strict_wrapper(self) -> None:
@@ -118,9 +102,7 @@ class CodeQualityGateTests(unittest.TestCase):
             with mock.patch.object(
                 code_quality_gate, "quality_python", return_value=Path(sys.executable)
             ):
-                result = code_quality_gate.run_strict_code_quality_gate(
-                    worktree, runner=runner
-                )
+                result = code_quality_gate.run_strict_code_quality_gate(worktree, runner=runner)
 
             self.assertTrue(result["passed"])
             self.assertEqual(result["status"], code_quality_gate.GATE_ENFORCED)
@@ -179,12 +161,8 @@ class CodeQualityGateTests(unittest.TestCase):
             shared_python.parent.mkdir(parents=True)
             shared_python.write_text("", encoding="utf-8")
 
-            with mock.patch.object(
-                code_quality_gate, "_git_common_dir", return_value=common_dir
-            ):
-                self.assertEqual(
-                    code_quality_gate.quality_python(worktree), shared_python
-                )
+            with mock.patch.object(code_quality_gate, "_git_common_dir", return_value=common_dir):
+                self.assertEqual(code_quality_gate.quality_python(worktree), shared_python)
 
 
 class CloseoutCodeQualityGateTests(unittest.TestCase):
@@ -221,9 +199,7 @@ class CloseoutCodeQualityGateTests(unittest.TestCase):
             output = io.StringIO()
             with redirect_stdout(output):
                 self.assertEqual(
-                    worktree_manager.command_closeout(
-                        closeout_args(contract, dry_run=True)
-                    ),
+                    worktree_manager.command_closeout(closeout_args(contract, dry_run=True)),
                     0,
                 )
             gate = json.loads(output.getvalue())["code_quality_gate"]
@@ -232,9 +208,7 @@ class CloseoutCodeQualityGateTests(unittest.TestCase):
 
             # Apply path (closeout.py:589-593): the real decider runs and fires the gate.
             with (
-                mock.patch.object(
-                    closeout_module, "requires_strict_code_quality", side_effect=spy
-                ),
+                mock.patch.object(closeout_module, "requires_strict_code_quality", side_effect=spy),
                 mock.patch.object(
                     closeout_module,
                     "run_strict_code_quality_gate",
@@ -242,9 +216,7 @@ class CloseoutCodeQualityGateTests(unittest.TestCase):
                 ) as gate_run,
                 redirect_stdout(io.StringIO()),
             ):
-                self.assertEqual(
-                    worktree_manager.command_closeout(closeout_args(contract)), 0
-                )
+                self.assertEqual(worktree_manager.command_closeout(closeout_args(contract)), 0)
 
             self.assertEqual(deciders, [contract.code_worktree])
             gate_run.assert_called_once_with(contract.code_worktree)
@@ -264,9 +236,7 @@ class CloseoutCodeQualityGateTests(unittest.TestCase):
                 mock.patch.object(
                     closeout_module,
                     "run_strict_code_quality_gate",
-                    side_effect=RuntimeError(
-                        "strict code-quality gate failed before code commit"
-                    ),
+                    side_effect=RuntimeError("strict code-quality gate failed before code commit"),
                 ),
                 self.assertRaisesRegex(
                     RuntimeError, "strict code-quality gate failed before code commit"
@@ -276,12 +246,8 @@ class CloseoutCodeQualityGateTests(unittest.TestCase):
 
             self.assertEqual(git(contract.code_worktree, "rev-parse", "HEAD"), code_head)
             self.assertEqual(git(contract.memory_worktree, "rev-parse", "HEAD"), memory_head)
-            self.assertEqual(
-                (contract.memory_worktree / "memory.md").read_bytes(), ledger_before
-            )
-            self.assertEqual(
-                load_contract(contract.contract_path).closeout_status, "not-started"
-            )
+            self.assertEqual((contract.memory_worktree / "memory.md").read_bytes(), ledger_before)
+            self.assertEqual(load_contract(contract.contract_path).closeout_status, "not-started")
 
     def test_success_runs_quality_before_code_commit(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -310,14 +276,10 @@ class CloseoutCodeQualityGateTests(unittest.TestCase):
                     "run_strict_code_quality_gate",
                     side_effect=run_gate,
                 ),
-                mock.patch.object(
-                    closeout_module, "commit_if_dirty", side_effect=record_commit
-                ),
+                mock.patch.object(closeout_module, "commit_if_dirty", side_effect=record_commit),
                 redirect_stdout(io.StringIO()),
             ):
-                self.assertEqual(
-                    worktree_manager.command_closeout(closeout_args(contract)), 0
-                )
+                self.assertEqual(worktree_manager.command_closeout(closeout_args(contract)), 0)
 
             self.assertEqual(events[:2], ["quality", "code-commit"])
 

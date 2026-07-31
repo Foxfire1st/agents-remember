@@ -141,9 +141,7 @@ class FakeControlAdapter:
         self, model_key: str, *, operation: ControlOperationRef | None = None
     ) -> SetResult:
         del operation
-        return SetResult(
-            ok=True, acceptance="immediate", requested_value=model_key, detail="fake"
-        )
+        return SetResult(ok=True, acceptance="immediate", requested_value=model_key, detail="fake")
 
     async def set_effort(
         self, effort: str, *, operation: ControlOperationRef | None = None
@@ -224,7 +222,9 @@ class FakeControlAdapter:
         pair = (turn_id or expected_operation_id or "", active)
         if self.last_interrupt is not None and self.last_interrupt[0] == pair:
             return self.last_interrupt[1]
-        self.interrupt_calls.append({"turn_id": turn_id, "expected_operation_id": expected_operation_id})
+        self.interrupt_calls.append(
+            {"turn_id": turn_id, "expected_operation_id": expected_operation_id}
+        )
         result = InterruptResult(
             acknowledgement="accepted",
             bridge_epoch="",
@@ -309,9 +309,7 @@ class FakeControlAdapter:
                     "turn": {"id": turn, "status": outcome, "items": []},
                 },
             },
-            snapshot=replace(self.current, activity="idle", raw={})
-            if self.current
-            else None,
+            snapshot=replace(self.current, activity="idle", raw={}) if self.current else None,
             operation=operation,
         )
 

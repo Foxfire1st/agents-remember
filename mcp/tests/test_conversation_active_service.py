@@ -83,9 +83,7 @@ class _ScriptedBridge:
         self.provenance: dict[str, str] = {}
         self.evicted_before = 0
         self.snapshot = AdapterSnapshot(
-            identity=ControlIdentity(
-                ar_session_id="ar-1", tmux_name="ar-t-1", created_at=NOW
-            ),
+            identity=ControlIdentity(ar_session_id="ar-1", tmux_name="ar-t-1", created_at=NOW),
             control="ready",
             activity="idle",
             acceptance="immediate",
@@ -117,7 +115,9 @@ class _ScriptedBridge:
             bridge_epoch=self.epoch,
         )
 
-    def read_native_page(self, entry, *, cursor=None, limit=200, byte_budget=None, expected_bridge_epoch=None):
+    def read_native_page(
+        self, entry, *, cursor=None, limit=200, byte_budget=None, expected_bridge_epoch=None
+    ):
         del entry, byte_budget, expected_bridge_epoch
         if self.native_error is not None:
             raise self.native_error
@@ -139,9 +139,7 @@ class _ScriptedBridge:
     def read_transcript(self, entry, *, after_sequence=0, limit=500):
         del entry
         return tuple(
-            entry_
-            for entry_ in self.transcript_entries
-            if _entry_sequence(entry_) > after_sequence
+            entry_ for entry_ in self.transcript_entries if _entry_sequence(entry_) > after_sequence
         )[:limit]
 
     def read_provenance(self, entry, *, expected_bridge_epoch, request_ids):
@@ -246,9 +244,7 @@ class CodexEngineTests(unittest.IsolatedAsyncioTestCase):
             "working more",
         )
         self.assertEqual(agent.revision, 2)
-        self.assertEqual(
-            [item.global_ordinal for item in result.items], [1, 2, 3]
-        )
+        self.assertEqual([item.global_ordinal for item in result.items], [1, 2, 3])
         self.assertEqual(result.total_items, 3)
         self.assertFalse(result.has_older)
 
@@ -345,8 +341,12 @@ class CodexEngineTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             live_ids,
             [
-                "turn-1-user", "turn-1-agent", "turn-result:turn-1",
-                "turn-2-user", "turn-2-agent", "turn-result:turn-2",
+                "turn-1-user",
+                "turn-1-agent",
+                "turn-result:turn-1",
+                "turn-2-user",
+                "turn-2-agent",
+                "turn-result:turn-2",
             ],
         )
         # The hosted thread now persists the SAME settled turns through thread/read under DISJOINT
@@ -354,28 +354,40 @@ class CodexEngineTests(unittest.IsolatedAsyncioTestCase):
         bridge.native_frames.extend(
             [
                 NativeEvidenceFrame(
-                    native_id="item-1", native_parent_id="turn-1", native_type="userMessage",
+                    native_id="item-1",
+                    native_parent_id="turn-1",
+                    native_type="userMessage",
                     created_at=NOW,
                     raw={
-                        "id": "item-1", "type": "userMessage", "clientId": "req-turn-1",
+                        "id": "item-1",
+                        "type": "userMessage",
+                        "clientId": "req-turn-1",
                         "content": [{"type": "text", "text": "go"}],
                     },
                 ),
                 NativeEvidenceFrame(
-                    native_id="item-2", native_parent_id="turn-1", native_type="agentMessage",
+                    native_id="item-2",
+                    native_parent_id="turn-1",
+                    native_type="agentMessage",
                     created_at=NOW,
                     raw={"id": "item-2", "type": "agentMessage", "text": "working more"},
                 ),
                 NativeEvidenceFrame(
-                    native_id="item-3", native_parent_id="turn-2", native_type="userMessage",
+                    native_id="item-3",
+                    native_parent_id="turn-2",
+                    native_type="userMessage",
                     created_at=NOW,
                     raw={
-                        "id": "item-3", "type": "userMessage", "clientId": "req-turn-2",
+                        "id": "item-3",
+                        "type": "userMessage",
+                        "clientId": "req-turn-2",
                         "content": [{"type": "text", "text": "go"}],
                     },
                 ),
                 NativeEvidenceFrame(
-                    native_id="item-4", native_parent_id="turn-2", native_type="agentMessage",
+                    native_id="item-4",
+                    native_parent_id="turn-2",
+                    native_type="agentMessage",
                     created_at=NOW,
                     raw={"id": "item-4", "type": "agentMessage", "text": "working more"},
                 ),
@@ -413,15 +425,21 @@ class CodexEngineTests(unittest.IsolatedAsyncioTestCase):
         bridge.native_frames.extend(
             [
                 NativeEvidenceFrame(
-                    native_id="item-1", native_parent_id="hist-turn-a", native_type="userMessage",
+                    native_id="item-1",
+                    native_parent_id="hist-turn-a",
+                    native_type="userMessage",
                     created_at=NOW,
                     raw={
-                        "id": "item-1", "type": "userMessage", "clientId": "req-turn-1",
+                        "id": "item-1",
+                        "type": "userMessage",
+                        "clientId": "req-turn-1",
                         "content": [{"type": "text", "text": "go"}],
                     },
                 ),
                 NativeEvidenceFrame(
-                    native_id="item-2", native_parent_id="hist-turn-a", native_type="agentMessage",
+                    native_id="item-2",
+                    native_parent_id="hist-turn-a",
+                    native_type="agentMessage",
                     created_at=NOW,
                     raw={"id": "item-2", "type": "agentMessage", "text": "working more"},
                 ),
@@ -434,7 +452,9 @@ class CodexEngineTests(unittest.IsolatedAsyncioTestCase):
         await projector.poll_once()
         settled = await projector.page(before_ordinal=None, limit=50)
         settled_ids = [item.item_id for item in settled.items]
-        self.assertEqual(settled_ids, live_ids, "clientId must anchor the whole renumbered native turn")
+        self.assertEqual(
+            settled_ids, live_ids, "clientId must anchor the whole renumbered native turn"
+        )
         self.assertNotIn("item-1", settled_ids)
         self.assertNotIn("item-2", settled_ids)
 
@@ -447,7 +467,9 @@ class CodexEngineTests(unittest.IsolatedAsyncioTestCase):
         bridge = _ScriptedBridge()
         bridge.native_frames.append(
             NativeEvidenceFrame(
-                native_id="hist-1", native_parent_id="turn-0", native_type="agentMessage",
+                native_id="hist-1",
+                native_parent_id="turn-0",
+                native_type="agentMessage",
                 created_at=NOW,
                 raw={"id": "hist-1", "type": "agentMessage", "text": "earlier session"},
             )
@@ -456,9 +478,7 @@ class CodexEngineTests(unittest.IsolatedAsyncioTestCase):
         projector = _projector(bridge)
         result = await projector.page(before_ordinal=None, limit=50)
         ids = [item.item_id for item in result.items]
-        self.assertEqual(
-            ids, ["hist-1", "turn-1-user", "turn-1-agent", "turn-result:turn-1"]
-        )
+        self.assertEqual(ids, ["hist-1", "turn-1-user", "turn-1-agent", "turn-result:turn-1"])
 
     async def test_rehydration_reproduces_identical_projection(self) -> None:
         bridge = _ScriptedBridge()
@@ -542,7 +562,10 @@ class ClaudeEngineTests(unittest.IsolatedAsyncioTestCase):
                 "type": "assistant",
                 "uuid": f"uuid-agent-{n}",
                 "session_id": "vendor-1",
-                "message": {"role": "assistant", "content": [{"type": "text", "text": f"answer {n}"}]},
+                "message": {
+                    "role": "assistant",
+                    "content": [{"type": "text", "text": f"answer {n}"}],
+                },
             },
         )
         bridge.push_evidence(
@@ -558,7 +581,14 @@ class ClaudeEngineTests(unittest.IsolatedAsyncioTestCase):
         result = await projector.page(before_ordinal=None, limit=50)
         self.assertEqual(
             [item.item_id for item in result.items],
-            ["uuid-user-1", "uuid-agent-1", "uuid-result-1:result", "uuid-user-2", "uuid-agent-2", "uuid-result-2:result"],
+            [
+                "uuid-user-1",
+                "uuid-agent-1",
+                "uuid-result-1:result",
+                "uuid-user-2",
+                "uuid-agent-2",
+                "uuid-result-2:result",
+            ],
         )
 
     async def test_nonuser_transcript_entries_mint_no_echo_unknown_vendor_rows(self) -> None:
@@ -625,7 +655,10 @@ class ClaudeEngineTests(unittest.IsolatedAsyncioTestCase):
         ]
         self.assertNotIn("claude:echo", vendor_types)
         self.assertTrue(
-            all("echo-" not in item.item_id or item.item_id == "uuid-user-1" for item in result.items)
+            all(
+                "echo-" not in item.item_id or item.item_id == "uuid-user-1"
+                for item in result.items
+            )
         )
         self.assertIn("uuid-user-1", [item.item_id for item in result.items])
 
@@ -846,9 +879,7 @@ class PiEngineTests(unittest.IsolatedAsyncioTestCase):
         )
         await projector.poll_once()
         result2 = await projector.page(before_ordinal=None, limit=50)
-        self.assertEqual(
-            [item.item_id for item in result2.items], ["entry-1", "entry-2"]
-        )
+        self.assertEqual([item.item_id for item in result2.items], ["entry-1", "entry-2"])
         self.assertEqual(result2.total_items, 2)
 
 
@@ -893,7 +924,12 @@ class ToolConvergenceTests(unittest.TestCase):
                     "message": {
                         "role": "assistant",
                         "content": [
-                            {"type": "tool_use", "id": "toolu_1", "name": "Bash", "input": {"command": "ls -la"}}
+                            {
+                                "type": "tool_use",
+                                "id": "toolu_1",
+                                "name": "Bash",
+                                "input": {"command": "ls -la"},
+                            }
                         ],
                     },
                 },
@@ -914,7 +950,12 @@ class ToolConvergenceTests(unittest.TestCase):
                     "message": {
                         "role": "user",
                         "content": [
-                            {"type": "tool_result", "tool_use_id": "toolu_1", "content": [{"type": "text", "text": "total 0"}], "is_error": False}
+                            {
+                                "type": "tool_result",
+                                "tool_use_id": "toolu_1",
+                                "content": [{"type": "text", "text": "total 0"}],
+                                "is_error": False,
+                            }
                         ],
                     },
                 },
@@ -1012,7 +1053,12 @@ class ToolConvergenceTests(unittest.TestCase):
                 sequence=1,
                 kind="pi:tool_execution_start",
                 created_at=NOW,
-                raw={"type": "tool_execution_start", "toolCallId": "tc-1", "toolName": "bash", "args": {"command": "ls"}},
+                raw={
+                    "type": "tool_execution_start",
+                    "toolCallId": "tc-1",
+                    "toolName": "bash",
+                    "args": {"command": "ls"},
+                },
             ),
             evidence_ref="ref-1",
         )
@@ -1021,7 +1067,13 @@ class ToolConvergenceTests(unittest.TestCase):
                 sequence=2,
                 kind="pi:tool_execution_update",
                 created_at=NOW,
-                raw={"type": "tool_execution_update", "toolCallId": "tc-1", "toolName": "bash", "args": {"command": "ls"}, "partialResult": {"content": [{"type": "text", "text": "part"}]}},
+                raw={
+                    "type": "tool_execution_update",
+                    "toolCallId": "tc-1",
+                    "toolName": "bash",
+                    "args": {"command": "ls"},
+                    "partialResult": {"content": [{"type": "text", "text": "part"}]},
+                },
             ),
             evidence_ref="ref-2",
         )
@@ -1030,7 +1082,13 @@ class ToolConvergenceTests(unittest.TestCase):
                 sequence=3,
                 kind="pi:tool_execution_end",
                 created_at=NOW,
-                raw={"type": "tool_execution_end", "toolCallId": "tc-1", "toolName": "bash", "result": {"content": [{"type": "text", "text": "done"}]}, "isError": False},
+                raw={
+                    "type": "tool_execution_end",
+                    "toolCallId": "tc-1",
+                    "toolName": "bash",
+                    "result": {"content": [{"type": "text", "text": "done"}]},
+                    "isError": False,
+                },
             ),
             evidence_ref="ref-3",
         )
@@ -1060,7 +1118,12 @@ class ToolConvergenceTests(unittest.TestCase):
                     "message": {
                         "role": "assistant",
                         "content": [
-                            {"type": "toolCall", "id": "tc-9", "name": "bash", "arguments": {"command": "ls"}}
+                            {
+                                "type": "toolCall",
+                                "id": "tc-9",
+                                "name": "bash",
+                                "arguments": {"command": "ls"},
+                            }
                         ],
                         "stopReason": "toolUse",
                         "timestamp": 1,
@@ -1146,7 +1209,12 @@ class DeltaStreamingTests(unittest.TestCase):
                 kind="codex-notification",
                 created_at=NOW,
                 raw={
-                    "item": {"id": "item-cmd", "type": "commandExecution", "command": "make test", "status": "inProgress"},
+                    "item": {
+                        "id": "item-cmd",
+                        "type": "commandExecution",
+                        "command": "make test",
+                        "status": "inProgress",
+                    },
                     "turnId": "turn-1",
                     "startedAtMs": 1,
                 },
@@ -1386,9 +1454,7 @@ class OverflowGapTests(unittest.IsolatedAsyncioTestCase):
             received: list[object] = []
             while not queue.empty():
                 received.append(queue.get_nowait())
-            envelopes = [
-                item for item in received if isinstance(item, ConversationEventEnvelope)
-            ]
+            envelopes = [item for item in received if isinstance(item, ConversationEventEnvelope)]
             gaps = [item for item in envelopes if item.mutation.op == "gap"]
             self.assertEqual(len(gaps), 1)
             gap = gaps[0]
@@ -1859,9 +1925,7 @@ class DormantReleaseTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertTrue(projector._closed)
         self.assertEqual(
-            projector._stream.store.page(
-                before_ordinal=None, limit=50, total_known=True
-            ).items,
+            projector._stream.store.page(before_ordinal=None, limit=50, total_known=True).items,
             (),
         )
         self.assertEqual(projector._native.live_turn_ids, {})

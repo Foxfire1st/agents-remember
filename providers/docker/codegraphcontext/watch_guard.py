@@ -93,8 +93,7 @@ def main() -> None:
         client = wait_for_ready(wait_seconds)
         if client is None:
             print(
-                f"[watch-guard] FalkorDB not ready after {wait_seconds}s; "
-                "starting cgc anyway",
+                f"[watch-guard] FalkorDB not ready after {wait_seconds}s; starting cgc anyway",
                 flush=True,
             )
         else:

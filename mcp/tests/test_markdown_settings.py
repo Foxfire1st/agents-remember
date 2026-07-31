@@ -12,12 +12,7 @@ from agents_remember.kernel.coordination_context.markdown_settings import parse_
 
 class MarkdownSettingsStorageTests(unittest.TestCase):
     def test_full_internal_storage_block_parses_mode_and_default(self) -> None:
-        block = (
-            "onboarding:\n"
-            "  storage:\n"
-            "    mode: repo-sidecar\n"
-            "    default: repo-sidecar\n"
-        )
+        block = "onboarding:\n  storage:\n    mode: repo-sidecar\n    default: repo-sidecar\n"
 
         storage, cross_repo, saw_settings = parse_settings_block(block, "internal")
 
@@ -41,12 +36,7 @@ class MarkdownSettingsStorageTests(unittest.TestCase):
         self.assertEqual(storage.default, "memory-repo")
 
     def test_explicit_default_after_mode_overrides_default_only(self) -> None:
-        block = (
-            "onboarding:\n"
-            "  storage:\n"
-            "    mode: repo-sidecar\n"
-            "    default: memory-repo\n"
-        )
+        block = "onboarding:\n  storage:\n    mode: repo-sidecar\n    default: memory-repo\n"
 
         storage, _cross_repo, _saw = parse_settings_block(block, "internal")
 
@@ -88,11 +78,7 @@ class MarkdownSettingsStorageTests(unittest.TestCase):
     def test_internal_and_external_topology_defaults_differ_without_storage(self) -> None:
         # With no storage block but a pathRules section the parser still returns a
         # StorageSettings whose mode reflects the topology default.
-        path_rules_only = (
-            "onboarding:\n"
-            "  pathRules:\n"
-            "    - path: src\n"
-        )
+        path_rules_only = "onboarding:\n  pathRules:\n    - path: src\n"
 
         internal_storage, _c1, _s1 = parse_settings_block(path_rules_only, "internal")
         external_storage, _c2, _s2 = parse_settings_block(path_rules_only, "external")
@@ -111,11 +97,7 @@ class MarkdownSettingsStorageTests(unittest.TestCase):
 
     def test_comments_and_blank_lines_are_ignored(self) -> None:
         block = (
-            "# top comment\n"
-            "onboarding:\n"
-            "\n"
-            "  storage:\n"
-            "    mode: memory-repo  # inline comment\n"
+            "# top comment\nonboarding:\n\n  storage:\n    mode: memory-repo  # inline comment\n"
         )
 
         storage, _cross_repo, saw_settings = parse_settings_block(block, "internal")
@@ -155,13 +137,7 @@ class MarkdownSettingsPathRulesTests(unittest.TestCase):
         self.assertEqual(rule.get("exclude_file_types"), [".min.js"])
 
     def test_global_path_rule_defaults_includes_to_star_when_absent(self) -> None:
-        block = (
-            "onboarding:\n"
-            "  pathRules:\n"
-            "    exclude:\n"
-            "      paths:\n"
-            "        - vendor/**\n"
-        )
+        block = "onboarding:\n  pathRules:\n    exclude:\n      paths:\n        - vendor/**\n"
 
         storage, _cross_repo, _saw = parse_settings_block(block, "internal")
 

@@ -477,9 +477,7 @@ class AgenticSettingsSeedTests(unittest.TestCase):
             self.assertTrue(settings_path.exists())
             seeded = json.loads(settings_path.read_text(encoding="utf-8"))
             self.assertEqual(seeded, default_agentic_settings_seed())
-            self.assertEqual(
-                seeded["orchestration"]["gateDelegation"], {"policy": "all-human"}
-            )
+            self.assertEqual(seeded["orchestration"]["gateDelegation"], {"policy": "all-human"})
 
     def test_existing_settings_file_is_never_clobbered(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -498,9 +496,7 @@ class AgenticSettingsSeedTests(unittest.TestCase):
                 provider_settings={},
             )
 
-            self.assertEqual(
-                settings_path.read_text(encoding="utf-8"), developer_content
-            )
+            self.assertEqual(settings_path.read_text(encoding="utf-8"), developer_content)
 
     def test_dry_run_counts_the_seed_without_writing(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

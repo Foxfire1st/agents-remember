@@ -134,7 +134,9 @@ def diff_projection(
         # A bare list isn't a node with a key, so it rides as a whole-value replacement
         # (like metrics/analytics) wrapped in a marker dict the client unwraps.
         deltas.append(
-            DeltaEvent("activeWorktreeGroups", {"activeWorktreeGroups": current.activeWorktreeGroups})
+            DeltaEvent(
+                "activeWorktreeGroups", {"activeWorktreeGroups": current.activeWorktreeGroups}
+            )
         )
     if prev.metrics != cur.metrics:
         deltas.append(DeltaEvent("metrics", current.metrics))

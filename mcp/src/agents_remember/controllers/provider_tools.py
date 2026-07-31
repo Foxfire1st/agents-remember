@@ -174,9 +174,13 @@ def _worktree_settings_override(target: WorktreeProviderTarget | None) -> Path |
 def _load_worktree_grepai_provider(settings_path: Path) -> dict[str, Any]:
     data = json.loads(settings_path.read_text(encoding="utf-8"))
     providers = data.get("contextProviders", {})
-    provider = providers.get("providers", {}).get("grepai-memory") if isinstance(providers, dict) else None
+    provider = (
+        providers.get("providers", {}).get("grepai-memory") if isinstance(providers, dict) else None
+    )
     if not isinstance(provider, dict):
-        raise ValueError(f"worktree grepai settings missing grepai-memory provider: {settings_path}")
+        raise ValueError(
+            f"worktree grepai settings missing grepai-memory provider: {settings_path}"
+        )
     return provider
 
 
@@ -599,9 +603,7 @@ def _normalized_repo_ids(repo_ids: list[str] | None) -> tuple[str, ...]:
     return tuple(normalized)
 
 
-def _canonical_repo_ids(
-    config: McpRuntimeConfig, repo_ids: tuple[str, ...]
-) -> tuple[str, ...]:
+def _canonical_repo_ids(config: McpRuntimeConfig, repo_ids: tuple[str, ...]) -> tuple[str, ...]:
     """Resolve user-supplied repo ids to their configured spelling, case-insensitively.
 
     MCP-configured repo ids can carry uppercase (e.g. ``Cobalt``). Accept any casing

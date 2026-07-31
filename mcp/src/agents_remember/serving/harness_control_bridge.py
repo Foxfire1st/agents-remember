@@ -530,9 +530,7 @@ class HarnessControlBridge:
         if not isinstance(payload, Mapping):
             raise HarnessControlError("adapter evidence payload must be an object")
         native_method = event.raw.get(AR_EVIDENCE_METHOD_KEY)
-        if native_method is not None and (
-            not isinstance(native_method, str) or not native_method
-        ):
+        if native_method is not None and (not isinstance(native_method, str) or not native_method):
             raise HarnessControlError("adapter evidence method must be non-empty text when present")
         self._append_evidence(
             event.sequence, event.kind, event.created_at, payload, native_method=native_method

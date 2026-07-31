@@ -20,9 +20,7 @@ from agents_remember.errors import AgentsRememberError
 # ``awaiting-developer`` is the NOTIFY-AND-CONTINUE turn-end state (leaf-28): the
 # model declares the turn complete and stops -- non-terminal, auto-resumed by the
 # next AR tool call (no gate, no wait).
-State = Literal[
-    "running", "paused", "blocked", "awaiting-developer", "completed", "abandoned"
-]
+State = Literal["running", "paused", "blocked", "awaiting-developer", "completed", "abandoned"]
 
 # Orthogonal to state (a lifecycle can be ``paused`` while in phase ``build``).
 # The enum is the session-lifecycle skill's heading vocabulary, hyphenated.
@@ -54,8 +52,7 @@ class GuardedStartError(LifecycleError):
 
     def __init__(self, active_id: str) -> None:
         super().__init__(
-            f"a lifecycle is already active ({active_id}); "
-            "end or switch it before starting another"
+            f"a lifecycle is already active ({active_id}); end or switch it before starting another"
         )
         self.active_id = active_id
 

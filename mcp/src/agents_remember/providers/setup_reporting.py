@@ -167,11 +167,7 @@ def setup_summary_paths(coordination_root: Path, action: str) -> dict[str, Path]
 def setup_summary_payload(payload: dict[str, Any]) -> dict[str, Any]:
     isolated = payload.get("isolatedProviderSettings")
     if isinstance(isolated, dict):
-        isolated = {
-            key: value
-            for key, value in isolated.items()
-            if key != "settings"
-        }
+        isolated = {key: value for key, value in isolated.items() if key != "settings"}
 
     return {
         "version": SUMMARY_VERSION,

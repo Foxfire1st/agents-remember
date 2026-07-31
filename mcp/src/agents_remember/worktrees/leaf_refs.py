@@ -403,7 +403,9 @@ def _resolve_repo_name(
             _leaf_candidates(coordination_root, repo_name),
         )
         raise LeafRefResolutionError(
-            "/".join(part for part in (parsed.repo_name, parsed.master_folder, parsed.value) if part),
+            "/".join(
+                part for part in (parsed.repo_name, parsed.master_folder, parsed.value) if part
+            ),
             repo_name=repo_name,
             reason="unmatchable",
             candidates=candidates,

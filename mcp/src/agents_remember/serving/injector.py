@@ -20,6 +20,7 @@ from agents_remember.serving.terminal_paste import (
 
 DeliveryOutcome = Literal["acked", "landed-unacked", "blocked", "failed"]
 
+
 @dataclass(frozen=True)
 class DeliveryRow:
     """One independently accepted dispatch input."""

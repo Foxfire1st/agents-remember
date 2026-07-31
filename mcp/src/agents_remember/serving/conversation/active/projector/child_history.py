@@ -102,9 +102,7 @@ class ChildHistoryProjection:
             )
         return await asyncio.shield(task)
 
-    def _finished(
-        self, thread_id: str, task: asyncio.Task[AgentHistoryHydration]
-    ) -> None:
+    def _finished(self, thread_id: str, task: asyncio.Task[AgentHistoryHydration]) -> None:
         if self.inflight.get(thread_id) is task:
             self.inflight.pop(thread_id, None)
         if not task.cancelled():
@@ -174,8 +172,7 @@ class ChildHistoryProjection:
                         output
                         for output in outputs
                         if not (
-                            isinstance(output, MappedItem)
-                            and is_agent_roster_item(output.item)
+                            isinstance(output, MappedItem) and is_agent_roster_item(output.item)
                         )
                     ]
                     outputs = [

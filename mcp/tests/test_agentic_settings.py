@@ -59,9 +59,7 @@ class MergePrecedenceTests(unittest.TestCase):
         settings = load_agentic_settings(self.coordination_root, self.repo_root)
 
         self.assertEqual(settings.spawn_harness, "codex")
-        self.assertEqual(
-            settings.sources, (agentic_settings_path(self.coordination_root),)
-        )
+        self.assertEqual(settings.sources, (agentic_settings_path(self.coordination_root),))
 
     def test_local_only(self) -> None:
         write_settings(
@@ -122,9 +120,7 @@ class MergePrecedenceTests(unittest.TestCase):
     def test_absent_files_mean_documented_defaults(self) -> None:
         settings = load_agentic_settings(self.coordination_root, self.repo_root)
 
-        self.assertIsNone(
-            settings.gate_policy.rule_for("closeout-approval").delegated_role
-        )
+        self.assertIsNone(settings.gate_policy.rule_for("closeout-approval").delegated_role)
         self.assertFalse(settings.gate_delegation_configured)
         self.assertEqual(settings.loops.defaults.max_rounds, 3)
         self.assertEqual(settings.loops.defaults.reviewer_reuse, "delta-verify")
@@ -143,9 +139,7 @@ class MergePrecedenceTests(unittest.TestCase):
         self.assertEqual(settings.sources, ())
 
     def test_repo_root_is_optional(self) -> None:
-        write_settings(
-            self.coordination_root, {"orchestration": {"spawn": {"harness": "claude"}}}
-        )
+        write_settings(self.coordination_root, {"orchestration": {"spawn": {"harness": "claude"}}})
 
         settings = load_agentic_settings(self.coordination_root)
 
@@ -165,21 +159,15 @@ class FailLoudTests(unittest.TestCase):
         self.tmp.cleanup()
 
     def test_unknown_orchestration_key_names_the_offending_file(self) -> None:
-        path = write_settings(
-            self.coordination_root, {"orchestration": {"lopps": {}}}
-        )
+        path = write_settings(self.coordination_root, {"orchestration": {"lopps": {}}})
 
         with self.assertRaisesRegex(AgenticSettingsError, "lopps") as caught:
             load_agentic_settings(self.coordination_root, self.repo_root)
         self.assertIn(str(path), str(caught.exception))
 
     def test_unknown_key_in_local_file_names_the_local_file(self) -> None:
-        write_settings(
-            self.coordination_root, {"orchestration": {"spawn": {"harness": "codex"}}}
-        )
-        local_path = write_settings(
-            self.repo_root, {"orchestration": {"spawn": {"harnes": "pi"}}}
-        )
+        write_settings(self.coordination_root, {"orchestration": {"spawn": {"harness": "codex"}}})
+        local_path = write_settings(self.repo_root, {"orchestration": {"spawn": {"harnes": "pi"}}})
 
         with self.assertRaisesRegex(AgenticSettingsError, "harnes") as caught:
             load_agentic_settings(self.coordination_root, self.repo_root)
@@ -214,18 +202,14 @@ class FailLoudTests(unittest.TestCase):
         )
         for family in ("concurrency", "roles", "loops", "spawn", "rolesPerLevel", "harnesses"):
             local_path = write_settings(self.repo_root, {"orchestration": {family: None}})
-            with self.assertRaisesRegex(
-                AgenticSettingsError, "inherit the global value"
-            ) as caught:
+            with self.assertRaisesRegex(AgenticSettingsError, "inherit the global value") as caught:
                 load_agentic_settings(self.coordination_root, self.repo_root)
             self.assertIn(f"orchestration.{family} is null", str(caught.exception))
             self.assertIn(str(local_path), str(caught.exception))
 
     def test_null_at_a_family_key_in_the_global_layer_also_refuses(self) -> None:
         """The null rule is uniform across BOTH layers (finding 6). A global-layer null refuses too."""
-        global_path = write_settings(
-            self.coordination_root, {"orchestration": {"loops": None}}
-        )
+        global_path = write_settings(self.coordination_root, {"orchestration": {"loops": None}})
         with self.assertRaisesRegex(AgenticSettingsError, "orchestration.loops is null") as caught:
             load_agentic_settings(self.coordination_root, self.repo_root)
         self.assertIn(str(global_path), str(caught.exception))
@@ -374,9 +358,7 @@ class TypedModelTests(unittest.TestCase):
 
     def test_complexity_thresholds_are_scale_validated(self) -> None:
         with self.assertRaisesRegex(AgenticSettingsError, "fullLoopAt"):
-            self._load(
-                {"loops": {"defaults": {"complexity": {"fullLoopAt": "extreme"}}}}
-            )
+            self._load({"loops": {"defaults": {"complexity": {"fullLoopAt": "extreme"}}}})
 
     def test_role_knobs_parse_and_default(self) -> None:
         settings = self._load(
@@ -396,12 +378,8 @@ class TypedModelTests(unittest.TestCase):
             RoleKnobs(harness="codex", model="gpt-5", effort="medium"),
         )
         self.assertEqual(settings.roles["orchestrator"], RoleKnobs(effort="high"))
-        self.assertEqual(
-            settings.roles["architect"], RoleKnobs(harness="claude", effort="high")
-        )
-        self.assertEqual(
-            settings.roles["curator"], RoleKnobs(harness="codex", effort="medium")
-        )
+        self.assertEqual(settings.roles["architect"], RoleKnobs(harness="claude", effort="high"))
+        self.assertEqual(settings.roles["curator"], RoleKnobs(harness="codex", effort="medium"))
         self.assertEqual(
             settings.roles["system-specialist"], RoleKnobs(harness="claude", model="fable")
         )
@@ -409,9 +387,7 @@ class TypedModelTests(unittest.TestCase):
         self.assertEqual(settings.role_knobs("manager"), RoleKnobs())
 
     def test_role_harness_must_be_a_registry_id(self) -> None:
-        with self.assertRaisesRegex(
-            AgenticSettingsError, "harness registry id.*claude-code"
-        ):
+        with self.assertRaisesRegex(AgenticSettingsError, "harness registry id.*claude-code"):
             self._load({"roles": {"worker": {"harness": "claude-code"}}})
 
     def test_spawn_harness_must_be_a_registry_id(self) -> None:
@@ -512,15 +488,11 @@ class TypedModelTests(unittest.TestCase):
 
     def test_human_pinned_gate_kind_cannot_be_delegated(self) -> None:
         with self.assertRaisesRegex(AgenticSettingsError, "human-pinned"):
-            self._load(
-                {"gateDelegation": {"kinds": {"push-approval": {"role": "manager"}}}}
-            )
+            self._load({"gateDelegation": {"kinds": {"push-approval": {"role": "manager"}}}})
 
     def test_unsupported_gate_kind_delegation_is_rejected(self) -> None:
         with self.assertRaisesRegex(AgenticSettingsError, "cannot be delegated"):
-            self._load(
-                {"gateDelegation": {"kinds": {"agent-question": {"role": "manager"}}}}
-            )
+            self._load({"gateDelegation": {"kinds": {"agent-question": {"role": "manager"}}}})
 
 
 class EscalationSettingsTests(unittest.TestCase):
@@ -681,9 +653,7 @@ class RolesPerLevelTests(unittest.TestCase):
     # The developer's canonical reviewer economics: cheap per leaf, smarter at the master seam,
     # smartest + workflows for the portfolio end-to-end.
     ECONOMICS: ClassVar[dict] = {
-        "roles": {
-            "reviewer": {"harness": "claude", "model": "sonnet", "effort": "high"}
-        },
+        "roles": {"reviewer": {"harness": "claude", "model": "sonnet", "effort": "high"}},
         "rolesPerLevel": {
             "master": {"reviewer": {"model": "opus", "effort": "xhigh"}},
             "portfolio": {"reviewer": {"model": "fable", "effort": "ultracode"}},
@@ -773,9 +743,7 @@ class RolesPerLevelTests(unittest.TestCase):
         settings = self._load(
             {
                 "roles": {"reviewer": {"promptKeywords": ["careful"]}},
-                "rolesPerLevel": {
-                    "portfolio": {"reviewer": {"promptKeywords": ["ultracode"]}}
-                },
+                "rolesPerLevel": {"portfolio": {"reviewer": {"promptKeywords": ["ultracode"]}}},
             }
         )
         self.assertEqual(
@@ -824,9 +792,7 @@ class HarnessesFamilyTests(unittest.TestCase):
         self.assertEqual(hermes.name, "hermes")
         self.assertEqual(hermes.defined_in, "settings")
         # Builtin order is preserved; new ids append.
-        self.assertEqual(
-            [h.id for h in settings.harnesses], ["claude", "codex", "pi", "hermes"]
-        )
+        self.assertEqual([h.id for h in settings.harnesses], ["claude", "codex", "pi", "hermes"])
 
     def test_argv_only_entry_derives_its_command(self) -> None:
         settings = self._load({"harnesses": {"hermes": {"argv": ["hermes", "--tui"]}}})
@@ -886,16 +852,10 @@ class HarnessesFamilyTests(unittest.TestCase):
 
     def test_vocabulary_pairs_must_come_together(self) -> None:
         with self.assertRaisesRegex(AgenticSettingsError, "effortFlagValues"):
-            self._load(
-                {"harnesses": {"hermes": {"command": "hermes", "effortFlag": "--r"}}}
-            )
+            self._load({"harnesses": {"hermes": {"command": "hermes", "effortFlag": "--r"}}})
         with self.assertRaisesRegex(AgenticSettingsError, "effortSessionCommand"):
             self._load(
-                {
-                    "harnesses": {
-                        "hermes": {"command": "hermes", "effortSessionValues": ["ultra"]}
-                    }
-                }
+                {"harnesses": {"hermes": {"command": "hermes", "effortSessionValues": ["ultra"]}}}
             )
 
     def test_effort_session_command_template_may_reference_only_value(self) -> None:

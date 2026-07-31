@@ -189,7 +189,9 @@ class ProviderMetricsStore:
             size = path.stat().st_size
         except OSError:
             return 0
-        budget = max_bytes if max_bytes is not None else retain_rows * _APPROX_METRICS_LINE_BYTES * 2
+        budget = (
+            max_bytes if max_bytes is not None else retain_rows * _APPROX_METRICS_LINE_BYTES * 2
+        )
         if size <= budget:
             return 0
         kept = _tail_lines(path, retain_rows)
@@ -267,18 +269,14 @@ def sample_provider_containers(
     # Review note: `docker stats` fed a stopped name can fail the WHOLE command
     # and blind every pressure number — only running containers get sampled.
     running_names = sorted(
-        name
-        for name, row in rows.items()
-        if str(row.get("State") or "").lower() == "running"
+        name for name, row in rows.items() if str(row.get("State") or "").lower() == "running"
     )
     stats = (
         _stats_rows(docker=docker, cwd=cwd, timeout=timeout, names=running_names)
         if running_names
         else {}
     )
-    containers = [
-        _container_sample(name, rows[name], stats.get(name)) for name in sorted(rows)
-    ]
+    containers = [_container_sample(name, rows[name], stats.get(name)) for name in sorted(rows)]
     return MetricsSnapshot(
         schema=PROVIDER_METRICS_SCHEMA, sampledAt=sampled_at, containers=containers
     )

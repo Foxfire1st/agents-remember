@@ -61,7 +61,9 @@ class CodexInterruptTests(unittest.IsolatedAsyncioTestCase):
             request_id=request_id,
         )
 
-    async def _status(self, turn: str = "turn-req-1", request_id: str = "req-1", *, reconcile=False):
+    async def _status(
+        self, turn: str = "turn-req-1", request_id: str = "req-1", *, reconcile=False
+    ):
         return await operations.interrupt_status(
             self.service,
             OPERATOR,
@@ -152,11 +154,14 @@ class CodexInterruptTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_control_unavailable_before_write_raises_503_class(self) -> None:
         await self._submit("req-1")
-        with mock.patch.object(
-            operations,
-            "interrupt_control",
-            side_effect=HarnessControlClientError("endpoint down", may_have_sent=False),
-        ), self.assertRaises(operations.ControlUnavailableError):
+        with (
+            mock.patch.object(
+                operations,
+                "interrupt_control",
+                side_effect=HarnessControlClientError("endpoint down", may_have_sent=False),
+            ),
+            self.assertRaises(operations.ControlUnavailableError),
+        ):
             await self._interrupt()
         with self.assertRaises(OperationNotFoundError):
             await self._status()

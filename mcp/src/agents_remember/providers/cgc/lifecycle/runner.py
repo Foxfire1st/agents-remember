@@ -74,7 +74,9 @@ def cgc_runner_image_build(args: argparse.Namespace, layout: CgcRuntimeLayout) -
     }
 
 
-def cgc_watcher_inspect(args: argparse.Namespace, layout: CgcRuntimeLayout) -> dict[str, Any] | None:
+def cgc_watcher_inspect(
+    args: argparse.Namespace, layout: CgcRuntimeLayout
+) -> dict[str, Any] | None:
     if args.dry_run:
         return None
     return docker_inspect_container(

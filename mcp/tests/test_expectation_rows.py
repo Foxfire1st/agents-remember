@@ -155,11 +155,11 @@ class ExpectationSettingsParserTests(unittest.TestCase):
         self.assertEqual(settings.sla_for("ack-by"), 300.0)
 
     def test_override_replaces_only_the_named_kind(self) -> None:
-        settings = _parse_expectations(
-            {"defaults": {"ack-by": 60.0}}, source="<test>"
-        )
+        settings = _parse_expectations({"defaults": {"ack-by": 60.0}}, source="<test>")
         self.assertEqual(settings.sla_for("ack-by"), 60.0)
-        self.assertEqual(settings.sla_for("briefed-by"), DEFAULT_EXPECTATION_SLA_SECONDS["briefed-by"])
+        self.assertEqual(
+            settings.sla_for("briefed-by"), DEFAULT_EXPECTATION_SLA_SECONDS["briefed-by"]
+        )
 
     def test_unknown_kind_fails_loud(self) -> None:
         with self.assertRaises(AgenticSettingsError):

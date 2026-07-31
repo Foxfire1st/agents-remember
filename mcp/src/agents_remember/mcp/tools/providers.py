@@ -53,9 +53,7 @@ def compact_diagnostics_payload(full: dict[str, Any], report_path: str) -> dict[
     already-on-disk current.json) were thousands of tokens per call; the report
     carries them, the response carries the path."""
     compact = {
-        key: value
-        for key, value in full.items()
-        if key not in {"rawStatus", "currentState"}
+        key: value for key, value in full.items() if key not in {"rawStatus", "currentState"}
     }
     compact["items"] = [
         {key: value for key, value in item.items() if key != "rawStatus"}
@@ -86,9 +84,7 @@ def provider_watchers_payload(
 def compact_watchers_payload(full: dict[str, Any], report_path: str) -> dict[str, Any]:
     """Per-provider outcomes inline; raw provider payloads in the report."""
     compact = {
-        key: value
-        for key, value in full.items()
-        if key not in {"steps", "results", "currentState"}
+        key: value for key, value in full.items() if key not in {"steps", "results", "currentState"}
     }
     if "steps" in full:
         compact["steps"] = [_compact_watcher_step(step) for step in full["steps"]]

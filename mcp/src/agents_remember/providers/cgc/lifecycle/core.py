@@ -121,11 +121,7 @@ def cgc_project_layouts_from_settings(
     primary_stable = stable_provider_id(str(primary["repoId"]))
     ordered_roots = [
         primary,
-        *[
-            root
-            for root in roots
-            if stable_provider_id(str(root["repoId"])) != primary_stable
-        ],
+        *[root for root in roots if stable_provider_id(str(root["repoId"])) != primary_stable],
     ]
     layouts = [
         cgc_runtime_layout_from_provider_settings(
@@ -138,7 +134,9 @@ def cgc_project_layouts_from_settings(
     return settings_path, provider_settings, layouts
 
 
-def cgc_backend_settings(provider_settings: dict[str, Any], layout: CgcRuntimeLayout) -> dict[str, Any]:
+def cgc_backend_settings(
+    provider_settings: dict[str, Any], layout: CgcRuntimeLayout
+) -> dict[str, Any]:
     backend_settings = cgc_backend_settings_dict(provider_settings)
     ports = cgc_backend_ports_dict(backend_settings)
     network = dict_value(backend_settings.get("network"))
@@ -158,9 +156,7 @@ def cgc_backend_settings(provider_settings: dict[str, Any], layout: CgcRuntimeLa
         "containerName": str(backend_settings.get("containerName", "ar-cgc-falkordb")),
         # FalkorDB v4 writes to /var/lib/falkordb/data, not /data; binding the
         # wrong destination leaves graphs in the ephemeral container layer.
-        "dataDestination": str(
-            backend_settings.get("dataDestination", "/var/lib/falkordb/data")
-        ),
+        "dataDestination": str(backend_settings.get("dataDestination", "/var/lib/falkordb/data")),
         "networkName": str(network.get("name", layout.network_name)),
         "falkordbHost": falkordb_host,
         "falkordbHostPort": falkordb_port.get("hostPort", "auto"),
@@ -225,7 +221,9 @@ def cgc_scoped_args(
     return scoped
 
 
-def cgc_apply_layout_state(layout: CgcRuntimeLayout, args: argparse.Namespace, settings_path: Path) -> None:
+def cgc_apply_layout_state(
+    layout: CgcRuntimeLayout, args: argparse.Namespace, settings_path: Path
+) -> None:
     if args.dry_run:
         return
     ensure_cgc_runtime_layout(layout)
@@ -275,7 +273,9 @@ def cgc_apply_backend_state(
     write_json(layouts[0].backend_state_file, backend_state)
 
 
-def cgc_backend_configured_state(layout: CgcRuntimeLayout, backend_settings: dict[str, Any]) -> dict[str, Any]:
+def cgc_backend_configured_state(
+    layout: CgcRuntimeLayout, backend_settings: dict[str, Any]
+) -> dict[str, Any]:
     return {
         "id": backend_settings.get("id", "codegraphcontext-falkordb"),
         "type": backend_settings.get("type", "falkordb-remote"),
@@ -286,9 +286,9 @@ def cgc_backend_configured_state(layout: CgcRuntimeLayout, backend_settings: dic
         "network": backend_settings.get("network"),
         "runtimeRoot": layout.backend_root.as_posix(),
         "dataRoot": layout.backend_data_root.as_posix(),
-        "status": read_json(layout.backend_state_file).get("backend", {}).get(
-            "status", "configured"
-        ),
+        "status": read_json(layout.backend_state_file)
+        .get("backend", {})
+        .get("status", "configured"),
     }
 
 

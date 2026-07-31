@@ -177,7 +177,15 @@ def _map_message(
 ) -> list[MapperOutput]:
     role = required_text(message.get("role"), "pi message.role")
     if role == "user":
-        return [_map_user_message(message, item_id=item_id, created_at=created_at, origin=origin, evidence_ref=evidence_ref)]
+        return [
+            _map_user_message(
+                message,
+                item_id=item_id,
+                created_at=created_at,
+                origin=origin,
+                evidence_ref=evidence_ref,
+            )
+        ]
     if role == "assistant":
         return _map_assistant_message(
             message,
@@ -315,11 +323,11 @@ def _map_assistant_message(
     if stop_reason in _COMPLETED_STOP_REASONS:
         outputs.append(MappedTurnOutcome(outcome="completed", stop_reason=stop_reason))
     elif stop_reason == "aborted":
-        outputs.extend(
-            _terminal_outputs(item_id, "interrupted", stop_reason, created_at, origin)
-        )
+        outputs.extend(_terminal_outputs(item_id, "interrupted", stop_reason, created_at, origin))
     elif stop_reason == "error":
-        outputs.extend(_terminal_outputs(item_id, "failed", error_message or stop_reason, created_at, origin))
+        outputs.extend(
+            _terminal_outputs(item_id, "failed", error_message or stop_reason, created_at, origin)
+        )
     return outputs
 
 
@@ -411,9 +419,7 @@ def _entry_tool_call_item(
             role="tool",
             kind="tool-call",
             phase="streaming",
-            blocks=(
-                ToolInputBlock(block_id="input", summary=name, data=part.get("arguments")),
-            ),
+            blocks=(ToolInputBlock(block_id="input", summary=name, data=part.get("arguments")),),
             correlation=ConversationCorrelation(tool_call_id=tool_id),
             created_at=created_at,
         )
@@ -431,13 +437,13 @@ def _live_tool_item(
     tool_name = optional_text(raw.get("toolName")) or "tool"
     blocks: list = []
     if include_input:
-        blocks.append(
-            ToolInputBlock(block_id="input", summary=tool_name, data=raw.get("args"))
-        )
+        blocks.append(ToolInputBlock(block_id="input", summary=tool_name, data=raw.get("args")))
     result = raw.get("result") if "result" in raw else raw.get("partialResult")
     if result is not None:
         blocks.append(
-            ToolOutputBlock(block_id="output", data={"result": result, "isError": raw.get("isError") is True})
+            ToolOutputBlock(
+                block_id="output", data={"result": result, "isError": raw.get("isError") is True}
+            )
         )
     return ConversationItem(
         item_id=tool_call_id,

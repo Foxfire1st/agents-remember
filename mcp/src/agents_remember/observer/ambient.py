@@ -159,7 +159,9 @@ class AmbientLifecycle:
         with self._lock:
             current = self._require_active()
             if current.state != "running":
-                raise LifecycleError(f"cannot block from state {current.state!r}; only running blocks")
+                raise LifecycleError(
+                    f"cannot block from state {current.state!r}; only running blocks"
+                )
             self.current = replace(current, state="blocked")
             ask = build_ask(kind, prompt, options)
             self._emit_locked(
@@ -377,14 +379,15 @@ class AmbientLifecycle:
         adopted worktree lifecycle) and is session-traceable by construction.
         """
         projected = [
-            {key: entry[key] for key in _READ_PACKET_FACTS if key in entry}
-            for entry in files
+            {key: entry[key] for key in _READ_PACKET_FACTS if key in entry} for entry in files
         ]
         with self._lock:
             if self.current is None:
                 return
             with contextlib.suppress(ValidationError, OSError):
-                self._emit_locked("read.packet", "observed", "model", repoId=repo_id, files=projected)
+                self._emit_locked(
+                    "read.packet", "observed", "model", repoId=repo_id, files=projected
+                )
 
     # --- served-onboarding dedup ledger -----------------------------------
 
@@ -620,6 +623,7 @@ def build_ask(
 
 
 # --- process-global registry ----------------------------------------------
+
 
 class _AmbientRegistry:
     """Holds the one ambient lifecycle for this server process.

@@ -70,9 +70,7 @@ def resolve_running_entry(
     if entry is None or entry.status != "running":
         raise UnknownSessionError("unknown or not-running AR session")
     if entry.kind != "harness" or entry.control_endpoint is None:
-        raise UnsupportedSessionError(
-            "session has no native protocol control endpoint"
-        )
+        raise UnsupportedSessionError("session has no native protocol control endpoint")
     if not runtime.host.has_session(entry.tmux_name):
         raise UnknownSessionError("AR session is not alive")
     return entry
@@ -94,9 +92,7 @@ def build_identity(
         )
     vendor_id = snapshot.vendor_session_id
     if not vendor_id:
-        raise UnsupportedSessionError(
-            "session has no proven native conversation identity yet"
-        )
+        raise UnsupportedSessionError("session has no proven native conversation identity yet")
     identity = ActiveConversationRef(
         harness_id=mapper.harness_id,
         vendor_conversation_id=vendor_id,

@@ -163,9 +163,7 @@ def grepai_embedder_runtime_details(
     inspect_data: dict[str, Any] | None,
 ) -> dict[str, Any]:
     http_mapping = (
-        docker_container_port(inspect_data, embedder["httpContainerPort"])
-        if inspect_data
-        else None
+        docker_container_port(inspect_data, embedder["httpContainerPort"]) if inspect_data else None
     )
     actual_data_mount = docker_data_mount_source(inspect_data, embedder["dataDestination"])
     connected_networks = sorted(docker_container_networks(inspect_data))
@@ -265,7 +263,13 @@ def grepai_embedder_start_context(
 ) -> tuple[Path, dict[str, Any], GrepaiRuntimeLayout, dict[str, Any], str]:
     settings_path, provider_settings, layout = grepai_layout_from_args(args)
     embedder = grepai_embedder_backend_settings(provider_settings, layout)
-    return settings_path, provider_settings, layout, embedder, grepai_network_name(provider_settings)
+    return (
+        settings_path,
+        provider_settings,
+        layout,
+        embedder,
+        grepai_network_name(provider_settings),
+    )
 
 
 def grepai_embedder_external_start_result(
@@ -306,12 +310,16 @@ def grepai_embedder_remove_mismatched_container(
         timeout=args.timeout,
     )
     if result["returncode"] != 0:
-        return inspect_data, result, {
-            "provider": "grepai",
-            "action": "embedder-start",
-            "ok": False,
-            "command": result,
-        }
+        return (
+            inspect_data,
+            result,
+            {
+                "provider": "grepai",
+                "action": "embedder-start",
+                "ok": False,
+                "command": result,
+            },
+        )
     return None, result, None
 
 
@@ -439,7 +447,9 @@ def grepai_embedder_create_start_result(
             compose=grepai_compose_summary(render),
             migration=migration,
         )
-    up_result = run_compose(render, command_args, cwd=layout.coordination_root, timeout=args.timeout)
+    up_result = run_compose(
+        render, command_args, cwd=layout.coordination_root, timeout=args.timeout
+    )
     if up_result["returncode"] != 0:
         return {
             "provider": "grepai",

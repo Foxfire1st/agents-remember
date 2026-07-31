@@ -123,9 +123,10 @@ class MountedBundleTests(unittest.TestCase):
         # there contradicted this very response's "the API is unaffected" and made the API's
         # method semantics depend on whether a frontend build happened to be present.
         # StaticFiles raises 405 for anything but GET/HEAD; the absent-bundle mount must too.
-        with TestClient(self._app(None)) as missing, TestClient(
-            self._app(_bundle(self.tmp / "dashboard"))
-        ) as built:
+        with (
+            TestClient(self._app(None)) as missing,
+            TestClient(self._app(_bundle(self.tmp / "dashboard"))) as built,
+        ):
             for verb in ("post", "put", "delete", "patch"):
                 with self.subTest(verb=verb):
                     self.assertEqual(

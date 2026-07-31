@@ -280,9 +280,7 @@ def test_stable_identity_revision_ordinal_and_unknown_input_survive_wire_round_t
 def test_unknown_input_and_controlled_terminal_provenance_fail_closed() -> None:
     item = _unknown_input_item()
     with pytest.raises(ValidationError, match="exact lane/producer/strength"):
-        ConversationItem.model_validate(
-            {**item.model_dump(), "source": "cockpit-composer"}
-        )
+        ConversationItem.model_validate({**item.model_dump(), "source": "cockpit-composer"})
     with pytest.raises(ValidationError, match="cannot claim a producer"):
         ConversationItem.model_validate(
             {
@@ -349,9 +347,7 @@ def test_unique_item_sources_enforce_the_exact_authority_cross_product() -> None
                 "origin": f"{source} authority",
                 "producer": producer,
             }
-            provenance.update(
-                {key: value for key, value in override.items() if key != "lane"}
-            )
+            provenance.update({key: value for key, value in override.items() if key != "lane"})
             with pytest.raises(ValidationError, match="exact lane/producer/strength"):
                 ConversationItem.model_validate(
                     {
@@ -1037,9 +1033,7 @@ def test_queue_projection_exposes_withdrawal_identity_only_for_queued_cockpit_wo
     assert queue.items[0].cockpit is not None
     assert queue.items[1].cockpit is None
     with pytest.raises(ValidationError, match="only a queued cockpit"):
-        OperationQueueItem.model_validate(
-            {**terminal_row.model_dump(), "withdrawable": True}
-        )
+        OperationQueueItem.model_validate({**terminal_row.model_dump(), "withdrawable": True})
     with pytest.raises(ValidationError, match="private"):
         OperationQueueItem.model_validate(
             {**terminal_row.model_dump(), "cockpit": cockpit.model_dump()}
@@ -1219,10 +1213,7 @@ def test_agent_ref_pins_status_vocabulary_and_additive_camel_case_shape() -> Non
             "status": "running",
         }
     )
-    assert (
-        ConversationAgentRef.model_validate(full.model_dump(mode="json", by_alias=True))
-        == full
-    )
+    assert ConversationAgentRef.model_validate(full.model_dump(mode="json", by_alias=True)) == full
     for status in get_args(ConversationAgentStatus):
         assert ConversationAgentRef(agent_id="agent-1", status=status).status == status
 
@@ -1282,9 +1273,7 @@ def test_library_agent_row_is_additive_and_evidence_bound() -> None:
         }
     )
     assert (
-        ConversationLibraryAgentRow.model_validate(
-            full.model_dump(mode="json", by_alias=True)
-        )
+        ConversationLibraryAgentRow.model_validate(full.model_dump(mode="json", by_alias=True))
         == full
     )
     with pytest.raises(ValidationError):
@@ -1317,9 +1306,7 @@ def test_library_row_agents_and_page_agents_note_default_to_absent() -> None:
     )
     assert grouped.agents == (agent_row,)
     assert (
-        ConversationLibraryRow.model_validate(
-            grouped.model_dump(mode="json", by_alias=True)
-        )
+        ConversationLibraryRow.model_validate(grouped.model_dump(mode="json", by_alias=True))
         == grouped
     )
 

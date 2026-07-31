@@ -129,9 +129,7 @@ class ActionEvaluationContext:
     kind: str | None = None
 
 
-def _find_actions(
-    projection: WorkspaceProjection, target: str
-) -> list[ActionAvailability] | None:
+def _find_actions(projection: WorkspaceProjection, target: str) -> list[ActionAvailability] | None:
     """The target node's precomputed actions (lifecycle by id, enclosure by name), or None."""
     for lifecycle in projection.lifecycles:
         if lifecycle.id == target:
@@ -191,8 +189,7 @@ def _dismiss_action_outcome(
             },
         )
     if target is None and not (
-        (context.kind == "gate-open" and context.gate_id)
-        or context.kind == "actionable-drift"
+        (context.kind == "gate-open" and context.gate_id) or context.kind == "actionable-drift"
     ):
         return ActionOutcome(
             400,

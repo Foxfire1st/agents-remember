@@ -329,9 +329,7 @@ def _map_task_lifecycle(
     last_tool_name = optional_text(raw.get("last_tool_name"))
     if subtype == "task_started":
         # The binding authority: both ids are required evidence on this frame.
-        join_key = required_text(
-            raw.get("tool_use_id"), "claude task_started.tool_use_id"
-        )
+        join_key = required_text(raw.get("tool_use_id"), "claude task_started.tool_use_id")
         agent_status: ConversationAgentStatus = "running"
         phase: ItemPhase = "streaming"
     elif subtype == "task_progress":
@@ -349,8 +347,7 @@ def _map_task_lifecycle(
             subagent_type=subagent_type,
             # task_started's description is the task's own; a progress frame's
             # description is a transient activity label, so the record keeps the first.
-            description=(binding.description if binding is not None else None)
-            or frame_description,
+            description=(binding.description if binding is not None else None) or frame_description,
             status=agent_status,
         ),
     )
@@ -443,9 +440,7 @@ def _map_background_tasks_changed(
     session_id = _session_key(raw)
     outputs: list[MapperOutput] = []
     for position, entry in enumerate(tasks):
-        entry_object = required_object(
-            entry, f"claude background_tasks_changed.tasks[{position}]"
-        )
+        entry_object = required_object(entry, f"claude background_tasks_changed.tasks[{position}]")
         task_id = required_text(
             entry_object.get("task_id"), "claude background_tasks_changed.task_id"
         )
@@ -505,9 +500,7 @@ def map_transcript_echo(
 
     if entry.get("role") != "user":
         raise UnmappableShape("claude transcript echo is only consumed for user submissions")
-    item_id = required_text(
-        entry.get("vendorCorrelationId"), "claude replay correlation uuid"
-    )
+    item_id = required_text(entry.get("vendorCorrelationId"), "claude replay correlation uuid")
     request_id = optional_text(entry.get("requestId"))
     created_at = optional_text(entry.get("createdAt"))
     return [
@@ -525,9 +518,7 @@ def map_transcript_echo(
                 role="user",
                 kind="message",
                 phase="completed",
-                blocks=(
-                    TextBlock(block_id="text", text=str(entry.get("text") or "")),
-                ),
+                blocks=(TextBlock(block_id="text", text=str(entry.get("text") or "")),),
                 correlation=(
                     ConversationCorrelation(request_id=request_id) if request_id else None
                 ),
@@ -804,9 +795,7 @@ def _map_tool_carrier(
                 # A parent-timeline result settling a bound Agent call carries the
                 # roster identity the task_* evidence bound to that join key.
                 block_agent = _spawned_agent_ref(session_id, tool_use_id)
-            outputs.append(
-                _map_tool_result(block, created_at=created_at, agent=block_agent)
-            )
+            outputs.append(_map_tool_result(block, created_at=created_at, agent=block_agent))
         elif block_type == "text" and agent is not None:
             # A sidechain user frame's text is the sub-agent's own input record (the
             # 2.1.220 probe shows the task prompt echo as the first sidechain user
@@ -928,9 +917,7 @@ def _map_result(
         detail = result_text
     elif isinstance(errors, list):
         detail = "\n".join(item for item in errors if isinstance(item, str))
-    stop_reason = optional_text(raw.get("stop_reason")) or optional_text(
-        raw.get("terminal_reason")
-    )
+    stop_reason = optional_text(raw.get("stop_reason")) or optional_text(raw.get("terminal_reason"))
     outputs: list[MapperOutput] = [
         MappedItem(
             item=ConversationItem(

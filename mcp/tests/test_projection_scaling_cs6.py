@@ -72,7 +72,10 @@ class GateReadFoldTests(unittest.TestCase):
             for index in range(lifecycles):
                 store.append(
                     GateRecord(
-                        id=f"g{index}", ts=NOW.isoformat(), kind="plan-approval", state="open",
+                        id=f"g{index}",
+                        ts=NOW.isoformat(),
+                        kind="plan-approval",
+                        state="open",
                         lifecycleId=f"life-{index}",
                     )
                 )
@@ -103,8 +106,12 @@ class TaskDocSharedCacheTests(unittest.TestCase):
             (tasks / f"leaf-{index}.json").write_text(
                 json.dumps(
                     {
-                        "schema": TASK_DOCUMENT_SCHEMA, "kind": "light", "id": f"L{index}",
-                        "title": "t", "repo": "repo", "status": "planning",
+                        "schema": TASK_DOCUMENT_SCHEMA,
+                        "kind": "light",
+                        "id": f"L{index}",
+                        "title": "t",
+                        "repo": "repo",
+                        "status": "planning",
                         "createdAt": NOW.isoformat(),
                     }
                 ),
@@ -199,9 +206,7 @@ class LandingProjectionHotPathTests(unittest.TestCase):
             )
             contract.contract_path.parent.mkdir(parents=True, exist_ok=True)
             write_contract(contract.contract_path, contract)
-            snapshot = contract_snapshot.build_contract_snapshot(
-                coordination_root / "tasks"
-            )
+            snapshot = contract_snapshot.build_contract_snapshot(coordination_root / "tasks")
             original = EngineProcessFacts(
                 contract={"contract_path": contract.contract_path.as_posix()},
                 guidance={"phase": "work"},
@@ -316,8 +321,13 @@ class LifecycleLogCacheTests(unittest.TestCase):
             for seq in range(events_per_log):
                 store.append(
                     Event(
-                        id=f"{lifecycle}-{seq}", ts=NOW.isoformat(), kind="test.event",
-                        trust="observed", actor="system", data={}, lifecycleId=f"life-{lifecycle}",
+                        id=f"{lifecycle}-{seq}",
+                        ts=NOW.isoformat(),
+                        kind="test.event",
+                        trust="observed",
+                        actor="system",
+                        data={},
+                        lifecycleId=f"life-{lifecycle}",
                     )
                 )
         projection_store._lifecycle_log_cache.clear()
@@ -404,8 +414,13 @@ class TaskDocumentsPayloadBudgetTests(unittest.TestCase):
 
     def _doc_node(self, index: int, body_len: int) -> TaskDocNode:
         return TaskDocNode(
-            id=f"L{index}", repository="repo", title="t", status="planning", kind="light",
-            docPath=f"tasks/repo/leaf-{index}.json", objective="x" * body_len,
+            id=f"L{index}",
+            repository="repo",
+            title="t",
+            status="planning",
+            kind="light",
+            docPath=f"tasks/repo/leaf-{index}.json",
+            objective="x" * body_len,
         )
 
     def _write_doc(self, coordination_root: Path, index: int, body_len: int) -> Path:
@@ -459,7 +474,9 @@ class TaskDocumentsPayloadBudgetTests(unittest.TestCase):
                     "createdAt": NOW.isoformat(),
                     "objective": "m" * body_len,
                     "sections": [{"heading": "Long", "body": "s" * body_len}],
-                    "decisions": [{"at": NOW.isoformat(), "decision": "d" * body_len, "rationale": "r"}],
+                    "decisions": [
+                        {"at": NOW.isoformat(), "decision": "d" * body_len, "rationale": "r"}
+                    ],
                 }
             ),
             encoding="utf-8",
@@ -471,7 +488,9 @@ class TaskDocumentsPayloadBudgetTests(unittest.TestCase):
             generatedAt=NOW.isoformat(), analytics=Analytics(taskDocuments=docs)
         )
 
-    def test_task_document_broadcast_summaries_are_body_free_and_windowed_at_two_sizes(self) -> None:
+    def test_task_document_broadcast_summaries_are_body_free_and_windowed_at_two_sizes(
+        self,
+    ) -> None:
         body_len = 1024
         for count in (TASK_DOCUMENT_SUMMARY_LIMIT + 20, TASK_DOCUMENT_SUMMARY_LIMIT + 200):
             with self.subTest(count=count), tempfile.TemporaryDirectory() as tmp:
@@ -528,11 +547,15 @@ class TaskDocumentsPayloadBudgetTests(unittest.TestCase):
         over = self._projection(over_docs)
 
         with self.assertNoLogs(projection_store.logger, level="WARNING"):
-            measured_under = projection_store._warn_if_task_documents_payload_over_budget(under, now=NOW)
+            measured_under = projection_store._warn_if_task_documents_payload_over_budget(
+                under, now=NOW
+            )
         self.assertLessEqual(measured_under, TASK_DOCUMENTS_PAYLOAD_BUDGET_BYTES)
 
         with self.assertLogs(projection_store.logger, level="WARNING") as captured:
-            measured_over = projection_store._warn_if_task_documents_payload_over_budget(over, now=NOW)
+            measured_over = projection_store._warn_if_task_documents_payload_over_budget(
+                over, now=NOW
+            )
         self.assertGreater(measured_over, TASK_DOCUMENTS_PAYLOAD_BUDGET_BYTES)
         self.assertIn("taskDocuments", captured.output[0])
 

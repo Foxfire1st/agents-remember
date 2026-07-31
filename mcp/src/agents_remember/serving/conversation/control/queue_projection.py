@@ -80,7 +80,9 @@ def _queue_row(
     epoch: str,
     item: OperationTimelineItem,
 ) -> OperationQueueItem:
-    identity = OperationIdentity(kind=item.kind, operation_id=item.operation_id, sequence=item.sequence)
+    identity = OperationIdentity(
+        kind=item.kind, operation_id=item.operation_id, sequence=item.sequence
+    )
     phase = cast(Literal["queued", "dispatching", "unknown"], item.state)
     source = item.source
     assert source is not None  # prompt rows always carry a submission source

@@ -1140,7 +1140,9 @@ class WorktreeSupportTests(unittest.TestCase):
         # executable choices -- passing each advertised memory_choice must DO something, never return
         # the identical block. 'custom' (wired nowhere) is no longer advertised.
         with tempfile.TemporaryDirectory() as tmp:
-            contract, _memory_repo, _unmapped, _content = self._unmapped_external_contract(Path(tmp))
+            contract, _memory_repo, _unmapped, _content = self._unmapped_external_contract(
+                Path(tmp)
+            )
             blocked: dict[str, Any] = worktree_manager.prepare_memory_for_start(
                 contract, worktree_manager.WorktreeArgs(memory_choice=None, dry_run=True)
             )

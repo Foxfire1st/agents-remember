@@ -69,9 +69,7 @@ class QueueProjectionTests(unittest.IsolatedAsyncioTestCase):
             ),
         )
 
-    async def _legacy_submit(
-        self, request_id: str, text: str, source: SubmissionSource
-    ) -> None:
+    async def _legacy_submit(self, request_id: str, text: str, source: SubmissionSource) -> None:
         await asyncio.to_thread(
             submit_control_prompt,
             self.harness.control_entry,
@@ -105,7 +103,9 @@ class QueueProjectionTests(unittest.IsolatedAsyncioTestCase):
         assert cockpit.cockpit is not None
         self.assertEqual(cockpit.cockpit.redacted_preview, "the exact cockpit draft body")
         self.assertFalse(cockpit.cockpit.preview_truncated)
-        self.assertEqual(cockpit.cockpit.content_digest, payload_digest("the exact cockpit draft body"))
+        self.assertEqual(
+            cockpit.cockpit.content_digest, payload_digest("the exact cockpit draft body")
+        )
         self.assertTrue(cockpit.cockpit.withdrawal_ref.startswith("ar-wdr1."))
         for source in ("terminal", "durable"):
             self.assertFalse(by_source[source].withdrawable)
@@ -114,7 +114,10 @@ class QueueProjectionTests(unittest.IsolatedAsyncioTestCase):
         serialized = json.dumps(projection.model_dump(mode="json", by_alias=True))
         self.assertNotIn("terminal body never crosses", serialized)
         self.assertNotIn("durable body never crosses", serialized)
-        self.assertNotIn("the exact cockpit draft body", serialized.replace("the exact cockpit draft body", "", 1))
+        self.assertNotIn(
+            "the exact cockpit draft body",
+            serialized.replace("the exact cockpit draft body", "", 1),
+        )
 
     async def test_legacy_cockpit_row_reports_empty_held_content_honestly(self) -> None:
         await drive_activity(self.harness, "running")
@@ -253,7 +256,9 @@ class WithdrawalRecoveryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.outcome, "withdrawn")
         self.assertEqual(response.revision, 1)
         self.assertEqual(response.recovery.text, "the exact withdrawn draft")
-        self.assertEqual(response.recovery.content_digest, payload_digest("the exact withdrawn draft"))
+        self.assertEqual(
+            response.recovery.content_digest, payload_digest("the exact withdrawn draft")
+        )
         self.assertEqual(response.recovery.submitted_draft_revision, 7)
         self.assertTrue(response.recovery.recovery_ref.startswith("ar-wrr1."))
         self.assertEqual(withdrawals.withdraw_http_status(response), 200)
@@ -268,7 +273,9 @@ class WithdrawalRecoveryTests(unittest.IsolatedAsyncioTestCase):
         row = await self._queue_row(1)
         first = await self._withdraw(row, "wd-2")
         replay = await self._withdraw(row, "wd-2")
-        assert isinstance(first, WithdrawnQueueResponse) and isinstance(replay, WithdrawnQueueResponse)
+        assert isinstance(first, WithdrawnQueueResponse) and isinstance(
+            replay, WithdrawnQueueResponse
+        )
         self.assertEqual(replay.revision, first.revision)
         self.assertEqual(replay.outcome, "withdrawn")
         self.assertEqual(replay.recovery.text, "replay body")

@@ -68,7 +68,9 @@ from agents_remember.serving.terminal_liveness import (
 NOW = datetime(2026, 7, 9, 12, 0, 0, tzinfo=UTC)
 
 
-def _signal(record_id: str, *, ts: datetime, detail: str = "turn-state-stale") -> SupervisorSignalRecord:
+def _signal(
+    record_id: str, *, ts: datetime, detail: str = "turn-state-stale"
+) -> SupervisorSignalRecord:
     return SupervisorSignalRecord(
         id=record_id,
         ts=ts.isoformat(),
@@ -133,7 +135,9 @@ class SupervisorSignalStoreScalingTests(unittest.TestCase):
                 cooldown_seconds=900.0,
                 records=snapshot,
             )
-        assert_bounded_count(reads["count"], 0, label="signal-store reads across 50 cooldown checks")
+        assert_bounded_count(
+            reads["count"], 0, label="signal-store reads across 50 cooldown checks"
+        )
 
     def test_read_is_corrupt_line_tolerant(self) -> None:
         """CS-6 D3 robustness: a torn/legacy line is skipped, not raised -- one bad append cannot
@@ -162,9 +166,7 @@ class ProviderMetricsTailReadTests(unittest.TestCase):
             for index in range(count):
                 # ~pad each line past the tail block so the tail must span multiple reads.
                 handle.write(
-                    json.dumps(
-                        {"schema": PROVIDER_METRICS_SCHEMA, "seq": index, "pad": "x" * 200}
-                    )
+                    json.dumps({"schema": PROVIDER_METRICS_SCHEMA, "seq": index, "pad": "x" * 200})
                     + "\n"
                 )
 
@@ -246,16 +248,26 @@ class EventStoreToleranceTests(unittest.TestCase):
             # Write to a lifecycle log: one good, one torn, one good.
             store.append(
                 Event(
-                    id="g1", ts=NOW.isoformat(), kind="test.b", trust="observed",
-                    actor="system", data={}, lifecycleId="life-1",
+                    id="g1",
+                    ts=NOW.isoformat(),
+                    kind="test.b",
+                    trust="observed",
+                    actor="system",
+                    data={},
+                    lifecycleId="life-1",
                 )
             )
             with path.open("a", encoding="utf-8") as handle:
                 handle.write('{"id": "torn", "ts": "oops"\n')  # truncated + bad ts
             store.append(
                 Event(
-                    id="g2", ts=NOW.isoformat(), kind="test.c", trust="observed",
-                    actor="system", data={}, lifecycleId="life-1",
+                    id="g2",
+                    ts=NOW.isoformat(),
+                    kind="test.c",
+                    trust="observed",
+                    actor="system",
+                    data={},
+                    lifecycleId="life-1",
                 )
             )
             events = store.read("life-1")
@@ -298,17 +310,24 @@ class LifecycleHeartbeatSidecarTests(unittest.TestCase):
                 log_lines = log_path.read_text(encoding="utf-8").splitlines()
                 self.assertEqual(len(log_lines), 1)
                 self.assertNotIn("lifecycle.heartbeat", log_path.read_text(encoding="utf-8"))
-                assert_bounded_file_size(log_path, 1024, label=f"heartbeat-free lifecycle log {beats}")
+                assert_bounded_file_size(
+                    log_path, 1024, label=f"heartbeat-free lifecycle log {beats}"
+                )
                 assert_bounded_file_size(sidecar_path, 1024, label=f"heartbeat sidecar {beats}")
                 events = store.read("life-1")
-                self.assertEqual([event.kind for event in events], ["lifecycle.started", "lifecycle.heartbeat"])
+                self.assertEqual(
+                    [event.kind for event in events], ["lifecycle.started", "lifecycle.heartbeat"]
+                )
                 self.assertEqual(events[-1].id, f"beat-{beats - 1}")
 
     def test_prune_fully_reclaims_beaten_lifecycles_before_fleeting_reap_at_two_sizes(self) -> None:
         """B1/F7/CS-6 D3: pruning owns every sidecar plus the lifecycle directory; the later
         opportunistic fleeting reap sees no heartbeat-only orphan left behind."""
         for lifecycle_count in (10, 100):
-            with self.subTest(lifecycle_count=lifecycle_count), tempfile.TemporaryDirectory() as tmp:
+            with (
+                self.subTest(lifecycle_count=lifecycle_count),
+                tempfile.TemporaryDirectory() as tmp,
+            ):
                 root = Path(tmp)
                 store = EventStore(root)
                 for index in range(lifecycle_count):
@@ -356,8 +375,12 @@ class ExpectationCompactTests(unittest.TestCase):
 
     def _terminal(self, row_id: str, *, state: str, at: datetime) -> ExpectationRow:
         return ExpectationRow(
-            id=row_id, ts=at.isoformat(), kind="briefed-by", state=state,  # type: ignore[arg-type]
-            createdAt=(at - timedelta(minutes=5)).isoformat(), dueAt=at.isoformat(),
+            id=row_id,
+            ts=at.isoformat(),
+            kind="briefed-by",
+            state=state,  # type: ignore[arg-type]
+            createdAt=(at - timedelta(minutes=5)).isoformat(),
+            dueAt=at.isoformat(),
             sourceId=f"src-{row_id}",
             metAt=at.isoformat() if state == "met" else None,
             missedAt=at.isoformat() if state == "missed" else None,
@@ -370,11 +393,17 @@ class ExpectationCompactTests(unittest.TestCase):
         def compacted_size(stale_count: int) -> float:
             store = ExpectationRowStore(Path(self.tmp.name) / f"n{stale_count}")
             for index in range(stale_count):
-                store.append(self._terminal(f"old-{index}", state="met", at=NOW - timedelta(days=2)))
+                store.append(
+                    self._terminal(f"old-{index}", state="met", at=NOW - timedelta(days=2))
+                )
             for index in range(3):
                 write_expectation_row(
-                    store, row_id=f"pending-{index}", now=NOW - timedelta(minutes=1),
-                    kind="briefed-by", sla_seconds=3600.0, source_id=f"seat-{index}",
+                    store,
+                    row_id=f"pending-{index}",
+                    now=NOW - timedelta(minutes=1),
+                    kind="briefed-by",
+                    sla_seconds=3600.0,
+                    source_id=f"seat-{index}",
                 )
             store.append(self._terminal("recent", state="missed", at=NOW - timedelta(seconds=30)))
             removed, kept = store.compact(now=NOW)
@@ -471,10 +500,14 @@ class ToleranceBatchTests(unittest.TestCase):
     def test_served_store_read_tolerant(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             store = ServedStore(Path(tmp))
-            store.append("life-1", ServedRecord(kind="overview", path="a", hash="h1", ts=NOW.isoformat()))
+            store.append(
+                "life-1", ServedRecord(kind="overview", path="a", hash="h1", ts=NOW.isoformat())
+            )
             with store.log_path("life-1").open("a", encoding="utf-8") as handle:
                 handle.write('{"kind": "overview", "path"\n')
-            store.append("life-1", ServedRecord(kind="overview", path="b", hash="h2", ts=NOW.isoformat()))
+            store.append(
+                "life-1", ServedRecord(kind="overview", path="b", hash="h2", ts=NOW.isoformat())
+            )
             self.assertEqual({r.path for r in store.read("life-1")}, {"a", "b"})
 
 
@@ -536,7 +569,9 @@ class TerminalCatalogSweepScalingTests(unittest.TestCase):
     def _sweep_disk_ops(self, rows: int) -> tuple[int, int]:
         with tempfile.TemporaryDirectory() as tmp:
             catalog = _DiskCountingCatalog(Path(tmp) / f"terminal-sessions-{rows}.json")
-            with catalog.batch():  # seed once (the batch itself is what makes this O(n), not O(n^2))
+            with (
+                catalog.batch()
+            ):  # seed once (the batch itself is what makes this O(n), not O(n^2))
                 for index in range(rows):
                     catalog.upsert(_running_harness_entry(f"s{index:05d}"))
             sweeper = TerminalCatalogLivenessSweeper(
@@ -610,16 +645,28 @@ class EventRiverCompactionTests(unittest.TestCase):
         recent_ts = (NOW - timedelta(minutes=5)).isoformat()
         for index in range(old_rows):
             store.append(
-                Event(id=f"old-{index:06d}", ts=old_ts, kind="supervisor.redeliver",
-                      trust="observed", actor="system", data={"n": index})
+                Event(
+                    id=f"old-{index:06d}",
+                    ts=old_ts,
+                    kind="supervisor.redeliver",
+                    trust="observed",
+                    actor="system",
+                    data={"n": index},
+                )
             )
         recent_ids: list[str] = []
         for index in range(recent_rows):
             event_id = f"recent-{index:04d}"
             recent_ids.append(event_id)
             store.append(
-                Event(id=event_id, ts=recent_ts, kind="orchestration.nudge",
-                      trust="observed", actor="system", data={"n": index})
+                Event(
+                    id=event_id,
+                    ts=recent_ts,
+                    kind="orchestration.nudge",
+                    trust="observed",
+                    actor="system",
+                    data={"n": index},
+                )
             )
         return recent_ids
 
@@ -658,7 +705,9 @@ class EventRiverCompactionTests(unittest.TestCase):
                 recent_ids = self._seed_river(root, old_rows=old_rows, recent_rows=recent_rows)
                 offsets = initial_event_offsets(root, now=NOW)
                 first_batch, _ = read_new_events(root, offsets, limit=1)
-                self.assertEqual([json.loads(event.data)["id"] for event in first_batch], [recent_ids[0]])
+                self.assertEqual(
+                    [json.loads(event.data)["id"] for event in first_batch], [recent_ids[0]]
+                )
                 cursor_after_first = decode_cursor(first_batch[0].cursor)
 
                 reclaimed = compact_workspace_river(root, now=NOW)
@@ -666,7 +715,9 @@ class EventRiverCompactionTests(unittest.TestCase):
                 self.assertEqual(reclaimed, old_rows)
                 self.assertGreater(workspace_base_offset(root), 0)
                 resumed, _ = read_new_events(root, cursor_after_first)
-                self.assertEqual([json.loads(event.data)["id"] for event in resumed], recent_ids[1:])
+                self.assertEqual(
+                    [json.loads(event.data)["id"] for event in resumed], recent_ids[1:]
+                )
 
     def test_compaction_is_noop_when_nothing_aged_out(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

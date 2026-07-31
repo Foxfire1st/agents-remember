@@ -141,9 +141,7 @@ def _master_task_root(config: McpRuntimeConfig, repo_id: str, master: str) -> Pa
     return config.coordination_root / "tasks" / repo_id / master
 
 
-def _master_enclosure_contracts(
-    config: McpRuntimeConfig, repo_id: str, master: str
-) -> list[Path]:
+def _master_enclosure_contracts(config: McpRuntimeConfig, repo_id: str, master: str) -> list[Path]:
     """Leaf contracts directly under ``tasks/<repo>/<master>/enclosures`` only."""
     task_root = _master_task_root(config, repo_id, master)
     if task_root is None:

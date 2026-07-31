@@ -120,7 +120,9 @@ class _Port:
 class _CodexKindPort(_Port):
     """Resolve target of the codex L0E-channel kind instead of argv."""
 
-    def __init__(self, cursor, *, harness: HarnessId = "codex", thread_id: str = "thr_exact_1") -> None:
+    def __init__(
+        self, cursor, *, harness: HarnessId = "codex", thread_id: str = "thr_exact_1"
+    ) -> None:
         super().__init__(cursor)
         self.harness_id: HarnessId = harness
         self._thread_id = thread_id

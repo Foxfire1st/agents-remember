@@ -488,8 +488,14 @@ class LeafChangesetTests(unittest.TestCase):
         # so committed still diffs base -> code_commit. The persisted authored id is mixed-case while
         # the dashboard selector is normalized lowercase; both sides must use the same canonicalizer.
         code, base, commit = self._committed_repo()
-        _write_leaf(self.config, "260707-HFX2-L15", code=code, code_base=base, code_commit=commit,
-                    code_worktree=self.tmp / "gone")
+        _write_leaf(
+            self.config,
+            "260707-HFX2-L15",
+            code=code,
+            code_base=base,
+            code_commit=commit,
+            code_worktree=self.tmp / "gone",
+        )
         body = leaf_changeset(self.config, "R", "t", "260707-hfx2-l15", "committed")
         files = _by_path(body["code"])
         self.assertEqual(body["mode"], "committed")
@@ -520,7 +526,9 @@ class LeafChangesetTests(unittest.TestCase):
         commit = _commit_all(code, "committed work")
         (code / "f.py").write_text("a\nb\nc\n", encoding="utf-8")  # dirty +1 over HEAD
         (code / "dirty_new.py").write_text("n\n", encoding="utf-8")  # untracked
-        _write_leaf(self.config, "l1", code=code, code_base=base, code_commit=commit, code_worktree=code)
+        _write_leaf(
+            self.config, "l1", code=code, code_base=base, code_commit=commit, code_worktree=code
+        )
         body = leaf_changeset(self.config, "R", "t", "l1", "working")
         files = _by_path(body["code"])
         self.assertEqual(body["mode"], "working")
@@ -529,8 +537,14 @@ class LeafChangesetTests(unittest.TestCase):
 
     def test_working_without_live_worktree_raises(self) -> None:
         code, base, commit = self._committed_repo()
-        _write_leaf(self.config, "l3", code=code, code_base=base, code_commit=commit,
-                    code_worktree=self.tmp / "gone")
+        _write_leaf(
+            self.config,
+            "l3",
+            code=code,
+            code_base=base,
+            code_commit=commit,
+            code_worktree=self.tmp / "gone",
+        )
         with self.assertRaises(FileNotFoundError):
             leaf_changeset(self.config, "R", "t", "l3", "working")
 
@@ -540,7 +554,9 @@ class LeafChangesetTests(unittest.TestCase):
 
     def test_leaf_is_scoped_by_master(self) -> None:
         code, base, commit = self._committed_repo()
-        _write_leaf(self.config, "l4", code=code, code_base=base, code_commit=commit, code_worktree=code)
+        _write_leaf(
+            self.config, "l4", code=code, code_base=base, code_commit=commit, code_worktree=code
+        )
         with self.assertRaises(FileNotFoundError):  # right leaf-id, wrong master
             leaf_changeset(self.config, "R", "other-master", "l4", "committed")
 
@@ -567,8 +583,14 @@ class LeafChangesetTests(unittest.TestCase):
 
     def test_leaf_file_diff_committed_base_to_commit(self) -> None:
         code, base, commit = self._committed_repo()
-        _write_leaf(self.config, "l5", code=code, code_base=base, code_commit=commit,
-                    code_worktree=self.tmp / "gone")
+        _write_leaf(
+            self.config,
+            "l5",
+            code=code,
+            code_base=base,
+            code_commit=commit,
+            code_worktree=self.tmp / "gone",
+        )
         body = leaf_file_diff(self.config, "R", "t", "l5", "code", "f.py", "committed")
         self.assertEqual(body["before"]["content"], "a\n")
         self.assertEqual(body["after"]["content"], "a\nb\n")
@@ -582,7 +604,9 @@ class LeafChangesetTests(unittest.TestCase):
         (code / "f.py").write_text("a\nb\n", encoding="utf-8")
         commit = _commit_all(code, "committed")
         (code / "f.py").write_text("a\nb\nc\n", encoding="utf-8")  # dirty
-        _write_leaf(self.config, "l6", code=code, code_base=base, code_commit=commit, code_worktree=code)
+        _write_leaf(
+            self.config, "l6", code=code, code_base=base, code_commit=commit, code_worktree=code
+        )
         body = leaf_file_diff(self.config, "R", "t", "l6", "code", "f.py", "working")
         self.assertEqual(body["before"]["content"], "a\nb\n")  # at worktree HEAD
         self.assertEqual(body["after"]["content"], "a\nb\nc\n")  # the dirty worktree
@@ -601,9 +625,17 @@ class LeafChangesetRouteTests(unittest.TestCase):
         base = _commit_all(code, "base")
         (code / "f.py").write_text("a\nb\n", encoding="utf-8")
         commit = _commit_all(code, "work")
-        _write_leaf(self.config, "ok", code=code, code_base=base, code_commit=commit, code_worktree=code)
-        _write_leaf(self.config, "gonewt", code=code, code_base=base, code_commit=commit,
-                    code_worktree=self.tmp / "gone")
+        _write_leaf(
+            self.config, "ok", code=code, code_base=base, code_commit=commit, code_worktree=code
+        )
+        _write_leaf(
+            self.config,
+            "gonewt",
+            code=code,
+            code_base=base,
+            code_commit=commit,
+            code_worktree=self.tmp / "gone",
+        )
         app = FastAPI()
         register_changeset_routes(app, self.config)
         self.client = TestClient(app)
@@ -612,32 +644,44 @@ class LeafChangesetRouteTests(unittest.TestCase):
         self._dir.cleanup()
 
     def test_leaf_without_master_is_400(self) -> None:
-        r = self.client.get("/api/changeset/task", params={"repo": "R", "leaf": "ok", "mode": "committed"})
+        r = self.client.get(
+            "/api/changeset/task", params={"repo": "R", "leaf": "ok", "mode": "committed"}
+        )
         self.assertEqual(r.status_code, 400)
 
     def test_leaf_with_bad_mode_is_400(self) -> None:
         r = self.client.get(
-            "/api/changeset/task", params={"repo": "R", "master": "t", "leaf": "ok", "mode": "bogus"}
+            "/api/changeset/task",
+            params={"repo": "R", "master": "t", "leaf": "ok", "mode": "bogus"},
         )
         self.assertEqual(r.status_code, 400)
 
     def test_leaf_committed_is_200(self) -> None:
         r = self.client.get(
-            "/api/changeset/task", params={"repo": "R", "master": "t", "leaf": "ok", "mode": "committed"}
+            "/api/changeset/task",
+            params={"repo": "R", "master": "t", "leaf": "ok", "mode": "committed"},
         )
         self.assertEqual(r.status_code, 200)
         self.assertEqual(r.json()["mode"], "committed")
 
     def test_working_without_worktree_is_404(self) -> None:
         r = self.client.get(
-            "/api/changeset/task", params={"repo": "R", "master": "t", "leaf": "gonewt", "mode": "working"}
+            "/api/changeset/task",
+            params={"repo": "R", "master": "t", "leaf": "gonewt", "mode": "working"},
         )
         self.assertEqual(r.status_code, 404)
 
     def test_file_diff_leaf_committed_is_200(self) -> None:
         r = self.client.get(
             "/api/changeset/file-diff",
-            params={"repo": "R", "master": "t", "leaf": "ok", "kind": "code", "path": "f.py", "mode": "committed"},
+            params={
+                "repo": "R",
+                "master": "t",
+                "leaf": "ok",
+                "kind": "code",
+                "path": "f.py",
+                "mode": "committed",
+            },
         )
         self.assertEqual(r.status_code, 200)
         self.assertEqual(r.json()["after"]["content"], "a\nb\n")

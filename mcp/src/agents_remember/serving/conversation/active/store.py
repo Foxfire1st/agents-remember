@@ -161,16 +161,16 @@ class ProjectionStore:
     def apply_item(self, mapped: MappedItem) -> list[StoreMutation]:
         """Append or upsert one item; identical replays are no-ops.
 
-        Tool-call items converge by scoped block-union: mappers legitimately
-        emit partial-block tool items (an invocation first, its result later),
-        so an upsert unions blocks by ``block_id`` — the candidate wins per
-        shared id and existing sibling blocks survive, and a late
-        ``streaming``-claiming tagging upsert never regresses a terminal phase
-. Full-item re-maps
-        (codex) are identical under union. Other kinds keep whole-item
-        replacement semantics, with one retention exception: a roster notice's
-        ``final-message`` block survives later block-less lifecycle upserts
-.
+                Tool-call items converge by scoped block-union: mappers legitimately
+                emit partial-block tool items (an invocation first, its result later),
+                so an upsert unions blocks by ``block_id`` — the candidate wins per
+                shared id and existing sibling blocks survive, and a late
+                ``streaming``-claiming tagging upsert never regresses a terminal phase
+        . Full-item re-maps
+                (codex) are identical under union. Other kinds keep whole-item
+                replacement semantics, with one retention exception: a roster notice's
+                ``final-message`` block survives later block-less lifecycle upserts
+        .
         """
 
         candidate = mapped.item
@@ -214,9 +214,7 @@ class ProjectionStore:
                 block for block in existing.blocks if block.block_id == "final-message"
             )
             if retained:
-                candidate = candidate.model_copy(
-                    update={"blocks": (*candidate.blocks, *retained)}
-                )
+                candidate = candidate.model_copy(update={"blocks": (*candidate.blocks, *retained)})
         comparable_existing = existing.model_copy(
             update={field: None for field in _NORMALIZED_FIELDS}
         )
@@ -378,9 +376,7 @@ class ProjectionStore:
         return mutations
 
     @staticmethod
-    def _mint_block_with_text(
-        item: ConversationItem, block_id: str, text: str
-    ) -> ConversationItem:
+    def _mint_block_with_text(item: ConversationItem, block_id: str, text: str) -> ConversationItem:
         """The item with a new typed text block carrying the first delta, revision bumped."""
 
         block: ConversationContentBlock
@@ -464,9 +460,7 @@ def _block_content_text(block: ConversationContentBlock) -> str:
 def _authoritative_block_ids(candidate: ConversationItem) -> frozenset[str]:
     """Blocks a mapped item carries with aggregated non-empty content (delta backlog authority)."""
 
-    return frozenset(
-        block.block_id for block in candidate.blocks if _block_content_text(block)
-    )
+    return frozenset(block.block_id for block in candidate.blocks if _block_content_text(block))
 
 
 def _union_blocks(

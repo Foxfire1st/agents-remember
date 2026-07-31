@@ -53,9 +53,7 @@ from agents_remember.providers.settings import lifecycle_settings_from_config
 def _armed_boot_config(tmp: Path, *, disk_providers: dict) -> McpRuntimeConfig:
     """A config whose BOOT SNAPSHOT is armed while the disk says ``disk_providers``."""
     authority = tmp / "authority.json"
-    authority.write_text(
-        json.dumps({"version": 1, "providers": disk_providers}), encoding="utf-8"
-    )
+    authority.write_text(json.dumps({"version": 1, "providers": disk_providers}), encoding="utf-8")
     coordination_root = tmp / "coord"
     workspace_root = tmp / "ws"
     return McpRuntimeConfig(
@@ -87,9 +85,7 @@ class ReloadProviderAuthorityTests(unittest.TestCase):
 
     def test_disk_armed_yields_live_map(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            config = _armed_boot_config(
-                Path(tmp), disk_providers={"codegraphcontext-code": {}}
-            )
+            config = _armed_boot_config(Path(tmp), disk_providers={"codegraphcontext-code": {}})
             authority = reload_provider_authority(config)
         self.assertEqual(sorted(authority.providers), ["codegraphcontext-code"])
         self.assertIsNone(authority.error)
@@ -120,9 +116,7 @@ class ReloadProviderAuthorityTests(unittest.TestCase):
 
     def test_require_launch_authority_returns_live_config_when_armed(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            config = _armed_boot_config(
-                Path(tmp), disk_providers={"codegraphcontext-code": {}}
-            )
+            config = _armed_boot_config(Path(tmp), disk_providers={"codegraphcontext-code": {}})
             live = require_provider_launch_authority(config, operation="test-op")
         self.assertEqual(sorted(live.providers), ["codegraphcontext-code"])
 
@@ -141,9 +135,7 @@ class WorktreeStartVetoTests(unittest.TestCase):
                     returncode=0, payload={"state": "blocked"}
                 )
 
-            with mock.patch.object(
-                worktree_tools.git_worktree_manager, "start_result", fake_start
-            ):
+            with mock.patch.object(worktree_tools.git_worktree_manager, "start_result", fake_start):
                 result = worktree_tools.worktree_start_tool(
                     config,
                     repo_id="repo",
@@ -157,9 +149,7 @@ class WorktreeStartVetoTests(unittest.TestCase):
 
     def test_disk_armed_snapshot_launches_with_live_map(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            config = _armed_boot_config(
-                Path(tmp), disk_providers={"grepai-memory": {}}
-            )
+            config = _armed_boot_config(Path(tmp), disk_providers={"grepai-memory": {}})
             captured: dict[str, object] = {}
 
             def fake_start(
@@ -177,9 +167,7 @@ class WorktreeStartVetoTests(unittest.TestCase):
                     returncode=0, payload={"state": "blocked"}
                 )
 
-            with mock.patch.object(
-                worktree_tools.git_worktree_manager, "start_result", fake_start
-            ):
+            with mock.patch.object(worktree_tools.git_worktree_manager, "start_result", fake_start):
                 result = worktree_tools.worktree_start_tool(
                     config,
                     repo_id="repo",
@@ -197,9 +185,7 @@ class QueryFunnelGateTests(unittest.TestCase):
     def test_query_funnel_requires_its_specific_provider(self) -> None:
         # Review note: an armed grepai must not authorize a cgc one-shot runner.
         with tempfile.TemporaryDirectory() as tmp:
-            config = _armed_boot_config(
-                Path(tmp), disk_providers={"grepai-memory": {}}
-            )
+            config = _armed_boot_config(Path(tmp), disk_providers={"grepai-memory": {}})
             run = mock.Mock()
             with self.assertRaises(ConfigError) as ctx:
                 provider_tools._provider_operation_result(
@@ -317,8 +303,9 @@ class FleetSetupLockTests(unittest.TestCase):
                 pass
 
     def test_lock_is_noop_when_uncontended(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp, _fleet_setup_lock(
-            Path(tmp) / "setup.lock", timeout=1
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            _fleet_setup_lock(Path(tmp) / "setup.lock", timeout=1),
         ):
             pass
 
@@ -388,9 +375,7 @@ class MetricsTests(unittest.TestCase):
                 "Names": "ar-grepai-postgres-i1",
                 "State": "running",
                 "Status": "Up 2 hours",
-                "Labels": (
-                    "agents-remember.provider=grepai-memory,agents-remember.instance-id=i1"
-                ),
+                "Labels": ("agents-remember.provider=grepai-memory,agents-remember.instance-id=i1"),
             }
         )
         stats_line = json.dumps(

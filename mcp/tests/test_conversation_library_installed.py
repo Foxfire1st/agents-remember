@@ -427,9 +427,7 @@ class CodexOpenEndToEndTests(unittest.IsolatedAsyncioTestCase):
             open_ledger=OpenOperationLedger(),
         )
         self.runtime = ConversationRuntime(
-            scope=ConversationScope(
-                workspace_root=self.workspace, coordination_root=self.tmp
-            ),
+            scope=ConversationScope(workspace_root=self.workspace, coordination_root=self.tmp),
             catalog=self.catalog,
             host=self.host,
             harness_registry=lambda: HARNESSES,

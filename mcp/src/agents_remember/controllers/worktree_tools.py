@@ -375,9 +375,7 @@ def lifecycle_finalize_task_tool(
         dry_run=dry_run,
         teardown_providers=teardown_providers,
     )
-    result = _worktree_result(
-        "lifecycle_finalize_task", git_worktree_manager.finalize_result(args)
-    )
+    result = _worktree_result("lifecycle_finalize_task", git_worktree_manager.finalize_result(args))
     if result["ok"] and not dry_run and config.retirement.auto_land_on_finalize:
         result["autoLandedSeats"] = _auto_land_completed_seats(
             config,

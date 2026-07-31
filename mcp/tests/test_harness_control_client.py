@@ -310,18 +310,14 @@ class HarnessControlClientRetrySafetyTests(unittest.TestCase):
             page = read_control_native_page(_Entry(), thread_id="agent-thread-1")
         self.assertEqual(page.bridge_epoch, "epoch-1")
         self.assertEqual(request.call_args.args[1], "evidence-native-page")
-        self.assertEqual(
-            request.call_args.args[2], {"limit": 200, "threadId": "agent-thread-1"}
-        )
+        self.assertEqual(request.call_args.args[2], {"limit": 200, "threadId": "agent-thread-1"})
 
         with mock.patch(
             "agents_remember.serving.harness_control_client.request_control",
             return_value=canned,
         ) as request:
             read_control_native_page(_Entry(), cursor="entry-2")
-        self.assertEqual(
-            request.call_args.args[2], {"limit": 200, "cursor": "entry-2"}
-        )
+        self.assertEqual(request.call_args.args[2], {"limit": 200, "cursor": "entry-2"})
 
 
 if __name__ == "__main__":

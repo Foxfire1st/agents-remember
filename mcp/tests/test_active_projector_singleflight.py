@@ -81,15 +81,9 @@ async def test_concurrent_reconnect_replaces_a_retired_projector_once() -> None:
         patch.object(service_module, "ActiveSessionProjector", _Projected),
     ):
         page, events, child_history = await asyncio.gather(
-            service._projector_for(
-                authorization, "ar-1", expected_bridge_epoch="epoch-1"
-            ),
-            service._projector_for(
-                authorization, "ar-1", expected_bridge_epoch="epoch-1"
-            ),
-            service._projector_for(
-                authorization, "ar-1", expected_bridge_epoch="epoch-1"
-            ),
+            service._projector_for(authorization, "ar-1", expected_bridge_epoch="epoch-1"),
+            service._projector_for(authorization, "ar-1", expected_bridge_epoch="epoch-1"),
+            service._projector_for(authorization, "ar-1", expected_bridge_epoch="epoch-1"),
         )
 
     assert page[0] is events[0] is child_history[0]

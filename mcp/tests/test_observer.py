@@ -98,9 +98,7 @@ class EventStoreTests(unittest.TestCase):
     def tearDown(self) -> None:
         self._dir.cleanup()
 
-    def _event(
-        self, lifecycle_id: str | None, kind: str = "tool.completed", **data: Any
-    ) -> Event:
+    def _event(self, lifecycle_id: str | None, kind: str = "tool.completed", **data: Any) -> Event:
         return Event(
             id=new_ulid(),
             ts=now_iso(),

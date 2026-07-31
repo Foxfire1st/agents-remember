@@ -158,9 +158,7 @@ class ContextPacketTests(unittest.TestCase):
             )
             write_contract(contract.contract_path, contract)
             payload = settings_payload(root)
-            payload["repositories"]["agents-remember"]["contractPath"] = str(
-                contract.contract_path
-            )
+            payload["repositories"]["agents-remember"]["contractPath"] = str(contract.contract_path)
             config_path = root / "mcp-settings.json"
             write_json(config_path, payload)
             config = load_config(config_path)

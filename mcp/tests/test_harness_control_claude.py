@@ -769,7 +769,10 @@ class ClaudeStreamJsonAdapterTests(unittest.IsolatedAsyncioTestCase):
             # ...while the structured pages carry per-question options and multiSelect.
             self.assertEqual(len(pending.questions), 2)
             mode, features = pending.questions
-            self.assertEqual((mode.text, mode.header, mode.multi_select), ("Which mode should be used?", "Mode", False))
+            self.assertEqual(
+                (mode.text, mode.header, mode.multi_select),
+                ("Which mode should be used?", "Mode", False),
+            )
             self.assertEqual(
                 [(option.label, option.description) for option in mode.options],
                 [("Safe", "Use safe mode"), ("Fast", "Use fast mode")],
@@ -842,9 +845,7 @@ class ClaudeStreamJsonAdapterTests(unittest.IsolatedAsyncioTestCase):
                     )
                 )
             with self.assertRaisesRegex(HarnessControlError, "JSON object"):
-                await bridge.respond(
-                    InteractionResponse("question-multi", "Safe", NOW)
-                )
+                await bridge.respond(InteractionResponse("question-multi", "Safe", NOW))
             # The failed responds never reached the transport; the interaction stays pending.
             self.assertIsNotNone(bridge.snapshot().pending_interaction)
             self.assertEqual(len(transport.writes), 4)
@@ -1389,9 +1390,7 @@ class ClaudeInterruptTests(unittest.IsolatedAsyncioTestCase):
             for line in (INTERRUPT_FIXTURE_ROOT / "interrupt.jsonl").read_text().splitlines()
         ]
 
-    async def _active_turn(
-        self, transport: _FakeClaudeTransport
-    ) -> HarnessControlBridge:
+    async def _active_turn(self, transport: _FakeClaudeTransport) -> HarnessControlBridge:
         adapter = _adapter(transport)
         bridge = HarnessControlBridge(_identity(), adapter, clock=lambda: NOW)
         await bridge.start(_launch())
@@ -1501,9 +1500,7 @@ class ClaudeInterruptTests(unittest.IsolatedAsyncioTestCase):
         await bridge.start(_launch())
         try:
             epoch = bridge.submission_authority().bridge_epoch
-            with self.assertRaisesRegex(
-                HarnessControlError, "no active Claude turn to interrupt"
-            ):
+            with self.assertRaisesRegex(HarnessControlError, "no active Claude turn to interrupt"):
                 await bridge.interrupt(epoch)
             self.assertEqual(len(transport.writes), 3)
         finally:
@@ -1719,7 +1716,9 @@ class ClaudeInterruptTests(unittest.IsolatedAsyncioTestCase):
         finally:
             await bridge.stop("forced")
 
-    async def test_lost_acknowledgement_is_unknown_and_a_late_success_still_correlates(self) -> None:
+    async def test_lost_acknowledgement_is_unknown_and_a_late_success_still_correlates(
+        self,
+    ) -> None:
         transport = _FakeClaudeTransport(_load_fixture("initialization.jsonl"))
         adapter = _adapter(transport, limits=ClaudeAdapterLimits(acceptance_timeout_seconds=0.05))
         bridge = HarnessControlBridge(_identity(), adapter, clock=lambda: NOW)
@@ -1788,7 +1787,7 @@ async def _wait_for_snapshot_raw(bridge: HarnessControlBridge, key: str, expecte
 
 # A stream-json speaker that reports a version at the forwarding floor, so the adapter takes its
 # probe/relaunch branch. It logs each launch argv, which is how the relaunch flag is proven.
-_STUB_CLAUDE_SOURCE = '''
+_STUB_CLAUDE_SOURCE = """
 import json, os, sys
 
 with open(os.environ["AR_STUB_CLAUDE_ARGV_LOG"], "a") as handle:
@@ -1859,7 +1858,7 @@ while True:
                 "is_error": False,
             }
         )
-'''
+"""
 
 
 class ClaudeProductionTransportRelaunchTests(unittest.IsolatedAsyncioTestCase):

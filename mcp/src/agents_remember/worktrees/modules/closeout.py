@@ -589,9 +589,7 @@ def closeout_result(args: WorktreeArgs) -> WorktreeCommandResult:
     code_quality_gate = code_quality_gate_preview(
         contract.code_worktree, code_would_commit=code_would_commit
     )
-    if requires_strict_code_quality(
-        contract.code_worktree, code_would_commit=code_would_commit
-    ):
+    if requires_strict_code_quality(contract.code_worktree, code_would_commit=code_would_commit):
         code_quality_gate = run_strict_code_quality_gate(contract.code_worktree)
     code_commit = commit_if_dirty(contract.code_worktree, args.code_commit_message)
     code_commit_date = commit_date(contract.code_worktree, code_commit)

@@ -72,7 +72,9 @@ def set_workspace_base_offset(root: Path, base_offset: int) -> None:
     path = root / WORKSPACE_SOURCE / WORKSPACE_CURSOR_FILE
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
-    tmp.write_text(json.dumps({"baseOffset": base_offset}, separators=(",", ":")) + "\n", encoding="utf-8")
+    tmp.write_text(
+        json.dumps({"baseOffset": base_offset}, separators=(",", ":")) + "\n", encoding="utf-8"
+    )
     os.replace(tmp, path)
 
 

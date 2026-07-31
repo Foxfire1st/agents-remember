@@ -122,7 +122,9 @@ def parse_provider_degradation_settings(raw: object) -> ProviderDegradationSetti
             "setupFailureCriticalStreak",
             defaults.setup_failure_critical_streak,
         ),
-        recent_sample_limit=_positive_setting(raw, "recentSampleLimit", defaults.recent_sample_limit),
+        recent_sample_limit=_positive_setting(
+            raw, "recentSampleLimit", defaults.recent_sample_limit
+        ),
     )
 
 

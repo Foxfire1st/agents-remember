@@ -104,9 +104,7 @@ def _live_managers(catalog: TerminalCatalog) -> list[TerminalCatalogEntry]:
     return [
         entry
         for entry in catalog.list()
-        if entry.kind == "harness"
-        and entry.status == "running"
-        and entry.binding_role == "manager"
+        if entry.kind == "harness" and entry.status == "running" and entry.binding_role == "manager"
     ]
 
 
@@ -150,9 +148,7 @@ def derive_leaf_manager_owner(
         return _manager_owner(direct_manager)
 
     live_managers = _live_managers(catalog)
-    route_leaf = signal_leaf_key(
-        catalog, sender_agent_id=sender_agent_id, leaf_key=leaf_key
-    )
+    route_leaf = signal_leaf_key(catalog, sender_agent_id=sender_agent_id, leaf_key=leaf_key)
     if route_leaf is not None:
         scoped = _scoped_managers(catalog, live_managers, route_leaf=route_leaf)
         if scoped:
@@ -334,9 +330,7 @@ def derive_architect_owner(catalog: TerminalCatalog) -> RoutedOwner:
             and entry.status == "running"
             and entry.binding_role == "architect"
         ):
-            return RoutedOwner(
-                role="architect", agent_id=entry.id, lifecycle_id=entry.lifecycle_id
-            )
+            return RoutedOwner(role="architect", agent_id=entry.id, lifecycle_id=entry.lifecycle_id)
     return RoutedOwner(role="architect")
 
 

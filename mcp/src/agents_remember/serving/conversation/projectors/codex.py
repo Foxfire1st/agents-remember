@@ -233,9 +233,17 @@ def map_evidence_frame(
         if not isinstance(delta, str):
             raise UnmappableShape("codex delta params.delta must be text")
         if isinstance(params.get("summaryIndex"), int):
-            return [MappedBlockDelta(item_id=item_id, block_id=f"summary-{params['summaryIndex']}", delta=delta)]
+            return [
+                MappedBlockDelta(
+                    item_id=item_id, block_id=f"summary-{params['summaryIndex']}", delta=delta
+                )
+            ]
         if isinstance(params.get("contentIndex"), int):
-            return [MappedBlockDelta(item_id=item_id, block_id=f"content-{params['contentIndex']}", delta=delta)]
+            return [
+                MappedBlockDelta(
+                    item_id=item_id, block_id=f"content-{params['contentIndex']}", delta=delta
+                )
+            ]
         # Bare delta: agentMessage, plan, and commandExecution output deltas
         # share this shape; the engine resolves the block from the item kind.
         return [MappedBlockDelta(item_id=item_id, block_id="", delta=delta)]
@@ -450,9 +458,7 @@ def _user_message_item(
         part = required_object(raw_part, "userMessage content part")
         part_type = required_text(part.get("type"), "userMessage content part type")
         if part_type == "text":
-            blocks.append(
-                TextBlock(block_id=f"text-{position}", text=str(part.get("text") or ""))
-            )
+            blocks.append(TextBlock(block_id=f"text-{position}", text=str(part.get("text") or "")))
         elif part_type in {"image", "localImage", "skill", "mention"}:
             reference = optional_text(part.get("url")) or optional_text(part.get("path"))
             name = (
@@ -508,13 +514,9 @@ def _reasoning_item(
 ) -> ConversationItem:
     blocks: list = []
     for index, summary in enumerate(required_list(item.get("summary"), "reasoning.summary")):
-        blocks.append(
-            ThinkingBlock(block_id=f"summary-{index}", markdown=str(summary))
-        )
+        blocks.append(ThinkingBlock(block_id=f"summary-{index}", markdown=str(summary)))
     for index, content in enumerate(required_list(item.get("content"), "reasoning.content")):
-        blocks.append(
-            ThinkingBlock(block_id=f"content-{index}", markdown=str(content))
-        )
+        blocks.append(ThinkingBlock(block_id=f"content-{index}", markdown=str(content)))
     return ConversationItem(
         item_id=item_id,
         revision=1,
@@ -691,9 +693,7 @@ def _roster_item(
             kind="notice",
             phase=_ROSTER_ITEM_PHASE.get(status, "unknown"),
             blocks=blocks,
-            agent=ConversationAgentRef(
-                agent_id=thread_id, agent_path=agent_path, status=status
-            ),
+            agent=ConversationAgentRef(agent_id=thread_id, agent_path=agent_path, status=status),
             created_at=created_at,
         )
     )
@@ -715,9 +715,7 @@ def _collab_status(
     return "unknown"
 
 
-def _collab_final_message(
-    agents_states: Mapping[str, object] | None, thread_id: str
-) -> str | None:
+def _collab_final_message(agents_states: Mapping[str, object] | None, thread_id: str) -> str | None:
     """The agent's final message when the collab state carries one (``message`` text)."""
 
     if agents_states is None:
@@ -756,9 +754,7 @@ def _map_collab_tool_call(
     if states_raw is not None and not isinstance(states_raw, Mapping):
         return None
     receiver_ids = [
-        receiver
-        for receiver in (receivers_raw or [])
-        if isinstance(receiver, str) and receiver
+        receiver for receiver in (receivers_raw or []) if isinstance(receiver, str) and receiver
     ]
     agents_states = states_raw if isinstance(states_raw, Mapping) else None
     status = optional_text(item.get("status")) or "completed"
@@ -802,11 +798,7 @@ def _map_collab_tool_call(
         dict.fromkeys(
             [
                 *receiver_ids,
-                *(
-                    key
-                    for key in (agents_states or {})
-                    if isinstance(key, str) and key
-                ),
+                *(key for key in (agents_states or {}) if isinstance(key, str) and key),
             ]
         )
     )
@@ -922,9 +914,7 @@ def _map_agent_thread_status(
     if thread_id is None:
         return []
     status = params.get("status")
-    status_type = (
-        optional_text(status.get("type")) if isinstance(status, Mapping) else None
-    )
+    status_type = optional_text(status.get("type")) if isinstance(status, Mapping) else None
     roster_status = _THREAD_STATUS_ROSTER.get(status_type or "")
     if roster_status is None:
         # ``idle`` (or an undocumented type) carries no honest roster transition.

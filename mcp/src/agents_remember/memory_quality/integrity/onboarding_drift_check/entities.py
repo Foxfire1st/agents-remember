@@ -48,12 +48,9 @@ def _normalized_header_cells(cells: list[str]) -> list[str]:
     return [re.sub(r"\s+", "", cell).lower() for cell in cells]
 
 
-def _entity_fingerprint_from_row(
-    headers: list[str], cells: list[str]
-) -> EntityFingerprint | None:
+def _entity_fingerprint_from_row(headers: list[str], cells: list[str]) -> EntityFingerprint | None:
     row = {
-        header: cells[index] if index < len(cells) else ""
-        for index, header in enumerate(headers)
+        header: cells[index] if index < len(cells) else "" for index, header in enumerate(headers)
     }
     entity = clean_scalar(row.get("entity", "")).strip()
     if not entity:

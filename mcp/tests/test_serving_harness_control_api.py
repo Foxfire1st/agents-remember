@@ -283,6 +283,7 @@ class HarnessControlApiTests(unittest.TestCase):
         self.assertEqual(status_response.json()["submissions"][0]["submission"]["state"], "queued")
         self.assertEqual(status_response.json()["submissions"][1]["outcome"], "not-found")
         self.assertEqual(withdraw_response.json()["outcome"], "withdrawn")
+
         def keys(value: object) -> set[str]:
             if isinstance(value, dict):
                 return set(value) | set().union(*(keys(item) for item in value.values()))
@@ -290,9 +291,7 @@ class HarnessControlApiTests(unittest.TestCase):
                 return set().union(*(keys(item) for item in value))
             return set()
 
-        public_keys = keys(
-            [descriptor.json(), status_response.json(), withdraw_response.json()]
-        )
+        public_keys = keys([descriptor.json(), status_response.json(), withdraw_response.json()])
         self.assertNotIn("text", public_keys)
         self.assertNotIn("raw", public_keys)
         self.assertEqual(descriptor_call.call_args.args[0].id, self.live.id)
@@ -332,9 +331,12 @@ class HarnessControlApiTests(unittest.TestCase):
             ),
         )
         for function, path, body in cases:
-            with self.subTest(path=path), mock.patch(
-                f"agents_remember.serving.harness_control_api.{function}",
-                side_effect=HarnessBridgeEpochMismatchError("old", BRIDGE_EPOCH),
+            with (
+                self.subTest(path=path),
+                mock.patch(
+                    f"agents_remember.serving.harness_control_api.{function}",
+                    side_effect=HarnessBridgeEpochMismatchError("old", BRIDGE_EPOCH),
+                ),
             ):
                 response = self.client.post(path, json=body)
                 self.assertEqual(response.status_code, 409)
@@ -374,9 +376,7 @@ class HarnessControlApiTests(unittest.TestCase):
         ) as status_call:
             for body in bodies:
                 with self.subTest(size=len(body["requestIds"])):
-                    response = self.client.post(
-                        "/api/terminal/live/submission-status", json=body
-                    )
+                    response = self.client.post("/api/terminal/live/submission-status", json=body)
                     self.assertEqual(response.status_code, 422)
         status_call.assert_not_called()
 
@@ -512,7 +512,9 @@ class HarnessControlApiTests(unittest.TestCase):
             acceptance="queued",
         )
 
-    def test_interaction_response_sends_the_structured_answers_map_without_a_lifecycle(self) -> None:
+    def test_interaction_response_sends_the_structured_answers_map_without_a_lifecycle(
+        self,
+    ) -> None:
         # The catalog row has lifecycle_id=None: this route is the lifecycle-free answer channel.
         self.assertIsNone(self.live.lifecycle_id)
         answers = {"Which mode should be used?": "Safe"}

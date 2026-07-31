@@ -412,7 +412,9 @@ def cgc_backend_create_start_result(
             compose=cgc_compose_summary(render),
             migration=migration,
         )
-    up_result = run_compose(render, command_args, cwd=layout.coordination_root, timeout=args.timeout)
+    up_result = run_compose(
+        render, command_args, cwd=layout.coordination_root, timeout=args.timeout
+    )
     if up_result["returncode"] != 0:
         return {
             "provider": "codegraphcontext",

@@ -84,7 +84,9 @@ def template_path(runtime_root: Path, name: str) -> Path:
     return runtime_root / "skills" / "l-01-agent-lifecycles" / "templates" / name
 
 
-def turn_report_artifact(task_root: Path, leaf_id: str, title: str, runtime_root: Path) -> TurnReportArtifact:
+def turn_report_artifact(
+    task_root: Path, leaf_id: str, title: str, runtime_root: Path
+) -> TurnReportArtifact:
     """Build the standard worker turn-report artifact location."""
     stem = _SAFE_STEM.sub("-", leaf_id).strip("-") or "leaf"
     return TurnReportArtifact(
@@ -141,7 +143,7 @@ def render_master_handover_packet(packet: MasterHandoverPacket) -> str:
             *[f"- {item}" for item in packet.carryOverState],
             "",
             "## Known Follow-Ups",
-            *[f"- {item}" for item in (packet.knownFollowUps or ['none'])],
+            *[f"- {item}" for item in (packet.knownFollowUps or ["none"])],
             "",
             "## Reachability",
             "- Manager seat stays reachable until the series retires.",
