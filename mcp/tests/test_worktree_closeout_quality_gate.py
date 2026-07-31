@@ -15,6 +15,7 @@ from unittest import mock
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
+from agents_remember.kernel.git_command import GIT_REPOSITORY_SELECTOR_ENV
 from agents_remember.worktrees import git_worktree_manager as worktree_manager
 from agents_remember.worktrees.modules import closeout as closeout_module
 from agents_remember.worktrees.modules import code_quality_gate
@@ -211,6 +212,27 @@ class CodeQualityGateTests(unittest.TestCase):
 
             with mock.patch.object(code_quality_gate, "_git_common_dir", return_value=common_dir):
                 self.assertEqual(code_quality_gate.quality_python(worktree), shared_python)
+
+    def test_the_gate_hands_the_wrapper_no_repository_selectors(self) -> None:
+        # The gate spawns the wrapper, and the wrapper runs git: `git ls-files` for its scope
+        # and `merge-base` for its diff base. Copying os.environ straight through made this
+        # gate's correctness -- which repository gets certified before a code commit -- rest
+        # on every git call inside a child process it cannot see behaving itself.
+        with tempfile.TemporaryDirectory() as tmp:
+            worktree = Path(tmp)
+            selectors = {name: str(worktree / "decoy") for name in GIT_REPOSITORY_SELECTOR_ENV}
+
+            with mock.patch.dict(os.environ, {**selectors, "PYTHONPATH": "/pre-existing"}):
+                env = code_quality_gate.quality_environment(worktree)
+
+            self.assertTrue(set(GIT_REPOSITORY_SELECTOR_ENV).isdisjoint(env))
+            # and nothing else changes: this worktree's src still leads, the inherited
+            # PYTHONPATH still follows, and PATH survives or the wrapper cannot start.
+            self.assertEqual(
+                env["PYTHONPATH"],
+                os.pathsep.join([(worktree / "mcp" / "src").as_posix(), "/pre-existing"]),
+            )
+            self.assertIn("PATH", env)
 
 
 class CloseoutCodeQualityGateTests(unittest.TestCase):

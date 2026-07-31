@@ -1,13 +1,15 @@
 from __future__ import annotations
 
+import subprocess
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from pathlib import Path
 
+from agents_remember.kernel.git_command import GIT_REMOTE_TIMEOUT_SECONDS, run_git
 from agents_remember.observer.drift_snapshots import remove_drift_snapshot
 from agents_remember.worktrees.modules import provider_async
 from agents_remember.worktrees.modules.args import WorktreeArgs
-from agents_remember.worktrees.modules.git import branch_exists, is_ancestor, run_git
+from agents_remember.worktrees.modules.git import branch_exists, is_ancestor
 from agents_remember.worktrees.modules.guidance import carryover_done, status_payload
 from agents_remember.worktrees.modules.integrate import integration_branch
 from agents_remember.worktrees.modules.models import WorktreeCommandResult
@@ -103,18 +105,38 @@ def _repo_default_branch(repo: Path) -> str:
     return "main"
 
 
+def _remote_git(repo: Path, args: list[str]) -> subprocess.CompletedProcess[str] | None:
+    """Run a remote-talking git command under the remote bound; ``None`` when it stalled.
+
+    Both callers below run inside an MCP tool call, which the client cannot cancel. They
+    used to go through a runner that set no timeout at all, so an unreachable or wedged
+    remote held the tool call open forever. A stall now reads exactly like the
+    already-handled unreachable-remote case rather than escaping as an exception.
+    """
+    try:
+        return run_git(repo, args, timeout=GIT_REMOTE_TIMEOUT_SECONDS)
+    except subprocess.TimeoutExpired:
+        return None
+
+
 def delete_remote_branch_if_present(repo: Path, branch: str, dry_run: bool) -> dict[str, object]:
     """Delete ``origin/<branch>`` if it still exists -- a PR branch survives a non-deleting merge (05m)."""
     if not branch:
         return {"remote_deleted": False, "reason": "empty"}
-    probe = run_git(repo, ["ls-remote", "--heads", "origin", branch])
-    if probe.returncode != 0:
+    probe = _remote_git(repo, ["ls-remote", "--heads", "origin", branch])
+    if probe is None or probe.returncode != 0:
         return {"remote_deleted": False, "reason": "remote-unreachable"}
     if not probe.stdout.strip():
         return {"remote_deleted": False, "reason": "already-absent"}
     if dry_run:
         return {"remote_deleted": False, "would_delete": True}
-    res = run_git(repo, ["push", "origin", "--delete", branch])
+    return _push_branch_deletion(repo, branch)
+
+
+def _push_branch_deletion(repo: Path, branch: str) -> dict[str, object]:
+    res = _remote_git(repo, ["push", "origin", "--delete", branch])
+    if res is None:
+        return {"remote_deleted": False, "reason": "remote-unreachable"}
     if res.returncode != 0:
         return {"remote_deleted": False, "reason": res.stderr.strip() or "git push --delete failed"}
     return {"remote_deleted": True}

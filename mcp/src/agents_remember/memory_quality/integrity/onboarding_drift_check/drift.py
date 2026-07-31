@@ -23,6 +23,7 @@ from agents_remember.kernel.coordination_context_resolver import (
     resolve_coordination_context,
     resolve_storage_for_source,
 )
+from agents_remember.kernel.git_command import run_git
 from agents_remember.memory_quality.integrity.onboarding_drift_check.discovery import (
     discover_onboarding_files,
     is_supported_sidecar_onboarding,
@@ -50,7 +51,6 @@ from agents_remember.memory_quality.integrity.onboarding_drift_check.git_ops imp
     list_repo_sources,
     local_change_note,
     local_route_change_note,
-    run_git,
 )
 from agents_remember.memory_quality.integrity.onboarding_drift_check.inline import (
     classify_inline_source,

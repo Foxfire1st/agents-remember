@@ -19,6 +19,7 @@ import contextlib
 import hashlib
 import json
 import logging
+import subprocess
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
@@ -37,6 +38,7 @@ from agents_remember.controlplane.interaction_retention import (
 from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
 from agents_remember.controlplane.records import GateRecord
 from agents_remember.controlplane.store import GateStore
+from agents_remember.kernel.git_command import run_git
 from agents_remember.kernel.memory_ledger import LedgerError, LedgerRow, load_ledger
 from agents_remember.mcp.config import McpRuntimeConfig
 from agents_remember.memory_quality.integrity.onboarding_drift_check.discovery import (
@@ -100,7 +102,6 @@ from agents_remember.tasks import (
     step_done,
     step_total,
 )
-from agents_remember.worktrees.modules.git import run_git
 from agents_remember.worktrees.modules.guidance import (
     contract_payload,
     lifecycle_guidance,
@@ -834,7 +835,12 @@ def _git_commit_meta(repo_root: Any, commits: list[str]) -> dict[str, tuple[str,
             Path(repo_root),
             ["log", "--no-walk", "--ignore-missing", "--format=%H%x1f%cI%x1f%s", *commits],
         )
-    except OSError:
+    except (OSError, subprocess.SubprocessError):
+        # SubprocessError is not a subclass of OSError, and TimeoutExpired is one: this call
+        # moved onto a runner that has a timeout, so a wedged `git log` now raises something
+        # `except OSError` cannot see. It would escape through `_enrich_ledger_rows` and fail
+        # the projection tick, breaking the promise `_ledger_window` and `read_ledger` both
+        # make -- that an unreadable ledger degrades to hash-only rows, never to an exception.
         return {}
     if result.returncode != 0:
         return {}

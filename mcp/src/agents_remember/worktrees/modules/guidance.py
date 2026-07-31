@@ -3,13 +3,11 @@ from __future__ import annotations
 from dataclasses import asdict
 from pathlib import Path
 
+from agents_remember.kernel.git_command import run_git
 from agents_remember.kernel.git_freshness import ahead_behind
 from agents_remember.kernel.memory_ledger import LedgerError, find_mapping, load_ledger
 from agents_remember.worktrees.modules import provider_async
-from agents_remember.worktrees.modules.git import (
-    run_git,
-    worktree_dirty,
-)
+from agents_remember.worktrees.modules.git import worktree_dirty
 from agents_remember.worktrees.modules.landing import landing_refs
 from agents_remember.worktrees.worktree_contract import WorktreeContract
 

@@ -7,6 +7,7 @@ from agents_remember.controlplane.enforcement import GateGuard, evaluate_gate
 from agents_remember.controlplane.gate_policy import GatePolicy
 from agents_remember.controlplane.records import GateRecord
 from agents_remember.controlplane.store import GateStore
+from agents_remember.kernel.git_command import run_git
 from agents_remember.kernel.memory_ledger import (
     find_mapping,
     load_ledger,
@@ -23,7 +24,6 @@ from agents_remember.worktrees.modules.git import (
     is_ancestor,
     require_clean,
     require_git,
-    run_git,
 )
 from agents_remember.worktrees.modules.guidance import (
     contract_next_args,

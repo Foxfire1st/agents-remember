@@ -11,7 +11,7 @@ from typing import Literal
 from agents_remember.errors import AuthorityError, RouteIndexCensusError
 from agents_remember.kernel.coordination_context.models import StorageSettings
 from agents_remember.kernel.coordination_context.storage import resolve_storage_for_source
-from agents_remember.kernel.git_command import run_git
+from agents_remember.kernel.git_command import GIT_METADATA_TIMEOUT_SECONDS, run_git
 
 TRACKED_FILE_MODES = {"100644", "100755", "120000"}
 NON_FILE_INDEX_MODES = {"040000", "160000"}
@@ -194,7 +194,9 @@ def _run_git(
     authority: bool,
 ) -> subprocess.CompletedProcess[str]:
     try:
-        return run_git(code_root, args)
+        # Census git is `rev-parse` and `ls-files` only, and it runs while a tool call
+        # waits, so it takes the metadata bound rather than the local default.
+        return run_git(code_root, args, timeout=GIT_METADATA_TIMEOUT_SECONDS)
     except (subprocess.TimeoutExpired, OSError) as error:
         detail = str(error).strip() or error.__class__.__name__
         message = f"{failure}: {detail}"

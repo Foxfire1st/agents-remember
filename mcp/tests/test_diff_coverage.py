@@ -15,6 +15,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
@@ -225,6 +226,46 @@ class BaseResolutionTests(unittest.TestCase):
             git(root, "commit", "--quiet", "-m", "unrelated")
 
             self.assertIsNone(diff_coverage.merge_base(root, "main"))
+
+    def test_the_three_git_wrappers_agree_on_which_failures_are_this_gate_s_error(self) -> None:
+        # `run_git`, `revision_exists` and `merge_base` all go through one `_git`, and two of
+        # them used to call it bare. Moving onto the shared runner made that difference
+        # matter: it has a timeout where the old inline call had none, and it passes `cwd=`,
+        # so `subprocess.run` raises for a missing project root before git is ever started --
+        # where the old `git -C <missing>` merely exited non-zero and these two answered
+        # `False` / `None`. Three siblings on one runner must not disagree about that.
+        with tempfile.TemporaryDirectory() as tmp:
+            missing = Path(tmp) / "no-such-root"
+
+            for call in (
+                lambda: diff_coverage.run_git(missing, ["ls-files"]),
+                lambda: diff_coverage.revision_exists(missing, "HEAD"),
+                lambda: diff_coverage.merge_base(missing, "main"),
+            ):
+                with self.assertRaises(diff_coverage.DiffScopeError):
+                    call()
+
+            wedged = subprocess.TimeoutExpired(cmd=["git"], timeout=300)
+            with patch.object(diff_coverage.git_command, "run_git", side_effect=wedged):
+                for call in (
+                    lambda: diff_coverage.run_git(missing, ["ls-files"]),
+                    lambda: diff_coverage.revision_exists(missing, "HEAD"),
+                    lambda: diff_coverage.merge_base(missing, "main"),
+                ):
+                    with self.assertRaises(diff_coverage.DiffScopeError):
+                        call()
+
+    def test_a_git_that_ran_and_said_no_is_still_an_answer_not_an_error(self) -> None:
+        # The conversion is for failures to *run* git. A revision that does not exist and a
+        # pair of refs with no merge base are answers, and converting those would turn every
+        # ordinary negative into a gate crash.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            seed = seeded_repository(root)
+
+            self.assertTrue(diff_coverage.revision_exists(root, seed))
+            self.assertFalse(diff_coverage.revision_exists(root, "no-such-revision"))
+            self.assertEqual(diff_coverage.merge_base(root, "main"), seed)
 
 
 class ChangedLineTests(unittest.TestCase):

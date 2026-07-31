@@ -37,6 +37,17 @@ class ConversationCompositionError(AgentsRememberError):
     """
 
 
+class TokenizerVocabularyError(AgentsRememberError):
+    """The tiktoken vocabulary a token counter needs is not the one vendored here.
+
+    Raised instead of letting tiktoken download the vocabulary it cannot find. The
+    counter is built while the MCP tool surface is still importing, so a download there
+    is a network round trip on the server's startup path -- the thing that made a cold
+    container, an offline machine and a hermetic CI job unable to start the server.
+    A build that failed to ship the file must say so, not work only where egress exists.
+    """
+
+
 class HarnessControlError(AgentsRememberError):
     """The hosted harness control contract or exact-session identity was violated."""
 

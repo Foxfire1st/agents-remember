@@ -45,6 +45,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from agents_remember.code_quality import crap_calculator, diff_coverage
+from agents_remember.kernel import git_command
 
 RADON_REPORT_NOTE = (
     "report only: radon exits 0 whatever it finds, so nothing below can fail the gate"
@@ -134,17 +135,17 @@ def git_ls_files(project_root: Path, *patterns: str) -> list[Path]:
     A failure here is fatal rather than an empty list: an empty scope would make every
     step of the gate pass by certifying nothing.
     """
-    command = ["git", "-C", str(project_root), "ls-files", "-z", "--", *patterns]
+    arguments = ["ls-files", "-z", "--", *patterns]
+    # On the package's one git runner, which strips GIT_DIR and friends. This gate runs
+    # from the pre-push hook and git exports GIT_DIR to its hooks, so an unstripped
+    # `ls-files` here would derive the whole gate's scope from another repository.
+    failed = f"could not list tracked files (git {' '.join(arguments)})"
     try:
-        completed = subprocess.run(
-            command,
-            capture_output=True,
-            text=True,
-            check=True,
-            stdin=subprocess.DEVNULL,
-        )
-    except (OSError, subprocess.CalledProcessError) as error:
-        raise ScopeError(f"could not list tracked files ({' '.join(command)}): {error}") from error
+        completed = git_command.run_git(project_root, arguments)
+    except (OSError, subprocess.SubprocessError) as error:
+        raise ScopeError(f"{failed}: {error}") from error
+    if completed.returncode != 0:
+        raise ScopeError(f"{failed}: exit {completed.returncode}: {completed.stderr.strip()}")
     return [Path(entry) for entry in completed.stdout.split("\0") if entry]
 
 

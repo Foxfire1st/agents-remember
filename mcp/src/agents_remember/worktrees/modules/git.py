@@ -1,22 +1,18 @@
 from __future__ import annotations
 
-import subprocess
 from pathlib import Path
 from typing import Any
 
 from agents_remember.kernel import filesystem
+from agents_remember.kernel.git_command import run_git
 from agents_remember.worktrees.worktree_contract import WorktreeContract
 
-
-def run_git(repo: Path, args: list[str]) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        ["git", "-c", f"safe.directory={repo.as_posix()}", *args],
-        cwd=repo,
-        text=True,
-        stdin=subprocess.DEVNULL,
-        capture_output=True,
-        check=False,
-    )
+# This module used to define its own `run_git` -- the kernel's function with the
+# environment guard, the timeout and the explicit encoding all dropped -- and every
+# destructive worktree operation (commit, merge --ff-only, reset --hard, rebase,
+# branch -f, branch -D, worktree remove --force, push origin --delete) ran through
+# it. With GIT_DIR exported those landed in whatever repository GIT_DIR named. The
+# helpers below now call the one guarded runner; nothing else about them changed.
 
 
 def require_git(repo: Path, args: list[str]) -> str:

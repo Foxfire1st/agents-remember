@@ -8,6 +8,8 @@ import sys
 from collections.abc import Callable, Mapping
 from pathlib import Path
 
+from agents_remember.kernel.git_command import git_environment, run_git
+
 QUALITY_WRAPPER = Path("mcp/src/agents_remember/code_quality/check.py")
 QUALITY_MODULE = "agents_remember.code_quality.check"
 FAILURE_OUTPUT_LINES = 40
@@ -153,8 +155,16 @@ def quality_python(code_worktree: Path) -> Path:
 
 
 def quality_environment(code_worktree: Path) -> dict[str, str]:
-    """Put the current worktree package first even when Python comes from another checkout."""
-    env = dict(os.environ)
+    """Put the current worktree package first even when Python comes from another checkout.
+
+    Built from :func:`git_environment` rather than ``os.environ``: the wrapper this hands the
+    environment to derives its own scope from ``git ls-files`` and its diff base from
+    ``merge-base``, and closeout spawns it from paths where ``GIT_DIR`` can be exported. Every
+    git call inside that subprocess strips the selectors itself today, so this is defence in
+    depth -- but the gate decides which repository gets certified, and that must not rest on
+    the good behaviour of a child process this one cannot see.
+    """
+    env = git_environment()
     entries = [(code_worktree / "mcp" / "src").as_posix()]
     existing = env.get("PYTHONPATH")
     if existing:
@@ -164,14 +174,9 @@ def quality_environment(code_worktree: Path) -> dict[str, str]:
 
 
 def _git_common_dir(code_worktree: Path) -> Path | None:
-    result = subprocess.run(
-        ["git", "rev-parse", "--path-format=absolute", "--git-common-dir"],
-        cwd=code_worktree,
-        text=True,
-        stdin=subprocess.DEVNULL,
-        capture_output=True,
-        check=False,
-    )
+    # On the one runner: an inherited GIT_DIR would answer with *its* common dir, and
+    # this value decides which repository the closeout quality gate then certifies.
+    result = run_git(code_worktree, ["rev-parse", "--path-format=absolute", "--git-common-dir"])
     if result.returncode != 0:
         return None
     value = result.stdout.strip()

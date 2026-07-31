@@ -14,7 +14,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from agents_remember.kernel.git_command import run_git
+from agents_remember.kernel.git_command import (
+    GIT_LOCAL_TIMEOUT_SECONDS,
+    GIT_METADATA_TIMEOUT_SECONDS,
+    run_git,
+)
 
 DEFAULT_FETCH_TIMEOUT = 30
 
@@ -32,22 +36,22 @@ class BranchFreshness:
 
 def upstream_ref(repo_root: Path, branch: str) -> str | None:
     """The remote-tracking ref of branch (e.g. ``origin/main``), or None when unset."""
-    result = run_git(repo_root, ["rev-parse", "--abbrev-ref", f"{branch}@{{upstream}}"])
+    # A local ref lookup, so the metadata bound rather than the runner's local default:
+    # every command in this module is classed by what it does, not by which file it is in.
+    result = run_git(
+        repo_root,
+        ["rev-parse", "--abbrev-ref", f"{branch}@{{upstream}}"],
+        timeout=GIT_METADATA_TIMEOUT_SECONDS,
+    )
     return result.stdout.strip() if result.returncode == 0 else None
 
 
 def fetch_remote(repo_root: Path, remote: str, timeout: int = DEFAULT_FETCH_TIMEOUT) -> str | None:
     """Fetch a remote's tracking refs. None on success, error text on failure."""
     try:
-        result = subprocess.run(
-            ["git", "-c", f"safe.directory={repo_root.as_posix()}", "fetch", remote],
-            cwd=repo_root,
-            text=True,
-            stdin=subprocess.DEVNULL,
-            capture_output=True,
-            check=False,
-            timeout=timeout,
-        )
+        # Its own bound, not the runner's: a fetch is the one network call here and
+        # 30s is the point past which "still fetching" means "not coming back".
+        result = run_git(repo_root, ["fetch", remote], timeout=timeout)
     except (OSError, subprocess.SubprocessError) as error:
         return f"git fetch {remote} failed: {error}"
     if result.returncode != 0:
@@ -57,7 +61,14 @@ def fetch_remote(repo_root: Path, remote: str, timeout: int = DEFAULT_FETCH_TIME
 
 def ahead_behind(repo_root: Path, local: str, other: str) -> tuple[int, int] | None:
     """(ahead, behind) commit counts of local relative to other, or None when unresolvable."""
-    result = run_git(repo_root, ["rev-list", "--left-right", "--count", f"{local}...{other}"])
+    # Not constant time: this walks history, and how much depends on how far the two refs
+    # have drifted apart, so it keeps the local bound -- named here so the choice reads as
+    # a decision rather than as the default nobody looked at.
+    result = run_git(
+        repo_root,
+        ["rev-list", "--left-right", "--count", f"{local}...{other}"],
+        timeout=GIT_LOCAL_TIMEOUT_SECONDS,
+    )
     if result.returncode != 0:
         return None
     parts = result.stdout.split()
@@ -87,7 +98,7 @@ def _read_branch_freshness(
     root: Path, branch: str | None, *, fetch: bool, fetch_timeout: int
 ) -> BranchFreshness:
     if branch is None:
-        current = run_git(root, ["branch", "--show-current"])
+        current = run_git(root, ["branch", "--show-current"], timeout=GIT_METADATA_TIMEOUT_SECONDS)
         if current.returncode != 0:
             return BranchFreshness(
                 "",

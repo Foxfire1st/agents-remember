@@ -9,10 +9,10 @@ import re
 import sys
 from pathlib import Path
 
+from agents_remember.kernel.git_command import run_git
 from agents_remember.memory_quality.integrity.onboarding_drift_check.discovery import rel
 from agents_remember.memory_quality.integrity.onboarding_drift_check.git_ops import (
     current_branch_name,
-    run_git,
 )
 from agents_remember.memory_quality.integrity.onboarding_drift_check.models import (
     CLASSIFICATIONS,

@@ -9,12 +9,11 @@ from __future__ import annotations
 import argparse
 import json
 import re
-import subprocess
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
 from agents_remember.kernel.coordination_context.models import StorageSettings
-from agents_remember.kernel.git_command import git_environment
+from agents_remember.kernel.git_command import run_git
 from agents_remember.kernel.memory_ledger import (
     LedgerError,
     MemoryLedger,
@@ -87,26 +86,6 @@ def request_from_args(args: argparse.Namespace) -> CarryoverRequest:
         source_memory=args.source_memory,
         code_repository_name=args.code_repository_name,
         replace_existing=args.replace_existing,
-    )
-
-
-def run_git(
-    repo: Path, args: list[str], *, input_text: str | None = None
-) -> subprocess.CompletedProcess[str]:
-    # stdin must never inherit the parent's descriptor: under the stdio MCP
-    # transport that descriptor IS the protocol request pipe, and a child
-    # holding or reading it wedges the tool call (GitHub #49).
-    stdin_kwargs: dict[str, object] = (
-        {"input": input_text} if input_text is not None else {"stdin": subprocess.DEVNULL}
-    )
-    return subprocess.run(
-        ["git", "-c", f"safe.directory={repo.as_posix()}", *args],
-        cwd=repo,
-        text=True,
-        capture_output=True,
-        check=False,
-        env=git_environment(),
-        **stdin_kwargs,  # type: ignore[arg-type]
     )
 
 

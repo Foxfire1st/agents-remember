@@ -16,13 +16,13 @@ from datetime import UTC, datetime
 from pathlib import Path
 from subprocess import CompletedProcess
 
+from agents_remember.kernel.git_command import run_git
 from agents_remember.kernel.git_freshness import fetch_remote, upstream_ref
 from agents_remember.kernel.memory_ledger import LedgerError, find_mapping, parse_ledger_text
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.git import (
     head_commit,
     is_ancestor,
-    run_git,
 )
 from agents_remember.worktrees.modules.guidance import (
     contract_next_args,

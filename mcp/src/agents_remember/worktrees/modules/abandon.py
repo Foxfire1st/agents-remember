@@ -18,6 +18,7 @@ from __future__ import annotations
 from dataclasses import replace
 from pathlib import Path
 
+from agents_remember.kernel.git_command import run_git
 from agents_remember.worktrees.modules import provider_async
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.cleanup import (
@@ -26,7 +27,7 @@ from agents_remember.worktrees.modules.cleanup import (
     remove_empty_dir,
     remove_registered_worktree,
 )
-from agents_remember.worktrees.modules.git import branch_exists, run_git
+from agents_remember.worktrees.modules.git import branch_exists
 from agents_remember.worktrees.modules.guidance import status_payload
 from agents_remember.worktrees.modules.integrate import integration_branch
 from agents_remember.worktrees.modules.models import WorktreeCommandResult

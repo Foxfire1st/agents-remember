@@ -79,6 +79,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from agents_remember.code_quality import crap_calculator
+from agents_remember.kernel import git_command
 
 # Zero uncovered changed lines. See the module docstring for the derivation; the short
 # form is that any value below 100 is a budget for untested code that grows with the
@@ -133,42 +134,52 @@ class DiffCoverage:
         return self.ratio * 100.0
 
 
-def run_git(project_root: Path, arguments: list[str]) -> str:
-    command = ["git", "-c", "core.quotePath=false", "-C", str(project_root), *arguments]
+def _git(project_root: Path, arguments: list[str]) -> subprocess.CompletedProcess[str]:
+    """This gate's git calls, on the package's one runner.
+
+    ``core.quotePath=false`` is this gate's own requirement and stays: without it git
+    octal-escapes non-ASCII paths in ``diff`` output and the changed-line parser stops
+    recognising the files it is supposed to score.
+
+    Routing through the shared runner is not cosmetic here. The full tier runs from the
+    ``pre-push`` hook, and git exports ``GIT_DIR`` to its hooks -- so of every git call
+    site in this package, this gate's were the ones most certain to meet the very
+    variables they did not strip, and would then have certified the coverage of a
+    different repository than the one being pushed.
+
+    The conversion to :class:`DiffScopeError` lives here rather than in one of the three
+    callers, so every caller gets it. ``run_git`` used to own it alone while
+    ``revision_exists`` and ``merge_base`` called this function bare, and the shared runner
+    made that difference load-bearing: it raises ``TimeoutExpired`` where the old inline
+    call had no timeout at all, and ``FileNotFoundError`` for a ``project_root`` that does
+    not exist, where the old ``git -C <path>`` with no ``cwd=`` merely exited non-zero and
+    those two answered ``False`` / ``None``. Three siblings on one runner must not disagree
+    about which failures are this gate's own error.
+    """
+
     try:
-        completed = subprocess.run(
-            command,
-            capture_output=True,
-            text=True,
-            check=True,
-            stdin=subprocess.DEVNULL,
+        return git_command.run_git(project_root, ["-c", "core.quotePath=false", *arguments])
+    except (OSError, subprocess.SubprocessError) as error:
+        raise DiffScopeError(f"git command failed (git {' '.join(arguments)}): {error}") from error
+
+
+def run_git(project_root: Path, arguments: list[str]) -> str:
+    completed = _git(project_root, arguments)
+    if completed.returncode != 0:
+        raise DiffScopeError(
+            f"git command failed (git {' '.join(arguments)}): "
+            f"exit {completed.returncode}: {completed.stderr.strip()}"
         )
-    except (OSError, subprocess.CalledProcessError) as error:
-        raise DiffScopeError(f"git command failed ({' '.join(command)}): {error}") from error
     return completed.stdout
 
 
 def revision_exists(project_root: Path, revision: str) -> bool:
-    command = [
-        "git",
-        "-C",
-        str(project_root),
-        "rev-parse",
-        "--verify",
-        "--quiet",
-        f"{revision}^{{commit}}",
-    ]
-    completed = subprocess.run(
-        command, capture_output=True, text=True, check=False, stdin=subprocess.DEVNULL
-    )
+    completed = _git(project_root, ["rev-parse", "--verify", "--quiet", f"{revision}^{{commit}}"])
     return completed.returncode == 0
 
 
 def merge_base(project_root: Path, revision: str) -> str | None:
-    command = ["git", "-C", str(project_root), "merge-base", "HEAD", revision]
-    completed = subprocess.run(
-        command, capture_output=True, text=True, check=False, stdin=subprocess.DEVNULL
-    )
+    completed = _git(project_root, ["merge-base", "HEAD", revision])
     if completed.returncode != 0:
         return None
     return completed.stdout.strip() or None

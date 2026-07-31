@@ -5,6 +5,7 @@ import os
 from dataclasses import dataclass, replace
 from pathlib import Path
 
+from agents_remember.kernel.git_command import run_git
 from agents_remember.kernel.git_freshness import freshness_to_packet, read_branch_freshness
 from agents_remember.kernel.memory_ledger import (
     LedgerError,
@@ -29,7 +30,6 @@ from agents_remember.worktrees.modules.git import (
     head_commit,
     longest_tracked_path_length,
     require_git,
-    run_git,
 )
 from agents_remember.worktrees.modules.guidance import (
     contract_next_args,

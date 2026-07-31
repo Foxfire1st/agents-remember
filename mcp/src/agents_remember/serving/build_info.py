@@ -23,15 +23,20 @@ read as a verified-pristine claim, an honest unknown mirrors ``commit``'s ``None
 from __future__ import annotations
 
 import contextlib
-import subprocess
 from dataclasses import dataclass
 from importlib import resources
 from pathlib import Path
 from typing import Any
 
 import agents_remember
+from agents_remember.kernel.git_command import run_git
 from agents_remember.mcp import SERVER_VERSION
 from agents_remember.observer.events import now_iso
+
+# Boot-time probes: the stamp is best-effort and must never delay app creation, so a
+# git that does not answer in two seconds is treated as "unstampable" like any other
+# failure. Kept tight deliberately, against the runner's general-purpose local bound.
+_PROBE_TIMEOUT_SECONDS = 2
 
 
 @dataclass(frozen=True)
@@ -62,15 +67,10 @@ class ServingBuild:
 def _git_short_head(anchor: Path) -> str | None:
     """The short HEAD hash of the checkout containing ``anchor``, or ``None`` off-checkout."""
     with contextlib.suppress(Exception):
-        result = subprocess.run(
-            ["git", "rev-parse", "--short", "HEAD"],  # fixed argv, no wire input
-            cwd=anchor,
-            capture_output=True,
-            text=True,
-            timeout=2,
-            check=False,
-            stdin=subprocess.DEVNULL,  # never inherit the MCP stdio protocol pipes
-        )
+        # The one runner: it strips GIT_DIR (so the stamp describes the checkout the
+        # server was started from, not an inherited one) and DEVNULLs stdin (so the
+        # probe can never touch the MCP stdio protocol pipes).
+        result = run_git(anchor, ["rev-parse", "--short", "HEAD"], timeout=_PROBE_TIMEOUT_SECONDS)
         if result.returncode == 0:
             head = result.stdout.strip()
             return head or None
@@ -88,15 +88,7 @@ def _git_worktree_dirty(anchor: Path) -> bool | None:
     the absent marker a false verified-pristine meaning.
     """
     with contextlib.suppress(Exception):
-        result = subprocess.run(
-            ["git", "status", "--porcelain"],  # fixed argv, no wire input
-            cwd=anchor,
-            capture_output=True,
-            text=True,
-            timeout=2,
-            check=False,
-            stdin=subprocess.DEVNULL,  # never inherit the MCP stdio protocol pipes
-        )
+        result = run_git(anchor, ["status", "--porcelain"], timeout=_PROBE_TIMEOUT_SECONDS)
         if result.returncode == 0:
             return bool(result.stdout.strip())
     return None  # unprovable: fail OPEN to unknown, not a fabricated clean tree

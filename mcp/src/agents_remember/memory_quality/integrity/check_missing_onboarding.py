@@ -18,6 +18,7 @@ from agents_remember.kernel.coordination_context_resolver import (
     resolve_coordination_context,
     resolve_storage_for_source,
 )
+from agents_remember.kernel.git_command import run_git
 from agents_remember.memory_quality.integrity.onboarding_drift_check.drift import (
     extract_inline_onboarding_block,
     mirror_onboarding_path,
@@ -78,8 +79,8 @@ def worktree_added_sources(repo_root: Path) -> list[str]:
         ["diff", "--cached", "--name-status", "--find-renames", "--diff-filter=ACR", "-z"],
         ["diff", "--name-status", "--find-renames", "--diff-filter=ACR", "-z"],
     ):
-        sources.update(parse_name_status(run_git(repo_root, args).stdout))
-    untracked = run_git(repo_root, ["ls-files", "--others", "--exclude-standard", "-z"])
+        sources.update(parse_name_status(require_git(repo_root, args).stdout))
+    untracked = require_git(repo_root, ["ls-files", "--others", "--exclude-standard", "-z"])
     sources.update(normalize_rel_path(path) for path in split_z(untracked.stdout))
     return sorted(sources)
 
@@ -172,22 +173,23 @@ def split_z(output: str) -> list[str]:
     return [value for value in output.split("\0") if value]
 
 
-def run_git(repo_root: Path, args: list[str]) -> subprocess.CompletedProcess[str]:
-    result = subprocess.run(
-        ["git", "-c", f"safe.directory={repo_root.as_posix()}", *args],
-        cwd=repo_root,
-        text=True,
-        stdin=subprocess.DEVNULL,
-        capture_output=True,
-        check=False,
-    )
+def require_git(repo_root: Path, args: list[str]) -> subprocess.CompletedProcess[str]:
+    """The one runner, plus this module's contract that any git failure is fatal.
+
+    Returns the completed process rather than its text (the shape the other
+    ``require_git`` helpers use) because every caller reads NUL-delimited output,
+    which a ``.strip()`` would corrupt. This used to be a sixth copy of ``run_git``
+    with the environment guard, the timeout and the explicit encoding missing.
+    """
+
+    result = run_git(repo_root, args)
     if result.returncode != 0:
         raise RuntimeError(result.stderr.strip() or f"git {' '.join(args)} failed")
     return result
 
 
 def code_repository_name_from_git(repo_root: Path) -> str:
-    common_dir = run_git(
+    common_dir = require_git(
         repo_root, ["rev-parse", "--path-format=absolute", "--git-common-dir"]
     ).stdout.strip()
     if common_dir:

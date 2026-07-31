@@ -39,6 +39,7 @@ from agents_remember.kernel.memory_ledger import (
 from agents_remember.mcp.config import McpRuntimeConfig, ProviderScope, RepositoryScope
 from agents_remember.memory_quality.integrity.onboarding_drift_check import summary
 from agents_remember.memory_quality.integrity.onboarding_drift_check.models import DriftRow
+from agents_remember.observer import snapshots
 from agents_remember.observer.drift_snapshots import drift_snapshot_path
 from agents_remember.observer.events import Event
 from agents_remember.observer.landing_state import LandingStateRefresher
@@ -2469,6 +2470,34 @@ class LedgerCommitMetaTests(unittest.TestCase):
         self.assertIsNone(rows[0].codeDate)
         self.assertIsNone(rows[0].memorySubject)
         self.assertIsNone(rows[0].memoryDate)
+
+    def test_a_wedged_git_log_degrades_to_hash_only_rows_instead_of_failing_the_tick(
+        self,
+    ) -> None:
+        # TimeoutExpired is a SubprocessError, and SubprocessError is not an OSError. The
+        # probe moved from a runner with no timeout onto one with the local bound, so a
+        # wedged `git log` now raises something `except OSError` cannot catch -- it would
+        # escape _git_commit_meta -> _enrich_ledger_rows and take the whole projection tick
+        # down, which is exactly what both entry points below promise never happens.
+        repo, shas = self._repo_with_commits(["code change", "memory change"])
+        ledger = prepend_mapping(create_initial_ledger("repo-a", "base", "base"), shas[0], shas[1])
+        write_ledger(repo / "memory.md", ledger)
+        wedged = subprocess.TimeoutExpired(cmd=["git", "log"], timeout=300)
+
+        with mock.patch.object(snapshots, "run_git", side_effect=wedged):
+            rows, total = _ledger_window(
+                (repo / "memory.md").as_posix(),
+                code_root=repo.as_posix(),
+                memory_root=repo.as_posix(),
+            )
+            node = read_ledger(repo, code_root=repo)
+
+        self.assertEqual(total, len(ledger.rows))
+        self.assertEqual(rows[0].codeCommit, shas[0])  # the hash survives
+        self.assertIsNone(rows[0].codeSubject)  # the enrichment does not, and is not faked
+        self.assertIsNone(rows[0].memoryDate)
+        assert node is not None  # the LedgerNode builder degrades the same way
+        self.assertIsNone(node.rows[0].codeSubject)
 
     def test_read_ledger_enriches_official_rows_with_code_root(self) -> None:
         # memory.md lives in the (git) memory repo so its memory commits resolve; code_root carries the code side

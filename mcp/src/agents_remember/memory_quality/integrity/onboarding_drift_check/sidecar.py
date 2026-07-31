@@ -10,6 +10,7 @@ from agents_remember.kernel.coordination_context_resolver import (
     normalize_rel_path,
     resolve_storage_for_source,
 )
+from agents_remember.kernel.git_command import run_git
 from agents_remember.memory_quality.integrity.onboarding_drift_check.discovery import (
     mirror_onboarding_path,
     normalize_overview_route,
@@ -22,7 +23,6 @@ from agents_remember.memory_quality.integrity.onboarding_drift_check.entities im
 from agents_remember.memory_quality.integrity.onboarding_drift_check.git_ops import (
     local_change_note,
     local_route_change_note,
-    run_git,
 )
 from agents_remember.memory_quality.integrity.onboarding_drift_check.models import (
     DriftRow,

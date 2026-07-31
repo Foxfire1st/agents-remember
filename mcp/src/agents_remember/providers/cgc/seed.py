@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from agents_remember.kernel.git_command import run_git
 from agents_remember.providers.cgc.bundle import rewrite_cgc_bundle_paths
 from agents_remember.providers.context_common import to_container_path
 from agents_remember.providers.setup_common import (
@@ -200,22 +200,9 @@ def git_head_or_none(repo_root: Path) -> str | None:
 
     if not repo_root.exists():
         return None
-    result = subprocess.run(
-        [
-            "git",
-            "-c",
-            f"safe.directory={repo_root.as_posix()}",
-            "-C",
-            repo_root.as_posix(),
-            "rev-parse",
-            "HEAD",
-        ],
-        text=True,
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.DEVNULL,
-        check=False,
-    )
+    # The one runner: an inherited GIT_DIR would return another repository's HEAD and
+    # the seed would then be declared fresh against a commit this repo never had.
+    result = run_git(repo_root, ["rev-parse", "HEAD"])
     if result.returncode != 0:
         return None
     return result.stdout.strip()
@@ -428,6 +415,11 @@ def _seed_validation_failure(
 # explicit `cgc refresh` only.
 DEFAULT_SEED_DELTA_MAX_FILES = 200
 
+# The catch-up diff is bounded well under the runner's general local bound: it runs
+# during provider setup, and a repo whose diff has not answered in a minute is not one
+# a per-file touch pass was going to catch up anyway.
+_CATCH_UP_DIFF_TIMEOUT_SECONDS = 60
+
 
 def seed_commit_divergence(
     source_repo_root: Path, source_head: str, target_head: str
@@ -444,14 +436,10 @@ def seed_commit_divergence(
     deletions and rename-sources leave phantom graph nodes no touch can fix —
     those are reported as residual staleness, never blessed as caught up.
     """
-    result = subprocess.run(
-        ["git", "diff", "--name-status", source_head, target_head],
-        cwd=source_repo_root,
-        stdin=subprocess.DEVNULL,
-        capture_output=True,
-        text=True,
-        timeout=60,
-        check=False,
+    result = run_git(
+        source_repo_root,
+        ["diff", "--name-status", source_head, target_head],
+        timeout=_CATCH_UP_DIFF_TIMEOUT_SECONDS,
     )
     if result.returncode != 0:
         return None

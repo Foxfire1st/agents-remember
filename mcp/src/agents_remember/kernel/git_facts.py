@@ -7,7 +7,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from agents_remember.kernel.git_command import run_git
+from agents_remember.kernel.git_command import (
+    GIT_LOCAL_TIMEOUT_SECONDS,
+    GIT_METADATA_TIMEOUT_SECONDS,
+    run_git,
+)
 
 
 @dataclass(frozen=True)
@@ -51,7 +55,17 @@ def _read_git_facts(repo_id: str, root: Path) -> GitFacts:
             f"repo path is not a directory: {root}",
         )
 
-    inside = run_git(root, ["rev-parse", "--is-inside-work-tree"])
+    # The timeout class is picked per command, not per module. The three ref reads below
+    # are constant time -- ~1.8ms each on this repository -- and sit on `resolve_context`,
+    # which runs on essentially every tool call. On the runner's local default all four
+    # probes here could hold one MCP call for twenty minutes over a stalled mount or a
+    # held index lock, with no cancellation path for the client; the metadata band exists
+    # to make that a failure instead of a wait. `kernel/coordination_context/cross_repo.py`
+    # already runs two of these three at the metadata bound, and one command must not mean
+    # two different things inside `kernel/`.
+    inside = run_git(
+        root, ["rev-parse", "--is-inside-work-tree"], timeout=GIT_METADATA_TIMEOUT_SECONDS
+    )
     if inside.returncode != 0 or inside.stdout.strip() != "true":
         return GitFacts(
             repo_id,
@@ -63,12 +77,14 @@ def _read_git_facts(repo_id: str, root: Path) -> GitFacts:
             _git_error(inside, "not a git work tree"),
         )
 
-    head = _git_stdout(root, ["rev-parse", "HEAD"])
+    head = _git_stdout(root, ["rev-parse", "HEAD"], timeout=GIT_METADATA_TIMEOUT_SECONDS)
     if not head:
         return GitFacts(repo_id, root, "", "", False, "unavailable", "git HEAD is unavailable")
 
-    branch = _git_stdout(root, ["branch", "--show-current"])
-    dirty = bool(_git_stdout(root, ["status", "--porcelain"]))
+    branch = _git_stdout(root, ["branch", "--show-current"], timeout=GIT_METADATA_TIMEOUT_SECONDS)
+    # `status --porcelain` is the one probe here that is not constant time -- it stats the
+    # whole work tree -- so it keeps the local bound and is named rather than defaulted.
+    dirty = bool(_git_stdout(root, ["status", "--porcelain"], timeout=GIT_LOCAL_TIMEOUT_SECONDS))
     state = "available" if branch else "detached"
     return GitFacts(repo_id, root, branch, head, dirty, state)
 
@@ -87,8 +103,10 @@ def git_facts_to_packet(facts: GitFacts) -> dict[str, Any]:
     return packet
 
 
-def _git_stdout(repo_root: Path, args: list[str]) -> str:
-    result = run_git(repo_root, args)
+def _git_stdout(repo_root: Path, args: list[str], *, timeout: float) -> str:
+    """Trimmed stdout, empty on failure. ``timeout`` is required -- see :func:`_read_git_facts`."""
+
+    result = run_git(repo_root, args, timeout=timeout)
     if result.returncode != 0:
         return ""
     return result.stdout.strip()

@@ -1036,7 +1036,8 @@ class BuildInfoTests(unittest.TestCase):
         # is False, proven-dirty is True, and an UNPROVABLE probe (git status raises or exits
         # non-zero) fails OPEN to None -- "not proven clean", never pristine. Reverting to the
         # old fail-closed `return False` collapses both unknown cases to a fabricated clean.
-        run = "agents_remember.serving.build_info.subprocess.run"
+        # Seam is the package's one git runner (the probe no longer spawns git itself).
+        run = "agents_remember.serving.build_info.run_git"
         anchor = Path("/some/checkout")
 
         dirty = subprocess.CompletedProcess(args=[], returncode=0, stdout=" M edited.py\n")
@@ -1061,12 +1062,14 @@ class BuildInfoTests(unittest.TestCase):
         # stamp must serve the hash WITHOUT claiming the tree is clean. Unknown dirtiness is
         # omitted from the wire exactly like a clean tree, but the object holds None (not False)
         # so nothing internally asserts a verified-pristine tree.
-        def fake_run(argv: list[str], *args: Any, **kwargs: Any) -> subprocess.CompletedProcess:
-            if argv[:2] == ["git", "rev-parse"]:
-                return subprocess.CompletedProcess(argv, 0, stdout="deadbee\n", stderr="")
+        def fake_run(
+            _repo: Path, arguments: list[str], **kwargs: Any
+        ) -> subprocess.CompletedProcess:
+            if arguments[:1] == ["rev-parse"]:
+                return subprocess.CompletedProcess(arguments, 0, stdout="deadbee\n", stderr="")
             raise OSError("git status: index locked")
 
-        with mock.patch("agents_remember.serving.build_info.subprocess.run", side_effect=fake_run):
+        with mock.patch("agents_remember.serving.build_info.run_git", side_effect=fake_run):
             build = resolve_serving_build(anchor=Path("/some/checkout"))
 
         self.assertEqual(build.commit, "deadbee")  # the hash resolved and rides the wire
