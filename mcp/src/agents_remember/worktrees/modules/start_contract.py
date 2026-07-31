@@ -25,6 +25,9 @@ from agents_remember.worktrees.task_resolver import (
 )
 from agents_remember.worktrees.worktree_contract import (
     ContractError,
+    ContractTask,
+    LeafIdentity,
+    RepoBranchPlan,
     WorktreeContract,
     default_contract,
     default_series_contract,
@@ -61,6 +64,28 @@ def memory_base_for_source(memory_repo, memory_source_branch: str) -> str:
 
 def _external_memory_value(memory_mode: str, value: str) -> str:
     return value if memory_mode == "external" else ""
+
+
+def _memory_plan(
+    memory_repo: Path | None,
+    *,
+    source_branch: str,
+    work_branch: str,
+    base_commit: str,
+) -> RepoBranchPlan | None:
+    """The memory side's branch plan, or ``None`` when this task has no memory repository.
+
+    Absence is the whole state: without a repo path there is no memory branch, no memory base
+    and no ledger, so a plan whose repo path is missing is not a plan.
+    """
+    if memory_repo is None:
+        return None
+    return RepoBranchPlan(
+        repo_path=memory_repo,
+        source_branch=source_branch,
+        work_branch=work_branch,
+        base_commit=base_commit,
+    )
 
 
 def _task_root_has_master_artifact(task_root: Path) -> bool:
@@ -124,20 +149,26 @@ def _parent_series_contract(
                 dry_run=args.dry_run,
             )
         contract = default_series_contract(
-            task_name=args.task_name,
-            repo_name=context.code_repository_name,
-            workflow_kind=args.workflow_kind,
-            memory_mode=memory_mode,
-            coordination_root=context.coordination_root,
-            code_repo_path=repo,
-            protected_branch=protected_branch,
-            integration_branch=integration_branch,
-            code_base_commit=head_commit(repo, protected_branch),
-            memory_repo_path=memory_repo,
-            memory_source_branch=memory_source_branch,
-            memory_work_branch=memory_work_branch,
-            memory_base_commit=memory_base_for_source(memory_repo, memory_source_branch),
-            parent_task_name=args.parent_task or "",
+            ContractTask(
+                name=args.task_name,
+                repo_name=context.code_repository_name,
+                coordination_root=context.coordination_root,
+                workflow_kind=args.workflow_kind,
+                memory_mode=memory_mode,
+                parent_task_name=args.parent_task or "",
+            ),
+            code=RepoBranchPlan(
+                repo_path=repo,
+                source_branch=protected_branch,
+                work_branch=integration_branch,
+                base_commit=head_commit(repo, protected_branch),
+            ),
+            memory=_memory_plan(
+                memory_repo,
+                source_branch=memory_source_branch,
+                work_branch=memory_work_branch,
+                base_commit=memory_base_for_source(memory_repo, memory_source_branch),
+            ),
             task_root=task_root,
         )
         if not args.dry_run:
@@ -187,22 +218,28 @@ def _build_start_contract(context, args: WorktreeArgs) -> WorktreeContract:
     else:
         memory_base = memory_base_for_source(memory_repo, memory_source_branch)
     return default_contract(
-        task_name=args.task_name,
-        repo_name=context.code_repository_name,
-        workflow_kind=args.workflow_kind,
-        memory_mode=memory_mode,
-        coordination_root=context.coordination_root,
-        code_repo_path=repo,
-        code_source_branch=source_branch,
-        code_work_branch=work_branch,
-        code_base_commit=base_commit,
-        worktree_name=args.worktree_name,
-        memory_repo_path=memory_repo,
-        memory_source_branch=memory_source_branch,
-        memory_work_branch=_external_memory_value(memory_mode, work_branch),
-        memory_base_commit=memory_base,
-        lifecycle_id=args.lifecycle_id,
-        leaf_id=leaf_id,
-        parent_task_name=parent_series.task_name if parent_series is not None else "",
-        parent_contract_path=parent_series.contract_path if parent_series is not None else None,
+        ContractTask(
+            name=args.task_name,
+            repo_name=context.code_repository_name,
+            coordination_root=context.coordination_root,
+            workflow_kind=args.workflow_kind,
+            memory_mode=memory_mode,
+            parent_task_name=parent_series.task_name if parent_series is not None else "",
+            parent_contract_path=parent_series.contract_path if parent_series is not None else None,
+        ),
+        leaf=LeafIdentity(
+            worktree_name=args.worktree_name, leaf_id=leaf_id, lifecycle_id=args.lifecycle_id
+        ),
+        code=RepoBranchPlan(
+            repo_path=repo,
+            source_branch=source_branch,
+            work_branch=work_branch,
+            base_commit=base_commit,
+        ),
+        memory=_memory_plan(
+            memory_repo,
+            source_branch=memory_source_branch,
+            work_branch=_external_memory_value(memory_mode, work_branch),
+            base_commit=memory_base,
+        ),
     )

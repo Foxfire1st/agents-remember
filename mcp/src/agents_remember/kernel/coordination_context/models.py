@@ -71,6 +71,61 @@ class CoordinationSelection:
     settings_path: Path
 
 
+@dataclass(frozen=True)
+class EnclosureSelector:
+    """How a caller names the enclosure to resolve.
+
+    Either directly, by ``contract_path``, or indirectly: a task (with ``parent_task`` to
+    disambiguate a repeated task name) plus the leaf id or worktree name that picks one
+    enclosure inside it. Resolution tries these in a fixed order, so a caller that supplies
+    a subset is still supplying one selector -- the whole set travels from the tool boundary
+    down to :func:`resolve_contract` unchanged.
+    """
+
+    contract_path: Path | None = None
+    task_name: str | None = None
+    parent_task: str | None = None
+    leaf_id: str | None = None
+    worktree_name: str | None = None
+
+
+@dataclass(frozen=True)
+class CoordinationHints:
+    """What a caller already knows about where the coordination tree is.
+
+    Every field is a hint, not a fact: a requested topology overrides detection, an explicit
+    coordination root or settings file short-circuits the search, and an onboarding root
+    selects the from-onboarding resolution path entirely. Detection fills in whatever is
+    absent.
+    """
+
+    topology: Literal["internal", "external"] | None = None
+    coordination_root: Path | None = None
+    settings_path: Path | None = None
+    onboarding_root: Path | None = None
+
+
+@dataclass(frozen=True)
+class CodeRepository:
+    """A resolved code repository: its name, its root on disk, and the workspace holding it."""
+
+    name: str
+    root: Path
+    workspace: Path
+
+
+@dataclass(frozen=True)
+class CoordinationRoots:
+    """The coordination tree after resolution: which topology won, and the four roots that
+    topology implies. Detection produces them together and no reader wants a subset."""
+
+    topology: Literal["internal", "external"]
+    coordination_root: Path
+    memory_root: Path
+    onboarding_root: Path
+    settings_path: Path
+
+
 @dataclass
 class CoordinationContext:
     topology: Literal["internal", "external"]

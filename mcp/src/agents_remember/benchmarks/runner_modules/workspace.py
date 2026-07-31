@@ -28,7 +28,11 @@ from agents_remember.benchmarks.runner_modules.mcp_registration import (
     prepare_configured_providers,
     write_benchmark_mcp_registration,
 )
-from agents_remember.benchmarks.runner_modules.models import BenchmarkCase
+from agents_remember.benchmarks.runner_modules.models import (
+    BenchmarkCase,
+    BenchmarkPreparation,
+    BenchmarkWorkspace,
+)
 
 
 def prepare_repo(
@@ -222,16 +226,17 @@ def filter_benchmark_provider_ids(
 
 
 def prepare_case(
-    benchmarks_root: Path,
+    preparation: BenchmarkPreparation,
     case: BenchmarkCase,
-    dry_run: bool,
-    skill_exposure_mode: str = "copy",
-    force_clone: bool = False,
-    provider_timeout: int = 1800,
+    *,
     provider_ids: tuple[str, ...] = (),
-    allowed_provider_ids: tuple[str, ...] | None = None,
 ) -> None:
-    provider_ids = filter_benchmark_provider_ids(case.case_id, provider_ids, allowed_provider_ids)
+    benchmarks_root = preparation.benchmarks_root
+    dry_run = preparation.dry_run
+    force_clone = preparation.force_clone
+    provider_ids = filter_benchmark_provider_ids(
+        case.case_id, provider_ids, preparation.allowed_provider_ids
+    )
     repository = case.repository
     root = workspace_root(benchmarks_root, case)
     source_only_root = source_only_workspace_root(benchmarks_root, case)
@@ -250,26 +255,27 @@ def prepare_case(
 
     coordination_root = with_memory_root / coordination_path(case)
     sync_runtime_assets(coordination_root, dry_run)
-    sync_workspace_skill_exposure(with_memory_root, coordination_root, dry_run, skill_exposure_mode)
+    sync_workspace_skill_exposure(
+        with_memory_root, coordination_root, dry_run, preparation.skill_exposure_mode
+    )
     memory_repo = prepare_memory_repo(case, coordination_root, dry_run, force_clone=force_clone)
-    write_benchmark_mcp_registration(
+    workspace = BenchmarkWorkspace(
         case=case,
         workspace_root=with_memory_root,
         coordination_root=coordination_root,
         source_repo_root=with_memory_repo_root,
         memory_repo=memory_repo,
         provider_ids=provider_ids,
-        provider_timeout=provider_timeout,
+    )
+    write_benchmark_mcp_registration(
+        workspace,
+        provider_timeout=preparation.provider_timeout,
         dry_run=dry_run,
     )
     prepare_configured_providers(
-        case,
-        coordination_root,
-        with_memory_repo_root,
-        memory_repo,
-        dry_run,
-        provider_timeout,
-        provider_ids=provider_ids,
+        workspace,
+        dry_run=dry_run,
+        provider_timeout=preparation.provider_timeout,
     )
 
     if dry_run:

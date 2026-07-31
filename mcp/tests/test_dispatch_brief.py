@@ -5,9 +5,16 @@ from unittest import mock
 
 import pytest
 from agents_remember.controlplane.expectation_rows import ExpectationRowStore
-from agents_remember.controlplane.operator_inbox_records import create_operator_inbox_entry
+from agents_remember.controlplane.operator_inbox_records import (
+    InboxAddress,
+    InboxMessage,
+    InboxPoster,
+    InboxRouting,
+    create_operator_inbox_entry,
+)
 from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
 from agents_remember.mcp.config import McpRuntimeConfig
+from agents_remember.mcp.tools.dispatch_brief import HostedDelivery
 from agents_remember.mcp.tools.operator_inbox import operator_inbox_post_payload
 from agents_remember.observer import observer_root
 from agents_remember.serving.dispatch_brief import DispatchBriefGate
@@ -16,8 +23,13 @@ from agents_remember.serving.harness_control_models import (
     SubmissionReceipt,
 )
 from agents_remember.serving.hosted_readiness import HostedReadinessResult
-from agents_remember.serving.inbox_delivery import deliver_inbox_entry
-from agents_remember.serving.terminal import TerminalHost
+from agents_remember.serving.hosted_session_runtime import HostedSessionRuntime
+from agents_remember.serving.inbox_delivery import (
+    DeliveryAdmission,
+    InboxDeliveryLog,
+    deliver_inbox_entry,
+)
+from agents_remember.serving.terminal import TerminalHost, TerminalHostSeams
 from agents_remember.serving.terminal_catalog import TerminalCatalog, TerminalCatalogEntry
 from agents_remember.serving.terminal_paste import PasteResult
 
@@ -82,9 +94,9 @@ def _post(
 ) -> tuple[dict[str, object], mock.Mock, _NoRawPaster]:
     paster = _NoRawPaster()
 
-    def submit(_target: object, _text: str, **kwargs: object) -> SubmissionReceipt:
+    def submit(_target: object, _text: str, submission: object) -> SubmissionReceipt:
         return SubmissionReceipt(
-            request_id=str(kwargs["request_id"]),
+            request_id=str(submission.request_id),  # type: ignore[attr-defined]
             acceptance=acceptance,  # type: ignore[arg-type]
             submitted_at=NOW,
             accepted_at=NOW if acceptance == "immediate" else None,
@@ -95,22 +107,28 @@ def _post(
     ) as submit_prompt:
         posted = operator_inbox_post_payload(
             _config(root),
-            lifecycle_id=None,
-            agent_id=entry.id,
-            ask="Implement the leaf",
-            response="Use the exact task contract.",
-            created_by="manager-1",
-            created_via="cli",
-            sender_agent_id="manager-1",
-            sender_role="manager",
-            recipient_role="worker",
-            message_kind="dispatch-brief",
-            deliver_to_hosted=True,
-            terminal_catalog=catalog,
-            terminal_host=TerminalHost(tmux_probe=lambda name: name == entry.tmux_name),
-            terminal_paster=paster,  # type: ignore[arg-type]
-            dispatch_readiness=_ready(entry),
-            dispatch_gate=DispatchBriefGate(readiness=_ready(entry)),
+            address=InboxAddress(lifecycle_id=None, agent_id=entry.id, recipient_role="worker"),
+            message=InboxMessage(
+                ask="Implement the leaf",
+                response="Use the exact task contract.",
+                message_kind="dispatch-brief",
+            ),
+            poster=InboxPoster(
+                created_by="manager-1",
+                created_via="cli",
+                sender_agent_id="manager-1",
+                sender_role="manager",
+            ),
+            delivery=HostedDelivery(
+                enabled=True,
+                catalog=catalog,
+                host=TerminalHost(
+                    TerminalHostSeams(tmux_probe=lambda name: name == entry.tmux_name)
+                ),
+                paster=paster,  # type: ignore[arg-type]
+                readiness=_ready(entry),
+                gate=DispatchBriefGate(readiness=_ready(entry)),
+            ),
         )
     return posted, submit_prompt, paster
 
@@ -157,15 +175,13 @@ def test_ambiguous_redelivery_reconciles_without_resubmitting(tmp_path: Path) ->
     catalog.upsert(target)
     store = OperatorInboxStore(tmp_path / "observer")
     entry = create_operator_inbox_entry(
+        InboxMessage(ask="Brief", response="Work", message_kind="dispatch-brief"),
         entry_id="dispatch-1",
         now=NOW,
-        lifecycle_id=target.lifecycle_id,
-        agent_id=target.id,
-        ask="Brief",
-        response="Work",
-        created_by="manager",
-        created_via="cli",
-        message_kind="dispatch-brief",
+        routing=InboxRouting(
+            address=InboxAddress(lifecycle_id=target.lifecycle_id, agent_id=target.id)
+        ),
+        poster=InboxPoster(created_by="manager", created_via="cli"),
     ).model_copy(
         update={
             "adapterRequestId": "dispatch-1",
@@ -187,12 +203,12 @@ def test_ambiguous_redelivery_reconciles_without_resubmitting(tmp_path: Path) ->
         mock.patch("agents_remember.serving.inbox_delivery.submit_control_prompt") as submit_prompt,
     ):
         delivered = deliver_inbox_entry(
-            store=store,
-            catalog=catalog,
-            host=TerminalHost(tmux_probe=lambda _name: True),
+            InboxDeliveryLog(store=store, entry=entry),
+            sessions=HostedSessionRuntime(
+                catalog=catalog, host=TerminalHost(TerminalHostSeams(tmux_probe=lambda _name: True))
+            ),
             paster=paster,  # type: ignore[arg-type]
-            entry=entry,
-            dispatch_gate=DispatchBriefGate(readiness=_ready(target)),
+            admission=DeliveryAdmission(dispatch_gate=DispatchBriefGate(readiness=_ready(target))),
         )
     assert delivered.deliveryState == "delivered"
     assert delivered.adapterDeliveryState == "accepted"
@@ -213,19 +229,99 @@ def test_not_ready_refuses_before_creating_durable_dispatch_row(tmp_path: Path) 
     with pytest.raises(ValueError, match="observed not-ready"):
         operator_inbox_post_payload(
             config,
-            lifecycle_id=None,
-            agent_id=target.id,
-            ask="Brief",
-            response="Work",
-            created_by="manager-1",
-            created_via="cli",
-            message_kind="dispatch-brief",
-            terminal_catalog=catalog,
-            terminal_host=TerminalHost(tmux_probe=lambda _name: True),
-            terminal_paster=_NoRawPaster(),  # type: ignore[arg-type]
-            dispatch_readiness=not_ready,
+            address=InboxAddress(lifecycle_id=None, agent_id=target.id),
+            message=InboxMessage(ask="Brief", response="Work", message_kind="dispatch-brief"),
+            poster=InboxPoster(created_by="manager-1", created_via="cli"),
+            delivery=HostedDelivery(
+                catalog=catalog,
+                host=TerminalHost(TerminalHostSeams(tmux_probe=lambda _name: True)),
+                paster=_NoRawPaster(),  # type: ignore[arg-type]
+                readiness=not_ready,
+            ),
         )
     assert OperatorInboxStore(observer_root(config)).current() == {}
+
+
+def _dispatch_row(store: OperatorInboxStore, target: TerminalCatalogEntry, *, kind: str):
+    entry = create_operator_inbox_entry(
+        InboxMessage(ask="Brief", response="Work", message_kind=kind),  # type: ignore[arg-type]
+        entry_id="dispatch-1",
+        now=NOW,
+        routing=InboxRouting(
+            address=InboxAddress(lifecycle_id=target.lifecycle_id, agent_id=target.id)
+        ),
+        poster=InboxPoster(created_by="manager", created_via="cli"),
+    )
+    store.append(entry)
+    return entry
+
+
+def _deliver(store: OperatorInboxStore, entry, catalog: TerminalCatalog, admission):
+    with mock.patch(
+        "agents_remember.serving.inbox_delivery.submit_control_prompt"
+    ) as submit_prompt:
+        delivered = deliver_inbox_entry(
+            InboxDeliveryLog(store=store, entry=entry),
+            sessions=HostedSessionRuntime(
+                catalog=catalog, host=TerminalHost(TerminalHostSeams(tmux_probe=lambda _name: True))
+            ),
+            paster=_NoRawPaster(),  # type: ignore[arg-type]
+            admission=admission,
+        )
+    return delivered, submit_prompt
+
+
+def test_an_uncommitted_caller_is_recorded_as_rejected_without_touching_the_adapter(
+    tmp_path: Path,
+) -> None:
+    # ``submit=False`` is a caller that has not committed to an adapter submission. The durable row
+    # must record that refusal as adapter-rejected evidence -- not silently succeed, and not reach
+    # the wire, because a submission it did not commit to is one it cannot own.
+    catalog = TerminalCatalog(tmp_path / "terminal-sessions.json")
+    target = _target(tmp_path)
+    catalog.upsert(target)
+    store = OperatorInboxStore(tmp_path / "observer")
+    entry = _dispatch_row(store, target, kind="message")
+
+    delivered, submit_prompt = _deliver(
+        store, entry, catalog, DeliveryAdmission(submit=False, dispatch_gate=DispatchBriefGate())
+    )
+
+    assert delivered.deliveryState == "unconfirmed"
+    assert delivered.adapterDeliveryState == "rejected"
+    assert (
+        delivered.deliveryDetail == "durable inbox delivery requires a committed adapter submission"
+    )
+    assert delivered.deliveredToSession == target.id
+    assert delivered.state == "pending"
+    submit_prompt.assert_not_called()
+
+
+def test_a_closed_dispatch_gate_refuses_the_brief_and_keeps_the_gate_reason(tmp_path: Path) -> None:
+    # A durable dispatch brief is exact-once, so it may only cross when the gate says the exact
+    # seat is adapter-ready. A closed gate is recorded with the gate's own words, and the row stays
+    # pending so the sweep can retry it once the seat comes up.
+    catalog = TerminalCatalog(tmp_path / "terminal-sessions.json")
+    target = _target(tmp_path)
+    catalog.upsert(target)
+    store = OperatorInboxStore(tmp_path / "observer")
+    entry = _dispatch_row(store, target, kind="dispatch-brief")
+
+    def not_ready(_catalog: TerminalCatalog, _host: object, session_id: str):
+        return HostedReadinessResult("not-ready", session_id, entry=target, detail="still booting")
+
+    delivered, submit_prompt = _deliver(
+        store,
+        entry,
+        catalog,
+        DeliveryAdmission(dispatch_gate=DispatchBriefGate(readiness=not_ready)),
+    )
+
+    assert delivered.deliveryState == "unconfirmed"
+    assert delivered.adapterDeliveryState == "rejected"
+    assert delivered.deliveryDetail == "dispatch target is not-ready: still booting"
+    assert delivered.state == "pending"
+    submit_prompt.assert_not_called()
 
 
 def test_exact_agent_target_never_falls_back_to_matching_lifecycle(tmp_path: Path) -> None:
@@ -234,24 +330,22 @@ def test_exact_agent_target_never_falls_back_to_matching_lifecycle(tmp_path: Pat
     catalog.upsert(target)
     store = OperatorInboxStore(tmp_path / "observer")
     entry = create_operator_inbox_entry(
+        InboxMessage(ask="Brief", response="Work", message_kind="dispatch-brief"),
         entry_id="dispatch-1",
         now=NOW,
-        lifecycle_id=target.lifecycle_id,
-        agent_id="missing-session",
-        ask="Brief",
-        response="Work",
-        created_by="manager",
-        created_via="cli",
-        message_kind="dispatch-brief",
+        routing=InboxRouting(
+            address=InboxAddress(lifecycle_id=target.lifecycle_id, agent_id="missing-session")
+        ),
+        poster=InboxPoster(created_by="manager", created_via="cli"),
     )
     store.append(entry)
     delivered = deliver_inbox_entry(
-        store=store,
-        catalog=catalog,
-        host=TerminalHost(tmux_probe=lambda _name: True),
+        InboxDeliveryLog(store=store, entry=entry),
+        sessions=HostedSessionRuntime(
+            catalog=catalog, host=TerminalHost(TerminalHostSeams(tmux_probe=lambda _name: True))
+        ),
         paster=_NoRawPaster(),  # type: ignore[arg-type]
-        entry=entry,
-        dispatch_gate=DispatchBriefGate(readiness=_ready(target)),
+        admission=DeliveryAdmission(dispatch_gate=DispatchBriefGate(readiness=_ready(target))),
     )
     assert delivered.deliveryState == "no-hosted-session"
     assert delivered.deliveredToSession is None

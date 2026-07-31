@@ -9,7 +9,7 @@ as a whole when invalidated; deletion therefore reclaims retained rows on that s
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from enum import StrEnum
 from pathlib import Path
@@ -140,12 +140,50 @@ class ProjectionInputs:
     active_worktree_groups: list[str]
 
 
+@dataclass(frozen=True)
+class RefreshPass:
+    """One pass of the input reader: the clock every snapshot is aged against, which domains
+    the pass was asked to refresh, and whether the task tree already changed under it.
+
+    Every domain refresher decides from these three together -- ``tasks_changed`` alone flips
+    lifecycles, engine facts and drift regardless of what the invalidation set said -- so the
+    pass is the frame they all run in, not three parameters each of them re-receives.
+    """
+
+    now: datetime
+    refresh: ProjectionRefresh
+    tasks_changed: bool = False
+
+
+@dataclass(frozen=True)
+class ActiveGroups:
+    """A worktree-group admission set for one pass, and whether it moved since the last one.
+
+    A refresher needs both: the set says what to read, the moved flag says whether to read at
+    all. Reading one without the other either re-reads every tick or never re-reads.
+    """
+
+    groups: set[str]
+    changed: bool
+
+
 LifecycleReader = Callable[[Path], list[list[Event]]]
 RepoSurfaceReader = Callable[
     ["McpRuntimeConfig", datetime],
     tuple[list[SidecarStaleNode], list[RouteCoverageNode], list[LedgerNode]],
 ]
 NodeT = TypeVar("NodeT", bound=BaseModel)
+
+
+@dataclass(frozen=True)
+class ProjectionReaders:
+    """The three readers a projection pass reaches the outside world through: the lifecycle
+    event logs, the cached repo-surface bundle, and the optional landing-state probe. Injected
+    together as the pass's I/O seam so a test can replace the set coherently."""
+
+    lifecycle: LifecycleReader
+    repo_surfaces: RepoSurfaceReader
+    landing_state: LandingStateReader | None = None
 
 
 class ProjectionInputState:
@@ -176,54 +214,32 @@ class ProjectionInputState:
     def read(
         self,
         config: McpRuntimeConfig,
+        readers: ProjectionReaders,
         *,
         observer_root: Path,
-        now: datetime,
-        refresh: ProjectionRefresh,
-        landing_state: LandingStateReader | None,
-        lifecycle_reader: LifecycleReader,
-        repo_surface_reader: RepoSurfaceReader,
+        pass_: RefreshPass,
     ) -> ProjectionInputs:
         """Refresh invalidated domains, then return the complete current input snapshot."""
+        now = pass_.now
         self._advance_ages(now)
-        tasks_changed = self._refresh_tasks(config, now=now, refresh=refresh)
-        self._refresh_lifecycles(
-            observer_root,
-            now=now,
-            refresh=refresh,
-            tasks_changed=tasks_changed,
-            lifecycle_reader=lifecycle_reader,
-        )
+        pass_ = replace(pass_, tasks_changed=self._refresh_tasks(config, pass_))
+        self._refresh_lifecycles(observer_root, pass_, lifecycle_reader=readers.lifecycle)
         provider_groups = admitted_worktree_groups(self._enclosures, self._lifecycle_logs, now=now)
         engine_groups = active_enclosure_worktree_groups(
             self._enclosures, self._lifecycle_logs, now=now
         )
-        provider_groups_changed = provider_groups != self._provider_groups
-        engine_groups_changed = engine_groups != self._engine_groups
+        providers = ActiveGroups(provider_groups, provider_groups != self._provider_groups)
+        engines = ActiveGroups(engine_groups, engine_groups != self._engine_groups)
         self._provider_groups = provider_groups
         self._engine_groups = engine_groups
 
-        self._refresh_providers(
-            config,
-            now=now,
-            refresh=refresh,
-            provider_groups=provider_groups,
-            provider_groups_changed=provider_groups_changed,
-        )
-        self._refresh_engine_facts(
-            config,
-            now=now,
-            refresh=refresh,
-            tasks_changed=tasks_changed,
-            engine_groups=engine_groups,
-            engine_groups_changed=engine_groups_changed,
-            landing_state=landing_state,
-        )
-        self._refresh_drift(config, now=now, refresh=refresh, tasks_changed=tasks_changed)
-        self._refresh_workspace(config, observer_root=observer_root, now=now, refresh=refresh)
-        self._refresh_progress(config, now=now, refresh=refresh)
+        self._refresh_providers(config, pass_, providers)
+        self._refresh_engine_facts(config, pass_, engines, landing_state=readers.landing_state)
+        self._refresh_drift(config, pass_)
+        self._refresh_workspace(config, pass_, observer_root=observer_root)
+        self._refresh_progress(config, pass_)
 
-        sidecars, routes, ledgers = repo_surface_reader(config, now)
+        sidecars, routes, ledgers = readers.repo_surfaces(config, now)
         self._ages_at = now
         return ProjectionInputs(
             lifecycle_logs=self._lifecycle_logs,
@@ -247,140 +263,118 @@ class ProjectionInputState:
             active_worktree_groups=sorted(engine_groups),
         )
 
-    def _refresh_tasks(
-        self,
-        config: McpRuntimeConfig,
-        *,
-        now: datetime,
-        refresh: ProjectionRefresh,
-    ) -> bool:
-        if not refresh.affects(ProjectionDomain.TASKS) and self._contracts is not None:
+    def _refresh_tasks(self, config: McpRuntimeConfig, pass_: RefreshPass) -> bool:
+        if not pass_.refresh.affects(ProjectionDomain.TASKS) and self._contracts is not None:
             return False
         self._contracts = self._contract_cache.build(config.coordination_root / "tasks")
         self._enclosures = read_enclosures(config.coordination_root, contracts=self._contracts)
         self._task_documents = read_task_documents(
-            config.coordination_root, enclosures=self._enclosures, now=now
+            config.coordination_root, enclosures=self._enclosures, now=pass_.now
         )
-        self._series = read_series_documents(config.coordination_root, now=now)
+        self._series = read_series_documents(config.coordination_root, now=pass_.now)
         return True
 
     def _refresh_lifecycles(
         self,
         observer_root: Path,
+        pass_: RefreshPass,
         *,
-        now: datetime,
-        refresh: ProjectionRefresh,
-        tasks_changed: bool,
         lifecycle_reader: LifecycleReader,
     ) -> None:
         if not (
-            refresh.is_heartbeat or tasks_changed or refresh.affects(ProjectionDomain.LIFECYCLES)
+            pass_.refresh.is_heartbeat
+            or pass_.tasks_changed
+            or pass_.refresh.affects(ProjectionDomain.LIFECYCLES)
         ):
             return
         prune_expired_lifecycle_event_logs(
             observer_root,
-            now=now,
-            protected_lifecycle_ids=series_retained_lifecycle_ids(self._enclosures, now=now),
+            now=pass_.now,
+            protected_lifecycle_ids=series_retained_lifecycle_ids(self._enclosures, now=pass_.now),
         )
         self._lifecycle_logs = lifecycle_reader(observer_root)
 
     def _refresh_providers(
         self,
         config: McpRuntimeConfig,
-        *,
-        now: datetime,
-        refresh: ProjectionRefresh,
-        provider_groups: set[str],
-        provider_groups_changed: bool,
+        pass_: RefreshPass,
+        groups: ActiveGroups,
     ) -> None:
-        providers_changed = refresh.is_heartbeat or refresh.affects(ProjectionDomain.PROVIDERS)
+        now = pass_.now
+        providers_changed = pass_.refresh.is_heartbeat or pass_.refresh.affects(
+            ProjectionDomain.PROVIDERS
+        )
         if providers_changed:
             self._setup_summaries = read_setup_summaries(config.coordination_root, now=now)
-        if not providers_changed and not provider_groups_changed:
+        if not providers_changed and not groups.changed:
             return
-        self._providers = read_providers(config, now=now, active_worktree_groups=provider_groups)
+        self._providers = read_providers(config, now=now, active_worktree_groups=groups.groups)
         self._setup_progress = read_setup_progress_nodes(
             config.coordination_root,
             now=now,
-            active_worktree_groups=provider_groups,
+            active_worktree_groups=groups.groups,
         )
 
     def _refresh_engine_facts(
         self,
         config: McpRuntimeConfig,
+        pass_: RefreshPass,
+        groups: ActiveGroups,
         *,
-        now: datetime,
-        refresh: ProjectionRefresh,
-        tasks_changed: bool,
-        engine_groups: set[str],
-        engine_groups_changed: bool,
         landing_state: LandingStateReader | None,
     ) -> None:
-        if not (refresh.is_heartbeat or tasks_changed or engine_groups_changed):
+        if not (pass_.refresh.is_heartbeat or pass_.tasks_changed or groups.changed):
             return
         assert self._contracts is not None
-        if tasks_changed or engine_groups_changed:
+        if pass_.tasks_changed or groups.changed:
             self._engine_process_facts = read_engine_process_facts(
                 config.coordination_root,
-                active_worktree_groups=engine_groups,
-                now=now,
+                active_worktree_groups=groups.groups,
+                now=pass_.now,
                 landing_state=landing_state,
                 contracts=self._contracts,
             )
         else:
             self._engine_process_facts = refresh_engine_process_landing(
                 self._engine_process_facts,
-                now=now,
+                now=pass_.now,
                 landing_state=landing_state,
                 contracts=self._contracts,
             )
 
-    def _refresh_drift(
-        self,
-        config: McpRuntimeConfig,
-        *,
-        now: datetime,
-        refresh: ProjectionRefresh,
-        tasks_changed: bool,
-    ) -> None:
-        if not tasks_changed and not refresh.affects(ProjectionDomain.DRIFT):
+    def _refresh_drift(self, config: McpRuntimeConfig, pass_: RefreshPass) -> None:
+        if not pass_.tasks_changed and not pass_.refresh.affects(ProjectionDomain.DRIFT):
             return
         assert self._contracts is not None
         prune_orphaned_drift_snapshots(config, contracts=self._contracts)
-        self._drift_snapshots = read_drift_snapshots(config.coordination_root, now=now)
+        self._drift_snapshots = read_drift_snapshots(config.coordination_root, now=pass_.now)
 
     def _refresh_workspace(
         self,
         config: McpRuntimeConfig,
+        pass_: RefreshPass,
         *,
         observer_root: Path,
-        now: datetime,
-        refresh: ProjectionRefresh,
     ) -> None:
         if not (
-            refresh.is_heartbeat
-            or refresh.affects(ProjectionDomain.WORKSPACE)
-            or refresh.affects(ProjectionDomain.LIFECYCLES)
+            pass_.refresh.is_heartbeat
+            or pass_.refresh.affects(ProjectionDomain.WORKSPACE)
+            or pass_.refresh.affects(ProjectionDomain.LIFECYCLES)
         ):
             return
+        now = pass_.now
         self._gates = read_gates(config.coordination_root, now=now)
         self._agent_pickups = read_agent_pickups(config.coordination_root, now=now)
         self._expectation_rows = read_expectation_rows(config.coordination_root, now=now)
         self._attention_dismissals = AttentionDismissalStore(observer_root).current()
 
-    def _refresh_progress(
-        self,
-        config: McpRuntimeConfig,
-        *,
-        now: datetime,
-        refresh: ProjectionRefresh,
-    ) -> None:
-        if refresh.affects(ProjectionDomain.START_PROGRESS):
+    def _refresh_progress(self, config: McpRuntimeConfig, pass_: RefreshPass) -> None:
+        if pass_.refresh.affects(ProjectionDomain.START_PROGRESS):
             self._engine_start_progress = read_start_progress_entries(
-                config.coordination_root, now=now
+                config.coordination_root, now=pass_.now
             )
-        if refresh.affects(ProjectionDomain.TOOL_REPORTS):
-            self._tool_reports = read_tool_reports(config.coordination_root, now=now)
+        if pass_.refresh.affects(ProjectionDomain.TOOL_REPORTS):
+            self._tool_reports = read_tool_reports(config.coordination_root, now=pass_.now)
 
     def _advance_ages(self, now: datetime) -> None:
         if self._ages_at is None:
@@ -413,9 +407,7 @@ class ProjectionInputState:
         ]
 
 
-def _advance_model_age(  # noqa: UP047 - runtime supports Python 3.11
-    nodes: list[NodeT], field: str, elapsed: float
-) -> list[NodeT]:
+def _advance_model_age(nodes: list[NodeT], field: str, elapsed: float) -> list[NodeT]:
     advanced: list[NodeT] = []
     for node in nodes:
         value = getattr(node, field)

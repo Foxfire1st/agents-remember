@@ -26,9 +26,10 @@ from agents_remember.serving.codex_app_server_adapter import (
     CodexAppServerSettings,
 )
 from agents_remember.serving.harness_capabilities import CapabilitySnapshot, SetResult
-from agents_remember.serving.harness_control_bridge import HarnessControlBridge
+from agents_remember.serving.harness_control_bridge import BridgeLimits, HarnessControlBridge
 from agents_remember.serving.harness_control_claude import ClaudeStreamJsonAdapter
 from agents_remember.serving.harness_control_client import (
+    ControlSubmission,
     read_control_evidence,
     read_control_native_page,
     read_control_snapshot,
@@ -65,10 +66,15 @@ from agents_remember.serving.harness_control_runner import (
     parse_runner_config,
 )
 from agents_remember.serving.hosted_control_projection import control_snapshot_entry
+from agents_remember.serving.hosted_session_runtime import HostedSessionRuntime
 from agents_remember.serving.pi_rpc_adapter import PiRpcAdapter
-from agents_remember.serving.terminal import TerminalSessionBinding
+from agents_remember.serving.terminal import TerminalSessionBinding, TerminalSessionSpec
 from agents_remember.serving.terminal_catalog import TerminalCatalog, TerminalCatalogEntry
-from agents_remember.serving.terminal_opener import open_terminal_session
+from agents_remember.serving.terminal_opener import (
+    ControlRunnerRequest,
+    TerminalLaunchRequest,
+    open_terminal_session,
+)
 
 NOW = "2026-07-19T08:00:00+00:00"
 CODEX_FIXTURE = Path(__file__).parent / "fixtures" / "codex_app_server_0_144_3.json"
@@ -479,7 +485,7 @@ class EvidenceBufferTests(unittest.IsolatedAsyncioTestCase):
                 identity = _identity(f"evict-{limit}")
                 adapter = _EvidenceAdapter()
                 bridge = HarnessControlBridge(
-                    identity, adapter, evidence_limit=limit, clock=lambda: NOW
+                    identity, adapter, clock=lambda: NOW, limits=BridgeLimits(evidence=limit)
                 )
                 await bridge.start(_launch(identity))
                 try:
@@ -501,7 +507,7 @@ class EvidenceBufferTests(unittest.IsolatedAsyncioTestCase):
         identity = _identity()
         adapter = _EvidenceAdapter()
         bridge = HarnessControlBridge(
-            identity, adapter, evidence_frame_bytes=128, clock=lambda: NOW
+            identity, adapter, clock=lambda: NOW, limits=BridgeLimits(evidence_frame_bytes=128)
         )
         await bridge.start(_launch(identity))
         try:
@@ -572,6 +578,34 @@ class EvidenceBufferTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn("must be an object", str(bridge.snapshot().raw["bridgeError"]))
         finally:
             await bridge.stop("forced")
+
+    async def test_a_present_but_unusable_native_method_fails_the_bridge_visibly(self) -> None:
+        # The projector switches on ``native_method`` to decide what a frame IS. An empty string or
+        # a non-string would be carried as a method that matches nothing, so every frame behind it
+        # would be silently misclassified. Absent is fine; present-and-unusable is not.
+        from agents_remember.serving.harness_control_models import (  # noqa: PLC0415
+            AR_EVIDENCE_METHOD_KEY,
+        )
+
+        for method in ("", 7, {"method": "x"}):
+            identity = _identity()
+            adapter = _EvidenceAdapter()
+            bridge = HarnessControlBridge(identity, adapter, clock=lambda: NOW)
+            await bridge.start(_launch(identity))
+            try:
+                adapter.emit(
+                    "state",
+                    {AR_EVIDENCE_METHOD_KEY: method, AR_EVIDENCE_KEY: {"a": 1}},
+                )
+                await _wait_for_failure(bridge)
+                self.assertIn(
+                    "adapter evidence method must be non-empty text when present",
+                    str(bridge.snapshot().raw["bridgeError"]),
+                )
+                # The frame is refused outright rather than buffered without its method.
+                self.assertEqual(bridge.evidence().frames, ())
+            finally:
+                await bridge.stop("forced")
 
 
 def _catalog_entry(identity: ControlIdentity) -> TerminalCatalogEntry:
@@ -791,24 +825,22 @@ class EvidenceIpcTests(unittest.IsolatedAsyncioTestCase):
                     submit_control_prompt,
                     entry,
                     "cockpit prompt",
-                    source="cockpit",
-                    request_id="prov-cockpit",
-                    expected_bridge_epoch=epoch,
+                    ControlSubmission(
+                        source="cockpit", request_id="prov-cockpit", expected_bridge_epoch=epoch
+                    ),
                 )
                 self.assertEqual(cockpit.acceptance, "immediate")
                 await asyncio.to_thread(
                     submit_control_prompt,
                     entry,
                     "terminal prompt",
-                    source="terminal",
-                    request_id="prov-terminal",
+                    ControlSubmission(source="terminal", request_id="prov-terminal"),
                 )
                 await asyncio.to_thread(
                     submit_control_prompt,
                     entry,
                     "durable prompt",
-                    source="durable",
-                    request_id="prov-durable",
+                    ControlSubmission(source="durable", request_id="prov-durable"),
                 )
                 ids = ("prov-cockpit", "prov-terminal", "prov-durable", "prov-missing")
                 batch = None
@@ -1625,20 +1657,17 @@ class _FakeHost:
     def has_session(self, tmux_name: str) -> bool:
         return tmux_name in self.known
 
-    def ensure(
-        self, sid, *, cwd, command, lifecycle_id=None, name=None, suspend_unsafe=False, env=None
-    ):
-        del env
-        tmux_name = name or f"ar-{sid}"
-        self.ensured.append({"sid": sid, "command": tuple(command)})
+    def ensure(self, sid: str, spec: TerminalSessionSpec) -> TerminalSessionBinding:
+        tmux_name = spec.tmux_name_for(sid)
+        self.ensured.append({"sid": sid, "command": spec.command})
         self.known.add(tmux_name)
         return TerminalSessionBinding(
             sid=sid,
             tmux_name=tmux_name,
-            cwd=Path(cwd),
-            command=tuple(command),
-            lifecycle_id=lifecycle_id,
-            suspend_unsafe=suspend_unsafe,
+            cwd=spec.cwd,
+            command=spec.command,
+            lifecycle_id=spec.lifecycle_id,
+            suspend_unsafe=spec.suspend_unsafe,
         )
 
 
@@ -1652,19 +1681,19 @@ class ResumeOpenerTests(unittest.TestCase):
         self.catalog = TerminalCatalog(self.tmp / "terminal-sessions.json")
         self.host = _FakeHost()
 
-    def _open(self, **kwargs: object):
-        base: dict[str, object] = {
-            "catalog": self.catalog,
-            "host": self.host,
-            "session_id": "resume-worker-1",
-            "kind": "harness",
-            "workspace_root": self.tmp,
-            "shell": "/bin/bash",
-            "harness": "codex",
-            "which": _detected,
-        }
-        base.update(kwargs)
-        return open_terminal_session(**base)  # type: ignore[arg-type]
+    def _open(self, *, harness: str = "codex", resume_thread_id: str | None = None):
+        return open_terminal_session(
+            runtime=HostedSessionRuntime(catalog=self.catalog, host=self.host),  # type: ignore[arg-type]
+            session_id="resume-worker-1",
+            launch=TerminalLaunchRequest(
+                kind="harness",
+                workspace_root=self.tmp,
+                shell="/bin/bash",
+                harness=harness,
+                which=_detected,
+                control=ControlRunnerRequest(resume_thread_id=resume_thread_id),
+            ),
+        )
 
     def test_codex_resume_rides_opener_to_runner_payload(self) -> None:
         result = self._open(resume_thread_id="thread-9")
@@ -1884,9 +1913,7 @@ class EvidenceTruncationSettlementIpcTests(unittest.IsolatedAsyncioTestCase):
             submit_control_prompt,
             entry,
             "drive one turn",
-            source="cockpit",
-            request_id=request_id,
-            expected_bridge_epoch=epoch,
+            ControlSubmission(source="cockpit", request_id=request_id, expected_bridge_epoch=epoch),
         )
         for _ in range(400):
             if any(item.request_id == request_id for item in adapter.submissions):

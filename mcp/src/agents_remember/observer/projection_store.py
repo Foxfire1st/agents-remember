@@ -36,9 +36,15 @@ from agents_remember.observer.projection import (
 )
 from agents_remember.observer.projection_inputs import (
     ProjectionInputState,
+    ProjectionReaders,
     ProjectionRefresh,
+    RefreshPass,
 )
-from agents_remember.observer.reducer import project_workspace
+from agents_remember.observer.reducer import (
+    AnalyticalInputs,
+    WorkspaceStructure,
+    project_workspace,
+)
 from agents_remember.observer.snapshots import (
     read_ledger,
     read_route_coverage,
@@ -193,55 +199,71 @@ class ProviderStateRefresh(Protocol):
     def maybe_refresh(self, config: McpRuntimeConfig, *, now: datetime) -> None: ...
 
 
+@dataclass(frozen=True)
+class ProjectionTickState:
+    """What a projector carries between ticks: the retained input snapshot it re-reads
+    incrementally, and the two pre-read refreshers (provider current state, landing state) it
+    drives before reading. All three are the projector's own long-lived collaborators; a tick
+    given some of them and not others silently reverts to a cold read."""
+
+    input_state: ProjectionInputState | None = None
+    provider_refresher: ProviderStateRefresh | None = None
+    landing_state: LandingStateReader | None = None
+
+
 def project_and_write(
     config: McpRuntimeConfig,
     *,
     now: datetime | None = None,
-    provider_refresher: ProviderStateRefresh | None = None,
-    landing_state: LandingStateReader | None = None,
-    input_state: ProjectionInputState | None = None,
     refresh: ProjectionRefresh | None = None,
+    tick: ProjectionTickState | None = None,
 ) -> WorkspaceProjection:
     """Read logs + structural + analytical snapshots, reduce the tree, write it atomically."""
+    tick = tick or ProjectionTickState()
     moment = now or datetime.now(UTC)
     root = observer_root(config)
-    if provider_refresher is not None:
-        provider_refresher.maybe_refresh(config, now=moment)
-    state = input_state or ProjectionInputState(contract_cache=_contract_snapshot_cache)
+    if tick.provider_refresher is not None:
+        tick.provider_refresher.maybe_refresh(config, now=moment)
+    state = tick.input_state or ProjectionInputState(contract_cache=_contract_snapshot_cache)
     inputs = state.read(
         config,
+        ProjectionReaders(
+            lifecycle=read_lifecycle_logs,
+            repo_surfaces=_gather_repo_surfaces_cached,
+            landing_state=tick.landing_state,
+        ),
         observer_root=root,
-        now=moment,
-        refresh=refresh or ProjectionRefresh.full(),
-        landing_state=landing_state,
-        lifecycle_reader=read_lifecycle_logs,
-        repo_surface_reader=_gather_repo_surfaces_cached,
+        pass_=RefreshPass(now=moment, refresh=refresh or ProjectionRefresh.full()),
     )
     attention_store = AttentionDismissalStore(root)
     projection = project_workspace(
         inputs.lifecycle_logs,
-        enclosures=inputs.enclosures,
-        providers=inputs.providers,
+        structure=WorkspaceStructure(
+            enclosures=inputs.enclosures,
+            providers=inputs.providers,
+            # The Topology constellation filters its tree on this active set — the same
+            # active-enclosure admission the Engine Room's engine_process_facts use, so both
+            # views share one definition of "active" rather than diverging.
+            active_worktree_groups=inputs.active_worktree_groups,
+        ),
         now=moment,
-        drift_snapshots=inputs.drift_snapshots,
-        sidecar_staleness=inputs.sidecar_staleness,
-        setup_summaries=inputs.setup_summaries,
-        setup_progress=inputs.setup_progress,
-        route_coverage=inputs.route_coverage,
-        tool_reports=inputs.tool_reports,
-        agent_pickups=inputs.agent_pickups,
-        expectation_rows=inputs.expectation_rows,
-        ledgers=inputs.ledgers,
-        task_documents=inputs.task_documents,
-        series=inputs.series,
-        engine_process_facts=inputs.engine_process_facts,
-        engine_start_progress=inputs.engine_start_progress,
-        gates=inputs.gates,
-        attention_dismissals=inputs.attention_dismissals,
-        # The Topology constellation filters its tree on this active set — the same
-        # active-enclosure admission the Engine Room's engine_process_facts use, so both
-        # views share one definition of "active" rather than diverging.
-        active_worktree_groups=inputs.active_worktree_groups,
+        given=AnalyticalInputs(
+            drift_snapshots=inputs.drift_snapshots,
+            sidecar_staleness=inputs.sidecar_staleness,
+            setup_summaries=inputs.setup_summaries,
+            setup_progress=inputs.setup_progress,
+            route_coverage=inputs.route_coverage,
+            tool_reports=inputs.tool_reports,
+            agent_pickups=inputs.agent_pickups,
+            expectation_rows=inputs.expectation_rows,
+            ledgers=inputs.ledgers,
+            task_documents=inputs.task_documents,
+            series=inputs.series,
+            engine_process_facts=inputs.engine_process_facts,
+            engine_start_progress=inputs.engine_start_progress,
+            gates=inputs.gates,
+            attention_dismissals=inputs.attention_dismissals,
+        ),
     )
     attention_store.prune_lifecycles(
         {

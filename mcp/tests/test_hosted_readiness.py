@@ -5,10 +5,15 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
+from agents_remember.errors import HarnessControlError
 from agents_remember.mcp.config import McpRuntimeConfig
 from agents_remember.mcp.tools.hosted_readiness import hosted_session_readiness_payload
 from agents_remember.serving.harness_control_models import AdapterSnapshot, ControlIdentity
-from agents_remember.serving.hosted_readiness import HostedReadinessResult, hosted_session_readiness
+from agents_remember.serving.hosted_readiness import (
+    HostedReadinessResult,
+    ReadinessWait,
+    hosted_session_readiness,
+)
 from agents_remember.serving.terminal_catalog import TerminalCatalog, TerminalCatalogEntry
 
 
@@ -122,11 +127,10 @@ def test_variable_protocol_boot_returns_as_soon_as_adapter_is_ready(
         catalog,
         _Host(),
         session_id="target",
-        wait_seconds=1.0,
         snapshot_reader=read,
-        monotonic=clock.monotonic,
-        sleep=clock.sleep,
-        poll_interval=0.1,
+        wait=ReadinessWait(
+            seconds=1.0, monotonic=clock.monotonic, sleep=clock.sleep, poll_interval=0.1
+        ),
     )
     assert result.status == "ready"
     assert clock.sleeps == [0.1, 0.1]
@@ -164,16 +168,65 @@ def test_not_ready_wait_is_bounded(catalog: TerminalCatalog) -> None:
         catalog,
         _Host(),
         session_id="target",
-        wait_seconds=0.25,
         snapshot_reader=lambda current: _snapshot(
             current, control="starting", acceptance="unknown", activity="unknown"
         ),
-        monotonic=clock.monotonic,
-        sleep=clock.sleep,
-        poll_interval=0.1,
+        wait=ReadinessWait(
+            seconds=0.25, monotonic=clock.monotonic, sleep=clock.sleep, poll_interval=0.1
+        ),
     )
     assert result.status == "not-ready"
     assert clock.value == pytest.approx(0.25)
+
+
+def test_an_unreachable_bridge_is_not_ready_and_keeps_the_adapter_refusal(
+    catalog: TerminalCatalog,
+) -> None:
+    # The row is addressable and the tmux session is up, so the bridge read is attempted -- and
+    # fails. That is "not ready yet", not a broken session: the caller may keep waiting, and the
+    # adapter's own words are carried through so the reason is visible rather than generic.
+    catalog.upsert(_entry("target"))
+
+    def read(current: TerminalCatalogEntry) -> AdapterSnapshot:
+        del current
+        raise HarnessControlError("control socket is not accepting connections yet")
+
+    result = hosted_session_readiness(catalog, _Host(), session_id="target", snapshot_reader=read)
+
+    assert result.status == "not-ready"
+    assert result.entry == catalog.get("target")
+    assert result.snapshot is None
+    assert result.detail == "control socket is not accepting connections yet"
+
+
+def test_an_unreachable_bridge_is_retried_until_the_wait_bound_expires(
+    catalog: TerminalCatalog,
+) -> None:
+    # A refused bridge read is a retryable observation, so the bounded wait keeps re-observing
+    # instead of answering on the first failure.
+    catalog.upsert(_entry("target"))
+    clock = _Clock()
+    reads = 0
+
+    def read(current: TerminalCatalogEntry) -> AdapterSnapshot:
+        del current
+        nonlocal reads
+        reads += 1
+        raise HarnessControlError("control socket is not accepting connections yet")
+
+    result = hosted_session_readiness(
+        catalog,
+        _Host(),
+        session_id="target",
+        snapshot_reader=read,
+        wait=ReadinessWait(
+            seconds=0.3, monotonic=clock.monotonic, sleep=clock.sleep, poll_interval=0.1
+        ),
+    )
+
+    assert result.status == "not-ready"
+    assert reads > 1
+    assert clock.value == pytest.approx(0.3)
 
 
 def test_exact_identity_change_during_adapter_read_is_unknown(catalog: TerminalCatalog) -> None:
@@ -201,10 +254,7 @@ def test_zero_bound_readiness_does_not_wait_for_held_writer_batch(
     def read() -> None:
         results.append(
             hosted_session_readiness(
-                reader,
-                _Host(),
-                session_id="target",
-                snapshot_reader=_snapshot,
+                reader, _Host(), session_id="target", snapshot_reader=_snapshot
             )
         )
         finished.set()

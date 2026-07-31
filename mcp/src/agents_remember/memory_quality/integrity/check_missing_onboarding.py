@@ -11,6 +11,7 @@ from typing import Any
 
 from agents_remember.kernel import filesystem
 from agents_remember.kernel.coordination_context_resolver import (
+    CoordinationHints,
     StorageSettings,
     is_sidecar_storage,
     normalize_rel_path,
@@ -94,43 +95,57 @@ def missing_onboarding_for_source(
     if storage_mode == "disabled":
         return None
     if is_sidecar_storage(storage_mode):
-        expected = mirror_onboarding_path(onboarding_root, source_file)
-        if filesystem.exists(expected):
-            return None
-        return MissingOnboarding(
-            source_file=source_file,
-            storage_mode=storage_mode,
-            expected_onboarding=expected.as_posix(),
-            state="missing",
-            note="Sidecar onboarding is missing for this newly added worktree file.",
-        )
+        return _missing_sidecar_onboarding(onboarding_root, source_file, storage_mode)
     if storage_mode == "inline":
-        source_path = code_repository_root / source_file
-        try:
-            text = filesystem.read_text(source_path, encoding="utf-8")
-        except UnicodeDecodeError:
-            return MissingOnboarding(
-                source_file=source_file,
-                storage_mode=storage_mode,
-                expected_onboarding=f"inline:{source_file}",
-                state="unsupported",
-                note="Inline onboarding could not be checked because the source is not UTF-8 text.",
-            )
-        if extract_inline_onboarding_block(text) is not None:
-            return None
-        return MissingOnboarding(
-            source_file=source_file,
-            storage_mode=storage_mode,
-            expected_onboarding=f"inline:{source_file}",
-            state="missing",
-            note="Inline onboarding block is missing for this newly added worktree file.",
-        )
+        return _missing_inline_onboarding(code_repository_root, source_file, storage_mode)
     return MissingOnboarding(
         source_file=source_file,
         storage_mode=storage_mode,
         expected_onboarding="",
         state="unsupported",
         note=f"Unsupported storage mode '{storage_mode}' for newly added worktree file.",
+    )
+
+
+def _missing_sidecar_onboarding(
+    onboarding_root: Path, source_file: str, storage_mode: str
+) -> MissingOnboarding | None:
+    """The mirrored sidecar this source expects, reported when that file does not exist."""
+    expected = mirror_onboarding_path(onboarding_root, source_file)
+    if filesystem.exists(expected):
+        return None
+    return MissingOnboarding(
+        source_file=source_file,
+        storage_mode=storage_mode,
+        expected_onboarding=expected.as_posix(),
+        state="missing",
+        note="Sidecar onboarding is missing for this newly added worktree file.",
+    )
+
+
+def _missing_inline_onboarding(
+    code_repository_root: Path, source_file: str, storage_mode: str
+) -> MissingOnboarding | None:
+    """The in-source onboarding block, reported when it is absent or unreadable."""
+    expected = f"inline:{source_file}"
+    try:
+        text = filesystem.read_text(code_repository_root / source_file, encoding="utf-8")
+    except UnicodeDecodeError:
+        return MissingOnboarding(
+            source_file=source_file,
+            storage_mode=storage_mode,
+            expected_onboarding=expected,
+            state="unsupported",
+            note="Inline onboarding could not be checked because the source is not UTF-8 text.",
+        )
+    if extract_inline_onboarding_block(text) is not None:
+        return None
+    return MissingOnboarding(
+        source_file=source_file,
+        storage_mode=storage_mode,
+        expected_onboarding=expected,
+        state="missing",
+        note="Inline onboarding block is missing for this newly added worktree file.",
     )
 
 
@@ -223,11 +238,13 @@ def main(argv: list[str] | None = None) -> int:
     context = resolve_coordination_context(
         code_repository_name=code_repository_name,
         workspace_root=code_repository_root.parent,
-        requested_topology=args.topology,
-        coordination_root=args.coordination_root,
-        settings_path=args.settings_path,
-        onboarding_root=args.onboarding_root,
         code_repository_root=code_repository_root,
+        hints=CoordinationHints(
+            topology=args.topology,
+            coordination_root=args.coordination_root,
+            settings_path=args.settings_path,
+            onboarding_root=args.onboarding_root,
+        ),
     )
     if not filesystem.exists(context.onboarding_root):
         parser.error(f"onboarding root does not exist: {context.onboarding_root}")

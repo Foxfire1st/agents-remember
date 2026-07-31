@@ -43,6 +43,7 @@ from agents_remember.observer import (
     observer_root,
     reset_ambient,
 )
+from agents_remember.observer.ambient import AmbientTiming
 from agents_remember.observer.served_store import ServedStore, served_key
 from test_config import settings_payload
 
@@ -406,7 +407,9 @@ class FrontDoorDedupTests(unittest.TestCase):
             storage_mode="repo-sidecar",
         )
         reset_ambient()
-        amb = AmbientLifecycle(EventStore(observer_root(self.config)), heartbeat_seconds=3600)
+        amb = AmbientLifecycle(
+            EventStore(observer_root(self.config)), timing=AmbientTiming(heartbeat_seconds=3600)
+        )
         amb.start(fleeting=True)
         install_ambient(amb)
         self.amb = amb
@@ -481,7 +484,7 @@ class ServedLedgerAndEventTests(unittest.TestCase):
         )
         reset_ambient()
         self.store = EventStore(observer_root(self.config))
-        amb = AmbientLifecycle(self.store, heartbeat_seconds=3600)
+        amb = AmbientLifecycle(self.store, timing=AmbientTiming(heartbeat_seconds=3600))
         amb.start(fleeting=True)
         install_ambient(amb)
         self.amb = amb

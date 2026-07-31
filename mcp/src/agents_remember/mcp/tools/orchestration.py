@@ -2,8 +2,14 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+from agents_remember.controlplane.operator_inbox_records import (
+    InboxAddress,
+    InboxMessage,
+    InboxPoster,
+)
 from agents_remember.controlplane.orchestration_nudges import (
     NudgeReason,
     OrchestrationNudgeRecord,
@@ -22,23 +28,40 @@ if TYPE_CHECKING:
     from agents_remember.mcp.config import McpRuntimeConfig
 
 
+@dataclass(frozen=True)
+class NudgeTarget:
+    """The manager seat a nudge is delivered to, addressed by its hosted-session agent id, its
+    lifecycle id, or both. At least one must be present -- a nudge with no addressee has no
+    mailbox to land in."""
+
+    agent_id: str | None = None
+    lifecycle_id: str | None = None
+
+
+@dataclass(frozen=True)
+class NudgeSubject:
+    """What the nudge is about: the human-readable subject line that names the stalled work, the
+    seat whose silence or missing turn report triggered it, and the artifact that evidences it."""
+
+    subject: str
+    agent_id: str | None = None
+    lifecycle_id: str | None = None
+    artifact_path: str | None = None
+
+
 def orchestration_nudge_manager_payload(
     config: McpRuntimeConfig,
     *,
     reason: NudgeReason,
-    subject: str,
-    manager_agent_id: str | None = None,
-    manager_lifecycle_id: str | None = None,
-    subject_agent_id: str | None = None,
-    subject_lifecycle_id: str | None = None,
-    artifact_path: str | None = None,
+    target: NudgeTarget,
+    subject: NudgeSubject,
     rate_limit_seconds: int = 900,
 ) -> dict[str, Any]:
     """Record and push a manager nudge for inactivity or a missing turn report."""
-    if manager_agent_id is None and manager_lifecycle_id is None:
+    if target.agent_id is None and target.lifecycle_id is None:
         raise ValueError("orchestration nudge requires manager_agent_id or manager_lifecycle_id")
     now = now_iso()
-    message = nudge_message(reason, subject=subject, artifact_path=artifact_path)
+    message = nudge_message(reason, subject=subject.subject, artifact_path=subject.artifact_path)
     store = OrchestrationNudgeStore(observer_root(config))
     record = store.record(
         OrchestrationNudgeRecord(
@@ -46,11 +69,11 @@ def orchestration_nudge_manager_payload(
             ts=now,
             state="sent",
             reason=reason,
-            targetAgentId=manager_agent_id,
-            targetLifecycleId=manager_lifecycle_id,
-            subjectAgentId=subject_agent_id,
-            subjectLifecycleId=subject_lifecycle_id,
-            artifactPath=artifact_path,
+            targetAgentId=target.agent_id,
+            targetLifecycleId=target.lifecycle_id,
+            subjectAgentId=subject.agent_id,
+            subjectLifecycleId=subject.lifecycle_id,
+            artifactPath=subject.artifact_path,
             message=message,
         ),
         rate_limit_seconds=rate_limit_seconds,
@@ -71,16 +94,18 @@ def orchestration_nudge_manager_payload(
 
     posted = operator_inbox_post_payload(
         config,
-        lifecycle_id=manager_lifecycle_id,
-        agent_id=manager_agent_id,
-        sender_role="system",
-        recipient_role="manager",
-        message_kind="nudge",
-        artifact_path=artifact_path,
-        ask=f"Nudge manager about {subject}",
-        response=message,
-        created_by="system",
-        created_via="cli",
+        address=InboxAddress(
+            lifecycle_id=target.lifecycle_id,
+            agent_id=target.agent_id,
+            recipient_role="manager",
+        ),
+        message=InboxMessage(
+            ask=f"Nudge manager about {subject.subject}",
+            response=message,
+            message_kind="nudge",
+            artifact_path=subject.artifact_path,
+        ),
+        poster=InboxPoster(created_by="system", created_via="cli", sender_role="system"),
     )
     return _tool_payload(
         "orchestration_nudge_manager",

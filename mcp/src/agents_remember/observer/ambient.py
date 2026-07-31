@@ -23,7 +23,7 @@ import contextlib
 import shutil
 import threading
 from collections.abc import Callable
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -74,6 +74,18 @@ def _default_clock() -> datetime:
     return datetime.now(UTC)
 
 
+@dataclass(frozen=True)
+class AmbientTiming:
+    """The three durations that govern one ambient lifecycle's clock: how often it beats, how
+    long a log lives, and how long inactivity is tolerated before the ticker stops beating.
+    They are read against each other -- a heartbeat longer than the TTL keeps nothing alive --
+    so they are one timing policy rather than three independent knobs."""
+
+    heartbeat_seconds: float = HEARTBEAT_SECONDS
+    ttl_seconds: float = TTL_SECONDS
+    inactivity_cutoff_seconds: float = INACTIVITY_CUTOFF_SECONDS
+
+
 class AmbientLifecycle:
     """Process-scoped current lifecycle: state machine + emission + heartbeat.
 
@@ -86,17 +98,16 @@ class AmbientLifecycle:
         self,
         store: EventStore,
         *,
-        heartbeat_seconds: float = HEARTBEAT_SECONDS,
-        ttl_seconds: float = TTL_SECONDS,
-        inactivity_cutoff_seconds: float = INACTIVITY_CUTOFF_SECONDS,
+        timing: AmbientTiming | None = None,
         clock: Clock = _default_clock,
         id_factory: IdFactory = new_ulid,
         served_store: ServedStore | None = None,
     ) -> None:
+        timing = timing or AmbientTiming()
         self._store = store
-        self._heartbeat_seconds = heartbeat_seconds
-        self._ttl_seconds = ttl_seconds
-        self._inactivity_cutoff_seconds = inactivity_cutoff_seconds
+        self._heartbeat_seconds = timing.heartbeat_seconds
+        self._ttl_seconds = timing.ttl_seconds
+        self._inactivity_cutoff_seconds = timing.inactivity_cutoff_seconds
         # ISO ts of the last real (non-heartbeat) event; gates the heartbeat ticker.
         self._last_activity_iso: str | None = None
         self._clock = clock

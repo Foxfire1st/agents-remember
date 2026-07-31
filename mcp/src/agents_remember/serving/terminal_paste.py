@@ -69,11 +69,66 @@ class DispatchPastePolicy:
     settle_delay: float = DISPATCH_SUBMIT_SETTLE_SECONDS
 
 
+@dataclass(frozen=True)
+class AcceptanceWindow:
+    """How long one Enter is given to show up in the harness log, and how often that is checked.
+
+    The two are one calibration: the poll interval is meaningless without the window it divides,
+    and shortening the window without tightening the interval changes how many probes a submission
+    actually gets. Every rung of the recovery ladder waits exactly one of these.
+    """
+
+    flush_window: float = 30.0
+    poll_interval: float = _POLL_INTERVAL
+
+
+@dataclass(frozen=True)
+class PasteRecoveryLadder:
+    """The fixed, bounded recovery contract for one verified paste.
+
+    Three rungs in order, each ending the moment the harness log confirms acceptance: the initial
+    paste+Enter, then :attr:`enter_represses` bare Enter re-presses for a composer that held the
+    text unsubmitted, then :attr:`repastes` clear/replace re-pastes driven by :attr:`clear_key`.
+    ``settle_delay`` is the pause between putting bytes in the composer and pressing Enter.
+
+    The bounds ARE the contract -- "fixed and bounded recovery" is a single safety property, and
+    raising one bound without the others silently changes how many duplicate submissions the ladder
+    can produce. They travel as one value so the whole contract is chosen at one call site.
+    """
+
+    window: AcceptanceWindow = AcceptanceWindow()
+    settle_delay: float = 0.1
+    enter_represses: int = 1
+    repastes: int = 1
+    clear_key: str = "C-u"
+
+
+DEFAULT_ACCEPTANCE_WINDOW = AcceptanceWindow()
+DEFAULT_PASTE_LADDER = PasteRecoveryLadder()
+
+
 TmuxBufferLoader = Callable[[str, str], bool | None]
 TmuxBufferPaster = Callable[[str, str], bool | None]
 TmuxKeySender = Callable[[str, str], bool | None]
 TmuxPaneCapturer = Callable[[str], str]
 AcceptanceProbe = Callable[[], bool]
+
+
+@dataclass(frozen=True)
+class TerminalPasterSeams:
+    """The impure surface a :class:`TerminalPaster` drives: the tmux commands and the clock.
+
+    One object for the same reason :class:`~agents_remember.serving.terminal.TerminalHostSeams` is:
+    a test that fakes tmux replaces the whole boundary at once, and time is part of that boundary
+    because the recovery ladder is defined in seconds. ``None`` keeps the real implementation.
+    """
+
+    load_buffer: TmuxBufferLoader | None = None
+    paste_buffer: TmuxBufferPaster | None = None
+    send_key: TmuxKeySender | None = None
+    capture_pane: TmuxPaneCapturer | None = None
+    sleep: Callable[[float], None] | None = None
+    monotonic: Callable[[], float] | None = None
 
 
 def _tmux_load_buffer(buffer_name: str, text: str) -> bool:
@@ -156,22 +211,14 @@ class TerminalPaster:
     advances, and a re-paste additionally requires pane-verified absence. Escape is refused.
     """
 
-    def __init__(
-        self,
-        *,
-        load_buffer: TmuxBufferLoader | None = None,
-        paste_buffer: TmuxBufferPaster | None = None,
-        send_key: TmuxKeySender | None = None,
-        capture_pane: TmuxPaneCapturer | None = None,
-        sleep: Callable[[float], None] | None = None,
-        monotonic: Callable[[], float] | None = None,
-    ) -> None:
-        self._load_buffer = load_buffer or _tmux_load_buffer
-        self._paste_buffer = paste_buffer or _tmux_paste_buffer
-        self._send_key = send_key or _tmux_send_key
-        self._capture_pane = capture_pane or _tmux_capture_pane
-        self._sleep = sleep or time.sleep
-        self._monotonic = monotonic or time.monotonic
+    def __init__(self, seams: TerminalPasterSeams | None = None) -> None:
+        resolved = seams or TerminalPasterSeams()
+        self._load_buffer = resolved.load_buffer or _tmux_load_buffer
+        self._paste_buffer = resolved.paste_buffer or _tmux_paste_buffer
+        self._send_key = resolved.send_key or _tmux_send_key
+        self._capture_pane = resolved.capture_pane or _tmux_capture_pane
+        self._sleep = resolved.sleep or time.sleep
+        self._monotonic = resolved.monotonic or time.monotonic
 
     def paste(
         self,
@@ -180,36 +227,55 @@ class TerminalPaster:
         *,
         submit: bool = False,
         accepted: AcceptanceProbe | None = None,
-        flush_window: float = 30.0,
-        poll_interval: float = _POLL_INTERVAL,
-        settle_delay: float = 0.1,
-        enter_represses: int = 1,
-        repastes: int = 1,
-        clear_key: str = "C-u",
-        dispatch_policy: DispatchPastePolicy | None = None,
+        ladder: PasteRecoveryLadder = DEFAULT_PASTE_LADDER,
     ) -> PasteResult:
-        """Paste ``text`` and require ``accepted`` after Enter.
+        """Paste ``text`` and require ``accepted`` after Enter, climbing ``ladder`` if it is absent.
 
         ``accepted=None`` is allowed only for draft transport or a spawn command whose evidence is
         intentionally checked retroactively after the id-bearing brief binds the session log. It
-        never produces ``submitted=True``.
+        never produces ``submitted=True``. A durable dispatch brief uses :meth:`paste_dispatch`
+        instead: it is exact-once and must never climb a recovery ladder.
         """
-        if dispatch_policy is not None:
-            if accepted is None:
-                raise ValueError("dispatch paste requires a harness-log acceptance probe")
-            return self._paste_dispatch(
-                tmux_name,
-                text,
-                accepted=accepted,
-                flush_window=flush_window,
-                poll_interval=poll_interval,
-                policy=dispatch_policy,
-            )
-
         sanitized = sanitize_for_injection(text)
-        if submit and accepted is not None and accepted():
-            return PasteResult(delivered=True, submitted=True)
-        origin = self._capture_pane(tmux_name) if submit and accepted is not None else ""
+        if not submit or accepted is None:
+            return self._paste_unverified(
+                tmux_name, sanitized, submit=submit, settle_delay=ladder.settle_delay
+            )
+        return self._paste_verified(tmux_name, sanitized, accepted=accepted, ladder=ladder)
+
+    def paste_dispatch(
+        self,
+        tmux_name: str,
+        text: str,
+        *,
+        accepted: AcceptanceProbe,
+        policy: DispatchPastePolicy,
+        window: AcceptanceWindow = DEFAULT_ACCEPTANCE_WINDOW,
+    ) -> PasteResult:
+        """Submit one durable brief exact-once: no Enter re-presses, no duplicate re-pastes.
+
+        The harness-log probe is mandatory here -- a durable brief that cannot be proven accepted
+        must fail rather than be retried into a duplicate.
+        """
+        return self._paste_dispatch(
+            tmux_name, text, accepted=accepted, window=window, policy=policy
+        )
+
+    def _paste_unverified(
+        self,
+        tmux_name: str,
+        sanitized: str,
+        *,
+        submit: bool,
+        settle_delay: float,
+    ) -> PasteResult:
+        """Move bytes only: paste, optionally press Enter, and never claim acceptance.
+
+        This is the draft-transport path and the spawn command whose evidence is checked
+        retroactively. With no harness-log probe there is nothing that could grant
+        ``submitted=True``, so the recovery ladder has nothing to recover towards and does not run.
+        """
+
         if not self._paste_text(tmux_name, sanitized):
             return self._failure(tmux_name)
         if not submit:
@@ -217,39 +283,139 @@ class TerminalPaster:
         self._settle(settle_delay)
         if not self._press(tmux_name, "Enter"):
             return self._failure(tmux_name, delivered=True)
-        if accepted is None:
-            return PasteResult(delivered=True, submitted=False)
-        if self._await_acceptance(accepted, flush_window, poll_interval):
+        return PasteResult(delivered=True, submitted=False)
+
+    def _paste_verified(
+        self,
+        tmux_name: str,
+        sanitized: str,
+        *,
+        accepted: AcceptanceProbe,
+        ladder: PasteRecoveryLadder,
+    ) -> PasteResult:
+        """Submit and accept only what the harness log confirms, climbing the recovery ladder.
+
+        Three fixed rungs, each ending the moment the probe confirms acceptance: the initial
+        paste+Enter, then bounded Enter re-presses for a composer that held the text unsubmitted,
+        then bounded clear/replace re-pastes. Running out of rungs is a failure, not a submission.
+        """
+
+        if accepted():
             return PasteResult(delivered=True, submitted=True)
+        origin = self._capture_pane(tmux_name)
+        if not self._paste_text(tmux_name, sanitized):
+            return self._failure(tmux_name)
+        self._settle(ladder.settle_delay)
+        settled = self._press_enter_and_await(tmux_name, accepted=accepted, window=ladder.window)
+        if settled is None:
+            settled = self._retry_enter_represses(tmux_name, accepted=accepted, ladder=ladder)
+        if settled is None:
+            settled = self._retry_repastes(
+                tmux_name, sanitized, origin=origin, accepted=accepted, ladder=ladder
+            )
+        return settled if settled is not None else self._failure(tmux_name, delivered=True)
 
-        for _attempt in range(max(0, enter_represses)):
-            if not self._press(tmux_name, "Enter"):
-                return self._failure(tmux_name, delivered=True)
-            if self._await_acceptance(accepted, flush_window, poll_interval):
-                return PasteResult(delivered=True, submitted=True)
+    def _retry_enter_represses(
+        self,
+        tmux_name: str,
+        *,
+        accepted: AcceptanceProbe,
+        ladder: PasteRecoveryLadder,
+    ) -> PasteResult | None:
+        """Ladder rung 2: re-press Enter without re-pasting. ``None`` means still unaccepted."""
 
-        for _attempt in range(max(0, repastes)):
-            current = self._capture_pane(tmux_name)
-            presence = _payload_presence(origin, current, sanitized)
-            if presence is None:
-                return self._failure(tmux_name, delivered=True, capture=current)
-            if presence:
-                if not self._press(tmux_name, clear_key):
-                    return self._failure(tmux_name, delivered=True)
-                self._settle(settle_delay)
-                cleared = self._capture_pane(tmux_name)
-                if _payload_presence(origin, cleared, sanitized) is not False:
-                    # A transcript chip or an uncleared composer is still evidence that the prior
-                    # payload may exist. Failing here is safer than appending a duplicate.
-                    return self._failure(tmux_name, delivered=True, capture=cleared)
+        for _attempt in range(max(0, ladder.enter_represses)):
+            settled = self._press_enter_and_await(
+                tmux_name, accepted=accepted, window=ladder.window
+            )
+            if settled is not None:
+                return settled
+        return None
+
+    def _retry_repastes(
+        self,
+        tmux_name: str,
+        sanitized: str,
+        *,
+        origin: str,
+        accepted: AcceptanceProbe,
+        ladder: PasteRecoveryLadder,
+    ) -> PasteResult | None:
+        """Ladder rung 3: clear any visible prior payload, re-paste, submit. ``None`` if unaccepted.
+
+        The pane is read here only to prove the prior payload absent or to clear it; that evidence
+        never grants acceptance.
+        """
+
+        for _attempt in range(max(0, ladder.repastes)):
+            blocked = self._clear_prior_payload(
+                tmux_name,
+                sanitized,
+                origin=origin,
+                clear_key=ladder.clear_key,
+                settle_delay=ladder.settle_delay,
+            )
+            if blocked is not None:
+                return blocked
             if not self._paste_text(tmux_name, sanitized):
                 return self._failure(tmux_name, delivered=True)
-            self._settle(settle_delay)
-            if not self._press(tmux_name, "Enter"):
-                return self._failure(tmux_name, delivered=True)
-            if self._await_acceptance(accepted, flush_window, poll_interval):
-                return PasteResult(delivered=True, submitted=True)
-        return self._failure(tmux_name, delivered=True)
+            self._settle(ladder.settle_delay)
+            settled = self._press_enter_and_await(
+                tmux_name, accepted=accepted, window=ladder.window
+            )
+            if settled is not None:
+                return settled
+        return None
+
+    def _clear_prior_payload(
+        self,
+        tmux_name: str,
+        sanitized: str,
+        *,
+        origin: str,
+        clear_key: str,
+        settle_delay: float,
+    ) -> PasteResult | None:
+        """Leave the composer verifiably free of the prior payload, or return the failure that stops.
+
+        ``None`` means a re-paste may proceed: either nothing of the payload was visible, or the
+        clear key removed it and a second capture confirmed the removal.
+        """
+
+        current = self._capture_pane(tmux_name)
+        presence = _payload_presence(origin, current, sanitized)
+        if presence is None:
+            return self._failure(tmux_name, delivered=True, capture=current)
+        if not presence:
+            return None
+        if not self._press(tmux_name, clear_key):
+            return self._failure(tmux_name, delivered=True)
+        self._settle(settle_delay)
+        cleared = self._capture_pane(tmux_name)
+        if _payload_presence(origin, cleared, sanitized) is not False:
+            # A transcript chip or an uncleared composer is still evidence that the prior
+            # payload may exist. Failing here is safer than appending a duplicate.
+            return self._failure(tmux_name, delivered=True, capture=cleared)
+        return None
+
+    def _press_enter_and_await(
+        self,
+        tmux_name: str,
+        *,
+        accepted: AcceptanceProbe,
+        window: AcceptanceWindow,
+    ) -> PasteResult | None:
+        """Press Enter and wait out one acceptance window.
+
+        Returns a finished result when the log accepted the input or the key could not be sent,
+        and ``None`` when the window closed unaccepted -- the caller's cue to advance a rung.
+        """
+
+        if not self._press(tmux_name, "Enter"):
+            return self._failure(tmux_name, delivered=True)
+        if self._await_acceptance(accepted, window):
+            return PasteResult(delivered=True, submitted=True)
+        return None
 
     def _paste_dispatch(
         self,
@@ -257,8 +423,7 @@ class TerminalPaster:
         text: str,
         *,
         accepted: AcceptanceProbe,
-        flush_window: float,
-        poll_interval: float,
+        window: AcceptanceWindow,
         policy: DispatchPastePolicy,
     ) -> PasteResult:
         """Submit one durable brief without Enter re-presses or duplicate re-pastes."""
@@ -266,26 +431,40 @@ class TerminalPaster:
         if accepted():
             return PasteResult(delivered=True, submitted=True)
         sanitized = sanitize_for_injection(text)
-        if policy.attempt == "recovery":
-            capture = self._capture_pane(tmux_name)
-            presence = _dispatch_payload_presence(
-                capture,
-                sanitized,
-                visible_marker=policy.visible_marker,
-                harness=policy.harness,
-            )
-            if presence is None:
-                return self._failure(tmux_name, delivered=True, capture=capture)
-            if not presence and not self._paste_text(tmux_name, sanitized):
-                return self._failure(tmux_name)
-        elif not self._paste_text(tmux_name, sanitized):
-            return self._failure(tmux_name)
+        blocked = self._compose_dispatch(tmux_name, sanitized, policy=policy)
+        if blocked is not None:
+            return blocked
         self._settle(policy.settle_delay)
-        if not self._press(tmux_name, "Enter"):
-            return self._failure(tmux_name, delivered=True)
-        if self._await_acceptance(accepted, flush_window, poll_interval):
-            return PasteResult(delivered=True, submitted=True)
-        return self._failure(tmux_name, delivered=True)
+        settled = self._press_enter_and_await(tmux_name, accepted=accepted, window=window)
+        return settled if settled is not None else self._failure(tmux_name, delivered=True)
+
+    def _compose_dispatch(
+        self,
+        tmux_name: str,
+        sanitized: str,
+        *,
+        policy: DispatchPastePolicy,
+    ) -> PasteResult | None:
+        """Put the brief in the composer for this attempt, or return the failure that stops it.
+
+        A recovery attempt must not append a second copy of a durable brief, so it re-pastes only
+        when the pane proves the prior draft absent; an unreadable or ambiguous pane fails instead.
+        """
+
+        if policy.attempt != "recovery":
+            return None if self._paste_text(tmux_name, sanitized) else self._failure(tmux_name)
+        capture = self._capture_pane(tmux_name)
+        presence = _dispatch_payload_presence(
+            capture,
+            sanitized,
+            visible_marker=policy.visible_marker,
+            harness=policy.harness,
+        )
+        if presence is None:
+            return self._failure(tmux_name, delivered=True, capture=capture)
+        if not presence and not self._paste_text(tmux_name, sanitized):
+            return self._failure(tmux_name)
+        return None
 
     def _paste_text(self, tmux_name: str, text: str) -> bool:
         buffer_name = f"ar-spawn-{os.getpid()}-{uuid4().hex[:8]}"
@@ -301,23 +480,18 @@ class TerminalPaster:
             )
         return self._send_key(tmux_name, key) is not False
 
-    def _await_acceptance(
-        self,
-        accepted: AcceptanceProbe,
-        flush_window: float,
-        poll_interval: float,
-    ) -> bool:
+    def _await_acceptance(self, accepted: AcceptanceProbe, window: AcceptanceWindow) -> bool:
         started = self._monotonic()
         while True:
             if accepted():
                 return True
-            remaining = max(0.0, flush_window) - (self._monotonic() - started)
+            remaining = max(0.0, window.flush_window) - (self._monotonic() - started)
             if remaining <= 0.0:
                 return False
             with contextlib.suppress(OSError):
                 # Never oversleep the calibrated window merely because the final poll interval is
                 # longer than the remaining evidence window.
-                self._sleep(min(max(0.01, poll_interval), remaining))
+                self._sleep(min(max(0.01, window.poll_interval), remaining))
 
     def _settle(self, delay: float) -> None:
         with contextlib.suppress(OSError):

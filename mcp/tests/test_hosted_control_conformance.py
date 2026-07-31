@@ -16,6 +16,7 @@ from agents_remember.errors import HarnessAdapterDisconnectedError, HarnessContr
 from agents_remember.serving.harness_capabilities import CapabilitySnapshot, SetResult
 from agents_remember.serving.harness_control_bridge import HarnessControlBridge
 from agents_remember.serving.harness_control_client import (
+    ControlSubmission,
     read_control_snapshot,
     read_control_transcript,
     reconcile_control_prompt,
@@ -223,15 +224,13 @@ class HostedControlConformanceTests(unittest.IsolatedAsyncioTestCase):
                         submit_control_prompt,
                         entry,
                         "first",
-                        source="durable",
-                        request_id=f"{harness_id}-immediate",
+                        ControlSubmission(source="durable", request_id=f"{harness_id}-immediate"),
                     )
                     second = await asyncio.to_thread(
                         submit_control_prompt,
                         entry,
                         "second",
-                        source="durable",
-                        request_id=f"{harness_id}-queued",
+                        ControlSubmission(source="durable", request_id=f"{harness_id}-queued"),
                     )
                     self.assertEqual((first.acceptance, second.acceptance), ("immediate", "queued"))
                     first_operation = adapter.submissions[-1].operation
@@ -326,8 +325,7 @@ class HostedControlConformanceTests(unittest.IsolatedAsyncioTestCase):
                         submit_control_prompt,
                         entry,
                         "ambiguous",
-                        source="durable",
-                        request_id=f"{harness_id}-unknown",
+                        ControlSubmission(source="durable", request_id=f"{harness_id}-unknown"),
                     )
                     self.assertEqual(unknown.acceptance, "unknown")
                     adapter.reconciliations[unknown.request_id] = ReconciliationResult(

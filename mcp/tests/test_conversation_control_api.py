@@ -17,7 +17,7 @@ from unittest import mock
 import httpx
 import uvicorn
 from _control_plane import OPERATOR, TINY_PNG, FakeControlAdapter, make_harness
-from agents_remember.serving.harness_control_client import submit_control_prompt
+from agents_remember.serving.harness_control_client import ControlSubmission, submit_control_prompt
 from agents_remember.serving.harness_control_models import AR_EVIDENCE_KEY
 
 SESSION = "ar-api-ctl"
@@ -172,8 +172,7 @@ class ControlApiTests(unittest.IsolatedAsyncioTestCase):
             submit_control_prompt,
             self.harness.control_entry,
             "terminal wire body",
-            source="terminal",
-            request_id="q-term",
+            ControlSubmission(source="terminal", request_id="q-term"),
         )
         queue = await self._queue()
         self.assertEqual(len(queue["items"]), 2)

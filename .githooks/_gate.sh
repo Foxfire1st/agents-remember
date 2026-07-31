@@ -59,33 +59,61 @@ fi
 PYTHONPATH="$checkout_pythonpath"
 export PYTHONPATH
 
-SOURCE_PATH="mcp/src/agents_remember"
-TEST_PATH="mcp/tests"
 STASH_MESSAGE="agents-remember $label gate: staged-content isolation"
 
 # --- checks -----------------------------------------------------------------
+
+# Scope is read off the index, exactly as `code_quality/check.py::derive_scope` does.
+# This tier used to name "mcp/src/agents_remember" and "mcp/tests" by hand, which was
+# narrower than the gate it fronts: a broken scripts/sync-skills.py passed pre-commit and
+# was then rejected on push. An empty list is fatal rather than a silent pass -- certifying
+# nothing is how a gate stops being one.
+over_tracked_python() {
+  if [ -z "$(git ls-files -- '*.py')" ]; then
+    echo "[$label] git tracks no Python files; refusing to certify an empty scope." >&2
+    return 1
+  fi
+  git ls-files -z -- '*.py' | xargs -0 "$@"
+}
 
 generated_copy_checks() {
   echo "[$label] checking generated skill copies..."
   "$py" scripts/sync-skills.py --check || return 1
   echo "[$label] checking generated runtime asset copies..."
   "$py" scripts/sync-runtime.py --check || return 1
+  echo "[$label] checking generated harness configuration trees..."
+  "$py" scripts/sync-harness.py --check || return 1
   return 0
 }
 
 run_fast_checks() {
   generated_copy_checks || return 1
+  # No `--extend-ignore` and no `--select`: ruff lints exactly what pyproject selects,
+  # C901/PLR0911/PLR0912/PLR0915 included. This step used to route those four codes away
+  # for a `complexity-baseline` step to hold against a shrink-only list; that list is gone
+  # along with the debt it recorded, and re-adding a flag here would silently un-enforce
+  # four rules in the tier developers actually feel.
   echo "[$label] ruff (lint)..."
-  "$py" -m ruff check "$SOURCE_PATH" "$TEST_PATH" || return 1
+  over_tracked_python "$py" -m ruff check || return 1
+  # Unformatted content is exactly what a staged-content check should catch before it
+  # lands, and the whole-tree check runs in well under a second.
+  echo "[$label] ruff format (--check)..."
+  over_tracked_python "$py" -m ruff format --check || return 1
   echo "[$label] Pyright (types)..."
-  "$py" -m pyright --project . --pythonpath "$py" "$SOURCE_PATH" "$TEST_PATH" || return 1
+  over_tracked_python "$py" -m pyright --project . --pythonpath "$py" || return 1
   echo "[$label] fast tier passed; the full suite (pytest + CRAP) runs on push."
   return 0
 }
 
+# The full tier carries the changed-lines coverage floor, which needs to know what
+# this branch was cut from. It resolves that itself -- AR_GATE_DIFF_BASE, then the
+# pull request base, the configured upstream, then the default branch -- and prints
+# the base it chose. Export AR_GATE_DIFF_BASE before pushing from a leaf branch cut
+# from a series branch: git cannot infer that fork point, and without it the floor
+# compares against the default branch and asks you to cover the series' lines too.
 run_full_checks() {
   generated_copy_checks || return 1
-  echo "[$label] running quality wrapper (ruff + Pyright + pytest + CRAP, enforcing)..."
+  echo "[$label] running quality wrapper (ruff + format + Pyright + pytest + CRAP + diff coverage)..."
   "$py" -m agents_remember.code_quality.check || return 1
   return 0
 }

@@ -30,8 +30,10 @@ from agents_remember.controlplane.attention_dismissals import (
     AttentionDismissalStore,
 )
 from agents_remember.controlplane.expectation_rows import (
+    Expectation,
     ExpectationRow,
     ExpectationRowStore,
+    ExpectationSubject,
     write_expectation_row,
 )
 from agents_remember.controlplane.orchestration_nudges import (
@@ -40,9 +42,11 @@ from agents_remember.controlplane.orchestration_nudges import (
 )
 from agents_remember.controlplane.supervisor_signals import (
     SupervisorSignalCooldownStore,
+    SupervisorSignalKey,
     SupervisorSignalRecord,
+    SupervisorSignalTarget,
 )
-from agents_remember.observer.ambient import AmbientLifecycle
+from agents_remember.observer.ambient import AmbientLifecycle, AmbientTiming
 from agents_remember.observer.event_retention import (
     WORKSPACE_EVENT_TTL_SECONDS,
     compact_workspace_river,
@@ -61,6 +65,7 @@ from agents_remember.serving.terminal_catalog import (
     TerminalCatalogEntry,
 )
 from agents_remember.serving.terminal_liveness import (
+    LivenessProbe,
     TerminalCatalogLivenessConfig,
     TerminalCatalogLivenessSweeper,
 )
@@ -125,12 +130,16 @@ class SupervisorSignalStoreScalingTests(unittest.TestCase):
         self.store.read = counting_read  # type: ignore[method-assign]
         for _ in range(50):
             self.store.in_cooldown(
-                target_agent_id="manager-1",
-                target_lifecycle_id=None,
-                target_role="manager",
-                leaf_key="repo/260707_master/leaf-1",
-                finding_kind="seat-liveness",
-                detail="turn-state-stale",
+                SupervisorSignalKey(
+                    target=SupervisorSignalTarget(
+                        agent_id="manager-1",
+                        lifecycle_id=None,
+                        role="manager",
+                        leaf_key="repo/260707_master/leaf-1",
+                    ),
+                    finding_kind="seat-liveness",
+                    detail="turn-state-stale",
+                ),
                 now=NOW,
                 cooldown_seconds=900.0,
                 records=snapshot,
@@ -213,12 +222,14 @@ class ExpectationRowSnapshotTests(unittest.TestCase):
             rows = [
                 write_expectation_row(
                     store,
+                    Expectation(
+                        kind="briefed-by",
+                        source_id=f"seat-{index}",
+                        subject=ExpectationSubject(agent_id="worker-1"),
+                    ),
                     row_id=f"exp-{index}",
                     now=NOW - timedelta(minutes=10),
-                    kind="briefed-by",
                     sla_seconds=60.0,
-                    source_id=f"seat-{index}",
-                    subject_agent_id="worker-1",
                 )
                 for index in range(20)
             ]
@@ -363,7 +374,9 @@ class LifecycleHeartbeatSidecarTests(unittest.TestCase):
                 self.assertEqual(len(removed), lifecycle_count)
                 self.assertEqual(list((root / "lifecycles").iterdir()), [])
 
-                ambient = AmbientLifecycle(store, heartbeat_seconds=3600, clock=lambda: NOW)
+                ambient = AmbientLifecycle(
+                    store, timing=AmbientTiming(heartbeat_seconds=3600), clock=lambda: NOW
+                )
                 self.addCleanup(ambient.shutdown)
                 self.assertEqual(ambient._reap_stale_fleeting(), [])
 
@@ -399,11 +412,10 @@ class ExpectationCompactTests(unittest.TestCase):
             for index in range(3):
                 write_expectation_row(
                     store,
+                    Expectation(kind="briefed-by", source_id=f"seat-{index}"),
                     row_id=f"pending-{index}",
                     now=NOW - timedelta(minutes=1),
-                    kind="briefed-by",
                     sla_seconds=3600.0,
-                    source_id=f"seat-{index}",
                 )
             store.append(self._terminal("recent", state="missed", at=NOW - timedelta(seconds=30)))
             removed, kept = store.compact(now=NOW)
@@ -578,8 +590,10 @@ class TerminalCatalogSweepScalingTests(unittest.TestCase):
                 catalog,
                 _AllAliveHost(),
                 now=lambda: NOW,
-                config=TerminalCatalogLivenessConfig(sweep_interval_seconds=0.0),
-                pane_capturer=lambda _tmux_name: "(esc to interrupt)",
+                probe=LivenessProbe(
+                    hysteresis=TerminalCatalogLivenessConfig(sweep_interval_seconds=0.0),
+                    pane_capturer=lambda _tmux_name: "(esc to interrupt)",
+                ),
             )
             catalog.disk_read_calls = 0
             catalog.disk_write_calls = 0

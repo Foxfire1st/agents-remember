@@ -18,7 +18,14 @@ from agents_remember.controlplane.escalation_ladder import (
     rung_due,
     seat_is_suspect,
 )
-from agents_remember.controlplane.operator_inbox_records import create_operator_inbox_entry
+from agents_remember.controlplane.operator_inbox_records import (
+    AgentRole,
+    InboxAddress,
+    InboxMessage,
+    InboxPoster,
+    InboxRouting,
+    create_operator_inbox_entry,
+)
 from agents_remember.controlplane.orphan_policy import find_orphaned_workers
 from agents_remember.serving.terminal_catalog import TerminalCatalog, TerminalCatalogEntry
 
@@ -26,21 +33,18 @@ NOW = datetime(2026, 7, 8, 12, 0, 0, tzinfo=UTC)
 T0 = "2026-07-08T11:00:00+00:00"
 
 
-def _entry(**overrides: object):
-    base: dict[str, object] = dict(
+def _entry(*, agent_id: str | None = "worker-1", recipient_role: AgentRole = "worker"):
+    return create_operator_inbox_entry(
+        InboxMessage(ask="ask", response="resp", message_kind="escalation"),
         entry_id="e1",
         now=T0,
-        lifecycle_id=None,
-        agent_id="worker-1",
-        ask="ask",
-        response="resp",
-        created_by="system",
-        created_via="cli",
-        message_kind="escalation",
-        recipient_role="worker",
+        routing=InboxRouting(
+            address=InboxAddress(
+                lifecycle_id=None, agent_id=agent_id, recipient_role=recipient_role
+            )
+        ),
+        poster=InboxPoster(created_by="system", created_via="cli"),
     )
-    base.update(overrides)
-    return create_operator_inbox_entry(**base)  # type: ignore[arg-type]
 
 
 def _catalog_entry(session_id: str, **overrides: object) -> TerminalCatalogEntry:

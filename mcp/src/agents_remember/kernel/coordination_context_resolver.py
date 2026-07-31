@@ -29,10 +29,14 @@ from agents_remember.kernel.coordination_context.cross_repo import (
     with_memory_ledger_state,
 )
 from agents_remember.kernel.coordination_context.models import (
+    CodeRepository,
     CoordinationContext,
+    CoordinationHints,
+    CoordinationRoots,
     CoordinationSelection,
     CrossRepoAllowEntry,
     CrossRepoSettings,
+    EnclosureSelector,
     MissingMemoryError,
     StorageRule,
     StorageSettings,
@@ -126,31 +130,18 @@ def detect_coordination_selection(
 def resolve_coordination_context(
     code_repository_name: str | None = None,
     workspace_root: Path | None = None,
-    requested_topology: Literal["internal", "external"] | None = None,
-    coordination_root: Path | None = None,
-    settings_path: Path | None = None,
-    onboarding_root: Path | None = None,
     code_repository_root: Path | None = None,
-    contract_path: Path | None = None,
-    task_name: str | None = None,
-    parent_task: str | None = None,
-    leaf_id: str | None = None,
-    worktree_name: str | None = None,
+    *,
+    hints: CoordinationHints | None = None,
+    selector: EnclosureSelector | None = None,
 ) -> CoordinationContext:
     return _with_facade_agents_repo(
         _resolver.resolve_coordination_context,
         code_repository_name,
         workspace_root,
-        requested_topology,
-        coordination_root,
-        settings_path,
-        onboarding_root,
         code_repository_root,
-        contract_path,
-        task_name,
-        parent_task,
-        leaf_id,
-        worktree_name,
+        hints=hints,
+        selector=selector,
     )
 
 
@@ -173,10 +164,14 @@ def _with_facade_agents_repo(function, *args, **kwargs):
 
 __all__ = [
     "DEFAULT_AR_COORDINATION_ROOT",
+    "CodeRepository",
     "CoordinationContext",
+    "CoordinationHints",
+    "CoordinationRoots",
     "CoordinationSelection",
     "CrossRepoAllowEntry",
     "CrossRepoSettings",
+    "EnclosureSelector",
     "MissingMemoryError",
     "StorageRule",
     "StorageSettings",

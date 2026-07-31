@@ -37,7 +37,7 @@ from agents_remember.serving.conversation.active.factories import (
     live_snapshot,
     resolve_running_entry,
 )
-from agents_remember.serving.conversation.models import ActiveConversationRef
+from agents_remember.serving.conversation.models import ActiveConversationRef, AuthorizationBinding
 from agents_remember.serving.conversation.runtime import ConversationRuntime
 from agents_remember.serving.harness_control_client import (
     ControlledSession,
@@ -151,6 +151,49 @@ class JournalEntry:
     draft_revision: int | None
     asset_ids: tuple[str, ...]
     submitted_at: str
+
+
+@dataclass(frozen=True)
+class ControlRequest:
+    """One authorized control request's scope: who is asking, of which session, at which epoch.
+
+    Nothing in this package may act on a session without all four. The service owns the
+    per-(session, epoch) channel; the authorization binding is what every operation fingerprint is
+    computed against; the session id and the caller's expected bridge epoch are what the epoch
+    check verifies. An operation carrying one caller's authorization against another session's
+    epoch is exactly the confusion that check exists to prevent, so the four travel bound together
+    instead of being re-listed at every layer.
+    """
+
+    service: ConversationControlService
+    authorization: AuthorizationBinding
+    ar_session_id: str
+    expected_bridge_epoch: str
+
+    def resolved(self, epoch: str) -> ControlScope:
+        """Narrow this request to the bridge epoch the service actually verified."""
+
+        return ControlScope(
+            service=self.service,
+            authorization=self.authorization,
+            ar_session_id=self.ar_session_id,
+            epoch=epoch,
+        )
+
+
+@dataclass(frozen=True)
+class ControlScope:
+    """A control request narrowed to the VERIFIED epoch, not the one the caller believed.
+
+    The distinction matters: refs are minted and decoded against the verified epoch, so carrying
+    the caller's claimed epoch past the check would let a stale client mint refs for an epoch that
+    no longer exists.
+    """
+
+    service: ConversationControlService
+    authorization: AuthorizationBinding
+    ar_session_id: str
+    epoch: str
 
 
 @dataclass

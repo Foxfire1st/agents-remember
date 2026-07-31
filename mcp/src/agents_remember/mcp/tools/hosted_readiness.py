@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any
 from agents_remember.serving.hosted_readiness import (
     MAX_HOSTED_READINESS_WAIT_SECONDS,
     HostedReadinessHost,
+    ReadinessWait,
     hosted_session_readiness,
 )
 from agents_remember.serving.terminal import TerminalHost
@@ -42,7 +43,7 @@ def hosted_session_readiness_payload(
         resolved_catalog,
         host or TerminalHost(),
         session_id=session_id,
-        wait_seconds=wait_seconds,
+        wait=ReadinessWait(seconds=wait_seconds),
     )
     entry = result.entry
     return _tool_payload(

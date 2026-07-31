@@ -20,6 +20,8 @@ reconciliation sweep").
 from __future__ import annotations
 
 import contextlib
+from collections.abc import Callable
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from time import perf_counter
@@ -33,12 +35,18 @@ from agents_remember.controlplane.escalation_ladder import (
 from agents_remember.controlplane.expectation_rows import ExpectationRow, ExpectationRowStore
 from agents_remember.controlplane.inbox_backoff import require_redelivery_floor_seconds
 from agents_remember.controlplane.operator_inbox_records import (
+    InboxAddress,
     InboxDeliveryState,
+    InboxMessage,
     InboxMessageKind,
+    InboxOwner,
+    InboxPoster,
+    InboxRouting,
+    InboxSubject,
     OperatorInboxEntry,
     create_operator_inbox_entry,
 )
-from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
+from agents_remember.controlplane.operator_inbox_store import InboxRenewal, OperatorInboxStore
 from agents_remember.controlplane.orchestration_artifacts import turn_report_artifact
 from agents_remember.controlplane.orchestration_nudges import (
     NudgeReason,
@@ -55,7 +63,9 @@ from agents_remember.controlplane.signal_routing import (
     leaf_chain_has_progress,
 )
 from agents_remember.controlplane.supervisor_signals import (
+    SupervisorSignalKey,
     SupervisorSignalRecord,
+    SupervisorSignalTarget,
 )
 from agents_remember.observer.events import Event, now_iso
 from agents_remember.observer.ulid import new_ulid
@@ -64,13 +74,18 @@ from agents_remember.serving.dispatch_brief import (
     dispatch_stays_on_exact_session,
     fulfill_briefed_expectation,
 )
-from agents_remember.serving.inbox_delivery import deliver_inbox_entry
+from agents_remember.serving.hosted_session_runtime import HostedSessionRuntime
+from agents_remember.serving.inbox_delivery import (
+    InboxDeliveryLog,
+    RedeliveryFloor,
+    deliver_inbox_entry,
+)
 from agents_remember.serving.inbox_reclamation import (
     InboxReclamationPlan,
     plan_confirmed_gone_reclamation,
 )
 from agents_remember.serving.pane_signals import classify_pane_signal
-from agents_remember.serving.retire import retire_entry
+from agents_remember.serving.retire import SeatClosure, retire_entry
 from agents_remember.serving.supervisor_models import (
     SupervisorActionResult,
     SupervisorContext,
@@ -363,12 +378,24 @@ def _delivery_failure_still_retrying(entry: OperatorInboxEntry) -> bool:
     )
 
 
+@dataclass(frozen=True)
+class EscalationSchedule:
+    """When an unacked row is due for its next ladder rung.
+
+    The SLA (how long a kind of message may sit unacked) and the rung dwell (how long each rung of
+    the ladder waits before the next) are one timetable: raising the SLA without the dwell just
+    moves where the same storm starts. ``rung_due`` needs both for every row.
+    """
+
+    sla_seconds: dict[str, float] = field(default_factory=dict)
+    rung_seconds: dict[int, float] = field(default_factory=dict)
+
+
 def evaluate_escalation_findings(
     store: OperatorInboxStore,
     *,
     now: datetime,
-    sla_seconds: dict[str, float],
-    rung_seconds: dict[int, float],
+    schedule: EscalationSchedule,
     catalog: TerminalCatalog | None = None,
     current: dict[str, OperatorInboxEntry] | None = None,
 ) -> list[SupervisorFinding]:
@@ -380,8 +407,8 @@ def evaluate_escalation_findings(
             continue
         if _delivery_failure_still_retrying(entry):
             continue
-        sla = sla_seconds.get(entry.messageKind, DEFAULT_ESCALATION_SLA_SECONDS)
-        dwell = rung_seconds.get(entry.rung, DEFAULT_ESCALATION_RUNG_SECONDS)
+        sla = schedule.sla_seconds.get(entry.messageKind, DEFAULT_ESCALATION_SLA_SECONDS)
+        dwell = schedule.rung_seconds.get(entry.rung, DEFAULT_ESCALATION_RUNG_SECONDS)
         if rung_due(entry, now=now, sla_seconds=sla, rung_seconds=dwell):
             findings.append(
                 SupervisorFinding(
@@ -472,10 +499,11 @@ def evaluate_predicates(
     findings += evaluate_escalation_findings(
         ctx.inbox_store,
         now=now,
-        sla_seconds=ctx.escalation_sla_seconds,
-        rung_seconds=ctx.escalation_rung_seconds,
         catalog=ctx.catalog,
         current=inbox_current,
+        schedule=EscalationSchedule(
+            sla_seconds=ctx.escalation_sla_seconds, rung_seconds=ctx.escalation_rung_seconds
+        ),
     )[: max(1, ctx.escalation_budget)]
     findings += evaluate_dead_upstream_findings(ctx.catalog)
     return findings
@@ -505,15 +533,16 @@ def _redeliver(
     if _ladder_terminal_and_dead(ctx.catalog, entry):
         return _resolve_ladder_terminal(ctx, finding, now=now, sweep=sweep)
     updated = deliver_inbox_entry(
-        store=ctx.inbox_store,
-        catalog=ctx.catalog,
-        host=ctx.host,
+        InboxDeliveryLog(
+            store=ctx.inbox_store,
+            entry=entry,
+            at=now.isoformat(),
+            floor=RedeliveryFloor(
+                current=sweep.inbox_current, seconds=ctx.redeliver_rate_limit_seconds
+            ),
+        ),
+        sessions=HostedSessionRuntime(catalog=ctx.catalog, host=ctx.host),
         paster=ctx.paster,
-        entry=entry,
-        submit=True,
-        current=sweep.inbox_current,
-        redelivery_floor_seconds=ctx.redeliver_rate_limit_seconds,
-        delivery_at=now.isoformat(),
     )
     sweep.remember(updated)
     fulfill_briefed_expectation(
@@ -657,14 +686,16 @@ def _auto_nudge(
     delivered = _post_owner_signal(
         ctx,
         owner,
-        message_kind="nudge",
-        ask=f"Nudge: {subject}",
-        response=message,
+        OwnerSignal(
+            message_kind="nudge",
+            ask=f"Nudge: {subject}",
+            response=message,
+            leaf_key=finding.leaf_key,
+            seat_role=finding.seat_role,
+            subject_agent_id=finding.session_id,
+        ),
         now=now,
         sweep=sweep,
-        leaf_key=finding.leaf_key,
-        seat_role=finding.seat_role,
-        subject_agent_id=finding.session_id,
     )
     _mark_expectation_missed(ctx, finding, now=now, sweep=sweep)
     return SupervisorActionResult("auto-nudge", finding, "sent", delivered)
@@ -717,18 +748,30 @@ def _find_coalescible(
     return None
 
 
+@dataclass(frozen=True)
+class OwnerSignal:
+    """One owner-addressed signal: what is being said, and about which seat.
+
+    The message and its subject are inseparable here -- coalescing looks up an existing row by
+    (ask, kind, leaf, role), and renewal rewrites the subject from the same value, so a message
+    carrying someone else's subject silently renews the wrong row.
+    """
+
+    message_kind: InboxMessageKind
+    ask: str
+    response: str
+    leaf_key: str | None = None
+    seat_role: str | None = None
+    subject_agent_id: str | None = None
+
+
 def _post_owner_signal(
     ctx: SupervisorContext,
     owner: RoutedOwner,
+    signal: OwnerSignal,
     *,
-    message_kind: InboxMessageKind,
-    ask: str,
-    response: str,
     now: datetime,
     sweep: _SweepState | None = None,
-    leaf_key: str | None = None,
-    seat_role: str | None = None,
-    subject_agent_id: str | None = None,
 ) -> InboxDeliveryState:
     """R4c: emit one owner-addressed signal row (L1 routing), attempt hosted delivery, and write
     its ack-by expectation row -- the same atomic-at-post shape every other dispatch surface uses.
@@ -738,60 +781,66 @@ def _post_owner_signal(
     appending a duplicate -- the storm that took the host down was this function minting a new
     pending row per re-fire, each of which the ladder then escalated into more rows."""
     entries = sweep.inbox_current if sweep is not None else ctx.inbox_store.current()
+    subject = InboxSubject(
+        leaf_key=signal.leaf_key, seat_role=signal.seat_role, agent_id=signal.subject_agent_id
+    )
     existing = _find_coalescible(
         entries,
-        ask=ask,
-        message_kind=message_kind,
-        leaf_key=leaf_key,
-        seat_role=seat_role,
+        ask=signal.ask,
+        message_kind=signal.message_kind,
+        leaf_key=signal.leaf_key,
+        seat_role=signal.seat_role,
     )
     if existing is not None:
         entry = ctx.inbox_store.renew(
             existing.id,
+            InboxRenewal(
+                response=signal.response,
+                subject=subject,
+                readdress_to=InboxOwner(
+                    role=owner.role, agent_id=owner.agent_id, lifecycle_id=owner.lifecycle_id
+                ),
+            ),
             now=now.isoformat(),
-            response=response,
-            leaf_key=leaf_key,
-            seat_role=seat_role,
-            subject_agent_id=subject_agent_id,
-            owner_role=owner.role,
-            owner_agent_id=owner.agent_id,
-            owner_lifecycle_id=owner.lifecycle_id,
-            readdress=True,
             current=entries,
         )
     else:
         entry = create_operator_inbox_entry(
+            InboxMessage(
+                ask=signal.ask,
+                response=signal.response,
+                message_kind=signal.message_kind,
+                subject=subject,
+            ),
             entry_id=new_ulid(),
             now=now.isoformat(),
-            lifecycle_id=owner.lifecycle_id,
-            agent_id=owner.agent_id,
-            ask=ask,
-            response=response,
-            created_by="supervisor",
-            created_via="cli",
-            sender_role="system",
-            recipient_role=owner.role,
-            message_kind=message_kind,
-            leaf_key=leaf_key,
-            seat_role=seat_role,
-            subject_agent_id=subject_agent_id,
-            owner_role=owner.role,
-            owner_agent_id=owner.agent_id,
-            owner_lifecycle_id=owner.lifecycle_id,
+            routing=InboxRouting(
+                address=InboxAddress(
+                    lifecycle_id=owner.lifecycle_id,
+                    agent_id=owner.agent_id,
+                    recipient_role=owner.role,
+                ),
+                owner=InboxOwner(
+                    role=owner.role, agent_id=owner.agent_id, lifecycle_id=owner.lifecycle_id
+                ),
+            ),
+            poster=InboxPoster(created_by="supervisor", created_via="cli", sender_role="system"),
         )
         ctx.inbox_store.append(entry)
     if sweep is not None:
         sweep.remember(entry)
     delivered = deliver_inbox_entry(
-        store=ctx.inbox_store,
-        catalog=ctx.catalog,
-        host=ctx.host,
+        InboxDeliveryLog(
+            store=ctx.inbox_store,
+            entry=entry,
+            at=now.isoformat(),
+            floor=RedeliveryFloor(
+                current=sweep.inbox_current if sweep is not None else None,
+                seconds=ctx.redeliver_rate_limit_seconds,
+            ),
+        ),
+        sessions=HostedSessionRuntime(catalog=ctx.catalog, host=ctx.host),
         paster=ctx.paster,
-        entry=entry,
-        submit=True,
-        current=sweep.inbox_current if sweep is not None else None,
-        redelivery_floor_seconds=ctx.redeliver_rate_limit_seconds,
-        delivery_at=now.isoformat(),
     )
     if sweep is not None:
         sweep.remember(delivered)
@@ -813,14 +862,19 @@ def _signal_emit(
     )
     if owner.agent_id is None and owner.lifecycle_id is None and owner.role is None:
         return SupervisorActionResult("signal-emit", finding, "skipped", "no routable owner")
-    if ctx.signal_cooldown_store.in_cooldown(
-        target_agent_id=owner.agent_id,
-        target_lifecycle_id=owner.lifecycle_id,
-        target_role=owner.role,
-        leaf_key=finding.leaf_key,
-        seat_role=finding.seat_role,
+    signal_key = SupervisorSignalKey(
+        target=SupervisorSignalTarget(
+            agent_id=owner.agent_id,
+            lifecycle_id=owner.lifecycle_id,
+            role=owner.role,
+            leaf_key=finding.leaf_key,
+            seat_role=finding.seat_role,
+        ),
         finding_kind=finding.kind,
         detail=finding.detail,
+    )
+    if ctx.signal_cooldown_store.in_cooldown(
+        signal_key,
         now=now,
         cooldown_seconds=ctx.signal_cooldown_seconds,
         records=sweep.signal_current,
@@ -831,14 +885,16 @@ def _signal_emit(
     delivery_state = _post_owner_signal(
         ctx,
         owner,
-        message_kind="escalation",
-        ask=ask,
-        response=response,
+        OwnerSignal(
+            message_kind="escalation",
+            ask=ask,
+            response=response,
+            leaf_key=finding.leaf_key,
+            seat_role=finding.seat_role,
+            subject_agent_id=finding.session_id,
+        ),
         now=now,
         sweep=sweep,
-        leaf_key=finding.leaf_key,
-        seat_role=finding.seat_role,
-        subject_agent_id=finding.session_id,
     )
     signal_record = SupervisorSignalRecord(
         id=new_ulid(),
@@ -912,23 +968,29 @@ def _escalate_rung(
         entry.id,
         rung=step.rung,
         now=now.isoformat(),
-        owner_role=step.owner.role,
-        owner_agent_id=step.owner.agent_id,
-        owner_lifecycle_id=step.owner.lifecycle_id,
-        readdress=step.rung > 1,
+        readdress_to=(
+            InboxOwner(
+                role=step.owner.role,
+                agent_id=step.owner.agent_id,
+                lifecycle_id=step.owner.lifecycle_id,
+            )
+            if step.rung > 1
+            else None
+        ),
         current=sweep.inbox_current,
     )
     sweep.remember(advanced)
     delivered = deliver_inbox_entry(
-        store=ctx.inbox_store,
-        catalog=ctx.catalog,
-        host=ctx.host,
+        InboxDeliveryLog(
+            store=ctx.inbox_store,
+            entry=advanced,
+            at=now.isoformat(),
+            floor=RedeliveryFloor(
+                current=sweep.inbox_current, seconds=ctx.redeliver_rate_limit_seconds
+            ),
+        ),
+        sessions=HostedSessionRuntime(catalog=ctx.catalog, host=ctx.host),
         paster=ctx.paster,
-        entry=advanced,
-        submit=True,
-        current=sweep.inbox_current,
-        redelivery_floor_seconds=ctx.redeliver_rate_limit_seconds,
-        delivery_at=now.isoformat(),
     )
     sweep.remember(delivered)
     delivery_state = delivered.deliveryState
@@ -991,10 +1053,12 @@ def _respawn_suspect(
         ctx.catalog,
         ctx.host,
         entry,
-        at=now.isoformat(),
-        by_session=None,
-        reason="escalation-ladder-suspect",
-        edge="supervisor-respawn",
+        SeatClosure(
+            at=now.isoformat(),
+            by_session=None,
+            reason="escalation-ladder-suspect",
+            edge="supervisor-respawn",
+        ),
     )
     orphaned: list[str] = []
     if entry.binding_role == "manager":
@@ -1010,9 +1074,7 @@ def _respawn_suspect(
         delivery_state = _post_owner_signal(
             ctx,
             owner,
-            message_kind="escalation",
-            ask=ask,
-            response=response,
+            OwnerSignal(message_kind="escalation", ask=ask, response=response),
             now=now,
             sweep=sweep,
         )
@@ -1058,14 +1120,16 @@ def _signal_dead_upstream(
     delivery_state = _post_owner_signal(
         ctx,
         owner,
-        message_kind="escalation",
-        ask=ask,
-        response=response,
+        OwnerSignal(
+            message_kind="escalation",
+            ask=ask,
+            response=response,
+            leaf_key=finding.leaf_key,
+            seat_role=finding.seat_role,
+            subject_agent_id=finding.session_id,
+        ),
         now=now,
         sweep=sweep,
-        leaf_key=finding.leaf_key,
-        seat_role=finding.seat_role,
-        subject_agent_id=finding.session_id,
     )
     _log_event(
         ctx,
@@ -1082,6 +1146,22 @@ def _signal_dead_upstream(
     return SupervisorActionResult("signal-manager", finding, delivery_state)
 
 
+_FindingAction = Callable[..., SupervisorActionResult]
+
+# One predicate kind -> the one act-phase handler that answers it. A finding kind with no entry
+# here is reported as unhandled rather than silently doing nothing, so adding a predicate without
+# its handler is visible in the sweep result instead of being lost.
+_FINDING_ACTIONS: dict[str, _FindingAction] = {
+    "inbox-redeliverable": _redeliver,
+    "inbox-ladder-terminal": _resolve_ladder_terminal,
+    "expectation-overdue": _auto_nudge,
+    "turn-report-stale": _auto_nudge,
+    "escalation-due": _escalate_rung,
+    "dead-upstream": _signal_dead_upstream,
+    "seat-liveness": _signal_emit,
+}
+
+
 def act_on_finding(
     ctx: SupervisorContext,
     finding: SupervisorFinding,
@@ -1092,19 +1172,10 @@ def act_on_finding(
     if sweep is None:
         current = ctx.inbox_store.current()
         sweep = _SweepState(inbox_current=current, redeliver_budget=ctx.redeliver_budget)
-    if finding.kind == "inbox-redeliverable":
-        return _redeliver(ctx, finding, now=now, sweep=sweep)
-    if finding.kind == "inbox-ladder-terminal":
-        return _resolve_ladder_terminal(ctx, finding, now=now, sweep=sweep)
-    if finding.kind in ("expectation-overdue", "turn-report-stale"):
-        return _auto_nudge(ctx, finding, now=now, sweep=sweep)
-    if finding.kind == "escalation-due":
-        return _escalate_rung(ctx, finding, now=now, sweep=sweep)
-    if finding.kind == "dead-upstream":
-        return _signal_dead_upstream(ctx, finding, now=now, sweep=sweep)
-    if finding.kind == "seat-liveness":
-        return _signal_emit(ctx, finding, now=now, sweep=sweep)
-    return SupervisorActionResult("none", finding, "skipped", "unhandled finding kind")
+    action = _FINDING_ACTIONS.get(finding.kind)
+    if action is None:
+        return SupervisorActionResult("none", finding, "skipped", "unhandled finding kind")
+    return action(ctx, finding, now=now, sweep=sweep)
 
 
 # --- the sweep itself ------------------------------------------------------------------------

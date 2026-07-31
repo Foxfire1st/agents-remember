@@ -56,7 +56,7 @@ async def test_concurrent_reconnect_replaces_a_retired_projector_once() -> None:
             await asyncio.sleep(0.02)
 
     class _Projected:
-        def __init__(self, **_kwargs: object) -> None:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
             created.append(self)
 
         def matches(self, candidate: ActiveConversationRef) -> bool:

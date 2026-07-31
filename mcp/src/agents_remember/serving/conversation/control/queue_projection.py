@@ -20,10 +20,16 @@ from __future__ import annotations
 from typing import Literal, cast
 
 from agents_remember.serving.conversation.control.previews import payload_digest, redacted_preview
-from agents_remember.serving.conversation.control.refs import OperationIdentity, mint_ref
+from agents_remember.serving.conversation.control.refs import (
+    OperationIdentity,
+    RefBinding,
+    RefTarget,
+    mint_ref,
+)
 from agents_remember.serving.conversation.control.service import (
     MAX_QUEUE_ROWS_PER_CHANNEL,
     ControlChannel,
+    ControlScope,
     ConversationControlService,
 )
 from agents_remember.serving.conversation.models import (
@@ -56,7 +62,7 @@ async def operation_queue(
     for item in items:
         if item.kind != "prompt" or item.state not in _LIVE_ROW_STATES:
             continue
-        row = _queue_row(service, authorization, channel, ar_session_id, epoch, item)
+        row = _queue_row(ControlScope(service, authorization, ar_session_id, epoch), channel, item)
         rows.append(row)
         key_parts.append(
             f"{row.operation_ref}|{row.revision}|{row.phase}|{row.withdrawable}|{row.sequence}"
@@ -73,13 +79,12 @@ async def operation_queue(
 
 
 def _queue_row(
-    service: ConversationControlService,
-    authorization: AuthorizationBinding,
+    scope: ControlScope,
     channel: ControlChannel,
-    ar_session_id: str,
-    epoch: str,
     item: OperationTimelineItem,
 ) -> OperationQueueItem:
+    service, authorization = scope.service, scope.authorization
+    ar_session_id, epoch = scope.ar_session_id, scope.epoch
     identity = OperationIdentity(
         kind=item.kind, operation_id=item.operation_id, sequence=item.sequence
     )
@@ -106,10 +111,8 @@ def _queue_row(
     operation_ref = mint_ref(
         service.secret,
         "operation-ref",
-        authorization,
-        ar_session_id=ar_session_id,
-        bridge_epoch=epoch,
-        identity=identity,
+        RefBinding(authorization, ar_session_id, epoch),
+        RefTarget(identity=identity),
     )
     cockpit: CockpitQueueIdentity | None = None
     if authorized:
@@ -126,10 +129,8 @@ def _queue_row(
             withdrawal_ref=mint_ref(
                 service.secret,
                 "withdrawal-ref",
-                authorization,
-                ar_session_id=ar_session_id,
-                bridge_epoch=epoch,
-                identity=identity,
+                RefBinding(authorization, ar_session_id, epoch),
+                RefTarget(identity=identity),
             ),
             redacted_preview=preview,
             preview_truncated=truncated,

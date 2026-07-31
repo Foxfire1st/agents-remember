@@ -76,6 +76,20 @@ def carryover_done(contract: WorktreeContract) -> tuple[bool, str]:
 
 
 def lifecycle_guidance(contract: WorktreeContract) -> dict[str, object]:
+    """Where the task stands in the worktree lifecycle, and the next move out of it.
+
+    Read back to front: a reclaimed worktree is done, an integrated one is waiting on
+    carryover/cleanup, and everything else is still working toward closeout.
+    """
+    return (
+        _reclaimed_phase(contract)
+        or _post_integration_phase(contract)
+        or _pre_integration_phase(contract)
+    )
+
+
+def _reclaimed_phase(contract: WorktreeContract) -> dict[str, object] | None:
+    """Terminal phases: the worktrees are gone, by cleanup or by abandonment."""
     if contract.cleanup == "completed":
         return {
             "phase": "cleanup-completed",
@@ -88,6 +102,11 @@ def lifecycle_guidance(contract: WorktreeContract) -> dict[str, object]:
             "summary": "Worktree abandoned — provider stack reclaimed; no further action.",
             **next_guidance("done"),
         }
+    return None
+
+
+def _post_integration_phase(contract: WorktreeContract) -> dict[str, object] | None:
+    """Integration has been attempted: it blocked, or it landed and carryover/cleanup follow."""
     if contract.integration_status == "blocked":
         return {
             "phase": "integration-blocked",
@@ -132,10 +151,17 @@ def lifecycle_guidance(contract: WorktreeContract) -> dict[str, object]:
                 args=contract_next_args(contract, dry_run=True),
             ),
         }
-    # slice 09: a dirty worktree is NOT a commit-approval gate. `commit-approval-pending` is owned by the
-    # closeout preview (the real gate moment, set in closeout.py) and — once the slice-6 gate plane is
-    # adopted — by a raised `closeout-approval` gate surfaced via GateNode; it is never inferred from
-    # `git status`. A dirty tree falls through to the honest lifecycle-position phase below.
+    return None
+
+
+def _pre_integration_phase(contract: WorktreeContract) -> dict[str, object]:
+    """Still working: closeout is pending, approved, or already done and awaiting integration.
+
+    slice 09: a dirty worktree is NOT a commit-approval gate. `commit-approval-pending` is owned by the
+    closeout preview (the real gate moment, set in closeout.py) and — once the slice-6 gate plane is
+    adopted — by a raised `closeout-approval` gate surfaced via GateNode; it is never inferred from
+    `git status`. A dirty tree falls through to the honest lifecycle-position phase below.
+    """
     if contract.closeout_status == "completed":
         return {
             "phase": "integration-pending",

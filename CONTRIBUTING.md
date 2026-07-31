@@ -63,10 +63,66 @@ For larger workflow changes, open a discussion or draft pull request early inste
 
 ## Quality gates
 
-One wrapper, `python -m agents_remember.code_quality.check`, is the gate. It runs
-ruff (lint), Pyright (types), the full pytest suite, and CRAP (complexity x
-coverage, where any score at or above the configured threshold is a hard
-failure), and it fails on any finding.
+One wrapper, `python -m agents_remember.code_quality.check`, is the gate. Four of
+its steps enforce and fail the run on any finding: ruff (lint, including the
+complexity rules `C901`, `PLR0911`, `PLR0912`, `PLR0915`), `ruff format --check`,
+Pyright (types), and the full pytest suite — followed by CRAP (complexity x
+**branch** coverage), where any score at or above the configured threshold is a hard
+failure. The gate prints the branch coverage each CRAP offender would need, and says
+so explicitly when the complexity term alone is over the line and no test can clear
+it.
+
+**No rail of this gate has a baseline, allowlist, ratchet or exemption file, and none
+may be added.** The complexity rules briefly had one: arming them produced 67
+offenders, which were recorded in `quality/complexity-baseline.txt` behind a
+shrink-only cap and a dated burn-down. That was overruled — all 67 were refactored,
+and the file, its module and its gate step were deleted. A complexity finding is
+cleared by extracting a cohesive helper, never by `# noqa`, a per-file ignore, or a
+wider limit in `pyproject.toml`. A CRAP finding is cleared by raising the function's
+branch coverage or by splitting it.
+
+Two steps do **not** enforce and are labelled as reports in the output: `radon
+cc` and `radon mi` exit 0 whatever they find, so no Radon finding has ever been
+able to fail this gate. They are printed for refactor scouting. A non-zero exit
+from either still fails the run, because for a tool that exits 0 on every
+finding a non-zero exit means the tool itself broke.
+
+Scope is derived from the tree, not written down: `git ls-files '*.py'` is what
+ruff, the formatter and Pyright receive, so a newly tracked Python file is gated
+the moment it is added. The wrapper accepts no path arguments — there is no way to
+narrow what it certifies.
+
+### The coverage floor is on your diff, not on the tree
+
+The binding coverage gate is `diff-coverage`, the last enforcing step. It scores the
+same coverage report pytest just produced — no second run — restricted to the lines
+your change touched, and it fails on **any** uncovered changed statement or untaken
+changed branch, naming each one as `path:line`.
+
+There is no aggregate percentage to pin, on purpose. With 88k lines of tests, much of
+the package runs simply by being imported: the tree reports 87% and one entirely
+untested twenty-line function moves that by 0.04 points, which no threshold can see.
+A floor on changed lines is the only form that can. And it is 100% because anything
+lower is a budget for untested code that grows with the size of the change — at a 90%
+floor the median commit here (234 changed units) may leave 23 lines untested, which is
+a whole function. `mcp/src/agents_remember/code_quality/diff_coverage.py` carries the
+measurements.
+
+The comparison point is the merge base against your source branch, resolved in this
+order and printed on every run: `AR_GATE_DIFF_BASE`, the pull request base, the
+branch's configured upstream, then the default branch. Set `AR_GATE_DIFF_BASE` when
+you are on a leaf branch cut from a series branch — git cannot infer that fork point,
+and without it the gate compares against `main` and asks you to cover the series'
+lines as well as your own.
+
+```sh
+AR_GATE_DIFF_BASE=ar/<series-branch> python -m agents_remember.code_quality.check
+```
+
+Changed Python outside the measured packages — the suite itself, `scripts/`, the
+provider images — is listed on every run under its own heading rather than dropped,
+because `--cov` measures the shipped package and the floor cannot honestly speak for
+the rest.
 
 Set it up once per clone:
 
@@ -80,13 +136,18 @@ Set it up once per clone:
 
 | Tier | Hook | Certifies | Runs | Cost |
 | --- | --- | --- | --- | --- |
-| `fast` | pre-commit | the staged content | generated-copy checks, ruff, Pyright | about 20 seconds |
+| `fast` | pre-commit | the staged content | generated-copy checks (skills, runtime, harness), ruff, `ruff format --check`, Pyright | about 20 seconds |
 | `full` | pre-push | the working tree | generated-copy checks, then the full wrapper | minutes |
+
+Both tiers read their scope from `git ls-files '*.py'`, so neither can fall
+behind the tree, and neither names a directory by hand. Neither passes a
+narrowing flag to ruff either: `ruff check` runs at the configured selection in
+both, so the complexity rules bite at commit time and not only on push.
 
 The fast tier is cheap on purpose. `--no-verify` is all-or-nothing: it disables
 every check, not only the slow one. A pre-commit hook expensive enough to be
-worth skipping therefore costs you ruff and Pyright as well, which is how this
-repository previously ended up with a gate that never ran.
+worth skipping therefore costs you ruff, the formatter and Pyright as well, which
+is how this repository previously ended up with a gate that never ran.
 
 To certify the staged content rather than the working tree, the fast tier parks
 unstaged and untracked files with `git stash push --keep-index --include-untracked`
@@ -109,17 +170,61 @@ success, on failure, and on Ctrl-C. What follows from that:
 `.github/workflows/quality-checks.yml` runs the same wrapper on every branch push
 and every pull request, on Python 3.11, 3.12, and 3.13, alongside the dashboard
 frontend rail (lint, typecheck, unit tests, build). The branch ruleset on `main`
-requires `Quality wrapper (Python 3.11)`, `Quality wrapper (Python 3.12)`, and
-`Quality wrapper (Python 3.13)` to pass before a merge, so a local `--no-verify`
-delays the verdict rather than avoiding it.
+requires all four to pass before a merge — `Quality wrapper (Python 3.11)`,
+`Quality wrapper (Python 3.12)`, `Quality wrapper (Python 3.13)` and
+`Dashboard frontend rail` — so a local `--no-verify` delays the verdict rather
+than avoiding it.
 
-`Dashboard frontend rail` runs on every push and pull request but is **not yet a
-required check**, so a red frontend does not currently block a merge. Making it
-required is a repository settings change, not a change to any file here: add the
-context `Dashboard frontend rail` (integration id `15368`) to the
-`required_status_checks` rule of the `main-branch-rules` ruleset. This paragraph
-is the enforced truth as of this commit — if the context is added, update it
-rather than leaving the document ahead of the setting.
+Two consequences worth knowing. The ruleset sets
+`strict_required_status_checks_policy`, so a branch must also be up to date with
+`main` before it can merge: a stale branch has to rebase and go green again on all
+four. And because the frontend rail runs `npm ci && npm run build`, a registry
+outage or a Node drift blocks merges until it is fixed — that is the intended
+trade, not a misconfiguration.
+
+This paragraph describes what the ruleset actually enforces. If the required
+contexts change, change it here in the same commit; a document that runs ahead of
+the setting is the failure mode this section exists to avoid.
+
+### The environment-gated integration paths
+
+`pyproject.toml` registers eight markers for suites that skip unless an `AR_*`
+variable opts them in — fourteen tests over the Pi RPC transport, the Codex
+app-server, the Claude stream-json transport, the L3 control routes, the production
+evidence seam and the real MCP stdio server. Registering a marker is not applying
+one: all eight were registered and documented while no test carried
+`@pytest.mark.<name>`, so `pytest -m ar_run_pi_rpc_smoke` selected nothing, and
+nothing set any of the variables either.
+
+`scripts/run-gated-integration.py` is one command per path, and `list` prints what
+each one needs plus whether this machine has it:
+
+```sh
+python scripts/run-gated-integration.py list
+python scripts/run-gated-integration.py ar-run-pi-rpc-smoke
+```
+
+`.github/workflows/integration-gated.yml` runs the two that need no vendor account
+on every push and pull request, and fails on failure:
+
+| Path | Needs | Runs in CI |
+| --- | --- | --- |
+| `ar-run-pi-rpc-smoke` | node + npm; installs its own pinned Pi build and drives it `--offline` against `127.0.0.1` | yes |
+| `agents-remember-real-mcp-config` | a generated settings file; spawns this repo's own MCP server over stdio. The live grepai half additionally needs the self-hosted docker stack up and indexed | the planning half |
+| `ar-codex-app-server-live-smoke` | an installed, signed-in Codex whose live catalogue advertises the model. Sends no prompt, so it bills nothing | no |
+| `ar-codex-app-server-live-conformance` | the same install, plus two real turns. Bills | no |
+| `ar-claude-stream-smoke` | an installed, signed-in Claude Code. The prompt is the local `/cost` command, so spend is negligible | no |
+| `ar-run-control-plane-installed` | exactly `codex 0.144.5` and `pi 0.80.7`, signed in, plus a 600-word essay prompt and an image upload. Bills | no |
+| `ar-run-control-installed` | the same pinned pair, plus the essay prompt, two settled turns and a PNG upload. Bills | no |
+| `ar-run-evidence-installed` | the same pinned pair. Tiny prompts, but it persists a real thread into your `CODEX_HOME`. Bills | no |
+
+Six of the eight need an installed, signed-in vendor CLI that no hosted runner can
+hold, and four of those bill for real model turns — that is a fact about the path,
+not a setup nobody got round to. None of them is faked, stubbed or soft-skipped in
+CI; they run here, in one command, and the runner states the cost before it starts.
+
+`mcp/tests/test_gated_integration_runner.py` fails if any registered marker selects
+zero tests again, or if the runner and the registry drift apart in either direction.
 
 ### Closeout
 

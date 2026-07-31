@@ -23,7 +23,11 @@ from agents_remember.controlplane.orchestration_nudges import (
     missing_artifact,
 )
 from agents_remember.mcp.config import McpRuntimeConfig, load_config
-from agents_remember.mcp.tools.orchestration import orchestration_nudge_manager_payload
+from agents_remember.mcp.tools.orchestration import (
+    NudgeSubject,
+    NudgeTarget,
+    orchestration_nudge_manager_payload,
+)
 from agents_remember.observer import observer_root
 from agents_remember.observer.store import EventStore
 from test_config import settings_payload
@@ -153,10 +157,12 @@ class NudgeToolTests(unittest.TestCase):
             payload = orchestration_nudge_manager_payload(
                 config,
                 reason="missing-turn-report",
-                subject="worker L3",
-                manager_agent_id="manager-a",
-                subject_agent_id="worker-a",
-                artifact_path="notes/reports/L3-worker-report.md",
+                target=NudgeTarget(agent_id="manager-a"),
+                subject=NudgeSubject(
+                    subject="worker L3",
+                    agent_id="worker-a",
+                    artifact_path="notes/reports/L3-worker-report.md",
+                ),
             )
 
             self.assertTrue(payload["ok"])

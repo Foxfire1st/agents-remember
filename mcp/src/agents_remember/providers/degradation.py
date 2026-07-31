@@ -20,6 +20,10 @@ from typing import TYPE_CHECKING, Any, Literal, cast
 from agents_remember.controllers.provider_tools import provider_watchers_tool
 from agents_remember.controlplane.operator_inbox_records import (
     AgentRole,
+    InboxAddress,
+    InboxMessage,
+    InboxPoster,
+    InboxRouting,
     create_operator_inbox_entry,
 )
 from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
@@ -32,7 +36,8 @@ from agents_remember.providers.metrics import (
     PROVIDER_METRICS_SCHEMA,
     ProviderMetricsStore,
 )
-from agents_remember.serving.inbox_delivery import deliver_inbox_entry
+from agents_remember.serving.hosted_session_runtime import HostedSessionRuntime
+from agents_remember.serving.inbox_delivery import InboxDeliveryLog, deliver_inbox_entry
 from agents_remember.serving.terminal import TerminalHost
 from agents_remember.serving.terminal_catalog import TerminalCatalog, terminal_catalog_path
 from agents_remember.serving.terminal_paste import TerminalPaster
@@ -182,11 +187,13 @@ def evaluate_provider_degradation(
 
     if state != previous.state:
         event = _build_event(
-            event_id=new_ulid(),
-            previous=previous.state,
-            state=state,
-            now=now,
-            evidence=evidence,
+            _DegradationTransition(
+                event_id=new_ulid(),
+                previous=previous.state,
+                state=state,
+                at=now,
+            ),
+            evidence,
             rows=rows,
             metric_store=metric_store,
         )
@@ -473,22 +480,33 @@ def _setup_failure_streak(
     return []
 
 
+@dataclass(frozen=True)
+class _DegradationTransition:
+    """One provider degradation state change: its id, from, to and when.
+
+    The four values are the identity of the event; everything else in the
+    payload is the evidence that justifies it.
+    """
+
+    event_id: str
+    previous: DegradationState
+    state: DegradationState
+    at: str
+
+
 def _build_event(
-    *,
-    event_id: str,
-    previous: DegradationState,
-    state: DegradationState,
-    now: str,
+    transition: _DegradationTransition,
     evidence: list[DegradationEvidence],
+    *,
     rows: list[dict[str, Any]],
     metric_store: ProviderMetricsStore,
 ) -> dict[str, Any]:
     return {
         "schema": DEGRADATION_EVENT_SCHEMA,
-        "id": event_id,
-        "at": now,
-        "from": previous,
-        "to": state,
+        "id": transition.event_id,
+        "at": transition.at,
+        "from": transition.previous,
+        "to": transition.state,
         "affectedStacks": sorted({item.affected for item in evidence}),
         "evidence": [item.to_payload() for item in evidence],
         "metrics": {
@@ -509,27 +527,28 @@ def _post_degradation_alerts(config: McpRuntimeConfig, event: dict[str, Any]) ->
         recipients = _role_recipients(config.coordination_root, role)
         for agent_id in recipients:
             entry = create_operator_inbox_entry(
+                InboxMessage(
+                    ask=f"Provider degradation state changed to {event['to']}",
+                    response=_alert_response(event, instruction),
+                    message_kind="degradation-alert",
+                ),
                 entry_id=new_ulid(),
                 now=now,
-                lifecycle_id=None,
-                agent_id=agent_id,
-                ask=f"Provider degradation state changed to {event['to']}",
-                response=_alert_response(event, instruction),
-                created_by="provider-degradation-detector",
-                created_via="cli",
-                sender_role="system",
-                recipient_role=role,
-                message_kind="degradation-alert",
+                routing=InboxRouting(
+                    address=InboxAddress(lifecycle_id=None, agent_id=agent_id, recipient_role=role)
+                ),
+                poster=InboxPoster(
+                    created_by="provider-degradation-detector",
+                    created_via="cli",
+                    sender_role="system",
+                ),
             )
             store.append(entry)
             store.compact(now=datetime.now(UTC))
             deliver_inbox_entry(
-                store=store,
-                catalog=catalog,
-                host=host,
+                InboxDeliveryLog(store=store, entry=entry),
+                sessions=HostedSessionRuntime(catalog=catalog, host=host),
                 paster=paster,
-                entry=entry,
-                submit=True,
             )
 
 

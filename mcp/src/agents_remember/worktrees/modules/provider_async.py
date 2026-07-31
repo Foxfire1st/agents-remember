@@ -15,6 +15,7 @@ import subprocess
 import threading
 import zipfile
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -54,16 +55,31 @@ def progress_identity(contract: WorktreeContract) -> dict[str, Any]:
     }
 
 
+@dataclass(frozen=True)
+class ProviderSetupJob:
+    """One background provider setup: the request to run, the enclosure it belongs to, where
+    its result state file is written, and the temporary settings file whose lifetime the
+    setup thread owns (``None`` when the caller keeps it). The four are what the daemon
+    thread closes over -- the thread cannot be started with a subset of them.
+    """
+
+    request: provider_setup.ProviderSetupRequest
+    contract: WorktreeContract
+    write_state_file: Callable[[dict[str, Any]], Path]
+    settings_cleanup: Path | None = None
+
+
 def launch_provider_setup(
+    job: ProviderSetupJob,
     *,
-    request: provider_setup.ProviderSetupRequest,
-    contract: WorktreeContract,
-    write_state_file: Callable[[dict[str, Any]], Path],
-    settings_cleanup: Path | None,
     runner: Callable[..., dict[str, Any]] = provider_setup.run_provider_setup,
     thread_factory: Callable[..., threading.Thread] = threading.Thread,
 ) -> dict[str, Any]:
     """Run provider setup on a daemon thread; return the `starting` state now."""
+    request = job.request
+    contract = job.contract
+    write_state_file = job.write_state_file
+    settings_cleanup = job.settings_cleanup
     progress_path = setup_progress_path(contract.worktree_group)
     progress = SetupProgressFile(progress_path, identity=progress_identity(contract))
 

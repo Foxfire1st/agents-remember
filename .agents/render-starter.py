@@ -1,20 +1,34 @@
 #!/usr/bin/env python3
 """Render the Antigravity/Gemini Agents Remember starter package for one workspace."""
 
+# Generated file -- do not edit.
+# Source: scripts/harness/render_starter.py
+# Regenerate: python3 scripts/sync-harness.py
+
 from __future__ import annotations
 
 import argparse
 import json
+from collections.abc import Callable
 from pathlib import Path
 
+HARNESS_LABEL = "Antigravity/Gemini"
 PATH_PLACEHOLDER = "<PATH/TO/YOUR/PROJECTS_FOLDER>"
 REPO_PLACEHOLDER = "<YOUR_REPOSITORY_FOLDER_NAME>"
+PLACEHOLDERS = (
+    PATH_PLACEHOLDER,
+    REPO_PLACEHOLDER,
+)
 TARGET_FILES = (
     "GEMINI.md",
     "mcp_config.json",
     "mcp/agents-remember-settings.json",
 )
+# Mirrored to the workspace root, where Antigravity reads it from.
 WORKSPACE_TARGET_FILES = ("GEMINI.md",)
+
+
+Renderer = Callable[[Path, Path, list[str]], None]
 
 
 def infer_workspace_root(script_root: Path) -> Path:
@@ -50,13 +64,21 @@ def replace_text(path: Path, replacements: dict[str, str]) -> None:
 def write_context_file(
     template_path: Path, target_path: Path, replacements: dict[str, str]
 ) -> None:
+    """Render a context file in place and mirror it to the workspace root.
+
+    Hermes and Antigravity read their context file from the workspace root rather than
+    from the starter folder, so the rendered template is copied out. An existing file
+    with different content is a merge the user has to make; overwriting it would
+    silently discard their instructions.
+    """
     text = template_path.read_text(encoding="utf-8")
     for old, new in replacements.items():
         text = text.replace(old, new)
     template_path.write_text(text, encoding="utf-8", newline="\n")
     if target_path.exists() and target_path.read_text(encoding="utf-8") != text:
         raise SystemExit(
-            f"{target_path} already exists with different content; merge it manually before rerunning"
+            f"{target_path} already exists with different content; "
+            "merge it manually before rerunning"
         )
     target_path.write_text(text, encoding="utf-8", newline="\n")
 
@@ -71,32 +93,28 @@ def render_settings(path: Path, workspace_root: Path, repos: list[str]) -> None:
     path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8", newline="\n")
 
 
-def validate(script_root: Path, workspace_root: Path) -> None:
+def validate(*groups: tuple[Path, tuple[str, ...]]) -> None:
     unresolved: list[str] = []
-    for relative in TARGET_FILES:
-        path = script_root / relative
-        text = path.read_text(encoding="utf-8")
-        if any(marker in text for marker in (PATH_PLACEHOLDER, REPO_PLACEHOLDER)):
-            unresolved.append(path.as_posix())
-    for relative in WORKSPACE_TARGET_FILES:
-        path = workspace_root / relative
-        text = path.read_text(encoding="utf-8")
-        if any(marker in text for marker in (PATH_PLACEHOLDER, REPO_PLACEHOLDER)):
-            unresolved.append(path.as_posix())
+    for root, relatives in groups:
+        for relative in relatives:
+            path = root / relative
+            text = path.read_text(encoding="utf-8")
+            if any(marker in text for marker in PLACEHOLDERS):
+                unresolved.append(path.as_posix())
     if unresolved:
         joined = "\n".join(unresolved)
         raise SystemExit(f"unresolved starter placeholders remain:\n{joined}")
 
 
-def render(script_root: Path, workspace_root: Path, repos: list[str]) -> None:
+def render_antigravity(script_root: Path, workspace_root: Path, repos: list[str]) -> None:
     replacements = {PATH_PLACEHOLDER: workspace_root.as_posix()}
     write_context_file(script_root / "GEMINI.md", workspace_root / "GEMINI.md", replacements)
     replace_text(script_root / "mcp_config.json", replacements)
     render_settings(script_root / "mcp" / "agents-remember-settings.json", workspace_root, repos)
-    validate(script_root, workspace_root)
+    validate((script_root, TARGET_FILES), (workspace_root, WORKSPACE_TARGET_FILES))
 
 
-def main() -> None:
+def main(render: Renderer) -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--repo",
@@ -111,8 +129,8 @@ def main() -> None:
     workspace_root = infer_workspace_root(script_root)
     repos = repository_ids(workspace_root, args.repo)
     render(script_root, workspace_root, repos)
-    print(f"Rendered Antigravity/Gemini starter for {workspace_root.as_posix()}")
+    print(f"Rendered {HARNESS_LABEL} starter for {workspace_root.as_posix()}")
 
 
 if __name__ == "__main__":
-    main()
+    main(render_antigravity)

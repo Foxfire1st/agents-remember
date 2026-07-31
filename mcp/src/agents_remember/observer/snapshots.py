@@ -1167,17 +1167,7 @@ def read_task_documents(
             doc = TaskDocument.model_validate(payload)
         except ValueError:
             continue
-        lifecycle_id = _task_doc_lifecycle_id(doc, path, lifecycle_maps)
-        nodes.append(
-            _task_doc_node(
-                doc,
-                lifecycle_id,
-                path,
-                lifecycle_maps.lifecycle_by_dir,
-                now,
-                include_body=False,
-            )
-        )
+        nodes.append(_task_doc_node(doc, path, lifecycle_maps, now, include_body=False))
     return nodes
 
 
@@ -1211,15 +1201,7 @@ def read_task_document_body(
     except ValueError:
         return None
     lifecycle_maps = _task_document_lifecycle_maps(enclosures)
-    lifecycle_id = _task_doc_lifecycle_id(doc, resolved, lifecycle_maps)
-    return _task_doc_node(
-        doc,
-        lifecycle_id,
-        resolved,
-        lifecycle_maps.lifecycle_by_dir,
-        now,
-        include_body=True,
-    )
+    return _task_doc_node(doc, resolved, lifecycle_maps, now, include_body=True)
 
 
 def _task_document_lifecycle_maps(enclosures: list[EnclosureNode]) -> _TaskDocumentLifecycleMaps:
@@ -1381,9 +1363,8 @@ def _ref_lifecycle(
 
 def _task_doc_node(
     doc: TaskDocument,
-    lifecycle_id: str | None,
     path: Path,
-    lifecycle_by_dir: dict[Path, str],
+    maps: _TaskDocumentLifecycleMaps,
     now: datetime,
     *,
     include_body: bool,
@@ -1392,7 +1373,11 @@ def _task_doc_node(
 
     Cross-master links resolve here: a subTask whose ``file`` points at another master, and the doc's
     own ``master`` parent ref, each resolve to the linked lifecycle (None when same-series/in-folder).
+    The lifecycle maps arrive whole: the doc's own id and the cross-folder link resolution are two
+    reads of the same index, and passing the id separately let them disagree.
     """
+    lifecycle_id = _task_doc_lifecycle_id(doc, path, maps)
+    lifecycle_by_dir = maps.lifecycle_by_dir
     base_dir = path.parent
     parent_lifecycle = _ref_lifecycle(base_dir, doc.master, lifecycle_by_dir)
     body_revision = _task_doc_body_revision(doc)

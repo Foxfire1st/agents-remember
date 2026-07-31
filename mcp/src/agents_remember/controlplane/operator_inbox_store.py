@@ -6,6 +6,7 @@ import fcntl
 import os
 from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
@@ -20,12 +21,62 @@ from agents_remember.controlplane.operator_inbox_records import (
     AdapterDeliveryState,
     AgentRole,
     InboxDeliveryState,
+    InboxOwner,
+    InboxSubject,
     OperatorInboxEntry,
     OperatorInboxVia,
     consume_operator_inbox_entry,
     fold_operator_inbox_entries,
     require_inbox_address,
 )
+
+
+@dataclass(frozen=True)
+class AdapterReceipt:
+    """What the vendor adapter reported about one delivery attempt: the state it returned, the
+    request it acknowledged, the vendor's own correlation id, when it accepted the payload, and
+    any detail. One receipt per attempt -- the fields are never sourced independently."""
+
+    delivery_state: AdapterDeliveryState | None = None
+    request_id: str | None = None
+    vendor_correlation_id: str | None = None
+    accepted_at: str | None = None
+    detail: str | None = None
+
+
+@dataclass(frozen=True)
+class DeliveryAttempt:
+    """One attempt to put a pending row in front of its addressee: the outcome, the session it
+    was pasted into, the human-readable detail, and the adapter's receipt for the same attempt.
+    ``delivered`` is not terminal (pasted != perceived); only a consume ends the schedule."""
+
+    delivery_state: InboxDeliveryState
+    delivered_to_session: str | None = None
+    detail: str | None = None
+    adapter: AdapterReceipt = AdapterReceipt()
+
+
+@dataclass(frozen=True)
+class InboxRenewal:
+    """What a re-firing condition refreshes on the one row it already has: the response text,
+    the subject the row now concerns, and -- when the routed owner has moved on -- the owner to
+    readdress it to. Passing ``readdress_to`` IS the readdress; there is no owner without one."""
+
+    response: str | None = None
+    subject: InboxSubject = field(default_factory=InboxSubject)
+    readdress_to: InboxOwner | None = None
+
+
+def _readdress_fields(owner: InboxOwner) -> dict[str, object]:
+    """Move a row's delivery address onto ``owner`` and record it as the routed owner."""
+    return {
+        "recipientRole": owner.role,
+        "agentId": owner.agent_id,
+        "lifecycleId": owner.lifecycle_id,
+        "ownerRole": owner.role,
+        "ownerAgentId": owner.agent_id,
+        "ownerLifecycleId": owner.lifecycle_id,
+    }
 
 
 class OperatorInboxStore:
@@ -82,16 +133,9 @@ class OperatorInboxStore:
     def record_delivery(
         self,
         entry_id: str,
+        attempt: DeliveryAttempt,
         *,
         now: str,
-        delivery_state: InboxDeliveryState,
-        delivered_to_session: str | None = None,
-        delivery_detail: str | None = None,
-        adapter_delivery_state: AdapterDeliveryState | None = None,
-        adapter_request_id: str | None = None,
-        adapter_vendor_correlation_id: str | None = None,
-        adapter_accepted_at: str | None = None,
-        adapter_delivery_detail: str | None = None,
         current: dict[str, OperatorInboxEntry] | None = None,
         redelivery_floor_seconds: float | None = None,
     ) -> OperatorInboxEntry:
@@ -106,24 +150,24 @@ class OperatorInboxStore:
         entry = self._entry_from_current(entry_id, current)
         if entry is None:
             raise KeyError(f"no operator inbox entry {entry_id!r}")
+        delivery_state = attempt.delivery_state
+        adapter = attempt.adapter
         attempt_count = entry.attemptCount + 1
         delivered = entry.model_copy(
             update={
                 "ts": now,
                 "deliveryState": delivery_state,
                 "deliveredAt": now if delivery_state == "delivered" else entry.deliveredAt,
-                "deliveredToSession": delivered_to_session,
-                "deliveryDetail": delivery_detail,
-                "adapterDeliveryState": adapter_delivery_state or entry.adapterDeliveryState,
-                "adapterRequestId": adapter_request_id or entry.adapterRequestId,
+                "deliveredToSession": attempt.delivered_to_session,
+                "deliveryDetail": attempt.detail,
+                "adapterDeliveryState": adapter.delivery_state or entry.adapterDeliveryState,
+                "adapterRequestId": adapter.request_id or entry.adapterRequestId,
                 "adapterVendorCorrelationId": (
-                    adapter_vendor_correlation_id or entry.adapterVendorCorrelationId
+                    adapter.vendor_correlation_id or entry.adapterVendorCorrelationId
                 ),
-                "adapterAcceptedAt": adapter_accepted_at or entry.adapterAcceptedAt,
+                "adapterAcceptedAt": adapter.accepted_at or entry.adapterAcceptedAt,
                 "adapterDeliveryDetail": (
-                    adapter_delivery_detail
-                    if adapter_delivery_detail is not None
-                    else entry.adapterDeliveryDetail
+                    adapter.detail if adapter.detail is not None else entry.adapterDeliveryDetail
                 ),
                 "attemptCount": attempt_count,
                 "lastAttemptAt": now,
@@ -216,10 +260,7 @@ class OperatorInboxStore:
         *,
         rung: int,
         now: str,
-        owner_role: AgentRole | None = None,
-        owner_agent_id: str | None = None,
-        owner_lifecycle_id: str | None = None,
-        readdress: bool = False,
+        readdress_to: InboxOwner | None = None,
         current: dict[str, OperatorInboxEntry] | None = None,
     ) -> OperatorInboxEntry:
         """Stamp the ladder's next rung (260707-HFX2-L4, R1/R2): re-anchors ``escalatedAt`` to
@@ -242,17 +283,8 @@ class OperatorInboxStore:
             "escalatedAt": now,
             "rungTransitionAt": now,
         }
-        if readdress:
-            update.update(
-                {
-                    "recipientRole": owner_role,
-                    "agentId": owner_agent_id,
-                    "lifecycleId": owner_lifecycle_id,
-                    "ownerRole": owner_role,
-                    "ownerAgentId": owner_agent_id,
-                    "ownerLifecycleId": owner_lifecycle_id,
-                }
-            )
+        if readdress_to is not None:
+            update.update(_readdress_fields(readdress_to))
         advanced = entry.model_copy(update=update)
         self.append(advanced)
         return advanced
@@ -260,16 +292,9 @@ class OperatorInboxStore:
     def renew(
         self,
         entry_id: str,
+        renewal: InboxRenewal,
         *,
         now: str,
-        response: str | None = None,
-        leaf_key: str | None = None,
-        seat_role: str | None = None,
-        subject_agent_id: str | None = None,
-        owner_role: AgentRole | None = None,
-        owner_agent_id: str | None = None,
-        owner_lifecycle_id: str | None = None,
-        readdress: bool = False,
         current: dict[str, OperatorInboxEntry] | None = None,
     ) -> OperatorInboxEntry:
         """Refresh one still-pending row in place: same id, bumped ``ts``, optionally refreshed
@@ -282,25 +307,16 @@ class OperatorInboxStore:
         if entry.state != "pending":
             return entry
         update: dict[str, object] = {"ts": now}
-        if response is not None:
-            update["response"] = response
-        if leaf_key is not None:
-            update["leafKey"] = leaf_key
-        if seat_role is not None:
-            update["seatRole"] = seat_role
-        if subject_agent_id is not None:
-            update["subjectAgentId"] = subject_agent_id
-        if readdress:
-            update.update(
-                {
-                    "recipientRole": owner_role,
-                    "agentId": owner_agent_id,
-                    "lifecycleId": owner_lifecycle_id,
-                    "ownerRole": owner_role,
-                    "ownerAgentId": owner_agent_id,
-                    "ownerLifecycleId": owner_lifecycle_id,
-                }
-            )
+        if renewal.response is not None:
+            update["response"] = renewal.response
+        if renewal.subject.leaf_key is not None:
+            update["leafKey"] = renewal.subject.leaf_key
+        if renewal.subject.seat_role is not None:
+            update["seatRole"] = renewal.subject.seat_role
+        if renewal.subject.agent_id is not None:
+            update["subjectAgentId"] = renewal.subject.agent_id
+        if renewal.readdress_to is not None:
+            update.update(_readdress_fields(renewal.readdress_to))
         renewed = entry.model_copy(update=update)
         self.append(renewed)
         return renewed

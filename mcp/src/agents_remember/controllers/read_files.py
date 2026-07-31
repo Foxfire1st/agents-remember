@@ -24,6 +24,8 @@ from agents_remember.errors import AuthorityError
 from agents_remember.kernel import filesystem
 from agents_remember.kernel.coordination_context.models import CoordinationContext
 from agents_remember.kernel.coordination_context_resolver import (
+    CoordinationHints,
+    EnclosureSelector,
     resolve_coordination_context,
     resolve_storage_for_source,
 )
@@ -92,9 +94,9 @@ def read_ar_files_tool(
     context = _context or resolve_coordination_context(
         code_repository_name=repo.repo_id,
         workspace_root=config.workspace_root,
-        coordination_root=config.coordination_root,
         code_repository_root=repo.path,
-        contract_path=repo.contract_path,
+        hints=CoordinationHints(coordination_root=config.coordination_root),
+        selector=EnclosureSelector(contract_path=repo.contract_path),
     )
 
     amb = ambient()

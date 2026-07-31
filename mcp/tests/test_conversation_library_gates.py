@@ -10,6 +10,7 @@ from agents_remember.serving.conversation.library import gates as gates_module
 from agents_remember.serving.conversation.library.errors import LibraryStoreError
 from agents_remember.serving.conversation.library.gates import (
     LOCKED_CODEX_RUNTIME_VERSION,
+    GateProbes,
     LibraryGateRegistry,
 )
 from agents_remember.serving.harnesses import Harness
@@ -44,8 +45,10 @@ def _registry(
         harness_registry=lambda: REGISTRY,
         workspace_root=Path(tmp),
         helper_host=helper_host,  # type: ignore[arg-type]
-        codex_probe=codex_probe,  # type: ignore[arg-type]
-        which=which,  # type: ignore[arg-type]
+        probes=GateProbes(
+            codex_probe=codex_probe,  # type: ignore[arg-type]
+            which=which,  # type: ignore[arg-type]
+        ),
     )
 
 

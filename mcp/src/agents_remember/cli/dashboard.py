@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import os
 from pathlib import Path
+from typing import Any, NamedTuple
 
 import uvicorn
 
@@ -20,7 +21,8 @@ from agents_remember.mcp.config import ConfigError, load_config
 from agents_remember.serving import daemon as serving_daemon
 from agents_remember.serving.app import create_app
 from agents_remember.serving.change_watcher import DEFAULT_HEARTBEAT_SECONDS
-from agents_remember.serving.sim import SimError, build_sim, parse_sim_speed
+from agents_remember.serving.projector import ProjectionCadence, ProjectionReplay
+from agents_remember.serving.sim import SimError, SimSetup, build_sim, parse_sim_speed
 
 # Dev hot-reload (``--reload``): uvicorn's reloader re-imports the app per worker restart, so it
 # needs an import-string *factory*, not a pre-built app object (an object silently disables reload).
@@ -48,8 +50,10 @@ def _dev_app():
     heartbeat_env = os.environ.get(_DEV_HEARTBEAT_ENV)
     return create_app(
         config,
-        interval=float(os.environ.get(_DEV_INTERVAL_ENV, "1.0")),
-        heartbeat=float(heartbeat_env) if heartbeat_env else None,
+        cadence=ProjectionCadence(
+            interval=float(os.environ.get(_DEV_INTERVAL_ENV, "1.0")),
+            heartbeat=float(heartbeat_env) if heartbeat_env else None,
+        ),
     )
 
 
@@ -131,61 +135,106 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
 
 
 def run(args: argparse.Namespace) -> int:
-    try:
-        config_path = args.config or discover_config()
-    except ConfigDiscoveryError as error:
-        print(f"error: {error}")
+    resolved = _resolve_settings(args)
+    if resolved is None:
         return 1
-    try:
-        config = load_config(config_path)
-    except ConfigError as error:
-        print(f"error: {error}")
-        return 1
+    config_path, config = resolved
     port = args.port if args.port is not None else config.dashboard.port
     if args.daemon or args.status or args.stop:
         return _run_daemon_command(args, config, port)
     if args.reload:
-        if args.sim:
-            print("error: --reload is not supported with --sim")
-            return 1
-        # Pass an import-string factory (not the built app object) so uvicorn's reloader can
-        # re-import on change; watch only the package source so node_modules/.git don't churn it.
-        os.environ[_DEV_CONFIG_ENV] = str(Path(config_path).resolve())
-        os.environ[_DEV_INTERVAL_ENV] = str(args.interval)
-        if args.heartbeat is not None:
-            os.environ[_DEV_HEARTBEAT_ENV] = str(args.heartbeat)
+        return _run_reload_server(args, config_path, port)
+    # ``built`` keeps the sim (and its temp coordination root) referenced until this call
+    # returns, i.e. for the whole server lifetime, so the sim root is not reclaimed early.
+    built = _build_app(args, config)
+    if built is None:
+        return 1
+    try:
         uvicorn.run(
-            "agents_remember.cli.dashboard:_dev_app",
-            factory=True,
-            reload=True,
-            reload_dirs=[str(Path(agents_remember.__file__).parent)],
+            built.app,
             host=args.host,
             port=port,
             access_log=not args.no_access_log,
             timeout_graceful_shutdown=DASHBOARD_GRACEFUL_SHUTDOWN_SECONDS,
         )
-        return 0
+    finally:
+        # The server has stopped, so the throwaway root has no reader left. Closing it here
+        # is what ends its life: dropping the reference instead leaves the directory to
+        # ``TemporaryDirectory``'s finaliser, which is a ResourceWarning, not a cleanup.
+        if built.sim is not None:
+            built.sim.temp_dir.cleanup()
+    return 0
+
+
+def _resolve_settings(
+    args: argparse.Namespace,
+) -> tuple[str, serving_daemon.McpRuntimeConfig] | None:
+    """Discover and load the trusted settings; report the failure and return None on error."""
+    try:
+        config_path = args.config or discover_config()
+        return str(config_path), load_config(config_path)
+    except (ConfigDiscoveryError, ConfigError) as error:
+        print(f"error: {error}")
+        return None
+
+
+def _run_reload_server(args: argparse.Namespace, config_path: str, port: int) -> int:
+    """Serve under uvicorn's reloader, which re-imports the app on every source change."""
     if args.sim:
-        try:
-            sim = build_sim(config, Path(args.sim), speed=parse_sim_speed(args.sim_speed))
-        except SimError as error:
-            print(f"error: {error}")
-            return 1
-        # ``sim`` (and its temp coordination root) stays referenced until this call returns,
-        # i.e. for the whole server lifetime, so the throwaway sim root is not reclaimed early.
-        app = create_app(
-            sim.config, interval=args.interval, now=sim.clock.now, before_tick=sim.feeder.feed
-        )
-    else:
-        app = create_app(config, interval=args.interval, heartbeat=args.heartbeat)
+        print("error: --reload is not supported with --sim")
+        return 1
+    # Pass an import-string factory (not the built app object) so uvicorn's reloader can
+    # re-import on change; watch only the package source so node_modules/.git don't churn it.
+    os.environ[_DEV_CONFIG_ENV] = str(Path(config_path).resolve())
+    os.environ[_DEV_INTERVAL_ENV] = str(args.interval)
+    if args.heartbeat is not None:
+        os.environ[_DEV_HEARTBEAT_ENV] = str(args.heartbeat)
     uvicorn.run(
-        app,
+        "agents_remember.cli.dashboard:_dev_app",
+        factory=True,
+        reload=True,
+        reload_dirs=[str(Path(agents_remember.__file__).parent)],
         host=args.host,
         port=port,
         access_log=not args.no_access_log,
         timeout_graceful_shutdown=DASHBOARD_GRACEFUL_SHUTDOWN_SECONDS,
     )
     return 0
+
+
+class _DashboardApp(NamedTuple):
+    """The serving app together with the sim whose throwaway root it reads (None when live).
+
+    The sim is carried alongside the app rather than dropped at build time because it owns
+    that root: releasing it would reclaim the directory under the running server.
+    """
+
+    app: Any
+    sim: SimSetup | None
+
+
+def _build_app(
+    args: argparse.Namespace, config: serving_daemon.McpRuntimeConfig
+) -> _DashboardApp | None:
+    """The app to serve — live state, or a replayed fixture; None when the fixture is unusable."""
+    if not args.sim:
+        return _DashboardApp(
+            create_app(
+                config, cadence=ProjectionCadence(interval=args.interval, heartbeat=args.heartbeat)
+            ),
+            None,
+        )
+    try:
+        sim = build_sim(config, Path(args.sim), speed=parse_sim_speed(args.sim_speed))
+    except SimError as error:
+        print(f"error: {error}")
+        return None
+    app = create_app(
+        sim.config,
+        cadence=ProjectionCadence(interval=args.interval),
+        replay=ProjectionReplay(now=sim.clock.now, before_tick=sim.feeder.feed),
+    )
+    return _DashboardApp(app, sim)
 
 
 def _run_daemon_command(
@@ -210,7 +259,9 @@ def _run_daemon_command(
         print(f"dashboard daemon: {serving_daemon.stop(directory)}")
         return 0
     result = serving_daemon.ensure(
-        config, host=args.host, port=port, interval=args.interval, heartbeat=args.heartbeat
+        config,
+        serving_daemon.DaemonEndpoint(host=args.host, port=port),
+        cadence=ProjectionCadence(interval=args.interval, heartbeat=args.heartbeat),
     )
     print(f"dashboard daemon {result.action}: {result.detail}")
     return 0 if result.action in ("adopted", "started", "restarted") else 1

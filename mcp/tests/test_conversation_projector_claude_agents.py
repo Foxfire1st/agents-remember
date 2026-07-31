@@ -218,16 +218,30 @@ def _map(raw: dict, sequence: int = 1) -> list:
 
 class ClaudeAgentLifecycleTests(unittest.TestCase):
     def test_full_lifecycle_binds_identity_and_upserts_roster(self) -> None:
-        session = "sess-l7-lifecycle"
+        """One sub-agent, start to finish, in the order the harness emits its frames.
 
-        # The spawning Agent tool_use stays a parent-timeline tool-call, untagged
-        # until task_started binds the roster identity.
+        The stages share the projector's per-session state, so they run in sequence against
+        one session and each asserts what its own frame added: the ninth frame's settlement
+        is only meaningful because the second frame bound the identity it settles.
+        """
+        session = "sess-l7-lifecycle"
+        self._assert_spawn_call_is_untagged(session)
+        self._assert_task_started_binds_the_roster_and_tags_the_call(session)
+        self._assert_sidechain_records_are_bound(session)
+        self._assert_task_progress_upserts_usage(session)
+        self._assert_task_notification_completes_the_roster_row(session)
+        self._assert_tool_result_settles_the_bound_call(session)
+
+    def _assert_spawn_call_is_untagged(self, session: str) -> None:
+        """The spawning Agent tool_use stays a parent-timeline tool-call, untagged
+        until task_started binds the roster identity."""
         (spawn_item,) = _items(_map(_agent_tool_use_frame(session), 1))
         self.assertEqual(spawn_item.item_id, AGENT_TOOL_ID)
         self.assertEqual(spawn_item.kind, "tool-call")
         self.assertIsNone(spawn_item.agent)
 
-        # task_started: roster item (running) + tagging upsert of the tool-call.
+    def _assert_task_started_binds_the_roster_and_tags_the_call(self, session: str) -> None:
+        """task_started: roster item (running) + tagging upsert of the tool-call."""
         started_items = _items(_map(_task_started(session), 2))
         roster = next(item for item in started_items if item.item_id == f"claude-agent-{TASK_ID}")
         self.assertEqual(roster.kind, "notice")
@@ -250,7 +264,12 @@ class ClaudeAgentLifecycleTests(unittest.TestCase):
         self.assertEqual(tagged.agent.agent_id, TASK_ID)
         self.assertEqual(tagged.agent.status, "running")
 
-        # Sidechain user text: the sub-agent's own input record, bound.
+    def _assert_sidechain_records_are_bound(self, session: str) -> None:
+        """Everything the sub-agent itself emits carries the bound identity.
+
+        Its own input record, its assistant text (which crosses via
+        ``--forward-subagent-text``), and both halves of an inner tool cycle.
+        """
         (side_user,) = _items(_map(_sidechain_user_text(session), 3))
         self.assertEqual(side_user.role, "user")
         self.assertEqual(side_user.kind, "message")
@@ -262,13 +281,11 @@ class ClaudeAgentLifecycleTests(unittest.TestCase):
         self.assertEqual(side_user.agent.status, "running")
         self.assertIsInstance(side_user.blocks[0], TextBlock)
 
-        # Sidechain assistant text (crosses via --forward-subagent-text), bound.
         (side_assistant,) = _items(_map(_sidechain_assistant_text(session), 4))
         self.assertEqual(side_assistant.role, "assistant")
         assert side_assistant.agent is not None
         self.assertEqual(side_assistant.agent.agent_id, TASK_ID)
 
-        # Sidechain tool cycle: inner tool-call and its result both bound.
         tool_use_frame, tool_result_frame = _sidechain_tool_cycle(session)
         (inner_call,) = _items(_map(tool_use_frame, 5))
         self.assertEqual(inner_call.item_id, INNER_TOOL_ID)
@@ -280,7 +297,8 @@ class ClaudeAgentLifecycleTests(unittest.TestCase):
         assert inner_result.agent is not None
         self.assertEqual(inner_result.agent.agent_id, TASK_ID)
 
-        # task_progress: roster upsert carrying usage + last tool.
+    def _assert_task_progress_upserts_usage(self, session: str) -> None:
+        """task_progress: roster upsert carrying usage + last tool."""
         (progress_roster,) = _items(_map(_task_progress(session), 7))
         self.assertEqual(progress_roster.item_id, f"claude-agent-{TASK_ID}")
         self.assertEqual(progress_roster.phase, "streaming")
@@ -296,7 +314,8 @@ class ClaudeAgentLifecycleTests(unittest.TestCase):
             },
         )
 
-        # task_notification: terminal roster upsert with the final summary.
+    def _assert_task_notification_completes_the_roster_row(self, session: str) -> None:
+        """task_notification: terminal roster upsert with the final summary."""
         (final_roster,) = _items(_map(_task_notification(session), 8))
         self.assertEqual(final_roster.phase, "completed")
         assert final_roster.agent is not None
@@ -315,7 +334,8 @@ class ClaudeAgentLifecycleTests(unittest.TestCase):
         )
         self.assertEqual(description.text, "probe")
 
-        # The Agent tool_result carrier settles the tool-call with the bound identity.
+    def _assert_tool_result_settles_the_bound_call(self, session: str) -> None:
+        """The Agent tool_result carrier settles the tool-call with the bound identity."""
         (settled,) = _items(_map(_agent_tool_result_frame(session), 9))
         self.assertEqual(settled.item_id, AGENT_TOOL_ID)
         self.assertEqual(settled.phase, "completed")

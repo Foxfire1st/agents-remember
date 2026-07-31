@@ -16,6 +16,7 @@ from agents_remember.serving.conversation.control import queue_projection
 from agents_remember.serving.conversation.control import service as control_service
 from agents_remember.serving.conversation.control.service import (
     ControlChannel,
+    ControlScope,
     ConversationControlService,
 )
 from agents_remember.serving.conversation.models import AuthorizationBinding
@@ -83,7 +84,9 @@ class QueueRowsBoundTests(unittest.TestCase):
         auth = AuthorizationBinding(principal_id="op", tenant_id="local")
         with mock.patch.object(queue_projection, "MAX_QUEUE_ROWS_PER_CHANNEL", 3):
             for seq in range(1, 7):
-                queue_projection._queue_row(service, auth, channel, "ar-1", "epoch-1", _item(seq))
+                queue_projection._queue_row(
+                    ControlScope(service, auth, "ar-1", "epoch-1"), channel, _item(seq)
+                )
         self.assertEqual(len(channel.queue_rows), 3)
         # The three oldest keys were evicted; the three newest remain.
         self.assertNotIn(("prompt", "op-1", 1), channel.queue_rows)

@@ -22,26 +22,33 @@ from agents_remember.worktrees.modules import provider_async
 from agents_remember.worktrees.modules import start as worktree_start
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.models import WorktreeProviderSetupConfig
-from agents_remember.worktrees.worktree_contract import default_contract, write_contract
+from agents_remember.worktrees.worktree_contract import (
+    ContractTask,
+    LeafIdentity,
+    RepoBranchPlan,
+    default_contract,
+    write_contract,
+)
 
 
 def make_contract(root: Path):
     coordination_root = root / "ar-coordination"
     contract = default_contract(
-        task_name="async-task",
-        repo_name="repo-a",
-        workflow_kind="light-task",
-        memory_mode="disabled",
-        coordination_root=coordination_root,
-        code_repo_path=root / "repo-a",
-        code_source_branch="main",
-        code_work_branch="ar/async-task",
-        code_base_commit="abc123",
-        worktree_name="async-task",
-        memory_repo_path=None,
-        memory_source_branch="",
-        memory_work_branch="",
-        memory_base_commit="",
+        ContractTask(
+            name="async-task",
+            repo_name="repo-a",
+            coordination_root=coordination_root,
+            workflow_kind="light-task",
+            memory_mode="disabled",
+        ),
+        leaf=LeafIdentity(worktree_name="async-task"),
+        code=RepoBranchPlan(
+            repo_path=root / "repo-a",
+            source_branch="main",
+            work_branch="ar/async-task",
+            base_commit="abc123",
+        ),
+        memory=RepoBranchPlan(repo_path=None, source_branch="", work_branch="", base_commit=""),  # type: ignore[arg-type]
     )
     contract.worktree_group.mkdir(parents=True, exist_ok=True)
     return contract
@@ -76,10 +83,12 @@ class LaunchProviderSetupTests(unittest.TestCase):
 
         threads = CapturedThreads()
         result = provider_async.launch_provider_setup(
-            request=mock.Mock(),
-            contract=contract,
-            write_state_file=write_state_file,
-            settings_cleanup=settings_cleanup,
+            provider_async.ProviderSetupJob(
+                request=mock.Mock(),
+                contract=contract,
+                write_state_file=write_state_file,
+                settings_cleanup=settings_cleanup,
+            ),
             runner=runner,
             thread_factory=threads,
         )
@@ -166,10 +175,12 @@ class ProviderSetupStatusTests(unittest.TestCase):
                 return {"ok": False, "state": "failed"}
 
             provider_async.launch_provider_setup(
-                request=mock.Mock(),
-                contract=contract,
-                write_state_file=lambda payload: Path(tmp) / "unused.json",
-                settings_cleanup=None,
+                provider_async.ProviderSetupJob(
+                    request=mock.Mock(),
+                    contract=contract,
+                    write_state_file=lambda payload: Path(tmp) / "unused.json",
+                    settings_cleanup=None,
+                ),
                 runner=runner,
                 thread_factory=threads,
             )
@@ -286,7 +297,7 @@ class StartOrderingTests(unittest.TestCase):
                     worktree_start.run_or_launch_provider_setup(
                         Namespace(), contract, args, {"state": "enabled", "paths": paths}
                     )
-                self.assertEqual(launch_mock.call_args.kwargs["settings_cleanup"], expected_cleanup)
+                self.assertEqual(launch_mock.call_args.args[0].settings_cleanup, expected_cleanup)
 
 
 class RetryProviderSetupTests(unittest.TestCase):

@@ -2,13 +2,24 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
-from agents_remember.controlplane.expectation_rows import write_expectation_row
+from agents_remember.controlplane.expectation_rows import (
+    Expectation,
+    ExpectationSubject,
+    write_expectation_row,
+)
 from agents_remember.controlplane.operator_inbox_records import (
     AgentRole,
+    InboxAddress,
+    InboxMessage,
     InboxMessageKind,
+    InboxOwner,
+    InboxPoster,
+    InboxRouting,
+    InboxSubject,
     OperatorInboxEntry,
     OperatorInboxVia,
     create_operator_inbox_entry,
@@ -23,8 +34,13 @@ from agents_remember.kernel.agentic_settings import load_agentic_settings
 from agents_remember.observer import observer_root
 from agents_remember.observer.events import now_iso
 from agents_remember.observer.ulid import new_ulid
-from agents_remember.serving.dispatch_brief import DispatchBriefGate
-from agents_remember.serving.inbox_delivery import deliver_inbox_entry
+from agents_remember.serving.hosted_session_runtime import HostedSessionRuntime
+from agents_remember.serving.inbox_delivery import (
+    DeliveryAdmission,
+    InboxDeliveryLog,
+    RedeliveryFloor,
+    deliver_inbox_entry,
+)
 from agents_remember.serving.terminal import TerminalHost
 from agents_remember.serving.terminal_catalog import (
     TerminalCatalog,
@@ -35,7 +51,8 @@ from agents_remember.serving.terminal_paste import TerminalPaster
 
 from .base import _tool_payload
 from .dispatch_brief import (
-    DispatchReadinessCheck,
+    HOSTED_DELIVERY,
+    HostedDelivery,
     expectation_sla_seconds,
     expectation_store,
     fulfill_dispatch_expectation,
@@ -92,17 +109,17 @@ def _post_address(
     owner: RoutedOwner,
     *,
     message_kind: InboxMessageKind,
-    lifecycle_id: str | None,
-    agent_id: str | None,
-    recipient_role: AgentRole | None,
-) -> tuple[str | None, str | None, AgentRole | None]:
+    address: InboxAddress,
+) -> InboxAddress:
     """Completion/artifact signals address the current owner; ordinary peer messages stay explicit."""
     has_owner = (
         owner.agent_id is not None or owner.lifecycle_id is not None or owner.role is not None
     )
     if message_kind not in ("turn-report", "master-handover") or not has_owner:
-        return lifecycle_id, agent_id, recipient_role
-    return owner.lifecycle_id, owner.agent_id, owner.role
+        return address
+    return InboxAddress(
+        lifecycle_id=owner.lifecycle_id, agent_id=owner.agent_id, recipient_role=owner.role
+    )
 
 
 def _post_catalog(
@@ -133,9 +150,7 @@ def _persist_post(
     entry: OperatorInboxEntry,
     dispatch_target: TerminalCatalogEntry | None,
     *,
-    target_agent_id: str | None,
-    target_lifecycle_id: str | None,
-    target_role: AgentRole | None,
+    address: InboxAddress,
 ) -> None:
     store.append(entry)
     store.compact(now=datetime.now(UTC))
@@ -146,39 +161,44 @@ def _persist_post(
         return
     write_expectation_row(
         expectation_store(config),
+        Expectation(
+            kind="ack-by",
+            source_id=entry.id,
+            subject=ExpectationSubject(
+                agent_id=address.agent_id, lifecycle_id=address.lifecycle_id
+            ),
+            note=(
+                f"ack-by: {entry.messageKind} to "
+                f"{address.recipient_role or address.agent_id or address.lifecycle_id}"
+            ),
+        ),
         row_id=new_ulid(),
         now=datetime.now(UTC),
-        kind="ack-by",
         sla_seconds=expectation_sla_seconds(config, "ack-by"),
-        source_id=entry.id,
-        subject_agent_id=target_agent_id,
-        subject_lifecycle_id=target_lifecycle_id,
-        note=f"ack-by: {entry.messageKind} to {target_role or target_agent_id or target_lifecycle_id}",
     )
 
 
 def _deliver_post(
     config: McpRuntimeConfig,
     *,
-    deliver_to_hosted: bool,
+    delivery: HostedDelivery,
     store: OperatorInboxStore,
-    catalog: TerminalCatalog | None,
-    host: TerminalHost,
-    paster: TerminalPaster | None,
     entry: OperatorInboxEntry,
-    dispatch_gate: DispatchBriefGate | None,
 ) -> OperatorInboxEntry:
-    if not deliver_to_hosted:
+    if not delivery.enabled:
         return entry
     return deliver_inbox_entry(
-        store=store,
-        catalog=_delivery_catalog(config, catalog),
-        host=host,
-        paster=paster or TerminalPaster(),
-        entry=entry,
-        submit=True,
-        redelivery_floor_seconds=_redelivery_floor_seconds(config),
-        dispatch_gate=dispatch_gate,
+        InboxDeliveryLog(
+            store=store,
+            entry=entry,
+            floor=RedeliveryFloor(seconds=_redelivery_floor_seconds(config)),
+        ),
+        sessions=HostedSessionRuntime(
+            catalog=_delivery_catalog(config, delivery.catalog),
+            host=delivery.host or TerminalHost(),
+        ),
+        paster=delivery.paster or TerminalPaster(),
+        admission=DeliveryAdmission(dispatch_gate=delivery.gate),
     )
 
 
@@ -194,97 +214,53 @@ def _finish_dispatch(
 def operator_inbox_post_payload(
     config: McpRuntimeConfig,
     *,
-    lifecycle_id: str | None,
-    agent_id: str | None,
-    ask: str,
-    response: str,
-    created_by: str,
-    created_via: OperatorInboxVia,
-    gate_id: str | None = None,
-    sender_agent_id: str | None = None,
-    sender_role: AgentRole | None = None,
-    recipient_role: AgentRole | None = None,
-    message_kind: InboxMessageKind = "message",
-    artifact_path: str | None = None,
-    deliver_to_hosted: bool = True,
-    terminal_catalog: TerminalCatalog | None = None,
-    terminal_host: TerminalHost | None = None,
-    terminal_paster: TerminalPaster | None = None,
-    dispatch_readiness: DispatchReadinessCheck | None = None,
-    dispatch_gate: DispatchBriefGate | None = None,
+    address: InboxAddress,
+    message: InboxMessage,
+    poster: InboxPoster,
+    delivery: HostedDelivery = HOSTED_DELIVERY,
 ) -> dict[str, Any]:
-    catalog = _post_catalog(config, terminal_catalog)
-    host = terminal_host or TerminalHost()
+    catalog = _post_catalog(config, delivery.catalog)
+    host = delivery.host or TerminalHost()
+    delivery = replace(delivery, catalog=catalog, host=host)
+    message_kind = message.message_kind
     dispatch_target = require_dispatch_target(
         message_kind=message_kind,
-        agent_id=agent_id,
-        deliver_to_hosted=deliver_to_hosted,
-        catalog=catalog,
+        agent_id=address.agent_id,
+        delivery=delivery,
         host=host,
-        readiness=dispatch_readiness,
     )
     owner, routed_leaf_key = _signal_route(
-        catalog, sender_agent_id=sender_agent_id, message_kind=message_kind
+        catalog, sender_agent_id=poster.sender_agent_id, message_kind=message_kind
     )
     leaf_key, seat_role, subject_agent_id = _dispatch_entry_fields(
         dispatch_target,
         routed_leaf_key=routed_leaf_key,
-        sender_agent_id=sender_agent_id,
+        sender_agent_id=poster.sender_agent_id,
     )
     # Completion/artifact messages are hierarchy signals, not arbitrary peer messages. Address
     # them to the current routed owner in the same post that attempts hosted delivery; merely
     # recording owner metadata leaves the stale caller-supplied mailbox in control and reproduces
     # the reviewer-finished/manager-never-woken halt.
-    target_lifecycle_id, target_agent_id, target_role = _post_address(
-        owner,
-        message_kind=message_kind,
-        lifecycle_id=lifecycle_id,
-        agent_id=agent_id,
-        recipient_role=recipient_role,
-    )
+    target = _post_address(owner, message_kind=message_kind, address=address)
     created_at = now_iso()
     entry = create_operator_inbox_entry(
+        replace(
+            message,
+            subject=InboxSubject(leaf_key=leaf_key, seat_role=seat_role, agent_id=subject_agent_id),
+        ),
         entry_id=new_ulid(),
         now=created_at,
-        lifecycle_id=target_lifecycle_id,
-        agent_id=target_agent_id,
-        gate_id=gate_id,
-        ask=ask,
-        response=response,
-        created_by=created_by,
-        created_via=created_via,
-        sender_agent_id=sender_agent_id,
-        sender_role=sender_role,
-        recipient_role=target_role,
-        message_kind=message_kind,
-        artifact_path=artifact_path,
-        leaf_key=leaf_key,
-        seat_role=seat_role,
-        subject_agent_id=subject_agent_id,
-        owner_role=owner.role,
-        owner_agent_id=owner.agent_id,
-        owner_lifecycle_id=owner.lifecycle_id,
+        routing=InboxRouting(
+            address=target,
+            owner=InboxOwner(
+                role=owner.role, agent_id=owner.agent_id, lifecycle_id=owner.lifecycle_id
+            ),
+        ),
+        poster=poster,
     )
     store = _store(config)
-    _persist_post(
-        config,
-        store,
-        entry,
-        dispatch_target,
-        target_agent_id=target_agent_id,
-        target_lifecycle_id=target_lifecycle_id,
-        target_role=target_role,
-    )
-    entry = _deliver_post(
-        config,
-        deliver_to_hosted=deliver_to_hosted,
-        store=store,
-        catalog=catalog,
-        host=host,
-        paster=terminal_paster,
-        entry=entry,
-        dispatch_gate=dispatch_gate,
-    )
+    _persist_post(config, store, entry, dispatch_target, address=target)
+    entry = _deliver_post(config, delivery=delivery, store=store, entry=entry)
     _finish_dispatch(config, dispatch_target, entry)
     return _tool_payload(
         "operator_inbox_post",

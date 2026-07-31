@@ -16,6 +16,9 @@ MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
 from agents_remember.worktrees.worktree_contract import (
+    ContractTask,
+    LeafIdentity,
+    RepoBranchPlan,
     WorktreeContract,
     contract_to_text,
     default_contract,
@@ -26,17 +29,20 @@ from agents_remember.worktrees.worktree_contract import (
 
 def _contract(root: Path, lifecycle_id: str) -> WorktreeContract:
     return default_contract(
-        task_name="Observe Lifecycle",
-        repo_name="repo-a",
-        workflow_kind="light-task",
-        memory_mode="disabled",
-        coordination_root=root,
-        code_repo_path=root / "repo-a",
-        code_source_branch="main",
-        code_work_branch="ar/observe-lifecycle",
-        code_base_commit="0" * 40,
-        worktree_name="observe-lifecycle",
-        lifecycle_id=lifecycle_id,
+        ContractTask(
+            name="Observe Lifecycle",
+            repo_name="repo-a",
+            coordination_root=root,
+            workflow_kind="light-task",
+            memory_mode="disabled",
+        ),
+        leaf=LeafIdentity(worktree_name="observe-lifecycle", lifecycle_id=lifecycle_id),
+        code=RepoBranchPlan(
+            repo_path=root / "repo-a",
+            source_branch="main",
+            work_branch="ar/observe-lifecycle",
+            base_commit="0" * 40,
+        ),
     )
 
 

@@ -4,6 +4,10 @@ import argparse
 import json
 from pathlib import Path
 
+from agents_remember.kernel.coordination_context.models import (
+    CoordinationHints,
+    EnclosureSelector,
+)
 from agents_remember.kernel.coordination_context.resolver import resolve_coordination_context
 from agents_remember.kernel.coordination_context.serialize import context_to_dict, print_text
 
@@ -77,16 +81,20 @@ def main(argv: list[str] | None = None) -> int:
         context = resolve_coordination_context(
             code_repository_name=args.code_repository_name,
             workspace_root=args.workspace_root,
-            requested_topology=args.topology,
-            coordination_root=args.coordination_root,
-            settings_path=args.settings_path,
-            onboarding_root=args.onboarding_root,
             code_repository_root=args.code_repository_root,
-            contract_path=args.contract_path,
-            task_name=args.task_name,
-            parent_task=args.parent_task,
-            leaf_id=args.leaf_id,
-            worktree_name=args.worktree_name,
+            hints=CoordinationHints(
+                topology=args.topology,
+                coordination_root=args.coordination_root,
+                settings_path=args.settings_path,
+                onboarding_root=args.onboarding_root,
+            ),
+            selector=EnclosureSelector(
+                contract_path=args.contract_path,
+                task_name=args.task_name,
+                parent_task=args.parent_task,
+                leaf_id=args.leaf_id,
+                worktree_name=args.worktree_name,
+            ),
         )
     except ValueError as error:
         parser.error(str(error))

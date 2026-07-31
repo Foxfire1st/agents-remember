@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from agents_remember.kernel.coordination_context.models import EnclosureSelector
 from agents_remember.worktrees.leaf_refs import resolve_leaf_enclosure_contract_for_ref
 from agents_remember.worktrees.task_resolver import (
     SERIES_CONTRACT_FILENAME,
@@ -18,25 +19,23 @@ from agents_remember.worktrees.worktree_contract import (
 
 
 def resolve_contract(
-    contract_path: Path | None,
+    selector: EnclosureSelector,
     coordination_root: Path,
     code_repository_name: str,
-    task_name: str | None,
-    parent_task: str | None = None,
-    leaf_id: str | None = None,
-    worktree_name: str | None = None,
 ) -> tuple[Any | None, Path | None]:
-    candidate = contract_path.resolve() if contract_path else None
-    if candidate is None and task_name:
+    candidate = selector.contract_path.resolve() if selector.contract_path else None
+    if candidate is None and selector.task_name:
         candidate = find_task_contract(
             coordination_root,
             code_repository_name,
-            task_name,
-            parent_task=parent_task,
-            leaf_id=leaf_id,
+            selector.task_name,
+            parent_task=selector.parent_task,
+            leaf_id=selector.leaf_id,
         )
-    if candidate is None and worktree_name:
-        candidate = find_worktree_contract(coordination_root, code_repository_name, worktree_name)
+    if candidate is None and selector.worktree_name:
+        candidate = find_worktree_contract(
+            coordination_root, code_repository_name, selector.worktree_name
+        )
     if candidate is None:
         return None, None
     if not candidate.exists():

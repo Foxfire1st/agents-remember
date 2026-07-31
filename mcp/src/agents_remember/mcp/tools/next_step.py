@@ -122,49 +122,67 @@ def compute_next_step(
     lifecycle so a lifecycle-less response stays unchanged.
     """
     if state is None or state.is_terminal:
-        # Terminal / no active lifecycle. After an explicit end, hint the loop back
-        # so the agent re-enters (start fresh or resume) instead of dead-ending.
-        if tool_name == "lifecycle_end":
-            return _LOOP_BACK
-        return None
+        return _terminal_step(tool_name)
+    parked = _parked_step(state)
+    if parked is not None:
+        return parked
+    if contract is None:
+        return _front_half_step(state)
+    return _linear_half_step(tool_name, contract, guidance)
 
-    # Blocked at an open gate (a raised lifecycle_gate set state="blocked"): the
-    # only correct next move is to await the developer's decision and resume — never
-    # the post-gate operational step below, which would jump the gate. (The parked
-    # gate path still works if raised; leaf-28 just no longer hints toward it.)
+
+def _terminal_step(tool_name: str) -> NextStep | None:
+    """Terminal / no active lifecycle. After an explicit end, hint the loop back
+    so the agent re-enters (start fresh or resume) instead of dead-ending."""
+    return _LOOP_BACK if tool_name == "lifecycle_end" else None
+
+
+def _parked_step(state: LifecycleState) -> NextStep | None:
+    """The lifecycle is parked and the next move is *not* the operational step below.
+
+    Blocked at an open gate (a raised lifecycle_gate set state="blocked"): the only
+    correct next move is to await the developer's decision and resume — never the
+    post-gate operational step, which would jump the gate. (The parked gate path still
+    works if raised; leaf-28 just no longer hints toward it.)
+
+    NOTIFY-AND-CONTINUE turn end (leaf-28): the lifecycle is parked in
+    awaiting-developer (the lifecycle_turn_end_notification response itself, before the
+    next call auto-resumes). Hint the stop, not another call — nextTool=None so the
+    agent does not push past its own turn end.
+    """
     if state.state == "blocked":
         return _AWAIT_GATE
-
-    # NOTIFY-AND-CONTINUE turn end (leaf-28): the lifecycle is parked in
-    # awaiting-developer (the lifecycle_turn_end_notification response itself, before
-    # the next call auto-resumes). Hint the stop, not another call — nextTool=None so
-    # the agent does not push past its own turn end.
     if state.state == "awaiting-developer":
         return _TURN_HANDED_TO_DEVELOPER
+    return None
 
-    # FRONT HALF — non-linear, prose-guided (no worktree contract yet).
-    if contract is None:
-        if state.phase == "decide":
-            return NextStep(
-                summary=(
-                    "Decide: verify `worktree_start --dry-run` (self-fix first), then notify via "
-                    "lifecycle_turn_end_notification and stop — the developer opens the worktree on "
-                    "their turn; your next AR tool call resumes automatically."
-                ),
-                nextTool="lifecycle_turn_end_notification",
-                nextArgs={"summary": "Ready to open the worktree — your call."},
-            )
+
+def _front_half_step(state: LifecycleState) -> NextStep:
+    """FRONT HALF — non-linear, prose-guided (no worktree contract yet)."""
+    if state.phase == "decide":
         return NextStep(
-            summary=_FRONT_HALF_SUMMARY,
+            summary=(
+                "Decide: verify `worktree_start --dry-run` (self-fix first), then notify via "
+                "lifecycle_turn_end_notification and stop — the developer opens the worktree on "
+                "their turn; your next AR tool call resumes automatically."
+            ),
             nextTool="lifecycle_turn_end_notification",
-            nextArgs={"summary": "Plan ready for your review."},
+            nextArgs={"summary": "Ready to open the worktree — your call."},
         )
+    return NextStep(
+        summary=_FRONT_HALF_SUMMARY,
+        nextTool="lifecycle_turn_end_notification",
+        nextArgs={"summary": "Plan ready for your review."},
+    )
 
-    # LINEAR HALF — overlay the existing-gate raise at the gate moments...
+
+def _linear_half_step(
+    tool_name: str, contract: WorktreeContract, guidance: dict[str, Any] | None
+) -> NextStep | None:
+    """LINEAR HALF — the gate-moment overlay, else the worktree guidance state machine."""
     gate = _gate_after(tool_name, contract)
     if gate is not None:
         return gate
-    # ...otherwise delegate to the proven worktree guidance state machine.
     if guidance is not None:
         return _from_guidance(guidance)
     return None

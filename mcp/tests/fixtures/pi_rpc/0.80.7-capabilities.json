@@ -1,7 +1,7 @@
 {
   "schema": "ar-pi-rpc-capabilities/v1",
   "package": "@earendil-works/pi-coding-agent",
-  "version": "0.80.6",
+  "version": "0.80.7",
   "launch": ["--mode", "rpc"],
   "framing": {
     "delimiter": "LF",
@@ -10,13 +10,18 @@
   },
   "commands": [
     "prompt",
+    "abort",
     "get_state",
     "get_entries",
+    "get_available_models",
+    "set_model",
+    "set_thinking_level",
     "extension_ui_response"
   ],
   "stateFields": [
     "sessionId",
     "sessionFile",
+    "model",
     "thinkingLevel",
     "isStreaming",
     "isCompacting",

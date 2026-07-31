@@ -28,6 +28,7 @@ from agents_remember.serving.conversation.active.projector import (
     ActiveSessionProjector,
     PageResult,
 )
+from agents_remember.serving.conversation.active.projector.facade import ProjectedSession
 from agents_remember.serving.conversation.models import (
     ActiveConversationRef,
     ActiveEventCursor,
@@ -201,11 +202,13 @@ class ActiveConversationService:
             self._lru_drop(ar_session_id)
         await self._evict_if_needed()
         projector = ActiveSessionProjector(
-            identity=identity,
-            authorization=authorization,
-            entry=entry,
-            mapper=mapper,
-            secret=self._secret,
+            ProjectedSession(
+                identity=identity,
+                authorization=authorization,
+                entry=entry,
+                mapper=mapper,
+                secret=self._secret,
+            ),
             clock=self._clock,
         )
         self._projectors[ar_session_id] = projector

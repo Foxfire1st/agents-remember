@@ -7,6 +7,7 @@ import tempfile
 import unittest
 from collections.abc import Mapping
 from pathlib import Path
+from typing import Any
 from unittest import mock
 
 from agents_remember.serving.conversation.library import open_service as open_module
@@ -22,7 +23,9 @@ from agents_remember.serving.conversation.library.errors import (
 from agents_remember.serving.conversation.library.factories import LibraryShared
 from agents_remember.serving.conversation.library.open_service import (
     ConversationOpenService,
+    LibraryBinding,
     OpenOperationLedger,
+    OpenRequest,
 )
 from agents_remember.serving.conversation.library.scope import canonical_library_scope
 from agents_remember.serving.conversation.library.service import ConversationLibraryService
@@ -44,7 +47,11 @@ from agents_remember.serving.harness_control_models import (
 from agents_remember.serving.hosted_readiness import HostedReadinessResult, HostedReadinessStatus
 from agents_remember.serving.terminal_catalog import TerminalCatalog, TerminalCatalogEntry
 from agents_remember.serving.terminal_liveness import TerminalCatalogLivenessConfig, utc_now
-from agents_remember.serving.terminal_opener import OpenTerminalResult
+from agents_remember.serving.terminal_opener import (
+    OpenTerminalResult,
+    SpawnProvenance,
+    TerminalLaunchRequest,
+)
 
 CALLER = AuthorizationBinding(
     principal_id="local-operator:1000", tenant_id="/tmp/tenant-must-match"
@@ -156,15 +163,19 @@ class _Opener:
         if self.fail:
             return OpenTerminalResult(status="bad-kind", detail="harness not installed")
         session_id = str(kwargs["session_id"])
+        launch = kwargs["launch"]
+        provenance = kwargs["provenance"]
+        assert isinstance(launch, TerminalLaunchRequest)
+        assert isinstance(provenance, SpawnProvenance)
         tmux_name = f"tmux-{session_id}"
         self.host.sessions.add(tmux_name)
         entry = TerminalCatalogEntry(
             id=session_id,
-            label=str(kwargs.get("label") or session_id),
+            label=str(provenance.label or session_id),
             kind="harness",
-            harness=str(kwargs.get("harness")),
+            harness=str(launch.harness),
             lifecycle_id=None,
-            cwd=Path(str(kwargs["workspace_root"])),
+            cwd=Path(str(launch.workspace_root)),
             tmux_name=tmux_name,
             command=("pi", "--mode", "rpc"),
             created_at="2026-07-18T00:00:00Z",
@@ -241,9 +252,7 @@ class OpenServiceTests(unittest.IsolatedAsyncioTestCase):
         )
         self.opener = _Opener(self.catalog, self.host)
         self.service = ConversationOpenService(
-            runtime=self.runtime,
-            shared=self.shared,
-            authorization=caller,
+            LibraryBinding(runtime=self.runtime, shared=self.shared, authorization=caller),
             library=self.library,
             port_builder=lambda _h: self.port,  # type: ignore[arg-type]
             opener=self.opener,
@@ -259,9 +268,7 @@ class OpenServiceTests(unittest.IsolatedAsyncioTestCase):
     def _blocking_service(self, gate: asyncio.Event) -> ConversationOpenService:
         blocking_port = _BlockingPort(self.cursor, gate)
         return ConversationOpenService(
-            runtime=self.runtime,
-            shared=self.shared,
-            authorization=self.caller,
+            LibraryBinding(runtime=self.runtime, shared=self.shared, authorization=self.caller),
             library=ConversationLibraryService(
                 runtime=self.runtime,
                 shared=self.shared,
@@ -281,18 +288,20 @@ class OpenServiceTests(unittest.IsolatedAsyncioTestCase):
         retired: list[str] = []
         real_retire = open_module.retire_entry
 
-        def _retire(catalog, host, entry, **kwargs):
+        def _retire(catalog, host, entry, *args, **kwargs):
             retired.append(entry.id)
-            return real_retire(catalog, host, entry, **kwargs)
+            return real_retire(catalog, host, entry, *args, **kwargs)
 
         open_task = asyncio.create_task(
             service.open(
                 "pi",
                 self.key_token,
-                request_id="req-race",
-                expected_identity_digest=self._digest(),
-                cwd=None,
-                launch_context={},
+                OpenRequest(
+                    request_id="req-race",
+                    expected_identity_digest=self._digest(),
+                    cwd=None,
+                    launch_context={},
+                ),
             )
         )
         for _ in range(100):  # let the drive reach the parked resolve (pre-launch)
@@ -345,7 +354,7 @@ class OpenServiceTests(unittest.IsolatedAsyncioTestCase):
     ) -> None:
         retired: list[str] = []
 
-        def _retire(catalog, host, entry, **_kwargs):
+        def _retire(catalog, host, entry, *_args, **_kwargs):
             retired.append(entry.id)
 
         real_get = self.catalog.get
@@ -386,10 +395,12 @@ class OpenServiceTests(unittest.IsolatedAsyncioTestCase):
             operation = await self.service.open(
                 "pi",
                 self.key_token,
-                request_id="req-pending",
-                expected_identity_digest=self._digest(),
-                cwd=None,
-                launch_context={},
+                OpenRequest(
+                    request_id="req-pending",
+                    expected_identity_digest=self._digest(),
+                    cwd=None,
+                    launch_context={},
+                ),
             )
             # No false tombstone: the owed retirement is pending, visible, and unreconciled.
             assert operation.outcome == "identity-mismatch"
@@ -423,9 +434,7 @@ class OpenServiceTests(unittest.IsolatedAsyncioTestCase):
 
     def _codex_service(self, port: _Port) -> ConversationOpenService:
         return ConversationOpenService(
-            runtime=self.runtime,
-            shared=self.shared,
-            authorization=self.caller,
+            LibraryBinding(runtime=self.runtime, shared=self.shared, authorization=self.caller),
             library=ConversationLibraryService(
                 runtime=self.runtime,
                 shared=self.shared,
@@ -456,17 +465,19 @@ class OpenServiceTests(unittest.IsolatedAsyncioTestCase):
             operation = await service.open(
                 "codex",
                 key,
-                request_id="req-codex-1",
-                expected_identity_digest=digest,
-                cwd=None,
-                launch_context={},
+                OpenRequest(
+                    request_id="req-codex-1",
+                    expected_identity_digest=digest,
+                    cwd=None,
+                    launch_context={},
+                ),
             )
         assert operation.outcome == "opened", operation.detail
         assert len(self.opener.calls) == 1
-        launch = self.opener.calls[0]
-        assert launch["harness"] == "codex"
-        assert launch["resume_thread_id"] == "thr_exact_1"
-        assert launch["launch_args"] == []
+        launch: Any = self.opener.calls[0]["launch"]
+        assert launch.harness == "codex"
+        assert launch.control.resume_thread_id == "thr_exact_1"
+        assert launch.knobs.launch_args == []
         assert operation.identity is not None
         assert operation.identity.vendor_conversation_id == "thr_exact_1"
         assert operation.identity.bridge_epoch == "epoch-cx"
@@ -487,16 +498,18 @@ class OpenServiceTests(unittest.IsolatedAsyncioTestCase):
             operation = await self.service.open(
                 "pi",
                 self.key_token,
-                request_id="req-pi-channel",
-                expected_identity_digest=self._digest(),
-                cwd=None,
-                launch_context={},
+                OpenRequest(
+                    request_id="req-pi-channel",
+                    expected_identity_digest=self._digest(),
+                    cwd=None,
+                    launch_context={},
+                ),
             )
         assert operation.outcome == "opened", operation.detail
-        launch = self.opener.calls[0]
-        assert launch["harness"] == "pi"
-        assert launch["resume_thread_id"] is None
-        assert launch["launch_args"] == ["--session", "/home/x/.pi/sess.jsonl"]
+        launch: Any = self.opener.calls[0]["launch"]
+        assert launch.harness == "pi"
+        assert launch.control.resume_thread_id is None
+        assert launch.knobs.launch_args == ["--session", "/home/x/.pi/sess.jsonl"]
 
     async def test_codex_open_with_invalid_resume_target_fails_typed(self) -> None:
         port = _CodexKindPort(self.cursor, harness="codex", thread_id="  ")
@@ -505,10 +518,12 @@ class OpenServiceTests(unittest.IsolatedAsyncioTestCase):
         operation = await service.open(
             "codex",
             key,
-            request_id="req-codex-bad",
-            expected_identity_digest=digest,
-            cwd=None,
-            launch_context={},
+            OpenRequest(
+                request_id="req-codex-bad",
+                expected_identity_digest=digest,
+                cwd=None,
+                launch_context={},
+            ),
         )
         assert operation.outcome == "launch-failed"
         assert operation.identity is None
@@ -520,10 +535,12 @@ class OpenServiceTests(unittest.IsolatedAsyncioTestCase):
         operation = await service.open(
             "pi",
             self.key_token,
-            request_id="req-kind-mismatch",
-            expected_identity_digest=self._digest(),
-            cwd=None,
-            launch_context={},
+            OpenRequest(
+                request_id="req-kind-mismatch",
+                expected_identity_digest=self._digest(),
+                cwd=None,
+                launch_context={},
+            ),
         )
         assert operation.outcome == "unsupported"
         assert operation.identity is None
@@ -533,9 +550,7 @@ class OpenServiceTests(unittest.IsolatedAsyncioTestCase):
 
     def _f5_service(self, opener: _Opener, port: _Port | None = None) -> ConversationOpenService:
         return ConversationOpenService(
-            runtime=self.runtime,
-            shared=self.shared,
-            authorization=self.caller,
+            LibraryBinding(runtime=self.runtime, shared=self.shared, authorization=self.caller),
             library=ConversationLibraryService(
                 runtime=self.runtime,
                 shared=self.shared,
@@ -566,10 +581,12 @@ class OpenServiceTests(unittest.IsolatedAsyncioTestCase):
             operation = await service.open(
                 "pi",
                 self.key_token,
-                request_id="req-f5",
-                expected_identity_digest=self._digest(),
-                cwd=None,
-                launch_context={},
+                OpenRequest(
+                    request_id="req-f5",
+                    expected_identity_digest=self._digest(),
+                    cwd=None,
+                    launch_context={},
+                ),
             )
         assert operation.outcome == "opened"
         return operation
@@ -599,10 +616,12 @@ class OpenServiceTests(unittest.IsolatedAsyncioTestCase):
             replay = await service.open(
                 "pi",
                 self.key_token,
-                request_id="req-f5",
-                expected_identity_digest=self._digest(),
-                cwd=None,
-                launch_context={},
+                OpenRequest(
+                    request_id="req-f5",
+                    expected_identity_digest=self._digest(),
+                    cwd=None,
+                    launch_context={},
+                ),
             )
         # R4 idempotence survives eviction: the absorb re-opens the same session, no retire.
         assert replay.outcome == "opened"
@@ -629,7 +648,7 @@ class OpenServiceTests(unittest.IsolatedAsyncioTestCase):
 
         retired: list[str] = []
 
-        def _retire(catalog, host, entry, **_kwargs):
+        def _retire(catalog, host, entry, *_args, **_kwargs):
             retired.append(entry.id)
 
         # The caller reuses the same requestId for a DIFFERENT conversation.
@@ -665,10 +684,12 @@ class OpenServiceTests(unittest.IsolatedAsyncioTestCase):
             operation = await service.open(
                 "pi",
                 other_key,
-                request_id="req-f5",
-                expected_identity_digest=other_digest,
-                cwd=None,
-                launch_context={},
+                OpenRequest(
+                    request_id="req-f5",
+                    expected_identity_digest=other_digest,
+                    cwd=None,
+                    launch_context={},
+                ),
             )
         # Honest settlement, never a retirement of the foreign live session.
         assert operation.outcome == "launch-failed"
@@ -723,10 +744,12 @@ class OpenServiceTests(unittest.IsolatedAsyncioTestCase):
             operation = await self.service.open(
                 "pi",
                 self.key_token,
-                request_id="req-1",
-                expected_identity_digest=self._digest(),
-                cwd=None,
-                launch_context={},
+                OpenRequest(
+                    request_id="req-1",
+                    expected_identity_digest=self._digest(),
+                    cwd=None,
+                    launch_context={},
+                ),
             )
         assert operation.outcome == "opened"
         assert operation.phase == "opened"
@@ -739,18 +762,20 @@ class OpenServiceTests(unittest.IsolatedAsyncioTestCase):
         assert identity.ar_session_id.startswith("ar-open-")
         assert operation.ar_session_id == identity.ar_session_id
         assert len(self.opener.calls) == 1
-        launch = self.opener.calls[0]
-        assert launch["kind"] == "harness" and launch["harness"] == "pi"
-        assert launch["launch_args"] == ["--session", "/home/x/.pi/sess.jsonl"]
-        assert str(launch["workspace_root"]) == str(self.tmp)
+        launch: Any = self.opener.calls[0]["launch"]
+        assert launch.kind == "harness" and launch.harness == "pi"
+        assert launch.knobs.launch_args == ["--session", "/home/x/.pi/sess.jsonl"]
+        assert str(launch.workspace_root) == str(self.tmp)
 
         replay = await self.service.open(
             "pi",
             self.key_token,
-            request_id="req-1",
-            expected_identity_digest=self._digest(),
-            cwd=None,
-            launch_context={},
+            OpenRequest(
+                request_id="req-1",
+                expected_identity_digest=self._digest(),
+                cwd=None,
+                launch_context={},
+            ),
         )
         assert replay == operation
         assert len(self.opener.calls) == 1
@@ -771,20 +796,24 @@ class OpenServiceTests(unittest.IsolatedAsyncioTestCase):
             await self.service.open(
                 "pi",
                 self.key_token,
-                request_id="req-1",
-                expected_identity_digest=self._digest(),
-                cwd=None,
-                launch_context={},
+                OpenRequest(
+                    request_id="req-1",
+                    expected_identity_digest=self._digest(),
+                    cwd=None,
+                    launch_context={},
+                ),
             )
         # The same requestId under different launch context is a fingerprint conflict.
         with self.assertRaises(OpenRequestConflictError):
             await self.service.open(
                 "pi",
                 self.key_token,
-                request_id="req-1",
-                expected_identity_digest=self._digest(),
-                cwd=None,
-                launch_context={"leafKey": "different"},
+                OpenRequest(
+                    request_id="req-1",
+                    expected_identity_digest=self._digest(),
+                    cwd=None,
+                    launch_context={"leafKey": "different"},
+                ),
             )
         assert len(self.opener.calls) == 1
 
@@ -793,10 +822,12 @@ class OpenServiceTests(unittest.IsolatedAsyncioTestCase):
         operation = await self.service.open(
             "pi",
             self.key_token,
-            request_id="req-2",
-            expected_identity_digest=self._digest(),
-            cwd=None,
-            launch_context={},
+            OpenRequest(
+                request_id="req-2",
+                expected_identity_digest=self._digest(),
+                cwd=None,
+                launch_context={},
+            ),
         )
         assert operation.outcome == "unsupported"
         assert operation.phase == "failed"
@@ -809,10 +840,12 @@ class OpenServiceTests(unittest.IsolatedAsyncioTestCase):
             await self.service.open(
                 "pi",
                 self.key_token,
-                request_id="req-3",
-                expected_identity_digest="sha256:" + "0" * 64,
-                cwd=None,
-                launch_context={},
+                OpenRequest(
+                    request_id="req-3",
+                    expected_identity_digest="sha256:" + "0" * 64,
+                    cwd=None,
+                    launch_context={},
+                ),
             )
         assert not self.opener.calls
 
@@ -821,10 +854,12 @@ class OpenServiceTests(unittest.IsolatedAsyncioTestCase):
         operation = await self.service.open(
             "pi",
             self.key_token,
-            request_id="req-4",
-            expected_identity_digest=self._digest(),
-            cwd=None,
-            launch_context={},
+            OpenRequest(
+                request_id="req-4",
+                expected_identity_digest=self._digest(),
+                cwd=None,
+                launch_context={},
+            ),
         )
         assert operation.outcome == "stale-identity"
         assert operation.identity is None
@@ -835,10 +870,12 @@ class OpenServiceTests(unittest.IsolatedAsyncioTestCase):
         operation = await self.service.open(
             "pi",
             self.key_token,
-            request_id="req-5",
-            expected_identity_digest=self._digest(),
-            cwd=None,
-            launch_context={},
+            OpenRequest(
+                request_id="req-5",
+                expected_identity_digest=self._digest(),
+                cwd=None,
+                launch_context={},
+            ),
         )
         assert operation.outcome == "launch-failed"
         assert operation.identity is None
@@ -847,7 +884,7 @@ class OpenServiceTests(unittest.IsolatedAsyncioTestCase):
     async def test_identity_mismatch_retires_and_reports(self) -> None:
         retired: list[str] = []
 
-        def _retire(catalog, host, entry, **_kwargs):
+        def _retire(catalog, host, entry, *_args, **_kwargs):
             retired.append(entry.id)
 
         with (
@@ -866,10 +903,12 @@ class OpenServiceTests(unittest.IsolatedAsyncioTestCase):
             operation = await self.service.open(
                 "pi",
                 self.key_token,
-                request_id="req-6",
-                expected_identity_digest=self._digest(),
-                cwd=None,
-                launch_context={},
+                OpenRequest(
+                    request_id="req-6",
+                    expected_identity_digest=self._digest(),
+                    cwd=None,
+                    launch_context={},
+                ),
             )
         assert operation.outcome == "identity-mismatch"
         assert operation.rollback == "retired"
@@ -903,10 +942,12 @@ class OpenServiceTests(unittest.IsolatedAsyncioTestCase):
             operation = await self.service.open(
                 "pi",
                 self.key_token,
-                request_id="req-7",
-                expected_identity_digest=self._digest(),
-                cwd=None,
-                launch_context={},
+                OpenRequest(
+                    request_id="req-7",
+                    expected_identity_digest=self._digest(),
+                    cwd=None,
+                    launch_context={},
+                ),
             )
             assert operation.outcome == "timeout-unknown"
             assert operation.phase == "catalog-wait"
@@ -934,19 +975,23 @@ class OpenServiceTests(unittest.IsolatedAsyncioTestCase):
                 await self.service.open(
                     "pi",
                     self.key_token,
-                    request_id=f"req-live-{index}",
-                    expected_identity_digest=self._digest(),
-                    cwd=None,
-                    launch_context={},
+                    OpenRequest(
+                        request_id=f"req-live-{index}",
+                        expected_identity_digest=self._digest(),
+                        cwd=None,
+                        launch_context={},
+                    ),
                 )
             with self.assertRaises(OpenLedgerFullError):
                 await self.service.open(
                     "pi",
                     self.key_token,
-                    request_id="req-live-overflow",
-                    expected_identity_digest=self._digest(),
-                    cwd=None,
-                    launch_context={},
+                    OpenRequest(
+                        request_id="req-live-overflow",
+                        expected_identity_digest=self._digest(),
+                        cwd=None,
+                        launch_context={},
+                    ),
                 )
         assert self.ledger.retained_record_count == 4
 
@@ -967,18 +1012,22 @@ class OpenServiceTests(unittest.IsolatedAsyncioTestCase):
                 await self.service.open(
                     "pi",
                     self.key_token,
-                    request_id=f"req-done-{index}",
-                    expected_identity_digest=self._digest(),
-                    cwd=None,
-                    launch_context={},
+                    OpenRequest(
+                        request_id=f"req-done-{index}",
+                        expected_identity_digest=self._digest(),
+                        cwd=None,
+                        launch_context={},
+                    ),
                 )
             operation = await self.service.open(
                 "pi",
                 self.key_token,
-                request_id="req-done-fresh",
-                expected_identity_digest=self._digest(),
-                cwd=None,
-                launch_context={},
+                OpenRequest(
+                    request_id="req-done-fresh",
+                    expected_identity_digest=self._digest(),
+                    cwd=None,
+                    launch_context={},
+                ),
             )
             assert operation.outcome == "opened"
         assert self.ledger.retained_record_count == 4
@@ -999,10 +1048,12 @@ class OpenServiceTests(unittest.IsolatedAsyncioTestCase):
             operation = await self.service.open(
                 "pi",
                 self.key_token,
-                request_id="req-novendor",
-                expected_identity_digest=self._digest(),
-                cwd=None,
-                launch_context={},
+                OpenRequest(
+                    request_id="req-novendor",
+                    expected_identity_digest=self._digest(),
+                    cwd=None,
+                    launch_context={},
+                ),
             )
         assert operation.outcome == "timeout-unknown"
         assert operation.identity is None
@@ -1030,10 +1081,12 @@ class OpenServiceTests(unittest.IsolatedAsyncioTestCase):
         await self.service.open(
             "pi",
             self.key_token,
-            request_id="req-8",
-            expected_identity_digest=self._digest(),
-            cwd=None,
-            launch_context={},
+            OpenRequest(
+                request_id="req-8",
+                expected_identity_digest=self._digest(),
+                cwd=None,
+                launch_context={},
+            ),
         )
         after = self.catalog.get("other-session")
         assert after == before

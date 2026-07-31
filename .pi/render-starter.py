@@ -1,19 +1,32 @@
 #!/usr/bin/env python3
 """Render the Pi.dev Agents Remember starter package for one workspace."""
 
+# Generated file -- do not edit.
+# Source: scripts/harness/render_starter.py
+# Regenerate: python3 scripts/sync-harness.py
+
 from __future__ import annotations
 
 import argparse
 import json
+from collections.abc import Callable
 from pathlib import Path
 
+HARNESS_LABEL = "Pi.dev"
 PATH_PLACEHOLDER = "<PATH/TO/YOUR/PROJECTS_FOLDER>"
 REPO_PLACEHOLDER = "<YOUR_REPOSITORY_FOLDER_NAME>"
+PLACEHOLDERS = (
+    PATH_PLACEHOLDER,
+    REPO_PLACEHOLDER,
+)
 TARGET_FILES = (
     "mcp.json",
     "mcp/agents-remember-settings.json",
     "extensions/agents-remember-start.ts",
 )
+
+
+Renderer = Callable[[Path, Path, list[str]], None]
 
 
 def infer_workspace_root(script_root: Path) -> Path:
@@ -56,27 +69,28 @@ def render_settings(path: Path, workspace_root: Path, repos: list[str]) -> None:
     path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8", newline="\n")
 
 
-def validate(script_root: Path) -> None:
+def validate(*groups: tuple[Path, tuple[str, ...]]) -> None:
     unresolved: list[str] = []
-    for relative in TARGET_FILES:
-        path = script_root / relative
-        text = path.read_text(encoding="utf-8")
-        if any(marker in text for marker in (PATH_PLACEHOLDER, REPO_PLACEHOLDER)):
-            unresolved.append(path.as_posix())
+    for root, relatives in groups:
+        for relative in relatives:
+            path = root / relative
+            text = path.read_text(encoding="utf-8")
+            if any(marker in text for marker in PLACEHOLDERS):
+                unresolved.append(path.as_posix())
     if unresolved:
         joined = "\n".join(unresolved)
         raise SystemExit(f"unresolved starter placeholders remain:\n{joined}")
 
 
-def render(script_root: Path, workspace_root: Path, repos: list[str]) -> None:
+def render_pi(script_root: Path, workspace_root: Path, repos: list[str]) -> None:
     replacements = {PATH_PLACEHOLDER: workspace_root.as_posix()}
     replace_text(script_root / "mcp.json", replacements)
     replace_text(script_root / "extensions" / "agents-remember-start.ts", replacements)
     render_settings(script_root / "mcp" / "agents-remember-settings.json", workspace_root, repos)
-    validate(script_root)
+    validate((script_root, TARGET_FILES))
 
 
-def main() -> None:
+def main(render: Renderer) -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--repo",
@@ -91,8 +105,8 @@ def main() -> None:
     workspace_root = infer_workspace_root(script_root)
     repos = repository_ids(workspace_root, args.repo)
     render(script_root, workspace_root, repos)
-    print(f"Rendered Pi.dev starter for {workspace_root.as_posix()}")
+    print(f"Rendered {HARNESS_LABEL} starter for {workspace_root.as_posix()}")
 
 
 if __name__ == "__main__":
-    main()
+    main(render_pi)

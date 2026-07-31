@@ -19,7 +19,7 @@ from pathlib import Path
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
-from agents_remember.observer.ambient import AmbientLifecycle, build_ask
+from agents_remember.observer.ambient import AmbientLifecycle, AmbientTiming, build_ask
 from agents_remember.observer.events import Event
 from agents_remember.observer.lifecycle_state import (
     GuardedStartError,
@@ -43,7 +43,7 @@ class _AmbientCase(unittest.TestCase):
         self.root = Path(self._dir.name)
         self.store = EventStore(self.root)
         # A long heartbeat keeps these tests deterministic (no ticker noise).
-        self.amb = AmbientLifecycle(self.store, heartbeat_seconds=3600)
+        self.amb = AmbientLifecycle(self.store, timing=AmbientTiming(heartbeat_seconds=3600))
 
     def tearDown(self) -> None:
         self.amb.shutdown()
@@ -253,7 +253,7 @@ class HeartbeatTests(unittest.TestCase):
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         store = EventStore(Path(tmp.name))
-        amb = AmbientLifecycle(store, heartbeat_seconds=0.02)
+        amb = AmbientLifecycle(store, timing=AmbientTiming(heartbeat_seconds=0.02))
         self.addCleanup(amb.shutdown)
         lc = amb.start()
         time.sleep(0.2)
@@ -268,7 +268,9 @@ class HeartbeatTests(unittest.TestCase):
         store = EventStore(Path(tmp.name))
         clock = [datetime(2026, 1, 1, tzinfo=UTC)]
         amb = AmbientLifecycle(
-            store, heartbeat_seconds=3600, inactivity_cutoff_seconds=600, clock=lambda: clock[0]
+            store,
+            timing=AmbientTiming(heartbeat_seconds=3600, inactivity_cutoff_seconds=600),
+            clock=lambda: clock[0],
         )
         self.addCleanup(amb.shutdown)
         amb.start()  # lifecycle.started records the first real activity at T0
@@ -296,7 +298,9 @@ class HeartbeatTests(unittest.TestCase):
         store = EventStore(Path(tmp.name))
         clock = [datetime(2026, 1, 1, tzinfo=UTC)]
         amb = AmbientLifecycle(
-            store, heartbeat_seconds=0.02, inactivity_cutoff_seconds=5.0, clock=lambda: clock[0]
+            store,
+            timing=AmbientTiming(heartbeat_seconds=0.02, inactivity_cutoff_seconds=5.0),
+            clock=lambda: clock[0],
         )
         self.addCleanup(amb.shutdown)
         lc = amb.start()

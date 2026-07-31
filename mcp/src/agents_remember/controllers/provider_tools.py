@@ -96,6 +96,62 @@ class WorktreeProviderTarget:
     settings_path: Path
 
 
+@dataclass(frozen=True)
+class ProviderQueryScope:
+    """Where a provider query runs and under what execution budget.
+
+    Every CGC/GrepAI query answers the same three questions before it can run: which
+    provider stack answers it (``worktree`` names a worktree's isolated stack; omitted,
+    the single per-repo stack or the workspace stack is used), whether the provider CLI
+    is actually invoked or only planned, and how long the run may take.
+    """
+
+    worktree: str | None = None
+    dry_run: bool = False
+    timeout: int | None = None
+
+
+@dataclass(frozen=True)
+class GrepaiRepoScope:
+    """Which indexed repos a GrepAI query spans.
+
+    Either an explicit set of configured repo ids, or -- when none are named -- the
+    whole workspace, which ``all_repos`` must permit.
+    """
+
+    repo_ids: list[str] | None = None
+    all_repos: bool = True
+
+
+WORKSPACE_QUERY_SCOPE = ProviderQueryScope()
+"""The default scope: the workspace provider stack, run for real, on the default timeout."""
+
+ALL_INDEXED_REPOS = GrepaiRepoScope()
+"""The default GrepAI corpus: every repo the workspace stack has indexed."""
+
+
+@dataclass(frozen=True)
+class GrepaiSearchQuery:
+    """One GrepAI semantic search: what to look for, how many hits, and how they come back."""
+
+    query: str
+    limit: int = 10
+    output_format: str = "json"
+
+
+@dataclass(frozen=True)
+class GrepaiTraceQuery:
+    """One GrepAI relationship trace: which edge kind to follow from which symbol.
+
+    ``depth`` bounds the walk and is only meaningful for ``trace_action='graph'``.
+    """
+
+    trace_action: str
+    symbol: str
+    depth: int | None = None
+    output_format: str = "json"
+
+
 def _worktree_provider_targets(config: McpRuntimeConfig) -> list[WorktreeProviderTarget]:
     """Discover worktree provider stacks from `worktrees/<repo>/<group>/provider-runtime`.
 
@@ -184,110 +240,97 @@ def _load_worktree_grepai_provider(settings_path: Path) -> dict[str, Any]:
     return provider
 
 
-def grepai_search_tool(
+def _grepai_target(
     config: McpRuntimeConfig,
-    *,
-    query: str,
-    repo_ids: list[str] | None = None,
-    all_repos: bool = True,
-    limit: int = 10,
-    output_format: str = "json",
-    dry_run: bool = False,
-    timeout: int | None = None,
-    worktree: str | None = None,
-) -> dict[str, Any]:
-    target = _resolve_worktree_target(
+    repos: GrepaiRepoScope,
+    scope: ProviderQueryScope,
+) -> WorktreeProviderTarget | None:
+    return _resolve_worktree_target(
         config,
-        repo_id=repo_ids[0] if repo_ids and len(repo_ids) == 1 else None,
-        worktree=worktree,
+        repo_id=repos.repo_ids[0] if repos.repo_ids and len(repos.repo_ids) == 1 else None,
+        worktree=scope.worktree,
     )
-    selection = _grepai_project_selection(
-        config,
-        repo_ids=repo_ids,
-        all_repos=all_repos,
-        allow_multiple=True,
-        provider_settings=_load_worktree_grepai_provider(target.settings_path) if target else None,
-    )
-    native_args = [
-        "search",
-        _required_text(query, "query"),
-        "--workspace",
-        selection.workspace,
-        "--limit",
-        str(_positive_int(limit, "limit")),
-        _grepai_output_flag(output_format),
-    ]
-    for project_id in selection.project_ids:
-        native_args.extend(["--project", project_id])
-    return _provider_operation_result(
-        config,
-        operation="grepai_search",
-        dry_run=dry_run,
-        timeout=timeout,
-        launch_capable=True,
-        launch_capable_provider="grepai-memory",
-        settings_path_override=_worktree_settings_override(target),
+
+
+def _grepai_operation(operation: str, native_args: list[str]) -> ProviderOperation:
+    return ProviderOperation(
+        operation=operation,
+        required_provider="grepai-memory",
         run=lambda service_config: lifecycle_service.run_grepai_lifecycle(
             service_config,
             action="run",
             native_args=native_args,
         ),
+    )
+
+
+def grepai_search_tool(
+    config: McpRuntimeConfig,
+    *,
+    query: GrepaiSearchQuery,
+    repos: GrepaiRepoScope = ALL_INDEXED_REPOS,
+    scope: ProviderQueryScope = WORKSPACE_QUERY_SCOPE,
+) -> dict[str, Any]:
+    target = _grepai_target(config, repos, scope)
+    selection = _grepai_project_selection(
+        config,
+        repos=repos,
+        allow_multiple=True,
+        provider_settings=_load_worktree_grepai_provider(target.settings_path) if target else None,
+    )
+    native_args = [
+        "search",
+        _required_text(query.query, "query"),
+        "--workspace",
+        selection.workspace,
+        "--limit",
+        str(_positive_int(query.limit, "limit")),
+        _grepai_output_flag(query.output_format),
+    ]
+    for project_id in selection.project_ids:
+        native_args.extend(["--project", project_id])
+    return _provider_operation_result(
+        config,
+        _grepai_operation("grepai_search", native_args),
+        scope=scope,
+        target=target,
     )
 
 
 def grepai_trace_tool(
     config: McpRuntimeConfig,
     *,
-    trace_action: str,
-    symbol: str,
-    repo_ids: list[str] | None = None,
-    all_repos: bool = True,
-    depth: int | None = None,
-    output_format: str = "json",
-    dry_run: bool = False,
-    timeout: int | None = None,
-    worktree: str | None = None,
+    trace: GrepaiTraceQuery,
+    repos: GrepaiRepoScope = ALL_INDEXED_REPOS,
+    scope: ProviderQueryScope = WORKSPACE_QUERY_SCOPE,
 ) -> dict[str, Any]:
-    action = _grepai_trace_action(trace_action)
-    if depth is not None and action != "graph":
+    action = _grepai_trace_action(trace.trace_action)
+    if trace.depth is not None and action != "graph":
         raise ValueError("grepai_trace depth is only supported for trace_action='graph'")
-    target = _resolve_worktree_target(
-        config,
-        repo_id=repo_ids[0] if repo_ids and len(repo_ids) == 1 else None,
-        worktree=worktree,
-    )
+    target = _grepai_target(config, repos, scope)
     selection = _grepai_project_selection(
         config,
-        repo_ids=repo_ids,
-        all_repos=all_repos,
+        repos=repos,
         allow_multiple=False,
         provider_settings=_load_worktree_grepai_provider(target.settings_path) if target else None,
     )
     native_args = [
         "trace",
         action,
-        _required_text(symbol, "symbol"),
+        _required_text(trace.symbol, "symbol"),
         "--workspace",
         selection.workspace,
-        _grepai_output_flag(output_format),
+        _grepai_output_flag(trace.output_format),
     ]
-    if depth is not None:
-        native_args.extend(["--depth", str(_positive_int(depth, "depth"))])
+    if trace.depth is not None:
+        native_args.extend(["--depth", str(_positive_int(trace.depth, "depth"))])
     for project_id in selection.project_ids:
         native_args.extend(["--project", project_id])
     return _provider_operation_result(
         config,
-        operation="grepai_trace",
-        dry_run=dry_run,
-        timeout=timeout,
-        launch_capable=True,
-        launch_capable_provider="grepai-memory",
-        settings_path_override=_worktree_settings_override(target),
-        run=lambda service_config: lifecycle_service.run_grepai_lifecycle(
-            service_config,
-            action="run",
-            native_args=native_args,
-        ),
+        _grepai_operation("grepai_trace", native_args),
+        scope=scope,
+        target=target,
     )
 
 
@@ -296,18 +339,14 @@ def cgc_symbol_search_tool(
     *,
     repo_id: str,
     name: str,
-    dry_run: bool = False,
-    timeout: int | None = None,
-    worktree: str | None = None,
+    scope: ProviderQueryScope = WORKSPACE_QUERY_SCOPE,
 ) -> dict[str, Any]:
     return _cgc_run_tool(
         config,
         operation="cgc_symbol_search",
         repo_id=repo_id,
         native_args=["find", "name", _required_text(name, "name")],
-        dry_run=dry_run,
-        timeout=timeout,
-        worktree=worktree,
+        scope=scope,
     )
 
 
@@ -317,9 +356,7 @@ def cgc_callers_tool(
     repo_id: str,
     function: str,
     file: str | None = None,
-    dry_run: bool = False,
-    timeout: int | None = None,
-    worktree: str | None = None,
+    scope: ProviderQueryScope = WORKSPACE_QUERY_SCOPE,
 ) -> dict[str, Any]:
     native_args = ["analyze", "callers", _required_text(function, "function")]
     if file:
@@ -329,9 +366,7 @@ def cgc_callers_tool(
         operation="cgc_callers",
         repo_id=repo_id,
         native_args=native_args,
-        dry_run=dry_run,
-        timeout=timeout,
-        worktree=worktree,
+        scope=scope,
     )
 
 
@@ -340,18 +375,14 @@ def cgc_callees_tool(
     *,
     repo_id: str,
     function: str,
-    dry_run: bool = False,
-    timeout: int | None = None,
-    worktree: str | None = None,
+    scope: ProviderQueryScope = WORKSPACE_QUERY_SCOPE,
 ) -> dict[str, Any]:
     return _cgc_run_tool(
         config,
         operation="cgc_callees",
         repo_id=repo_id,
         native_args=["analyze", "calls", _required_text(function, "function")],
-        dry_run=dry_run,
-        timeout=timeout,
-        worktree=worktree,
+        scope=scope,
     )
 
 
@@ -360,18 +391,14 @@ def cgc_dependencies_tool(
     *,
     repo_id: str,
     module: str,
-    dry_run: bool = False,
-    timeout: int | None = None,
-    worktree: str | None = None,
+    scope: ProviderQueryScope = WORKSPACE_QUERY_SCOPE,
 ) -> dict[str, Any]:
     return _cgc_run_tool(
         config,
         operation="cgc_dependencies",
         repo_id=repo_id,
         native_args=["analyze", "deps", _required_text(module, "module")],
-        dry_run=dry_run,
-        timeout=timeout,
-        worktree=worktree,
+        scope=scope,
     )
 
 
@@ -380,9 +407,7 @@ def cgc_complexity_tool(
     *,
     repo_id: str,
     function: str | None = None,
-    dry_run: bool = False,
-    timeout: int | None = None,
-    worktree: str | None = None,
+    scope: ProviderQueryScope = WORKSPACE_QUERY_SCOPE,
 ) -> dict[str, Any]:
     native_args = ["analyze", "complexity"]
     if function:
@@ -392,9 +417,7 @@ def cgc_complexity_tool(
         operation="cgc_complexity",
         repo_id=repo_id,
         native_args=native_args,
-        dry_run=dry_run,
-        timeout=timeout,
-        worktree=worktree,
+        scope=scope,
     )
 
 
@@ -404,27 +427,27 @@ def cgc_visualize_tool(
     repo_id: str,
     port: int = 8000,
     context: str | None = None,
-    dry_run: bool = False,
-    timeout: int | None = None,
-    worktree: str | None = None,
+    scope: ProviderQueryScope = WORKSPACE_QUERY_SCOPE,
 ) -> dict[str, Any]:
     require_repo(config, repo_id)
-    target = _resolve_worktree_target(config, repo_id=repo_id, worktree=worktree)
+    target = _resolve_worktree_target(config, repo_id=repo_id, worktree=scope.worktree)
     return _provider_operation_result(
         config,
-        operation="cgc_visualize",
-        dry_run=dry_run,
-        timeout=timeout,
-        launch_capable=True,
-        launch_capable_provider="codegraphcontext-code",
-        settings_path_override=_worktree_settings_override(target),
-        run=lambda service_config: lifecycle_service.run_cgc_lifecycle(
-            service_config,
-            action="visualize",
-            repo_id=repo_id,
-            port=port,
-            context=context,
+        ProviderOperation(
+            operation="cgc_visualize",
+            required_provider="codegraphcontext-code",
+            run=lambda service_config: lifecycle_service.run_cgc_lifecycle(
+                service_config,
+                lifecycle_service.CgcLifecycleRequest(
+                    action="visualize",
+                    repo_id=repo_id,
+                    port=port,
+                    context=context,
+                ),
+            ),
         ),
+        scope=scope,
+        target=target,
     )
 
 
@@ -434,26 +457,26 @@ def _cgc_run_tool(
     operation: str,
     repo_id: str,
     native_args: list[str],
-    dry_run: bool,
-    timeout: int | None,
-    worktree: str | None = None,
+    scope: ProviderQueryScope,
 ) -> dict[str, Any]:
     require_repo(config, repo_id)
-    target = _resolve_worktree_target(config, repo_id=repo_id, worktree=worktree)
+    target = _resolve_worktree_target(config, repo_id=repo_id, worktree=scope.worktree)
     return _provider_operation_result(
         config,
-        operation=operation,
-        dry_run=dry_run,
-        timeout=timeout,
-        launch_capable=True,
-        launch_capable_provider="codegraphcontext-code",
-        settings_path_override=_worktree_settings_override(target),
-        run=lambda service_config: lifecycle_service.run_cgc_lifecycle(
-            service_config,
-            action="run",
-            repo_id=repo_id,
-            native_args=native_args,
+        ProviderOperation(
+            operation=operation,
+            required_provider="codegraphcontext-code",
+            run=lambda service_config: lifecycle_service.run_cgc_lifecycle(
+                service_config,
+                lifecycle_service.CgcLifecycleRequest(
+                    action="run",
+                    repo_id=repo_id,
+                    native_args=tuple(native_args),
+                ),
+            ),
         ),
+        scope=scope,
+        target=target,
     )
 
 
@@ -472,8 +495,7 @@ class GrepaiProjectSelection:
 def _grepai_project_selection(
     config: McpRuntimeConfig,
     *,
-    repo_ids: list[str] | None,
-    all_repos: bool,
+    repos: GrepaiRepoScope,
     allow_multiple: bool,
     provider_settings: dict[str, Any] | None = None,
 ) -> GrepaiProjectSelection:
@@ -486,9 +508,9 @@ def _grepai_project_selection(
         "grepai workspace",
     )
     project_by_repo = _grepai_project_ids_by_repo(config, provider_settings)
-    selected_repo_ids = _canonical_repo_ids(config, _normalized_repo_ids(repo_ids))
+    selected_repo_ids = _canonical_repo_ids(config, _normalized_repo_ids(repos.repo_ids))
     if not selected_repo_ids:
-        return _grepai_workspace_selection(workspace, all_repos)
+        return _grepai_workspace_selection(workspace, repos.all_repos)
 
     _validate_grepai_project_selection(
         config,
@@ -643,13 +665,14 @@ def _provider_watchers_once(
 ) -> dict[str, Any]:
     payload = _provider_operation_result(
         config,
-        operation="provider_watchers",
-        dry_run=dry_run,
-        timeout=None,
-        run=lambda service_config: lifecycle_service.run_watchers_lifecycle(
-            service_config,
-            action=action,
+        ProviderOperation(
+            operation="provider_watchers",
+            run=lambda service_config: lifecycle_service.run_watchers_lifecycle(
+                service_config,
+                action=action,
+            ),
         ),
+        scope=ProviderQueryScope(dry_run=dry_run),
     )
     if action == "status" and payload.get("provider") == "watchers":
         current_state = write_current_provider_state(config, payload)
@@ -667,30 +690,33 @@ def _provider_invalidate_indexes(config: McpRuntimeConfig, *, dry_run: bool) -> 
     'restart' instead when the goal is only to bring a sleeping watcher back up to date.
     """
     steps: list[dict[str, Any]] = []
+    scope = ProviderQueryScope(dry_run=dry_run)
     if "grepai-memory" in config.providers:
         steps.append(
             _provider_operation_result(
                 config,
-                operation="provider_watchers",
-                dry_run=dry_run,
-                timeout=None,
-                run=lambda service_config: lifecycle_service.run_grepai_lifecycle(
-                    service_config,
-                    action="refresh",
+                ProviderOperation(
+                    operation="provider_watchers",
+                    run=lambda service_config: lifecycle_service.run_grepai_lifecycle(
+                        service_config,
+                        action="refresh",
+                    ),
                 ),
+                scope=scope,
             )
         )
     if "codegraphcontext-code" in config.providers:
         steps.append(
             _provider_operation_result(
                 config,
-                operation="provider_watchers",
-                dry_run=dry_run,
-                timeout=None,
-                run=lambda service_config: lifecycle_service.run_cgc_lifecycle(
-                    service_config,
-                    action="refresh-all",
+                ProviderOperation(
+                    operation="provider_watchers",
+                    run=lambda service_config: lifecycle_service.run_cgc_lifecycle(
+                        service_config,
+                        lifecycle_service.CgcLifecycleRequest(action="refresh-all"),
+                    ),
                 ),
+                scope=scope,
             )
         )
     return {
@@ -707,29 +733,43 @@ ProviderLifecycleRunner = Callable[
 ]
 
 
+@dataclass(frozen=True)
+class ProviderOperation:
+    """One provider-CLI call behind a tool.
+
+    ``operation`` is the tool name the result is stamped with, ``run`` performs the
+    call against a resolved lifecycle-service config, and ``required_provider`` names
+    the provider whose on-disk launch authority must be armed first. A ``None``
+    ``required_provider`` marks an operation that needs no launch authority (stop and
+    status are always legal), so no authority reload happens for it.
+    """
+
+    operation: str
+    run: ProviderLifecycleRunner
+    required_provider: str | None = None
+
+
 def _provider_operation_result(
     config: McpRuntimeConfig,
+    operation: ProviderOperation,
     *,
-    operation: str,
-    dry_run: bool = False,
-    timeout: int | None = None,
-    run: ProviderLifecycleRunner,
-    settings_path_override: Path | None = None,
-    launch_capable: bool = False,
-    launch_capable_provider: str | None = None,
+    scope: ProviderQueryScope = WORKSPACE_QUERY_SCOPE,
+    target: WorktreeProviderTarget | None = None,
 ) -> dict[str, Any]:
-    if launch_capable:
+    settings_path_override = _worktree_settings_override(target)
+    if operation.required_provider is not None:
         # Containment R1 (260707-HFX-L1): query/run ops spin one-shot runner
         # containers, and a worktree's persisted settings file is stamped
         # enabled:true forever — neither is launch authority. The live on-disk
         # providers map gates both; with an override the worktree's own stack
         # settings still drive the run, but only under an armed authority.
         # Review note: the SPECIFIC provider must be armed, not just any.
-        live = require_provider_launch_authority(config, operation=operation)
-        if launch_capable_provider and launch_capable_provider not in live.providers:
+        live = require_provider_launch_authority(config, operation=operation.operation)
+        if operation.required_provider not in live.providers:
             raise ConfigError(
-                f"{operation} refused: provider {launch_capable_provider!r} is not enabled "
-                f"in the on-disk authority settings ({config.config_path}) (containment R1)"
+                f"{operation.operation} refused: provider {operation.required_provider!r} is not "
+                f"enabled in the on-disk authority settings ({config.config_path}) "
+                "(containment R1)"
             )
         if settings_path_override is None:
             config = live
@@ -746,11 +786,11 @@ def _provider_operation_result(
         service_config = lifecycle_service.ProviderLifecycleServiceConfig(
             coordination_root=config.coordination_root,
             settings_path=settings_path,
-            dry_run=dry_run,
-            timeout=timeout or DEFAULT_DOCKER_CONTROL_SECONDS,
+            dry_run=scope.dry_run,
+            timeout=scope.timeout or DEFAULT_DOCKER_CONTROL_SECONDS,
         )
-        data = run(service_config)
-        payload = {**data, "operation": operation, "ok": bool(data.get("ok"))}
+        data = operation.run(service_config)
+        payload = {**data, "operation": operation.operation, "ok": bool(data.get("ok"))}
         if not owns_settings:
             payload["worktreeScoped"] = True
         return payload

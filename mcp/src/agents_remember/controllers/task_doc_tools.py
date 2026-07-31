@@ -10,6 +10,8 @@ schema before it is written.
 from __future__ import annotations
 
 import difflib
+from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -83,27 +85,55 @@ class TaskDocError(AgentsRememberError):
     """Raised when a task-document operation cannot be completed."""
 
 
+@dataclass(frozen=True)
+class TaskDocTarget:
+    """Which task document a ``task_doc`` call addresses.
+
+    The task itself is located from the repo plus either its name or its contract
+    path; ``slug`` then picks the document inside that task root (the leaf's own
+    ``task.json`` by default).
+    """
+
+    repo_id: str
+    task_name: str | None = None
+    contract_path: str | None = None
+    slug: str | None = None
+
+
+@dataclass(frozen=True)
+class TaskDocEdit:
+    """The single edit a ``task_doc`` call applies, in the shape the operation names.
+
+    Each operation draws from exactly one of these: ``set_status``/``set_field`` from
+    ``fields``, ``set_step`` from ``step``, and so on. The rest stay unset.
+    """
+
+    fields: dict[str, Any] | None = None
+    step: dict[str, Any] | None = None
+    decision: dict[str, Any] | None = None
+    subtask: dict[str, Any] | None = None
+    section: dict[str, Any] | None = None
+
+
+NO_EDIT = TaskDocEdit()
+"""The read-only form, for operations (``get``) that change nothing."""
+
+
 def task_doc_tool(
     config: McpRuntimeConfig,
+    target: TaskDocTarget,
     *,
-    repo_id: str,
     operation: str,
-    task_name: str | None = None,
-    contract_path: str | None = None,
-    slug: str | None = None,
-    fields: dict[str, Any] | None = None,
-    step: dict[str, Any] | None = None,
-    decision: dict[str, Any] | None = None,
-    subtask: dict[str, Any] | None = None,
-    section: dict[str, Any] | None = None,
+    edit: TaskDocEdit = NO_EDIT,
     dry_run: bool = False,
 ) -> dict[str, Any]:
     if operation not in VALID_OPERATIONS:
         raise TaskDocError(
             f"unknown operation {operation!r}; expected one of {', '.join(VALID_OPERATIONS)}"
         )
-    task_root, contract = _resolve(config, repo_id, task_name, contract_path)
-    payload_fields = fields or {}
+    task_root, contract = _resolve(config, target.repo_id, target.task_name, target.contract_path)
+    payload_fields = edit.fields or {}
+    slug = target.slug
 
     if operation == "get":
         json_path = _existing_json(task_root, slug)
@@ -111,7 +141,7 @@ def task_doc_tool(
         return _result(operation, doc, json_path, markdown_path_for(task_root, doc))
 
     if operation == "remove_subtask":
-        return _remove_subtask(task_root, slug, subtask, dry_run)
+        return _remove_subtask(task_root, slug, edit.subtask, dry_run)
 
     if operation == "create":
         doc = _create(payload_fields, contract, task_root)
@@ -119,15 +149,7 @@ def task_doc_tool(
         json_path = _existing_json(task_root, slug)
         doc = _replace(payload_fields, contract, task_root, json_path)
     else:
-        doc = _apply(
-            operation,
-            read_task_doc(_existing_json(task_root, slug)),
-            fields=payload_fields,
-            step=step,
-            decision=decision,
-            subtask=subtask,
-            section=section,
-        )
+        doc = _apply(operation, read_task_doc(_existing_json(task_root, slug)), edit)
 
     try:
         master_sync = plan_master_sync(task_root, doc)
@@ -251,52 +273,92 @@ def _build_doc(
     return _validate(data)
 
 
-def _apply(
-    operation: str,
-    doc: TaskDocument,
-    *,
-    fields: dict[str, Any],
-    step: dict[str, Any] | None,
-    decision: dict[str, Any] | None,
-    subtask: dict[str, Any] | None,
-    section: dict[str, Any] | None,
-) -> TaskDocument:
+@dataclass(frozen=True)
+class _Edit:
+    """The one edit payload bundle an ``_apply`` operation may draw from."""
+
+    kind: str
+    fields: dict[str, Any]
+    step: dict[str, Any] | None
+    decision: dict[str, Any] | None
+    subtask: dict[str, Any] | None
+    section: dict[str, Any] | None
+
+
+def _apply_set_status(data: dict[str, Any], edit: _Edit) -> None:
+    status = edit.fields.get("status")
+    if status is None:
+        raise TaskDocError("set_status requires fields.status")
+    data["status"] = status
+
+
+def _apply_set_field(data: dict[str, Any], edit: _Edit) -> None:
+    updates = {key: value for key, value in edit.fields.items() if key in _MUTABLE_FIELDS}
+    if not updates:
+        raise TaskDocError(
+            f"set_field requires at least one of: {', '.join(sorted(_MUTABLE_FIELDS))}"
+        )
+    data.update(updates)
+
+
+def _apply_set_step(data: dict[str, Any], edit: _Edit) -> None:
+    if edit.kind == "master":
+        raise TaskDocError("set_step is not valid for a master; use set_subtask")
+    if not edit.step:
+        raise TaskDocError("set_step requires a step object")
+    _upsert_step(data, edit.step)
+
+
+def _apply_set_subtask(data: dict[str, Any], edit: _Edit) -> None:
+    if edit.kind != "master":
+        raise TaskDocError("set_subtask is only valid for a master document")
+    if not edit.subtask:
+        raise TaskDocError("set_subtask requires a subtask object")
+    _upsert_subtask(data, edit.subtask)
+
+
+def _apply_set_section(data: dict[str, Any], edit: _Edit) -> None:
+    if not edit.section:
+        raise TaskDocError("set_section requires a section object")
+    # A leaf doc may carry freeform sections (R4); the schema validator backstops the
+    # leaf "freeform only" rule, so there is no master-only gate here (unlike set_subtask).
+    _upsert_section(data, edit.section)
+
+
+def _apply_append_decision(data: dict[str, Any], edit: _Edit) -> None:
+    if not edit.decision:
+        raise TaskDocError("append_decision requires a decision object")
+    decisions: list[dict[str, Any]] = data.setdefault("decisions", [])
+    decisions.append(edit.decision)
+
+
+# Operations that mutate an existing document in place. Anything absent here (create,
+# replace, get, remove_subtask, reopen) is handled before `_apply` and re-validates unchanged.
+_MUTATIONS: dict[str, Callable[[dict[str, Any], _Edit], None]] = {
+    "set_status": _apply_set_status,
+    "set_field": _apply_set_field,
+    "set_step": _apply_set_step,
+    "set_subtask": _apply_set_subtask,
+    "set_section": _apply_set_section,
+    "append_decision": _apply_append_decision,
+}
+
+
+def _apply(operation: str, doc: TaskDocument, edit: TaskDocEdit) -> TaskDocument:
     data = doc.model_dump(by_alias=True)
-    if operation == "set_status":
-        status = fields.get("status")
-        if status is None:
-            raise TaskDocError("set_status requires fields.status")
-        data["status"] = status
-    elif operation == "set_field":
-        updates = {key: value for key, value in fields.items() if key in _MUTABLE_FIELDS}
-        if not updates:
-            raise TaskDocError(
-                f"set_field requires at least one of: {', '.join(sorted(_MUTABLE_FIELDS))}"
-            )
-        data.update(updates)
-    elif operation == "set_step":
-        if doc.kind == "master":
-            raise TaskDocError("set_step is not valid for a master; use set_subtask")
-        if not step:
-            raise TaskDocError("set_step requires a step object")
-        _upsert_step(data, step)
-    elif operation == "set_subtask":
-        if doc.kind != "master":
-            raise TaskDocError("set_subtask is only valid for a master document")
-        if not subtask:
-            raise TaskDocError("set_subtask requires a subtask object")
-        _upsert_subtask(data, subtask)
-    elif operation == "set_section":
-        if not section:
-            raise TaskDocError("set_section requires a section object")
-        # A leaf doc may carry freeform sections (R4); the schema validator backstops the
-        # leaf "freeform only" rule, so there is no master-only gate here (unlike set_subtask).
-        _upsert_section(data, section)
-    elif operation == "append_decision":
-        if not decision:
-            raise TaskDocError("append_decision requires a decision object")
-        decisions: list[dict[str, Any]] = data.setdefault("decisions", [])
-        decisions.append(decision)
+    mutate = _MUTATIONS.get(operation)
+    if mutate is not None:
+        mutate(
+            data,
+            _Edit(
+                kind=doc.kind,
+                fields=edit.fields or {},
+                step=edit.step,
+                decision=edit.decision,
+                subtask=edit.subtask,
+                section=edit.section,
+            ),
+        )
     return _validate(data)
 
 

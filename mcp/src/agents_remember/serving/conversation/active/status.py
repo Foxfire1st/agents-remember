@@ -286,6 +286,23 @@ def _age_ms(last_evidence_at: str | None, now: str) -> int | None:
     return max(0, int((current - then).total_seconds() * 1000))
 
 
+@dataclass(frozen=True)
+class TurnTransition:
+    """One proposed turn-state change, and the evidence strength that justifies it.
+
+    The state, its turn, what it is waiting on and how it ended are one observation; the strength
+    is what decides whether this observation may overwrite the last one. Deciding them separately
+    is how a weak observation overwrites a strong one.
+    """
+
+    state: ConversationTurnState
+    strength: ProvenanceStrength
+    turn_id: str | None = None
+    reason: str | None = None
+    waiting: ConversationTurnWaiting | None = None
+    terminal_outcome: ConversationTurnOutcome | None = None
+
+
 class ConversationStatusService:
     """The revisioned canonical status authority for one exact active identity.
 
@@ -354,15 +371,17 @@ class ConversationStatusService:
             state = self._terminal_turn_state(terminal)
             return (
                 self._set_turn(
-                    state,
-                    turn_id=terminal.turn_id or self._turn.turn_id,
-                    strength="exact",
-                    reason="native turn settlement observed on the evidence stream",
-                    now=now,
-                    terminal_outcome=ConversationTurnOutcome(
-                        state=terminal.outcome,
-                        stop_reason=terminal.stop_reason,
+                    TurnTransition(
+                        state=state,
+                        strength="exact",
+                        turn_id=terminal.turn_id or self._turn.turn_id,
+                        reason="native turn settlement observed on the evidence stream",
+                        terminal_outcome=ConversationTurnOutcome(
+                            state=terminal.outcome,
+                            stop_reason=terminal.stop_reason,
+                        ),
                     ),
+                    now=now,
                 )
                 or changed
             )
@@ -378,35 +397,28 @@ class ConversationStatusService:
             )
             return (
                 self._set_turn(
-                    mapped,
-                    turn_id=classification.turn.turn_id,
-                    strength=classification.turn.strength,
-                    reason=classification.turn.reason,
+                    TurnTransition(
+                        state=mapped,
+                        strength=classification.turn.strength,
+                        turn_id=classification.turn.turn_id,
+                        reason=classification.turn.reason,
+                        waiting=self._waiting_for(classification.turn),
+                        terminal_outcome=outcome,
+                    ),
                     now=now,
-                    waiting=self._waiting_for(classification.turn),
-                    terminal_outcome=outcome,
                 )
                 or changed
             )
         return changed
 
-    def _set_turn(
-        self,
-        state: ConversationTurnState,
-        *,
-        turn_id: str | None,
-        strength: ProvenanceStrength,
-        reason: str | None,
-        now: str,
-        waiting: ConversationTurnWaiting | None = None,
-        terminal_outcome: ConversationTurnOutcome | None = None,
-    ) -> bool:
+    def _set_turn(self, transition: TurnTransition, *, now: str) -> bool:
+        strength, reason = transition.strength, transition.reason
         candidate = ConversationTurnStatus(
-            state=state,
-            turn_id=turn_id,
+            state=transition.state,
+            turn_id=transition.turn_id,
             state_since=self._turn.state_since,
-            waiting=waiting,
-            terminal_outcome=terminal_outcome,
+            waiting=transition.waiting,
+            terminal_outcome=transition.terminal_outcome,
         )
         if (
             candidate.state == self._turn.state

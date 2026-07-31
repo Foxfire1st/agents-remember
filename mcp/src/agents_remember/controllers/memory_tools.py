@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any
 
 from agents_remember.controllers._guards import require_repo, require_within_coordination
 from agents_remember.kernel.coordination_context_resolver import (
+    CoordinationHints,
+    EnclosureSelector,
     resolve_coordination_context,
 )
 from agents_remember.kernel.memory_init import initialize_memory
@@ -28,10 +31,12 @@ def drift_check_tool(
     context = resolve_coordination_context(
         code_repository_name=repo.repo_id,
         workspace_root=config.workspace_root,
-        coordination_root=config.coordination_root,
         code_repository_root=repo.path,
-        onboarding_root=(repo.memory_root / "onboarding") if repo.memory_root else None,
-        contract_path=repo.contract_path,
+        hints=CoordinationHints(
+            coordination_root=config.coordination_root,
+            onboarding_root=(repo.memory_root / "onboarding") if repo.memory_root else None,
+        ),
+        selector=EnclosureSelector(contract_path=repo.contract_path),
     )
     packet = run_drift_summary(
         code_repository_root=repo.path,
@@ -55,10 +60,11 @@ def memory_quality_check_tool(
     context = resolve_coordination_context(
         code_repository_name=repo.repo_id,
         workspace_root=config.workspace_root,
-        coordination_root=config.coordination_root,
         code_repository_root=repo.path,
-        onboarding_root=onboarding_root,
-        contract_path=repo.contract_path,
+        hints=CoordinationHints(
+            coordination_root=config.coordination_root, onboarding_root=onboarding_root
+        ),
+        selector=EnclosureSelector(contract_path=repo.contract_path),
     )
     payload = run_memory_quality_check(
         onboarding_root,
@@ -90,10 +96,11 @@ def route_index_refresh_tool(
     context = resolve_coordination_context(
         code_repository_name=repo.repo_id,
         workspace_root=config.workspace_root,
-        coordination_root=config.coordination_root,
         code_repository_root=repo.path,
-        onboarding_root=onboarding_root,
-        contract_path=repo.contract_path,
+        hints=CoordinationHints(
+            coordination_root=config.coordination_root, onboarding_root=onboarding_root
+        ),
+        selector=EnclosureSelector(contract_path=repo.contract_path),
     )
     result = build_route_indexes(
         code_root=repo.path,
@@ -126,6 +133,51 @@ def memory_init_tool(
     )
 
 
+@dataclass(frozen=True)
+class MemoryBranches:
+    """The external-memory repo's branch pair: the line adoption starts from and the line it
+    works on. Either side omitted falls back to the memory repo's configured default."""
+
+    source_branch: str | None = None
+    work_branch: str | None = None
+
+
+DEFAULT_MEMORY_BRANCHES = MemoryBranches()
+"""The memory repo's own configured branches -- neither side overridden by the caller."""
+
+
+@dataclass(frozen=True)
+class CarryoverSelection:
+    """Which branch memory is carried onto which landed code.
+
+    ``source_memory`` is the branch's memory repo; the three refs bound the landed
+    range the carryover is allowed to trust -- the official code tip memory already
+    describes, the source branch tip its memory describes, and the base the branch was
+    cut from. ``replace_existing`` decides whether landed entries may overwrite
+    official ones already present.
+    """
+
+    repo_id: str
+    source_memory: str
+    official_code_ref: str
+    source_code_ref: str
+    old_base: str
+    replace_existing: bool = False
+
+
+@dataclass(frozen=True)
+class CarryoverCommitMessages:
+    """The two commits an applied carryover writes: one in the official memory repo for the
+    carried onboarding, one in the ledger that records the carryover itself."""
+
+    memory: str = "Carry over landed branch memory"
+    ledger: str = "Record branch memory carryover"
+
+
+DEFAULT_CARRYOVER_MESSAGES = CarryoverCommitMessages()
+"""The standard carryover commit subjects, used when the caller supplies none."""
+
+
 def memory_baseline_status_tool(config: McpRuntimeConfig, *, repo_id: str) -> dict[str, Any]:
     repo = require_repo(config, repo_id)
     payload = baseline.baseline_status(_baseline_request(config, repo))
@@ -141,16 +193,15 @@ def memory_baseline_adopt_tool(
     *,
     repo_id: str,
     accept_drift: bool = False,
-    source_branch: str | None = None,
-    work_branch: str | None = None,
+    branches: MemoryBranches = DEFAULT_MEMORY_BRANCHES,
     dry_run: bool = False,
 ) -> dict[str, Any]:
     repo = require_repo(config, repo_id)
     returncode, payload = baseline.baseline_adopt(
         _baseline_request(config, repo),
         accept_drift=accept_drift,
-        source_branch=source_branch,
-        work_branch=work_branch,
+        source_branch=branches.source_branch,
+        work_branch=branches.work_branch,
         dry_run=dry_run,
     )
     return {"ok": returncode == 0, "operation": "memory_baseline_adopt", **payload}
@@ -158,55 +209,26 @@ def memory_baseline_adopt_tool(
 
 def memory_carryover_plan_tool(
     config: McpRuntimeConfig,
-    *,
-    repo_id: str,
-    source_memory: str,
-    official_code_ref: str,
-    source_code_ref: str,
-    old_base: str,
-    replace_existing: bool = False,
+    selection: CarryoverSelection,
 ) -> dict[str, Any]:
-    request = _carryover_request(
-        config,
-        repo_id=repo_id,
-        source_memory=source_memory,
-        official_code_ref=official_code_ref,
-        source_code_ref=source_code_ref,
-        old_base=old_base,
-        replace_existing=replace_existing,
-    )
-    payload = carryover.build_plan_for_request(request)
+    payload = carryover.build_plan_for_request(_carryover_request(config, selection))
     return {"ok": True, "operation": "memory_carryover_plan", **payload}
 
 
 def memory_carryover_apply_tool(
     config: McpRuntimeConfig,
+    selection: CarryoverSelection,
     *,
-    repo_id: str,
-    source_memory: str,
-    official_code_ref: str,
-    source_code_ref: str,
-    old_base: str,
     intent_note: str,
-    replace_existing: bool = False,
     include_review_required: list[str] | None = None,
-    memory_commit_message: str = "Carry over landed branch memory",
-    ledger_commit_message: str = "Record branch memory carryover",
+    messages: CarryoverCommitMessages = DEFAULT_CARRYOVER_MESSAGES,
 ) -> dict[str, Any]:
     payload = carryover.apply_carryover_for_request(
-        _carryover_request(
-            config,
-            repo_id=repo_id,
-            source_memory=source_memory,
-            official_code_ref=official_code_ref,
-            source_code_ref=source_code_ref,
-            old_base=old_base,
-            replace_existing=replace_existing,
-        ),
+        _carryover_request(config, selection),
         intent_note=intent_note,
         include_review_required=include_review_required,
-        memory_commit_message=memory_commit_message,
-        ledger_commit_message=ledger_commit_message,
+        memory_commit_message=messages.memory,
+        ledger_commit_message=messages.ledger,
     )
     return {"ok": True, "operation": "memory_carryover_apply", **payload}
 
@@ -223,25 +245,21 @@ def _baseline_request(config: McpRuntimeConfig, repo: RepositoryScope) -> baseli
 
 def _carryover_request(
     config: McpRuntimeConfig,
-    *,
-    repo_id: str,
-    source_memory: str,
-    official_code_ref: str,
-    source_code_ref: str,
-    old_base: str,
-    replace_existing: bool,
+    selection: CarryoverSelection,
 ) -> carryover.CarryoverRequest:
-    repo = require_repo(config, repo_id)
+    repo = require_repo(config, selection.repo_id)
     if repo.memory_root is None:
-        raise ValueError(f"repo_id {repo_id!r} does not have a memory root")
-    source_memory_path = require_within_coordination(config, source_memory, "source_memory")
+        raise ValueError(f"repo_id {selection.repo_id!r} does not have a memory root")
+    source_memory_path = require_within_coordination(
+        config, selection.source_memory, "source_memory"
+    )
     return carryover.CarryoverRequest(
         code_repository_root=repo.path,
-        official_code_ref=official_code_ref,
-        source_code_ref=source_code_ref,
-        old_base=old_base,
+        official_code_ref=selection.official_code_ref,
+        source_code_ref=selection.source_code_ref,
+        old_base=selection.old_base,
         official_memory=repo.memory_root,
         source_memory=source_memory_path,
         code_repository_name=repo.repo_id,
-        replace_existing=replace_existing,
+        replace_existing=selection.replace_existing,
     )

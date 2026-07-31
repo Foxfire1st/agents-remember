@@ -21,6 +21,9 @@ from agents_remember.kernel.memory_ledger import (
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.sync import sync_result
 from agents_remember.worktrees.worktree_contract import (
+    ContractTask,
+    LeafIdentity,
+    RepoBranchPlan,
     default_contract,
     load_contract,
     write_contract,
@@ -44,20 +47,26 @@ class SyncFixture:
         git(self.memory_repo, "commit", "-m", "Add memory ledger")
         self.memory_base = git(self.memory_repo, "rev-parse", "HEAD")
         self.contract = default_contract(
-            task_name="Sync Thing",
-            repo_name="repo-a",
-            workflow_kind="light-task",
-            memory_mode="external",
-            coordination_root=root / "ar-coordination",
-            code_repo_path=self.code_repo,
-            code_source_branch="main",
-            code_work_branch="ar/sync-thing",
-            code_base_commit=self.code_base,
-            worktree_name="sync-thing",
-            memory_repo_path=self.memory_repo,
-            memory_source_branch="main",
-            memory_work_branch="ar/sync-thing",
-            memory_base_commit=self.memory_base,
+            ContractTask(
+                name="Sync Thing",
+                repo_name="repo-a",
+                coordination_root=root / "ar-coordination",
+                workflow_kind="light-task",
+                memory_mode="external",
+            ),
+            leaf=LeafIdentity(worktree_name="sync-thing"),
+            code=RepoBranchPlan(
+                repo_path=self.code_repo,
+                source_branch="main",
+                work_branch="ar/sync-thing",
+                base_commit=self.code_base,
+            ),
+            memory=RepoBranchPlan(
+                repo_path=self.memory_repo,
+                source_branch="main",
+                work_branch="ar/sync-thing",
+                base_commit=self.memory_base,
+            ),
         )
         assert self.contract.memory_worktree is not None
         git(

@@ -37,6 +37,7 @@ from agents_remember.serving.conversation.control.service import (
     MAX_INTERRUPTS_PER_CHANNEL,
     CapabilityRefusedError,
     ControlChannel,
+    ControlRequest,
     ControlUnavailableError,
     ConversationControlService,
     OperationConflictError,
@@ -44,7 +45,6 @@ from agents_remember.serving.conversation.control.service import (
 )
 from agents_remember.serving.conversation.models import (
     ActiveConversationRef,
-    AuthorizationBinding,
     InterruptOperation,
     OperationFingerprint,
     operation_fingerprint,
@@ -55,6 +55,7 @@ from agents_remember.serving.harness_control_client import (
 )
 from agents_remember.serving.harness_control_models import (
     AR_TERMINAL_OUTCOME_KEY,
+    EvidenceFrame,
     InterruptResult,
 )
 from agents_remember.serving.terminal_catalog import TerminalCatalogEntry
@@ -92,15 +93,17 @@ class InterruptAnswer:
 
 
 async def interrupt(
-    service: ConversationControlService,
-    authorization: AuthorizationBinding,
-    ar_session_id: str,
+    request: ControlRequest,
     *,
-    expected_bridge_epoch: str,
     turn_id: str,
     request_id: str,
 ) -> InterruptOperation:
     """Request one exact-turn interrupt; idempotent under the caller's tuple."""
+
+    service = request.service
+    authorization = request.authorization
+    ar_session_id = request.ar_session_id
+    expected_bridge_epoch = request.expected_bridge_epoch
 
     entry = service.resolve_entry(ar_session_id)
     epoch = await service.verify_epoch(entry, expected_bridge_epoch)
@@ -142,26 +145,30 @@ async def interrupt(
             service,
             entry,
             identity,
-            fingerprint,
-            turn_id=turn_id,
-            request_id=request_id,
-            evidence_floor=snapshot.last_event_sequence,
+            InterruptTicket(
+                turn_id=turn_id,
+                request_id=request_id,
+                fingerprint=fingerprint,
+                evidence_floor=snapshot.last_event_sequence,
+            ),
         )
         _store(channel, record)
         return _projection(ar_session_id, epoch, record)
 
 
 async def interrupt_status(
-    service: ConversationControlService,
-    authorization: AuthorizationBinding,
-    ar_session_id: str,
+    request: ControlRequest,
     *,
-    expected_bridge_epoch: str,
     turn_id: str,
     request_id: str,
     reconcile: bool,
 ) -> InterruptOperation:
     """Read (and, for reconcile, actively re-drive) one interrupt operation."""
+
+    service = request.service
+    authorization = request.authorization
+    ar_session_id = request.ar_session_id
+    expected_bridge_epoch = request.expected_bridge_epoch
 
     entry = service.resolve_entry(ar_session_id)
     epoch = await service.verify_epoch(entry, expected_bridge_epoch)
@@ -194,16 +201,29 @@ async def interrupt_status(
     return _projection(ar_session_id, epoch, record)
 
 
+@dataclass(frozen=True)
+class InterruptTicket:
+    """The exact turn being interrupted and the request that is interrupting it.
+
+    The turn, the caller's request id, the fingerprint that makes the request idempotent and the
+    evidence floor the settlement is observed from are one attempt: a record stamped with one
+    attempt's fingerprint but another's evidence floor would settle against the wrong turn.
+    """
+
+    turn_id: str
+    request_id: str
+    fingerprint: OperationFingerprint
+    evidence_floor: int
+
+
 async def _drive_interrupt(
     service: ConversationControlService,
     entry: TerminalCatalogEntry,
     identity: ActiveConversationRef,
-    fingerprint: OperationFingerprint,
-    *,
-    turn_id: str,
-    request_id: str,
-    evidence_floor: int,
+    ticket: InterruptTicket,
 ) -> InterruptRecord:
+    turn_id, request_id = ticket.turn_id, ticket.request_id
+    fingerprint, evidence_floor = ticket.fingerprint, ticket.evidence_floor
     now = service.clock()
     record = InterruptRecord(
         request_id=request_id,
@@ -388,34 +408,45 @@ async def _claude_terminal_outcome(
         for frame in page.frames:
             if frame.kind != "completed" or frame.raw.get("type") != "result":
                 continue
-            stamped = frame.raw.get(AR_TERMINAL_OUTCOME_KEY)
-            if stamped == "cancelled":
-                return (
-                    "interrupted",
-                    "the accepted interrupt correlated the exact Claude turn's error-shaped result",
-                )
-            if stamped == "completed":
-                return (
-                    "already-settled",
-                    "the exact Claude turn completed natively before interruption",
-                )
-            if stamped == "failed":
-                return (
-                    "failed",
-                    "the exact Claude turn's result failed without an accepted interrupt",
-                )
-            # Stamp-less fallback (foreign/older evidence): native classification only.
-            if frame.raw.get("subtype") == "success" and frame.raw.get("is_error") is False:
-                return (
-                    "already-settled",
-                    "the exact Claude turn completed natively before interruption",
-                )
-            if frame.raw.get("terminal_reason") in _CLAUDE_CANCEL_REASONS:
-                return "interrupted", "native terminal_reason settled the exact Claude turn"
-            return "failed", "native result failed the exact Claude turn"
+            return _claude_result_settlement(frame)
         if not page.truncated:
             return None
         after = page.frames[-1].sequence
+
+
+def _claude_result_settlement(frame: EvidenceFrame) -> tuple[Settlement, str]:
+    """Read one Claude result frame as a settlement.
+
+    The adapter-attributed ``arTerminalOutcome`` stamp is authoritative when present because it
+    carries the accepted-interrupt correlation. Only unstamped frames -- foreign or older evidence
+    -- fall back to the native ``subtype`` / ``is_error`` / ``terminal_reason`` shape, where an
+    error-shaped result keeps its failed meaning.
+    """
+
+    stamped = frame.raw.get(AR_TERMINAL_OUTCOME_KEY)
+    if stamped == "cancelled":
+        return (
+            "interrupted",
+            "the accepted interrupt correlated the exact Claude turn's error-shaped result",
+        )
+    if stamped == "completed":
+        return (
+            "already-settled",
+            "the exact Claude turn completed natively before interruption",
+        )
+    if stamped == "failed":
+        return (
+            "failed",
+            "the exact Claude turn's result failed without an accepted interrupt",
+        )
+    if frame.raw.get("subtype") == "success" and frame.raw.get("is_error") is False:
+        return (
+            "already-settled",
+            "the exact Claude turn completed natively before interruption",
+        )
+    if frame.raw.get("terminal_reason") in _CLAUDE_CANCEL_REASONS:
+        return "interrupted", "native terminal_reason settled the exact Claude turn"
+    return "failed", "native result failed the exact Claude turn"
 
 
 async def _pi_terminal_outcome(

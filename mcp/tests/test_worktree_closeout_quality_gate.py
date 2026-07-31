@@ -117,6 +117,54 @@ class CodeQualityGateTests(unittest.TestCase):
                 (worktree / "mcp" / "src").as_posix(),
             )
 
+    def test_gate_measures_the_leaf_diff_not_the_whole_branch(self) -> None:
+        """The leaf's base commit reaches the wrapper as --diff-base.
+
+        Without it the wrapper resolves its base to origin/HEAD or main, and the
+        100% per-diff coverage floor then measures every change on the integration
+        branch instead of this leaf's own diff. That is unpassable for any leaf, so
+        the gate would block every closeout rather than enforce anything.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            worktree = _checkout_with_wrapper(Path(tmp))
+            calls: list[list[str]] = []
+
+            def runner(
+                command: list[str], cwd: Path, env: Mapping[str, str]
+            ) -> subprocess.CompletedProcess[str]:
+                calls.append(command)
+                return subprocess.CompletedProcess(command, 0, stdout="passed\n")
+
+            with mock.patch.object(
+                code_quality_gate, "quality_python", return_value=Path(sys.executable)
+            ):
+                result = code_quality_gate.run_strict_code_quality_gate(
+                    worktree, diff_base="c1dc5056", runner=runner
+                )
+
+            self.assertEqual(
+                calls[0],
+                [
+                    sys.executable,
+                    "-m",
+                    "agents_remember.code_quality.check",
+                    "--diff-base",
+                    "c1dc5056",
+                ],
+            )
+            self.assertEqual(result["diffBase"], "c1dc5056")
+            self.assertIn("--diff-base c1dc5056", str(result["command"]))
+
+    def test_gate_preview_reports_the_diff_base_it_will_use(self) -> None:
+        """The preview names the exact command, so a reader can rerun what will run."""
+        with tempfile.TemporaryDirectory() as tmp:
+            worktree = _checkout_with_wrapper(Path(tmp))
+            preview = code_quality_gate.code_quality_gate_preview(
+                worktree, code_would_commit=True, diff_base="c1dc5056"
+            )
+            self.assertEqual(preview["diffBase"], "c1dc5056")
+            self.assertIn("--diff-base c1dc5056", str(preview["command"]))
+
     def test_gate_failure_includes_bounded_wrapper_output(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             worktree = _checkout_with_wrapper(Path(tmp))
@@ -219,7 +267,9 @@ class CloseoutCodeQualityGateTests(unittest.TestCase):
                 self.assertEqual(worktree_manager.command_closeout(closeout_args(contract)), 0)
 
             self.assertEqual(deciders, [contract.code_worktree])
-            gate_run.assert_called_once_with(contract.code_worktree)
+            gate_run.assert_called_once_with(
+                contract.code_worktree, diff_base=contract.code_base_commit
+            )
 
     def test_gate_failure_precedes_all_closeout_commits(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -254,12 +304,13 @@ class CloseoutCodeQualityGateTests(unittest.TestCase):
             contract = dirty_open_external_contract_fixture(Path(tmp))
             events: list[str] = []
 
-            def run_gate(_worktree: Path) -> dict[str, object]:
+            def run_gate(_worktree: Path, *, diff_base: str = "") -> dict[str, object]:
                 events.append("quality")
                 return {
                     "required": True,
                     "passed": True,
                     "command": "python -m agents_remember.code_quality.check",
+                    "diffBase": diff_base,
                 }
 
             def record_commit(repo: Path, message: str) -> str:

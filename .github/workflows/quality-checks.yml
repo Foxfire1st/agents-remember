@@ -29,9 +29,14 @@ jobs:
         python-version: ["3.11", "3.12", "3.13"]
 
     steps:
+      # Full history, not the default single commit. The wrapper's changed-lines
+      # coverage floor diffs against the merge base with the branch's source; a
+      # shallow clone has no merge base to find, which would silently turn the
+      # strictest step of the gate into "compare against the empty tree".
       - uses: actions/checkout@v6
         with:
           persist-credentials: false
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v6
@@ -49,10 +54,21 @@ jobs:
           git config --global user.email "ci@agents-remember.invalid"
           git config --global user.name "Agents Remember CI"
 
-      # Enforces ALL of: ruff (lint), Pyright (types), the full pytest suite, and
-      # CRAP (complexity x coverage). The wrapper exits non-zero if ANY of them
-      # fail; CRAP threshold enforcement is mandatory in the default command.
-      - name: Run quality wrapper (ruff + Pyright + pytest + CRAP, enforcing)
+      # Enforces ALL of: ruff (lint, complexity rules C901/PLR0911/PLR0912/PLR0915
+      # included), `ruff format --check`, Pyright (types), the full pytest suite,
+      # CRAP (complexity x branch coverage) and the changed-lines coverage floor.
+      # The wrapper exits non-zero if ANY of them fail; CRAP threshold enforcement
+      # is mandatory in the default command. Nothing here is baselined or
+      # allowlisted -- the complexity baseline this job used to run was deleted
+      # with the debt it recorded. Its two Radon steps are labelled reports and
+      # cannot fail it -- radon exits 0 whatever it finds -- so they are not named
+      # here.
+      #
+      # The coverage floor needs the base branch to diff against. `fetch-depth: 0`
+      # above gives it the history; on a pull request it reads `GITHUB_BASE_REF`
+      # itself, and on a branch push it falls back to the merge base with the
+      # remote's default branch. The base it used is printed in the step output.
+      - name: Run quality wrapper (ruff + format + Pyright + pytest + CRAP + diff coverage)
         run: python -m agents_remember.code_quality.check
 
   dashboard:

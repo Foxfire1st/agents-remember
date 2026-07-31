@@ -269,9 +269,9 @@ class ProviderDegradationEvaluatorTests(unittest.TestCase):
 
         delivery_attempts: list[dict[str, Any]] = []
 
-        def deliver_entry(**kwargs: Any) -> Any:
-            delivery_attempts.append(kwargs)
-            return kwargs["entry"]
+        def deliver_entry(log: Any, **kwargs: Any) -> Any:
+            delivery_attempts.append({"log": log, **kwargs})
+            return log.entry
 
         with patch(
             "agents_remember.providers.degradation.deliver_inbox_entry", side_effect=deliver_entry
@@ -311,7 +311,7 @@ class ProviderDegradationEvaluatorTests(unittest.TestCase):
         )
         self.assertEqual(len(delivery_attempts), 2)
         self.assertEqual(
-            {attempt["entry"].agentId for attempt in delivery_attempts},
+            {attempt["log"].entry.agentId for attempt in delivery_attempts},
             {"orchestrator-1", "manager-1"},
         )
         responses = {entry.recipientRole: entry.response for entry in inbox_entries}

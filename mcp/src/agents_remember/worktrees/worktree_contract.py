@@ -92,6 +92,52 @@ class WorktreeContract:
     sync_log: tuple[dict[str, str], ...] = field(default=())
 
 
+@dataclass(frozen=True)
+class RepoBranchPlan:
+    """One repository's branch plan for a worktree pair.
+
+    The contract's ``code:`` and ``memory:`` sections carry exactly these four facts, and
+    ``start_contract`` derives them per side as a unit, so they travel together everywhere.
+    On the series contract the pair reads ``protected_branch``/``integration_branch``;
+    those were only other names for the same fork point and landing branch.
+    """
+
+    repo_path: Path
+    source_branch: str = ""
+    work_branch: str = ""
+    base_commit: str = ""
+
+
+@dataclass(frozen=True)
+class ContractTask:
+    """The task a contract speaks for.
+
+    Its name, the repository it changes, the coordination tree that holds it, how it is
+    run, and the contract one level up (a leaf's series, a series' enclosing task).
+    """
+
+    name: str
+    repo_name: str
+    coordination_root: Path
+    workflow_kind: str
+    memory_mode: str
+    parent_task_name: str = ""
+    parent_contract_path: Path | None = None
+
+
+@dataclass(frozen=True)
+class LeafIdentity:
+    """Which leaf a leaf-enclosure contract is for.
+
+    The worktree it names, the task-doc id it is filed under (defaulting to the slugified
+    worktree name), and the lifecycle the enclosure anchors.
+    """
+
+    worktree_name: str
+    leaf_id: str | None = None
+    lifecycle_id: str = ""
+
+
 def worktree_folder_name(worktree_name: str) -> str:
     slug = slugify(worktree_name)
     return slug if slug.endswith("-ar") else f"{slug}-ar"
@@ -102,120 +148,97 @@ def worktree_group_for(coordination_root: Path, repo_name: str, worktree_name: s
 
 
 def default_contract(
+    task: ContractTask,
     *,
-    task_name: str,
-    repo_name: str,
-    workflow_kind: str,
-    memory_mode: str,
-    coordination_root: Path,
-    code_repo_path: Path,
-    code_source_branch: str,
-    code_work_branch: str,
-    code_base_commit: str,
-    worktree_name: str,
-    memory_repo_path: Path | None = None,
-    memory_source_branch: str = "",
-    memory_work_branch: str = "",
-    memory_base_commit: str = "",
-    lifecycle_id: str = "",
-    leaf_id: str | None = None,
-    parent_task_name: str = "",
-    parent_contract_path: Path | None = None,
+    leaf: LeafIdentity,
+    code: RepoBranchPlan,
+    memory: RepoBranchPlan | None = None,
 ) -> WorktreeContract:
-    if memory_mode not in VALID_MEMORY_MODES:
+    if task.memory_mode not in VALID_MEMORY_MODES:
         raise ContractError(f"memory_mode must be one of {sorted(VALID_MEMORY_MODES)}")
-    task_id = slugify(task_name).upper()
-    task_root = resolve_active_task_root(coordination_root, repo_name, task_name)
-    leaf = leaf_id or worktree_name
-    persisted_leaf = leaf_id or slugify(worktree_name)
-    contract_path = leaf_enclosure_path(task_root, leaf)
+    task_id = slugify(task.name).upper()
+    task_root = resolve_active_task_root(task.coordination_root, task.repo_name, task.name)
+    leaf_ref = leaf.leaf_id or leaf.worktree_name
+    persisted_leaf = leaf.leaf_id or slugify(leaf.worktree_name)
+    contract_path = leaf_enclosure_path(task_root, leaf_ref)
     task_artifact = task_root / "task.md"
-    worktree_group = worktree_group_for(coordination_root, repo_name, worktree_name)
-    code_worktree = worktree_group / slugify(worktree_name)
+    worktree_group = worktree_group_for(task.coordination_root, task.repo_name, leaf.worktree_name)
+    code_worktree = worktree_group / slugify(leaf.worktree_name)
     memory_worktree = (
-        worktree_group / f"memory-{slugify(worktree_name)}" if memory_mode == "external" else None
+        worktree_group / f"memory-{slugify(leaf.worktree_name)}"
+        if task.memory_mode == "external"
+        else None
     )
     ledger_path = memory_worktree / "memory.md" if memory_worktree else None
     return WorktreeContract(
         kind="leaf",
         task_id=task_id,
-        task_name=task_name,
-        repo_name=repo_name,
-        workflow_kind=workflow_kind,
-        memory_mode=memory_mode,
-        coordination_root=coordination_root,
+        task_name=task.name,
+        repo_name=task.repo_name,
+        workflow_kind=task.workflow_kind,
+        memory_mode=task.memory_mode,
+        coordination_root=task.coordination_root,
         task_root=task_root,
         contract_path=contract_path,
         task_artifact=task_artifact,
         worktree_group=worktree_group,
-        code_repo_path=code_repo_path,
-        code_source_branch=code_source_branch,
-        code_work_branch=code_work_branch,
-        code_base_commit=code_base_commit,
+        code_repo_path=code.repo_path,
+        code_source_branch=code.source_branch,
+        code_work_branch=code.work_branch,
+        code_base_commit=code.base_commit,
         code_worktree=code_worktree,
-        memory_repo_path=memory_repo_path,
-        memory_source_branch=memory_source_branch,
-        memory_work_branch=memory_work_branch,
-        memory_base_commit=memory_base_commit,
+        memory_repo_path=memory.repo_path if memory is not None else None,
+        memory_source_branch=memory.source_branch if memory is not None else "",
+        memory_work_branch=memory.work_branch if memory is not None else "",
+        memory_base_commit=memory.base_commit if memory is not None else "",
         memory_worktree=memory_worktree,
         ledger_path=ledger_path,
-        memory_state="disabled" if memory_mode == "disabled" else "",
-        lifecycle_id=lifecycle_id,
+        memory_state="disabled" if task.memory_mode == "disabled" else "",
+        lifecycle_id=leaf.lifecycle_id,
         leaf_id=persisted_leaf,
-        parent_task_name=parent_task_name,
-        parent_contract_path=parent_contract_path or series_contract_path(task_root),
+        parent_task_name=task.parent_task_name,
+        parent_contract_path=task.parent_contract_path or series_contract_path(task_root),
     )
 
 
 def default_series_contract(
+    task: ContractTask,
     *,
-    task_name: str,
-    repo_name: str,
-    workflow_kind: str,
-    memory_mode: str,
-    coordination_root: Path,
-    code_repo_path: Path,
-    protected_branch: str,
-    integration_branch: str,
-    code_base_commit: str,
-    memory_repo_path: Path | None = None,
-    memory_source_branch: str = "",
-    memory_work_branch: str = "",
-    memory_base_commit: str = "",
-    parent_task_name: str = "",
-    parent_contract_path: Path | None = None,
+    code: RepoBranchPlan,
+    memory: RepoBranchPlan | None = None,
     task_root: Path | None = None,
 ) -> WorktreeContract:
-    if memory_mode not in VALID_MEMORY_MODES:
+    if task.memory_mode not in VALID_MEMORY_MODES:
         raise ContractError(f"memory_mode must be one of {sorted(VALID_MEMORY_MODES)}")
-    task_id = slugify(task_name).upper()
-    task_root = task_root or task_root_for(coordination_root, repo_name, task_name)
+    task_id = slugify(task.name).upper()
+    task_root = task_root or task_root_for(task.coordination_root, task.repo_name, task.name)
     contract_path = series_contract_path(task_root)
+    memory_repo_path = memory.repo_path if memory is not None else None
     memory_ledger = memory_repo_path / "memory.md" if memory_repo_path else None
     return WorktreeContract(
         kind="series",
         task_id=task_id,
-        task_name=task_name,
-        repo_name=repo_name,
-        workflow_kind=workflow_kind,
-        memory_mode=memory_mode,
-        coordination_root=coordination_root,
+        task_name=task.name,
+        repo_name=task.repo_name,
+        workflow_kind=task.workflow_kind,
+        memory_mode=task.memory_mode,
+        coordination_root=task.coordination_root,
         task_root=task_root,
         contract_path=contract_path,
         task_artifact=task_root / "task.md",
         worktree_group=task_root / "enclosures",
-        code_repo_path=code_repo_path,
-        code_source_branch=protected_branch,
-        code_work_branch=integration_branch,
-        code_base_commit=code_base_commit,
-        code_worktree=code_repo_path,
+        code_repo_path=code.repo_path,
+        code_source_branch=code.source_branch,
+        code_work_branch=code.work_branch,
+        code_base_commit=code.base_commit,
+        code_worktree=code.repo_path,
         memory_repo_path=memory_repo_path,
-        memory_source_branch=memory_source_branch,
-        memory_work_branch=memory_work_branch,
-        memory_base_commit=memory_base_commit,
+        memory_source_branch=memory.source_branch if memory is not None else "",
+        memory_work_branch=memory.work_branch if memory is not None else "",
+        memory_base_commit=memory.base_commit if memory is not None else "",
         ledger_path=memory_ledger,
-        parent_task_name=parent_task_name,
-        parent_contract_path=parent_contract_path,
+        parent_task_name=task.parent_task_name,
+        parent_contract_path=task.parent_contract_path,
     )
 
 

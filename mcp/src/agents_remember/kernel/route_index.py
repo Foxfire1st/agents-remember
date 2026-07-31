@@ -397,20 +397,26 @@ def _identifier_hints(text: str) -> list[str]:
 
 
 def _is_source_anchor(token: str) -> bool:
-    if len(token) < 3:
+    """A hint worth indexing: long enough, not a generic word, and shaped like code."""
+    if len(token) < 3 or token.lower() in GENERIC_ANCHOR_WORDS:
         return False
-    lowered = token.lower()
-    if lowered in GENERIC_ANCHOR_WORDS:
-        return False
-    if "." in token or "/" in token:
-        return True
-    if "_" in token:
-        return True
-    if any(char.isdigit() for char in token):
-        return True
-    if token.isupper():
-        return True
-    return any(char.isupper() for char in token[1:])
+    return _has_code_shape(token)
+
+
+def _has_code_shape(token: str) -> bool:
+    """True when the token's own spelling marks it as an identifier rather than prose.
+
+    Any one signal is enough: a dotted or slashed path, snake_case, an embedded digit,
+    an all-caps constant, or an interior capital (camelCase / PascalCase).
+    """
+    return (
+        "." in token
+        or "/" in token
+        or "_" in token
+        or any(char.isdigit() for char in token)
+        or token.isupper()
+        or any(char.isupper() for char in token[1:])
+    )
 
 
 def _clean_hint(value: str) -> str:

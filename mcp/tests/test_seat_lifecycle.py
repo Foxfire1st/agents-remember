@@ -10,6 +10,7 @@ from __future__ import annotations
 import sys
 import tempfile
 import unittest
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 from unittest import mock
@@ -21,19 +22,16 @@ from agents_remember.controllers import worktree_tools
 from agents_remember.mcp.config import McpRuntimeConfig, RetirementSettings
 from agents_remember.mcp.tools.terminal import session_rename_payload, session_retire_payload
 from agents_remember.serving.landing import land_seats_for_leaf
+from agents_remember.serving.retire import SeatClosure
 from agents_remember.serving.retire_policy import (
     RetirePolicyError,
     SeatRef,
     check_retire_authority,
     master_of,
 )
-from agents_remember.serving.terminal_catalog import (
-    TerminalCatalog,
-    TerminalCatalogEntry,
-    TerminalSessionKind,
-    TerminalSessionStatus,
-)
+from agents_remember.serving.terminal_catalog import TerminalCatalog, TerminalCatalogEntry
 from agents_remember.serving.terminal_liveness import (
+    LivenessProbe,
     TerminalCatalogLivenessConfig,
     observe_terminal_liveness,
 )
@@ -65,24 +63,26 @@ def _entry(
     *,
     leaf_key: str | None = None,
     spawn_role: str | None = None,
-    replacement_for_leaf: str | None = None,
-    status: TerminalSessionStatus = "running",
-    kind: TerminalSessionKind = "harness",
 ) -> TerminalCatalogEntry:
+    """A running harness seat holding ``leaf_key`` as ``spawn_role``.
+
+    Those two are what every case here varies -- the leaf a seat occupies and the role that
+    occupies it. Rarer shapes (a terminated row, a plain terminal row, an unbound replacement)
+    are ``replace(...)`` on the frozen ``TerminalCatalogEntry``, which already owns the fields.
+    """
     return TerminalCatalogEntry(
         id=session_id,
         label=f"Seat {session_id}",
-        kind=kind,
-        harness="claude" if kind == "harness" else None,
+        kind="harness",
+        harness="claude",
         lifecycle_id=None,
         cwd=Path("/workspace"),
         tmux_name=f"ar-{session_id}",
         command=("claude",),
         created_at="2026-07-07T00:00:00+00:00",
         last_attached_at="2026-07-07T00:00:00+00:00",
-        status=status,
+        status="running",
         leaf_key=leaf_key,
-        replacement_for_leaf=replacement_for_leaf,
         spawn_role=spawn_role,
     )
 
@@ -231,9 +231,8 @@ class SessionRetireToolTests(unittest.TestCase):
     def test_manager_retires_unbound_failed_dispatch_from_replacement_leaf(self) -> None:
         self.catalog.upsert(_entry("mgr", leaf_key="repo/master-a/manager", spawn_role="manager"))
         self.catalog.upsert(
-            _entry(
-                "worker-failed",
-                spawn_role="worker",
+            replace(
+                _entry("worker-failed", spawn_role="worker"),
                 replacement_for_leaf="repo/master-a/leaf-1",
             )
         )
@@ -361,7 +360,7 @@ class SessionRenameToolTests(unittest.TestCase):
         self.assertEqual(_get(self.catalog, "worker-1").spawn_role, "worker")
 
     def test_rename_of_a_retired_session_is_refused(self) -> None:
-        self.catalog.upsert(_entry("worker-1", status="terminated"))
+        self.catalog.upsert(replace(_entry("worker-1"), status="terminated"))
         result = self._rename("worker-1", "Too Late")
         self.assertEqual(result["status"], "unknown-session")
 
@@ -474,7 +473,7 @@ class TurnStateSweepWiringTests(unittest.TestCase):
         self._dir.cleanup()
 
     def test_alive_legacy_harness_pane_is_diagnostic_only(self) -> None:
-        entry = _entry("chat-1", kind="harness")
+        entry = _entry("chat-1")
         self.catalog.upsert(entry)
 
         class _AliveHost:
@@ -493,8 +492,7 @@ class TurnStateSweepWiringTests(unittest.TestCase):
             _AliveHost(),
             entry,
             checked_at=datetime(2026, 7, 8, tzinfo=UTC),
-            config=TerminalCatalogLivenessConfig(),
-            pane_capturer=capturer,
+            probe=LivenessProbe(hysteresis=TerminalCatalogLivenessConfig(), pane_capturer=capturer),
         )
         self.assertTrue(observation.alive)
         self.assertTrue(observation.turn_state_changed)
@@ -504,7 +502,7 @@ class TurnStateSweepWiringTests(unittest.TestCase):
         self.assertEqual(observation.entry.control_raw["paneDiagnostic"], "working")
 
     def test_plain_terminal_rows_are_never_classified(self) -> None:
-        entry = _entry("term-1", kind="terminal")
+        entry = replace(_entry("term-1"), kind="terminal", harness=None)
         self.catalog.upsert(entry)
 
         class _AliveHost:
@@ -525,8 +523,7 @@ class TurnStateSweepWiringTests(unittest.TestCase):
             _AliveHost(),
             entry,
             checked_at=datetime(2026, 7, 8, tzinfo=UTC),
-            config=TerminalCatalogLivenessConfig(),
-            pane_capturer=_capture,
+            probe=LivenessProbe(hysteresis=TerminalCatalogLivenessConfig(), pane_capturer=_capture),
         )
         self.assertIsNone(observation.entry.turn_state)
         self.assertEqual(calls, [])  # never captured for a plain terminal row
@@ -604,11 +601,11 @@ class LandSeatsForLeafTests(unittest.TestCase):
 
         landed = land_seats_for_leaf(
             self.catalog,
+            SeatClosure(
+                reason="leaf integrated", edge="leaf-integration", at="2026-07-08T00:00:00+00:00"
+            ),
             leaf_key="repo/master-a/leaf-1",
             roles=frozenset({"worker", "reviewer"}),
-            reason="leaf integrated",
-            edge="leaf-integration",
-            at="2026-07-08T00:00:00+00:00",
         )
 
         self.assertEqual({entry.id for entry in landed}, {"worker-1", "reviewer-1"})
@@ -619,20 +616,16 @@ class LandSeatsForLeafTests(unittest.TestCase):
 
     def test_terminated_seats_are_skipped_by_landing(self) -> None:
         self.catalog.upsert(
-            _entry(
-                "worker-1",
-                leaf_key="repo/master-a/leaf-1",
-                spawn_role="worker",
+            replace(
+                _entry("worker-1", leaf_key="repo/master-a/leaf-1", spawn_role="worker"),
                 status="terminated",
             )
         )
         landed = land_seats_for_leaf(
             self.catalog,
+            SeatClosure(reason="x", edge="leaf-integration", at="2026-07-08T00:00:00+00:00"),
             leaf_key="repo/master-a/leaf-1",
             roles=frozenset({"worker"}),
-            reason="x",
-            edge="leaf-integration",
-            at="2026-07-08T00:00:00+00:00",
         )
         self.assertEqual(landed, [])
 
@@ -754,9 +747,7 @@ class AutoLandHookIntegrationTests(unittest.TestCase):
             ),
             mock.patch.object(worktree_tools, "load_contract", return_value=self.fake_contract),
         ):
-            result = worktree_tools.lifecycle_finalize_task_tool(
-                config, contract_path=str(self.contract_path)
-            )
+            result = worktree_tools.lifecycle_finalize_task_tool(config, str(self.contract_path))
         self.assertTrue(result["ok"])
         self.assertEqual(set(result["autoLandedSeats"]), {"mgr", "reviewer-1"})
         self.assertEqual(_get(catalog, "mgr").status, "landed")
@@ -824,9 +815,7 @@ class AutoLandHookIntegrationTests(unittest.TestCase):
                 side_effect=RuntimeError("unexpected failure"),
             ),
         ):
-            result = worktree_tools.lifecycle_finalize_task_tool(
-                config, contract_path=str(self.contract_path)
-            )
+            result = worktree_tools.lifecycle_finalize_task_tool(config, str(self.contract_path))
         self.assertTrue(result["ok"])  # the finalize edge itself is never blocked
         self.assertEqual(result["autoLandedSeats"], [])
         self.assertEqual(_get(catalog, "mgr").status, "running")

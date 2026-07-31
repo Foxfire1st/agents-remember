@@ -38,6 +38,8 @@ stay inline in the test modules that assert them.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 from agents_remember.serving.codex_app_server_protocol import JsonObject
 
 # Stable synthetic timestamps (seconds and milliseconds); no real capture data.
@@ -58,14 +60,29 @@ def agent_message_item(item_id: str, text: str) -> JsonObject:
     return {"id": item_id, "type": "agentMessage", "text": text}
 
 
+@dataclass(frozen=True)
+class CollabAgents:
+    """The agent threads one collab tool call connects, and the states it reports for them.
+
+    The vendor's three thread-bearing fields travel together on every ``CollabAgentToolCall``:
+    ``senderThreadId`` is the calling thread, ``receiverThreadIds`` are the agent threads it
+    addresses, and ``agentsStates`` is keyed by those same receiver thread ids. They are one
+    fact -- who the call is between -- not three arguments, which is why they are one object.
+    ``None`` (never an empty collection) omits the vendor's optional field entirely, matching
+    what a real spawn/wait frame carries.
+    """
+
+    sender_thread_id: str
+    receiver_thread_ids: list[str] | None = None
+    states: dict[str, JsonObject] | None = None
+
+
 def collab_agent_tool_call_item(
     item_id: str,
     tool: str,
     *,
-    sender_thread_id: str,
+    agents: CollabAgents,
     status: str = "completed",
-    receiver_thread_ids: list[str] | None = None,
-    agents_states: dict[str, JsonObject] | None = None,
     prompt: str | None = None,
 ) -> JsonObject:
     """A ``ThreadItem::CollabAgentToolCall`` wire item.
@@ -78,12 +95,12 @@ def collab_agent_tool_call_item(
         "type": "collabAgentToolCall",
         "tool": tool,
         "status": status,
-        "senderThreadId": sender_thread_id,
+        "senderThreadId": agents.sender_thread_id,
     }
-    if receiver_thread_ids is not None:
-        item["receiverThreadIds"] = receiver_thread_ids
-    if agents_states is not None:
-        item["agentsStates"] = agents_states
+    if agents.receiver_thread_ids is not None:
+        item["receiverThreadIds"] = agents.receiver_thread_ids
+    if agents.states is not None:
+        item["agentsStates"] = agents.states
     if prompt is not None:
         item["prompt"] = prompt
     return item

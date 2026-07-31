@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
+from dataclasses import dataclass
 from typing import Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -45,6 +46,78 @@ AdapterDeliveryState = Literal[
 OPERATOR_INBOX_FORWARD_COMPATIBLE_FIELDS = frozenset(
     {"adapterDeliveryState", "adapterDeliveryDetail"}
 )
+
+
+@dataclass(frozen=True)
+class InboxAddress:
+    """The mailbox an inbox row is delivered to: a lifecycle, a specific agent, a role -- at
+    least one of the three, which is exactly what :func:`require_inbox_address` enforces. The
+    three are one address, never independently meaningful."""
+
+    lifecycle_id: str | None = None
+    agent_id: str | None = None
+    recipient_role: AgentRole | None = None
+
+
+@dataclass(frozen=True)
+class InboxOwner:
+    """R4: the routed owner a poster derives from catalog spawn provenance BEFORE posting.
+
+    Stamped once at creation (and re-stamped by a readdressing ladder rung) so redelivery
+    never has to re-derive it from a catalog snapshot that has since moved on.
+    """
+
+    role: AgentRole | None = None
+    agent_id: str | None = None
+    lifecycle_id: str | None = None
+
+
+@dataclass(frozen=True)
+class InboxRouting:
+    """Where an inbox row goes and who owns it.
+
+    ``address`` is the mailbox this snapshot is delivered to right now; ``owner`` is the
+    routed owner recorded alongside it. A readdressing ladder rung moves the address onto the
+    next owner and rewrites both together, which is why they are one routing decision.
+    """
+
+    address: InboxAddress
+    owner: InboxOwner = InboxOwner()
+
+
+@dataclass(frozen=True)
+class InboxSubject:
+    """What a row is about, as opposed to who it goes to: the leaf and the seat under
+    discussion and the agent being reported on. The supervisor coalesces re-fires and the
+    ladder readdresses on exactly this triple."""
+
+    leaf_key: str | None = None
+    seat_role: str | None = None
+    agent_id: str | None = None
+
+
+@dataclass(frozen=True)
+class InboxMessage:
+    """What a row says and what it says it about: the ask, the response-channel text, the kind
+    of message, the gate or artifact it points at, and its subject."""
+
+    ask: str
+    response: str
+    message_kind: InboxMessageKind = "message"
+    gate_id: str | None = None
+    artifact_path: str | None = None
+    subject: InboxSubject = InboxSubject()
+
+
+@dataclass(frozen=True)
+class InboxPoster:
+    """Who put the row in the inbox: the recorded author and surface (``createdBy`` /
+    ``createdVia``) plus the agent and role it was sent as."""
+
+    created_by: str
+    created_via: OperatorInboxVia
+    sender_agent_id: str | None = None
+    sender_role: AgentRole | None = None
 
 
 def require_inbox_address(
@@ -163,63 +236,45 @@ def fold_operator_inbox_entries(
 
 
 def create_operator_inbox_entry(
+    message: InboxMessage,
     *,
     entry_id: str,
     now: str,
-    lifecycle_id: str | None,
-    agent_id: str | None,
-    ask: str,
-    response: str,
-    created_by: str,
-    created_via: OperatorInboxVia,
-    gate_id: str | None = None,
-    sender_agent_id: str | None = None,
-    sender_role: AgentRole | None = None,
-    recipient_role: AgentRole | None = None,
-    message_kind: InboxMessageKind = "message",
-    artifact_path: str | None = None,
-    leaf_key: str | None = None,
-    seat_role: str | None = None,
-    subject_agent_id: str | None = None,
-    owner_role: AgentRole | None = None,
-    owner_agent_id: str | None = None,
-    owner_lifecycle_id: str | None = None,
+    routing: InboxRouting,
+    poster: InboxPoster,
 ) -> OperatorInboxEntry:
-    """Create a pending inbox entry. Pure: the caller mints ``entry_id`` and ``now``.
-
-    ``owner_*`` (R4) is the routed address the caller derived from catalog spawn provenance
-    (or a reserved role like ``architect`` for a ``decision-item``) BEFORE posting -- stamped once,
-    at creation, so redelivery never has to re-derive it from a catalog snapshot that may have
-    since moved on.
-    """
+    """Create a pending inbox entry. Pure: the caller mints ``entry_id`` and ``now``."""
+    address = routing.address
+    owner = routing.owner
+    subject = message.subject
     require_inbox_address(
-        lifecycle_id=lifecycle_id,
-        agent_id=agent_id,
-        recipient_role=recipient_role,
+        lifecycle_id=address.lifecycle_id,
+        agent_id=address.agent_id,
+        recipient_role=address.recipient_role,
     )
     return OperatorInboxEntry(
         id=entry_id,
         ts=now,
         state="pending",
-        lifecycleId=lifecycle_id,
-        agentId=agent_id,
-        senderAgentId=sender_agent_id,
-        senderRole=sender_role,
-        recipientRole=recipient_role,
-        gateId=gate_id,
-        messageKind=message_kind,
-        artifactPath=artifact_path,
-        leafKey=leaf_key,
-        seatRole=seat_role,
-        subjectAgentId=subject_agent_id,
-        ask=ask,
-        response=response,
+        lifecycleId=address.lifecycle_id,
+        agentId=address.agent_id,
+        senderAgentId=poster.sender_agent_id,
+        senderRole=poster.sender_role,
+        recipientRole=address.recipient_role,
+        gateId=message.gate_id,
+        messageKind=message.message_kind,
+        artifactPath=message.artifact_path,
+        leafKey=subject.leaf_key,
+        seatRole=subject.seat_role,
+        subjectAgentId=subject.agent_id,
+        ask=message.ask,
+        response=message.response,
         createdAt=now,
-        createdBy=created_by,
-        createdVia=created_via,
-        ownerRole=owner_role,
-        ownerAgentId=owner_agent_id,
-        ownerLifecycleId=owner_lifecycle_id,
+        createdBy=poster.created_by,
+        createdVia=poster.created_via,
+        ownerRole=owner.role,
+        ownerAgentId=owner.agent_id,
+        ownerLifecycleId=owner.lifecycle_id,
     )
 
 

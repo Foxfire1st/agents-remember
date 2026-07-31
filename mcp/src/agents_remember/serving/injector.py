@@ -104,12 +104,11 @@ def deliver(
         if row.kind == "session-command"
         else (lambda: session_log.message_present(row.entry_id))
     )
-    outcome = paster.paste(
-        tmux_name,
-        text,
-        submit=True,
-        accepted=accepted,
-        dispatch_policy=row.dispatch_policy,
+    dispatch_policy = row.dispatch_policy
+    outcome = (
+        paster.paste_dispatch(tmux_name, text, accepted=accepted, policy=dispatch_policy)
+        if dispatch_policy is not None
+        else paster.paste(tmux_name, text, submit=True, accepted=accepted)
     )
     if outcome.submitted:
         return DeliveryResult(

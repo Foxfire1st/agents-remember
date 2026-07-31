@@ -117,7 +117,7 @@ def test_global_registration_has_one_stable_inclusion_seam() -> None:
 
     # L0 one-time composition binding: the single registration call now carries the
     # immutable ConversationRuntime authority; still exactly one call and no other seam.
-    assert harness_api.count("register_conversation_routes(app, conversation_runtime)") == 1
+    assert harness_api.count("register_conversation_routes(app, runtime)") == 1
     assert "register_conversation_routes" not in app_source
     assert "include_router" not in app_source
 

@@ -17,6 +17,7 @@ from __future__ import annotations
 import os
 import shutil
 from collections.abc import Awaitable, Callable, Mapping
+from dataclasses import dataclass
 from pathlib import Path
 from types import TracebackType
 
@@ -245,6 +246,22 @@ class _AppServer:
         return self._transport
 
 
+@dataclass(frozen=True)
+class AppServerSeams:
+    """How a codex app-server subprocess is reached: the environment it inherits and its transport.
+
+    The environment selects the binary and its credentials; the transport factory decides how the
+    process is spoken to. A fake transport against the real environment (or the reverse) talks to a
+    process nobody meant to start, so both are replaced as one seam.
+    """
+
+    env: Callable[[], Mapping[str, str]] = lambda: os.environ
+    transport_factory: Callable[[], CodexAppServerTransport] = CodexStdioTransport
+
+
+DEFAULT_APP_SERVER_SEAMS = AppServerSeams()
+
+
 class CodexConversationLibrary:
     """The dormant Codex library port: native list/read/resolve with no local index.
 
@@ -261,9 +278,10 @@ class CodexConversationLibrary:
         cursor_authority: LibraryCursorAuthority,
         capabilities: _Capabilities,
         harness: Harness,
-        env: Callable[[], Mapping[str, str]] = lambda: os.environ,
-        transport_factory: Callable[[], CodexAppServerTransport] = CodexStdioTransport,
+        seams: AppServerSeams = DEFAULT_APP_SERVER_SEAMS,
     ) -> None:
+        env = seams.env
+        transport_factory = seams.transport_factory
         self._authorization = authorization
         self._cursor_authority = cursor_authority
         self._capabilities = capabilities

@@ -305,7 +305,7 @@ def _string_parts(value: object) -> list[str]:
     return [part for part in value if isinstance(part, str) and part]
 
 
-ToolPhase: TypeAlias = Literal["completed", "failed", "interrupted"]  # noqa: UP040 - Python 3.11 support
+ToolPhase: TypeAlias = Literal["completed", "failed", "interrupted"]
 """Normalized terminal phases a Codex tool item can report."""
 
 _STATUS_PHASES: dict[str, ToolPhase] = {

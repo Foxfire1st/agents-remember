@@ -20,6 +20,8 @@ from agents_remember.serving.conversation.active.projector import (
     ZipperEvidenceEvicted,
     mutation_stream,
 )
+from agents_remember.serving.conversation.active.projector.facade import ProjectedSession
+from agents_remember.serving.conversation.active.projector.wiring import BridgeReaders
 from agents_remember.serving.conversation.active.store import ProjectionStore
 from agents_remember.serving.conversation.models import (
     ActiveConversationRef,
@@ -115,10 +117,10 @@ class _ScriptedBridge:
             bridge_epoch=self.epoch,
         )
 
-    def read_native_page(
-        self, entry, *, cursor=None, limit=200, byte_budget=None, expected_bridge_epoch=None
-    ):
-        del entry, byte_budget, expected_bridge_epoch
+    def read_native_page(self, entry, *, cursor=None, limit=200, expected_bridge_epoch=None):
+        # The production seam (``read_control_native_page``) takes exactly these; a double that
+        # also accepted a ``byte_budget`` would let a caller pass one the real reader rejects.
+        del entry, expected_bridge_epoch
         if self.native_error is not None:
             raise self.native_error
         start = 0
@@ -176,17 +178,21 @@ def _projector(bridge: _ScriptedBridge, harness: str = "codex") -> ActiveSession
     mapper = projector_for(harness)
     assert mapper is not None
     return ActiveSessionProjector(
-        identity=_identity(harness),
-        authorization=_authorization(),
-        entry=_ControlledEntry(),
-        mapper=mapper,
-        secret=SECRET,
+        ProjectedSession(
+            identity=_identity(harness),
+            authorization=_authorization(),
+            entry=_ControlledEntry(),
+            mapper=mapper,
+            secret=SECRET,
+        ),
         clock=lambda: NOW,
-        evidence_reader=bridge.read_evidence,
-        native_page_reader=bridge.read_native_page,
-        transcript_reader=bridge.read_transcript,
-        provenance_reader=bridge.read_provenance,
-        snapshot_reader=bridge.read_snapshot,
+        readers=BridgeReaders(
+            evidence=bridge.read_evidence,
+            native_page=bridge.read_native_page,
+            transcript=bridge.read_transcript,
+            provenance=bridge.read_provenance,
+            snapshot=bridge.read_snapshot,
+        ),
     )
 
 

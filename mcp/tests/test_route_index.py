@@ -196,36 +196,71 @@ class RouteIndexTests(unittest.TestCase):
             self.assertEqual(route_index["hotPath"]["candidateHints"], ["pkg"])
             self.assertEqual(sidecar_status("pkg/module.py", route_index), "absent")
 
+    @staticmethod
+    def _write_scoped_fixture(code_root: Path, onboarding_root: Path) -> None:
+        """A committed tree that spans every exclusion the census has to respect.
+
+        Three tracked sources in scope, one of them under a path-rule-excluded directory but
+        carrying a sidecar, plus a .gitignore whose entries must never become candidates.
+        """
+        init_repo(code_root)
+        (code_root / ".gitignore").write_text(
+            ".cache/\nnode_modules/\nsrc/app/ignored.py\n",
+            encoding="utf-8",
+        )
+        (code_root / "README.md").write_text("# Repo\n", encoding="utf-8")
+        (code_root / "src" / "app").mkdir(parents=True)
+        (code_root / "src" / "app" / "service.py").write_text("SERVICE = 1\n", encoding="utf-8")
+        (code_root / "src" / "app" / "missing.py").write_text("MISSING = 1\n", encoding="utf-8")
+        (code_root / "src" / "generated").mkdir(parents=True)
+        (code_root / "src" / "generated" / "tracked.py").write_text(
+            "GENERATED = 1\n", encoding="utf-8"
+        )
+        commit_all(code_root)
+
+        (onboarding_root / "src" / "app").mkdir(parents=True)
+        (onboarding_root / "overview.md").write_text("# Repo\n", encoding="utf-8")
+        (onboarding_root / "src" / "app" / "overview.md").write_text("# App\n", encoding="utf-8")
+        (onboarding_root / "src" / "generated").mkdir(parents=True)
+        (onboarding_root / "src" / "generated" / "tracked.py.md").write_text(
+            "# tracked.py\n", encoding="utf-8"
+        )
+
+    def _assert_contamination_is_invisible_to_git(self, code_root: Path) -> None:
+        """Write the artifacts a real checkout accumulates, and record what git still offers.
+
+        Half are .gitignored and half are not: the ones git does offer as untracked candidates
+        are precisely the ones the census must reject on its own rules.
+        """
+        contamination = {
+            ".cache/ignored.py": "CACHE = 1\n",
+            "node_modules/ignored.js": "export default 1\n",
+            "src/app/ignored.py": "IGNORED = 1\n",
+            "coverage/report.py": "REPORT = 1\n",
+            "src/generated/runtime.py": "GENERATED = 2\n",
+            "build/cache.py": "BUILD = 1\n",
+        }
+        for relative, content in contamination.items():
+            target = code_root / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(content, encoding="utf-8")
+
+        candidates = set(
+            run_git(code_root, "ls-files", "--others", "--exclude-standard").splitlines()
+        )
+        self.assertNotIn(".cache/ignored.py", candidates)
+        self.assertNotIn("node_modules/ignored.js", candidates)
+        self.assertNotIn("src/app/ignored.py", candidates)
+        self.assertIn("coverage/report.py", candidates)
+        self.assertIn("src/generated/runtime.py", candidates)
+        self.assertIn("build/cache.py", candidates)
+
     def test_ignored_generated_and_path_rule_excluded_artifacts_do_not_change_bytes(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             code_root = root / "repo"
             onboarding_root = root / "memory" / "onboarding"
-            init_repo(code_root)
-
-            (code_root / ".gitignore").write_text(
-                ".cache/\nnode_modules/\nsrc/app/ignored.py\n",
-                encoding="utf-8",
-            )
-            (code_root / "README.md").write_text("# Repo\n", encoding="utf-8")
-            (code_root / "src" / "app").mkdir(parents=True)
-            (code_root / "src" / "app" / "service.py").write_text("SERVICE = 1\n", encoding="utf-8")
-            (code_root / "src" / "app" / "missing.py").write_text("MISSING = 1\n", encoding="utf-8")
-            (code_root / "src" / "generated").mkdir(parents=True)
-            (code_root / "src" / "generated" / "tracked.py").write_text(
-                "GENERATED = 1\n", encoding="utf-8"
-            )
-            commit_all(code_root)
-
-            (onboarding_root / "src" / "app").mkdir(parents=True)
-            (onboarding_root / "overview.md").write_text("# Repo\n", encoding="utf-8")
-            (onboarding_root / "src" / "app" / "overview.md").write_text(
-                "# App\n", encoding="utf-8"
-            )
-            (onboarding_root / "src" / "generated").mkdir(parents=True)
-            (onboarding_root / "src" / "generated" / "tracked.py.md").write_text(
-                "# tracked.py\n", encoding="utf-8"
-            )
+            self._write_scoped_fixture(code_root, onboarding_root)
             settings = storage_settings(
                 includes=["README.md", "src/**"],
                 excludes=["src/generated/**"],
@@ -244,33 +279,7 @@ class RouteIndexTests(unittest.TestCase):
             self.assertEqual(app_index["coverageCounts"]["sourceFilesInScope"], 2)
             self.assertIn("src/generated/tracked.py", root_index["coveredFiles"])
 
-            contamination = {
-                ".cache/ignored.py": "CACHE = 1\n",
-                "node_modules/ignored.js": "export default 1\n",
-                "src/app/ignored.py": "IGNORED = 1\n",
-                "coverage/report.py": "REPORT = 1\n",
-                "src/generated/runtime.py": "GENERATED = 2\n",
-                "build/cache.py": "BUILD = 1\n",
-            }
-            for relative, content in contamination.items():
-                target = code_root / relative
-                target.parent.mkdir(parents=True, exist_ok=True)
-                target.write_text(content, encoding="utf-8")
-
-            candidates = set(
-                run_git(
-                    code_root,
-                    "ls-files",
-                    "--others",
-                    "--exclude-standard",
-                ).splitlines()
-            )
-            self.assertNotIn(".cache/ignored.py", candidates)
-            self.assertNotIn("node_modules/ignored.js", candidates)
-            self.assertNotIn("src/app/ignored.py", candidates)
-            self.assertIn("coverage/report.py", candidates)
-            self.assertIn("src/generated/runtime.py", candidates)
-            self.assertIn("build/cache.py", candidates)
+            self._assert_contamination_is_invisible_to_git(code_root)
 
             contaminated = build_route_indexes(
                 code_root=code_root,

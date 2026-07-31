@@ -22,6 +22,9 @@ from agents_remember.observer.landing_state import (
 from agents_remember.observer.projection import LandingRefNode
 from agents_remember.tasks.reopen import _clear_frozen_landing, reopen_task
 from agents_remember.worktrees.worktree_contract import (
+    ContractTask,
+    LeafIdentity,
+    RepoBranchPlan,
     WorktreeContract,
     default_contract,
     load_contract,
@@ -55,16 +58,20 @@ def _stamp_contract(contract: WorktreeContract, when: datetime) -> None:
 
 def _contract(root: Path, index: int) -> WorktreeContract:
     contract = default_contract(
-        task_name=f"landing-{index}",
-        repo_name=f"repo-{index}",
-        workflow_kind="light",
-        memory_mode="disabled",
-        coordination_root=root,
-        code_repo_path=root / f"repo-{index}",
-        code_source_branch=f"feat/{index}",
-        code_work_branch=f"ar/{index}",
-        code_base_commit=f"base-{index}",
-        worktree_name=f"landing-{index}",
+        ContractTask(
+            name=f"landing-{index}",
+            repo_name=f"repo-{index}",
+            coordination_root=root,
+            workflow_kind="light",
+            memory_mode="disabled",
+        ),
+        leaf=LeafIdentity(worktree_name=f"landing-{index}"),
+        code=RepoBranchPlan(
+            repo_path=root / f"repo-{index}",
+            source_branch=f"feat/{index}",
+            work_branch=f"ar/{index}",
+            base_commit=f"base-{index}",
+        ),
     )
     contract = replace(contract, closeout_status="completed")
     contract.contract_path.parent.mkdir(parents=True, exist_ok=True)

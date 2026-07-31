@@ -53,6 +53,9 @@ from agents_remember.observer.snapshots import (
 from agents_remember.observer.store import EventStore
 from agents_remember.worktrees.task_resolver import ENCLOSURES_DIR, SERIES_CONTRACT_FILENAME
 from agents_remember.worktrees.worktree_contract import (
+    ContractTask,
+    LeafIdentity,
+    RepoBranchPlan,
     WorktreeContract,
     default_contract,
     write_contract,
@@ -193,16 +196,20 @@ class LandingProjectionHotPathTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             coordination_root = Path(tmp)
             contract = default_contract(
-                task_name="landing-heartbeat",
-                repo_name="repo",
-                workflow_kind="light",
-                memory_mode="disabled",
-                coordination_root=coordination_root,
-                code_repo_path=coordination_root / "repo",
-                code_source_branch="main",
-                code_work_branch="ar/landing",
-                code_base_commit="base",
-                worktree_name="landing-heartbeat",
+                ContractTask(
+                    name="landing-heartbeat",
+                    repo_name="repo",
+                    coordination_root=coordination_root,
+                    workflow_kind="light",
+                    memory_mode="disabled",
+                ),
+                leaf=LeafIdentity(worktree_name="landing-heartbeat"),
+                code=RepoBranchPlan(
+                    repo_path=coordination_root / "repo",
+                    source_branch="main",
+                    work_branch="ar/landing",
+                    base_commit="base",
+                ),
             )
             contract.contract_path.parent.mkdir(parents=True, exist_ok=True)
             write_contract(contract.contract_path, contract)
@@ -251,16 +258,20 @@ class LandingProjectionHotPathTests(unittest.TestCase):
             coordination_root = Path(tmp)
             for index in range(4):
                 contract = default_contract(
-                    task_name=f"landing-{index}",
-                    repo_name=f"repo-{index}",
-                    workflow_kind="light",
-                    memory_mode="disabled",
-                    coordination_root=coordination_root,
-                    code_repo_path=coordination_root / f"repo-{index}",
-                    code_source_branch=f"feat/{index}",
-                    code_work_branch=f"ar/{index}",
-                    code_base_commit=f"base-{index}",
-                    worktree_name=f"landing-{index}",
+                    ContractTask(
+                        name=f"landing-{index}",
+                        repo_name=f"repo-{index}",
+                        coordination_root=coordination_root,
+                        workflow_kind="light",
+                        memory_mode="disabled",
+                    ),
+                    leaf=LeafIdentity(worktree_name=f"landing-{index}"),
+                    code=RepoBranchPlan(
+                        repo_path=coordination_root / f"repo-{index}",
+                        source_branch=f"feat/{index}",
+                        work_branch=f"ar/{index}",
+                        base_commit=f"base-{index}",
+                    ),
                 )
                 contract = replace(contract, closeout_status="completed")
                 contract.contract_path.parent.mkdir(parents=True, exist_ok=True)
@@ -590,17 +601,20 @@ class ContractSnapshotSharedPassTests(unittest.TestCase):
         contracts: list[WorktreeContract] = []
         for index in range(count):
             contract = default_contract(
-                task_name=f"scaling task {index}",
-                repo_name="repo",
-                workflow_kind="light-task",
-                memory_mode="disabled",
-                coordination_root=coordination_root,
-                code_repo_path=coordination_root / "repo",
-                code_source_branch="main",
-                code_work_branch=f"ar/leaf-{index}",
-                code_base_commit="0" * 40,
-                worktree_name=f"leaf-{index}",
-                lifecycle_id=f"LC-{index}",
+                ContractTask(
+                    name=f"scaling task {index}",
+                    repo_name="repo",
+                    coordination_root=coordination_root,
+                    workflow_kind="light-task",
+                    memory_mode="disabled",
+                ),
+                leaf=LeafIdentity(worktree_name=f"leaf-{index}", lifecycle_id=f"LC-{index}"),
+                code=RepoBranchPlan(
+                    repo_path=coordination_root / "repo",
+                    source_branch="main",
+                    work_branch=f"ar/leaf-{index}",
+                    base_commit="0" * 40,
+                ),
             )
             contract.contract_path.parent.mkdir(parents=True, exist_ok=True)
             write_contract(contract.contract_path, contract)

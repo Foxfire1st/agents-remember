@@ -27,15 +27,17 @@ from agents_remember.serving.codex_app_server_adapter import (
     CodexAppServerSettings,
 )
 from agents_remember.serving.harness_capabilities import CapabilitySnapshot, SetResult
-from agents_remember.serving.harness_control_bridge import HarnessControlBridge
+from agents_remember.serving.harness_control_bridge import BridgeLimits, HarnessControlBridge
 from agents_remember.serving.harness_control_claude import ClaudeStreamJsonAdapter
 from agents_remember.serving.harness_control_client import (
+    ControlSubmission,
     _interrupt_result,
     _operation_timeline,
     _withdrawal_result,
     interrupt_control,
     read_operation_timeline,
     read_submission_authority,
+    request_control,
     set_control_effort,
     set_control_model,
     submit_control_prompt,
@@ -248,6 +250,41 @@ class _CapableAdapter(_PlainAdapter):
     async def submit_with_assets(self, request: PromptRequest) -> SubmissionReceipt:
         self.asset_submissions.append(request)
         return await self.submit(request)
+
+
+class ControlActionDispatchTests(unittest.IsolatedAsyncioTestCase):
+    """The IPC server answers only actions it implements, and says so by name.
+
+    The action table IS the control protocol's surface. A client holding a newer (or misspelled)
+    verb must get a typed refusal naming the verb rather than a silent success, a hang, or a
+    connection that dies with no explanation -- that difference is what makes a version skew
+    diagnosable from the caller's side.
+    """
+
+    async def _serve(self, identity: ControlIdentity, tmp: str):
+        bridge = HarnessControlBridge(identity, _PlainAdapter(), clock=lambda: NOW)
+        await bridge.start(_launch(identity))
+        endpoint = LocalControlEndpoint.for_session(Path(tmp), identity)
+        server = HarnessControlServer(endpoint, bridge)
+        await server.start()
+        return bridge, server, _ControlledEntry(identity, endpoint.path)
+
+    async def test_an_unknown_action_is_refused_by_name_and_leaves_the_bridge_serving(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            identity = _identity("unknown-action")
+            bridge, server, entry = await self._serve(identity, tmp)
+            try:
+                with self.assertRaises(HarnessControlError) as ctx:
+                    await asyncio.to_thread(request_control, entry, "teleport", {})
+                self.assertIn("unknown control action: teleport", str(ctx.exception))
+                # The refusal is per-request: the endpoint still answers a verb it does implement.
+                self.assertEqual(bridge.snapshot().control, "ready")
+                handshake = await asyncio.to_thread(request_control, entry, "handshake", {})
+                assert isinstance(handshake, Mapping)
+                self.assertEqual(handshake["protocol"], CONTROL_PROTOCOL_VERSION)
+            finally:
+                await server.close()
+                await bridge.stop("forced")
 
 
 class InterruptBridgeTests(unittest.IsolatedAsyncioTestCase):
@@ -927,7 +964,7 @@ class _SetterAdapter(_CapableAdapter):
 
 class OperationTimelineTests(unittest.IsolatedAsyncioTestCase):
     async def _serve(self, adapter, identity: ControlIdentity, tmp: str, **bridge_kwargs):
-        bridge = HarnessControlBridge(identity, adapter, clock=lambda: NOW, **bridge_kwargs)
+        bridge = HarnessControlBridge(identity, adapter, **bridge_kwargs, clock=lambda: NOW)
         await bridge.start(_launch(identity))
         endpoint = LocalControlEndpoint.for_session(Path(tmp), identity)
         server = HarnessControlServer(endpoint, bridge)
@@ -946,23 +983,21 @@ class OperationTimelineTests(unittest.IsolatedAsyncioTestCase):
                     submit_control_prompt,
                     entry,
                     "cockpit body",
-                    source="cockpit",
-                    request_id="tl-cockpit",
-                    expected_bridge_epoch=epoch,
+                    ControlSubmission(
+                        source="cockpit", request_id="tl-cockpit", expected_bridge_epoch=epoch
+                    ),
                 )
                 await asyncio.to_thread(
                     submit_control_prompt,
                     entry,
                     "terminal body",
-                    source="terminal",
-                    request_id="tl-terminal",
+                    ControlSubmission(source="terminal", request_id="tl-terminal"),
                 )
                 await asyncio.to_thread(
                     submit_control_prompt,
                     entry,
                     "durable body",
-                    source="durable",
-                    request_id="tl-durable",
+                    ControlSubmission(source="durable", request_id="tl-durable"),
                 )
                 await _drive_completions(adapter, ["tl-cockpit", "tl-terminal", "tl-durable"])
                 await asyncio.to_thread(set_control_model, entry, "model-b")
@@ -1029,8 +1064,7 @@ class OperationTimelineTests(unittest.IsolatedAsyncioTestCase):
                         submit_control_prompt,
                         entry,
                         f"body-{index}-{'y' * 200}",
-                        source="durable",
-                        request_id=f"tl-p-{index}",
+                        ControlSubmission(source="durable", request_id=f"tl-p-{index}"),
                     )
                 chained: list[int] = []
                 after = 0
@@ -1075,7 +1109,7 @@ class OperationTimelineTests(unittest.IsolatedAsyncioTestCase):
             identity = _identity("timeline-evict")
             adapter = _SetterAdapter()
             bridge, server, entry = await self._serve(
-                adapter, identity, tmp, submission_limit=4, queue_limit=4
+                adapter, identity, tmp, limits=BridgeLimits(submission=4, queue=4)
             )
             try:
                 descriptor = await asyncio.to_thread(read_submission_authority, entry)
@@ -1086,8 +1120,7 @@ class OperationTimelineTests(unittest.IsolatedAsyncioTestCase):
                         submit_control_prompt,
                         entry,
                         f"evict-{request_id}",
-                        source="durable",
-                        request_id=request_id,
+                        ControlSubmission(source="durable", request_id=request_id),
                     )
                     await _drive_completions(adapter, [request_id])
                 page = await asyncio.to_thread(
@@ -1205,7 +1238,13 @@ class AssetChannelTests(unittest.IsolatedAsyncioTestCase):
                 async def submit_with(**overrides: object):
                     kwargs = dict(base)
                     kwargs.update(overrides)
-                    return await asyncio.to_thread(submit_control_prompt, entry, **kwargs)  # type: ignore[arg-type]  # type: ignore[arg-type]
+                    text = kwargs.pop("text")
+                    return await asyncio.to_thread(
+                        submit_control_prompt,
+                        entry,
+                        text,  # type: ignore[arg-type]
+                        ControlSubmission(**kwargs),  # type: ignore[arg-type]
+                    )
 
                 ok = await submit_with(assets=[staged])
                 self.assertEqual(ok.acceptance, "immediate")
@@ -1260,10 +1299,12 @@ class AssetChannelTests(unittest.IsolatedAsyncioTestCase):
                             submit_control_prompt,
                             entry,
                             "trav",
-                            source="cockpit",
-                            request_id="req-trav",
-                            expected_bridge_epoch=epoch,
-                            assets=[{**staged, "assetId": bad}],
+                            ControlSubmission(
+                                source="cockpit",
+                                request_id="req-trav",
+                                expected_bridge_epoch=epoch,
+                                assets=[{**staged, "assetId": bad}],
+                            ),
                         )
                 bad_request_ids = ["../escape", "a/b", ".", "..", "x" * 256]
                 for bad in bad_request_ids:
@@ -1272,10 +1313,12 @@ class AssetChannelTests(unittest.IsolatedAsyncioTestCase):
                             submit_control_prompt,
                             entry,
                             "trav",
-                            source="cockpit",
-                            request_id=bad,
-                            expected_bridge_epoch=epoch,
-                            assets=[staged],
+                            ControlSubmission(
+                                source="cockpit",
+                                request_id=bad,
+                                expected_bridge_epoch=epoch,
+                                assets=[staged],
+                            ),
                         )
                 self.assertEqual(adapter.asset_submissions, [])
             finally:
@@ -1296,20 +1339,24 @@ class AssetChannelTests(unittest.IsolatedAsyncioTestCase):
                         submit_control_prompt,
                         entry,
                         "v",
-                        source="cockpit",
-                        request_id="req-v",
-                        expected_bridge_epoch=epoch,
-                        assets=[{**staged, "byteSize": cast(int, staged["byteSize"]) + 3}],
+                        ControlSubmission(
+                            source="cockpit",
+                            request_id="req-v",
+                            expected_bridge_epoch=epoch,
+                            assets=[{**staged, "byteSize": cast(int, staged["byteSize"]) + 3}],
+                        ),
                     )
                 with self.assertRaises(HarnessControlError):
                     await asyncio.to_thread(
                         submit_control_prompt,
                         entry,
                         "v",
-                        source="cockpit",
-                        request_id="req-v",
-                        expected_bridge_epoch=epoch,
-                        assets=[{**staged, "sha256": "f" * 64}],
+                        ControlSubmission(
+                            source="cockpit",
+                            request_id="req-v",
+                            expected_bridge_epoch=epoch,
+                            assets=[{**staged, "sha256": "f" * 64}],
+                        ),
                     )
                 missing = dict(staged)
                 with self.assertRaises(HarnessControlError):
@@ -1317,10 +1364,12 @@ class AssetChannelTests(unittest.IsolatedAsyncioTestCase):
                         submit_control_prompt,
                         entry,
                         "v",
-                        source="cockpit",
-                        request_id="req-missing",
-                        expected_bridge_epoch=epoch,
-                        assets=[missing],
+                        ControlSubmission(
+                            source="cockpit",
+                            request_id="req-missing",
+                            expected_bridge_epoch=epoch,
+                            assets=[missing],
+                        ),
                     )
                 self.assertEqual(adapter.asset_submissions, [])
             finally:
@@ -1340,10 +1389,12 @@ class AssetChannelTests(unittest.IsolatedAsyncioTestCase):
                     submit_control_prompt,
                     entry,
                     "u",
-                    source="cockpit",
-                    request_id="req-u",
-                    expected_bridge_epoch=epoch,
-                    assets=[staged],
+                    ControlSubmission(
+                        source="cockpit",
+                        request_id="req-u",
+                        expected_bridge_epoch=epoch,
+                        assets=[staged],
+                    ),
                 )
                 self.assertEqual(receipt.acceptance, "unsupported")
                 self.assertIn("asset submissions", receipt.detail or "")
@@ -1369,17 +1420,17 @@ class AssetChannelTests(unittest.IsolatedAsyncioTestCase):
                     submit_control_prompt,
                     entry,
                     "same text",
-                    source="cockpit",
-                    request_id="req-idem",
-                    expected_bridge_epoch=epoch,
+                    ControlSubmission(
+                        source="cockpit", request_id="req-idem", expected_bridge_epoch=epoch
+                    ),
                 )
                 replay = await asyncio.to_thread(
                     submit_control_prompt,
                     entry,
                     "same text",
-                    source="cockpit",
-                    request_id="req-idem",
-                    expected_bridge_epoch=epoch,
+                    ControlSubmission(
+                        source="cockpit", request_id="req-idem", expected_bridge_epoch=epoch
+                    ),
                 )
                 self.assertEqual(replay.acceptance, first.acceptance)
                 await _drive_completions(adapter, ["req-idem"])
@@ -1390,10 +1441,12 @@ class AssetChannelTests(unittest.IsolatedAsyncioTestCase):
                         submit_control_prompt,
                         entry,
                         "same text",
-                        source="cockpit",
-                        request_id="req-idem",
-                        expected_bridge_epoch=epoch,
-                        assets=[staged],
+                        ControlSubmission(
+                            source="cockpit",
+                            request_id="req-idem",
+                            expected_bridge_epoch=epoch,
+                            assets=[staged],
+                        ),
                     )
                 # Identical replay with the same asset set dedupes honestly.
                 staged_b = _stage_asset(Path(tmp), "req-idem-b", "a1", b"png-b")
@@ -1401,19 +1454,23 @@ class AssetChannelTests(unittest.IsolatedAsyncioTestCase):
                     submit_control_prompt,
                     entry,
                     "asset text",
-                    source="cockpit",
-                    request_id="req-idem-b",
-                    expected_bridge_epoch=epoch,
-                    assets=[staged_b],
+                    ControlSubmission(
+                        source="cockpit",
+                        request_id="req-idem-b",
+                        expected_bridge_epoch=epoch,
+                        assets=[staged_b],
+                    ),
                 )
                 replay_b = await asyncio.to_thread(
                     submit_control_prompt,
                     entry,
                     "asset text",
-                    source="cockpit",
-                    request_id="req-idem-b",
-                    expected_bridge_epoch=epoch,
-                    assets=[staged_b],
+                    ControlSubmission(
+                        source="cockpit",
+                        request_id="req-idem-b",
+                        expected_bridge_epoch=epoch,
+                        assets=[staged_b],
+                    ),
                 )
                 self.assertEqual(replay_b.acceptance, first_b.acceptance)
                 self.assertEqual(len(adapter.asset_submissions), 1)
@@ -1569,18 +1626,20 @@ class WithdrawalRecoveryTests(unittest.IsolatedAsyncioTestCase):
                     submit_control_prompt,
                     entry,
                     "first in flight",
-                    source="cockpit",
-                    request_id="req-head",
-                    expected_bridge_epoch=epoch,
+                    ControlSubmission(
+                        source="cockpit", request_id="req-head", expected_bridge_epoch=epoch
+                    ),
                 )
                 await asyncio.to_thread(
                     submit_control_prompt,
                     entry,
                     "recovery body exact",
-                    source="cockpit",
-                    request_id="req-rec",
-                    expected_bridge_epoch=epoch,
-                    assets=[staged],
+                    ControlSubmission(
+                        source="cockpit",
+                        request_id="req-rec",
+                        expected_bridge_epoch=epoch,
+                        assets=[staged],
+                    ),
                 )
                 result = await asyncio.to_thread(
                     withdraw_control_submission,

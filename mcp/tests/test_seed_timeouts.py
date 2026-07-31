@@ -43,12 +43,14 @@ class StallWatchdogTests(unittest.TestCase):
     def test_completing_command_returns_completed_process(self) -> None:
         result = grepai_seed._run_with_stall_watchdog(
             [sys.executable, "-c", "print('done')"],
+            grepai_seed._StallWatchdog(
+                progress=lambda: 0,
+                stall_seconds=30,
+                poll_seconds=0.1,
+            ),
             cwd=Path.cwd(),
             stdout=grepai_seed.subprocess.PIPE,
             stdin=grepai_seed.subprocess.DEVNULL,
-            progress=lambda: 0,
-            stall_seconds=30,
-            poll_seconds=0.1,
         )
         assert result is not None
         self.assertEqual(result.returncode, 0)
@@ -57,12 +59,14 @@ class StallWatchdogTests(unittest.TestCase):
     def test_stalled_command_is_killed_and_returns_none(self) -> None:
         result = grepai_seed._run_with_stall_watchdog(
             [sys.executable, "-c", "import time; time.sleep(60)"],
+            grepai_seed._StallWatchdog(
+                progress=lambda: 0,  # never advances
+                stall_seconds=1,
+                poll_seconds=0.1,
+            ),
             cwd=Path.cwd(),
             stdout=grepai_seed.subprocess.PIPE,
             stdin=grepai_seed.subprocess.DEVNULL,
-            progress=lambda: 0,  # never advances
-            stall_seconds=1,
-            poll_seconds=0.1,
         )
         self.assertIsNone(result)
 
@@ -70,12 +74,14 @@ class StallWatchdogTests(unittest.TestCase):
         ticks = iter(range(1000))  # progress advances every poll
         result = grepai_seed._run_with_stall_watchdog(
             [sys.executable, "-c", "import time; time.sleep(0.6); print('ok')"],
+            grepai_seed._StallWatchdog(
+                progress=lambda: next(ticks),
+                stall_seconds=1,
+                poll_seconds=0.1,
+            ),
             cwd=Path.cwd(),
             stdout=grepai_seed.subprocess.PIPE,
             stdin=grepai_seed.subprocess.DEVNULL,
-            progress=lambda: next(ticks),
-            stall_seconds=1,
-            poll_seconds=0.1,
         )
         assert result is not None
         self.assertEqual(result.returncode, 0)
@@ -83,12 +89,14 @@ class StallWatchdogTests(unittest.TestCase):
     def test_nonzero_exit_is_reported_not_treated_as_stall(self) -> None:
         result = grepai_seed._run_with_stall_watchdog(
             [sys.executable, "-c", "import sys; sys.stderr.write('boom'); sys.exit(3)"],
+            grepai_seed._StallWatchdog(
+                progress=lambda: 0,
+                stall_seconds=30,
+                poll_seconds=0.1,
+            ),
             cwd=Path.cwd(),
             stdout=grepai_seed.subprocess.PIPE,
             stdin=grepai_seed.subprocess.DEVNULL,
-            progress=lambda: 0,
-            stall_seconds=30,
-            poll_seconds=0.1,
         )
         assert result is not None
         self.assertEqual(result.returncode, 3)
@@ -131,9 +139,9 @@ class GrepaiCloneStallTests(unittest.TestCase):
         self.assertTrue(result["ok"])
         for call in watchdog.call_args_list:
             self.assertNotIn("timeout", call.kwargs)
-            self.assertEqual(
-                call.kwargs.get("stall_seconds"), grepai_seed.GREPAI_CLONE_STALL_SECONDS
-            )
+            # `stall_seconds` now rides the `_StallWatchdog` passed positionally beside the
+            # command, so the cap is asserted on the object rather than on a loose kwarg.
+            self.assertEqual(call.args[1].stall_seconds, grepai_seed.GREPAI_CLONE_STALL_SECONDS)
 
 
 class GrepaiScanMarkerTests(unittest.TestCase):

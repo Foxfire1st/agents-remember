@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Awaitable, Callable, Mapping
+from dataclasses import dataclass
 
 from agents_remember.errors import (
     HarnessAdapterBusyError,
@@ -28,28 +29,41 @@ RequestIdFactory = Callable[[str], str]
 DEFAULT_PI_MUTATION_TIMEOUT_SECONDS = 5.0
 
 
+@dataclass(frozen=True)
+class ConfigurationPorts:
+    """The adapter surface one set transaction drives, from request to committed evidence.
+
+    A set is atomic across all six: it mints a request id, writes through the transport, re-reads
+    the state and capabilities that must corroborate the write, and commits both together. Handing
+    them over as one port is what keeps a transaction from reading one adapter and committing to
+    another.
+    """
+
+    transport: TransportGetter
+    read_state: StateReader
+    read_capabilities: CapabilitiesReader
+    capabilities: CapabilitiesGetter
+    commit: StateCommitter
+    request_id: RequestIdFactory
+
+
 class PiRpcConfiguration:
     """Make one mutation response and its get_state evidence an atomic set transaction."""
 
     def __init__(
         self,
+        ports: ConfigurationPorts,
         *,
-        transport: TransportGetter,
-        read_state: StateReader,
-        read_capabilities: CapabilitiesReader,
-        capabilities: CapabilitiesGetter,
-        commit: StateCommitter,
-        request_id: RequestIdFactory,
         timeout_seconds: float = DEFAULT_PI_MUTATION_TIMEOUT_SECONDS,
     ) -> None:
         if timeout_seconds <= 0:
             raise HarnessControlError("Pi configuration timeout must be positive")
-        self._transport = transport
-        self._read_state = read_state
-        self._read_capabilities = read_capabilities
-        self._capabilities = capabilities
-        self._commit = commit
-        self._request_id = request_id
+        self._transport = ports.transport
+        self._read_state = ports.read_state
+        self._read_capabilities = ports.read_capabilities
+        self._capabilities = ports.capabilities
+        self._commit = ports.commit
+        self._request_id = ports.request_id
         self._timeout_seconds = timeout_seconds
         self._lock = asyncio.Lock()
 

@@ -33,8 +33,32 @@ MCP_TESTS = Path(__file__).resolve().parent
 sys.path.insert(0, str(MCP_SRC))
 sys.path.insert(0, str(MCP_TESTS))
 
+from agents_remember.controllers.memory_tools import CarryoverSelection
+from agents_remember.controllers.provider_tools import (
+    GrepaiSearchQuery,
+    GrepaiTraceQuery,
+    ProviderQueryScope,
+)
+from agents_remember.controllers.task_doc_tools import TaskDocEdit, TaskDocTarget
+from agents_remember.controllers.task_ref import TaskRef
+from agents_remember.controllers.worktree_tools import (
+    CloseoutApproval,
+    CloseoutCommitMessages,
+    StartExecution,
+    TaskBases,
+    TaskIdentity,
+)
+from agents_remember.controlplane.operator_inbox_records import (
+    InboxAddress,
+    InboxMessage,
+    InboxPoster,
+)
+from agents_remember.controlplane.records import GateAnchor, GateRequest, GateVerdict
 from agents_remember.mcp import tools
 from agents_remember.mcp.config import load_config
+from agents_remember.mcp.tools.gates import GateRaise, GateWait
+from agents_remember.mcp.tools.orchestration import NudgeSubject, NudgeTarget
+from agents_remember.mcp.tools.terminal import RetiredSpawnInputs
 from agents_remember.models.base import FlexibleResponseModel
 from agents_remember.models.tool_registry import TOOL_RESPONSE_MODELS
 from agents_remember.observer import (
@@ -43,6 +67,7 @@ from agents_remember.observer import (
     install_ambient,
     reset_ambient,
 )
+from agents_remember.observer.ambient import AmbientTiming
 from agents_remember.tasks import TaskDocument, write_task_doc
 from test_config import settings_payload
 from test_worktree_support import (
@@ -54,6 +79,8 @@ from test_worktree_support import (
 )
 
 REPO = "agents-remember"
+DRY_RUN_SCOPE = ProviderQueryScope(dry_run=True)
+DISABLED_MEMORY_BASES = TaskBases(memory_mode="disabled", memory_choice="disabled-memory")
 
 
 def _write_json(path: Path, data: dict) -> None:
@@ -152,7 +179,7 @@ def _simple_payloads(config) -> dict[str, dict]:
         # tmux spawn, so the conformance fixture never touches a real terminal host.
         "spawn_agent_session": tools.spawn_agent_session_payload(
             config,
-            harness="definitely-not-a-real-harness",
+            retired=RetiredSpawnInputs(harness="definitely-not-a-real-harness"),
         ),
         "hosted_session_readiness": tools.hosted_session_readiness_payload(
             config,
@@ -171,7 +198,7 @@ def _simple_payloads(config) -> dict[str, dict]:
             label="New Label",
         ),
         "runtime_install": tools.runtime_install_payload(config, install_provider_deps=False),
-        "resolve_context": tools.resolve_context_payload(config, REPO),
+        "resolve_context": tools.resolve_context_payload(config, TaskRef(repo_id=REPO)),
         "drift_check": tools.drift_check_payload(config, REPO),
         "memory_quality_check": tools.memory_quality_check_payload(config, REPO),
         "route_index_refresh": tools.route_index_refresh_payload(config, REPO),
@@ -180,14 +207,22 @@ def _simple_payloads(config) -> dict[str, dict]:
         "provider_status": tools.provider_status_payload(config),
         "provider_diagnostics": tools.provider_diagnostics_payload(config),
         "provider_watchers": tools.provider_watchers_payload(config, action="status"),
-        "grepai_search": tools.grepai_search_payload(config, "query", dry_run=True),
-        "grepai_trace": tools.grepai_trace_payload(config, "graph", "sym", dry_run=True),
-        "cgc_symbol_search": tools.cgc_symbol_search_payload(config, REPO, "sym", dry_run=True),
-        "cgc_callers": tools.cgc_callers_payload(config, REPO, "fn", dry_run=True),
-        "cgc_callees": tools.cgc_callees_payload(config, REPO, "fn", dry_run=True),
-        "cgc_dependencies": tools.cgc_dependencies_payload(config, REPO, "mod", dry_run=True),
-        "cgc_complexity": tools.cgc_complexity_payload(config, REPO, dry_run=True),
-        "cgc_visualize": tools.cgc_visualize_payload(config, REPO, dry_run=True),
+        "grepai_search": tools.grepai_search_payload(
+            config, GrepaiSearchQuery(query="query"), scope=DRY_RUN_SCOPE
+        ),
+        "grepai_trace": tools.grepai_trace_payload(
+            config, GrepaiTraceQuery(trace_action="graph", symbol="sym"), scope=DRY_RUN_SCOPE
+        ),
+        "cgc_symbol_search": tools.cgc_symbol_search_payload(
+            config, REPO, "sym", scope=DRY_RUN_SCOPE
+        ),
+        "cgc_callers": tools.cgc_callers_payload(config, REPO, "fn", scope=DRY_RUN_SCOPE),
+        "cgc_callees": tools.cgc_callees_payload(config, REPO, "fn", scope=DRY_RUN_SCOPE),
+        "cgc_dependencies": tools.cgc_dependencies_payload(
+            config, REPO, "mod", scope=DRY_RUN_SCOPE
+        ),
+        "cgc_complexity": tools.cgc_complexity_payload(config, REPO, scope=DRY_RUN_SCOPE),
+        "cgc_visualize": tools.cgc_visualize_payload(config, REPO, scope=DRY_RUN_SCOPE),
         "memory_baseline_status": tools.memory_baseline_status_payload(config, REPO),
         "memory_baseline_adopt": tools.memory_baseline_adopt_payload(config, REPO),
         "codex_benchmark_prepare": tools.codex_benchmark_prepare_payload(config),
@@ -210,27 +245,26 @@ def _worktree_payloads(root: Path) -> dict[str, dict]:
     payloads: dict[str, dict] = {}
     payloads["worktree_start"] = tools.worktree_start_payload(
         config,
-        REPO,
-        "demo-task",
-        "demo-wt",
-        dry_run=False,
-        skip_provider_setup=True,
-        memory_mode="disabled",
-        memory_choice="disabled-memory",
+        TaskIdentity(repo_id=REPO, task_name="demo-task", worktree_name="demo-wt"),
+        bases=DISABLED_MEMORY_BASES,
+        execution=StartExecution(skip_provider_setup=True),
     )
     contract_path = payloads["worktree_start"]["contract_path"]
     payloads["worktree_status"] = tools.worktree_status_payload(
-        config, REPO, contract_path=contract_path
+        config, TaskRef(repo_id=REPO, contract_path=contract_path)
     )
     payloads["worktree_attach"] = tools.worktree_attach_payload(
-        config, REPO, contract_path=contract_path
+        config, TaskRef(repo_id=REPO, contract_path=contract_path)
     )
     payloads["worktree_sync"] = tools.worktree_sync_payload(config, contract_path, dry_run=True)
     payloads["worktree_closeout_preview"] = tools.worktree_closeout_preview_payload(
-        config, contract_path, "code commit message"
+        config, contract_path, CloseoutCommitMessages(code="code commit message")
     )
     payloads["worktree_closeout_apply"] = tools.worktree_closeout_apply_payload(
-        config, contract_path, "intent note", "code commit message", dry_run=False
+        config,
+        contract_path,
+        CloseoutCommitMessages(code="code commit message"),
+        CloseoutApproval(intent_note="intent note"),
     )
     _run_git(config.workspace_root / REPO, ["checkout", "ar/demo-task"])
     payloads["worktree_integrate"] = tools.worktree_integrate_payload(
@@ -244,13 +278,9 @@ def _worktree_payloads(root: Path) -> dict[str, dict]:
     )
     abandon_start = tools.worktree_start_payload(
         config,
-        REPO,
-        "abandon-task",
-        "abandon-wt",
-        dry_run=False,
-        skip_provider_setup=True,
-        memory_mode="disabled",
-        memory_choice="disabled-memory",
+        TaskIdentity(repo_id=REPO, task_name="abandon-task", worktree_name="abandon-wt"),
+        bases=DISABLED_MEMORY_BASES,
+        execution=StartExecution(skip_provider_setup=True),
     )
     payloads["worktree_abandon"] = tools.worktree_abandon_payload(
         config, abandon_start["contract_path"], dry_run=False, force=True
@@ -291,12 +321,22 @@ def _carryover_payloads(root: Path) -> dict[str, dict]:
     source = source_memory.as_posix()
     return {
         "memory_carryover_plan": tools.memory_carryover_plan_payload(
-            config, "repo-a", source, "main", "workbench/reado/v1.2", old_base
+            config, _carryover_selection(source, old_base)
         ),
         "memory_carryover_apply": tools.memory_carryover_apply_payload(
-            config, "repo-a", source, "main", "workbench/reado/v1.2", old_base, "intent note"
+            config, _carryover_selection(source, old_base), intent_note="intent note"
         ),
     }
+
+
+def _carryover_selection(source: str, old_base: str) -> CarryoverSelection:
+    return CarryoverSelection(
+        repo_id="repo-a",
+        source_memory=source,
+        official_code_ref="main",
+        source_code_ref="workbench/reado/v1.2",
+        old_base=old_base,
+    )
 
 
 def _lifecycle_payloads(root: Path) -> dict[str, dict]:
@@ -308,7 +348,9 @@ def _lifecycle_payloads(root: Path) -> dict[str, dict]:
     not an advertised public MCP tool.
     """
     install_ambient(
-        AmbientLifecycle(EventStore(root / "logs" / "observer"), heartbeat_seconds=3600)
+        AmbientLifecycle(
+            EventStore(root / "logs" / "observer"), timing=AmbientTiming(heartbeat_seconds=3600)
+        )
     )
     try:
         return {
@@ -338,19 +380,20 @@ def _task_doc_payloads(root: Path) -> dict[str, dict]:
     return {
         "task_doc": tools.task_doc_payload(
             config,
-            repo_id=REPO,
+            TaskDocTarget(repo_id=REPO, task_name="demo-task"),
             operation="create",
-            task_name="demo-task",
-            fields={
-                "id": "DEMO",
-                "slug": "task",
-                "title": "Demo",
-                "kind": "master",
-                "repo": REPO,
-                "type": "Code",
-                "createdAt": "2026-01-01T00:00",
-                "objective": "demo",
-            },
+            edit=TaskDocEdit(
+                fields={
+                    "id": "DEMO",
+                    "slug": "task",
+                    "title": "Demo",
+                    "kind": "master",
+                    "repo": REPO,
+                    "type": "Code",
+                    "createdAt": "2026-01-01T00:00",
+                    "objective": "demo",
+                }
+            ),
         )
     }
 
@@ -360,7 +403,7 @@ def _gate_payloads(config) -> dict[str, dict]:
     install_ambient(
         AmbientLifecycle(
             EventStore(config.coordination_root / "logs" / "observer"),
-            heartbeat_seconds=3600,
+            timing=AmbientTiming(heartbeat_seconds=3600),
         )
     )
     try:
@@ -378,22 +421,26 @@ def _gate_payloads(config) -> dict[str, dict]:
                 config,
                 gate_id=open_gates[0]["id"],
                 lifecycle_id=started["lifecycleId"],
-                decision="approve",
-                decided_by="developer",
-                decided_via="dashboard",
+                verdict=GateVerdict(decision="approve", by="developer", via="dashboard"),
             )
 
         lifecycle_gate = tools.lifecycle_gate_payload(
             config,
-            kind="agent-question",
-            ask={"kind": "question", "prompt": "Continue?", "options": ["yes", "no"]},
-            packet={"summary": "demo gate"},
-            sleep=approve_lifecycle_gate,
+            GateRaise(
+                kind="agent-question",
+                request=GateRequest(packet={"summary": "demo gate"}),
+                ask={"kind": "question", "prompt": "Continue?", "options": ["yes", "no"]},
+            ),
+            wait=GateWait(timeout_seconds=None, sleep=approve_lifecycle_gate),
         )
     finally:
         reset_ambient()
 
-    created = tools.gate_create_payload(config, kind="closeout-approval", lifecycle_id="gate-demo")
+    created = tools.gate_create_payload(
+        config,
+        kind="closeout-approval",
+        anchor=GateAnchor(lifecycle_id="gate-demo"),
+    )
     gate_id = created["gateId"]
     return {
         "lifecycle_gate": lifecycle_gate,
@@ -402,15 +449,19 @@ def _gate_payloads(config) -> dict[str, dict]:
             config,
             gate_id=gate_id,
             lifecycle_id="gate-demo",
-            decision="approve",
-            decided_by="developer",
-            decided_via="dashboard",
+            verdict=GateVerdict(decision="approve", by="developer", via="dashboard"),
         ),
         "gate_wait": tools.gate_wait_payload(
-            config, gate_id=gate_id, lifecycle_id="gate-demo", sleep=lambda _s: None
+            config,
+            gate_id=gate_id,
+            lifecycle_id="gate-demo",
+            wait=GateWait(timeout_seconds=30.0, poll_seconds=1.0, sleep=lambda _s: None),
         ),
         "gate_response_wait": tools.gate_response_wait_payload(
-            config, gate_id=gate_id, lifecycle_id="gate-demo", sleep=lambda _s: None
+            config,
+            gate_id=gate_id,
+            lifecycle_id="gate-demo",
+            wait=GateWait(sleep=lambda _s: None),
         ),
         "gate_list": tools.gate_list_payload(config, lifecycle_id="gate-demo"),
     }
@@ -420,13 +471,9 @@ def _operator_inbox_payloads(config) -> dict[str, dict]:
     """External-chat inbox substrate: post, poll, then consume one entry."""
     posted = tools.operator_inbox_post_payload(
         config,
-        lifecycle_id="inbox-demo",
-        agent_id="agent-a",
-        gate_id="gate-demo",
-        ask="Continue?",
-        response="Yes, proceed.",
-        created_by="developer",
-        created_via="dashboard",
+        address=InboxAddress(lifecycle_id="inbox-demo", agent_id="agent-a"),
+        message=InboxMessage(ask="Continue?", response="Yes, proceed.", gate_id="gate-demo"),
+        poster=InboxPoster(created_by="developer", created_via="dashboard"),
     )
     return {
         "operator_inbox_post": posted,
@@ -449,10 +496,12 @@ def _orchestration_payloads(config) -> dict[str, dict]:
         "orchestration_nudge_manager": tools.orchestration_nudge_manager_payload(
             config,
             reason="missing-turn-report",
-            subject="worker 260703-L3",
-            manager_agent_id="manager-a",
-            subject_agent_id="worker-a",
-            artifact_path="notes/reports/260703-L3-worker-report.md",
+            target=NudgeTarget(agent_id="manager-a"),
+            subject=NudgeSubject(
+                subject="worker 260703-L3",
+                agent_id="worker-a",
+                artifact_path="notes/reports/260703-L3-worker-report.md",
+            ),
         )
     }
 

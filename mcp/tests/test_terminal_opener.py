@@ -13,7 +13,6 @@ import sys
 import tempfile
 import threading
 import unittest
-from collections.abc import Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from unittest import mock
@@ -25,9 +24,16 @@ import agents_remember
 from agents_remember.serving.harness_control_runner import parse_runner_config
 from agents_remember.serving.harness_launch import ResolvedLaunch
 from agents_remember.serving.harnesses import Harness
-from agents_remember.serving.terminal import TerminalSessionBinding
+from agents_remember.serving.hosted_session_runtime import HostedSessionRuntime
+from agents_remember.serving.terminal import TerminalSessionBinding, TerminalSessionSpec
 from agents_remember.serving.terminal_catalog import TerminalCatalog, TerminalCatalogEntry
-from agents_remember.serving.terminal_opener import open_terminal_session
+from agents_remember.serving.terminal_opener import (
+    ControlRunnerRequest,
+    SpawnKnobs,
+    SpawnProvenance,
+    TerminalLaunchRequest,
+    open_terminal_session,
+)
 
 # The source root of the agents_remember package this test process imported (``.../mcp/src``) --
 # what the opener must seed onto the runner spawn's PYTHONPATH.
@@ -44,41 +50,77 @@ class _FakeHost:
     def has_session(self, tmux_name: str) -> bool:
         return tmux_name in self.known
 
-    def ensure(
-        self,
-        sid: str,
-        *,
-        cwd: Path,
-        command: Sequence[str],
-        lifecycle_id: str | None = None,
-        name: str | None = None,
-        suspend_unsafe: bool = False,
-        env: Mapping[str, str] | None = None,
-    ) -> TerminalSessionBinding:
-        tmux_name = name or f"ar-{sid}"
+    def ensure(self, sid: str, spec: TerminalSessionSpec) -> TerminalSessionBinding:
+        tmux_name = spec.tmux_name_for(sid)
         self.ensured.append(
             {
                 "sid": sid,
-                "cwd": Path(cwd),
-                "command": tuple(command),
-                "lifecycle_id": lifecycle_id,
-                "suspend_unsafe": suspend_unsafe,
-                "env": dict(env or {}),
+                "cwd": spec.cwd,
+                "command": spec.command,
+                "lifecycle_id": spec.lifecycle_id,
+                "suspend_unsafe": spec.suspend_unsafe,
+                "env": dict(spec.env or {}),
             }
         )
         self.known.add(tmux_name)
         return TerminalSessionBinding(
             sid=sid,
             tmux_name=tmux_name,
-            cwd=Path(cwd),
-            command=tuple(command),
-            lifecycle_id=lifecycle_id,
-            suspend_unsafe=suspend_unsafe,
+            cwd=spec.cwd,
+            command=spec.command,
+            lifecycle_id=spec.lifecycle_id,
+            suspend_unsafe=spec.suspend_unsafe,
         )
 
 
 def _detected(_command: str) -> str | None:
     return "/usr/bin/harness"
+
+
+# The opener takes concepts (a launch, its knobs, its control wiring, the seat provenance); these
+# fixtures let each test keep naming the ONE field it is about and route it to the right object.
+_KNOB_FIELDS = frozenset({"launch_args", "prompt_keywords", "session_commands"})
+_CONTROL_FIELDS = {
+    "resolved_launch": "resolved_launch",
+    "resume_thread_id": "resume_thread_id",
+    "control_endpoint": "endpoint",
+    "control_root": "endpoint_root",
+}
+_PROVENANCE_FIELDS = frozenset(
+    {
+        "label",
+        "lifecycle_id",
+        "leaf_key",
+        "replacement_for_leaf",
+        "spawned_by_session",
+        "spawned_by_lifecycle",
+        "spawn_level",
+        "spawn_level_source",
+    }
+)
+
+
+def _open_session(
+    catalog: TerminalCatalog,
+    host: _FakeHost,
+    session_id: str,
+    **fields: object,
+):
+    knobs = {name: fields.pop(name) for name in list(fields) if name in _KNOB_FIELDS}
+    control = {
+        _CONTROL_FIELDS[name]: fields.pop(name) for name in list(fields) if name in _CONTROL_FIELDS
+    }
+    provenance = {name: fields.pop(name) for name in list(fields) if name in _PROVENANCE_FIELDS}
+    return open_terminal_session(
+        runtime=HostedSessionRuntime(catalog=catalog, host=host),  # type: ignore[arg-type]
+        session_id=session_id,
+        launch=TerminalLaunchRequest(
+            knobs=SpawnKnobs(**knobs),  # type: ignore[arg-type]
+            control=ControlRunnerRequest(**control),  # type: ignore[arg-type]
+            **fields,  # type: ignore[arg-type]
+        ),
+        provenance=SpawnProvenance(**provenance),  # type: ignore[arg-type]
+    )
 
 
 def _runner_config(host: _FakeHost):
@@ -119,9 +161,6 @@ class OpenTerminalSessionTests(unittest.TestCase):
 
     def _open(self, **kwargs: object):
         base: dict[str, object] = {
-            "catalog": self.catalog,
-            "host": self.host,
-            "session_id": "worker-1",
             "kind": "harness",
             "workspace_root": self.tmp,
             "shell": "/bin/bash",
@@ -129,7 +168,8 @@ class OpenTerminalSessionTests(unittest.TestCase):
             "which": _detected,
         }
         base.update(kwargs)
-        return open_terminal_session(**base)  # type: ignore[arg-type]
+        session_id = str(base.pop("session_id", "worker-1"))
+        return _open_session(self.catalog, self.host, session_id, **base)
 
     def test_opened_records_provenance_env_and_leaf(self) -> None:
         result = self._open(
@@ -305,9 +345,6 @@ class KnobApplicationTests(unittest.TestCase):
 
     def _open(self, **kwargs: object):
         base: dict[str, object] = {
-            "catalog": self.catalog,
-            "host": self.host,
-            "session_id": "worker-1",
             "kind": "harness",
             "workspace_root": self.tmp,
             "shell": "/bin/bash",
@@ -315,7 +352,8 @@ class KnobApplicationTests(unittest.TestCase):
             "which": _detected,
         }
         base.update(kwargs)
-        return open_terminal_session(**base)  # type: ignore[arg-type]
+        session_id = str(base.pop("session_id", "worker-1"))
+        return _open_session(self.catalog, self.host, session_id, **base)
 
     def test_claude_resolved_launch_rides_the_runner_payload(self) -> None:
         resolved = ResolvedLaunch("claude", "claude-fable-5", "max", self.tmp)
@@ -370,6 +408,72 @@ class KnobApplicationTests(unittest.TestCase):
         self.assertEqual(self.catalog.get("worker-1"), actual)
         self.assertEqual(len(self.host.ensured), 1)
         self.assertEqual(_runner_config(self.host).resolved_launch, original)
+
+    def test_live_reopen_from_another_workspace_root_conflicts_on_cwd(self) -> None:
+        # A durable tmux session keeps the directory it was created in. Reopening the same session
+        # id from a different workspace root is a different process identity, not a relocation, so
+        # the opener refuses and names both directories rather than rewriting the row.
+        first = self._open()
+        assert first.entry is not None
+        elsewhere = self.tmp / "other-workspace"
+        elsewhere.mkdir()
+
+        conflict = self._open(workspace_root=elsewhere)
+
+        self.assertEqual(conflict.status, "launch-conflict")
+        self.assertEqual(conflict.entry, first.entry)
+        assert conflict.detail is not None
+        self.assertIn(str(self.tmp), conflict.detail)
+        self.assertIn(str(elsewhere), conflict.detail)
+        self.assertEqual(self.catalog.get("worker-1"), first.entry)
+        self.assertEqual(len(self.host.ensured), 1)
+
+    def test_live_reopen_whose_resolved_launch_names_another_harness_conflicts(self) -> None:
+        # The resolved launch is the authority the runner applies, so a request whose launch names
+        # a different harness than the live row disagrees about what the process IS -- even though
+        # the request's own harness id still matches. It is refused before the runner is touched.
+        first = self._open()
+        assert first.entry is not None
+
+        conflict = self._open(resolved_launch=ResolvedLaunch("codex", "model-a", "high", self.tmp))
+
+        self.assertEqual(conflict.status, "launch-conflict")
+        self.assertEqual(conflict.entry, first.entry)
+        assert conflict.detail is not None
+        self.assertIn("resolved launch requested 'codex'", conflict.detail)
+        self.assertEqual(len(self.host.ensured), 1)
+
+    def test_a_dead_pre_bridge_row_is_replaced_by_a_controlled_spawn(self) -> None:
+        # A harness row with no control endpoint predates the bridge. Its recorded argv is only
+        # authoritative while its process still runs; once tmux no longer has the session there is
+        # nothing to preserve, so the replacement is an ordinary controlled spawn under the runner.
+        self.catalog.upsert(
+            TerminalCatalogEntry(
+                id="worker-1",
+                label="Claude Code",
+                kind="harness",
+                harness="claude",
+                lifecycle_id=None,
+                cwd=self.tmp,
+                tmux_name="ar-worker-1",
+                command=("claude", "--legacy-flag"),
+                created_at="2026-07-04T00:00:00Z",
+                last_attached_at="2026-07-04T00:00:00Z",
+                status="running",
+                control_endpoint=None,
+            )
+        )
+
+        result = self._open()
+
+        assert result.entry is not None
+        self.assertEqual(result.status, "opened")
+        self.assertEqual(len(self.host.ensured), 1)
+        spawned = self.host.ensured[0]["command"]
+        assert isinstance(spawned, tuple)
+        self.assertNotEqual(spawned, ("claude", "--legacy-flag"))
+        self.assertEqual(_runner_config(self.host).argv, ("claude",))
+        self.assertIsNotNone(result.entry.control_endpoint)
 
     def test_dead_replacement_uses_new_pair_and_fresh_control_generation(self) -> None:
         original = ResolvedLaunch("claude", "model-a", "high", self.tmp)

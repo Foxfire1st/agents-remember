@@ -33,7 +33,7 @@ from agents_remember.serving.change_watcher import (
     projection_domains_for_paths,
     projection_input_roots,
 )
-from agents_remember.serving.projector import Projector
+from agents_remember.serving.projector import ProjectionCadence, ProjectionRefreshers, Projector
 
 
 def _config(tmp: Path) -> McpRuntimeConfig:
@@ -275,7 +275,9 @@ class AdaptiveProjectorTests(unittest.IsolatedAsyncioTestCase):
     async def test_quiet_world_projects_only_at_heartbeat_cadence(self) -> None:
         watcher = _FakeWatcher()
         projector = Projector(
-            _config(self.tmp), interval=0.02, heartbeat=0.2, change_watcher=watcher
+            _config(self.tmp),
+            cadence=ProjectionCadence(interval=0.02, heartbeat=0.2),
+            refreshers=ProjectionRefreshers(change_watcher=watcher),
         )
         await self._run_projector(projector)
         await asyncio.wait_for(watcher.started.wait(), timeout=1)
@@ -291,7 +293,9 @@ class AdaptiveProjectorTests(unittest.IsolatedAsyncioTestCase):
     async def test_single_change_projects_within_the_debounce_bound(self) -> None:
         watcher = _FakeWatcher()
         projector = Projector(
-            _config(self.tmp), interval=0.02, heartbeat=30.0, change_watcher=watcher
+            _config(self.tmp),
+            cadence=ProjectionCadence(interval=0.02, heartbeat=30.0),
+            refreshers=ProjectionRefreshers(change_watcher=watcher),
         )
         await self._run_projector(projector)
         await asyncio.wait_for(watcher.started.wait(), timeout=1)
@@ -310,7 +314,9 @@ class AdaptiveProjectorTests(unittest.IsolatedAsyncioTestCase):
     async def test_burst_coalesces_to_a_bounded_projection_count(self) -> None:
         watcher = _FakeWatcher()
         projector = Projector(
-            _config(self.tmp), interval=0.15, heartbeat=30.0, change_watcher=watcher
+            _config(self.tmp),
+            cadence=ProjectionCadence(interval=0.15, heartbeat=30.0),
+            refreshers=ProjectionRefreshers(change_watcher=watcher),
         )
         await self._run_projector(projector)
         await asyncio.wait_for(watcher.started.wait(), timeout=1)
@@ -330,7 +336,9 @@ class AdaptiveProjectorTests(unittest.IsolatedAsyncioTestCase):
     async def test_missing_watchfiles_degrades_loudly_to_fixed_interval(self) -> None:
         config = _config(self.tmp)
         projector = Projector(
-            config, interval=0.05, heartbeat=30.0, change_watcher=ProjectionInputWatcher(config)
+            config,
+            cadence=ProjectionCadence(interval=0.05, heartbeat=30.0),
+            refreshers=ProjectionRefreshers(change_watcher=ProjectionInputWatcher(config)),
         )
         with (
             mock.patch.object(change_watcher_module, "watchfiles", None),
@@ -345,9 +353,8 @@ class AdaptiveProjectorTests(unittest.IsolatedAsyncioTestCase):
     async def test_crashed_watcher_task_degrades_loudly_to_fixed_interval(self) -> None:
         projector = Projector(
             _config(self.tmp),
-            interval=0.05,
-            heartbeat=30.0,
-            change_watcher=_CrashingWatcher(),
+            cadence=ProjectionCadence(interval=0.05, heartbeat=30.0),
+            refreshers=ProjectionRefreshers(change_watcher=_CrashingWatcher()),
         )
         with self.assertLogs("agents_remember.serving.projector", level="ERROR") as logs:
             await self._run_projector(projector)
@@ -408,7 +415,9 @@ class AdaptiveProjectorTests(unittest.IsolatedAsyncioTestCase):
     async def test_run_owns_the_watcher_task_lifecycle(self) -> None:
         watcher = _FakeWatcher()
         projector = Projector(
-            _config(self.tmp), interval=100, heartbeat=100, change_watcher=watcher
+            _config(self.tmp),
+            cadence=ProjectionCadence(interval=100, heartbeat=100),
+            refreshers=ProjectionRefreshers(change_watcher=watcher),
         )
         task = asyncio.create_task(projector.run())
         await asyncio.wait_for(watcher.started.wait(), timeout=1)
@@ -420,7 +429,7 @@ class AdaptiveProjectorTests(unittest.IsolatedAsyncioTestCase):
     async def test_without_a_watcher_the_legacy_interval_pacing_is_kept(self) -> None:
         # The sim/replay and injected-now() path: no watcher, no pacer -- the loop must
         # keep ticking unconditionally every interval exactly as before this change.
-        projector = Projector(_config(self.tmp), interval=0.05)
+        projector = Projector(_config(self.tmp), cadence=ProjectionCadence(interval=0.05))
         self.assertIsNone(projector._pacer)
         await self._run_projector(projector)
         await asyncio.sleep(0.4)
@@ -445,9 +454,8 @@ class RealWatchfilesIntegrationTests(unittest.IsolatedAsyncioTestCase):
         (self.tmp / "tasks").mkdir()
         projector = Projector(
             config,
-            interval=0.05,
-            heartbeat=60.0,
-            change_watcher=ProjectionInputWatcher(config),
+            cadence=ProjectionCadence(interval=0.05, heartbeat=60.0),
+            refreshers=ProjectionRefreshers(change_watcher=ProjectionInputWatcher(config)),
         )
         task = asyncio.create_task(projector.run())
         try:

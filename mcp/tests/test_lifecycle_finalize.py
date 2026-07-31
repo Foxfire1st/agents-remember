@@ -12,7 +12,13 @@ from agents_remember.models.tool_registry import PUBLIC_TOOL_RESPONSE_MODELS
 from agents_remember.tasks import TaskDocument, read_task_doc, write_task_doc
 from agents_remember.worktrees.modules.finalize import FinalizeArgs, finalize_result
 from agents_remember.worktrees.modules.models import WorktreeCommandResult
-from agents_remember.worktrees.worktree_contract import default_contract, write_contract
+from agents_remember.worktrees.worktree_contract import (
+    ContractTask,
+    LeafIdentity,
+    RepoBranchPlan,
+    default_contract,
+    write_contract,
+)
 from test_worktree_support import commit_file, git, init_repo
 
 
@@ -37,16 +43,20 @@ class LifecycleFinalizeTests(unittest.TestCase):
         if landed:
             git(code_repo, "merge", "--ff-only", "ar/task")
         contract = default_contract(
-            task_name="Finalize Thing",
-            repo_name="repo-a",
-            workflow_kind="light-task",
-            memory_mode="disabled",
-            coordination_root=self.tmp / "ar-coordination",
-            code_repo_path=code_repo,
-            code_source_branch="main",
-            code_work_branch="ar/task",
-            code_base_commit=code_base,
-            worktree_name="finalize-thing",
+            ContractTask(
+                name="Finalize Thing",
+                repo_name="repo-a",
+                coordination_root=self.tmp / "ar-coordination",
+                workflow_kind="light-task",
+                memory_mode="disabled",
+            ),
+            leaf=LeafIdentity(worktree_name="finalize-thing"),
+            code=RepoBranchPlan(
+                repo_path=code_repo,
+                source_branch="main",
+                work_branch="ar/task",
+                base_commit=code_base,
+            ),
         )
         values = {
             "human_review_status": "approved",

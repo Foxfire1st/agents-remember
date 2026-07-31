@@ -217,6 +217,10 @@ def map_evidence_frame(
 
     raw = frame.raw
     frame_type = optional_text(raw.get("type"))
+    recognize = _SILENT_FRAME_CONTRACTS.get(frame_type or "")
+    if recognize is not None:
+        recognize(raw)
+        return []
     if frame_type == "assistant":
         return _map_assistant(raw, created_at=frame.created_at, evidence_ref=evidence_ref)
     if frame_type == "result":
@@ -225,13 +229,6 @@ def map_evidence_frame(
         return _map_tool_carrier(raw, created_at=frame.created_at, evidence_ref=evidence_ref)
     if frame_type == "system":
         return _map_system(raw, created_at=frame.created_at, sequence=frame.sequence)
-    if frame_type == "command_lifecycle":
-        return _map_command_lifecycle(raw)
-    if frame_type == "rate_limit_event":
-        # Rate-limit telemetry feeds the L3 telemetry projection, exactly like codex rateLimits;
-        # it mints no timeline row. Validated so a shape drift surfaces instead of silently passing.
-        required_object(raw.get("rate_limit_info"), "claude rate_limit_event.rate_limit_info")
-        return []
     return [
         MappedUnknownVendor(
             item_id=f"claude-event-{frame.sequence}",
@@ -242,13 +239,8 @@ def map_evidence_frame(
     ]
 
 
-def _map_command_lifecycle(raw: Mapping[str, object]) -> list[MapperOutput]:
-    """Strictly recognize the 3-state slash-command lifecycle; mint no timeline item.
-
-    Recognizing the exact contract (rather than falling to unknown-vendor) is what keeps an ordinary
-    claude session flood-free; validating it is what surfaces a genuine future shape drift as an
-    honest failure instead of silent tolerance.
-    """
+def _require_command_lifecycle(raw: Mapping[str, object]) -> None:
+    """Strictly recognize the 3-state slash-command lifecycle."""
 
     required_text(raw.get("command_uuid"), "claude command_lifecycle.command_uuid")
     state = required_text(raw.get("state"), "claude command_lifecycle.state")
@@ -256,7 +248,22 @@ def _map_command_lifecycle(raw: Mapping[str, object]) -> list[MapperOutput]:
         raise UnmappableShape(
             f"claude command_lifecycle.state {state!r} is not a documented lifecycle state"
         )
-    return []
+
+
+def _require_rate_limit_event(raw: Mapping[str, object]) -> None:
+    """Strictly recognize rate-limit telemetry, which feeds L3 exactly like codex rateLimits."""
+
+    required_object(raw.get("rate_limit_info"), "claude rate_limit_event.rate_limit_info")
+
+
+# Frame types with a known contract that mints NO timeline row. Recognizing them by name (rather
+# than letting them fall to unknown-vendor) is what keeps an ordinary claude session flood-free;
+# validating their shape anyway is what surfaces a genuine future drift as an honest failure
+# instead of silent tolerance.
+_SILENT_FRAME_CONTRACTS: dict[str, Callable[[Mapping[str, object]], None]] = {
+    "command_lifecycle": _require_command_lifecycle,
+    "rate_limit_event": _require_rate_limit_event,
+}
 
 
 def _map_system(
@@ -309,60 +316,38 @@ def _map_task_lifecycle(
     tool call is honestly still streaming here and the later tool_result upsert
     settles it. task_updated ({task_id, patch:{status,...}}) duplicates the
     notification's terminal signal without the join key and stays unmapped.
+
+    Each decision the frame carries lives in one named helper below — the identity
+    defaults, the usage shape check, the subtype's status/phase, the emitted blocks,
+    the task_started tagging item — so this body is the fixed order they happen in:
+    resolve identity, validate, decide the lifecycle state, record the binding, emit.
+    That order is load-bearing: the lookup above has to read the PREVIOUS binding
+    before the record below replaces it wholesale.
     """
 
     task_id = required_text(raw.get("task_id"), f"claude {subtype}.task_id")
     session_id = _session_key(raw)
     binding = _AGENT_BINDINGS.lookup(session_id, task_id=task_id)
-    tool_use_id = optional_text(raw.get("tool_use_id"))
-    join_key = tool_use_id or (binding.join_key if binding is not None else None)
-    subagent_type = optional_text(raw.get("subagent_type")) or (
-        binding.subagent_type if binding is not None else None
-    )
-    frame_description = optional_text(raw.get("description"))
-    description = frame_description or (binding.description if binding is not None else None)
-    usage_raw = raw.get("usage")
-    if usage_raw is not None and not isinstance(usage_raw, Mapping):
-        raise UnmappableShape(f"claude {subtype}.usage must be an object")
-    usage = usage_raw if isinstance(usage_raw, Mapping) else None
+    identity = _resolve_task_identity(raw, binding)
+    usage = _require_task_usage(subtype, raw)
     summary = optional_text(raw.get("summary"))
     last_tool_name = optional_text(raw.get("last_tool_name"))
-    if subtype == "task_started":
-        # The binding authority: both ids are required evidence on this frame.
-        join_key = required_text(raw.get("tool_use_id"), "claude task_started.tool_use_id")
-        agent_status: ConversationAgentStatus = "running"
-        phase: ItemPhase = "streaming"
-    elif subtype == "task_progress":
-        agent_status = "running"
-        phase = "streaming"
-    else:  # task_notification
-        status_text = required_text(raw.get("status"), "claude task_notification.status")
-        agent_status = _NOTIFICATION_AGENT_STATUS.get(status_text, "unknown")
-        phase = _NOTIFICATION_ITEM_PHASE.get(agent_status, "unknown")
+    join_key, agent_status, phase = _task_lifecycle_state(subtype, raw, join_key=identity.join_key)
     _AGENT_BINDINGS.record(
         session_id,
         _AgentBinding(
             task_id=task_id,
             join_key=join_key,
-            subagent_type=subagent_type,
-            # task_started's description is the task's own; a progress frame's
-            # description is a transient activity label, so the record keeps the first.
-            description=(binding.description if binding is not None else None) or frame_description,
+            subagent_type=identity.subagent_type,
+            description=identity.retained_description,
             status=agent_status,
         ),
     )
-    blocks: list[ConversationContentBlock] = []
-    if description:
-        blocks.append(TextBlock(block_id="description", text=description))
-    if summary:
-        blocks.append(TextBlock(block_id="summary", text=summary))
-    if usage is not None or last_tool_name is not None:
-        data: dict[str, object] = {}
-        if usage is not None:
-            data["usage"] = usage
-        if last_tool_name is not None:
-            data["lastToolName"] = last_tool_name
-        blocks.append(ToolOutputBlock(block_id="usage", data=data))
+    blocks = _task_lifecycle_blocks(
+        description=identity.description,
+        summary=summary,
+        usage_block=_task_usage_block(usage, last_tool_name),
+    )
     outputs: list[MapperOutput] = [
         MappedItem(
             item=ConversationItem(
@@ -377,10 +362,10 @@ def _map_task_lifecycle(
                 role="system",
                 kind="notice",
                 phase=phase,
-                blocks=tuple(blocks),
+                blocks=blocks,
                 agent=ConversationAgentRef(
                     agent_id=task_id,
-                    role=subagent_type,
+                    role=identity.subagent_type,
                     join_key=join_key,
                     status=agent_status,
                 ),
@@ -390,35 +375,183 @@ def _map_task_lifecycle(
     ]
     if subtype == "task_started" and join_key is not None:
         outputs.append(
-            MappedItem(
-                item=ConversationItem(
-                    item_id=join_key,
-                    revision=1,
-                    global_ordinal=1,
-                    lane="harness",
-                    source="harness-live",
-                    provenance=harness_provenance(
-                        "claude stream-json task_started frame (agent identity binding)",
-                        observed_at=created_at,
-                    ),
-                    role="tool",
-                    kind="tool-call",
-                    phase="streaming",
-                    # Block-union upsert: the tool_use/tool_result blocks the parent
-                    # timeline already minted survive untouched.
-                    blocks=(),
-                    correlation=ConversationCorrelation(tool_call_id=join_key),
-                    agent=ConversationAgentRef(
-                        agent_id=task_id,
-                        role=subagent_type,
-                        join_key=join_key,
-                        status="running",
-                    ),
-                    created_at=created_at,
-                )
+            _agent_identity_tag_item(
+                task_id,
+                join_key=join_key,
+                subagent_type=identity.subagent_type,
+                created_at=created_at,
             )
         )
     return outputs
+
+
+@dataclass(frozen=True)
+class _TaskIdentity:
+    """The roster identity one task_* frame resolves to: frame evidence over binding."""
+
+    join_key: str | None
+    subagent_type: str | None
+    description: str | None
+    # What the replacing binding record keeps, which is deliberately NOT always what
+    # the roster row displays; see _resolve_task_identity.
+    retained_description: str | None
+
+
+def _resolve_task_identity(
+    raw: Mapping[str, object],
+    binding: _AgentBinding | None,
+) -> _TaskIdentity:
+    """Resolve a task_* frame's identity fields against the binding it already has.
+
+    Every field prefers the frame's own evidence and falls back to what earlier
+    task_* evidence already proved, because the later frames are sparse: a
+    task_notification carries neither ``subagent_type`` nor ``description``, and its
+    roster upsert must not blank what task_started filled in. Nothing is guessed — a
+    field absent from both the frame and the binding stays None.
+    """
+
+    if binding is None:
+        bound_join_key, bound_type, bound_description = None, None, None
+    else:
+        bound_join_key = binding.join_key
+        bound_type = binding.subagent_type
+        bound_description = binding.description
+    frame_description = optional_text(raw.get("description"))
+    return _TaskIdentity(
+        join_key=optional_text(raw.get("tool_use_id")) or bound_join_key,
+        subagent_type=optional_text(raw.get("subagent_type")) or bound_type,
+        description=frame_description or bound_description,
+        # task_started's description is the task's own; a progress frame's
+        # description is a transient activity label, so the record keeps the first.
+        retained_description=bound_description or frame_description,
+    )
+
+
+def _require_task_usage(subtype: str, raw: Mapping[str, object]) -> Mapping[str, object] | None:
+    """The frame's optional ``usage`` telemetry, validated as the vendor-owned object it is.
+
+    Absent is normal (task_started carries none); present-but-not-an-object is vendor
+    shape drift, which the caller degrades to preserved unknown-vendor.
+    """
+
+    usage_raw = raw.get("usage")
+    if usage_raw is None:
+        return None
+    if not isinstance(usage_raw, Mapping):
+        raise UnmappableShape(f"claude {subtype}.usage must be an object")
+    return usage_raw
+
+
+def _task_lifecycle_state(
+    subtype: str,
+    raw: Mapping[str, object],
+    *,
+    join_key: str | None,
+) -> tuple[str | None, ConversationAgentStatus, ItemPhase]:
+    """The join key, agent status and item phase this lifecycle subtype settles on.
+
+    started and progress are both honestly still running; only a notification is
+    terminal, and its ``status`` word is table-driven so anything outside the probed
+    vocabulary stays ``unknown`` instead of being guessed. The join key is returned
+    rather than merely passed through because task_started is the binding authority:
+    there the id is REQUIRED evidence, not the optional default the other subtypes
+    inherit from the binding.
+    """
+
+    if subtype == "task_started":
+        # The binding authority: both ids are required evidence on this frame.
+        return (
+            required_text(raw.get("tool_use_id"), "claude task_started.tool_use_id"),
+            "running",
+            "streaming",
+        )
+    if subtype == "task_progress":
+        return (join_key, "running", "streaming")
+    # task_notification
+    status_text = required_text(raw.get("status"), "claude task_notification.status")
+    agent_status = _NOTIFICATION_AGENT_STATUS.get(status_text, "unknown")
+    return (join_key, agent_status, _NOTIFICATION_ITEM_PHASE.get(agent_status, "unknown"))
+
+
+def _task_usage_block(
+    usage: Mapping[str, object] | None,
+    last_tool_name: str | None,
+) -> ToolOutputBlock | None:
+    """The roster row's telemetry block, or None when the frame carried neither half.
+
+    The two halves are independent — a progress frame can carry usage without a last
+    tool name — so each key is emitted only when the frame actually evidenced it.
+    """
+
+    if usage is None and last_tool_name is None:
+        return None
+    data: dict[str, object] = {}
+    if usage is not None:
+        data["usage"] = usage
+    if last_tool_name is not None:
+        data["lastToolName"] = last_tool_name
+    return ToolOutputBlock(block_id="usage", data=data)
+
+
+def _task_lifecycle_blocks(
+    *,
+    description: str | None,
+    summary: str | None,
+    usage_block: ToolOutputBlock | None,
+) -> tuple[ConversationContentBlock, ...]:
+    """The roster row's content blocks, in the order every upsert re-emits them."""
+
+    blocks: list[ConversationContentBlock] = []
+    if description:
+        blocks.append(TextBlock(block_id="description", text=description))
+    if summary:
+        blocks.append(TextBlock(block_id="summary", text=summary))
+    if usage_block is not None:
+        blocks.append(usage_block)
+    return tuple(blocks)
+
+
+def _agent_identity_tag_item(
+    task_id: str,
+    *,
+    join_key: str,
+    subagent_type: str | None,
+    created_at: str | None,
+) -> MappedItem:
+    """The task_started upsert that tags the spawning Agent tool-call with the bound identity.
+
+    It targets the tool-call item the parent timeline already minted (its item id IS
+    the Agent ``tool_use`` id) and carries identity only — the call is honestly still
+    streaming at task_started, and the later tool_result upsert settles it.
+    """
+
+    return MappedItem(
+        item=ConversationItem(
+            item_id=join_key,
+            revision=1,
+            global_ordinal=1,
+            lane="harness",
+            source="harness-live",
+            provenance=harness_provenance(
+                "claude stream-json task_started frame (agent identity binding)",
+                observed_at=created_at,
+            ),
+            role="tool",
+            kind="tool-call",
+            phase="streaming",
+            # Block-union upsert: the tool_use/tool_result blocks the parent
+            # timeline already minted survive untouched.
+            blocks=(),
+            correlation=ConversationCorrelation(tool_call_id=join_key),
+            agent=ConversationAgentRef(
+                agent_id=task_id,
+                role=subagent_type,
+                join_key=join_key,
+                status="running",
+            ),
+            created_at=created_at,
+        )
+    )
 
 
 def _map_background_tasks_changed(

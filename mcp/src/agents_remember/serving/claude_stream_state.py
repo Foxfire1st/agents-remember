@@ -80,25 +80,51 @@ class _PendingControl:
     target_request_id: str
 
 
+@dataclass(frozen=True)
+class ClaudeStreamSession:
+    """WHICH Claude stream this state reduces: its identity, its snapshot, its wire, its verbs.
+
+    The four are settled together at handshake and never independently: the supported command set
+    is what THIS transport advertised for THIS identity, and the snapshot is the state that pairing
+    starts from.
+    """
+
+    identity: ControlIdentity
+    snapshot: AdapterSnapshot
+    transport: ClaudeStreamTransport
+    supported_commands: frozenset[str]
+
+
+@dataclass(frozen=True)
+class TranscriptCorrelation:
+    """What ties one transcript entry back to the submission that produced it, and when.
+
+    The AR request id and the vendor's own correlation id name the same submission from the two
+    sides of the bridge; the timestamp is the moment they were observed together. An entry stamped
+    with one submission's ids and another's time is unusable as evidence.
+    """
+
+    request_id: str | None
+    vendor_correlation_id: str | None
+    created_at: str
+
+
 class ClaudeStreamState:
     """Own bounded submission evidence and reduce Claude frames into L1 adapter events."""
 
     def __init__(
         self,
+        session: ClaudeStreamSession,
         *,
-        identity: ControlIdentity,
-        snapshot: AdapterSnapshot,
-        transport: ClaudeStreamTransport,
-        supported_commands: frozenset[str],
         clock: Clock,
         correlation_factory: CorrelationFactory,
         limits: ClaudeAdapterLimits,
         pending_interaction_frame: dict[str, object] | None = None,
     ) -> None:
-        self._identity = identity
-        self._snapshot = snapshot
-        self._transport = transport
-        self._supported_commands = supported_commands
+        self._identity = session.identity
+        self._snapshot = session.snapshot
+        self._transport = session.transport
+        self._supported_commands = session.supported_commands
         self._clock = clock
         self._correlation_factory = correlation_factory
         self._limits = limits
@@ -602,49 +628,10 @@ class ClaudeStreamState:
             self._pending_by_correlation.get(correlation) if isinstance(correlation, str) else None
         )
         if request_id is None:
-            abandoned = next(
-                (
-                    record
-                    for record in self._history.values()
-                    if isinstance(correlation, str)
-                    and record.correlation_id == correlation
-                    and record.abandoned
-                ),
-                None,
-            )
-            if abandoned is not None:
-                if frame.get("session_id") != self._snapshot.vendor_session_id:
-                    raise HarnessControlError("Claude replay-user-message changed session identity")
-                if abandoned.replay_text != wire_text:
-                    raise HarnessControlError(
-                        "Claude replay-user-message body changed for its retained correlation"
-                    )
-                if abandoned.completed:
-                    await self._emit(
-                        "state",
-                        raw={"completedClaudeReplayIgnored": abandoned.request.request_id},
-                    )
-                    return
-                if abandoned.request.request_id not in self._accepted_order:
-                    self._accepted_order.append(abandoned.request.request_id)
-                await self._emit(
-                    "state",
-                    raw={
-                        "lateClaudeReplayIgnored": abandoned.request.request_id,
-                        _ACTIVE_TURN_ID_KEY: abandoned.operation.operation_id,
-                    },
-                )
-                return
-            raise HarnessControlError(
-                "Claude replayed a user message without a retained correlation"
-            )
+            await self._handle_abandoned_replay(frame, correlation=correlation, wire_text=wire_text)
+            return
         record = self._history[request_id]
-        if frame.get("session_id") != self._snapshot.vendor_session_id:
-            raise HarnessControlError("Claude replay-user-message changed session identity")
-        if record.replay_text != wire_text:
-            raise HarnessControlError(
-                "Claude replay-user-message body changed for its retained correlation"
-            )
+        self._require_faithful_replay(frame, retained_text=record.replay_text, wire_text=wire_text)
         accepted_at = self._created_at(frame)
         if self._accepted_order:
             raise HarnessControlError("Claude accepted a second ordinary prompt")
@@ -665,11 +652,13 @@ class ClaudeStreamState:
             record.acceptance_future.set_result(receipt)
         self._snapshot = replace(self._snapshot, activity="running", acceptance=acceptance)
         transcript = self._transcript_entry(
+            TranscriptCorrelation(
+                request_id=request_id,
+                vendor_correlation_id=record.correlation_id,
+                created_at=accepted_at,
+            ),
             role="user",
             text=record.request.text,
-            request_id=request_id,
-            vendor_correlation_id=record.correlation_id,
-            created_at=accepted_at,
         )
         await self._emit(
             "state",
@@ -680,6 +669,74 @@ class ClaudeStreamState:
             },
         )
 
+    async def _handle_abandoned_replay(
+        self,
+        frame: Mapping[str, object],
+        *,
+        correlation: object,
+        wire_text: str,
+    ) -> None:
+        """Absorb a replay whose request is no longer pending, using the retained record.
+
+        A correlation with no retained record is unattributable and fails the stream. A retained
+        one is still verified verbatim, then ignored for acceptance -- the turn it named already
+        completed, or it landed late -- while the late case still restores the accepted order and
+        the active turn id so the seat does not read as idle.
+        """
+
+        abandoned = next(
+            (
+                record
+                for record in self._history.values()
+                if isinstance(correlation, str)
+                and record.correlation_id == correlation
+                and record.abandoned
+            ),
+            None,
+        )
+        if abandoned is None:
+            raise HarnessControlError(
+                "Claude replayed a user message without a retained correlation"
+            )
+        self._require_faithful_replay(
+            frame, retained_text=abandoned.replay_text, wire_text=wire_text
+        )
+        if abandoned.completed:
+            await self._emit(
+                "state",
+                raw={"completedClaudeReplayIgnored": abandoned.request.request_id},
+            )
+            return
+        if abandoned.request.request_id not in self._accepted_order:
+            self._accepted_order.append(abandoned.request.request_id)
+        await self._emit(
+            "state",
+            raw={
+                "lateClaudeReplayIgnored": abandoned.request.request_id,
+                _ACTIVE_TURN_ID_KEY: abandoned.operation.operation_id,
+            },
+        )
+
+    def _require_faithful_replay(
+        self,
+        frame: Mapping[str, object],
+        *,
+        retained_text: str,
+        wire_text: str,
+    ) -> None:
+        """Refuse a replay that is not the retained submission, verbatim, on the same session.
+
+        A changed session identity or a changed body means the echo is not evidence about the
+        request it correlates to, so nothing may be concluded from it in either direction.
+        """
+
+        if frame.get("session_id") != self._snapshot.vendor_session_id:
+            raise HarnessControlError("Claude replay-user-message changed session identity")
+        if retained_text != wire_text:
+            raise HarnessControlError(
+                "Claude replay-user-message body changed for its retained correlation"
+            )
+
     async def _handle_assistant(self, frame: Mapping[str, object]) -> None:
         self._snapshot = replace(self._snapshot, activity="running")
         text = message_text(frame)
@@ -687,11 +744,13 @@ class ClaudeStreamState:
         if text:
             transcript = (
                 self._transcript_entry(
+                    TranscriptCorrelation(
+                        request_id=self._current_request_id(),
+                        vendor_correlation_id=optional_text(frame.get("uuid")),
+                        created_at=self._created_at(frame),
+                    ),
                     role="assistant",
                     text=text,
-                    request_id=self._current_request_id(),
-                    vendor_correlation_id=optional_text(frame.get("uuid")),
-                    created_at=self._created_at(frame),
                 ),
             )
         await self._emit(
@@ -755,11 +814,13 @@ class ClaudeStreamState:
             record.completed = True
             self._history.move_to_end(request_id)
         transcript = self._transcript_entry(
+            TranscriptCorrelation(
+                request_id=request_id,
+                vendor_correlation_id=optional_text(frame.get("uuid")),
+                created_at=completed_at,
+            ),
             role="result",
             text=detail or outcome,
-            request_id=request_id,
-            vendor_correlation_id=optional_text(frame.get("uuid")),
-            created_at=completed_at,
             terminal_result=terminal,
         )
         activity = (
@@ -863,14 +924,15 @@ class ClaudeStreamState:
 
     def _transcript_entry(
         self,
+        correlation: TranscriptCorrelation,
         *,
         role: TranscriptRole,
         text: str,
-        request_id: str | None,
-        vendor_correlation_id: str | None,
-        created_at: str,
         terminal_result: TerminalResult | None = None,
     ) -> TranscriptEntry:
+        request_id = correlation.request_id
+        vendor_correlation_id = correlation.vendor_correlation_id
+        created_at = correlation.created_at
         self._transcript_sequence += 1
         return TranscriptEntry(
             sequence=self._transcript_sequence,

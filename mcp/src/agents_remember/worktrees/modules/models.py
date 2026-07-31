@@ -17,6 +17,22 @@ class WorktreeCommandResult:
 
 
 @dataclass(frozen=True)
+class VerifiedChange:
+    """The landed code change that onboarding metadata is stamped against.
+
+    Every refresher needs the same four facts together -- the commit, its date, the paths it
+    touched, and the working-tree subset of those paths that gates closeout (``None`` when
+    the caller has no separate working set). Splitting them let a caller stamp one commit's
+    hash beside another's path list.
+    """
+
+    commit: str
+    commit_date: str
+    changed_paths: list[str]
+    working_paths: list[str] | None = None
+
+
+@dataclass(frozen=True)
 class WorktreeProviderSetupConfig:
     coordination_root: Path
     settings_path: Path

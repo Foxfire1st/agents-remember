@@ -2,14 +2,18 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from agents_remember.controlplane.operator_inbox_records import (
     AdapterDeliveryState,
     InboxDeliveryState,
     OperatorInboxEntry,
 )
-from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
+from agents_remember.controlplane.operator_inbox_store import (
+    AdapterReceipt,
+    DeliveryAttempt,
+    OperatorInboxStore,
+)
 from agents_remember.errors import HarnessControlError
 from agents_remember.observer.events import now_iso
 from agents_remember.serving.dispatch_brief import (
@@ -18,11 +22,12 @@ from agents_remember.serving.dispatch_brief import (
     with_prompt_keywords,
 )
 from agents_remember.serving.harness_control_client import (
+    ControlSubmission,
     reconcile_control_prompt,
     submit_control_prompt,
 )
 from agents_remember.serving.harness_control_models import ReconciliationResult, SubmissionReceipt
-from agents_remember.serving.terminal import TerminalHost
+from agents_remember.serving.hosted_session_runtime import HostedSessionRuntime
 from agents_remember.serving.terminal_catalog import TerminalCatalog, TerminalCatalogEntry
 from agents_remember.serving.terminal_paste import TerminalPaster
 
@@ -36,18 +41,119 @@ class InboxDeliveryResult:
     detail: str | None = None
 
 
-def deliver_inbox_entry(
-    *,
-    store: OperatorInboxStore,
-    catalog: TerminalCatalog,
-    host: TerminalHost,
-    paster: TerminalPaster,
+@dataclass(frozen=True)
+class _DeliveryOutcome:
+    """What one delivery attempt amounted to, in exactly the fields ``_record`` writes.
+
+    A refusal, an adapter receipt and a reconciliation all reduce to this triple, which is why it
+    is one value: the three fields are always decided together and are meaningless apart (a
+    delivery state with someone else's detail is a lie in the durable record).
+    """
+
+    delivery_state: InboxDeliveryState
+    adapter_state: AdapterDeliveryState | None
+    detail: str
+
+
+@dataclass(frozen=True)
+class _AdapterCorrelation:
+    """How the adapter identifies the submission this attempt produced, if it produced one."""
+
+    request_id: str | None = None
+    vendor_correlation_id: str | None = None
+    accepted_at: str | None = None
+
+
+@dataclass(frozen=True)
+class RedeliveryFloor:
+    """The rate limit on re-recording a delivery, and the row snapshot it is measured against.
+
+    The floor is meaningless without ``current``: the store needs the rows it is comparing this
+    attempt's timing against. They arrive together from the sweep that owns both.
+    """
+
+    current: dict[str, OperatorInboxEntry] | None = None
+    seconds: float | None = None
+
+
+@dataclass(frozen=True)
+class InboxDeliveryLog:
+    """One durable row's delivery journal: which row, where attempts are written, and when.
+
+    Every recorder in this module writes through the same journal, so it travels as one value and
+    each recorder supplies only what is genuinely different about its own outcome.
+    """
+
+    store: OperatorInboxStore
+    entry: OperatorInboxEntry
+    at: str = field(default_factory=now_iso)
+    floor: RedeliveryFloor = field(default_factory=RedeliveryFloor)
+
+
+@dataclass(frozen=True)
+class DeliveryAdmission:
+    """Whether this push is allowed to reach the wire at all.
+
+    Both checks settle before any adapter call: ``submit`` is the caller's commitment to a real
+    adapter submission, and ``dispatch_gate`` is the exact-once gate a durable brief must pass.
+    """
+
+    submit: bool = True
+    dispatch_gate: DispatchBriefGate | None = None
+
+
+_NO_ADAPTER_CORRELATION = _AdapterCorrelation()
+DEFAULT_DELIVERY_ADMISSION = DeliveryAdmission()
+"""The ordinary committed push: a real adapter submission with the default brief gate."""
+
+
+def _delivery_refusal(
     entry: OperatorInboxEntry,
-    submit: bool = True,
-    current: dict[str, OperatorInboxEntry] | None = None,
-    redelivery_floor_seconds: float | None = None,
-    delivery_at: str | None = None,
-    dispatch_gate: DispatchBriefGate | None = None,
+    *,
+    sessions: HostedSessionRuntime,
+    target: TerminalCatalogEntry,
+    admission: DeliveryAdmission,
+) -> _DeliveryOutcome | None:
+    """The refusal to durably record for an addressed target, or ``None`` to go submit.
+
+    Every check here is settled before any adapter call is made, so a dead pane, a legacy session
+    with no bridge, an uncommitted caller or a closed dispatch-brief gate never reaches the wire.
+    """
+
+    if not sessions.host.has_session(target.tmux_name):
+        return _DeliveryOutcome(
+            "no-hosted-session", None, "catalog row exists but tmux session is not running"
+        )
+    if target.kind != "harness" or target.control_endpoint is None:
+        return _DeliveryOutcome(
+            "unconfirmed",
+            "unsupported",
+            "legacy or ordinary terminal session has no protocol delivery adapter",
+        )
+    if not admission.submit:
+        return _DeliveryOutcome(
+            "unconfirmed",
+            "rejected",
+            "durable inbox delivery requires a committed adapter submission",
+        )
+    if entry.messageKind == DISPATCH_BRIEF_KIND:
+        gate_detail = (admission.dispatch_gate or DispatchBriefGate()).check(
+            sessions.catalog,
+            sessions.host,
+            target,
+            recovery=entry.attemptCount > 0,
+        )
+        if gate_detail is not None:
+            return _DeliveryOutcome("unconfirmed", "rejected", gate_detail)
+    return None
+
+
+def deliver_inbox_entry(
+    log: InboxDeliveryLog,
+    *,
+    sessions: HostedSessionRuntime,
+    paster: TerminalPaster,
+    admission: DeliveryAdmission = DEFAULT_DELIVERY_ADMISSION,
 ) -> OperatorInboxEntry:
     """Deliver a pre-existing durable row and record adapter evidence without consuming it.
 
@@ -56,85 +162,24 @@ def deliver_inbox_entry(
     """
 
     del paster  # compatibility composition parameter; protocol delivery never uses terminal input
-    timestamp = delivery_at or now_iso()
-    target = _target_session(catalog, entry)
+    entry = log.entry
+    target = _target_session(sessions.catalog, entry)
     if target is None:
         return _record(
-            store,
-            entry,
-            timestamp,
-            target=None,
-            delivery_state="no-hosted-session",
-            adapter_state=None,
-            detail="no running hosted session matched the inbox address",
-            current=current,
-            redelivery_floor_seconds=redelivery_floor_seconds,
+            log,
+            None,
+            _DeliveryOutcome(
+                "no-hosted-session",
+                None,
+                "no running hosted session matched the inbox address",
+            ),
         )
-    if not host.has_session(target.tmux_name):
-        return _record(
-            store,
-            entry,
-            timestamp,
-            target=target,
-            delivery_state="no-hosted-session",
-            adapter_state=None,
-            detail="catalog row exists but tmux session is not running",
-            current=current,
-            redelivery_floor_seconds=redelivery_floor_seconds,
-        )
-    if target.kind != "harness" or target.control_endpoint is None:
-        return _record(
-            store,
-            entry,
-            timestamp,
-            target=target,
-            delivery_state="unconfirmed",
-            adapter_state="unsupported",
-            detail="legacy or ordinary terminal session has no protocol delivery adapter",
-            current=current,
-            redelivery_floor_seconds=redelivery_floor_seconds,
-        )
-    if not submit:
-        return _record(
-            store,
-            entry,
-            timestamp,
-            target=target,
-            delivery_state="unconfirmed",
-            adapter_state="rejected",
-            detail="durable inbox delivery requires a committed adapter submission",
-            current=current,
-            redelivery_floor_seconds=redelivery_floor_seconds,
-        )
-    if entry.messageKind == DISPATCH_BRIEF_KIND:
-        gate_detail = (dispatch_gate or DispatchBriefGate()).check(
-            catalog,
-            host,
-            target,
-            recovery=entry.attemptCount > 0,
-        )
-        if gate_detail is not None:
-            return _record(
-                store,
-                entry,
-                timestamp,
-                target=target,
-                delivery_state="unconfirmed",
-                adapter_state="rejected",
-                detail=gate_detail,
-                current=current,
-                redelivery_floor_seconds=redelivery_floor_seconds,
-            )
+    refusal = _delivery_refusal(entry, sessions=sessions, target=target, admission=admission)
+    if refusal is not None:
+        return _record(log, target, refusal)
 
     if entry.adapterRequestId is not None:
-        return _redelivery(
-            store,
-            entry,
-            target,
-            timestamp,
-            current=current,
-            redelivery_floor_seconds=redelivery_floor_seconds,
-        )
+        return _redelivery(log, target)
 
     text = _push_text(entry)
     if entry.messageKind == DISPATCH_BRIEF_KIND:
@@ -143,66 +188,38 @@ def deliver_inbox_entry(
         receipt = submit_control_prompt(
             target,
             text,
-            source="durable",
-            request_id=entry.id,
-            submitted_at=timestamp,
+            ControlSubmission(source="durable", request_id=entry.id, submitted_at=log.at),
         )
     except HarnessControlError as exc:
         reconciliation = _try_reconcile(target, entry.id)
         return _record_reconciliation(
-            store,
-            entry,
+            log,
             target,
-            timestamp,
             reconciliation,
             fallback_detail=f"ambiguous adapter transport: {exc}",
-            current=current,
-            redelivery_floor_seconds=redelivery_floor_seconds,
         )
-    return _record_receipt(
-        store,
-        entry,
-        target,
-        timestamp,
-        receipt,
-        current=current,
-        redelivery_floor_seconds=redelivery_floor_seconds,
-    )
+    return _record_receipt(log, target, receipt)
 
 
-def _redelivery(
-    store: OperatorInboxStore,
-    entry: OperatorInboxEntry,
-    target: TerminalCatalogEntry,
-    timestamp: str,
-    *,
-    current: dict[str, OperatorInboxEntry] | None,
-    redelivery_floor_seconds: float | None,
-) -> OperatorInboxEntry:
+def _redelivery(log: InboxDeliveryLog, target: TerminalCatalogEntry) -> OperatorInboxEntry:
+    entry = log.entry
     if entry.adapterDeliveryState in {"accepted", "queued", "completed"}:
         return _record(
-            store,
-            entry,
-            timestamp,
-            target=target,
-            delivery_state="delivered",
-            adapter_state=entry.adapterDeliveryState,
-            detail=f"adapter-{entry.adapterDeliveryState}: already correlated",
-            current=current,
-            redelivery_floor_seconds=redelivery_floor_seconds,
+            log,
+            target,
+            _DeliveryOutcome(
+                "delivered",
+                entry.adapterDeliveryState,
+                f"adapter-{entry.adapterDeliveryState}: already correlated",
+            ),
         )
     request_id = entry.adapterRequestId
     assert request_id is not None  # this helper is entered only for an already-correlated row
-    reconciliation = _try_reconcile(target, request_id)
     return _record_reconciliation(
-        store,
-        entry,
+        log,
         target,
-        timestamp,
-        reconciliation,
+        _try_reconcile(target, request_id),
         fallback_detail="adapter request remains ambiguous; not resubmitted",
-        current=current,
-        redelivery_floor_seconds=redelivery_floor_seconds,
     )
 
 
@@ -214,14 +231,9 @@ def _try_reconcile(target: TerminalCatalogEntry, request_id: str) -> Reconciliat
 
 
 def _record_receipt(
-    store: OperatorInboxStore,
-    entry: OperatorInboxEntry,
+    log: InboxDeliveryLog,
     target: TerminalCatalogEntry,
-    timestamp: str,
     receipt: SubmissionReceipt,
-    *,
-    current: dict[str, OperatorInboxEntry] | None,
-    redelivery_floor_seconds: float | None,
 ) -> OperatorInboxEntry:
     adapter_state: AdapterDeliveryState = (
         "accepted" if receipt.acceptance == "immediate" else receipt.acceptance
@@ -233,31 +245,23 @@ def _record_receipt(
     if receipt.detail:
         detail += f": {receipt.detail}"
     return _record(
-        store,
-        entry,
-        timestamp,
-        target=target,
-        delivery_state=delivery_state,
-        adapter_state=adapter_state,
-        detail=detail,
-        request_id=receipt.request_id,
-        vendor_correlation_id=receipt.vendor_correlation_id,
-        accepted_at=receipt.accepted_at,
-        current=current,
-        redelivery_floor_seconds=redelivery_floor_seconds,
+        log,
+        target,
+        _DeliveryOutcome(delivery_state, adapter_state, detail),
+        _AdapterCorrelation(
+            request_id=receipt.request_id,
+            vendor_correlation_id=receipt.vendor_correlation_id,
+            accepted_at=receipt.accepted_at,
+        ),
     )
 
 
 def _record_reconciliation(
-    store: OperatorInboxStore,
-    entry: OperatorInboxEntry,
+    log: InboxDeliveryLog,
     target: TerminalCatalogEntry,
-    timestamp: str,
     reconciliation: ReconciliationResult | None,
     *,
     fallback_detail: str,
-    current: dict[str, OperatorInboxEntry] | None,
-    redelivery_floor_seconds: float | None,
 ) -> OperatorInboxEntry:
     if reconciliation is None or reconciliation.state == "unresolved":
         state: AdapterDeliveryState = "unknown"
@@ -269,54 +273,45 @@ def _record_reconciliation(
         state = reconciliation.state
         detail = reconciliation.detail or f"adapter reconciliation {reconciliation.state}"
     return _record(
-        store,
-        entry,
-        timestamp,
-        target=target,
-        delivery_state="delivered" if state == "accepted" else "unconfirmed",
-        adapter_state=state,
-        detail=detail,
-        request_id=(
-            reconciliation.request_id
-            if reconciliation is not None
-            else entry.adapterRequestId or entry.id
+        log,
+        target,
+        _DeliveryOutcome("delivered" if state == "accepted" else "unconfirmed", state, detail),
+        _AdapterCorrelation(
+            request_id=(
+                reconciliation.request_id
+                if reconciliation is not None
+                else log.entry.adapterRequestId or log.entry.id
+            ),
+            vendor_correlation_id=(
+                reconciliation.vendor_correlation_id if reconciliation is not None else None
+            ),
         ),
-        vendor_correlation_id=(
-            reconciliation.vendor_correlation_id if reconciliation is not None else None
-        ),
-        current=current,
-        redelivery_floor_seconds=redelivery_floor_seconds,
     )
 
 
 def _record(
-    store: OperatorInboxStore,
-    entry: OperatorInboxEntry,
-    timestamp: str,
-    *,
+    log: InboxDeliveryLog,
     target: TerminalCatalogEntry | None,
-    delivery_state: InboxDeliveryState,
-    adapter_state: AdapterDeliveryState | None,
-    detail: str,
-    current: dict[str, OperatorInboxEntry] | None,
-    redelivery_floor_seconds: float | None,
-    request_id: str | None = None,
-    vendor_correlation_id: str | None = None,
-    accepted_at: str | None = None,
+    outcome: _DeliveryOutcome,
+    correlation: _AdapterCorrelation = _NO_ADAPTER_CORRELATION,
 ) -> OperatorInboxEntry:
-    return store.record_delivery(
-        entry.id,
-        now=timestamp,
-        delivery_state=delivery_state,
-        delivered_to_session=target.id if target is not None else None,
-        delivery_detail=detail,
-        adapter_delivery_state=adapter_state,
-        adapter_request_id=entry.adapterRequestId or request_id,
-        adapter_vendor_correlation_id=vendor_correlation_id,
-        adapter_accepted_at=accepted_at,
-        adapter_delivery_detail=detail,
-        current=current,
-        redelivery_floor_seconds=redelivery_floor_seconds,
+    return log.store.record_delivery(
+        log.entry.id,
+        DeliveryAttempt(
+            delivery_state=outcome.delivery_state,
+            delivered_to_session=target.id if target is not None else None,
+            detail=outcome.detail,
+            adapter=AdapterReceipt(
+                delivery_state=outcome.adapter_state,
+                request_id=log.entry.adapterRequestId or correlation.request_id,
+                vendor_correlation_id=correlation.vendor_correlation_id,
+                accepted_at=correlation.accepted_at,
+                detail=outcome.detail,
+            ),
+        ),
+        now=log.at,
+        current=log.floor.current,
+        redelivery_floor_seconds=log.floor.seconds,
     )
 
 

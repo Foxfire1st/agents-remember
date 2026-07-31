@@ -7,9 +7,15 @@ import unittest
 from datetime import UTC, datetime
 from pathlib import Path
 
-from agents_remember.controlplane.operator_inbox_records import create_operator_inbox_entry
+from agents_remember.controlplane.operator_inbox_records import (
+    InboxAddress,
+    InboxMessage,
+    InboxPoster,
+    InboxRouting,
+    create_operator_inbox_entry,
+)
 from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
-from agents_remember.controlplane.records import create_gate
+from agents_remember.controlplane.records import GateAnchor, create_gate
 from agents_remember.controlplane.store import GateStore
 from agents_remember.observer.paths import observer_logs_root
 from agents_remember.observer.snapshots import read_agent_pickups, read_gates
@@ -25,10 +31,10 @@ class InteractionRetentionTests(unittest.TestCase):
         store = GateStore(observer_logs_root(self.root))
         store.append(
             create_gate(
-                kind="agent-question",
-                lifecycle_id="L1",
+                "agent-question",
                 gate_id="G1",
                 now="2026-06-01T10:00:00+00:00",
+                anchor=GateAnchor(lifecycle_id="L1"),
             )
         )
 
@@ -44,28 +50,20 @@ class InteractionRetentionTests(unittest.TestCase):
         store = OperatorInboxStore(observer_logs_root(self.root))
         store.append(
             create_operator_inbox_entry(
+                InboxMessage(ask="Continue?", response="Approved.", gate_id="G1"),
                 entry_id="fresh",
                 now="2026-06-01T10:00:00+00:00",
-                lifecycle_id="L1",
-                agent_id=None,
-                gate_id="G1",
-                ask="Continue?",
-                response="Approved.",
-                created_by="developer",
-                created_via="dashboard",
+                routing=InboxRouting(address=InboxAddress(lifecycle_id="L1", agent_id=None)),
+                poster=InboxPoster(created_by="developer", created_via="dashboard"),
             )
         )
         store.append(
             create_operator_inbox_entry(
+                InboxMessage(ask="Continue?", response="Approved.", gate_id="G2"),
                 entry_id="stale",
                 now="2026-06-01T09:50:00+00:00",
-                lifecycle_id="L2",
-                agent_id=None,
-                gate_id="G2",
-                ask="Continue?",
-                response="Approved.",
-                created_by="developer",
-                created_via="dashboard",
+                routing=InboxRouting(address=InboxAddress(lifecycle_id="L2", agent_id=None)),
+                poster=InboxPoster(created_by="developer", created_via="dashboard"),
             )
         )
 

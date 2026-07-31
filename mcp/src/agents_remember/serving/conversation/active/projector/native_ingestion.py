@@ -7,24 +7,19 @@ from collections.abc import Callable
 from typing import Protocol
 
 from agents_remember.errors import AgentsRememberError, HarnessControlError
-from agents_remember.serving.conversation.models import ActiveConversationRef
-from agents_remember.serving.conversation.projectors import HarnessProjector
 from agents_remember.serving.conversation.projectors.common import (
     MappedItem,
     MappedUnknownVendor,
     MapperOutput,
     UnmappableShape,
 )
-from agents_remember.serving.harness_control_client import ControlledSession
 from agents_remember.serving.harness_control_models import (
     EvidenceFrame,
     EvidencePage,
     NativeEvidencePage,
 )
 
-from .agent_authority import AgentAuthority
-from .mutation_stream import ProjectionMutationStream
-from .references import ProjectionEvidenceRefs
+from .wiring import BridgeReaders, SessionProjectionSpine
 
 EvidenceReader = Callable[..., EvidencePage]
 NativePageReader = Callable[..., NativeEvidencePage]
@@ -49,26 +44,16 @@ class EvidenceTimelineRegressed(AgentsRememberError):
 class NativeEvidenceIngestion:
     """Own source watermarks, completeness, mapping, and live/native dedupe."""
 
-    def __init__(
-        self,
-        *,
-        identity: ActiveConversationRef,
-        entry: ControlledSession,
-        mapper: HarnessProjector,
-        stream: ProjectionMutationStream,
-        agents: AgentAuthority,
-        refs: ProjectionEvidenceRefs,
-        evidence_reader: EvidenceReader,
-        native_page_reader: NativePageReader,
-    ) -> None:
-        self._identity = identity
-        self._entry = entry
+    def __init__(self, spine: SessionProjectionSpine, readers: BridgeReaders) -> None:
+        mapper = spine.mapper
+        self._identity = spine.identity
+        self._entry = spine.entry
         self._mapper = mapper
-        self._stream = stream
-        self._agents = agents
-        self._refs = refs
-        self._read_evidence = evidence_reader
-        self._read_native_page = native_page_reader
+        self._stream = spine.stream
+        self._agents = spine.agents
+        self._refs = spine.refs
+        self._read_evidence = readers.evidence
+        self._read_native_page = readers.native_page
         self.evidence_after = 0
         self.evidence_window_complete = True
         self.native_cursor: str | None = None

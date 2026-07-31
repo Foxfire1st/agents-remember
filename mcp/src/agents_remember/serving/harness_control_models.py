@@ -687,6 +687,43 @@ def _bounded_identity_scalar(value: object) -> str | None:
     return None
 
 
+_TOP_LEVEL_IDENTITY_KEYS = ("type", "subtype", "terminal_reason", AR_TERMINAL_OUTCOME_KEY)
+"""Identity/status enums the settlement reads take straight off the frame root."""
+
+
+def _bounded_identity_scalars(
+    source: Mapping[str, object], keys: tuple[str, ...]
+) -> dict[str, object]:
+    """The subset of ``keys`` present in ``source`` as bounded scalars, kept at their own names.
+
+    A key is dropped whole when it is absent, non-string, or over-length -- never invented and
+    never truncated, so a surviving value is always the exact scalar a consumer would have read.
+    """
+
+    preserved: dict[str, object] = {}
+    for key in keys:
+        scalar = _bounded_identity_scalar(source.get(key))
+        if scalar is not None:
+            preserved[key] = scalar
+    return preserved
+
+
+def _nested_identity_scalars(
+    payload: Mapping[str, object], *, path: str, keys: tuple[str, ...]
+) -> dict[str, object]:
+    """One nested object's surviving identity scalars, rebuilt at ``path``.
+
+    Empty when the path is absent, is not an object, or contributed nothing -- so a clipped frame
+    never grows an empty ``message``/``turn`` shell that a consumer could mistake for evidence.
+    """
+
+    nested = payload.get(path)
+    if not isinstance(nested, Mapping):
+        return {}
+    kept = _bounded_identity_scalars(nested, keys)
+    return {path: kept} if kept else {}
+
+
 def _preserved_evidence_identity(payload: Mapping[str, object]) -> dict[str, object]:
     """The terminal-identity fields that survive a clip, each at its original payload path.
 
@@ -710,34 +747,11 @@ def _preserved_evidence_identity(payload: Mapping[str, object]) -> dict[str, obj
       degrades to a mis-read failure.
     """
 
-    preserved: dict[str, object] = {}
-    frame_type = _bounded_identity_scalar(payload.get("type"))
-    if frame_type is not None:
-        preserved["type"] = frame_type
-    for claude_terminal_key in ("subtype", "terminal_reason"):
-        scalar = _bounded_identity_scalar(payload.get(claude_terminal_key))
-        if scalar is not None:
-            preserved[claude_terminal_key] = scalar
-    adapter_outcome = _bounded_identity_scalar(payload.get(AR_TERMINAL_OUTCOME_KEY))
-    if adapter_outcome is not None:
-        preserved[AR_TERMINAL_OUTCOME_KEY] = adapter_outcome
-    message = payload.get("message")
-    if isinstance(message, Mapping):
-        stop_reason = _bounded_identity_scalar(message.get("stopReason"))
-        if stop_reason is not None:
-            preserved["message"] = {"stopReason": stop_reason}
-    turn = payload.get("turn")
-    if isinstance(turn, Mapping):
-        turn_identity: dict[str, object] = {}
-        turn_id = _bounded_identity_scalar(turn.get("id"))
-        if turn_id is not None:
-            turn_identity["id"] = turn_id
-        turn_status = _bounded_identity_scalar(turn.get("status"))
-        if turn_status is not None:
-            turn_identity["status"] = turn_status
-        if turn_identity:
-            preserved["turn"] = turn_identity
-    return preserved
+    return {
+        **_bounded_identity_scalars(payload, _TOP_LEVEL_IDENTITY_KEYS),
+        **_nested_identity_scalars(payload, path="message", keys=("stopReason",)),
+        **_nested_identity_scalars(payload, path="turn", keys=("id", "status")),
+    }
 
 
 _CONTENT_TRUNCATION_LIMITS = (65536, 16384, 4096, 1024, 320)

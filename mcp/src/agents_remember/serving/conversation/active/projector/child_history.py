@@ -10,15 +10,12 @@ from agents_remember.serving.conversation.active.agent_history import (
     AgentHistoryHydration,
     agent_history_state_item,
 )
-from agents_remember.serving.conversation.projectors import HarnessProjector
 from agents_remember.serving.conversation.projectors.common import MappedItem
-from agents_remember.serving.harness_control_client import ControlledSession
 from agents_remember.serving.harness_control_models import NativeEvidencePage
 
-from .agent_authority import AgentAuthority, is_agent_roster_item
-from .mutation_stream import ProjectionMutationStream
+from .agent_authority import is_agent_roster_item
 from .native_ingestion import NATIVE_PAGE_LIMIT, NativeEvidenceIngestion
-from .references import ProjectionEvidenceRefs
+from .wiring import BridgeReaders, SessionProjectionSpine
 
 Clock = Callable[[], str]
 NativePageReader = Callable[..., NativeEvidencePage]
@@ -30,30 +27,21 @@ class ChildHistoryProjection:
 
     def __init__(
         self,
-        *,
-        parent_thread_id: str | None,
-        bridge_epoch: str,
-        entry: ControlledSession,
-        mapper: HarnessProjector,
-        stream: ProjectionMutationStream,
-        agents: AgentAuthority,
+        spine: SessionProjectionSpine,
+        readers: BridgeReaders,
         native: NativeEvidenceIngestion,
-        refs: ProjectionEvidenceRefs,
-        native_page_reader: NativePageReader,
-        apply_lock: asyncio.Lock,
-        clock: Clock,
     ) -> None:
-        self._parent_thread_id = parent_thread_id
-        self._bridge_epoch = bridge_epoch
-        self._entry = entry
-        self._mapper = mapper
-        self._stream = stream
-        self._agents = agents
+        self._parent_thread_id = spine.parent_thread_id
+        self._bridge_epoch = spine.bridge_epoch
+        self._entry = spine.entry
+        self._mapper = spine.mapper
+        self._stream = spine.stream
+        self._agents = spine.agents
         self._native = native
-        self._refs = refs
-        self._read_native_page = native_page_reader
-        self._apply_lock = apply_lock
-        self._clock = clock
+        self._refs = spine.refs
+        self._read_native_page = readers.native_page
+        self._apply_lock = spine.apply_lock
+        self._clock = spine.clock
         self.walked: set[str] = set()
         self.failures: set[str] = set()
         self.inflight: dict[str, asyncio.Task[AgentHistoryHydration]] = {}

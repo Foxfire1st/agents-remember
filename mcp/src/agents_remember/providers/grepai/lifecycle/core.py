@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import platform
 import urllib.parse
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -29,8 +30,10 @@ from agents_remember.providers.grepai.context import (
     GREPAI_POSTGRES_DEFAULT_HOST,
     GREPAI_RUNNER_CONTAINER_NAME,
     GREPAI_RUNNER_IMAGE_REPOSITORY,
+    GrepaiInstance,
     GrepaiMemoryRoot,
     GrepaiRuntimeLayout,
+    GrepaiWorkspace,
     ensure_grepai_root_gitignore,
     grepai_runtime_layout,
     grepai_runtime_layout_from_provider_settings,
@@ -63,10 +66,12 @@ def grepai_layout_from_args(
         settings_path,
         provider_settings,
         grepai_runtime_layout(
-            coordination_root=args.coordination_root,
-            workspace_name=str(provider_settings.get("workspace", "agents-remember-memory")),
-            roots=(GrepaiMemoryRoot(project_id=stable_provider_id(root.name), path=root),),
-            runtime_root=runtime_root,
+            GrepaiWorkspace(
+                coordination_root=args.coordination_root,
+                name=str(provider_settings.get("workspace", "agents-remember-memory")),
+                roots=(GrepaiMemoryRoot(project_id=stable_provider_id(root.name), path=root),),
+            ),
+            instance=GrepaiInstance(runtime_root=runtime_root),
         ),
     )
 
@@ -81,22 +86,47 @@ def grepai_settings_layout_requested(
     )
 
 
+@dataclass(frozen=True)
+class GrepaiServicePorts:
+    """The host ports the GrepAI stack publishes its dependencies on."""
+
+    postgres: int | str | None = None
+    ollama: int | str | None = None
+
+
+# Nothing published yet: each command falls back to the configured host port.
+UNRESOLVED_SERVICE_PORTS = GrepaiServicePorts()
+
+
+@dataclass(frozen=True)
+class GrepaiWorkspaceConfig:
+    """What one GrepAI workspace.yaml says: the store, the embedder, the projects.
+
+    The three settings are only meaningful as one document — the watcher reads
+    them together to know where to write vectors, how to produce them, and
+    which paths each indexed project lives at inside the container.
+    """
+
+    dsn: str
+    embedder_settings: dict[str, Any] | None = None
+    project_paths: dict[str, str] | None = None
+
+
 def prepare_grepai_workspace(
     layout: GrepaiRuntimeLayout,
     provider_settings: dict[str, Any],
+    config: GrepaiWorkspaceConfig,
     *,
-    dsn: str,
     dry_run: bool = False,
-    project_paths: dict[str, str] | None = None,
-    embedder_settings: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     gitignored = [] if dry_run else ensure_grepai_root_gitignore(layout.roots)
     if not dry_run:
         write_grepai_workspace_config(
             layout,
-            dsn=dsn,
-            embedder_settings=embedder_settings or grepai_embedder_settings(provider_settings),
-            project_paths=project_paths,
+            dsn=config.dsn,
+            embedder_settings=config.embedder_settings
+            or grepai_embedder_settings(provider_settings),
+            project_paths=config.project_paths,
         )
     return {
         "gitignoredRoots": gitignored,

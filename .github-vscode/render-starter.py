@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 """Render the VS Code + Copilot Agents Remember starter package for one workspace."""
 
+# Generated file -- do not edit.
+# Source: scripts/harness/render_starter.py
+# Regenerate: python3 scripts/sync-harness.py
+
 from __future__ import annotations
 
 import argparse
@@ -10,19 +14,29 @@ import platform
 import shlex
 import subprocess
 import sys
+from collections.abc import Callable
 from pathlib import Path
 
+HARNESS_LABEL = "VS Code + Copilot"
 PATH_PLACEHOLDER = "<PATH/TO/YOUR/PROJECTS_FOLDER>"
 REPO_PLACEHOLDER = "<YOUR_REPOSITORY_FOLDER_NAME>"
+PLACEHOLDERS = (
+    PATH_PLACEHOLDER,
+    REPO_PLACEHOLDER,
+)
 TARGET_FILES = (
     "copilot-instructions.md",
     "hooks/agents-remember-session-start.json",
     "hooks/agents-remember-session-start.py",
 )
+# Rendered into the sibling .vscode/ folder, not into this one.
 VSCODE_TARGET_FILES = (
     "mcp.json",
     "mcp/agents-remember-settings.json",
 )
+
+
+Renderer = Callable[[Path, Path, list[str]], None]
 
 
 def command_string(argv: list[str]) -> str:
@@ -72,10 +86,24 @@ def render_settings(path: Path, workspace_root: Path, repos: list[str]) -> None:
 
 
 def hook_script_path(workspace_root: Path) -> Path:
+    """Where the VS Code starter installs its session-start hook.
+
+    The starter folder ships as ``.github-vscode/`` so it does not collide with a
+    repository's own ``.github/``, but VS Code reads the hook from ``.github/``. The
+    installed path is therefore not the folder this program runs from.
+    """
     return workspace_root / ".github" / "hooks" / "agents-remember-session-start.py"
 
 
-def render_hooks(path: Path, workspace_root: Path) -> None:
+def vscode_root(workspace_root: Path) -> Path:
+    root = workspace_root / ".vscode"
+    if not root.is_dir():
+        raise SystemExit(f"VS Code starter folder is missing: {root}")
+    return root
+
+
+def render_vscode_hooks(path: Path, workspace_root: Path) -> None:
+    """VS Code takes a default command plus a per-platform override key."""
     data = json.loads(path.read_text(encoding="utf-8"))
     rendered = command_string(
         [str(Path(sys.executable).resolve()), hook_script_path(workspace_root).as_posix()]
@@ -92,42 +120,32 @@ def render_hooks(path: Path, workspace_root: Path) -> None:
     path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8", newline="\n")
 
 
-def vscode_root(workspace_root: Path) -> Path:
-    root = workspace_root / ".vscode"
-    if not root.is_dir():
-        raise SystemExit(f"VS Code starter folder is missing: {root}")
-    return root
-
-
-def validate(script_root: Path, vscode_dir: Path) -> None:
+def validate(*groups: tuple[Path, tuple[str, ...]]) -> None:
     unresolved: list[str] = []
-    for relative in TARGET_FILES:
-        path = script_root / relative
-        text = path.read_text(encoding="utf-8")
-        if any(marker in text for marker in (PATH_PLACEHOLDER, REPO_PLACEHOLDER)):
-            unresolved.append(path.as_posix())
-    for relative in VSCODE_TARGET_FILES:
-        path = vscode_dir / relative
-        text = path.read_text(encoding="utf-8")
-        if any(marker in text for marker in (PATH_PLACEHOLDER, REPO_PLACEHOLDER)):
-            unresolved.append(path.as_posix())
+    for root, relatives in groups:
+        for relative in relatives:
+            path = root / relative
+            text = path.read_text(encoding="utf-8")
+            if any(marker in text for marker in PLACEHOLDERS):
+                unresolved.append(path.as_posix())
     if unresolved:
         joined = "\n".join(unresolved)
         raise SystemExit(f"unresolved starter placeholders remain:\n{joined}")
 
 
-def render(script_root: Path, workspace_root: Path, repos: list[str]) -> None:
+def render_vscode(script_root: Path, workspace_root: Path, repos: list[str]) -> None:
     vscode_dir = vscode_root(workspace_root)
     replace_text(
         script_root / "copilot-instructions.md", {PATH_PLACEHOLDER: workspace_root.as_posix()}
     )
-    render_hooks(script_root / "hooks" / "agents-remember-session-start.json", workspace_root)
+    hooks_path = script_root / "hooks" / "agents-remember-session-start.json"
+    render_vscode_hooks(hooks_path, workspace_root)
     replace_text(vscode_dir / "mcp.json", {PATH_PLACEHOLDER: workspace_root.as_posix()})
     render_settings(vscode_dir / "mcp" / "agents-remember-settings.json", workspace_root, repos)
-    validate(script_root, vscode_dir)
+    validate((script_root, TARGET_FILES), (vscode_dir, VSCODE_TARGET_FILES))
 
 
-def main() -> None:
+def main(render: Renderer) -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--repo",
@@ -142,8 +160,8 @@ def main() -> None:
     workspace_root = infer_workspace_root(script_root)
     repos = repository_ids(workspace_root, args.repo)
     render(script_root, workspace_root, repos)
-    print(f"Rendered VS Code + Copilot starter for {workspace_root.as_posix()}")
+    print(f"Rendered {HARNESS_LABEL} starter for {workspace_root.as_posix()}")
 
 
 if __name__ == "__main__":
-    main()
+    main(render_vscode)

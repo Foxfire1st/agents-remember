@@ -15,6 +15,7 @@ import argparse
 from pathlib import Path
 
 from agents_remember.kernel.coordination_context_resolver import (
+    CoordinationHints,
     StorageSettings,
     clean_scalar,
     is_sidecar_storage,
@@ -271,11 +272,13 @@ def main(argv: list[str] | None = None) -> int:
         context = resolve_coordination_context(
             code_repository_name=code_repository_root.name,
             workspace_root=code_repository_root.parent,
-            requested_topology=args.topology,
-            coordination_root=args.coordination_root,
-            settings_path=args.settings_path,
-            onboarding_root=args.onboarding_root,
             code_repository_root=code_repository_root,
+            hints=CoordinationHints(
+                topology=args.topology,
+                coordination_root=args.coordination_root,
+                settings_path=args.settings_path,
+                onboarding_root=args.onboarding_root,
+            ),
         )
     except ValueError as error:
         parser.error(str(error))

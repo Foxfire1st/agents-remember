@@ -28,6 +28,18 @@ from agents_remember.serving.terminal_catalog_lock import exclusive_terminal_cat
 # (the catalog is a runtime cache), so nothing durable is lost when a stale tombstone is reclaimed.
 TERMINATED_RETENTION_SECONDS = 86400.0
 
+DEFAULT_LIVENESS_FAILURE_THRESHOLD = 3
+"""Consecutive tmux-command failures needed before a catalog row is marked exited."""
+
+DEFAULT_LIVENESS_FAILURE_WINDOW_SECONDS = 5.0
+"""Minimum age of the first failed command probe before hysteresis can exit-mark a row."""
+
+DEFAULT_PANE_GONE_FAILURE_THRESHOLD = 1
+"""Pane-gone evidence is definitive, so it may mark faster than command failures."""
+
+DEFAULT_LIVENESS_SWEEP_INTERVAL_SECONDS = 10.0
+"""Minimum spacing between full catalog sweeps, independent of the dashboard projection tick."""
+
 TerminalSessionKind = Literal["terminal", "harness"]
 TerminalSessionStatus = Literal["running", "exited", "landed", "terminated"]
 TerminalLivenessEvidence = Literal["tmux-command-failed", "pane-gone"]
@@ -40,6 +52,25 @@ SeatTurnState = Literal["working", "turn-ended", "awaiting-input", "stale"]
 # is a CHAT. Uniqueness is per (leaf, role) -- at most one running chat AND one running terminal per
 # leaf -- so an agent chat and a scratch terminal can share a leaf without colliding (L5 fix 2).
 TerminalSessionRole = Literal["chat", "terminal"]
+
+
+@dataclass(frozen=True)
+class TerminalCatalogLivenessConfig:
+    """The hysteresis that decides when probe failures are allowed to exit-mark a row.
+
+    One value because the thresholds only mean something together: a failure count without the
+    minimum window would mark a row on a burst of fast failures, and the pane-gone threshold is
+    deliberately lower than the command-failure one because that evidence is definitive. The sweep
+    interval belongs with them for the same reason -- it sets how quickly those counts accumulate.
+    """
+
+    failure_threshold: int = DEFAULT_LIVENESS_FAILURE_THRESHOLD
+    minimum_failure_window_seconds: float = DEFAULT_LIVENESS_FAILURE_WINDOW_SECONDS
+    pane_gone_failure_threshold: int = DEFAULT_PANE_GONE_FAILURE_THRESHOLD
+    sweep_interval_seconds: float = DEFAULT_LIVENESS_SWEEP_INTERVAL_SECONDS
+
+
+DEFAULT_LIVENESS_HYSTERESIS = TerminalCatalogLivenessConfig()
 
 
 def role_for_kind(kind: TerminalSessionKind) -> TerminalSessionRole:
@@ -566,9 +597,7 @@ class TerminalCatalog:
         alive: bool,
         checked_at: datetime,
         evidence: TerminalLivenessEvidence | None = None,
-        failure_threshold: int = 3,
-        minimum_failure_window_seconds: float = 5.0,
-        pane_gone_failure_threshold: int = 1,
+        hysteresis: TerminalCatalogLivenessConfig = DEFAULT_LIVENESS_HYSTERESIS,
     ) -> TerminalCatalogEntry | None:
         """Persist one liveness observation with hysteresis and success-side self-healing."""
         with self._catalog_access():
@@ -585,9 +614,9 @@ class TerminalCatalog:
                 updated = entry.with_liveness_failure(
                     evidence=evidence,
                     checked_at=checked_at,
-                    failure_threshold=failure_threshold,
-                    minimum_failure_window_seconds=minimum_failure_window_seconds,
-                    pane_gone_failure_threshold=pane_gone_failure_threshold,
+                    failure_threshold=hysteresis.failure_threshold,
+                    minimum_failure_window_seconds=hysteresis.minimum_failure_window_seconds,
+                    pane_gone_failure_threshold=hysteresis.pane_gone_failure_threshold,
                 )
             if updated != entry:
                 entries[index] = updated

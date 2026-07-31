@@ -16,6 +16,7 @@ is a later slice. Here we only own the honest, history-preserving fact.
 from __future__ import annotations
 
 from collections.abc import Sequence
+from dataclasses import dataclass
 from typing import Any, Literal, cast, get_args
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -118,59 +119,91 @@ DECISION_STATES: dict[str, GateState] = {
 }
 
 
+@dataclass(frozen=True)
+class GateAnchor:
+    """What a gate is raised against: the lifecycle that opened it, the enclosure it guards,
+    and the repository that enclosure changes. Every reader that matches a gate to work in
+    flight matches on this triple, so it is one anchor rather than three loose ids."""
+
+    lifecycle_id: str | None = None
+    enclosure: str | None = None
+    repo_id: str | None = None
+
+
+@dataclass(frozen=True)
+class GateRequest:
+    """What the decider is handed: the packet to read, the decisions the gate will accept, and
+    the evidence attached at open time."""
+
+    packet: dict[str, Any] | None = None
+    required_decision: list[str] | None = None
+    evidence_refs: Sequence[GateEvidenceRef | dict[str, Any]] | None = None
+
+
+@dataclass(frozen=True)
+class GateVerdict:
+    """One decider's verdict on a gate: the verb, who decided, through which surface, in which
+    role, and the note they left.
+
+    The closeout policy never reads these apart -- a delegated approval is the ``orchestration``
+    channel AND a ``manager`` role AND an actor that is not the owning lifecycle -- so a verdict
+    assembled field by field is a verdict that can be assembled wrongly.
+    """
+
+    decision: str
+    via: DecidedVia
+    by: str | None = None
+    note: str | None = None
+    deciding_role: str | None = None
+
+
 def create_gate(
-    *,
     kind: GateKind,
-    lifecycle_id: str | None,
+    *,
     gate_id: str,
     now: str,
-    enclosure: str | None = None,
-    repo_id: str | None = None,
-    packet: dict[str, Any] | None = None,
-    required_decision: list[str] | None = None,
-    evidence_refs: Sequence[GateEvidenceRef | dict[str, Any]] | None = None,
+    anchor: GateAnchor | None = None,
+    request: GateRequest | None = None,
 ) -> GateRecord:
     """A freshly opened gate. Pure: the caller mints ``gate_id`` and ``now``."""
+    anchor = anchor or GateAnchor()
+    request = request or GateRequest()
     return GateRecord(
         id=gate_id,
         ts=now,
         kind=kind,
         state="open",
-        lifecycleId=lifecycle_id,
-        enclosure=enclosure,
-        repoId=repo_id,
-        packet=packet or {},
-        requiredDecision=required_decision,
-        evidenceRefs=_coerce_evidence_refs(evidence_refs),
+        lifecycleId=anchor.lifecycle_id,
+        enclosure=anchor.enclosure,
+        repoId=anchor.repo_id,
+        packet=request.packet or {},
+        requiredDecision=request.required_decision,
+        evidenceRefs=_coerce_evidence_refs(request.evidence_refs),
     )
 
 
 def decide_gate(
     gate: GateRecord,
+    verdict: GateVerdict,
     *,
-    decision: str,
-    by: str,
-    via: DecidedVia,
-    note: str | None,
     now: str,
-    deciding_role: str | None = None,
     evidence_refs: Sequence[GateEvidenceRef | dict[str, Any]] | None = None,
 ) -> GateRecord:
     """A new snapshot carrying the decision (same ``id``, new ``ts``). Pure.
 
-    ``decision`` is one of :data:`DECISION_STATES`; an unknown verb is a
+    ``verdict.decision`` is one of :data:`DECISION_STATES`; an unknown verb is a
     ``KeyError`` here (the tool boundary validates first for a clean message).
     """
-    state = DECISION_STATES[decision]
+    state = DECISION_STATES[verdict.decision]
     attached_evidence = [*gate.evidenceRefs, *_coerce_evidence_refs(evidence_refs)]
     return gate.model_copy(
         update={
             "ts": now,
             "state": state,
-            "decidedBy": by,
-            "decidedVia": via,
-            "decidingRole": deciding_role,
-            "decisionNote": note,
+            "decidedBy": verdict.by,
+            "decidedVia": verdict.via,
+            "decidingRole": verdict.deciding_role,
+            "decisionNote": verdict.note,
             "decidedAt": now,
             "evidenceRefs": attached_evidence,
         }

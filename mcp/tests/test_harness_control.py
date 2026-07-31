@@ -22,7 +22,13 @@ from fastapi.testclient import TestClient
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
-from agents_remember.controlplane.operator_inbox_records import create_operator_inbox_entry
+from agents_remember.controlplane.operator_inbox_records import (
+    InboxAddress,
+    InboxMessage,
+    InboxPoster,
+    InboxRouting,
+    create_operator_inbox_entry,
+)
 from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
 from agents_remember.errors import (
     HarnessAdapterDisconnectedError,
@@ -30,17 +36,23 @@ from agents_remember.errors import (
     HarnessInteractionNotPendingError,
     HarnessRequestConflictError,
 )
+from agents_remember.serving.conversation.authorization import (
+    LocalOperatorAuthorizationResolver,
+)
+from agents_remember.serving.conversation.runtime import (
+    ConversationRuntime,
+    ConversationScope,
+)
 from agents_remember.serving.harness_capabilities import CapabilitySnapshot, SetResult
+from agents_remember.serving.harness_capability_catalog import HarnessCapabilityCatalog
 from agents_remember.serving.harness_control_adapter import (
     HarnessProtocolRegistry,
     protocol_adapter_status,
 )
 from agents_remember.serving.harness_control_api import register_harness_control_routes
-from agents_remember.serving.harness_control_bridge import HarnessControlBridge
+from agents_remember.serving.harness_control_bridge import BridgeLimits, HarnessControlBridge
 from agents_remember.serving.harness_control_client import (
-    _snapshot as parse_snapshot_wire,
-)
-from agents_remember.serving.harness_control_client import (
+    ControlSubmission,
     read_control_capabilities,
     read_control_snapshot,
     read_submission_authority,
@@ -50,6 +62,9 @@ from agents_remember.serving.harness_control_client import (
     set_control_model,
     submit_control_prompt,
     withdraw_control_submission,
+)
+from agents_remember.serving.harness_control_client import (
+    _snapshot as parse_snapshot_wire,
 )
 from agents_remember.serving.harness_control_ipc import (
     HarnessControlClient,
@@ -84,8 +99,9 @@ from agents_remember.serving.harness_control_models import (
 )
 from agents_remember.serving.harness_terminal_surface import HarnessTerminalSurface
 from agents_remember.serving.hosted_control_projection import control_snapshot_entry
-from agents_remember.serving.inbox_delivery import deliver_inbox_entry
-from agents_remember.serving.terminal import TerminalHost
+from agents_remember.serving.hosted_session_runtime import HostedSessionRuntime
+from agents_remember.serving.inbox_delivery import InboxDeliveryLog, deliver_inbox_entry
+from agents_remember.serving.terminal import TerminalHost, TerminalHostSeams
 from agents_remember.serving.terminal_catalog import TerminalCatalog, TerminalCatalogEntry
 from agents_remember.serving.terminal_liveness import (
     TerminalCatalogLivenessConfig,
@@ -597,7 +613,7 @@ class HarnessControlConformanceTests(unittest.IsolatedAsyncioTestCase):
     async def test_snapshot_subscription_is_bounded_and_coalesces_to_latest_state(self) -> None:
         identity = _identity()
         adapter = _FakeAdapter()
-        bridge = HarnessControlBridge(identity, adapter, subscriber_queue_limit=1)
+        bridge = HarnessControlBridge(identity, adapter, limits=BridgeLimits(subscriber_queue=1))
         await bridge.start(_launch(identity))
         stream = bridge.subscribe()
         try:
@@ -1074,7 +1090,7 @@ class HarnessControlConformanceTests(unittest.IsolatedAsyncioTestCase):
         identity = _identity()
         adapter = _FakeAdapter()
         adapter.disconnects.extend((True, True))
-        bridge = HarnessControlBridge(identity, adapter, queue_limit=2, submission_limit=2)
+        bridge = HarnessControlBridge(identity, adapter, limits=BridgeLimits(queue=2, submission=2))
         await bridge.start(_launch(identity))
         try:
             first = await bridge.submit(
@@ -1196,7 +1212,7 @@ class HarnessControlConformanceTests(unittest.IsolatedAsyncioTestCase):
     async def test_evicted_reconciliation_fails_loudly_and_runner_survives(self) -> None:
         identity = _identity()
         adapter = _FakeAdapter()
-        bridge = HarnessControlBridge(identity, adapter, queue_limit=1, submission_limit=1)
+        bridge = HarnessControlBridge(identity, adapter, limits=BridgeLimits(queue=1, submission=1))
         await bridge.start(_launch(identity))
         try:
             await bridge.submit(bridge.prompt("old", source="terminal", request_id="old"))
@@ -1222,8 +1238,7 @@ class HarnessControlConformanceTests(unittest.IsolatedAsyncioTestCase):
             bridge = HarnessControlBridge(
                 identity,
                 registry.create("settings-harness"),
-                queue_limit=4,
-                submission_limit=4,
+                limits=BridgeLimits(queue=4, submission=4),
             )
             await bridge.start(replace(_launch(identity), harness_id="settings-harness"))
             try:
@@ -1290,7 +1305,7 @@ class HarnessControlConformanceTests(unittest.IsolatedAsyncioTestCase):
     async def test_transcript_reclamation_is_bounded_at_two_input_sizes(self) -> None:
         identity = _identity()
         adapter = _FakeAdapter()
-        bridge = HarnessControlBridge(identity, adapter, transcript_limit=3)
+        bridge = HarnessControlBridge(identity, adapter, limits=BridgeLimits(transcript=3))
         await bridge.start(_launch(identity))
         try:
             first = tuple(
@@ -1361,8 +1376,7 @@ class HarnessControlIpcTests(unittest.IsolatedAsyncioTestCase):
                         submit_control_prompt,
                         entry,
                         "hold the ordinary lane",
-                        source="durable",
-                        request_id="active-durable",
+                        ControlSubmission(source="durable", request_id="active-durable"),
                     )
                 )
                 await asyncio.wait_for(adapter.submit_started.wait(), timeout=1.0)
@@ -1370,9 +1384,11 @@ class HarnessControlIpcTests(unittest.IsolatedAsyncioTestCase):
                     submit_control_prompt,
                     entry,
                     "withdraw this exact text",
-                    source="cockpit",
-                    request_id="cockpit-queued",
-                    expected_bridge_epoch=descriptor.bridge_epoch,
+                    ControlSubmission(
+                        source="cockpit",
+                        request_id="cockpit-queued",
+                        expected_bridge_epoch=descriptor.bridge_epoch,
+                    ),
                 )
                 self.assertEqual(queued.acceptance, "queued")
 
@@ -1459,8 +1475,7 @@ class HarnessControlIpcTests(unittest.IsolatedAsyncioTestCase):
                     submit_control_prompt,
                     entry,
                     "one complete message",
-                    source="durable",
-                    request_id="outer-loss-request",
+                    ControlSubmission(source="durable", request_id="outer-loss-request"),
                 )
                 self.assertEqual(receipt.acceptance, "unknown")
                 self.assertEqual(receipt.request_id, "outer-loss-request")
@@ -1512,37 +1527,32 @@ class HarnessControlIpcTests(unittest.IsolatedAsyncioTestCase):
             )
             store = OperatorInboxStore(root)
             inbox = create_operator_inbox_entry(
+                InboxMessage(ask="Continue", response="Review the result"),
                 entry_id="durable-request",
                 now=identity.created_at,
-                lifecycle_id="L1",
-                agent_id=identity.ar_session_id,
-                ask="Continue",
-                response="Review the result",
-                created_by="manager",
-                created_via="cli",
+                routing=InboxRouting(
+                    address=InboxAddress(lifecycle_id="L1", agent_id=identity.ar_session_id)
+                ),
+                poster=InboxPoster(created_by="manager", created_via="cli"),
             )
             store.append(inbox)
             paster = mock.Mock()
-            host = TerminalHost(tmux_probe=lambda _name: True)
+            host = TerminalHost(TerminalHostSeams(tmux_probe=lambda _name: True))
             try:
                 first = await asyncio.to_thread(
                     deliver_inbox_entry,
-                    store=store,
-                    catalog=catalog,
-                    host=host,
+                    InboxDeliveryLog(store=store, entry=inbox),
+                    sessions=HostedSessionRuntime(catalog=catalog, host=host),
                     paster=paster,
-                    entry=inbox,
                 )
                 self.assertEqual(first.adapterDeliveryState, "unknown")
                 self.assertEqual(first.adapterRequestId, "durable-request")
 
                 recovered = await asyncio.to_thread(
                     deliver_inbox_entry,
-                    store=store,
-                    catalog=catalog,
-                    host=host,
+                    InboxDeliveryLog(store=store, entry=first),
+                    sessions=HostedSessionRuntime(catalog=catalog, host=host),
                     paster=paster,
-                    entry=first,
                 )
 
                 self.assertEqual(recovered.deliveryState, "delivered")
@@ -1590,13 +1600,16 @@ class HarnessControlIpcTests(unittest.IsolatedAsyncioTestCase):
             app = FastAPI()
             register_harness_control_routes(
                 app,
-                workspace_root=root,
-                coordination_root=root,
-                harness_registry=lambda: (),
-                catalog=catalog,
-                host=TerminalHost(tmux_probe=lambda _name: True),
-                liveness_clock=lambda: datetime(2026, 7, 16, 8, 0, tzinfo=UTC),
-                liveness_config=TerminalCatalogLivenessConfig(),
+                ConversationRuntime(
+                    scope=ConversationScope(workspace_root=root, coordination_root=root),
+                    harness_registry=lambda: (),
+                    catalog=catalog,
+                    host=TerminalHost(TerminalHostSeams(tmux_probe=lambda _name: True)),
+                    liveness_clock=lambda: datetime(2026, 7, 16, 8, 0, tzinfo=UTC),
+                    liveness_config=TerminalCatalogLivenessConfig(),
+                    capability_catalog=HarnessCapabilityCatalog(root),
+                    authorization=LocalOperatorAuthorizationResolver.for_workspace(root),
+                ),
             )
             try:
                 with (
@@ -1689,13 +1702,16 @@ class HarnessControlIpcTests(unittest.IsolatedAsyncioTestCase):
             app = FastAPI()
             register_harness_control_routes(
                 app,
-                workspace_root=root,
-                coordination_root=root,
-                harness_registry=lambda: (),
-                catalog=catalog,
-                host=TerminalHost(tmux_probe=lambda _name: True),
-                liveness_clock=lambda: datetime(2026, 7, 16, 8, 0, tzinfo=UTC),
-                liveness_config=TerminalCatalogLivenessConfig(),
+                ConversationRuntime(
+                    scope=ConversationScope(workspace_root=root, coordination_root=root),
+                    harness_registry=lambda: (),
+                    catalog=catalog,
+                    host=TerminalHost(TerminalHostSeams(tmux_probe=lambda _name: True)),
+                    liveness_clock=lambda: datetime(2026, 7, 16, 8, 0, tzinfo=UTC),
+                    liveness_config=TerminalCatalogLivenessConfig(),
+                    capability_catalog=HarnessCapabilityCatalog(root),
+                    authorization=LocalOperatorAuthorizationResolver.for_workspace(root),
+                ),
             )
             try:
                 with (

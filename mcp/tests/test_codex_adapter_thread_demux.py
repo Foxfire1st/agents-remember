@@ -14,6 +14,7 @@ from typing import cast
 
 import pytest
 from _agent_wire_fixtures import (
+    CollabAgents,
     agent_message_delta_params,
     agent_message_item,
     collab_agent_tool_call_item,
@@ -224,9 +225,11 @@ async def test_collab_items_bind_agent_identity_into_the_registry() -> None:
                     collab_agent_tool_call_item(
                         "collab-1",
                         "spawnAgent",
-                        sender_thread_id="thread-1",
-                        receiver_thread_ids=["agent-thread-9"],
-                        agents_states={"agent-thread-9": {"status": "running"}},
+                        agents=CollabAgents(
+                            "thread-1",
+                            receiver_thread_ids=["agent-thread-9"],
+                            states={"agent-thread-9": {"status": "running"}},
+                        ),
                         prompt="investigate the failure",
                     ),
                 ),

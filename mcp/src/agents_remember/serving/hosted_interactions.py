@@ -11,7 +11,9 @@ from typing import Any
 from agents_remember.controlplane.operator_inbox_records import OperatorInboxEntry
 from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
 from agents_remember.controlplane.records import (
+    GateAnchor,
     GateRecord,
+    GateRequest,
     apply_gate,
     create_gate,
     expire_gate,
@@ -75,27 +77,29 @@ class HostedInteractionSynchronizer:
         if matching is None:
             self._gates.append(
                 create_gate(
-                    kind="agent-question",
-                    lifecycle_id=entry.lifecycle_id,
+                    "agent-question",
                     gate_id=new_ulid(),
                     now=now_iso(),
-                    packet={
-                        "adapterInteraction": {
-                            "sessionId": entry.id,
-                            "interactionId": interaction.interaction_id,
-                            "kind": interaction.kind,
-                            "prompt": interaction.prompt,
-                            "choices": list(interaction.choices),
-                            "createdAt": interaction.created_at,
-                            "raw": dict(interaction.raw),
-                            "questions": [
-                                interaction_question_json(question)
-                                for question in interaction.questions
-                            ],
-                        }
-                    },
-                    required_decision=(
-                        list(interaction.choices) if interaction.choices else ["approve", "reject"]
+                    anchor=GateAnchor(lifecycle_id=entry.lifecycle_id),
+                    request=GateRequest(
+                        packet={
+                            "adapterInteraction": {
+                                "sessionId": entry.id,
+                                "interactionId": interaction.interaction_id,
+                                "kind": interaction.kind,
+                                "prompt": interaction.prompt,
+                                "choices": list(interaction.choices),
+                                "createdAt": interaction.created_at,
+                                "raw": dict(interaction.raw),
+                                "questions": [
+                                    interaction_question_json(question)
+                                    for question in interaction.questions
+                                ],
+                            }
+                        },
+                        required_decision=list(interaction.choices)
+                        if interaction.choices
+                        else ["approve", "reject"],
                     ),
                 )
             )

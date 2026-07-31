@@ -25,7 +25,7 @@ import hashlib
 import os
 from collections import OrderedDict
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
@@ -53,11 +53,16 @@ from agents_remember.serving.conversation.models import (
 from agents_remember.serving.conversation.runtime import ConversationRuntime
 from agents_remember.serving.harness_control_client import read_submission_authority
 from agents_remember.serving.hosted_readiness import hosted_session_readiness
-from agents_remember.serving.retire import retire_entry
+from agents_remember.serving.hosted_session_runtime import HostedSessionRuntime
+from agents_remember.serving.retire import SeatClosure, retire_entry
 from agents_remember.serving.terminal import TerminalHost
 from agents_remember.serving.terminal_catalog import TerminalCatalogEntry
 from agents_remember.serving.terminal_opener import (
+    ControlRunnerRequest,
     OpenTerminalResult,
+    SpawnKnobs,
+    SpawnProvenance,
+    TerminalLaunchRequest,
     open_terminal_session,
 )
 
@@ -184,23 +189,51 @@ class OpenOperationLedger:
                 )
 
 
+@dataclass(frozen=True)
+class LibraryBinding:
+    """The app-scoped library authorities bound to ONE caller.
+
+    The runtime and the shared library state are per-app; the authorization is per-caller. Every
+    operation fingerprint, ledger key and minted session id is derived from that pairing, so
+    binding them once is what stops one caller's request from being keyed under another's identity.
+    """
+
+    runtime: ConversationRuntime
+    shared: LibraryShared
+    authorization: AuthorizationBinding
+
+
+@dataclass(frozen=True)
+class OpenRequest:
+    """One idempotent open, in the caller's own words.
+
+    The request id keys the ledger, the identity digest is the exact row the caller believes it is
+    opening, and the cwd/launch context narrow where and how. Replaying the id with any of the
+    others changed is a conflict, not a second open -- which is only checkable because they form
+    one fingerprinted value.
+    """
+
+    request_id: str
+    expected_identity_digest: str
+    cwd: str | None = None
+    launch_context: Mapping[str, str | None] = field(default_factory=dict)
+
+
 class ConversationOpenService:
     """Idempotent exact open/status/reconcile composed over the tracked opener + catalog."""
 
     def __init__(
         self,
+        binding: LibraryBinding,
         *,
-        runtime: ConversationRuntime,
-        shared: LibraryShared,
-        authorization: AuthorizationBinding,
         library: ConversationLibraryService,
         port_builder: PortBuilder,
         opener: Callable[..., OpenTerminalResult] = open_terminal_session,
         proof_wait_seconds: float = _DEFAULT_PROOF_WAIT_SECONDS,
     ) -> None:
-        self._runtime = runtime
-        self._shared = shared
-        self._authorization = authorization
+        self._runtime = binding.runtime
+        self._shared = binding.shared
+        self._authorization = binding.authorization
         self._library = library
         self._port_builder = port_builder
         self._opener = opener
@@ -210,12 +243,12 @@ class ConversationOpenService:
         self,
         harness_id: HarnessId,
         key_token: str,
-        *,
-        request_id: str,
-        expected_identity_digest: str,
-        cwd: str | None,
-        launch_context: Mapping[str, str | None],
+        request: OpenRequest,
     ) -> OpenConversationOperation:
+        request_id = request.request_id
+        expected_identity_digest = request.expected_identity_digest
+        cwd = request.cwd
+        launch_context = request.launch_context
         scope, ref, binding = self._library.resolve_key(harness_id, key_token)
         if expected_identity_digest != binding.identity_digest:
             raise StaleNativeIdentityError(
@@ -392,20 +425,30 @@ class ConversationOpenService:
         try:
             return await asyncio.to_thread(
                 self._opener,
-                catalog=self._runtime.catalog,
-                host=host,
+                runtime=HostedSessionRuntime(catalog=self._runtime.catalog, host=host),
                 session_id=record.ar_session_id,
-                kind="harness",
-                harness=record.harness_id,
-                workspace_root=Path(record.scope.canonical_project_scope),
-                shell=os.environ.get("SHELL") or "/bin/bash",
-                label=f"Library open: {record.harness_id} {record.ref.vendor_conversation_id[-6:]}",
-                leaf_key=record.launch_context.get("leafKey") or None,
-                env=env,
-                launch_args=list(record.launch_args),
-                resume_thread_id=record.resume_thread_id,
-                control_root=self._runtime.scope.coordination_root / "runtime" / "harness-control",
-                harnesses=self._runtime.harness_registry(),
+                launch=TerminalLaunchRequest(
+                    kind="harness",
+                    workspace_root=Path(record.scope.canonical_project_scope),
+                    shell=os.environ.get("SHELL") or "/bin/bash",
+                    harness=record.harness_id,
+                    harnesses=self._runtime.harness_registry(),
+                    env=env,
+                    knobs=SpawnKnobs(launch_args=list(record.launch_args)),
+                    control=ControlRunnerRequest(
+                        resume_thread_id=record.resume_thread_id,
+                        endpoint_root=(
+                            self._runtime.scope.coordination_root / "runtime" / "harness-control"
+                        ),
+                    ),
+                ),
+                provenance=SpawnProvenance(
+                    label=(
+                        f"Library open: {record.harness_id} "
+                        f"{record.ref.vendor_conversation_id[-6:]}"
+                    ),
+                    leaf_key=record.launch_context.get("leafKey") or None,
+                ),
             )
         except Exception as exc:  # the opener raises typed errors on internal failures
             return OpenTerminalResult(status="launch-conflict", detail=str(exc))
@@ -613,10 +656,12 @@ class ConversationOpenService:
                 self._runtime.catalog,
                 cast(TerminalHost, self._runtime.host),
                 entry,
-                at=now_iso(),
-                by_session=_RETIRE_ACTOR,
-                reason=f"library open {record.outcome}",
-                edge="library-open",
+                SeatClosure(
+                    at=now_iso(),
+                    by_session=_RETIRE_ACTOR,
+                    reason=f"library open {record.outcome}",
+                    edge="library-open",
+                ),
             )
         except Exception:
             if record.identity is not None:

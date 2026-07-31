@@ -5,7 +5,9 @@ from __future__ import annotations
 from typing import Any
 
 from agents_remember.providers.grepai.lifecycle.core import (
+    UNRESOLVED_SERVICE_PORTS,
     GrepaiRuntimeLayout,
+    GrepaiServicePorts,
     grepai_container_env,
     grepai_embedder_backend_settings,
     grepai_network_name,
@@ -42,13 +44,11 @@ def grepai_compose_render(
     layout: GrepaiRuntimeLayout,
     runner: dict[str, Any],
     backend: dict[str, Any],
-    *,
-    postgres_port: int | str | None = None,
-    ollama_port: int | str | None = None,
+    ports: GrepaiServicePorts = UNRESOLVED_SERVICE_PORTS,
 ) -> ComposeRender:
     embedder = grepai_embedder_backend_settings(provider_settings, layout)
-    postgres_port = postgres_port or backend["postgresHostPort"]
-    ollama_port = ollama_port or embedder["httpHostPort"]
+    postgres_port = ports.postgres or backend["postgresHostPort"]
+    ollama_port = ports.ollama or embedder["httpHostPort"]
     roots_mount = runner["rootsMount"].rstrip("/")
     root_volumes = "\n".join(
         f"      - {yaml_scalar(f'{root.path.as_posix()}:{roots_mount}/{root.project_id}')}"

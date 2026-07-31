@@ -32,6 +32,7 @@ from agents_remember.serving.terminal_catalog import (
 from agents_remember.serving.terminal_liveness import (
     DEFAULT_CONTROL_READ_FAILURE_THRESHOLD,
     DEFAULT_STARTING_SWEEP_INTERVAL_SECONDS,
+    LivenessProbe,
     SnapshotReader,
     TerminalCatalogLivenessConfig,
     TerminalCatalogLivenessSweeper,
@@ -192,11 +193,13 @@ class TerminalCatalogLivenessTests(unittest.TestCase):
             self.catalog,
             host,
             now=self.clock,
-            config=TerminalCatalogLivenessConfig(
-                failure_threshold=3,
-                minimum_failure_window_seconds=5.0,
-                pane_gone_failure_threshold=1,
-                sweep_interval_seconds=sweep_interval_seconds,
+            probe=LivenessProbe(
+                hysteresis=TerminalCatalogLivenessConfig(
+                    failure_threshold=3,
+                    minimum_failure_window_seconds=5.0,
+                    pane_gone_failure_threshold=1,
+                    sweep_interval_seconds=sweep_interval_seconds,
+                )
             ),
         )
 
@@ -211,14 +214,16 @@ class TerminalCatalogLivenessTests(unittest.TestCase):
             catalog or self.catalog,
             host,
             now=self.clock,
-            config=TerminalCatalogLivenessConfig(
-                failure_threshold=3,
-                minimum_failure_window_seconds=5.0,
-                pane_gone_failure_threshold=1,
-                sweep_interval_seconds=10.0,
+            probe=LivenessProbe(
+                hysteresis=TerminalCatalogLivenessConfig(
+                    failure_threshold=3,
+                    minimum_failure_window_seconds=5.0,
+                    pane_gone_failure_threshold=1,
+                    sweep_interval_seconds=10.0,
+                ),
+                pane_capturer=lambda _tmux_name: "",
+                snapshot_reader=snapshot_reader,
             ),
-            pane_capturer=lambda _tmux_name: "",
-            snapshot_reader=snapshot_reader,
         )
 
     def _control_sweeper(
@@ -231,14 +236,16 @@ class TerminalCatalogLivenessTests(unittest.TestCase):
             self.catalog,
             host,
             now=self.clock,
-            config=TerminalCatalogLivenessConfig(
-                failure_threshold=3,
-                minimum_failure_window_seconds=5.0,
-                pane_gone_failure_threshold=1,
-                sweep_interval_seconds=0.0,
+            probe=LivenessProbe(
+                hysteresis=TerminalCatalogLivenessConfig(
+                    failure_threshold=3,
+                    minimum_failure_window_seconds=5.0,
+                    pane_gone_failure_threshold=1,
+                    sweep_interval_seconds=0.0,
+                ),
+                pane_capturer=lambda _tmux_name: "",
+                snapshot_reader=snapshot_reader,
             ),
-            pane_capturer=lambda _tmux_name: "",
-            snapshot_reader=snapshot_reader,
         )
 
     def test_transient_failure_storm_leaves_sessions_running_until_window_elapsed(self) -> None:
@@ -274,11 +281,13 @@ class TerminalCatalogLivenessTests(unittest.TestCase):
             self.catalog,
             host,
             now=self.clock,
-            config=TerminalCatalogLivenessConfig(
-                failure_threshold=3,
-                minimum_failure_window_seconds=5.0,
-                pane_gone_failure_threshold=1,
-                sweep_interval_seconds=0.0,
+            probe=LivenessProbe(
+                hysteresis=TerminalCatalogLivenessConfig(
+                    failure_threshold=3,
+                    minimum_failure_window_seconds=5.0,
+                    pane_gone_failure_threshold=1,
+                    sweep_interval_seconds=0.0,
+                )
             ),
         )
 
@@ -301,11 +310,13 @@ class TerminalCatalogLivenessTests(unittest.TestCase):
             self.catalog,
             host,
             now=self.clock,
-            config=TerminalCatalogLivenessConfig(
-                failure_threshold=3,
-                minimum_failure_window_seconds=5.0,
-                pane_gone_failure_threshold=1,
-                sweep_interval_seconds=0.0,
+            probe=LivenessProbe(
+                hysteresis=TerminalCatalogLivenessConfig(
+                    failure_threshold=3,
+                    minimum_failure_window_seconds=5.0,
+                    pane_gone_failure_threshold=1,
+                    sweep_interval_seconds=0.0,
+                )
             ),
         )
 
@@ -371,13 +382,17 @@ class TerminalCatalogLivenessTests(unittest.TestCase):
                 catalog,
                 host,
                 now=self.clock,
-                config=TerminalCatalogLivenessConfig(
-                    failure_threshold=3,
-                    minimum_failure_window_seconds=5.0,
-                    pane_gone_failure_threshold=1,
-                    sweep_interval_seconds=0.0,
+                probe=LivenessProbe(
+                    hysteresis=TerminalCatalogLivenessConfig(
+                        failure_threshold=3,
+                        minimum_failure_window_seconds=5.0,
+                        pane_gone_failure_threshold=1,
+                        sweep_interval_seconds=0.0,
+                    ),
+                    pane_capturer=lambda tmux_name: (
+                        captured.append(tmux_name) or "(esc to interrupt)"
+                    ),
                 ),
-                pane_capturer=lambda tmux_name: captured.append(tmux_name) or "(esc to interrupt)",
             )
 
             catalog.read_calls = 0

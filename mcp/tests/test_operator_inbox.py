@@ -19,16 +19,29 @@ sys.path.insert(0, str(MCP_SRC))
 
 from agents_remember.controlplane.interaction_retention import INBOX_MAX_CURRENT_ROWS
 from agents_remember.controlplane.operator_inbox_records import (
+    InboxAddress,
+    InboxMessage,
+    InboxPoster,
+    InboxRouting,
     OperatorInboxCompatibleRecord,
     OperatorInboxEntry,
     consume_operator_inbox_entry,
     create_operator_inbox_entry,
 )
-from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
+from agents_remember.controlplane.operator_inbox_store import (
+    DeliveryAttempt,
+    OperatorInboxStore,
+)
 from agents_remember.mcp.tools import operator_inbox as inbox_tools
+from agents_remember.mcp.tools.dispatch_brief import HostedDelivery
 from agents_remember.serving.harness_control_models import SubmissionReceipt
-from agents_remember.serving.inbox_delivery import deliver_inbox_entry
-from agents_remember.serving.terminal import TerminalHost
+from agents_remember.serving.hosted_session_runtime import HostedSessionRuntime
+from agents_remember.serving.inbox_delivery import (
+    InboxDeliveryLog,
+    RedeliveryFloor,
+    deliver_inbox_entry,
+)
+from agents_remember.serving.terminal import TerminalHost, TerminalHostSeams
 from agents_remember.serving.terminal_catalog import TerminalCatalog, TerminalCatalogEntry
 from agents_remember.serving.terminal_paste import PasteResult
 
@@ -39,20 +52,24 @@ T2 = "2026-06-23T10:05:00+00:00"
 class OperatorInboxRecordTests(unittest.TestCase):
     def test_create_and_consume_are_snapshots(self) -> None:
         entry = create_operator_inbox_entry(
+            InboxMessage(
+                ask="Continue?",
+                response="Yes, proceed.",
+                message_kind="turn-report",
+                gate_id="gate-1",
+                artifact_path="notes/reports/L3-worker-report.md",
+            ),
             entry_id="01H",
             now=T1,
-            lifecycle_id="L1",
-            agent_id="agent-a",
-            gate_id="gate-1",
-            ask="Continue?",
-            response="Yes, proceed.",
-            created_by="developer",
-            created_via="dashboard",
-            sender_agent_id="manager-1",
-            sender_role="manager",
-            recipient_role="worker",
-            message_kind="turn-report",
-            artifact_path="notes/reports/L3-worker-report.md",
+            routing=InboxRouting(
+                address=InboxAddress(lifecycle_id="L1", agent_id="agent-a", recipient_role="worker")
+            ),
+            poster=InboxPoster(
+                created_by="developer",
+                created_via="dashboard",
+                sender_agent_id="manager-1",
+                sender_role="manager",
+            ),
         )
         self.assertEqual(entry.state, "pending")
         self.assertEqual(entry.senderAgentId, "manager-1")
@@ -75,26 +92,20 @@ class OperatorInboxRecordTests(unittest.TestCase):
     def test_requires_mailbox_address(self) -> None:
         with self.assertRaises(ValueError):
             create_operator_inbox_entry(
+                InboxMessage(ask="Continue?", response="Yes."),
                 entry_id="01H",
                 now=T1,
-                lifecycle_id=None,
-                agent_id=None,
-                ask="Continue?",
-                response="Yes.",
-                created_by="developer",
-                created_via="dashboard",
+                routing=InboxRouting(address=InboxAddress(lifecycle_id=None, agent_id=None)),
+                poster=InboxPoster(created_by="developer", created_via="dashboard"),
             )
 
     def test_wire_roundtrip_uses_schema_alias(self) -> None:
         entry = create_operator_inbox_entry(
+            InboxMessage(ask="Continue?", response="Yes."),
             entry_id="01H",
             now=T1,
-            lifecycle_id="L1",
-            agent_id=None,
-            ask="Continue?",
-            response="Yes.",
-            created_by="developer",
-            created_via="dashboard",
+            routing=InboxRouting(address=InboxAddress(lifecycle_id="L1", agent_id=None)),
+            poster=InboxPoster(created_by="developer", created_via="dashboard"),
         )
         line = entry.model_dump_json(by_alias=True, exclude_none=True)
         self.assertIn('"schema":"ar-operator-inbox-entry/v1"', line)
@@ -155,14 +166,13 @@ class OperatorInboxStoreTests(unittest.TestCase):
         agent_id: str | None = "agent-a",
     ) -> OperatorInboxEntry:
         return create_operator_inbox_entry(
+            InboxMessage(ask=f"Ask {entry_id}", response=f"Response {entry_id}"),
             entry_id=entry_id,
             now=T1,
-            lifecycle_id=lifecycle_id,
-            agent_id=agent_id,
-            ask=f"Ask {entry_id}",
-            response=f"Response {entry_id}",
-            created_by="developer",
-            created_via="dashboard",
+            routing=InboxRouting(
+                address=InboxAddress(lifecycle_id=lifecycle_id, agent_id=agent_id)
+            ),
+            poster=InboxPoster(created_by="developer", created_via="dashboard"),
         )
 
     def test_pending_filter_matches_lifecycle_or_agent(self) -> None:
@@ -171,16 +181,13 @@ class OperatorInboxStoreTests(unittest.TestCase):
         self.store.append(self._entry("C", lifecycle_id="L1", agent_id="agent-b"))
         self.store.append(
             create_operator_inbox_entry(
+                InboxMessage(ask="Nudge", response="Check worker.", message_kind="nudge"),
                 entry_id="D",
                 now=T1,
-                lifecycle_id=None,
-                agent_id=None,
-                recipient_role="manager",
-                ask="Nudge",
-                response="Check worker.",
-                created_by="system",
-                created_via="cli",
-                message_kind="nudge",
+                routing=InboxRouting(
+                    address=InboxAddress(lifecycle_id=None, agent_id=None, recipient_role="manager")
+                ),
+                poster=InboxPoster(created_by="system", created_via="cli"),
             )
         )
 
@@ -251,10 +258,12 @@ class OperatorInboxStoreTests(unittest.TestCase):
         self.store.append(self._entry("A"))
         delivered = self.store.record_delivery(
             "A",
+            DeliveryAttempt(
+                delivery_state="delivered",
+                delivered_to_session="agent-a",
+                detail="harness-log-confirmed",
+            ),
             now=T2,
-            delivery_state="delivered",
-            delivered_to_session="agent-a",
-            delivery_detail="harness-log-confirmed",
         )
         self.assertEqual(delivered.deliveryState, "delivered")
         self.assertEqual(delivered.deliveredAt, T2)
@@ -270,7 +279,7 @@ class OperatorInboxStoreTests(unittest.TestCase):
         # and schedules a durable nextAttemptAt, because consume=ack is the only terminal outcome.
         self.store.append(self._entry("A"))
         delivered = self.store.record_delivery(
-            "A", now=T2, delivery_state="delivered", delivered_to_session="agent-a"
+            "A", DeliveryAttempt(delivery_state="delivered", delivered_to_session="agent-a"), now=T2
         )
         self.assertEqual(delivered.attemptCount, 1)
         self.assertEqual(delivered.lastAttemptAt, T2)
@@ -284,7 +293,7 @@ class OperatorInboxStoreTests(unittest.TestCase):
         )
         # A second delivery attempt (e.g. a redelivery pass) bumps again and re-schedules further out.
         second = self.store.record_delivery(
-            "A", now="2026-06-23T10:10:00+00:00", delivery_state="unconfirmed"
+            "A", DeliveryAttempt(delivery_state="unconfirmed"), now="2026-06-23T10:10:00+00:00"
         )
         self.assertEqual(second.attemptCount, 2)
         assert second.nextAttemptAt is not None
@@ -292,14 +301,16 @@ class OperatorInboxStoreTests(unittest.TestCase):
 
     def test_record_delivery_clears_schedule_only_via_consume(self) -> None:
         self.store.append(self._entry("A"))
-        self.store.record_delivery("A", now=T2, delivery_state="delivered")
+        self.store.record_delivery("A", DeliveryAttempt(delivery_state="delivered"), now=T2)
         consumed, _ = self.store.consume("A", now=T2, consumed_by="model", consumed_via="cli")
         self.assertEqual(consumed.state, "consumed")
 
     def test_list_redeliverable_returns_pending_rows_past_backoff(self) -> None:
         self.store.append(self._entry("A"))
         self.store.record_delivery(
-            "A", now="2026-06-23T09:00:00+00:00", delivery_state="no-hosted-session"
+            "A",
+            DeliveryAttempt(delivery_state="no-hosted-session"),
+            now="2026-06-23T09:00:00+00:00",
         )
         now = datetime.fromisoformat("2026-06-24T09:00:00+00:00")
         redeliverable = self.store.list_redeliverable(now=now)
@@ -307,7 +318,7 @@ class OperatorInboxStoreTests(unittest.TestCase):
 
     def test_list_redeliverable_excludes_consumed_rows(self) -> None:
         self.store.append(self._entry("A"))
-        self.store.record_delivery("A", now=T1, delivery_state="delivered")
+        self.store.record_delivery("A", DeliveryAttempt(delivery_state="delivered"), now=T1)
         self.store.consume("A", now=T2, consumed_by="model", consumed_via="cli")
         now = datetime.fromisoformat("2026-06-24T09:00:00+00:00")
         self.assertEqual(self.store.list_redeliverable(now=now), [])
@@ -356,14 +367,11 @@ class OperatorInboxStoreTests(unittest.TestCase):
         # record is the artifact on disk, never the inbox row. Supersedes the HFX2-L1 R1
         # immortal-pending rule that let the 2026-07-09 escalation storm fill the store.
         ancient = create_operator_inbox_entry(
+            InboxMessage(ask="Ancient ask", response="Ancient response"),
             entry_id="OLD",
             now="2020-01-01T00:00:00+00:00",
-            lifecycle_id="L1",
-            agent_id="agent-a",
-            ask="Ancient ask",
-            response="Ancient response",
-            created_by="developer",
-            created_via="dashboard",
+            routing=InboxRouting(address=InboxAddress(lifecycle_id="L1", agent_id="agent-a")),
+            poster=InboxPoster(created_by="developer", created_via="dashboard"),
         )
         self.store.append(ancient)
         removed = self.store.compact(now=datetime.now(UTC))
@@ -372,14 +380,11 @@ class OperatorInboxStoreTests(unittest.TestCase):
 
     def test_compaction_keeps_a_fresh_pending_row(self) -> None:
         fresh = create_operator_inbox_entry(
+            InboxMessage(ask="Fresh ask", response="Fresh response"),
             entry_id="FRESH",
             now=datetime.now(UTC).isoformat(),
-            lifecycle_id="L1",
-            agent_id="agent-a",
-            ask="Fresh ask",
-            response="Fresh response",
-            created_by="developer",
-            created_via="dashboard",
+            routing=InboxRouting(address=InboxAddress(lifecycle_id="L1", agent_id="agent-a")),
+            poster=InboxPoster(created_by="developer", created_via="dashboard"),
         )
         self.store.append(fresh)
         removed = self.store.compact(now=datetime.now(UTC))
@@ -395,14 +400,13 @@ class OperatorInboxStoreTests(unittest.TestCase):
         for index in range(total):
             self.store.append(
                 create_operator_inbox_entry(
+                    InboxMessage(ask=f"ask {index}", response="resp"),
                     entry_id=f"row-{index:04d}",
                     now=(now - timedelta(seconds=total - index)).isoformat(),
-                    lifecycle_id="L1",
-                    agent_id="agent-a",
-                    ask=f"ask {index}",
-                    response="resp",
-                    created_by="developer",
-                    created_via="dashboard",
+                    routing=InboxRouting(
+                        address=InboxAddress(lifecycle_id="L1", agent_id="agent-a")
+                    ),
+                    poster=InboxPoster(created_by="developer", created_via="dashboard"),
                 )
             )
         removed = self.store.compact(now=now)
@@ -444,19 +448,18 @@ class OperatorInboxToolTests(unittest.TestCase):
 
     def test_post_poll_consume_flow(self) -> None:
         posted = inbox_tools.operator_inbox_post_payload(
-            None,  # type: ignore[arg-type]  # _store is patched; config is unused
-            lifecycle_id="L1",
-            agent_id="agent-a",
-            gate_id="gate-1",
-            ask="Continue?",
-            response="Yes, proceed.",
-            created_by="developer",
-            created_via="dashboard",
-            sender_agent_id="manager-1",
-            sender_role="manager",
-            recipient_role="worker",
-            message_kind="message",
-            deliver_to_hosted=False,
+            None,  # type: ignore[arg-type]  # the store is patched; config is unused here
+            address=InboxAddress(lifecycle_id="L1", agent_id="agent-a", recipient_role="worker"),
+            message=InboxMessage(
+                ask="Continue?", response="Yes, proceed.", message_kind="message", gate_id="gate-1"
+            ),
+            poster=InboxPoster(
+                created_by="developer",
+                created_via="dashboard",
+                sender_agent_id="manager-1",
+                sender_role="manager",
+            ),
+            delivery=HostedDelivery(enabled=False),
         )
         self.assertEqual(posted["state"], "pending")
         self.assertEqual(posted["senderAgentId"], "manager-1")
@@ -496,16 +499,16 @@ class OperatorInboxToolTests(unittest.TestCase):
         # Master-exit Finding 1: the schema rejected it with a ValidationError before this leaf.
         posted_item = inbox_tools.operator_inbox_post_payload(
             None,  # type: ignore[arg-type]
-            lifecycle_id="L1",
-            agent_id=None,
-            ask="Ratify the escalation-ladder change?",
-            response="See notes/reports/decision-context.md",
-            created_by="orchestrator",
-            created_via="cli",
-            sender_role="orchestrator",
-            recipient_role="architect",
-            message_kind="decision-item",
-            deliver_to_hosted=False,
+            address=InboxAddress(lifecycle_id="L1", agent_id=None, recipient_role="architect"),
+            message=InboxMessage(
+                ask="Ratify the escalation-ladder change?",
+                response="See notes/reports/decision-context.md",
+                message_kind="decision-item",
+            ),
+            poster=InboxPoster(
+                created_by="orchestrator", created_via="cli", sender_role="orchestrator"
+            ),
+            delivery=HostedDelivery(enabled=False),
         )
         self.assertEqual(posted_item["messageKind"], "decision-item")
         self.assertEqual(posted_item["recipientRole"], "architect")
@@ -521,16 +524,14 @@ class OperatorInboxToolTests(unittest.TestCase):
 
         posted_ruling = inbox_tools.operator_inbox_post_payload(
             None,  # type: ignore[arg-type]
-            lifecycle_id="L1",
-            agent_id=None,
-            ask="Ruling on the escalation-ladder change",
-            response="Ratified as proposed.",
-            created_by="architect",
-            created_via="cli",
-            sender_role="architect",
-            recipient_role="orchestrator",
-            message_kind="decision-ruling",
-            deliver_to_hosted=False,
+            address=InboxAddress(lifecycle_id="L1", agent_id=None, recipient_role="orchestrator"),
+            message=InboxMessage(
+                ask="Ruling on the escalation-ladder change",
+                response="Ratified as proposed.",
+                message_kind="decision-ruling",
+            ),
+            poster=InboxPoster(created_by="architect", created_via="cli", sender_role="architect"),
+            delivery=HostedDelivery(enabled=False),
         )
         self.assertEqual(posted_ruling["messageKind"], "decision-ruling")
         self.assertEqual(posted_ruling["recipientRole"], "orchestrator")
@@ -539,16 +540,14 @@ class OperatorInboxToolTests(unittest.TestCase):
         for role in ("architect", "curator"):
             posted = inbox_tools.operator_inbox_post_payload(
                 None,  # type: ignore[arg-type]
-                lifecycle_id="L1",
-                agent_id=None,
-                ask="FYI",
-                response="Nothing to action.",
-                created_by="developer",
-                created_via="dashboard",
-                sender_role="developer",
-                recipient_role=role,
-                message_kind="message",
-                deliver_to_hosted=False,
+                address=InboxAddress(lifecycle_id="L1", agent_id=None, recipient_role=role),
+                message=InboxMessage(
+                    ask="FYI", response="Nothing to action.", message_kind="message"
+                ),
+                poster=InboxPoster(
+                    created_by="developer", created_via="dashboard", sender_role="developer"
+                ),
+                delivery=HostedDelivery(enabled=False),
             )
             self.assertEqual(posted["recipientRole"], role)
             self.assertEqual(posted["messageKind"], "message")
@@ -634,28 +633,34 @@ class OperatorInboxToolTests(unittest.TestCase):
             "agents_remember.serving.inbox_delivery.submit_control_prompt",
             autospec=True,
         ) as submit_prompt:
-            submit_prompt.side_effect = lambda _target, _text, **kwargs: SubmissionReceipt(
-                request_id=kwargs["request_id"],
+            submit_prompt.side_effect = lambda _target, _text, submission: SubmissionReceipt(
+                request_id=submission.request_id,
                 acceptance="immediate",
                 submitted_at=T1,
                 accepted_at=T1,
             )
             posted = inbox_tools.operator_inbox_post_payload(
-                None,  # type: ignore[arg-type]  # temp store/catalog are injected
-                lifecycle_id="L-old",
-                agent_id="manager-old",
-                ask="Reviewer report complete",
-                response="See notes/reports/reviewer-report.md",
-                created_by="reviewer-1",
-                created_via="cli",
-                sender_agent_id="reviewer-1",
-                sender_role="reviewer",
-                recipient_role="manager",
-                message_kind="turn-report",
-                artifact_path="notes/reports/reviewer-report.md",
-                terminal_catalog=catalog,
-                terminal_host=TerminalHost(tmux_probe=lambda _name: True),
-                terminal_paster=_Paster(),  # type: ignore[arg-type]
+                None,  # type: ignore[arg-type]
+                address=InboxAddress(
+                    lifecycle_id="L-old", agent_id="manager-old", recipient_role="manager"
+                ),
+                message=InboxMessage(
+                    ask="Reviewer report complete",
+                    response="See notes/reports/reviewer-report.md",
+                    message_kind="turn-report",
+                    artifact_path="notes/reports/reviewer-report.md",
+                ),
+                poster=InboxPoster(
+                    created_by="reviewer-1",
+                    created_via="cli",
+                    sender_agent_id="reviewer-1",
+                    sender_role="reviewer",
+                ),
+                delivery=HostedDelivery(
+                    catalog=catalog,
+                    host=TerminalHost(TerminalHostSeams(tmux_probe=lambda _name: True)),
+                    paster=_Paster(),  # type: ignore[arg-type]
+                ),
             )
 
         self.assertEqual(posted["recipientRole"], "manager")
@@ -692,20 +697,17 @@ class OperatorInboxDeliveryTests(unittest.TestCase):
                 control_protocol="ar-harness-control/v1",
             )
         )
-        self.host = TerminalHost(tmux_probe=lambda _name: True)
+        self.host = TerminalHost(TerminalHostSeams(tmux_probe=lambda _name: True))
 
     def test_deliver_inbox_entry_pushes_to_hosted_session(self) -> None:
         entry = create_operator_inbox_entry(
+            InboxMessage(ask="Please continue.", response="Review the report."),
             entry_id="A",
             now=T1,
-            lifecycle_id="L1",
-            agent_id="agent-a",
-            sender_role="manager",
-            recipient_role="worker",
-            ask="Please continue.",
-            response="Review the report.",
-            created_by="manager-1",
-            created_via="cli",
+            routing=InboxRouting(
+                address=InboxAddress(lifecycle_id="L1", agent_id="agent-a", recipient_role="worker")
+            ),
+            poster=InboxPoster(created_by="manager-1", created_via="cli", sender_role="manager"),
         )
         self.store.append(entry)
         calls: list[tuple[str, str, bool]] = []
@@ -724,19 +726,17 @@ class OperatorInboxDeliveryTests(unittest.TestCase):
 
         with mock.patch(
             "agents_remember.serving.inbox_delivery.submit_control_prompt",
-            side_effect=lambda _target, _text, **kwargs: SubmissionReceipt(
-                request_id=kwargs["request_id"],
+            side_effect=lambda _target, _text, submission: SubmissionReceipt(
+                request_id=submission.request_id,
                 acceptance="queued",
                 submitted_at=T1,
                 accepted_at=T1,
             ),
         ) as submit_prompt:
             delivered = deliver_inbox_entry(
-                store=self.store,
-                catalog=self.catalog,
-                host=self.host,
+                InboxDeliveryLog(store=self.store, entry=entry),
+                sessions=HostedSessionRuntime(catalog=self.catalog, host=self.host),
                 paster=_Paster(),  # type: ignore[arg-type]
-                entry=entry,
             )
         self.assertEqual(delivered.deliveryState, "delivered")
         self.assertEqual(delivered.deliveredToSession, "agent-a")
@@ -747,28 +747,25 @@ class OperatorInboxDeliveryTests(unittest.TestCase):
 
     def test_consume_during_in_flight_delivery_cannot_resurrect_pending_entry(self) -> None:
         entry = create_operator_inbox_entry(
+            InboxMessage(ask="Please continue.", response="Review the report."),
             entry_id="A",
             now=T1,
-            lifecycle_id="L1",
-            agent_id="agent-a",
-            sender_role="manager",
-            recipient_role="worker",
-            ask="Please continue.",
-            response="Review the report.",
-            created_by="manager-1",
-            created_via="cli",
+            routing=InboxRouting(
+                address=InboxAddress(lifecycle_id="L1", agent_id="agent-a", recipient_role="worker")
+            ),
+            poster=InboxPoster(created_by="manager-1", created_via="cli", sender_role="manager"),
         )
         self.store.append(entry)
         stale_current = self.store.current()
         delivery_started = threading.Event()
         finish_delivery = threading.Event()
 
-        def in_flight(_target: object, _text: str, **kwargs: object) -> SubmissionReceipt:
+        def in_flight(_target: object, _text: str, submission: object) -> SubmissionReceipt:
             delivery_started.set()
             if not finish_delivery.wait(timeout=2):
                 raise AssertionError("test did not release the in-flight delivery")
             return SubmissionReceipt(
-                request_id=str(kwargs["request_id"]),
+                request_id=str(submission.request_id),  # type: ignore[attr-defined]
                 acceptance="immediate",
                 submitted_at=T1,
                 accepted_at=T1,
@@ -783,13 +780,14 @@ class OperatorInboxDeliveryTests(unittest.TestCase):
         ):
             delivery = executor.submit(
                 deliver_inbox_entry,
-                store=self.store,
-                catalog=self.catalog,
-                host=self.host,
+                InboxDeliveryLog(
+                    store=self.store,
+                    entry=entry,
+                    at=T2,
+                    floor=RedeliveryFloor(current=stale_current),
+                ),
+                sessions=HostedSessionRuntime(catalog=self.catalog, host=self.host),
                 paster=mock.Mock(),  # type: ignore[arg-type]
-                entry=entry,
-                current=stale_current,
-                delivery_at=T2,
             )
             self.assertTrue(delivery_started.wait(timeout=2))
             with mock.patch.object(inbox_tools, "_store", return_value=self.store):
@@ -820,16 +818,13 @@ class OperatorInboxDeliveryTests(unittest.TestCase):
 
     def test_deliver_inbox_entry_records_unknown_adapter_acceptance(self) -> None:
         entry = create_operator_inbox_entry(
+            InboxMessage(ask="Please continue.", response="Review the report."),
             entry_id="A",
             now=T1,
-            lifecycle_id="L1",
-            agent_id="agent-a",
-            sender_role="manager",
-            recipient_role="worker",
-            ask="Please continue.",
-            response="Review the report.",
-            created_by="manager-1",
-            created_via="cli",
+            routing=InboxRouting(
+                address=InboxAddress(lifecycle_id="L1", agent_id="agent-a", recipient_role="worker")
+            ),
+            poster=InboxPoster(created_by="manager-1", created_via="cli", sender_role="manager"),
         )
         self.store.append(entry)
         attempts: list[tuple[str, str]] = []
@@ -850,19 +845,17 @@ class OperatorInboxDeliveryTests(unittest.TestCase):
 
         with mock.patch(
             "agents_remember.serving.inbox_delivery.submit_control_prompt",
-            side_effect=lambda _target, _text, **kwargs: SubmissionReceipt(
-                request_id=kwargs["request_id"],
+            side_effect=lambda _target, _text, submission: SubmissionReceipt(
+                request_id=submission.request_id,
                 acceptance="unknown",
                 submitted_at=T1,
                 detail="transport closed after write",
             ),
         ):
             recorded = deliver_inbox_entry(
-                store=self.store,
-                catalog=self.catalog,
-                host=self.host,
+                InboxDeliveryLog(store=self.store, entry=entry),
+                sessions=HostedSessionRuntime(catalog=self.catalog, host=self.host),
                 paster=_UnconfirmedPaster(),  # type: ignore[arg-type]
-                entry=entry,
             )
         self.assertEqual(attempts, [])
         self.assertEqual(recorded.deliveryState, "unconfirmed")
@@ -873,16 +866,13 @@ class OperatorInboxDeliveryTests(unittest.TestCase):
 
     def test_unverified_delivery_with_empty_capture_still_records_a_loud_detail(self) -> None:
         entry = create_operator_inbox_entry(
+            InboxMessage(ask="Please continue.", response="Review the report."),
             entry_id="B",
             now=T1,
-            lifecycle_id="L1",
-            agent_id="agent-a",
-            sender_role="manager",
-            recipient_role="worker",
-            ask="Please continue.",
-            response="Review the report.",
-            created_by="manager-1",
-            created_via="cli",
+            routing=InboxRouting(
+                address=InboxAddress(lifecycle_id="L1", agent_id="agent-a", recipient_role="worker")
+            ),
+            poster=InboxPoster(created_by="manager-1", created_via="cli", sender_role="manager"),
         )
         self.store.append(entry)
 
@@ -902,11 +892,9 @@ class OperatorInboxDeliveryTests(unittest.TestCase):
         assert legacy is not None
         self.catalog.upsert(replace(legacy, control_endpoint=None, control_state="unsupported"))
         recorded = deliver_inbox_entry(
-            store=self.store,
-            catalog=self.catalog,
-            host=self.host,
+            InboxDeliveryLog(store=self.store, entry=entry),
+            sessions=HostedSessionRuntime(catalog=self.catalog, host=self.host),
             paster=_GonePaster(),  # type: ignore[arg-type]
-            entry=entry,
         )
         self.assertEqual(recorded.deliveryState, "unconfirmed")
         self.assertEqual(recorded.adapterDeliveryState, "unsupported")

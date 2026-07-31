@@ -29,6 +29,7 @@ from agents_remember.serving.conversation.runtime import (
 from agents_remember.serving.harness_capability_catalog import HarnessCapabilityCatalog
 from agents_remember.serving.harness_control_api import register_harness_control_routes
 from agents_remember.serving.harnesses import Harness
+from agents_remember.serving.projector import ProjectionCadence
 from agents_remember.serving.terminal_catalog import TerminalCatalog
 from agents_remember.serving.terminal_liveness import (
     TerminalCatalogLivenessConfig,
@@ -50,17 +51,23 @@ def _empty_registry() -> list[Harness]:
     return []
 
 
-def _runtime(workspace: Path, *, coordination: Path | None = None) -> ConversationRuntime:
+def _runtime(
+    workspace: Path,
+    *,
+    coordination: Path | None = None,
+    catalog: TerminalCatalog | None = None,
+    liveness_config: TerminalCatalogLivenessConfig | None = None,
+) -> ConversationRuntime:
     return ConversationRuntime(
         scope=ConversationScope(
             workspace_root=workspace,
             coordination_root=coordination if coordination is not None else workspace,
         ),
-        catalog=TerminalCatalog(workspace / "terminal-sessions.json"),
+        catalog=catalog or TerminalCatalog(workspace / "terminal-sessions.json"),
         host=_NoSessionHost(),
         harness_registry=_empty_registry,
         liveness_clock=utc_now,
-        liveness_config=TerminalCatalogLivenessConfig(),
+        liveness_config=liveness_config or TerminalCatalogLivenessConfig(),
         capability_catalog=HarnessCapabilityCatalog(workspace),
         authorization=LocalOperatorAuthorizationResolver.for_workspace(workspace),
     )
@@ -109,13 +116,7 @@ def test_production_composition_installs_one_typed_runtime(tmp_path: Path) -> No
     liveness_config = TerminalCatalogLivenessConfig()
     register_harness_control_routes(
         app,
-        workspace_root=tmp_path,
-        coordination_root=tmp_path,
-        harness_registry=_empty_registry,
-        catalog=catalog,
-        host=_NoSessionHost(),
-        liveness_clock=utc_now,
-        liveness_config=liveness_config,
+        _runtime(tmp_path, catalog=catalog, liveness_config=liveness_config),
     )
 
     runtime = conversation_runtime_from_app(app)
@@ -132,7 +133,7 @@ def test_production_composition_installs_one_typed_runtime(tmp_path: Path) -> No
 
 
 def test_create_app_installs_runtime_from_live_composition(tmp_path: Path) -> None:
-    app = create_app(_config(tmp_path), interval=100)
+    app = create_app(_config(tmp_path), cadence=ProjectionCadence(interval=100))
     runtime = conversation_runtime_from_app(app)
     assert runtime.scope == ConversationScope(workspace_root=tmp_path, coordination_root=tmp_path)
     assert isinstance(runtime.authorization, LocalOperatorAuthorizationResolver)
@@ -147,18 +148,10 @@ def test_duplicate_installation_fails_closed(tmp_path: Path) -> None:
 
 def test_second_harness_control_registration_fails_closed(tmp_path: Path) -> None:
     app = FastAPI()
-    kwargs: dict[str, Any] = {
-        "workspace_root": tmp_path,
-        "coordination_root": tmp_path,
-        "harness_registry": _empty_registry,
-        "catalog": TerminalCatalog(tmp_path / "terminal-sessions.json"),
-        "host": _NoSessionHost(),
-        "liveness_clock": utc_now,
-        "liveness_config": TerminalCatalogLivenessConfig(),
-    }
-    register_harness_control_routes(app, **kwargs)
+    runtime = _runtime(tmp_path)
+    register_harness_control_routes(app, runtime)
     with pytest.raises(ConversationCompositionError, match="already installed"):
-        register_harness_control_routes(app, **kwargs)
+        register_harness_control_routes(app, runtime)
 
 
 def test_missing_installation_fails_closed(tmp_path: Path) -> None:
@@ -236,9 +229,8 @@ def test_production_composition_accepts_no_injected_identity() -> None:
     assert params.isdisjoint(
         {"authorization", "resolver", "principal", "tenant", "identity", "operator"}
     )
-    assert "LocalOperatorAuthorizationResolver" in inspect.getsource(
-        register_harness_control_routes
-    )
+    # The production composition mints its own resolver in create_app; no caller ever supplies one.
+    assert "LocalOperatorAuthorizationResolver" in inspect.getsource(create_app)
 
 
 def test_production_modules_have_no_fixture_pty_or_browser_identity_reliance() -> None:

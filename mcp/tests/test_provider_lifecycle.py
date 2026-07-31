@@ -15,7 +15,7 @@ MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
 from agents_remember.providers import lifecycle, lifecycle_service
-from agents_remember.providers.cgc.context.core import to_container_path
+from agents_remember.providers.cgc.context.core import CgcInstance, CgcRepo, to_container_path
 from agents_remember.providers.cgc.lifecycle import installation
 from agents_remember.providers.cgc.lifecycle import query as cgc_query
 from agents_remember.providers.cgc.lifecycle import refresh as cgc_refresh_lifecycle
@@ -414,9 +414,11 @@ class ProviderLifecycleParserTests(unittest.TestCase):
 
             result = lifecycle_service.run_cgc_lifecycle(
                 service_config,
-                action="run",
-                repo_id="repo-a",
-                native_args=["find", "name", "Token"],
+                lifecycle_service.CgcLifecycleRequest(
+                    action="run",
+                    repo_id="repo-a",
+                    native_args=("find", "name", "Token"),
+                ),
             )
 
         self.assertTrue(result["ok"])
@@ -823,20 +825,24 @@ class ProviderLifecycleParserTests(unittest.TestCase):
             code_repo = root / "workspace" / "repo-a"
             code_repo.mkdir(parents=True)
             layout = lifecycle.cgc_runtime_layout(
-                coordination_root=coordination_root,
-                repo_id="repo-a",
-                code_repo_root=code_repo,
-                runtime_root=(
-                    coordination_root
-                    / "worktrees"
-                    / "repo-a"
-                    / "task-ar"
-                    / "provider-runtime"
-                    / "providers"
-                    / "runners"
-                    / "codegraphcontext"
-                    / "worktree-abc123"
-                    / "repo-a"
+                CgcRepo(
+                    coordination_root=coordination_root,
+                    repo_id="repo-a",
+                    code_repo_root=code_repo,
+                ),
+                instance=CgcInstance(
+                    runtime_root=(
+                        coordination_root
+                        / "worktrees"
+                        / "repo-a"
+                        / "task-ar"
+                        / "provider-runtime"
+                        / "providers"
+                        / "runners"
+                        / "codegraphcontext"
+                        / "worktree-abc123"
+                        / "repo-a"
+                    ),
                 ),
             )
 
@@ -854,10 +860,14 @@ class ProviderLifecycleParserTests(unittest.TestCase):
             code_repo = root / "workspace" / "repo-a"
             code_repo.mkdir(parents=True)
             layout = lifecycle.cgc_runtime_layout(
-                coordination_root=coordination_root,
-                repo_id="repo-a",
-                code_repo_root=code_repo,
-                runtime_root=code_repo / ".codegraphcontext",
+                CgcRepo(
+                    coordination_root=coordination_root,
+                    repo_id="repo-a",
+                    code_repo_root=code_repo,
+                ),
+                instance=CgcInstance(
+                    runtime_root=code_repo / ".codegraphcontext",
+                ),
             )
 
             result = lifecycle.cgc_runtime_root_containment_check(layout)

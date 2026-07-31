@@ -113,9 +113,14 @@ def _json_path_rule_state(raw_path_rules: object) -> str:
         return _json_path_rule_member_state(raw_path_rules)
     if not isinstance(raw_path_rules, list):
         return "invalid"
-    if not raw_path_rules:
+    return _json_path_rule_list_state(raw_path_rules)
+
+
+def _json_path_rule_list_state(raw_rules: list[object]) -> str:
+    """Fold a rule list into one state; the weakest member decides, and no rules is absent."""
+    if not raw_rules:
         return "absent"
-    states = [_json_path_rule_member_state(rule) for rule in raw_path_rules]
+    states = [_json_path_rule_member_state(rule) for rule in raw_rules]
     if "invalid" in states:
         return "invalid"
     if "empty-member" in states:

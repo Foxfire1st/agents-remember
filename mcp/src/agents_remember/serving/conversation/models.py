@@ -285,7 +285,7 @@ class UnknownVendorBlock(WireModel):
     evidence_ref: NonEmptyText
 
 
-ConversationContentBlock: TypeAlias = Annotated[  # noqa: UP040 - Python 3.11 support
+ConversationContentBlock: TypeAlias = Annotated[
     MarkdownBlock
     | TextBlock
     | ThinkingBlock
@@ -609,7 +609,7 @@ class GapMutation(WireModel):
     close_after_event: Literal[True] = True
 
 
-ConversationMutation: TypeAlias = Annotated[  # noqa: UP040 - Python 3.11 support
+ConversationMutation: TypeAlias = Annotated[
     AppendItemMutation
     | AppendBlockDeltaMutation
     | UpsertItemMutation
@@ -1026,7 +1026,7 @@ class FailedWithdrawalResponse(WireModel):
     detail: NonEmptyText
 
 
-WithdrawQueueResponse: TypeAlias = Annotated[  # noqa: UP040 - Python 3.11 support
+WithdrawQueueResponse: TypeAlias = Annotated[
     WithdrawnQueueResponse | FailedWithdrawalResponse,
     Field(discriminator="outcome"),
 ]
@@ -1129,7 +1129,7 @@ class AssetSubmitBlock(WireModel):
     sha256: NonEmptyText
 
 
-ComposerSubmitBlock: TypeAlias = Annotated[  # noqa: UP040 - Python 3.11 support
+ComposerSubmitBlock: TypeAlias = Annotated[
     TextSubmitBlock | AssetSubmitBlock, Field(discriminator="type")
 ]
 
@@ -1190,7 +1190,7 @@ class MetricScope(WireModel):
     safe_id: str | None = None
 
 
-class MetricEvidence(WireModel, Generic[T]):  # noqa: UP046 - Python 3.11 support
+class MetricEvidence(WireModel, Generic[T]):
     value: T
     unit: NonEmptyText
     origin: NonEmptyText

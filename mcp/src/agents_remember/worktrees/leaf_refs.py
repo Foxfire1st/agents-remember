@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Iterable
+from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
 from difflib import get_close_matches
 from pathlib import Path
@@ -310,49 +310,55 @@ def _candidate_aliases(*values: str) -> tuple[str, ...]:
     return tuple(dict.fromkeys(aliases))
 
 
-def _leaf_candidates_for_root(repo_name: str, task_root: Path) -> list[_LeafCandidate]:
-    by_qualified: dict[str, set[str]] = {}
+def _root_document_leaves(
+    root_doc: TaskDocument, task_root: Path
+) -> Iterator[tuple[str, tuple[str, ...]]]:
+    """A master root names its sub-task leaves; a leaf root names only itself."""
+    if root_doc.kind == "master":
+        for ref in root_doc.subTasks:
+            file_stem = Path(ref.file).stem if ref.file else ""
+            yield ref.number, (file_stem, ref.file)
+        return
+    enclosure_aliases = tuple(ref.leafId for ref in root_doc.enclosures)
+    yield root_doc.id, (root_doc.slug, task_root.name, *enclosure_aliases)
 
-    def add_candidate(doc_id: str, aliases: Iterable[str]) -> None:
-        clean_id = doc_id.strip()
-        if not clean_id:
-            return
-        qualified = f"{repo_name}/{task_root.name}/{clean_id}"
-        bucket = by_qualified.setdefault(qualified, set())
-        bucket.update(_candidate_aliases(clean_id, *aliases, qualified))
 
+def _declared_leaves(task_root: Path) -> Iterator[tuple[str, tuple[str, ...]]]:
+    """Yield ``(doc id, alias seeds)`` for every leaf this task root declares.
+
+    Two sources: the root ``task.json`` and the sibling leaf documents beside it.
+    """
     root_doc = _read_optional_task_document(task_root / "task.json")
     if root_doc is not None:
-        if root_doc.kind == "master":
-            for ref in root_doc.subTasks:
-                file_stem = Path(ref.file).stem if ref.file else ""
-                add_candidate(ref.number, (file_stem, ref.file))
-        else:
-            enclosure_aliases = [ref.leafId for ref in root_doc.enclosures]
-            add_candidate(root_doc.id, (root_doc.slug, task_root.name, *enclosure_aliases))
-
+        yield from _root_document_leaves(root_doc, task_root)
     for json_path in sorted(task_root.glob("*.json")):
-        if json_path.name == "task.json":
-            continue
-        if not _has_task_doc_schema_marker(json_path):
+        if json_path.name == "task.json" or not _has_task_doc_schema_marker(json_path):
             continue
         doc = read_task_doc(json_path)
         if doc.kind == "master":
             continue
-        enclosure_aliases = [ref.leafId for ref in doc.enclosures]
-        add_candidate(doc.id, (doc.slug, json_path.stem, *enclosure_aliases))
+        enclosure_aliases = tuple(ref.leafId for ref in doc.enclosures)
+        yield doc.id, (doc.slug, json_path.stem, *enclosure_aliases)
 
-    candidates: list[_LeafCandidate] = []
-    for qualified, aliases in by_qualified.items():
-        _, _, doc_id = qualified.split("/", 2)
-        candidates.append(
-            _LeafCandidate(
-                repo_name=repo_name,
-                task_root=task_root,
-                doc_id=doc_id,
-                aliases=tuple(sorted(aliases)),
-            )
+
+def _leaf_candidates_for_root(repo_name: str, task_root: Path) -> list[_LeafCandidate]:
+    by_qualified: dict[str, set[str]] = {}
+    for doc_id, aliases in _declared_leaves(task_root):
+        clean_id = doc_id.strip()
+        if not clean_id:
+            continue
+        qualified = f"{repo_name}/{task_root.name}/{clean_id}"
+        bucket = by_qualified.setdefault(qualified, set())
+        bucket.update(_candidate_aliases(clean_id, *aliases, qualified))
+    candidates = [
+        _LeafCandidate(
+            repo_name=repo_name,
+            task_root=task_root,
+            doc_id=qualified.split("/", 2)[2],
+            aliases=tuple(sorted(aliases)),
         )
+        for qualified, aliases in by_qualified.items()
+    ]
     return sorted(candidates, key=lambda candidate: candidate.qualified_id.lower())
 
 

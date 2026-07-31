@@ -37,7 +37,9 @@ from agents_remember.serving.conversation.library.helper_host import (
 )
 from agents_remember.serving.conversation.library.open_service import (
     ConversationOpenService,
+    LibraryBinding,
     OpenOperationLedger,
+    OpenRequest,
 )
 from agents_remember.serving.conversation.library.pi import PiConversationLibrary
 from agents_remember.serving.conversation.library.scope import canonical_library_scope
@@ -49,8 +51,8 @@ from agents_remember.serving.conversation.models import (
 from agents_remember.serving.conversation.runtime import ConversationRuntime, ConversationScope
 from agents_remember.serving.harness_capability_catalog import HarnessCapabilityCatalog
 from agents_remember.serving.harnesses import HARNESSES
-from agents_remember.serving.hosted_readiness import hosted_session_readiness
-from agents_remember.serving.retire import retire_entry
+from agents_remember.serving.hosted_readiness import ReadinessWait, hosted_session_readiness
+from agents_remember.serving.retire import SeatClosure, retire_entry
 from agents_remember.serving.terminal import TerminalHost
 from agents_remember.serving.terminal_catalog import TerminalCatalog
 from agents_remember.serving.terminal_liveness import TerminalCatalogLivenessConfig, utc_now
@@ -319,9 +321,11 @@ class PiOpenEndToEndTests(unittest.IsolatedAsyncioTestCase):
             authorization=_Resolver(self.caller),
         )
         self.service = ConversationOpenService(
-            runtime=self.runtime,
-            shared=self.shared,
-            authorization=self.caller,
+            LibraryBinding(
+                runtime=self.runtime,
+                shared=self.shared,
+                authorization=self.caller,
+            ),
             library=ConversationLibraryService(
                 runtime=self.runtime,
                 shared=self.shared,
@@ -341,10 +345,12 @@ class PiOpenEndToEndTests(unittest.IsolatedAsyncioTestCase):
                     self.catalog,
                     self.host,
                     entry,
-                    at=now_iso(),
-                    by_session="pi-open-e2e-test",
-                    reason="test cleanup",
-                    edge="library-open-test",
+                    SeatClosure(
+                        at=now_iso(),
+                        by_session="pi-open-e2e-test",
+                        reason="test cleanup",
+                        edge="library-open-test",
+                    ),
                 )
         self._tmpdir.cleanup()
 
@@ -366,10 +372,12 @@ class PiOpenEndToEndTests(unittest.IsolatedAsyncioTestCase):
         operation = await self.service.open(
             "pi",
             str(row.conversation_key),
-            request_id="e2e-pi-open-1",
-            expected_identity_digest=row.identity_digest,
-            cwd=None,
-            launch_context={},
+            OpenRequest(
+                request_id="e2e-pi-open-1",
+                expected_identity_digest=row.identity_digest,
+                cwd=None,
+                launch_context={},
+            ),
         )
         assert operation.outcome == "opened", operation.detail
         assert operation.phase == "opened"
@@ -384,7 +392,10 @@ class PiOpenEndToEndTests(unittest.IsolatedAsyncioTestCase):
 
         # External corroboration: the tracked session really is live and ready.
         readiness = hosted_session_readiness(
-            self.catalog, self.host, session_id=identity.ar_session_id, wait_seconds=0.0
+            self.catalog,
+            self.host,
+            session_id=identity.ar_session_id,
+            wait=ReadinessWait(seconds=0.0),
         )
         assert readiness.status == "ready"
 
@@ -392,10 +403,12 @@ class PiOpenEndToEndTests(unittest.IsolatedAsyncioTestCase):
         replay = await self.service.open(
             "pi",
             str(row.conversation_key),
-            request_id="e2e-pi-open-1",
-            expected_identity_digest=row.identity_digest,
-            cwd=None,
-            launch_context={},
+            OpenRequest(
+                request_id="e2e-pi-open-1",
+                expected_identity_digest=row.identity_digest,
+                cwd=None,
+                launch_context={},
+            ),
         )
         assert replay == operation
 
@@ -437,9 +450,11 @@ class CodexOpenEndToEndTests(unittest.IsolatedAsyncioTestCase):
             authorization=_Resolver(self.caller),
         )
         self.service = ConversationOpenService(
-            runtime=self.runtime,
-            shared=self.shared,
-            authorization=self.caller,
+            LibraryBinding(
+                runtime=self.runtime,
+                shared=self.shared,
+                authorization=self.caller,
+            ),
             library=ConversationLibraryService(
                 runtime=self.runtime,
                 shared=self.shared,
@@ -459,10 +474,12 @@ class CodexOpenEndToEndTests(unittest.IsolatedAsyncioTestCase):
                     self.catalog,
                     self.host,
                     entry,
-                    at=now_iso(),
-                    by_session="codex-open-e2e-test",
-                    reason="test cleanup",
-                    edge="library-open-test",
+                    SeatClosure(
+                        at=now_iso(),
+                        by_session="codex-open-e2e-test",
+                        reason="test cleanup",
+                        edge="library-open-test",
+                    ),
                 )
         self._tmpdir.cleanup()
 
@@ -489,10 +506,12 @@ class CodexOpenEndToEndTests(unittest.IsolatedAsyncioTestCase):
         operation = await self.service.open(
             "codex",
             str(row.conversation_key),
-            request_id="e2e-codex-open-1",
-            expected_identity_digest=row.identity_digest,
-            cwd=None,
-            launch_context={},
+            OpenRequest(
+                request_id="e2e-codex-open-1",
+                expected_identity_digest=row.identity_digest,
+                cwd=None,
+                launch_context={},
+            ),
         )
         assert operation.outcome == "opened", operation.detail
         assert operation.phase == "opened"
@@ -509,7 +528,10 @@ class CodexOpenEndToEndTests(unittest.IsolatedAsyncioTestCase):
         # exact native identity over the control IPC (the catalog's projected vendor field
         # catches up on the next liveness sweep; the snapshot is the proof authority).
         readiness = hosted_session_readiness(
-            self.catalog, self.host, session_id=identity.ar_session_id, wait_seconds=0.0
+            self.catalog,
+            self.host,
+            session_id=identity.ar_session_id,
+            wait=ReadinessWait(seconds=0.0),
         )
         assert readiness.status == "ready"
         assert readiness.snapshot is not None
@@ -519,10 +541,12 @@ class CodexOpenEndToEndTests(unittest.IsolatedAsyncioTestCase):
         replay = await self.service.open(
             "codex",
             str(row.conversation_key),
-            request_id="e2e-codex-open-1",
-            expected_identity_digest=row.identity_digest,
-            cwd=None,
-            launch_context={},
+            OpenRequest(
+                request_id="e2e-codex-open-1",
+                expected_identity_digest=row.identity_digest,
+                cwd=None,
+                launch_context={},
+            ),
         )
         assert replay == operation
 

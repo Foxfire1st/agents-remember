@@ -15,11 +15,44 @@ best-effort: observability must never make a start fail.
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 START_PROGRESS_SCHEMA = "ar-worktree-start-progress/v1"
+
+
+@dataclass(frozen=True)
+class StartingEnclosure:
+    """The enclosure a start-progress beat is about.
+
+    These are the contract's own front-matter facts -- task, repo, worktree name and group,
+    memory mode, and the code branch/commit/paths the start has resolved so far -- written
+    early precisely because the contract that would normally carry them does not exist yet.
+    Every writer builds it from the in-flight contract, which is why they travel as one thing.
+    """
+
+    repo_name: str
+    task_name: str
+    worktree_name: str
+    worktree_group: str
+    memory_mode: str
+    code_source_branch: str = ""
+    code_base_commit: str = ""
+    code_repo_path: str = ""
+    code_worktree: str = ""
+
+
+@dataclass(frozen=True)
+class StartBeat:
+    """How far a start has got: the phase it is in, the phases already behind it, the choices
+    it is waiting on, and why it is blocked (``None`` on a happy-path beat)."""
+
+    phase: str
+    completed_phases: tuple[str, ...] = ()
+    choices: tuple[str, ...] = ()
+    blocked_reason: str | None = None
 
 
 def start_progress_dir(coordination_root: Path) -> Path:
@@ -32,42 +65,30 @@ def start_progress_path(coordination_root: Path, repo_name: str, worktree_name: 
 
 def write_start_progress(
     coordination_root: Path,
-    *,
-    repo_name: str,
-    task_name: str,
-    worktree_name: str,
-    worktree_group: str,
-    phase: str,
-    memory_mode: str,
-    code_source_branch: str = "",
-    code_base_commit: str = "",
-    code_repo_path: str = "",
-    code_worktree: str = "",
-    blocked_reason: str | None = None,
-    completed_phases: tuple[str, ...] = (),
-    choices: tuple[str, ...] = (),
+    enclosure: StartingEnclosure,
+    beat: StartBeat,
 ) -> None:
     """Write the transient start-progress file. Never raises -- a start must not fail on this."""
     payload: dict[str, Any] = {
         "schema": START_PROGRESS_SCHEMA,
-        "repoName": repo_name,
-        "taskName": task_name,
-        "worktreeName": worktree_name,
-        "worktreeGroup": worktree_group,
-        "phase": phase,
-        "memoryMode": memory_mode,
-        "codeSourceBranch": code_source_branch,
-        "codeBaseCommit": code_base_commit,
-        "codeRepoPath": code_repo_path,
-        "codeWorktree": code_worktree,
-        "completedPhases": list(completed_phases),
-        "choices": list(choices),
+        "repoName": enclosure.repo_name,
+        "taskName": enclosure.task_name,
+        "worktreeName": enclosure.worktree_name,
+        "worktreeGroup": enclosure.worktree_group,
+        "phase": beat.phase,
+        "memoryMode": enclosure.memory_mode,
+        "codeSourceBranch": enclosure.code_source_branch,
+        "codeBaseCommit": enclosure.code_base_commit,
+        "codeRepoPath": enclosure.code_repo_path,
+        "codeWorktree": enclosure.code_worktree,
+        "completedPhases": list(beat.completed_phases),
+        "choices": list(beat.choices),
         "updatedAt": datetime.now(UTC).isoformat(),
     }
-    if blocked_reason is not None:
-        payload["blockedReason"] = blocked_reason
+    if beat.blocked_reason is not None:
+        payload["blockedReason"] = beat.blocked_reason
     try:
-        path = start_progress_path(coordination_root, repo_name, worktree_name)
+        path = start_progress_path(coordination_root, enclosure.repo_name, enclosure.worktree_name)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
     except OSError:

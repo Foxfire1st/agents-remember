@@ -44,6 +44,7 @@ from agents_remember.worktrees.modules.models import (
     RouteOverviewBodyClassification,
     RouteOverviewRefreshPlan,
     SidecarBodyClassification,
+    VerifiedChange,
     WorktreeCommandResult,
 )
 from agents_remember.worktrees.modules.onboarding import (
@@ -280,7 +281,9 @@ def closeout_preview_payload(contract, args: WorktreeArgs) -> dict[str, object]:
         metadata_refresh, entity_refresh, route_overview_refresh, route_index_refresh
     )
     code_quality_gate = code_quality_gate_preview(
-        contract.code_worktree, code_would_commit=code_dirty
+        contract.code_worktree,
+        code_would_commit=code_dirty,
+        diff_base=contract.code_base_commit,
     )
     return {
         "state": "would-closeout",
@@ -489,11 +492,7 @@ def _run_memory_quality_gate(context) -> dict[str, Any]:
 def _external_closeout_commits(
     contract,
     args: WorktreeArgs,
-    changed_paths: list[str],
-    code_commit: str,
-    code_commit_date: str,
-    *,
-    working_paths: list[str],
+    change: VerifiedChange,
 ) -> tuple[
     str,
     str,
@@ -505,19 +504,16 @@ def _external_closeout_commits(
 ]:
     if contract.memory_worktree is None or contract.ledger_path is None:
         raise RuntimeError("external-memory closeout requires memory worktree and ledger path")
+    code_commit = change.commit
     context = _closeout_contract_context(contract)
-    refreshed_onboarding = refresh_onboarding_metadata(
-        contract, changed_paths, code_commit, code_commit_date, working_paths=working_paths
-    )
+    refreshed_onboarding = refresh_onboarding_metadata(contract, change)
     refreshed_route_overviews = refresh_route_overview_metadata_for_context(
         context,
-        changed_paths,
-        code_commit,
-        code_commit_date,
+        change,
         memory_tree=contract.memory_worktree,
         memory_verified_commit=contract_memory_verified_commit(contract),
     )
-    refreshed_entities = refresh_entity_fingerprints_for_context(context, changed_paths)
+    refreshed_entities = refresh_entity_fingerprints_for_context(context, change.changed_paths)
     route_index_refresh = refresh_route_indexes_for_context(context)
     memory_quality = _run_memory_quality_gate(context)
     memory_content_dirty = worktree_dirty(contract.memory_worktree)
@@ -587,10 +583,14 @@ def closeout_result(args: WorktreeArgs) -> WorktreeCommandResult:
         stamped_overviews = overview_gate["stamped_without_body_review"]
     code_would_commit = worktree_dirty(contract.code_worktree)
     code_quality_gate = code_quality_gate_preview(
-        contract.code_worktree, code_would_commit=code_would_commit
+        contract.code_worktree,
+        code_would_commit=code_would_commit,
+        diff_base=contract.code_base_commit,
     )
     if requires_strict_code_quality(contract.code_worktree, code_would_commit=code_would_commit):
-        code_quality_gate = run_strict_code_quality_gate(contract.code_worktree)
+        code_quality_gate = run_strict_code_quality_gate(
+            contract.code_worktree, diff_base=contract.code_base_commit
+        )
     code_commit = commit_if_dirty(contract.code_worktree, args.code_commit_message)
     code_commit_date = commit_date(contract.code_worktree, code_commit)
     memory_commit = ""
@@ -612,10 +612,12 @@ def closeout_result(args: WorktreeArgs) -> WorktreeCommandResult:
         ) = _external_closeout_commits(
             contract,
             args,
-            changed_paths,
-            code_commit,
-            code_commit_date,
-            working_paths=worklist["working"],
+            VerifiedChange(
+                commit=code_commit,
+                commit_date=code_commit_date,
+                changed_paths=changed_paths,
+                working_paths=worklist["working"],
+            ),
         )
     integration_reopen = _completed_integration_reopen(
         contract,

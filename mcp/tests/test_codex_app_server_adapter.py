@@ -5,6 +5,7 @@ import json
 from collections import defaultdict, deque
 from collections.abc import AsyncIterator, Callable, Mapping
 from copy import deepcopy
+from dataclasses import replace
 from pathlib import Path
 from typing import cast
 
@@ -21,6 +22,7 @@ from agents_remember.serving.codex_app_server_adapter import (
 )
 from agents_remember.serving.codex_app_server_protocol import JsonObject, RequestId
 from agents_remember.serving.harness_control_models import (
+    AdapterEvent,
     ControlIdentity,
     ControlOperationRef,
     InteractionResponse,
@@ -220,29 +222,24 @@ def prime_start(
     transport.queue_response(method, fixture_object(data, key))
 
 
+TEST_SETTINGS = CodexAppServerSettings(
+    reasoning_effort="xhigh",
+    model="gpt-5.6-sol",
+    ephemeral=True,
+)
+"""The settings every adapter test starts from; vary one with ``replace(TEST_SETTINGS, ...)``.
+
+``CodexAppServerSettings`` already *is* the object these tests were spelling out one field at
+a time -- it carries the resume thread, the approval policy and reviewer, the sandbox and its
+turn policy, the config map and the submission limit -- so the fixture threads the settings
+object itself rather than re-declaring a parallel parameter list that can drift from it.
+"""
+
+
 def make_adapter(
     transport: FakeCodexTransport,
-    *,
-    resume_thread_id: str | None = None,
-    approval_policy: object | None = None,
-    approvals_reviewer: str | None = None,
-    sandbox: str | None = None,
-    turn_sandbox_policy: Mapping[str, object] | None = None,
-    config: Mapping[str, object] | None = None,
-    submission_limit: int = 256,
+    settings: CodexAppServerSettings = TEST_SETTINGS,
 ) -> CodexAppServerAdapter:
-    settings = CodexAppServerSettings(
-        reasoning_effort="xhigh",
-        model="gpt-5.6-sol",
-        ephemeral=True,
-        resume_thread_id=resume_thread_id,
-        approval_policy=approval_policy,
-        approvals_reviewer=approvals_reviewer,
-        sandbox=sandbox,
-        turn_sandbox_policy=turn_sandbox_policy,
-        config=config or {},
-        submission_limit=submission_limit,
-    )
     return CodexAppServerAdapter(
         settings,
         transport_factory=lambda: transport,
@@ -253,6 +250,37 @@ def make_adapter(
 async def settle() -> None:
     await asyncio.sleep(0)
     await asyncio.sleep(0)
+
+
+def drain_events(adapter: CodexAppServerAdapter) -> int:
+    """Empty the adapter's event queue and return the sequence to compare against.
+
+    A duplicate notification is proved inert by the sequence not moving, which only reads
+    as evidence from a known-empty queue.
+    """
+    while not adapter._events.empty():
+        adapter._events.get_nowait()
+    return adapter._event_sequence
+
+
+async def assert_notification_is_inert(
+    adapter: CodexAppServerAdapter,
+    transport: FakeCodexTransport,
+    notification: JsonObject,
+) -> None:
+    """Emit a notification the adapter has already settled and prove nothing moved."""
+    event_sequence = drain_events(adapter)
+    transport.emit(notification)
+    await settle()
+    assert adapter._event_sequence == event_sequence
+
+
+async def next_event_of_kind(events: AsyncIterator[AdapterEvent], kind: str) -> AdapterEvent:
+    """The next event of ``kind``, skipping the ones the adapter emits on the way there."""
+    while True:
+        event = await asyncio.wait_for(anext(events), 1)
+        if event.kind == kind:
+            return event
 
 
 def turn_start_result(data: JsonObject, turn_id: str, status: str = "inProgress") -> JsonObject:
@@ -276,11 +304,14 @@ async def test_handshake_uses_stable_protocol_and_exposes_effort_menu() -> None:
     prime_start(transport, data)
     adapter = make_adapter(
         transport,
-        approval_policy="on-request",
-        approvals_reviewer="user",
-        sandbox="workspace-write",
-        turn_sandbox_policy={"type": "workspaceWrite", "writableRoots": ["/workspace"]},
-        config={"feature_flag": True},
+        replace(
+            TEST_SETTINGS,
+            approval_policy="on-request",
+            approvals_reviewer="user",
+            sandbox="workspace-write",
+            turn_sandbox_policy={"type": "workspaceWrite", "writableRoots": ["/workspace"]},
+            config={"feature_flag": True},
+        ),
     )
 
     handshake = await adapter.start(launch())
@@ -486,7 +517,7 @@ async def test_resume_preserves_exact_thread_and_effective_settings() -> None:
     data = fixture()
     transport = FakeCodexTransport()
     prime_start(transport, data, resume=True)
-    adapter = make_adapter(transport, resume_thread_id="thread-1")
+    adapter = make_adapter(transport, replace(TEST_SETTINGS, resume_thread_id="thread-1"))
     handshake = await adapter.start(launch())
     try:
         assert handshake.snapshot.vendor_session_id == "thread-1"
@@ -526,10 +557,7 @@ async def test_turn_acceptance_blocking_and_terminal_mapping(status: str, outcom
 
         terminal = deepcopy(fixture_object(data, "notifications", status))
         transport.emit(terminal)
-        while True:
-            event = await asyncio.wait_for(anext(events), timeout=1.0)
-            if event.kind == "completed":
-                break
+        event = await next_event_of_kind(events, "completed")
         assert event.transcript[0].terminal_result is not None
         assert event.transcript[0].terminal_result.outcome == outcome
         assert event.snapshot is not None
@@ -649,7 +677,7 @@ async def test_codex_terminal_correlation_is_bounded_across_many_synchronous_tur
             "turn/start",
             {"turn": {"id": f"turn-sync-{index}", "status": "completed", "items": []}},
         )
-    adapter = make_adapter(transport, submission_limit=2)
+    adapter = make_adapter(transport, replace(TEST_SETTINGS, submission_limit=2))
     await adapter.start(launch())
     try:
         for index in range(5):
@@ -670,7 +698,7 @@ async def test_early_codex_completion_releases_live_correlation_and_late_duplica
     transport = BlockingTurnStartTransport()
     prime_start(transport, data)
     transport.queue_response("turn/start", turn_start_result(data, "turn-early"))
-    adapter = make_adapter(transport, submission_limit=2)
+    adapter = make_adapter(transport, replace(TEST_SETTINGS, submission_limit=2))
     await adapter.start(launch())
     events = adapter.subscribe()
     early_notification = turn_completed_notification(data, "turn-early")
@@ -685,10 +713,7 @@ async def test_early_codex_completion_releases_live_correlation_and_late_duplica
         transport.release_turn_start.set()
         first_receipt = await asyncio.wait_for(first_task, 1)
         assert first_receipt.acceptance == "immediate"
-        while True:
-            first_event = await asyncio.wait_for(anext(events), 1)
-            if first_event.kind == "completed":
-                break
+        first_event = await next_event_of_kind(events, "completed")
         assert first_event.operation == first_request.operation
         assert adapter._turn_operations == {}
         assert adapter._unbound_completions == {}
@@ -700,26 +725,16 @@ async def test_early_codex_completion_releases_live_correlation_and_late_duplica
         successor_request = request("request-successor")
         successor_task = asyncio.create_task(adapter.submit(successor_request))
         await asyncio.wait_for(transport.turn_start_requested.wait(), 1)
-        while not adapter._events.empty():
-            adapter._events.get_nowait()
-        event_sequence = adapter._event_sequence
 
         # A retained old duplicate is discarded even while the successor start is pending.
-        transport.emit(early_notification)
-        await settle()
-        assert adapter._event_sequence == event_sequence
+        await assert_notification_is_inert(adapter, transport, early_notification)
         assert adapter._unbound_completions == {}
 
         transport.release_turn_start.set()
         await asyncio.wait_for(successor_task, 1)
         assert adapter._turn_operations == {"turn-successor": successor_request.operation}
-        while not adapter._events.empty():
-            adapter._events.get_nowait()
-        event_sequence = adapter._event_sequence
 
-        transport.emit(early_notification)
-        await settle()
-        assert adapter._event_sequence == event_sequence
+        await assert_notification_is_inert(adapter, transport, early_notification)
         assert adapter._active_operation == successor_request.operation
         assert adapter._turn_operations == {"turn-successor": successor_request.operation}
 
@@ -744,7 +759,7 @@ async def test_early_completion_plus_rejected_turn_start_clears_all_correlation(
     prime_start(transport, data)
     turn_id = f"turn-early-{status}"
     transport.queue_response("turn/start", turn_start_result(data, turn_id, status))
-    adapter = make_adapter(transport, submission_limit=2)
+    adapter = make_adapter(transport, replace(TEST_SETTINGS, submission_limit=2))
     await adapter.start(launch())
     notification = turn_completed_notification(data, turn_id)
     try:
@@ -779,7 +794,7 @@ async def test_mismatched_early_completion_is_cleared_before_successor_activatio
     transport.queue_response("turn/start", turn_start_result(data, "turn-evicted-old", "completed"))
     transport.queue_response("turn/start", turn_start_result(data, "turn-newest", "completed"))
     transport.queue_response("turn/start", turn_start_result(data, "turn-successor"))
-    adapter = make_adapter(transport, submission_limit=1)
+    adapter = make_adapter(transport, replace(TEST_SETTINGS, submission_limit=1))
     await adapter.start(launch())
     try:
         transport.release_turn_start.set()
@@ -814,7 +829,7 @@ async def test_retained_terminal_turn_id_cannot_be_reused_for_a_successor() -> N
     prime_start(transport, data)
     transport.queue_response("turn/start", turn_start_result(data, "turn-reused", "completed"))
     transport.queue_response("turn/start", turn_start_result(data, "turn-reused"))
-    adapter = make_adapter(transport, submission_limit=2)
+    adapter = make_adapter(transport, replace(TEST_SETTINGS, submission_limit=2))
     await adapter.start(launch())
     try:
         first = await adapter.submit(request("request-first"))
@@ -835,17 +850,14 @@ async def test_codex_terminal_correlation_is_bounded_across_many_async_turns() -
     prime_start(transport, data)
     for index in range(5):
         transport.queue_response("turn/start", turn_start_result(data, f"turn-async-{index}"))
-    adapter = make_adapter(transport, submission_limit=2)
+    adapter = make_adapter(transport, replace(TEST_SETTINGS, submission_limit=2))
     await adapter.start(launch())
     events = adapter.subscribe()
     try:
         for index in range(5):
             await adapter.submit(request(f"request-async-{index}"))
             transport.emit(turn_completed_notification(data, f"turn-async-{index}"))
-            while True:
-                event = await asyncio.wait_for(anext(events), 1)
-                if event.kind == "completed":
-                    break
+            await next_event_of_kind(events, "completed")
             assert adapter._turn_operations == {}
             assert len(adapter._completed_turns) <= 2
         assert list(adapter._completed_turns) == ["turn-async-3", "turn-async-4"]

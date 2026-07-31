@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import datetime
 
 from agents_remember.controlplane.expectation_rows import (
+    Expectation,
     ExpectationKind,
     ExpectationRowStore,
+    ExpectationSubject,
     write_expectation_row,
 )
 from agents_remember.controlplane.operator_inbox_records import (
@@ -23,6 +26,7 @@ from agents_remember.observer import observer_root
 from agents_remember.observer.ulid import new_ulid
 from agents_remember.serving.dispatch_brief import (
     DISPATCH_BRIEF_KIND,
+    DispatchBriefGate,
     fulfill_briefed_expectation,
 )
 from agents_remember.serving.hosted_readiness import (
@@ -30,11 +34,40 @@ from agents_remember.serving.hosted_readiness import (
     HostedReadinessResult,
     hosted_session_readiness,
 )
+from agents_remember.serving.terminal import TerminalHost
 from agents_remember.serving.terminal_catalog import TerminalCatalog, TerminalCatalogEntry
+from agents_remember.serving.terminal_paste import TerminalPaster
 
 DispatchReadinessCheck = Callable[
     [TerminalCatalog, HostedReadinessHost, str], HostedReadinessResult
 ]
+
+
+@dataclass(frozen=True)
+class HostedDelivery:
+    """Whether an inbox entry is pushed into its recipient's live hosted session, and the
+    collaborators that do the pushing.
+
+    ``enabled`` is the caller's request to deliver at all; the rest are the seams the
+    delivery runs through -- the session catalog that locates the recipient, the terminal
+    host and paster that write into it, the readiness probe a ``dispatch-brief`` must pass
+    before a durable row is created, and the gate that admits it. Each is optional so
+    production takes the real collaborator and tests inject a double.
+    """
+
+    enabled: bool = True
+    catalog: TerminalCatalog | None = None
+    host: TerminalHost | None = None
+    paster: TerminalPaster | None = None
+    readiness: DispatchReadinessCheck | None = None
+    gate: DispatchBriefGate | None = None
+
+
+HOSTED_DELIVERY = HostedDelivery()
+"""Deliver to the recipient's hosted session using the real catalog, host, and paster."""
+
+NO_HOSTED_DELIVERY = HostedDelivery(enabled=False)
+"""Record the entry durably and stop -- nothing is pushed into a live session."""
 
 
 def expectation_store(config: McpRuntimeConfig) -> ExpectationRowStore:
@@ -51,20 +84,18 @@ def require_dispatch_target(
     *,
     message_kind: InboxMessageKind,
     agent_id: str | None,
-    deliver_to_hosted: bool,
-    catalog: TerminalCatalog | None,
+    delivery: HostedDelivery,
     host: HostedReadinessHost,
-    readiness: DispatchReadinessCheck | None,
 ) -> TerminalCatalogEntry | None:
     """Return the exact ready target, or refuse before the durable row is created."""
 
     if message_kind != DISPATCH_BRIEF_KIND:
         return None
-    if catalog is None:
+    if delivery.catalog is None:
         raise ValueError("dispatch-brief requires runtime configuration")
-    if agent_id is None or not deliver_to_hosted:
+    if agent_id is None or not delivery.enabled:
         raise ValueError("dispatch-brief requires exact agent_id and deliver_to_hosted=true")
-    observed = (readiness or _readiness)(catalog, host, agent_id)
+    observed = (delivery.readiness or _readiness)(delivery.catalog, host, agent_id)
     if observed.status != "ready" or observed.entry is None or observed.entry.id != agent_id:
         raise ValueError(
             "dispatch-brief requires prior exact-session status=ready; "
@@ -93,16 +124,20 @@ def start_dispatch_expectations(
             continue
         write_expectation_row(
             store,
+            Expectation(
+                kind=kind,
+                source_id=entry.id,
+                subject=ExpectationSubject(
+                    agent_id=target.id,
+                    lifecycle_id=target.lifecycle_id,
+                    leaf_key=leaf_key,
+                    seat_role=target.binding_role,
+                ),
+                note=note,
+            ),
             row_id=new_ulid(),
             now=created_at,
-            kind=kind,
             sla_seconds=expectation_sla_seconds(config, kind),
-            source_id=entry.id,
-            subject_agent_id=target.id,
-            subject_lifecycle_id=target.lifecycle_id,
-            leaf_key=leaf_key,
-            seat_role=target.binding_role,
-            note=note,
         )
 
 

@@ -23,6 +23,7 @@ from dataclasses import replace
 from unittest import mock
 
 from _agent_wire_fixtures import (
+    CollabAgents,
     agent_message_delta_params,
     agent_message_item,
     collab_agent_tool_call_item,
@@ -35,6 +36,8 @@ from _agent_wire_fixtures import (
 )
 from agents_remember.errors import NativeHistoryUnavailable
 from agents_remember.serving.conversation.active.projector import ActiveSessionProjector
+from agents_remember.serving.conversation.active.projector.facade import ProjectedSession
+from agents_remember.serving.conversation.active.projector.wiring import BridgeReaders
 from agents_remember.serving.conversation.models import (
     ConversationItem,
     MarkdownBlock,
@@ -111,10 +114,8 @@ def _collab_item(
     return collab_agent_tool_call_item(
         item_id,
         tool,
-        sender_thread_id=PARENT,
+        agents=CollabAgents(PARENT, receiver_thread_ids=receivers, states=states),
         status=status,
-        receiver_thread_ids=receivers,
-        agents_states=states,
     )
 
 
@@ -369,7 +370,6 @@ class _MultiplexedBridge(_ScriptedBridge):
         *,
         cursor=None,
         limit=200,
-        byte_budget=None,
         expected_bridge_epoch=None,
         thread_id=None,
     ):
@@ -378,7 +378,6 @@ class _MultiplexedBridge(_ScriptedBridge):
                 entry,
                 cursor=cursor,
                 limit=limit,
-                byte_budget=byte_budget,
                 expected_bridge_epoch=expected_bridge_epoch,
             )
         self.agent_native_reads.append(thread_id)
@@ -412,17 +411,21 @@ def _projector(bridge: _MultiplexedBridge) -> ActiveSessionProjector:
     mapper = projector_for("codex")
     assert mapper is not None
     return ActiveSessionProjector(
-        identity=_identity("codex"),
-        authorization=_authorization(),
-        entry=_ControlledEntry(),
-        mapper=mapper,
-        secret=SECRET,
+        ProjectedSession(
+            identity=_identity("codex"),
+            authorization=_authorization(),
+            entry=_ControlledEntry(),
+            mapper=mapper,
+            secret=SECRET,
+        ),
         clock=lambda: NOW,
-        evidence_reader=bridge.read_evidence,
-        native_page_reader=bridge.read_native_page,
-        transcript_reader=bridge.read_transcript,
-        provenance_reader=bridge.read_provenance,
-        snapshot_reader=bridge.read_snapshot,
+        readers=BridgeReaders(
+            evidence=bridge.read_evidence,
+            native_page=bridge.read_native_page,
+            transcript=bridge.read_transcript,
+            provenance=bridge.read_provenance,
+            snapshot=bridge.read_snapshot,
+        ),
     )
 
 
@@ -857,8 +860,7 @@ class CodexAgentEngineTests(unittest.IsolatedAsyncioTestCase):
                 collab_agent_tool_call_item(
                     "collab-1",
                     "spawnAgent",
-                    sender_thread_id=PARENT,
-                    receiver_thread_ids=[AGENT],
+                    agents=CollabAgents(PARENT, receiver_thread_ids=[AGENT]),
                 ),
             ),
             thread_id=PARENT,

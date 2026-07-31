@@ -46,25 +46,42 @@ def summarize_command_logs(payload: Any, *, failure_tail: int = DEFAULT_FAILURE_
     """
     if isinstance(payload, dict):
         succeeded = payload.get("ok") is True or payload.get("returncode") == 0
-        for key in _LOG_KEYS:
-            value = payload.get(key)
-            if isinstance(value, str) and value:
-                payload[key] = "" if succeeded else tail_lines(value, failure_tail)
-        for key in _DROP_ALWAYS:
-            payload.pop(key, None)
-        if succeeded:
-            for key in _DROP_ON_SUCCESS:
-                payload.pop(key, None)
-        else:
-            for key in _COMMAND_KEYS:
-                if key in payload:
-                    payload[key] = _redact_commands(payload[key])
+        _shrink_logs(payload, succeeded=succeeded, failure_tail=failure_tail)
+        _drop_verbose_plumbing(payload, succeeded=succeeded)
         for value in payload.values():
             summarize_command_logs(value, failure_tail=failure_tail)
     elif isinstance(payload, list):
         for item in payload:
             summarize_command_logs(item, failure_tail=failure_tail)
     return payload
+
+
+def _shrink_logs(node: dict[str, Any], *, succeeded: bool, failure_tail: int) -> None:
+    """Empty this node's captured output on success; cap it to the failure tail otherwise.
+
+    The keys stay present (as ``""``) so the response keeps its shape either way.
+    """
+    for key in _LOG_KEYS:
+        value = node.get(key)
+        if isinstance(value, str) and value:
+            node[key] = "" if succeeded else tail_lines(value, failure_tail)
+
+
+def _drop_verbose_plumbing(node: dict[str, Any], *, succeeded: bool) -> None:
+    """Drop the always-redundant mirror, then the debug-only keys or their secrets.
+
+    A successful node loses the plumbing outright; a failing one keeps it -- redacted --
+    because that detail is what makes the failure debuggable.
+    """
+    for key in _DROP_ALWAYS:
+        node.pop(key, None)
+    if succeeded:
+        for key in _DROP_ON_SUCCESS:
+            node.pop(key, None)
+        return
+    for key in _COMMAND_KEYS:
+        if key in node:
+            node[key] = _redact_commands(node[key])
 
 
 def _redact_commands(value: Any) -> Any:

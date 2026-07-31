@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import dataclass
 
 from pydantic import ValidationError
 
@@ -17,11 +18,6 @@ from agents_remember.serving.conversation.projectors import HarnessProjector
 from agents_remember.serving.conversation.projectors.common import UnmappableShape
 from agents_remember.serving.harness_control_client import (
     ControlledSession,
-    read_control_evidence,
-    read_control_native_page,
-    read_control_snapshot,
-    read_control_transcript,
-    read_submission_provenance,
 )
 
 from .agent_authority import AgentAuthority
@@ -34,12 +30,30 @@ from .native_ingestion import (
     NativeEvidenceIngestion,
     ZipperEvidenceEvicted,
 )
-from .rebuild_coordinator import PageResult, RebuildCoordinator
+from .rebuild_coordinator import IngestionComponents, PageResult, RebuildCoordinator
 from .references import ProjectionEvidenceRefs
+from .wiring import LIVE_BRIDGE_READERS, BridgeReaders, SessionProjectionSpine
 
 POLL_INTERVAL_SECONDS = 1.0
 CONSUMER_TTL_SECONDS = 30.0
 MAX_CONSECUTIVE_READ_FAILURES = 5
+
+
+@dataclass(frozen=True)
+class ProjectedSession:
+    """WHICH conversation is being projected, and the authority to mint references for it.
+
+    The identity names the exact session and bridge epoch; the controlled session is the row those
+    reads go through; the mapper is that harness's shape reader; the authorization and the signing
+    secret are what every emitted reference is bound to. A projector built from a mixed set would
+    publish one session's events under another's references, so the five arrive as one value.
+    """
+
+    identity: ActiveConversationRef
+    authorization: AuthorizationBinding
+    entry: ControlledSession
+    mapper: HarnessProjector
+    secret: bytes
 
 
 class ActiveSessionProjector:
@@ -47,81 +61,52 @@ class ActiveSessionProjector:
 
     def __init__(
         self,
+        session: ProjectedSession,
         *,
-        identity: ActiveConversationRef,
-        authorization: AuthorizationBinding,
-        entry: ControlledSession,
-        mapper: HarnessProjector,
-        secret: bytes,
         clock,
-        evidence_reader=read_control_evidence,
-        native_page_reader=read_control_native_page,
-        transcript_reader=read_control_transcript,
-        provenance_reader=read_submission_provenance,
-        snapshot_reader=read_control_snapshot,
+        readers: BridgeReaders = LIVE_BRIDGE_READERS,
     ) -> None:
+        identity = session.identity
+        entry = session.entry
+        mapper = session.mapper
         self._identity = identity
         self._entry = entry
         self._mapper = mapper
         self._apply_lock = asyncio.Lock()
-        refs = ProjectionEvidenceRefs.from_bridge_epoch(identity.bridge_epoch)
         self._stream = ProjectionMutationStream(
             identity=identity,
-            authorization=authorization,
-            secret=secret,
+            authorization=session.authorization,
+            secret=session.secret,
             clock=clock,
         )
         self._agents = AgentAuthority(identity.vendor_conversation_id)
-        self._native = NativeEvidenceIngestion(
+        spine = SessionProjectionSpine(
             identity=identity,
             entry=entry,
             mapper=mapper,
             stream=self._stream,
             agents=self._agents,
-            refs=refs,
-            evidence_reader=evidence_reader,
-            native_page_reader=native_page_reader,
-        )
-        self._echo = EchoIngestion(
-            entry=entry,
-            mapper=mapper,
-            stream=self._stream,
-            refs=refs,
-            transcript_reader=transcript_reader,
-            evidence_mapper=self._native.map_evidence_frame,
-        )
-        self._child_history = ChildHistoryProjection(
-            parent_thread_id=identity.vendor_conversation_id,
-            bridge_epoch=identity.bridge_epoch,
-            entry=entry,
-            mapper=mapper,
-            stream=self._stream,
-            agents=self._agents,
-            native=self._native,
-            refs=refs,
-            native_page_reader=native_page_reader,
+            refs=ProjectionEvidenceRefs.from_bridge_epoch(identity.bridge_epoch),
             apply_lock=self._apply_lock,
             clock=clock,
         )
+        self._native = NativeEvidenceIngestion(spine, readers)
+        self._echo = EchoIngestion(spine, readers, self._native.map_evidence_frame)
+        self._child_history = ChildHistoryProjection(spine, readers, self._native)
         self._interactions = InteractionProjection(
             stream=self._stream,
             parent_thread_id=identity.vendor_conversation_id,
             agent_ref=self._agents.ref,
         )
         self._coordinator = RebuildCoordinator(
-            identity=identity,
-            entry=entry,
-            mapper=mapper,
-            stream=self._stream,
-            native=self._native,
-            echo=self._echo,
-            agents=self._agents,
-            child_history=self._child_history,
-            interactions=self._interactions,
-            apply_lock=self._apply_lock,
-            snapshot_reader=snapshot_reader,
-            provenance_reader=provenance_reader,
-            clock=clock,
+            spine,
+            readers,
+            IngestionComponents(
+                native=self._native,
+                echo=self._echo,
+                child_history=self._child_history,
+                interactions=self._interactions,
+            ),
         )
         self._poll_task: asyncio.Task[None] | None = None
         self._consumer_until = 0.0

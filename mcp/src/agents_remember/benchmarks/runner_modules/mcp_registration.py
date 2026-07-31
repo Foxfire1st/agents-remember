@@ -16,7 +16,7 @@ from agents_remember.benchmarks.runner_modules.constants import (
     CODEX_HARNESS_DIR,
 )
 from agents_remember.benchmarks.runner_modules.manifest import manifest_path_component
-from agents_remember.benchmarks.runner_modules.models import BenchmarkCase
+from agents_remember.benchmarks.runner_modules.models import BenchmarkCase, BenchmarkWorkspace
 from agents_remember.mcp.config import (
     McpRuntimeConfig,
     ProviderScope,
@@ -98,24 +98,29 @@ def toml_string(value: object) -> str:
     return json.dumps(str(value))
 
 
+def benchmark_repo_id(case: BenchmarkCase) -> str:
+    return manifest_path_component(case.repository["name"], f"{case.case_id}.repository.name")
+
+
 def benchmark_mcp_settings_payload(
+    workspace: BenchmarkWorkspace,
     *,
-    repo_id: str,
-    coordination_root: Path,
-    workspace_root: Path,
-    provider_ids: tuple[str, ...],
     provider_timeout: int,
-    provider_instance: str | None = None,
 ) -> dict[str, Any]:
-    provider_settings = {"scope": "benchmark"}
-    if provider_instance is not None:
-        provider_settings["instanceId"] = provider_instance
+    provider_settings = {
+        "scope": "benchmark",
+        "instanceId": provider_instance_id("benchmark", workspace.workspace_root),
+    }
     return {
         "version": 1,
-        "coordinationRoot": coordination_root.resolve().as_posix(),
-        "workspaceRoot": workspace_root.resolve().as_posix(),
-        "repositories": {repo_id: {}},
-        "providers": {provider_id: dict(provider_settings) for provider_id in provider_ids},
+        "coordinationRoot": workspace.coordination_root.resolve().as_posix(),
+        # The registration's workspace root is the directory that CONTAINS the
+        # cloned repos, not the workspace root itself.
+        "workspaceRoot": workspace.source_repo_root.parent.resolve().as_posix(),
+        "repositories": {benchmark_repo_id(workspace.case): {}},
+        "providers": {
+            provider_id: dict(provider_settings) for provider_id in workspace.provider_ids
+        },
         "timeoutCaps": {
             "toolSeconds": 30,
             "providerSetupSeconds": provider_timeout,
@@ -147,38 +152,29 @@ def benchmark_agents_config_text(settings_path: Path) -> str:
 
 
 def write_benchmark_mcp_registration(
+    workspace: BenchmarkWorkspace,
     *,
-    case: BenchmarkCase,
-    workspace_root: Path,
-    coordination_root: Path,
-    source_repo_root: Path,
-    memory_repo: Path,
-    provider_ids: tuple[str, ...],
     provider_timeout: int,
     dry_run: bool,
 ) -> tuple[Path, Path]:
-    repo_id = manifest_path_component(case.repository["name"], f"{case.case_id}.repository.name")
-    expected_memory_repo = coordination_root / "memory-repos" / f"ar-{repo_id}"
-    if source_repo_root.name != repo_id:
+    repo_id = benchmark_repo_id(workspace.case)
+    expected_memory_repo = workspace.coordination_root / "memory-repos" / f"ar-{repo_id}"
+    if workspace.source_repo_root.name != repo_id:
         raise RuntimeError(
             "benchmark MCP registration requires the source repository directory "
-            f"to match the repository id {repo_id!r}: {source_repo_root}"
+            f"to match the repository id {repo_id!r}: {workspace.source_repo_root}"
         )
-    if memory_repo.resolve() != expected_memory_repo.resolve():
+    if workspace.memory_repo.resolve() != expected_memory_repo.resolve():
         raise RuntimeError(
             "benchmark MCP registration requires memory repository "
-            f"{expected_memory_repo}; got {memory_repo}"
+            f"{expected_memory_repo}; got {workspace.memory_repo}"
         )
 
-    mcp_settings_path = benchmark_mcp_settings_path(workspace_root)
-    agents_config_path = benchmark_agents_config_path(workspace_root)
+    mcp_settings_path = benchmark_mcp_settings_path(workspace.workspace_root)
+    agents_config_path = benchmark_agents_config_path(workspace.workspace_root)
     settings_payload = benchmark_mcp_settings_payload(
-        repo_id=repo_id,
-        coordination_root=coordination_root,
-        workspace_root=source_repo_root.parent,
-        provider_ids=provider_ids,
+        workspace,
         provider_timeout=provider_timeout,
-        provider_instance=provider_instance_id("benchmark", workspace_root),
     )
     if dry_run:
         print(f"Would write benchmark MCP settings {mcp_settings_path}")
@@ -198,15 +194,9 @@ def write_benchmark_mcp_registration(
     return mcp_settings_path, agents_config_path
 
 
-def benchmark_mcp_config(
-    *,
-    case: BenchmarkCase,
-    coordination_root: Path,
-    source_repo_root: Path,
-    memory_repo: Path,
-    provider_ids: tuple[str, ...],
-) -> McpRuntimeConfig:
-    repo_id = manifest_path_component(case.repository["name"], f"{case.case_id}.repository.name")
+def benchmark_mcp_config(workspace: BenchmarkWorkspace) -> McpRuntimeConfig:
+    repo_id = benchmark_repo_id(workspace.case)
+    coordination_root = workspace.coordination_root
     workspace_root = coordination_root.parent.resolve()
     instance_id = provider_instance_id("benchmark", workspace_root)
     providers = {
@@ -225,7 +215,7 @@ def benchmark_mcp_config(
             instance_id=instance_id,
             scope="benchmark",
         )
-        for provider_id in provider_ids
+        for provider_id in workspace.provider_ids
     }
     return McpRuntimeConfig(
         config_path=coordination_root / ".benchmark-mcp-settings.generated.json",
@@ -235,8 +225,8 @@ def benchmark_mcp_config(
         repositories={
             repo_id: RepositoryScope(
                 repo_id=repo_id,
-                path=source_repo_root.resolve(),
-                memory_root=memory_repo.resolve(),
+                path=workspace.source_repo_root.resolve(),
+                memory_root=workspace.memory_repo.resolve(),
             )
         },
         providers=providers,
@@ -244,22 +234,8 @@ def benchmark_mcp_config(
     )
 
 
-def benchmark_lifecycle_settings(
-    *,
-    case: BenchmarkCase,
-    coordination_root: Path,
-    source_repo_root: Path,
-    memory_repo: Path,
-    provider_ids: tuple[str, ...],
-) -> dict[str, Any]:
-    config = benchmark_mcp_config(
-        case=case,
-        coordination_root=coordination_root,
-        source_repo_root=source_repo_root,
-        memory_repo=memory_repo,
-        provider_ids=provider_ids,
-    )
-    return lifecycle_settings_from_config(config)
+def benchmark_lifecycle_settings(workspace: BenchmarkWorkspace) -> dict[str, Any]:
+    return lifecycle_settings_from_config(benchmark_mcp_config(workspace))
 
 
 def write_temp_provider_settings(settings: dict[str, Any]) -> Path:
@@ -276,30 +252,21 @@ def write_temp_provider_settings(settings: dict[str, Any]) -> Path:
 
 
 def prepare_configured_providers(
-    case: BenchmarkCase,
-    coordination_root: Path,
-    source_repo_root: Path,
-    memory_repo: Path,
+    workspace: BenchmarkWorkspace,
+    *,
     dry_run: bool,
     provider_timeout: int,
-    *,
-    provider_ids: tuple[str, ...],
 ) -> None:
-    if not provider_ids:
+    coordination_root = workspace.coordination_root
+    if not workspace.provider_ids:
         if dry_run:
             print(
-                f"Would skip benchmark provider setup for {case.case_id}; no variants request providers"
+                f"Would skip benchmark provider setup for {workspace.case.case_id}; "
+                "no variants request providers"
             )
         return
 
-    settings = benchmark_lifecycle_settings(
-        case=case,
-        coordination_root=coordination_root,
-        source_repo_root=source_repo_root,
-        memory_repo=memory_repo,
-        provider_ids=provider_ids,
-    )
-    settings_path = write_temp_provider_settings(settings)
+    settings_path = write_temp_provider_settings(benchmark_lifecycle_settings(workspace))
     if dry_run:
         print(
             "Would run provider setup service for "

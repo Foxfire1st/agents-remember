@@ -91,6 +91,22 @@ class _OutputWindow:
     used_bytes: int = 0
 
 
+@dataclass(frozen=True)
+class BoundedPageRequest:
+    """One bounded native-history page: which thread, from where, and how much may come back.
+
+    The two bounds are not independent: the reader stops at whichever of ``limit`` frames or
+    ``byte_budget`` bytes is reached first, and the cursor is only meaningful for the thread it was
+    minted against. Reading a page under a mismatched set is how a walk silently returns another
+    thread's frames.
+    """
+
+    thread_id: str
+    cursor: str | None
+    limit: int
+    byte_budget: int
+
+
 @dataclass
 class CodexNativeHistoryReader:
     """One connection's probed native-history contract and bounded page reader."""
@@ -123,6 +139,9 @@ class CodexNativeHistoryReader:
         limit: int,
         byte_budget: int,
     ) -> NativeEvidencePage:
+        window = BoundedPageRequest(
+            thread_id=thread_id, cursor=cursor, limit=limit, byte_budget=byte_budget
+        )
         if cursor is not None and self.contract == "unknown":
             raise NativeHistoryUnavailable(
                 "Codex bounded history cursor expired with its app-server connection",
@@ -131,18 +150,12 @@ class CodexNativeHistoryReader:
         if self.contract == "bounded-items":
             return await self._read_bounded_items(
                 transport,
-                thread_id=thread_id,
-                cursor=cursor,
-                limit=limit,
-                byte_budget=byte_budget,
+                window,
             )
         if self.contract == "bounded-turns":
             return await self._read_bounded_turns(
                 transport,
-                thread_id=thread_id,
-                cursor=cursor,
-                limit=limit,
-                byte_budget=byte_budget,
+                window,
             )
         if self.contract == "legacy-thread-read":
             return await self._read_legacy_whole_thread_page_under_transport_fuse(
@@ -162,10 +175,7 @@ class CodexNativeHistoryReader:
             self.contract = "bounded-items"
             return await self._read_bounded_items(
                 transport,
-                thread_id=thread_id,
-                cursor=cursor,
-                limit=limit,
-                byte_budget=byte_budget,
+                window,
                 first_response=first_items,
             )
 
@@ -178,10 +188,7 @@ class CodexNativeHistoryReader:
             self.contract = "bounded-turns"
             return await self._read_bounded_turns(
                 transport,
-                thread_id=thread_id,
-                cursor=cursor,
-                limit=limit,
-                byte_budget=byte_budget,
+                window,
                 first_response=first_turns,
             )
 
@@ -213,13 +220,11 @@ class CodexNativeHistoryReader:
     async def _read_bounded_items(
         self,
         transport: CodexAppServerTransport,
-        *,
-        thread_id: str,
-        cursor: str | None,
-        limit: int,
-        byte_budget: int,
+        window: BoundedPageRequest,
         first_response: JsonObject | None = None,
     ) -> NativeEvidencePage:
+        thread_id = window.thread_id
+
         async def read_source_page(
             source_cursor: str | None,
         ) -> tuple[tuple[NativeEvidenceFrame, ...], str | None]:
@@ -234,25 +239,16 @@ class CodexNativeHistoryReader:
             )
             return self._parse_items_page(response)
 
-        return await self._scan_bounded_source(
-            read_source_page,
-            contract="bounded-items",
-            thread_id=thread_id,
-            cursor=cursor,
-            limit=limit,
-            byte_budget=byte_budget,
-        )
+        return await self._scan_bounded_source(read_source_page, window, contract="bounded-items")
 
     async def _read_bounded_turns(
         self,
         transport: CodexAppServerTransport,
-        *,
-        thread_id: str,
-        cursor: str | None,
-        limit: int,
-        byte_budget: int,
+        window: BoundedPageRequest,
         first_response: JsonObject | None = None,
     ) -> NativeEvidencePage:
+        thread_id = window.thread_id
+
         async def read_source_page(
             source_cursor: str | None,
         ) -> tuple[tuple[NativeEvidenceFrame, ...], str | None]:
@@ -267,35 +263,26 @@ class CodexNativeHistoryReader:
             )
             return self._parse_turns_page(response)
 
-        return await self._scan_bounded_source(
-            read_source_page,
-            contract="bounded-turns",
-            thread_id=thread_id,
-            cursor=cursor,
-            limit=limit,
-            byte_budget=byte_budget,
-        )
+        return await self._scan_bounded_source(read_source_page, window, contract="bounded-turns")
 
     async def _scan_bounded_source(
         self,
         read_source_page: SourcePageReader,
+        window: BoundedPageRequest,
         *,
         contract: SourceContract,
-        thread_id: str,
-        cursor: str | None,
-        limit: int,
-        byte_budget: int,
     ) -> NativeEvidencePage:
+        thread_id = window.thread_id
         walk = self._walk_for(
-            cursor,
+            window.cursor,
             contract=contract,
             thread_id=thread_id,
         )
         output = _OutputWindow(
             contract=contract,
             thread_id=thread_id,
-            limit=limit,
-            byte_budget=byte_budget,
+            limit=window.limit,
+            byte_budget=window.byte_budget,
         )
         while True:
             if not walk.loaded:
@@ -544,11 +531,10 @@ class CodexNativeHistoryReader:
 
         return await self._scan_bounded_source(
             read_source_page,
+            BoundedPageRequest(
+                thread_id=thread_id, cursor=cursor, limit=limit, byte_budget=byte_budget
+            ),
             contract="legacy-thread-read",
-            thread_id=thread_id,
-            cursor=cursor,
-            limit=limit,
-            byte_budget=byte_budget,
         )
 
     @staticmethod

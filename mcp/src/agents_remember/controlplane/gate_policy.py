@@ -159,8 +159,12 @@ def decision_role_for_gate(gate: GateRecord) -> DecisionRole | None:
     return None
 
 
-def delegated_decision_failure_reason(gate: GateRecord, policy: GatePolicy) -> str | None:
-    """Return a refusal reason when an orchestration decision is not policy-valid."""
+def _decision_attribution_failure_reason(gate: GateRecord) -> str | None:
+    """Return why the gate's recorded decision is not a usable orchestration attribution.
+
+    Identity only -- who decided, and through which channel -- before any policy is
+    consulted. A decision that fails here names no role the policy could be asked about.
+    """
     if gate.decidedVia != ORCHESTRATION_DECIDED_VIA:
         return f"gate {gate.id} was not decided through orchestration"
     if not gate.decidedBy:
@@ -169,6 +173,15 @@ def delegated_decision_failure_reason(gate: GateRecord, policy: GatePolicy) -> s
         return f"gate {gate.id} cannot be decided by its owning lifecycle {gate.lifecycleId!r}"
     if gate.decidingRole is None:
         return f"gate {gate.id} has no deciding role"
+    return None
+
+
+def delegated_decision_failure_reason(gate: GateRecord, policy: GatePolicy) -> str | None:
+    """Return a refusal reason when an orchestration decision is not policy-valid."""
+    attribution_failure = _decision_attribution_failure_reason(gate)
+    if attribution_failure is not None:
+        return attribution_failure
+    assert gate.decidingRole is not None  # the attribution check above proves it
     role = coerce_decision_role(gate.decidingRole)
     rule = policy.rule_for(gate.kind)
     if not rule.allows_role(role) or role == HUMAN_ROLE:

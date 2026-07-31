@@ -14,8 +14,9 @@ from __future__ import annotations
 import json
 from typing import Annotated, Literal, cast
 
-from fastapi import APIRouter, File, Form, Query, Request, UploadFile
+from fastapi import APIRouter, Form, Query, Request, UploadFile
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel, ConfigDict, Field
 
 from agents_remember.errors import (
     AuthorityError,
@@ -38,6 +39,7 @@ from agents_remember.serving.conversation.control.capabilities import (
 from agents_remember.serving.conversation.control.refs import ControlRefError
 from agents_remember.serving.conversation.control.service import (
     ControlOperationError,
+    ControlRequest,
     OperationRejectedError,
     conversation_control_service,
 )
@@ -139,10 +141,12 @@ async def conversation_interrupt(
         runtime = get_conversation_runtime(request)
         authorization = resolve_conversation_authorization(request)
         operation = await operations.interrupt(
-            conversation_control_service(runtime),
-            authorization,
-            ar_session_id,
-            expected_bridge_epoch=expected_bridge_epoch,
+            ControlRequest(
+                service=conversation_control_service(runtime),
+                authorization=authorization,
+                ar_session_id=ar_session_id,
+                expected_bridge_epoch=expected_bridge_epoch,
+            ),
             turn_id=body.turn_id,
             request_id=body.request_id,
         )
@@ -166,10 +170,12 @@ async def conversation_interrupt_status(
         runtime = get_conversation_runtime(request)
         authorization = resolve_conversation_authorization(request)
         operation = await operations.interrupt_status(
-            conversation_control_service(runtime),
-            authorization,
-            ar_session_id,
-            expected_bridge_epoch=expected_bridge_epoch,
+            ControlRequest(
+                service=conversation_control_service(runtime),
+                authorization=authorization,
+                ar_session_id=ar_session_id,
+                expected_bridge_epoch=expected_bridge_epoch,
+            ),
             turn_id=body.turn_id,
             request_id=body.request_id,
             reconcile=False,
@@ -194,10 +200,12 @@ async def conversation_interrupt_reconcile(
         runtime = get_conversation_runtime(request)
         authorization = resolve_conversation_authorization(request)
         operation = await operations.interrupt_status(
-            conversation_control_service(runtime),
-            authorization,
-            ar_session_id,
-            expected_bridge_epoch=expected_bridge_epoch,
+            ControlRequest(
+                service=conversation_control_service(runtime),
+                authorization=authorization,
+                ar_session_id=ar_session_id,
+                expected_bridge_epoch=expected_bridge_epoch,
+            ),
             turn_id=body.turn_id,
             request_id=body.request_id,
             reconcile=True,
@@ -244,10 +252,12 @@ async def conversation_withdraw(
         runtime = get_conversation_runtime(request)
         authorization = resolve_conversation_authorization(request)
         response = await withdrawals.withdraw(
-            conversation_control_service(runtime),
-            authorization,
-            ar_session_id,
-            expected_bridge_epoch=expected_bridge_epoch,
+            ControlRequest(
+                service=conversation_control_service(runtime),
+                authorization=authorization,
+                ar_session_id=ar_session_id,
+                expected_bridge_epoch=expected_bridge_epoch,
+            ),
             operation_ref=body.operation_ref,
             withdrawal_ref=body.withdrawal_ref,
             withdraw_request_id=body.withdraw_request_id,
@@ -272,10 +282,12 @@ async def conversation_withdraw_status(
         runtime = get_conversation_runtime(request)
         authorization = resolve_conversation_authorization(request)
         projection = await withdrawals.withdraw_status(
-            conversation_control_service(runtime),
-            authorization,
-            ar_session_id,
-            expected_bridge_epoch=expected_bridge_epoch,
+            ControlRequest(
+                service=conversation_control_service(runtime),
+                authorization=authorization,
+                ar_session_id=ar_session_id,
+                expected_bridge_epoch=expected_bridge_epoch,
+            ),
             operation_ref=body.operation_ref,
             withdraw_request_id=body.withdraw_request_id,
             reconcile=False,
@@ -298,10 +310,12 @@ async def conversation_withdraw_reconcile(
         runtime = get_conversation_runtime(request)
         authorization = resolve_conversation_authorization(request)
         projection = await withdrawals.withdraw_status(
-            conversation_control_service(runtime),
-            authorization,
-            ar_session_id,
-            expected_bridge_epoch=expected_bridge_epoch,
+            ControlRequest(
+                service=conversation_control_service(runtime),
+                authorization=authorization,
+                ar_session_id=ar_session_id,
+                expected_bridge_epoch=expected_bridge_epoch,
+            ),
             operation_ref=body.operation_ref,
             withdraw_request_id=body.withdraw_request_id,
             reconcile=True,
@@ -323,10 +337,12 @@ async def conversation_pending_recoveries(
         runtime = get_conversation_runtime(request)
         authorization = resolve_conversation_authorization(request)
         projection = await withdrawals.pending_recoveries(
-            conversation_control_service(runtime),
-            authorization,
-            ar_session_id,
-            expected_bridge_epoch=expected_bridge_epoch,
+            ControlRequest(
+                service=conversation_control_service(runtime),
+                authorization=authorization,
+                ar_session_id=ar_session_id,
+                expected_bridge_epoch=expected_bridge_epoch,
+            )
         )
     except _TYPED_ERRORS as exc:
         return _map_typed_error(exc)
@@ -346,10 +362,12 @@ async def conversation_fetch_recovery(
         runtime = get_conversation_runtime(request)
         authorization = resolve_conversation_authorization(request)
         recovery = await withdrawals.fetch_recovery(
-            conversation_control_service(runtime),
-            authorization,
-            ar_session_id,
-            expected_bridge_epoch=expected_bridge_epoch,
+            ControlRequest(
+                service=conversation_control_service(runtime),
+                authorization=authorization,
+                ar_session_id=ar_session_id,
+                expected_bridge_epoch=expected_bridge_epoch,
+            ),
             recovery_ref=body.recovery_ref,
         )
     except _TYPED_ERRORS as exc:
@@ -370,10 +388,12 @@ async def conversation_ack_recovery(
         runtime = get_conversation_runtime(request)
         authorization = resolve_conversation_authorization(request)
         projection = await withdrawals.acknowledge_recovery(
-            conversation_control_service(runtime),
-            authorization,
-            ar_session_id,
-            expected_bridge_epoch=expected_bridge_epoch,
+            ControlRequest(
+                service=conversation_control_service(runtime),
+                authorization=authorization,
+                ar_session_id=ar_session_id,
+                expected_bridge_epoch=expected_bridge_epoch,
+            ),
             recovery_ref=body.recovery_ref,
             disposition=body.disposition,
         )
@@ -382,17 +402,31 @@ async def conversation_ack_recovery(
     return JSONResponse(content=_dump(projection))
 
 
+class StageAttachmentsForm(BaseModel):
+    """The multipart body of one attachment-staging request: its id, its metadata, its bytes.
+
+    One model because the three parts are one upload -- the metadata array is positionally matched
+    against the assets, and both are only meaningful under the request id that makes the staging
+    idempotent.
+    """
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    request_id: str = Field(alias="requestId")
+    metadata: str | None = None
+    assets: list[UploadFile] | None = None
+
+
 @router.post("/conversation/attachments")
 async def conversation_stage_attachments(
     ar_session_id: str,
     expected_bridge_epoch: EpochQuery,
     request: Request,
-    request_id: Annotated[str, Form(alias="requestId")],
-    metadata: Annotated[str | None, Form()] = None,
-    assets: Annotated[list[UploadFile] | None, File()] = None,
+    form: Annotated[StageAttachmentsForm, Form()],
 ) -> JSONResponse:
     """Stage and bind typed caller uploads; idempotent under the same content."""
 
+    request_id = form.request_id
     try:
         runtime = get_conversation_runtime(request)
         authorization = resolve_conversation_authorization(request)
@@ -402,12 +436,14 @@ async def conversation_stage_attachments(
         snapshot = await service.live_snapshot(entry)
         identity = service.build_identity(entry, bridge_epoch=epoch, snapshot=snapshot)
         capabilities = control_capabilities_for(identity.harness_id, snapshot).attachments
-        uploads = await _parse_uploads(assets or [], metadata)
+        uploads = await _parse_uploads(form.assets or [], form.metadata)
         answer = await attachments.stage(
-            service,
-            authorization,
-            ar_session_id,
-            expected_bridge_epoch=expected_bridge_epoch,
+            ControlRequest(
+                service=service,
+                authorization=authorization,
+                ar_session_id=ar_session_id,
+                expected_bridge_epoch=expected_bridge_epoch,
+            ),
             request_id=request_id,
             kind_capabilities={
                 "image": capabilities.image,
@@ -439,10 +475,12 @@ async def conversation_rebind_attachment(
         runtime = get_conversation_runtime(request)
         authorization = resolve_conversation_authorization(request)
         answer = await attachments.rebind(
-            conversation_control_service(runtime),
-            authorization,
-            ar_session_id,
-            expected_bridge_epoch=expected_bridge_epoch,
+            ControlRequest(
+                service=conversation_control_service(runtime),
+                authorization=authorization,
+                ar_session_id=ar_session_id,
+                expected_bridge_epoch=expected_bridge_epoch,
+            ),
             recovery_asset_ref=body.recovery_asset_ref,
             request_id=body.request_id,
         )
@@ -469,10 +507,12 @@ async def conversation_attachment_status(
         runtime = get_conversation_runtime(request)
         authorization = resolve_conversation_authorization(request)
         projection = await attachments.attachment_status(
-            conversation_control_service(runtime),
-            authorization,
-            ar_session_id,
-            expected_bridge_epoch=expected_bridge_epoch,
+            ControlRequest(
+                service=conversation_control_service(runtime),
+                authorization=authorization,
+                ar_session_id=ar_session_id,
+                expected_bridge_epoch=expected_bridge_epoch,
+            ),
             request_id=request_id,
             reconcile=False,
         )
@@ -494,10 +534,12 @@ async def conversation_attachment_reconcile(
         runtime = get_conversation_runtime(request)
         authorization = resolve_conversation_authorization(request)
         projection = await attachments.attachment_status(
-            conversation_control_service(runtime),
-            authorization,
-            ar_session_id,
-            expected_bridge_epoch=expected_bridge_epoch,
+            ControlRequest(
+                service=conversation_control_service(runtime),
+                authorization=authorization,
+                ar_session_id=ar_session_id,
+                expected_bridge_epoch=expected_bridge_epoch,
+            ),
             request_id=request_id,
             reconcile=True,
         )

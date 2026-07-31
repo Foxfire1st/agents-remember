@@ -70,57 +70,87 @@ def ensure_grepai_requirements_file(coordination_root: Path) -> Path:
     return ensure_provider_requirements_file(coordination_root, GREPAI_PROVIDER, GREPAI_PIN)
 
 
+@dataclass(frozen=True)
+class GrepaiWorkspace:
+    """The memory workspace GrepAI indexes, and the root that owns the instance."""
+
+    coordination_root: Path
+    name: str = "agents-remember-memory"
+    roots: tuple[GrepaiMemoryRoot, ...] = ()
+
+
+@dataclass(frozen=True)
+class GrepaiInstance:
+    """Where the GrepAI instance lives on disk and what it is pinned to.
+
+    Every field is an optional override of the conventional placement under
+    ``providers/runners/grepai``; a settings entry may pin any of them.
+    """
+
+    runtime_root: Path | None = None
+    logs_root: Path | None = None
+    requirements_file: Path | None = None
+    state_file: Path | None = None
+
+
+@dataclass(frozen=True)
+class GrepaiBackend:
+    """The managed PostgreSQL backend a GrepAI instance connects to."""
+
+    root: Path | None = None
+    data_root: Path | None = None
+    state_file: Path | None = None
+
+
+# Conventional placement: every field of these is an override, so the empty
+# instance IS the convention. Module-level singletons because they are frozen.
+DEFAULT_GREPAI_INSTANCE = GrepaiInstance()
+DEFAULT_GREPAI_BACKEND = GrepaiBackend()
+
+
 def grepai_runtime_layout(
+    workspace: GrepaiWorkspace,
     *,
-    coordination_root: Path,
-    workspace_name: str = "agents-remember-memory",
-    roots: tuple[GrepaiMemoryRoot, ...] = (),
-    runtime_root: Path | None = None,
-    logs_root: Path | None = None,
-    requirements_file: Path | None = None,
-    state_file: Path | None = None,
-    backend_root: Path | None = None,
-    backend_data_root: Path | None = None,
-    backend_state_file: Path | None = None,
+    instance: GrepaiInstance = DEFAULT_GREPAI_INSTANCE,
+    backend: GrepaiBackend = DEFAULT_GREPAI_BACKEND,
 ) -> GrepaiRuntimeLayout:
     """Build the managed GrepAI runtime layout for memory-root indexing."""
 
-    coordination_root = coordination_root.resolve()
+    coordination_root = workspace.coordination_root.resolve()
     providers_root = coordination_root / "providers"
     provider_data_root = coordination_root / "providers" / "data"
     runtime_root = _resolve_optional_path(
-        runtime_root, providers_root / "runners" / GREPAI_PROVIDER
+        instance.runtime_root, providers_root / "runners" / GREPAI_PROVIDER
     )
     backend_root = _resolve_optional_path(
-        backend_root,
+        backend.root,
         provider_data_root / GREPAI_PROVIDER / "postgres",
     )
-    backend_data_root = _resolve_optional_path(backend_data_root, backend_root / "data")
-    workspace_name = stable_provider_id(workspace_name)
+    backend_data_root = _resolve_optional_path(backend.data_root, backend_root / "data")
     return GrepaiRuntimeLayout(
         coordination_root=coordination_root,
-        workspace_name=workspace_name,
-        roots=tuple(roots),
+        workspace_name=stable_provider_id(workspace.name),
+        roots=tuple(workspace.roots),
         providers_root=providers_root,
         runtime_root=runtime_root,
         requirements_file=_resolve_optional_path(
-            requirements_file,
+            instance.requirements_file,
             provider_requirements_file(coordination_root, GREPAI_PROVIDER),
         ),
         config_root=runtime_root / "config",
         workspace_config_file=runtime_root / "home" / ".grepai" / "workspace.yaml",
         state_root=runtime_root / "state",
         state_file=_resolve_optional_path(
-            state_file, runtime_root / "state" / "provider-state.json"
+            instance.state_file, runtime_root / "state" / "provider-state.json"
         ),
-        logs_root=_resolve_optional_path(logs_root, runtime_root / "logs"),
+        logs_root=_resolve_optional_path(instance.logs_root, runtime_root / "logs"),
         home_root=runtime_root / "home",
         run_root=runtime_root / "run",
         cache_root=runtime_root / "cache",
         backend_root=backend_root,
         backend_data_root=backend_data_root,
         backend_state_file=_resolve_optional_path(
-            backend_state_file,
+            backend.state_file,
             backend_root / "backend-state.json",
         ),
     )
@@ -277,16 +307,22 @@ def grepai_runtime_layout_from_provider_settings(
     # never stages it.
     roots = grepai_roots_from_provider_settings(coordination_root, provider_settings)
     return grepai_runtime_layout(
-        coordination_root=coordination_root,
-        workspace_name=workspace_name,
-        roots=roots,
-        runtime_root=provider_runtime_root,
-        logs_root=logs_root,
-        requirements_file=requirements_file,
-        state_file=state_file,
-        backend_root=backend_runtime_root,
-        backend_data_root=backend_data_root,
-        backend_state_file=backend_runtime_root / "backend-state.json",
+        GrepaiWorkspace(
+            coordination_root=coordination_root,
+            name=workspace_name,
+            roots=roots,
+        ),
+        instance=GrepaiInstance(
+            runtime_root=provider_runtime_root,
+            logs_root=logs_root,
+            requirements_file=requirements_file,
+            state_file=state_file,
+        ),
+        backend=GrepaiBackend(
+            root=backend_runtime_root,
+            data_root=backend_data_root,
+            state_file=backend_runtime_root / "backend-state.json",
+        ),
     )
 
 

@@ -1,6 +1,29 @@
+// The slice of Pi's extension API this file uses. Pi ships no type package to install beside a
+// project-local extension, so the contract it hands us is written down here instead of being
+// implied by untyped parameters -- `tsconfig.json` in this directory checks the file against it.
+interface BeforeAgentStartEvent {
+  systemPrompt: string;
+}
+
+interface BeforeAgentStartResult {
+  systemPrompt: string;
+  message?: {
+    customType: string;
+    content: string;
+    display: boolean;
+  };
+}
+
+interface Pi {
+  on(
+    event: "before_agent_start",
+    handler: (event: BeforeAgentStartEvent) => BeforeAgentStartResult,
+  ): void;
+}
+
 const WORKSPACE_ROOT = "<PATH/TO/YOUR/PROJECTS_FOLDER>";
 
-function setupRequired(systemPrompt) {
+function setupRequired(systemPrompt: string): BeforeAgentStartResult {
   const message = [
     "Agents Remember setup is incomplete.",
     "Replace <PATH/TO/YOUR/PROJECTS_FOLDER> in .pi/extensions/agents-remember-start.ts before using this starter package."
@@ -16,8 +39,8 @@ function setupRequired(systemPrompt) {
   };
 }
 
-export default function (pi) {
-  pi.on("before_agent_start", (event) => {
+export default function (pi: Pi): void {
+  pi.on("before_agent_start", (event: BeforeAgentStartEvent): BeforeAgentStartResult => {
     if (WORKSPACE_ROOT.startsWith("<")) {
       return setupRequired(event.systemPrompt);
     }

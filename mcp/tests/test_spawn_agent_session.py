@@ -11,10 +11,9 @@ import json
 import sys
 import tempfile
 import unittest
-from collections.abc import Mapping, Sequence
 from dataclasses import replace
 from pathlib import Path
-from typing import ClassVar
+from typing import Any, ClassVar
 
 from fastapi.testclient import TestClient
 
@@ -24,7 +23,13 @@ sys.path.insert(0, str(MCP_SRC))
 import agents_remember
 from agents_remember.kernel.agentic_settings import agentic_settings_path
 from agents_remember.mcp.config import McpRuntimeConfig, RepositoryScope
-from agents_remember.mcp.tools.terminal import spawn_agent_session_payload
+from agents_remember.mcp.tools.terminal import (
+    RetiredSpawnInputs,
+    SpawnedBy,
+    SpawnOverrides,
+    SpawnSeat,
+    spawn_agent_session_payload,
+)
 from agents_remember.observer import (
     AmbientLifecycle,
     EventStore,
@@ -33,11 +38,12 @@ from agents_remember.observer import (
     reset_ambient,
 )
 from agents_remember.observer.ambient import ambient
-from agents_remember.serving.app import create_app
+from agents_remember.serving.app import ServingCollaborators, create_app
 from agents_remember.serving.harness_control_runner import parse_runner_config
 from agents_remember.serving.harness_launch import ResolvedLaunch
 from agents_remember.serving.harness_logs import CommandEvidence
-from agents_remember.serving.terminal import TerminalSessionBinding
+from agents_remember.serving.projector import ProjectionCadence
+from agents_remember.serving.terminal import TerminalSessionBinding, TerminalSessionSpec
 from agents_remember.serving.terminal_catalog import TerminalCatalog, TerminalCatalogEntry
 from agents_remember.serving.terminal_paste import PasteResult
 from agents_remember.tasks import TaskDocument, write_task_doc
@@ -45,6 +51,44 @@ from agents_remember.tasks import TaskDocument, write_task_doc
 # The source root of the agents_remember package this test process imported -- what the opener
 # seeds onto every harness-runner spawn's PYTHONPATH.
 _DAEMON_PACKAGE_ROOT = str(Path(agents_remember.__file__).resolve().parent.parent)
+
+
+_SEAT_FIELDS = ("kind", "leaf_key", "replacement_for_leaf", "level", "label", "env")
+_RETIRED_FIELDS = (
+    "context",
+    "submit",
+    "harness",
+    "model",
+    "effort",
+    "launch_args",
+    "prompt_keywords",
+    "session_commands",
+)
+_OVERRIDE_FIELDS = ("session_id", "host", "paster", "session_log", "which")
+_SPAWNED_BY_FIELDS = {"spawned_by_session": "session_id", "spawned_by_lifecycle": "lifecycle_id"}
+
+
+def call_spawn(config: Any, **flat: Any) -> dict:
+    """Call the payload builder from the flat kwargs these tests are written in.
+
+    The builder takes four parameter objects (seat, retired inputs, spawner provenance,
+    substituted collaborators); this keeps the test call sites reading as one spawn request.
+    """
+    unknown = (
+        set(flat)
+        - set(_SEAT_FIELDS)
+        - set(_RETIRED_FIELDS)
+        - set(_OVERRIDE_FIELDS)
+        - set(_SPAWNED_BY_FIELDS)
+    )
+    assert not unknown, f"unknown spawn kwargs: {sorted(unknown)}"
+    return spawn_agent_session_payload(
+        config,
+        seat=SpawnSeat(**{k: flat[k] for k in _SEAT_FIELDS if k in flat}),
+        retired=RetiredSpawnInputs(**{k: flat[k] for k in _RETIRED_FIELDS if k in flat}),
+        spawned_by=SpawnedBy(**{v: flat[k] for k, v in _SPAWNED_BY_FIELDS.items() if k in flat}),
+        overrides=SpawnOverrides(**{k: flat[k] for k in _OVERRIDE_FIELDS if k in flat}),
+    )
 
 
 def _config(root: Path) -> McpRuntimeConfig:
@@ -118,27 +162,17 @@ class _FakeHost:
         # The create_app lifespan calls this on teardown; the fake has nothing to reap.
         return None
 
-    def ensure(
-        self,
-        sid: str,
-        *,
-        cwd: Path,
-        command: Sequence[str],
-        lifecycle_id: str | None = None,
-        name: str | None = None,
-        suspend_unsafe: bool = False,
-        env: Mapping[str, str] | None = None,
-    ) -> TerminalSessionBinding:
-        tmux_name = name or f"ar-{sid}"
-        self.ensured.append({"sid": sid, "env": dict(env or {}), "command": tuple(command)})
+    def ensure(self, sid: str, spec: TerminalSessionSpec) -> TerminalSessionBinding:
+        tmux_name = spec.tmux_name_for(sid)
+        self.ensured.append({"sid": sid, "env": dict(spec.env or {}), "command": spec.command})
         self.known.add(tmux_name)
         return TerminalSessionBinding(
             sid=sid,
             tmux_name=tmux_name,
-            cwd=Path(cwd),
-            command=tuple(command),
-            lifecycle_id=lifecycle_id,
-            suspend_unsafe=suspend_unsafe,
+            cwd=spec.cwd,
+            command=spec.command,
+            lifecycle_id=spec.lifecycle_id,
+            suspend_unsafe=spec.suspend_unsafe,
         )
 
 
@@ -243,7 +277,7 @@ class SpawnAgentSessionTests(unittest.TestCase):
         paster = base.get("paster")
         if "session_log" not in base and isinstance(paster, _FakePaster):
             base["session_log"] = paster.log
-        return spawn_agent_session_payload(self.config, **base)  # type: ignore[arg-type]
+        return call_spawn(self.config, **base)
 
     def test_spawns_bound_seat_without_brief_or_readiness_claim(self) -> None:
         paster = _FakePaster(delivered=True, submitted=True)
@@ -434,7 +468,7 @@ class SpawnKnobApplicationTests(unittest.TestCase):
         paster = base.get("paster")
         if "session_log" not in base and isinstance(paster, _FakePaster):
             base["session_log"] = paster.log
-        return spawn_agent_session_payload(self.config, **base)  # type: ignore[arg-type]
+        return call_spawn(self.config, **base)
 
     def test_native_launch_selection_rides_the_runner_config_with_no_session_command(self) -> None:
         self._write_settings(
@@ -787,7 +821,7 @@ class SettingsDefinedHarnessTests(unittest.TestCase):
         paster = base.get("paster")
         if "session_log" not in base and isinstance(paster, _FakePaster):
             base["session_log"] = paster.log
-        return spawn_agent_session_payload(self.config, **base)  # type: ignore[arg-type]
+        return call_spawn(self.config, **base)
 
     def test_settings_defined_harness_spawns_with_its_argv(self) -> None:
         self._write_settings(
@@ -952,7 +986,7 @@ class SpawnLevelResolutionTests(unittest.TestCase):
         paster = base.get("paster")
         if "session_log" not in base and isinstance(paster, _FakePaster):
             base["session_log"] = paster.log
-        return spawn_agent_session_payload(self.config, **base)  # type: ignore[arg-type]
+        return call_spawn(self.config, **base)
 
     def test_level_override_deep_merges_harness_inherited(self) -> None:
         self._write_settings(self.coordination_root, self.ECONOMICS)
@@ -1229,7 +1263,7 @@ class SpawnHarnessResolutionTests(unittest.TestCase):
         paster = base.get("paster")
         if "session_log" not in base and isinstance(paster, _FakePaster):
             base["session_log"] = paster.log
-        return spawn_agent_session_payload(self.config, **base)  # type: ignore[arg-type]
+        return call_spawn(self.config, **base)
 
     def test_omitted_harness_uses_the_global_settings_preference(self) -> None:
         self._write_settings(self.coordination_root, "codex")
@@ -1315,10 +1349,12 @@ class TerminalPasteEndpointTests(unittest.TestCase):
         self._current_paster = paster
         app = create_app(
             self.config,
-            interval=100,
-            terminal_host=self.host,  # type: ignore[arg-type]
-            terminal_catalog=self.catalog,
-            terminal_paster=paster,  # type: ignore[arg-type]
+            cadence=ProjectionCadence(interval=100),
+            collaborators=ServingCollaborators(
+                terminal_host=self.host,  # type: ignore[arg-type]
+                terminal_catalog=self.catalog,
+                terminal_paster=paster,  # type: ignore[arg-type]
+            ),
         )
         return TestClient(app)
 

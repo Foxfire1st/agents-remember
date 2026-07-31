@@ -18,7 +18,13 @@ from pathlib import Path
 from unittest import mock
 
 import pytest
-from agents_remember.controlplane.operator_inbox_records import create_operator_inbox_entry
+from agents_remember.controlplane.operator_inbox_records import (
+    InboxAddress,
+    InboxMessage,
+    InboxPoster,
+    InboxRouting,
+    create_operator_inbox_entry,
+)
 from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
 from agents_remember.errors import HarnessControlError
 from agents_remember.serving.conversation.active.store import ProjectionStore
@@ -38,6 +44,7 @@ from agents_remember.serving.harness_control_models import (
 from agents_remember.serving.hosted_interactions import HostedInteractionSynchronizer
 from agents_remember.serving.terminal_catalog import TerminalCatalog, TerminalCatalogEntry
 from agents_remember.serving.terminal_liveness import (
+    LivenessProbe,
     TerminalCatalogLivenessConfig,
     TerminalCatalogLivenessSweeper,
 )
@@ -145,10 +152,12 @@ def test_h1_poisoned_row_is_quarantined_and_never_breaks_the_catalog_sweep(
         catalog,
         _AliveHost(),
         now=lambda: datetime(2026, 7, 20, tzinfo=UTC),
-        config=TerminalCatalogLivenessConfig(sweep_interval_seconds=0.0),
-        pane_capturer=lambda _name: "",
-        snapshot_reader=_snapshot,
-        on_control_snapshot=synchronizer.observe,
+        probe=LivenessProbe(
+            hysteresis=TerminalCatalogLivenessConfig(sweep_interval_seconds=0.0),
+            pane_capturer=lambda _name: "",
+            snapshot_reader=_snapshot,
+            on_control_snapshot=synchronizer.observe,
+        ),
     )
 
     with mock.patch(
@@ -191,10 +200,12 @@ def test_f2_quarantine_logs_on_state_change_and_heals(
             catalog,
             _AliveHost(),
             now=lambda: datetime(2026, 7, 20, tzinfo=UTC),
-            config=TerminalCatalogLivenessConfig(sweep_interval_seconds=0.0),
-            pane_capturer=lambda _name: "",
-            snapshot_reader=_snapshot,
-            on_control_snapshot=synchronizer.observe,
+            probe=LivenessProbe(
+                hysteresis=TerminalCatalogLivenessConfig(sweep_interval_seconds=0.0),
+                pane_capturer=lambda _name: "",
+                snapshot_reader=_snapshot,
+                on_control_snapshot=synchronizer.observe,
+            ),
         )
 
     def _warnings() -> list[logging.LogRecord]:
@@ -243,14 +254,11 @@ def test_h1_healthy_completion_still_synchronizes_through_the_sweep(tmp_path: Pa
     inbox = OperatorInboxStore(tmp_path)
     inbox.append(
         create_operator_inbox_entry(
+            InboxMessage(ask="Continue", response="Please continue"),
             entry_id="inbox-1",
             now=NOW,
-            lifecycle_id="L1",
-            agent_id="healthy-1",
-            ask="Continue",
-            response="Please continue",
-            created_by="manager-1",
-            created_via="cli",
+            routing=InboxRouting(address=InboxAddress(lifecycle_id="L1", agent_id="healthy-1")),
+            poster=InboxPoster(created_by="manager-1", created_via="cli"),
         ).model_copy(
             update={
                 "deliveryState": "delivered",
@@ -275,10 +283,12 @@ def test_h1_healthy_completion_still_synchronizes_through_the_sweep(tmp_path: Pa
         catalog,
         _AliveHost(),
         now=lambda: datetime(2026, 7, 20, tzinfo=UTC),
-        config=TerminalCatalogLivenessConfig(sweep_interval_seconds=0.0),
-        pane_capturer=lambda _name: "",
-        snapshot_reader=_snapshot,
-        on_control_snapshot=synchronizer.observe,
+        probe=LivenessProbe(
+            hysteresis=TerminalCatalogLivenessConfig(sweep_interval_seconds=0.0),
+            pane_capturer=lambda _name: "",
+            snapshot_reader=_snapshot,
+            on_control_snapshot=synchronizer.observe,
+        ),
     )
     with mock.patch(
         "agents_remember.serving.hosted_interactions.read_control_transcript",

@@ -31,105 +31,79 @@ from agents_remember.memory_quality.integrity.onboarding_drift_check.models impo
 
 def classify_external_onboarding(onboarding_file: Path, repo_root: Path) -> DriftRow:
     metadata = parse_table_metadata(onboarding_file)
-    repository = metadata.get("repository", "")
     source_file = normalize_rel_path(metadata.get("path", ""))
     last_hash = metadata.get("lastVerifiedCommitHash", "")
-    last_date = metadata.get("lastVerifiedCommitDate", "")
 
-    if not source_file or not last_hash:
+    def row(*, classification: str, trust: str, affected_sections: str, note: str) -> DriftRow:
+        """One verdict for this sidecar; identity and verification stamp are fixed."""
         return DriftRow(
             onboarding_file=onboarding_file.as_posix(),
             source_file=source_file,
-            repository=repository,
+            repository=metadata.get("repository", ""),
             storage_mode="external",
             last_verified_hash=last_hash,
-            last_verified_date=last_date,
-            classification="missing verification",
-            trust="medium",
-            affected_sections="metadata; verification",
-            note="Missing source path or lastVerifiedCommitHash.",
+            last_verified_date=metadata.get("lastVerifiedCommitDate", ""),
+            classification=classification,
+            trust=trust,
+            affected_sections=affected_sections,
+            note=note,
         )
 
-    source_path = repo_root / source_file
-    if not source_path.exists():
-        return DriftRow(
-            onboarding_file=onboarding_file.as_posix(),
-            source_file=source_file,
-            repository=repository,
-            storage_mode="external",
-            last_verified_hash=last_hash,
-            last_verified_date=last_date,
-            classification="orphaned",
-            trust="low",
-            affected_sections="all; source missing",
-            note="Source file no longer exists.",
-        )
+    def _early_classification() -> DriftRow | None:
+        """Classify missing/orphaned/unavailable-commit sidecars before the diff."""
+        if not source_file or not last_hash:
+            return row(
+                classification="missing verification",
+                trust="medium",
+                affected_sections="metadata; verification",
+                note="Missing source path or lastVerifiedCommitHash.",
+            )
+        if not (repo_root / source_file).exists():
+            return row(
+                classification="orphaned",
+                trust="low",
+                affected_sections="all; source missing",
+                note="Source file no longer exists.",
+            )
+        exists = run_git(repo_root, ["cat-file", "-e", f"{last_hash}^{{commit}}"])
+        if exists.returncode != 0:
+            return row(
+                classification="drifted",
+                trust="medium",
+                affected_sections="logic; invariants; metadata",
+                note="Recorded verification commit is not available in git history.",
+            )
+        return None
 
-    rev = f"{last_hash}^{{commit}}"
-    exists = run_git(repo_root, ["cat-file", "-e", rev])
-    if exists.returncode != 0:
-        return DriftRow(
-            onboarding_file=onboarding_file.as_posix(),
-            source_file=source_file,
-            repository=repository,
-            storage_mode="external",
-            last_verified_hash=last_hash,
-            last_verified_date=last_date,
-            classification="drifted",
-            trust="medium",
-            affected_sections="logic; invariants; metadata",
-            note="Recorded verification commit is not available in git history.",
-        )
+    early = _early_classification()
+    if early is not None:
+        return early
 
     diff = run_git(repo_root, ["diff", "--quiet", last_hash, "HEAD", "--", source_file])
     if diff.returncode == 0:
         local_note = local_change_note(repo_root, source_file)
         if local_note:
-            return DriftRow(
-                onboarding_file=onboarding_file.as_posix(),
-                source_file=source_file,
-                repository=repository,
-                storage_mode="external",
-                last_verified_hash=last_hash,
-                last_verified_date=last_date,
+            return row(
                 classification="drifted",
                 trust="medium",
                 affected_sections="logic; invariants; conventions; docs references",
                 note=local_note,
             )
-        return DriftRow(
-            onboarding_file=onboarding_file.as_posix(),
-            source_file=source_file,
-            repository=repository,
-            storage_mode="external",
-            last_verified_hash=last_hash,
-            last_verified_date=last_date,
+        return row(
             classification="up to date",
             trust="high",
             affected_sections="none",
             note="No source diff since recorded verification commit.",
         )
     if diff.returncode == 1:
-        return DriftRow(
-            onboarding_file=onboarding_file.as_posix(),
-            source_file=source_file,
-            repository=repository,
-            storage_mode="external",
-            last_verified_hash=last_hash,
-            last_verified_date=last_date,
+        return row(
             classification="drifted",
             trust="medium",
             affected_sections="logic; invariants; conventions; docs references",
             note="Source changed since recorded verification commit.",
         )
 
-    return DriftRow(
-        onboarding_file=onboarding_file.as_posix(),
-        source_file=source_file,
-        repository=repository,
-        storage_mode="external",
-        last_verified_hash=last_hash,
-        last_verified_date=last_date,
+    return row(
         classification="drifted",
         trust="medium",
         affected_sections="logic; invariants; metadata",

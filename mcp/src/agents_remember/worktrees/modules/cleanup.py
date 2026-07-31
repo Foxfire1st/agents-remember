@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from agents_remember.observer.drift_snapshots import remove_drift_snapshot
@@ -120,22 +120,37 @@ def delete_remote_branch_if_present(repo: Path, branch: str, dry_run: bool) -> d
     return {"remote_deleted": True}
 
 
+@dataclass(frozen=True)
+class RetiringBranch:
+    """One task work branch on its way out.
+
+    The repo it lives in, the branch itself, the source branch it must be proven merged into
+    before deletion, and that repo's default branch -- the one to check out when the branch
+    being deleted is the one currently checked out. Retirement can never consult any of these
+    without the others, and each call site derives the whole set from one contract side.
+    """
+
+    repo: Path
+    branch: str
+    source_branch: str
+    default_branch: str
+
+
 def _retire_work_branch(
-    repo: Path,
-    branch: str,
-    source_branch: str,
-    default_branch: str,
+    target: RetiringBranch,
     dry_run: bool,
     *,
     remote: bool,
 ) -> dict[str, object]:
+    repo = target.repo
+    branch = target.branch
     out: dict[str, object] = {"branch": branch}
-    if not branch or branch == default_branch:
+    if not branch or branch == target.default_branch:
         out.update({"deleted": False, "reason": "default-or-empty"})
         return out
     if not dry_run and run_git(repo, ["branch", "--show-current"]).stdout.strip() == branch:
-        run_git(repo, ["checkout", default_branch])
-    out.update(delete_branch_if_merged_into(repo, branch, source_branch, dry_run))
+        run_git(repo, ["checkout", target.default_branch])
+    out.update(delete_branch_if_merged_into(repo, branch, target.source_branch, dry_run))
     if remote and (out.get("deleted") or out.get("would_delete")):
         out["remote"] = delete_remote_branch_if_present(repo, branch, dry_run)
     return out
@@ -183,10 +198,12 @@ def _deleted_branches(contract, dry_run: bool) -> dict[str, dict[str, object]]:
     code_default = _repo_default_branch(contract.code_repo_path)
     branches: dict[str, dict[str, object]] = {
         "code": _retire_work_branch(
-            contract.code_repo_path,
-            contract.code_work_branch,
-            contract.code_source_branch,
-            code_default,
+            RetiringBranch(
+                repo=contract.code_repo_path,
+                branch=contract.code_work_branch,
+                source_branch=contract.code_source_branch,
+                default_branch=code_default,
+            ),
             dry_run,
             remote=True,
         )
@@ -194,20 +211,24 @@ def _deleted_branches(contract, dry_run: bool) -> dict[str, dict[str, object]]:
     if contract.memory_mode == "external" and contract.memory_repo_path is not None:
         mem_default = _repo_default_branch(contract.memory_repo_path)
         branches["memory"] = _retire_work_branch(
-            contract.memory_repo_path,
-            contract.memory_work_branch,
-            contract.memory_source_branch,
-            mem_default,
+            RetiringBranch(
+                repo=contract.memory_repo_path,
+                branch=contract.memory_work_branch,
+                source_branch=contract.memory_source_branch,
+                default_branch=mem_default,
+            ),
             dry_run,
             remote=False,
         )
         integration_work_branch = integration_branch(contract)
         if branch_exists(contract.memory_repo_path, integration_work_branch):
             branches["memory_integration"] = _retire_work_branch(
-                contract.memory_repo_path,
-                integration_work_branch,
-                contract.memory_source_branch,
-                mem_default,
+                RetiringBranch(
+                    repo=contract.memory_repo_path,
+                    branch=integration_work_branch,
+                    source_branch=contract.memory_source_branch,
+                    default_branch=mem_default,
+                ),
                 dry_run,
                 remote=False,
             )

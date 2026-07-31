@@ -103,6 +103,57 @@ class TurnStateClassification:
     evidence: str | None
 
 
+def _first_matching_state(
+    ladder: tuple[tuple[SeatTurnState, tuple[re.Pattern[str], ...]], ...], text: str
+) -> TurnStateClassification:
+    """Walk a precedence-ordered marker ladder; the first pattern that fires names the state."""
+
+    for state, patterns in ladder:
+        for pattern in patterns:
+            if pattern.search(text):
+                return TurnStateClassification(state, evidence=pattern.pattern)
+    return TurnStateClassification("stale", evidence=None)
+
+
+def _classify_codex_pane(pane_text: str) -> TurnStateClassification:
+    """Classify Codex off the live pane TAIL only.
+
+    Codex renders submitted user messages into scrollback with the same U+203A the live composer
+    uses, so a full-scrollback regex would keep re-reading history. Readiness comes from the empty
+    composer; busy/blocked markers are read from the last two non-blank lines. There is deliberately
+    no turn-ended marker family here -- an unrecognized tail is ``stale``, not idle.
+    """
+
+    if codex_empty_composer_visible(pane_text):
+        return TurnStateClassification("turn-ended", evidence="codex-empty-composer-tail")
+    non_blank = [line for line in pane_text.splitlines() if line.strip()]
+    tail = "\n".join(non_blank[-2:])
+    return _first_matching_state(
+        (
+            ("working", _WORKING_PATTERNS),
+            ("awaiting-input", _AWAITING_INPUT_PATTERNS),
+        ),
+        tail,
+    )
+
+
+def _classify_by_marker_tables(pane_text: str, harness: str | None) -> TurnStateClassification:
+    """Classify any harness off the shared marker tables, with per-harness overrides first."""
+
+    key = harness or ""
+    return _first_matching_state(
+        (
+            ("working", (*_HARNESS_WORKING_PATTERNS.get(key, ()), *_WORKING_PATTERNS)),
+            (
+                "awaiting-input",
+                (*_HARNESS_AWAITING_INPUT_PATTERNS.get(key, ()), *_AWAITING_INPUT_PATTERNS),
+            ),
+            ("turn-ended", (*_HARNESS_TURN_ENDED_PATTERNS.get(key, ()), *_TURN_ENDED_PATTERNS)),
+        ),
+        pane_text,
+    )
+
+
 def classify_turn_state(
     pane_text: str | None, *, harness: str | None = None
 ) -> TurnStateClassification:
@@ -116,30 +167,8 @@ def classify_turn_state(
     if not pane_text or not pane_text.strip():
         return TurnStateClassification("stale", evidence=None)
     if harness == "codex":
-        if codex_empty_composer_visible(pane_text):
-            return TurnStateClassification("turn-ended", evidence="codex-empty-composer-tail")
-        tail = "\n".join(line for line in pane_text.splitlines() if line.strip())
-        tail = "\n".join(tail.splitlines()[-2:])
-        for pattern in _WORKING_PATTERNS:
-            if pattern.search(tail):
-                return TurnStateClassification("working", evidence=pattern.pattern)
-        for pattern in _AWAITING_INPUT_PATTERNS:
-            if pattern.search(tail):
-                return TurnStateClassification("awaiting-input", evidence=pattern.pattern)
-        return TurnStateClassification("stale", evidence=None)
-    for pattern in (*_HARNESS_WORKING_PATTERNS.get(harness or "", ()), *_WORKING_PATTERNS):
-        if pattern.search(pane_text):
-            return TurnStateClassification("working", evidence=pattern.pattern)
-    for pattern in (
-        *_HARNESS_AWAITING_INPUT_PATTERNS.get(harness or "", ()),
-        *_AWAITING_INPUT_PATTERNS,
-    ):
-        if pattern.search(pane_text):
-            return TurnStateClassification("awaiting-input", evidence=pattern.pattern)
-    for pattern in (*_HARNESS_TURN_ENDED_PATTERNS.get(harness or "", ()), *_TURN_ENDED_PATTERNS):
-        if pattern.search(pane_text):
-            return TurnStateClassification("turn-ended", evidence=pattern.pattern)
-    return TurnStateClassification("stale", evidence=None)
+        return _classify_codex_pane(pane_text)
+    return _classify_by_marker_tables(pane_text, harness)
 
 
 def boot_ready(pane_text: str | None, *, harness: str | None = None) -> bool:

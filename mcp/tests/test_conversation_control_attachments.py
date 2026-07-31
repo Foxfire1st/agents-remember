@@ -24,6 +24,7 @@ from agents_remember.serving.conversation.control.capabilities import (
 )
 from agents_remember.serving.conversation.control.service import (
     CapabilityRefusedError,
+    ControlRequest,
     OperationConflictError,
     OperationRejectedError,
 )
@@ -87,10 +88,12 @@ class AttachmentStageTests(unittest.IsolatedAsyncioTestCase):
 
     async def _stage(self, request_id: str, uploads):
         return await attachments.stage(
-            self.service,
-            OPERATOR,
-            SESSION,
-            expected_bridge_epoch=self.epoch,
+            ControlRequest(
+                service=self.service,
+                authorization=OPERATOR,
+                ar_session_id=SESSION,
+                expected_bridge_epoch=self.epoch,
+            ),
             request_id=request_id,
             kind_capabilities=self.caps,
             uploads=uploads,
@@ -168,10 +171,12 @@ class AttachmentSubmitTests(unittest.IsolatedAsyncioTestCase):
 
     async def _stage_and_receipt(self, request_id: str):
         answer = await attachments.stage(
-            self.service,
-            OPERATOR,
-            SESSION,
-            expected_bridge_epoch=self.epoch,
+            ControlRequest(
+                service=self.service,
+                authorization=OPERATOR,
+                ar_session_id=SESSION,
+                expected_bridge_epoch=self.epoch,
+            ),
             request_id=request_id,
             kind_capabilities=self.caps,
             uploads=[_png()],
@@ -245,10 +250,12 @@ class AttachmentRebindTests(unittest.IsolatedAsyncioTestCase):
     async def _withdraw_with_asset(self):
         await drive_activity(self.harness, "running")
         staged = await attachments.stage(
-            self.service,
-            OPERATOR,
-            SESSION,
-            expected_bridge_epoch=self.epoch,
+            ControlRequest(
+                service=self.service,
+                authorization=OPERATOR,
+                ar_session_id=SESSION,
+                expected_bridge_epoch=self.epoch,
+            ),
             request_id="at-r1",
             kind_capabilities=self.caps,
             uploads=[_png()],
@@ -277,10 +284,12 @@ class AttachmentRebindTests(unittest.IsolatedAsyncioTestCase):
         row = next(item for item in projection.items if item.phase == "queued")
         assert row.cockpit is not None
         response = await withdrawals.withdraw(
-            self.service,
-            OPERATOR,
-            SESSION,
-            expected_bridge_epoch=self.epoch,
+            ControlRequest(
+                service=self.service,
+                authorization=OPERATOR,
+                ar_session_id=SESSION,
+                expected_bridge_epoch=self.epoch,
+            ),
             operation_ref=row.operation_ref,
             withdrawal_ref=row.cockpit.withdrawal_ref,
             withdraw_request_id="wd-r1",
@@ -295,10 +304,12 @@ class AttachmentRebindTests(unittest.IsolatedAsyncioTestCase):
         recovery_asset = response.recovery.attachments[0]
         self.assertEqual(recovery_asset.alt, "dot.png, image/png")
         answer = await attachments.rebind(
-            self.service,
-            OPERATOR,
-            SESSION,
-            expected_bridge_epoch=self.epoch,
+            ControlRequest(
+                service=self.service,
+                authorization=OPERATOR,
+                ar_session_id=SESSION,
+                expected_bridge_epoch=self.epoch,
+            ),
             recovery_asset_ref=recovery_asset.recovery_asset_ref,
             request_id="at-r3",
         )
@@ -308,20 +319,24 @@ class AttachmentRebindTests(unittest.IsolatedAsyncioTestCase):
         new_path = self.harness.endpoint.path.parent / "assets" / "at-r3" / new_receipt.asset_id
         self.assertTrue(new_path.exists())
         replay = await attachments.rebind(
-            self.service,
-            OPERATOR,
-            SESSION,
-            expected_bridge_epoch=self.epoch,
+            ControlRequest(
+                service=self.service,
+                authorization=OPERATOR,
+                ar_session_id=SESSION,
+                expected_bridge_epoch=self.epoch,
+            ),
             recovery_asset_ref=recovery_asset.recovery_asset_ref,
             request_id="at-r3",
         )
         self.assertEqual(replay.receipts[0].asset_id, new_receipt.asset_id)
         with self.assertRaises(OperationConflictError):
             await attachments.rebind(
-                self.service,
-                OPERATOR,
-                SESSION,
-                expected_bridge_epoch=self.epoch,
+                ControlRequest(
+                    service=self.service,
+                    authorization=OPERATOR,
+                    ar_session_id=SESSION,
+                    expected_bridge_epoch=self.epoch,
+                ),
                 recovery_asset_ref=recovery_asset.recovery_asset_ref,
                 request_id="at-r4",
             )
@@ -366,13 +381,20 @@ class AttachmentRebindTests(unittest.IsolatedAsyncioTestCase):
         _staged, response = await self._withdraw_with_asset()
         assert isinstance(response, WithdrawnQueueResponse)
         pending = await withdrawals.pending_recoveries(
-            self.service, OPERATOR, SESSION, expected_bridge_epoch=self.epoch
+            ControlRequest(
+                service=self.service,
+                authorization=OPERATOR,
+                ar_session_id=SESSION,
+                expected_bridge_epoch=self.epoch,
+            )
         )
         await withdrawals.acknowledge_recovery(
-            self.service,
-            OPERATOR,
-            SESSION,
-            expected_bridge_epoch=self.epoch,
+            ControlRequest(
+                service=self.service,
+                authorization=OPERATOR,
+                ar_session_id=SESSION,
+                expected_bridge_epoch=self.epoch,
+            ),
             recovery_ref=pending.items[0].recovery_ref,
             disposition="keep-current-draft",
         )
@@ -396,10 +418,12 @@ class AttachmentReconcileTransitionTests(unittest.IsolatedAsyncioTestCase):
 
     async def _stage_submit_and_status(self, request_id: str, *, reconcile: bool):
         staged = await attachments.stage(
-            self.service,
-            OPERATOR,
-            SESSION,
-            expected_bridge_epoch=self.epoch,
+            ControlRequest(
+                service=self.service,
+                authorization=OPERATOR,
+                ar_session_id=SESSION,
+                expected_bridge_epoch=self.epoch,
+            ),
             request_id=request_id,
             kind_capabilities=self.caps,
             uploads=[_png()],
@@ -411,10 +435,12 @@ class AttachmentReconcileTransitionTests(unittest.IsolatedAsyncioTestCase):
             body=_submit_body(request_id, self.epoch, staged.receipts[0]),
         )
         return await attachments.attachment_status(
-            self.service,
-            OPERATOR,
-            SESSION,
-            expected_bridge_epoch=self.epoch,
+            ControlRequest(
+                service=self.service,
+                authorization=OPERATOR,
+                ar_session_id=SESSION,
+                expected_bridge_epoch=self.epoch,
+            ),
             request_id=request_id,
             reconcile=reconcile,
         )
@@ -422,10 +448,12 @@ class AttachmentReconcileTransitionTests(unittest.IsolatedAsyncioTestCase):
     async def test_rejected_row_advances_to_failed_with_revision_bump(self) -> None:
         self.adapter.next_acceptance = "rejected"
         staged = await attachments.stage(
-            self.service,
-            OPERATOR,
-            SESSION,
-            expected_bridge_epoch=self.epoch,
+            ControlRequest(
+                service=self.service,
+                authorization=OPERATOR,
+                ar_session_id=SESSION,
+                expected_bridge_epoch=self.epoch,
+            ),
             request_id="at-t1",
             kind_capabilities=self.caps,
             uploads=[_png()],
@@ -437,10 +465,12 @@ class AttachmentReconcileTransitionTests(unittest.IsolatedAsyncioTestCase):
             body=_submit_body("at-t1", self.epoch, staged.receipts[0]),
         )
         projection = await attachments.attachment_status(
-            self.service,
-            OPERATOR,
-            SESSION,
-            expected_bridge_epoch=self.epoch,
+            ControlRequest(
+                service=self.service,
+                authorization=OPERATOR,
+                ar_session_id=SESSION,
+                expected_bridge_epoch=self.epoch,
+            ),
             request_id="at-t1",
             reconcile=True,
         )
@@ -450,10 +480,12 @@ class AttachmentReconcileTransitionTests(unittest.IsolatedAsyncioTestCase):
     async def test_unknown_outcome_is_retained_and_never_cleaned(self) -> None:
         self.adapter.next_acceptance = "unknown"
         staged = await attachments.stage(
-            self.service,
-            OPERATOR,
-            SESSION,
-            expected_bridge_epoch=self.epoch,
+            ControlRequest(
+                service=self.service,
+                authorization=OPERATOR,
+                ar_session_id=SESSION,
+                expected_bridge_epoch=self.epoch,
+            ),
             request_id="at-t2",
             kind_capabilities=self.caps,
             uploads=[_png()],
@@ -465,10 +497,12 @@ class AttachmentReconcileTransitionTests(unittest.IsolatedAsyncioTestCase):
             body=_submit_body("at-t2", self.epoch, staged.receipts[0]),
         )
         projection = await attachments.attachment_status(
-            self.service,
-            OPERATOR,
-            SESSION,
-            expected_bridge_epoch=self.epoch,
+            ControlRequest(
+                service=self.service,
+                authorization=OPERATOR,
+                ar_session_id=SESSION,
+                expected_bridge_epoch=self.epoch,
+            ),
             request_id="at-t2",
             reconcile=True,
         )
@@ -480,10 +514,12 @@ class AttachmentReconcileTransitionTests(unittest.IsolatedAsyncioTestCase):
     async def test_queued_then_dispatching_advances_phase(self) -> None:
         await drive_activity(self.harness, "running")
         staged = await attachments.stage(
-            self.service,
-            OPERATOR,
-            SESSION,
-            expected_bridge_epoch=self.epoch,
+            ControlRequest(
+                service=self.service,
+                authorization=OPERATOR,
+                ar_session_id=SESSION,
+                expected_bridge_epoch=self.epoch,
+            ),
             request_id="at-t3",
             kind_capabilities=self.caps,
             uploads=[_png()],
@@ -495,10 +531,12 @@ class AttachmentReconcileTransitionTests(unittest.IsolatedAsyncioTestCase):
             body=_submit_body("at-t3", self.epoch, staged.receipts[0]),
         )
         queued = await attachments.attachment_status(
-            self.service,
-            OPERATOR,
-            SESSION,
-            expected_bridge_epoch=self.epoch,
+            ControlRequest(
+                service=self.service,
+                authorization=OPERATOR,
+                ar_session_id=SESSION,
+                expected_bridge_epoch=self.epoch,
+            ),
             request_id="at-t3",
             reconcile=True,
         )
@@ -516,10 +554,12 @@ class AttachmentReconcileTransitionTests(unittest.IsolatedAsyncioTestCase):
                 self.fail("row never dispatched into the gate")
             await asyncio.sleep(0.05)
         dispatching = await attachments.attachment_status(
-            self.service,
-            OPERATOR,
-            SESSION,
-            expected_bridge_epoch=self.epoch,
+            ControlRequest(
+                service=self.service,
+                authorization=OPERATOR,
+                ar_session_id=SESSION,
+                expected_bridge_epoch=self.epoch,
+            ),
             request_id="at-t3",
             reconcile=True,
         )

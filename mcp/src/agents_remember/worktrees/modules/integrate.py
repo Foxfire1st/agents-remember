@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import replace
+from dataclasses import dataclass, replace
 
 from agents_remember.controlplane.enforcement import GateGuard, evaluate_gate
 from agents_remember.controlplane.gate_policy import GatePolicy
@@ -258,9 +258,27 @@ def replay_memory_content(
     return integrated_memory_content_commit, integrated_ledger_commit, None
 
 
-def _integration_replay_requirements(
-    contract: WorktreeContract,
-) -> tuple[str, str, bool, bool]:
+@dataclass(frozen=True)
+class IntegrationSources:
+    """Where each side's source branch stands at the moment integration starts.
+
+    Its current head, and whether that head has already moved past the commit closeout
+    landed -- which is exactly what makes a fast-forward impossible and ``--strategy replay``
+    necessary. Head and verdict are read in the same breath per side and every consumer
+    needs both, so they are one reading of the two source branches, not four values.
+    """
+
+    current_code_source: str
+    current_memory_source: str
+    code_replay_required: bool
+    memory_replay_required: bool
+
+    @property
+    def replay_required(self) -> bool:
+        return self.code_replay_required or self.memory_replay_required
+
+
+def _integration_replay_requirements(contract: WorktreeContract) -> IntegrationSources:
     current_code_source = head_commit(contract.code_repo_path, contract.code_source_branch)
     current_memory_source = ""
     code_replay_required = not is_ancestor(
@@ -275,14 +293,18 @@ def _integration_replay_requirements(
         memory_replay_required = not is_ancestor(
             contract.memory_repo_path, current_memory_source, contract.ledger_commit
         )
-    return current_code_source, current_memory_source, code_replay_required, memory_replay_required
+    return IntegrationSources(
+        current_code_source=current_code_source,
+        current_memory_source=current_memory_source,
+        code_replay_required=code_replay_required,
+        memory_replay_required=memory_replay_required,
+    )
 
 
 def _blocked_non_ff_result(
     contract: WorktreeContract,
     args: WorktreeArgs,
-    code_replay_required: bool,
-    memory_replay_required: bool,
+    sources: IntegrationSources,
 ) -> WorktreeCommandResult:
     return WorktreeCommandResult(
         2,
@@ -291,8 +313,8 @@ def _blocked_non_ff_result(
             "blocked-non-ff",
             "source branch moved; rerun with --strategy replay after reviewing parallel changes",
             persist=not args.dry_run,
-            code_replay_required=code_replay_required,
-            memory_replay_required=memory_replay_required,
+            code_replay_required=sources.code_replay_required,
+            memory_replay_required=sources.memory_replay_required,
         ),
     )
 
@@ -300,8 +322,7 @@ def _blocked_non_ff_result(
 def _dry_run_result(
     contract: WorktreeContract,
     args: WorktreeArgs,
-    code_replay_required: bool,
-    memory_replay_required: bool,
+    sources: IntegrationSources,
     *,
     guard: GateGuard,
     handover_warning: dict[str, object] | None,
@@ -331,8 +352,8 @@ def _dry_run_result(
             ),
         ),
         "strategy": args.strategy,
-        "code_replay_required": code_replay_required,
-        "memory_replay_required": memory_replay_required,
+        "code_replay_required": sources.code_replay_required,
+        "memory_replay_required": sources.memory_replay_required,
         "handover_gate": {
             "permitted": guard.permitted,
             "gateId": guard.gate_id,
@@ -403,12 +424,21 @@ def _integrated_memory_commits(
     return integrated_memory_content_commit, integrated_ledger_commit, None
 
 
-def _merge_integrated_commits(
-    contract: WorktreeContract,
-    integrated_code_commit: str,
-    integrated_ledger_commit: str,
-    integrated_memory_content_commit: str,
-) -> None:
+@dataclass(frozen=True)
+class IntegratedCommits:
+    """The three commits one integration lands: the code commit, the memory content commit,
+    and the ledger commit that maps them. Every step past the replay decision -- the merge,
+    the contract rewrite, the result payload -- consumes all three or none."""
+
+    code: str
+    memory_content: str
+    ledger: str
+
+
+def _merge_integrated_commits(contract: WorktreeContract, commits: IntegratedCommits) -> None:
+    integrated_code_commit = commits.code
+    integrated_ledger_commit = commits.ledger
+    integrated_memory_content_commit = commits.memory_content
     external = contract.memory_mode == "external"
     # Pre-validate that BOTH fast-forwards are possible before mutating either
     # branch, so a memory-side problem cannot leave the code branch advanced
@@ -451,9 +481,7 @@ def _merge_integrated_commits(
 def _integrated_result(
     contract: WorktreeContract,
     args: WorktreeArgs,
-    integrated_code_commit: str,
-    integrated_memory_content_commit: str,
-    integrated_ledger_commit: str,
+    commits: IntegratedCommits,
     *,
     handover_warning: dict[str, object] | None,
 ) -> WorktreeCommandResult:
@@ -461,9 +489,9 @@ def _integrated_result(
         contract,
         integration_status="completed",
         integration_strategy=args.strategy,
-        integrated_code_commit=integrated_code_commit,
-        integrated_memory_content_commit=integrated_memory_content_commit,
-        integrated_ledger_commit=integrated_ledger_commit,
+        integrated_code_commit=commits.code,
+        integrated_memory_content_commit=commits.memory_content,
+        integrated_ledger_commit=commits.ledger,
         cleanup="pending",
     )
     write_contract(contract.contract_path, updated)
@@ -472,9 +500,9 @@ def _integrated_result(
         **status_payload(updated),
         "summary": "Integration completed; ask the developer whether to clean up worktrees and merged local branches.",
         "strategy": args.strategy,
-        "integrated_code_commit": integrated_code_commit,
-        "integrated_memory_content_commit": integrated_memory_content_commit,
-        "integrated_ledger_commit": integrated_ledger_commit,
+        "integrated_code_commit": commits.code,
+        "integrated_memory_content_commit": commits.memory_content,
+        "integrated_ledger_commit": commits.ledger,
         "cleanup_question": "Integration completed. Remove the code and memory worktrees plus merged local task branches now?",
     }
     if handover_warning is not None:
@@ -523,40 +551,50 @@ def integrate_result(args: WorktreeArgs) -> WorktreeCommandResult:
             },
         )
 
-    current_code_source, current_memory_source, code_replay_required, memory_replay_required = (
-        _integration_replay_requirements(contract)
-    )
-    if args.strategy == "ff-only" and (code_replay_required or memory_replay_required):
-        return _blocked_non_ff_result(contract, args, code_replay_required, memory_replay_required)
+    sources = _integration_replay_requirements(contract)
+    if args.strategy == "ff-only" and sources.replay_required:
+        return _blocked_non_ff_result(contract, args, sources)
     if args.dry_run:
         return _dry_run_result(
             contract,
             args,
-            code_replay_required,
-            memory_replay_required,
+            sources,
             guard=guard,
             handover_warning=handover_warning,
         )
 
-    integrated_code_commit, blocked = _integrated_code_commit(contract, args, current_code_source)
+    return _apply_integration(
+        contract,
+        args,
+        sources,
+        handover_warning=handover_warning,
+    )
+
+
+def _apply_integration(
+    contract: WorktreeContract,
+    args: WorktreeArgs,
+    sources: IntegrationSources,
+    *,
+    handover_warning: dict[str, object] | None,
+) -> WorktreeCommandResult:
+    """Land the code commit, then the memory commits, then merge both into their sources."""
+    integrated_code_commit, blocked = _integrated_code_commit(
+        contract, args, sources.current_code_source
+    )
     if blocked is not None:
         return WorktreeCommandResult(2, blocked)
     integrated_memory_content_commit, integrated_ledger_commit, blocked = (
-        _integrated_memory_commits(contract, args, current_memory_source, integrated_code_commit)
+        _integrated_memory_commits(
+            contract, args, sources.current_memory_source, integrated_code_commit
+        )
     )
     if blocked is not None:
         return WorktreeCommandResult(2, blocked)
-    _merge_integrated_commits(
-        contract,
-        integrated_code_commit,
-        integrated_ledger_commit,
-        integrated_memory_content_commit,
+    commits = IntegratedCommits(
+        code=integrated_code_commit,
+        memory_content=integrated_memory_content_commit,
+        ledger=integrated_ledger_commit,
     )
-    return _integrated_result(
-        contract,
-        args,
-        integrated_code_commit,
-        integrated_memory_content_commit,
-        integrated_ledger_commit,
-        handover_warning=handover_warning,
-    )
+    _merge_integrated_commits(contract, commits)
+    return _integrated_result(contract, args, commits, handover_warning=handover_warning)

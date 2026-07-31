@@ -33,6 +33,9 @@ import {
 } from "../test/fixtures/submitScenarios";
 import type { TerminalCatalogRow } from "../types/terminalCatalog";
 import type { TerminalOpenSuccessBody } from "../types/terminalOpen";
+// The probe shapes and the `window` augmentation live in benchProbes.ts: the Playwright drivers
+// read these globals from their own tsconfig project, so the contract cannot be declared here.
+import type { CockpitBenchProbe, CockpitResetAudit } from "./benchProbes";
 
 // Dedicated Chats-cockpit scenarios. They are catalogued by scenarios.ts, but their server
 // facts stay here so the already-large Engine Room timeline file does not become a second API
@@ -201,53 +204,6 @@ export const COCKPIT_SCENARIOS: readonly CockpitScenarioDefinition[] = [
     socket: "live",
   },
 ] as const;
-
-export interface CockpitBenchProbe {
-  scenario: string;
-  requestCounts: Record<string, number>;
-  totalRequests: number;
-  requests: CockpitBenchRequest[];
-  launchedSessionIds: string[];
-  resetAudit?: CockpitResetAudit;
-  snapshot: () => CockpitResetAudit;
-  advance: (transition: CockpitBenchTransition) => void;
-}
-
-export type CockpitBenchTransition =
-  | "launch-failures"
-  | "set-turn-ended"
-  | "defer-next-open"
-  | "release-open";
-
-export interface CockpitBenchRequest {
-  method: string;
-  path: string;
-  body?: unknown;
-}
-
-export interface CockpitResetAudit {
-  sessionIds: string[];
-  activeId: string | null;
-  focusedSessionId: string | null;
-  cockpitSessionIds: string[];
-  capabilityHarnesses: string[];
-  polite: string;
-  assertive: string;
-  lifecycleResiduals: number;
-  ptyHarvestSessions: string[];
-  pollHealth: {
-    lastBeatAt: number | null;
-    missedBeats: number;
-    healthy: boolean;
-  };
-}
-
-declare global {
-  interface Window {
-    __cockpitBench?: CockpitBenchProbe;
-    __cockpitBenchResetAudit?: CockpitResetAudit;
-  }
-}
 
 const json = (body: unknown, status = 200): Response =>
   new Response(JSON.stringify(body), {

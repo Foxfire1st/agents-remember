@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from agents_remember.providers.context import (
+    CgcRepo,
     CgcRuntimeLayout,
     ContextProviderError,
     cgc_runtime_layout,
@@ -47,9 +48,11 @@ def cgc_layout_from_args(args: argparse.Namespace) -> CgcRuntimeLayout:
             "CGC manual override commands require --repo-id and --code-repo-root"
         )
     return cgc_runtime_layout(
-        coordination_root=args.coordination_root,
-        repo_id=args.repo_id,
-        code_repo_root=args.code_repo_root,
+        CgcRepo(
+            coordination_root=args.coordination_root,
+            repo_id=args.repo_id,
+            code_repo_root=args.code_repo_root,
+        )
     )
 
 

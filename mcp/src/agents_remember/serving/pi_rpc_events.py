@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections import OrderedDict
 from collections.abc import Callable, Mapping
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from typing import Literal, cast
 
 from agents_remember.errors import HarnessAdapterDisconnectedError, HarnessControlError
@@ -32,6 +32,24 @@ from agents_remember.serving.pi_rpc_protocol import (
 )
 
 Clock = Callable[[], str]
+
+
+@dataclass(frozen=True)
+class EventPayload:
+    """What one adapter event carries besides its kind and raw frame.
+
+    An event may republish the snapshot, append transcript entries, name the operation it settles
+    and carry the full frame as evidence. Each combination belongs to a specific kind of frame, so
+    it is chosen once as a payload rather than as four independently defaulted switches.
+    """
+
+    snapshot: AdapterSnapshot | None = None
+    transcript: tuple[TranscriptEntry, ...] = ()
+    operation: ControlOperationRef | None = None
+    evidence: Mapping[str, object] | None = None
+
+
+EMPTY_EVENT_PAYLOAD = EventPayload()
 
 
 class PiRpcEventMapper:
@@ -147,7 +165,7 @@ class PiRpcEventMapper:
             return self._state_event(frame, activity=transition[0], acceptance=transition[1])
         if event_type == "queue_update":
             return self._queue_event(frame)
-        return self._next_event(f"pi:{event_type}", frame, evidence=frame)
+        return self._next_event(f"pi:{event_type}", frame, EventPayload(evidence=frame))
 
     def disconnected(self, error: HarnessAdapterDisconnectedError) -> AdapterEvent:
         self._snapshot = replace(
@@ -157,7 +175,9 @@ class PiRpcEventMapper:
             acceptance="unknown",
             raw={**self.snapshot.raw, "disconnect": str(error)},
         )
-        return self._next_event("disconnected", {"type": "disconnect"}, snapshot=self.snapshot)
+        return self._next_event(
+            "disconnected", {"type": "disconnect"}, EventPayload(snapshot=self.snapshot)
+        )
 
     def failed(self, error: HarnessControlError) -> AdapterEvent:
         self._snapshot = replace(
@@ -167,10 +187,12 @@ class PiRpcEventMapper:
             acceptance="rejected",
             raw={**self.snapshot.raw, "adapterError": str(error)},
         )
-        return self._next_event("failed", {"type": "failed"}, snapshot=self.snapshot)
+        return self._next_event("failed", {"type": "failed"}, EventPayload(snapshot=self.snapshot))
 
     def reconnected(self) -> AdapterEvent:
-        return self._next_event("state", {"type": "reconnected"}, snapshot=self.snapshot)
+        return self._next_event(
+            "state", {"type": "reconnected"}, EventPayload(snapshot=self.snapshot)
+        )
 
     def _settled_event(
         self,
@@ -189,10 +211,7 @@ class PiRpcEventMapper:
         self._dialogs.clear()
         snapshot = self.apply_state(state, cursor=cursor)
         return self._next_event(
-            "completed",
-            frame,
-            snapshot=snapshot,
-            operation=operation,
+            "completed", frame, EventPayload(snapshot=snapshot, operation=operation)
         )
 
     def _extension_event(self, frame: Mapping[str, object]) -> AdapterEvent:
@@ -200,13 +219,13 @@ class PiRpcEventMapper:
         method = required_pi_text(frame, "method")
         if method in PI_RPC_DIALOG_METHODS:
             self._add_dialog(interaction_id, frame)
-            return self._next_event("state", frame, snapshot=self.snapshot)
+            return self._next_event("state", frame, EventPayload(snapshot=self.snapshot))
         if method not in PI_RPC_FIRE_AND_FORGET_METHODS:
             raise HarnessControlError(f"unsupported Pi extension UI method: {method}")
         entry = self._transcript_entry(
             role="interaction", text=f"{method}: {pi_extension_display_text(frame)}", raw=frame
         )
-        return self._next_event("transcript", frame, transcript=(entry,))
+        return self._next_event("transcript", frame, EventPayload(transcript=(entry,)))
 
     def _add_dialog(self, interaction_id: str, frame: Mapping[str, object]) -> None:
         if interaction_id in self._dialogs:
@@ -234,11 +253,13 @@ class PiRpcEventMapper:
         except HarnessControlError:
             # An interrupted turn can end a message before any text/thinking block exists.
             # The frame crosses as evidence only — never a bridge failure, never a fake entry.
-            return self._next_event("pi:message_end", frame, evidence=frame)
+            return self._next_event("pi:message_end", frame, EventPayload(evidence=frame))
         entry = self._transcript_entry(
             role=cast(Literal["user", "assistant"], role), text=text, raw=frame
         )
-        return self._next_event("transcript", frame, transcript=(entry,), evidence=frame)
+        return self._next_event(
+            "transcript", frame, EventPayload(transcript=(entry,), evidence=frame)
+        )
 
     def _queue_event(self, frame: Mapping[str, object]) -> AdapterEvent:
         pending = pi_queue_update_count(frame)
@@ -254,7 +275,7 @@ class PiRpcEventMapper:
                 "piEvent": dict(frame),
             },
         )
-        return self._next_event("state", frame, snapshot=self.snapshot)
+        return self._next_event("state", frame, EventPayload(snapshot=self.snapshot))
 
     def _state_event(
         self,
@@ -269,18 +290,18 @@ class PiRpcEventMapper:
             acceptance=acceptance,
             raw={**self.snapshot.raw, "piEvent": dict(frame)},
         )
-        return self._next_event("state", frame, snapshot=self.snapshot)
+        return self._next_event("state", frame, EventPayload(snapshot=self.snapshot))
 
     def _next_event(
         self,
         kind: str,
         raw: Mapping[str, object],
-        *,
-        snapshot: AdapterSnapshot | None = None,
-        transcript: tuple[TranscriptEntry, ...] = (),
-        operation: ControlOperationRef | None = None,
-        evidence: Mapping[str, object] | None = None,
+        payload: EventPayload = EMPTY_EVENT_PAYLOAD,
     ) -> AdapterEvent:
+        snapshot = payload.snapshot
+        transcript = payload.transcript
+        operation = payload.operation
+        evidence = payload.evidence
         self._event_sequence += 1
         if snapshot is not None:
             snapshot = replace(snapshot, last_event_sequence=self._event_sequence)

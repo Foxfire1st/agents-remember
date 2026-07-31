@@ -8,6 +8,8 @@ from typing import Any
 
 from agents_remember.errors import AuthorityError
 from agents_remember.kernel.coordination_context_resolver import (
+    CoordinationHints,
+    EnclosureSelector,
     context_to_dict,
     resolve_coordination_context,
 )
@@ -60,10 +62,14 @@ def build_context_packet(
     context = resolve_coordination_context(
         code_repository_name=repo_scope.repo_id,
         workspace_root=config.workspace_root,
-        coordination_root=config.coordination_root,
         code_repository_root=repo_scope.path,
-        onboarding_root=(repo_scope.memory_root / "onboarding") if repo_scope.memory_root else None,
-        contract_path=repo_scope.contract_path,
+        hints=CoordinationHints(
+            coordination_root=config.coordination_root,
+            onboarding_root=(repo_scope.memory_root / "onboarding")
+            if repo_scope.memory_root
+            else None,
+        ),
+        selector=EnclosureSelector(contract_path=repo_scope.contract_path),
     )
     context_dict = context_to_dict(context)
     git_facts = read_git_facts(repo_scope.repo_id, repo_scope.path)

@@ -46,7 +46,7 @@ from agents_remember.controlplane.attention_dismissals import (
     AttentionDismissalStore,
 )
 from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
-from agents_remember.controlplane.records import create_gate
+from agents_remember.controlplane.records import GateAnchor, create_gate
 from agents_remember.controlplane.store import GateStore
 from agents_remember.mcp.config import ConfigError, McpRuntimeConfig
 from agents_remember.observer import projection as projection_module
@@ -69,11 +69,14 @@ from agents_remember.observer.projection import (
 )
 from agents_remember.observer.projection_store import project_and_write
 from agents_remember.serving.actions import (
+    ActionEvaluationContext,
     DismissalIntent,
     GateDecisionIntent,
     evaluate_action,
 )
 from agents_remember.serving.app import (
+    LiveProjectionInputs,
+    ServingCollaborators,
     _if_none_match_matches,
     _ProjectionBodyCache,
     create_app,
@@ -97,10 +100,16 @@ from agents_remember.serving.events import (
     read_new_events,
     stream_raw_events,
 )
-from agents_remember.serving.projector import Projector
+from agents_remember.serving.projector import (
+    ProjectionCadence,
+    ProjectionRefreshers,
+    ProjectionReplay,
+    Projector,
+)
 from agents_remember.serving.sim import (
     ReplayClock,
     SimError,
+    SimSetup,
     build_sim,
     load_fixture,
     parse_sim_speed,
@@ -162,17 +171,18 @@ def _projection(
     providers: tuple[ProviderNode, ...] = (),
     enclosures: tuple[EnclosureNode, ...] = (),
     active_worktree_groups: tuple[str, ...] = (),
-    metrics: Metrics | None = None,
-    analytics: Analytics | None = None,
 ) -> WorkspaceProjection:
+    """A projection of the resolved tree at ``_TS``.
+
+    ``WorkspaceProjection`` defaults every field, so the rolled-up ``metrics``/``analytics``
+    cases construct the model directly rather than routing another two knobs through here.
+    """
     return WorkspaceProjection(
         generatedAt=_TS,
         lifecycles=list(lifecycles),
         providers=list(providers),
         enclosures=list(enclosures),
         activeWorktreeGroups=list(active_worktree_groups),
-        metrics=metrics or Metrics(),
-        analytics=analytics or Analytics(),
     )
 
 
@@ -227,12 +237,16 @@ class DeltaTests(unittest.TestCase):
         self.assertEqual(deltas, [DeltaEvent("enclosure.removed", {"enclosure": "e1"})])
 
     def test_metrics_changed(self) -> None:
-        deltas = diff_projection(_projection(), _projection(metrics=Metrics(lifecycleCount=1)))
+        deltas = diff_projection(
+            _projection(), WorkspaceProjection(generatedAt=_TS, metrics=Metrics(lifecycleCount=1))
+        )
         self.assertEqual(deltas, [DeltaEvent("metrics", Metrics(lifecycleCount=1))])
 
     def test_analytics_changed(self) -> None:
         cur_analytics = Analytics(routeCoverage=[RouteCoverageNode(route="r")])
-        deltas = diff_projection(_projection(), _projection(analytics=cur_analytics))
+        deltas = diff_projection(
+            _projection(), WorkspaceProjection(generatedAt=_TS, analytics=cur_analytics)
+        )
         self.assertEqual(deltas, [DeltaEvent("analytics", cur_analytics)])
 
     def test_removals_are_sorted_for_determinism(self) -> None:
@@ -264,8 +278,8 @@ class DeltaTests(unittest.TestCase):
                 ageSeconds=age,
             )
 
-        prev = _projection(analytics=Analytics(taskDocuments=[doc(1.0)]))
-        cur = _projection(analytics=Analytics(taskDocuments=[doc(2.0)]))
+        prev = WorkspaceProjection(generatedAt=_TS, analytics=Analytics(taskDocuments=[doc(1.0)]))
+        cur = WorkspaceProjection(generatedAt=_TS, analytics=Analytics(taskDocuments=[doc(2.0)]))
         self.assertEqual(diff_projection(prev, cur), [])
 
     def test_real_change_emits_with_fresh_ages_riding_along(self) -> None:
@@ -326,7 +340,7 @@ class ProjectorTests(unittest.IsolatedAsyncioTestCase):
         self._dir.cleanup()
 
     async def test_prime_sets_latest(self) -> None:
-        projector = Projector(_config(self.tmp), interval=100)
+        projector = Projector(_config(self.tmp), cadence=ProjectionCadence(interval=100))
         await projector.prime()
         seq, latest = projector.current()
         self.assertEqual(seq, 0)
@@ -335,7 +349,7 @@ class ProjectorTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(latest.version, 2)
 
     async def test_subscribe_receives_broadcast(self) -> None:
-        projector = Projector(_config(self.tmp), interval=100)
+        projector = Projector(_config(self.tmp), cadence=ProjectionCadence(interval=100))
         agen = projector.subscribe()
         pending = asyncio.create_task(agen.__anext__())
         await asyncio.sleep(0.02)  # let subscribe() register its queue
@@ -356,9 +370,9 @@ class ProjectorTests(unittest.IsolatedAsyncioTestCase):
 
         projector = Projector(
             _config(self.tmp),
-            interval=100,
-            now=lambda: moment,
-            provider_refresher=Refresher(),
+            cadence=ProjectionCadence(interval=100),
+            replay=ProjectionReplay(now=lambda: moment),
+            refreshers=ProjectionRefreshers(provider=Refresher()),
         )
         await projector.prime()
         self.assertEqual(calls, [moment])
@@ -380,8 +394,8 @@ class ProjectorTests(unittest.IsolatedAsyncioTestCase):
 
         projector = Projector(
             _config(self.tmp),
-            interval=100,
-            landing_refresher=Refresher(),
+            cadence=ProjectionCadence(interval=100),
+            refreshers=ProjectionRefreshers(landing=Refresher()),
         )
         task = asyncio.create_task(projector.run())
         await asyncio.wait_for(started.wait(), timeout=1)
@@ -400,7 +414,7 @@ class StreamEventsTests(unittest.IsolatedAsyncioTestCase):
         self._dir.cleanup()
 
     async def test_snapshot_then_delta(self) -> None:
-        projector = Projector(_config(self.tmp), interval=100)
+        projector = Projector(_config(self.tmp), cadence=ProjectionCadence(interval=100))
         await projector.prime()
         gen = stream_events(projector)
         first = await asyncio.wait_for(gen.__anext__(), timeout=1)
@@ -414,7 +428,7 @@ class StreamEventsTests(unittest.IsolatedAsyncioTestCase):
         await gen.aclose()
 
     async def test_snapshot_subscription_cannot_lose_an_interleaved_projection(self) -> None:
-        projector = Projector(_config(self.tmp), interval=100)
+        projector = Projector(_config(self.tmp), cadence=ProjectionCadence(interval=100))
         await projector.prime()
         gen = stream_events(projector)
 
@@ -436,7 +450,7 @@ class StreamEventsTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(projector._subscribers), 0)
 
     async def test_failed_prime_recovery_emits_one_snapshot_then_normal_deltas(self) -> None:
-        projector = Projector(_config(self.tmp), interval=100)
+        projector = Projector(_config(self.tmp), cadence=ProjectionCadence(interval=100))
         with mock.patch.object(projector, "_tick_sync", side_effect=RuntimeError("forced failure")):
             await projector.prime()
         self.assertIsNone(projector.current()[1])
@@ -466,7 +480,7 @@ class StreamEventsTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(projector._subscribers), 0)
 
     async def test_cancelled_waiting_stream_releases_its_subscription(self) -> None:
-        projector = Projector(_config(self.tmp), interval=100)
+        projector = Projector(_config(self.tmp), cadence=ProjectionCadence(interval=100))
         gen = stream_events(projector)
         pending = asyncio.create_task(gen.__anext__())
         await asyncio.sleep(0)
@@ -478,7 +492,7 @@ class StreamEventsTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(projector._subscribers), 0)
 
     async def test_snapshot_carries_the_serving_build_stamp(self) -> None:
-        projector = Projector(_config(self.tmp), interval=100)
+        projector = Projector(_config(self.tmp), cadence=ProjectionCadence(interval=100))
         await projector.prime()
         build = ServingBuild(version="9.9.9", commit="abc1234", booted_at="2026-07-07T05:00:00Z")
         gen = stream_events(projector, build=build)
@@ -501,7 +515,7 @@ class AppTests(unittest.TestCase):
         self._dir.cleanup()
 
     def test_state_endpoint_serves_projection(self) -> None:
-        app = create_app(_config(self.tmp), interval=100)
+        app = create_app(_config(self.tmp), cadence=ProjectionCadence(interval=100))
         with TestClient(app) as client:
             response = client.get("/api/state")
         self.assertEqual(response.status_code, 200)
@@ -520,7 +534,7 @@ class AppTests(unittest.TestCase):
             '<title>Agents Remember</title><div id="root"></div>', encoding="utf-8"
         )
         with mock.patch("agents_remember.serving.static.dashboard_static_dir", return_value=bundle):
-            app = create_app(_config(self.tmp), interval=100)
+            app = create_app(_config(self.tmp), cadence=ProjectionCadence(interval=100))
         with TestClient(app) as client:
             response = client.get("/")
         self.assertEqual(response.status_code, 200)
@@ -533,7 +547,7 @@ class AppTests(unittest.TestCase):
         # The server must still boot, the API must still own /api ahead of the greedy mount,
         # and the static surface must name the remedy rather than 404 into silence.
         with mock.patch("agents_remember.serving.static.dashboard_static_dir", return_value=None):
-            app = create_app(_config(self.tmp), interval=100)
+            app = create_app(_config(self.tmp), cadence=ProjectionCadence(interval=100))
         with TestClient(app) as client:
             root = client.get("/")
             api = client.get("/api/state")
@@ -559,7 +573,11 @@ class AppTests(unittest.TestCase):
             mock.patch.object(host, "shutdown", wraps=host.shutdown) as shutdown,
             self.assertLogs("agents_remember.serving.projector", level="ERROR"),
         ):
-            app = create_app(_config(self.tmp), interval=100, terminal_host=host)
+            app = create_app(
+                _config(self.tmp),
+                cadence=ProjectionCadence(interval=100),
+                collaborators=ServingCollaborators(terminal_host=host),
+            )
             with TestClient(app):
                 self.assertTrue(failed.wait(timeout=1))
         shutdown.assert_called_once_with()
@@ -580,16 +598,20 @@ class StateEtagTests(unittest.TestCase):
     ) -> TestClient:
         patcher = mock.patch(
             "agents_remember.serving.projector.project_and_write",
-            side_effect=lambda config, *, now, provider_refresher=None, landing_state=None, input_state=None, refresh=None: (
-                held[0]
-            ),
+            side_effect=lambda config, *, now, tick=None, refresh=None: held[0],
         )
         patcher.start()
         self.addCleanup(patcher.stop)
         # watch_changes=False: this world changes only through the mocked project_and_write,
         # which no filesystem watcher can observe -- the tick loop must stay interval-paced
         # (the live contract for watcher-invisible changes is the heartbeat bound instead).
-        return TestClient(create_app(_config(self.tmp), interval=interval, watch_changes=False))
+        return TestClient(
+            create_app(
+                _config(self.tmp),
+                cadence=ProjectionCadence(interval=interval),
+                live_inputs=LiveProjectionInputs(change_watch=False),
+            )
+        )
 
     def _get_until(self, client: TestClient, *, etag: str, want_status: int) -> httpx.Response:
         """Poll /api/state with If-None-Match until the tick loop publishes ``want_status``."""
@@ -663,15 +685,19 @@ class ProjectionBodyCacheTests(unittest.TestCase):
     ) -> TestClient:
         patcher = mock.patch(
             "agents_remember.serving.projector.project_and_write",
-            side_effect=lambda config, *, now, provider_refresher=None, landing_state=None, input_state=None, refresh=None: (
-                held[0]
-            ),
+            side_effect=lambda config, *, now, tick=None, refresh=None: held[0],
         )
         patcher.start()
         self.addCleanup(patcher.stop)
         # Same posture as StateEtagTests: the world changes only through the mocked
         # project_and_write, so the tick loop stays interval-paced.
-        return TestClient(create_app(_config(self.tmp), interval=interval, watch_changes=False))
+        return TestClient(
+            create_app(
+                _config(self.tmp),
+                cadence=ProjectionCadence(interval=interval),
+                live_inputs=LiveProjectionInputs(change_watch=False),
+            )
+        )
 
     def test_cache_keys_on_instance_identity(self) -> None:
         cache = _ProjectionBodyCache()
@@ -733,7 +759,7 @@ class StreamSnapshotCacheTests(unittest.IsolatedAsyncioTestCase):
         self._dir.cleanup()
 
     async def test_subscribers_share_one_snapshot_dump_until_content_changes(self) -> None:
-        projector = Projector(_config(self.tmp), interval=100)
+        projector = Projector(_config(self.tmp), cadence=ProjectionCadence(interval=100))
         await projector.prime()
         with mock.patch.object(
             WorkspaceProjection,
@@ -788,13 +814,17 @@ class GzipMiddlewareTests(unittest.TestCase):
     def _client_with_held_projection(self, held: list[WorkspaceProjection]) -> TestClient:
         patcher = mock.patch(
             "agents_remember.serving.projector.project_and_write",
-            side_effect=lambda config, *, now, provider_refresher=None, landing_state=None, input_state=None, refresh=None: (
-                held[0]
-            ),
+            side_effect=lambda config, *, now, tick=None, refresh=None: held[0],
         )
         patcher.start()
         self.addCleanup(patcher.stop)
-        return TestClient(create_app(_config(self.tmp), interval=0.02, watch_changes=False))
+        return TestClient(
+            create_app(
+                _config(self.tmp),
+                cadence=ProjectionCadence(interval=0.02),
+                live_inputs=LiveProjectionInputs(change_watch=False),
+            )
+        )
 
     def test_large_json_get_is_gzipped_for_gzip_clients(self) -> None:
         held = [_projection(lifecycles=tuple(_lifecycle(f"L{i}") for i in range(50)))]
@@ -838,13 +868,15 @@ class GzipSseFlowTests(unittest.IsolatedAsyncioTestCase):
         held = [_projection(lifecycles=(_lifecycle("L1"),))]
         patcher = mock.patch(
             "agents_remember.serving.projector.project_and_write",
-            side_effect=lambda config, *, now, provider_refresher=None, landing_state=None, input_state=None, refresh=None: (
-                held[0]
-            ),
+            side_effect=lambda config, *, now, tick=None, refresh=None: held[0],
         )
         patcher.start()
         self.addCleanup(patcher.stop)
-        app = create_app(_config(self.tmp), interval=100, watch_changes=False)
+        app = create_app(
+            _config(self.tmp),
+            cadence=ProjectionCadence(interval=100),
+            live_inputs=LiveProjectionInputs(change_watch=False),
+        )
         scope = {
             "type": "http",
             "asgi": {"version": "3.0"},
@@ -1057,10 +1089,7 @@ class ActionGateTests(unittest.TestCase):
             _projection(),
             "approve",
             "L1",
-            actor="developer",
-            now=_TS,
-            gate_id="G1",
-            note="Looks good.",
+            ActionEvaluationContext(actor="developer", now=_TS, gate_id="G1", note="Looks good."),
         )
         self.assertEqual(outcome.status_code, 202)
         self.assertEqual(
@@ -1078,9 +1107,7 @@ class ActionGateTests(unittest.TestCase):
             _projection(),
             "reject",
             "L1",
-            actor="developer",
-            now=_TS,
-            gate_id="G1",
+            ActionEvaluationContext(actor="developer", now=_TS, gate_id="G1"),
         )
         self.assertEqual(outcome.status_code, 400)
         self.assertEqual(outcome.body["status"], "missing-rejection-reason")
@@ -1091,10 +1118,9 @@ class ActionGateTests(unittest.TestCase):
             _projection(),
             "cancel",
             None,
-            actor="developer",
-            now=_TS,
-            gate_id="G1",
-            note="Cleared from attention queue.",
+            ActionEvaluationContext(
+                actor="developer", now=_TS, gate_id="G1", note="Cleared from attention queue."
+            ),
         )
         self.assertEqual(outcome.status_code, 202)
         self.assertEqual(
@@ -1109,7 +1135,9 @@ class ActionGateTests(unittest.TestCase):
 
     def test_evaluate_action_transition_keeps_4b_skeleton(self) -> None:
         # a non-gate action on an unknown target stays the 4b no-mutation skeleton
-        outcome = evaluate_action(_projection(), "integrate", "nope", actor="developer", now=_TS)
+        outcome = evaluate_action(
+            _projection(), "integrate", "nope", ActionEvaluationContext(actor="developer", now=_TS)
+        )
         self.assertIsNone(outcome.gate_decision)
         self.assertEqual(outcome.status_code, 404)
 
@@ -1117,10 +1145,13 @@ class ActionGateTests(unittest.TestCase):
         store = GateStore(observer_logs_root(self.tmp))
         store.append(
             create_gate(
-                kind="closeout-approval", lifecycle_id="L1", gate_id="G1", now=_FRESH_GATE_TS
+                "closeout-approval",
+                gate_id="G1",
+                now=_FRESH_GATE_TS,
+                anchor=GateAnchor(lifecycle_id="L1"),
             )
         )
-        app = create_app(_config(self.tmp), interval=100)
+        app = create_app(_config(self.tmp), cadence=ProjectionCadence(interval=100))
         with TestClient(app) as client:
             response = client.post(
                 "/api/actions/reject",
@@ -1137,17 +1168,22 @@ class ActionGateTests(unittest.TestCase):
     def test_api_action_with_stale_gate_id_is_409(self) -> None:
         store = GateStore(observer_logs_root(self.tmp))
         store.append(
-            create_gate(kind="agent-question", lifecycle_id="L1", gate_id="A", now=_FRESH_GATE_TS)
+            create_gate(
+                "agent-question",
+                gate_id="A",
+                now=_FRESH_GATE_TS,
+                anchor=GateAnchor(lifecycle_id="L1"),
+            )
         )
         store.append(
             create_gate(
-                kind="closeout-approval",
-                lifecycle_id="L1",
+                "closeout-approval",
                 gate_id="B",
                 now=_FRESH_GATE_TS_LATER,
+                anchor=GateAnchor(lifecycle_id="L1"),
             )
         )
-        app = create_app(_config(self.tmp), interval=100)
+        app = create_app(_config(self.tmp), cadence=ProjectionCadence(interval=100))
         with TestClient(app) as client:
             response = client.post("/api/actions/approve", json={"target": "L1", "gateId": "A"})
         self.assertEqual(response.status_code, 409)
@@ -1156,7 +1192,7 @@ class ActionGateTests(unittest.TestCase):
         self.assertEqual(store.current("L1")["B"].state, "open")
 
     def test_api_action_approve_without_open_gate_is_409(self) -> None:
-        app = create_app(_config(self.tmp), interval=100)
+        app = create_app(_config(self.tmp), cadence=ProjectionCadence(interval=100))
         with TestClient(app) as client:
             response = client.post("/api/actions/approve", json={"target": "L1"})
         self.assertEqual(response.status_code, 409)
@@ -1165,9 +1201,14 @@ class ActionGateTests(unittest.TestCase):
     def test_api_action_cancel_deletes_gate(self) -> None:
         store = GateStore(observer_logs_root(self.tmp))
         store.append(
-            create_gate(kind="agent-question", lifecycle_id="L1", gate_id="G1", now=_FRESH_GATE_TS)
+            create_gate(
+                "agent-question",
+                gate_id="G1",
+                now=_FRESH_GATE_TS,
+                anchor=GateAnchor(lifecycle_id="L1"),
+            )
         )
-        app = create_app(_config(self.tmp), interval=100)
+        app = create_app(_config(self.tmp), cadence=ProjectionCadence(interval=100))
         with TestClient(app) as client:
             response = client.post(
                 "/api/actions/cancel",
@@ -1177,12 +1218,34 @@ class ActionGateTests(unittest.TestCase):
         self.assertEqual(response.json()["gate"]["state"], "cancelled")
         self.assertEqual(store.current("L1"), {})
 
+    def test_api_action_naming_neither_a_lifecycle_nor_a_gate_is_missing_target(self) -> None:
+        # The single place an unaddressed gate decision is refused. Everything downstream of
+        # `evaluate_action` -- `_recorded_gate_decision`, `_gate_decision_response` -- is written
+        # against this guard holding, so it is asserted on the wire and not only as a unit.
+        app = create_app(_config(self.tmp), cadence=ProjectionCadence(interval=100))
+        with TestClient(app) as client:
+            response = client.post("/api/actions/cancel", json={"note": "Nothing named."})
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(
+            response.json(),
+            {
+                "status": "missing-target",
+                "detail": "gate decisions require a lifecycle target unless cancelling a gate id",
+                "action": "cancel",
+            },
+        )
+
     def test_api_action_cancel_deletes_workspace_gate_by_id_only(self) -> None:
         store = GateStore(observer_logs_root(self.tmp))
         store.append(
-            create_gate(kind="agent-question", lifecycle_id=None, gate_id="G1", now=_FRESH_GATE_TS)
+            create_gate(
+                "agent-question",
+                gate_id="G1",
+                now=_FRESH_GATE_TS,
+                anchor=GateAnchor(lifecycle_id=None),
+            )
         )
-        app = create_app(_config(self.tmp), interval=100)
+        app = create_app(_config(self.tmp), cadence=ProjectionCadence(interval=100))
         with TestClient(app) as client:
             response = client.post(
                 "/api/actions/cancel",
@@ -1193,7 +1256,7 @@ class ActionGateTests(unittest.TestCase):
         self.assertEqual(store.current(None), {})
 
     def test_api_operator_inbox_records_developer_response(self) -> None:
-        app = create_app(_config(self.tmp), interval=100)
+        app = create_app(_config(self.tmp), cadence=ProjectionCadence(interval=100))
         with TestClient(app) as client:
             response = client.post(
                 "/api/operator-inbox",
@@ -1220,7 +1283,7 @@ class ActionGateTests(unittest.TestCase):
         self.assertEqual(entries[0].createdVia, "dashboard")
 
     def test_api_operator_inbox_dismiss_deletes_entry(self) -> None:
-        app = create_app(_config(self.tmp), interval=100)
+        app = create_app(_config(self.tmp), cadence=ProjectionCadence(interval=100))
         with TestClient(app) as client:
             posted = client.post(
                 "/api/operator-inbox",
@@ -1238,7 +1301,7 @@ class ActionGateTests(unittest.TestCase):
         self.assertEqual(OperatorInboxStore(observer_logs_root(self.tmp)).read(), [])
 
     def test_api_operator_inbox_requires_address(self) -> None:
-        app = create_app(_config(self.tmp), interval=100)
+        app = create_app(_config(self.tmp), cadence=ProjectionCadence(interval=100))
         with TestClient(app) as client:
             response = client.post(
                 "/api/operator-inbox",
@@ -1262,10 +1325,12 @@ class ActionDismissTests(unittest.TestCase):
             _projection(),
             "dismiss",
             "L1",
-            actor="developer",
-            now=_TS,
-            item_id="awaiting-developer:L1",
-            kind="awaiting-developer",
+            ActionEvaluationContext(
+                actor="developer",
+                now=_TS,
+                item_id="awaiting-developer:L1",
+                kind="awaiting-developer",
+            ),
         )
         self.assertEqual(outcome.status_code, 202)
         self.assertIsNone(outcome.gate_decision)
@@ -1283,7 +1348,10 @@ class ActionDismissTests(unittest.TestCase):
 
     def test_evaluate_action_dismiss_requires_item_id(self) -> None:
         outcome = evaluate_action(
-            _projection(), "dismiss", "L1", actor="developer", now=_TS, kind="blocked-gate"
+            _projection(),
+            "dismiss",
+            "L1",
+            ActionEvaluationContext(actor="developer", now=_TS, kind="blocked-gate"),
         )
         self.assertEqual(outcome.status_code, 400)
         self.assertEqual(outcome.body["status"], "missing-item")
@@ -1294,10 +1362,9 @@ class ActionDismissTests(unittest.TestCase):
             _projection(),
             "dismiss",
             None,
-            actor="developer",
-            now=_TS,
-            item_id="provider-down:cgc",
-            kind="provider-down",
+            ActionEvaluationContext(
+                actor="developer", now=_TS, item_id="provider-down:cgc", kind="provider-down"
+            ),
         )
         self.assertEqual(outcome.status_code, 400)
         self.assertEqual(outcome.body["status"], "missing-lifecycle")
@@ -1308,10 +1375,12 @@ class ActionDismissTests(unittest.TestCase):
             _projection(),
             "dismiss",
             None,
-            actor="developer",
-            now=_TS,
-            item_id="actionable-drift:agents-remember:main",
-            kind="actionable-drift",
+            ActionEvaluationContext(
+                actor="developer",
+                now=_TS,
+                item_id="actionable-drift:agents-remember:main",
+                kind="actionable-drift",
+            ),
         )
         self.assertEqual(outcome.status_code, 202)
         self.assertEqual(
@@ -1392,7 +1461,7 @@ class ActionDismissTests(unittest.TestCase):
         self.assertEqual(store.current()["stale-session:L1"].dismissedAt, "2026-06-14T10:01:00Z")
 
     def test_api_action_dismiss_records_lifecycle_acknowledgement(self) -> None:
-        app = create_app(_config(self.tmp), interval=100)
+        app = create_app(_config(self.tmp), cadence=ProjectionCadence(interval=100))
         with TestClient(app) as client:
             response = client.post(
                 "/api/actions/dismiss",
@@ -1408,7 +1477,7 @@ class ActionDismissTests(unittest.TestCase):
         self.assertEqual(dismissals["stale-session:L1"].lifecycleId, "L1")
 
     def test_api_action_dismiss_records_actionable_drift_acknowledgement(self) -> None:
-        app = create_app(_config(self.tmp), interval=100)
+        app = create_app(_config(self.tmp), cadence=ProjectionCadence(interval=100))
         with TestClient(app) as client:
             response = client.post(
                 "/api/actions/dismiss",
@@ -1421,12 +1490,31 @@ class ActionDismissTests(unittest.TestCase):
         dismissals = AttentionDismissalStore(observer_logs_root(self.tmp)).current()
         self.assertIsNone(dismissals["actionable-drift:agents-remember:main"].lifecycleId)
 
+    def test_api_action_dismiss_scoped_to_nothing_is_missing_lifecycle(self) -> None:
+        # The single place an unscoped acknowledgement is refused. `_dismissal_response` writes the
+        # row for everything that is not a gate cancel, so an unscoped item getting past this guard
+        # would put an un-prunable entry in the dismissal store; assert the refusal on the wire.
+        app = create_app(_config(self.tmp), cadence=ProjectionCadence(interval=100))
+        with TestClient(app) as client:
+            response = client.post(
+                "/api/actions/dismiss",
+                json={"itemId": "provider-down:cgc", "kind": "provider-down"},
+            )
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["status"], "missing-lifecycle")
+        self.assertEqual(AttentionDismissalStore(observer_logs_root(self.tmp)).current(), {})
+
     def test_api_action_dismiss_gate_open_also_cancels_gate(self) -> None:
         store = GateStore(observer_logs_root(self.tmp))
         store.append(
-            create_gate(kind="agent-question", lifecycle_id="L1", gate_id="G1", now=_FRESH_GATE_TS)
+            create_gate(
+                "agent-question",
+                gate_id="G1",
+                now=_FRESH_GATE_TS,
+                anchor=GateAnchor(lifecycle_id="L1"),
+            )
         )
-        app = create_app(_config(self.tmp), interval=100)
+        app = create_app(_config(self.tmp), cadence=ProjectionCadence(interval=100))
         with TestClient(app) as client:
             response = client.post(
                 "/api/actions/dismiss",
@@ -1446,7 +1534,7 @@ class ActionDismissTests(unittest.TestCase):
     def test_api_action_dismiss_missing_gate_is_already_consumed(self) -> None:
         # A gate-open dismiss whose gate already vanished must not 500: the cancel KeyError
         # is swallowed because the missing gate means the source item is already gone.
-        app = create_app(_config(self.tmp), interval=100)
+        app = create_app(_config(self.tmp), cadence=ProjectionCadence(interval=100))
         with TestClient(app) as client:
             response = client.post(
                 "/api/actions/dismiss",
@@ -1572,7 +1660,7 @@ class CliRunTests(unittest.TestCase):
         self.assertEqual(app, "APP")
         load.assert_called_once_with("/abs/settings.json")
         _, kwargs = create.call_args
-        self.assertEqual(kwargs["interval"], 2.5)
+        self.assertEqual(kwargs["cadence"].interval, 2.5)
 
     def test_main_dispatches_to_subcommand(self) -> None:
         with mock.patch.object(cli_dashboard, "run", return_value=0) as run_stub:
@@ -2099,8 +2187,19 @@ class SimReplayTests(unittest.TestCase):
     def _at(second: int) -> datetime:
         return datetime(2026, 6, 14, 9, 0, second, tzinfo=UTC)
 
-    def test_build_sim_overrides_root_to_a_fresh_dir(self) -> None:
+    def _build_sim(self) -> SimSetup:
+        """Build a sim and close its throwaway root when the test ends.
+
+        ``build_sim`` hands the caller a live ``TemporaryDirectory``: the CLI holds it for
+        the server's lifetime, so the function cannot close it itself. A test that drops the
+        setup without closing it leaves ``/tmp/ar-dashboard-sim-*`` to the finaliser.
+        """
         sim = build_sim(self.config, FIXTURE_DIR, speed=1.0)
+        self.addCleanup(sim.temp_dir.cleanup)
+        return sim
+
+    def test_build_sim_overrides_root_to_a_fresh_dir(self) -> None:
+        sim = self._build_sim()
         self.assertNotEqual(sim.config.coordination_root, self.config.coordination_root)
         self.assertEqual(sim.config.coordination_root, Path(sim.temp_dir.name))
         self.assertTrue(sim.config.coordination_root.is_dir())
@@ -2110,7 +2209,7 @@ class SimReplayTests(unittest.TestCase):
             build_sim(self.config, Path(empty), speed=1.0)
 
     def test_feeder_is_progressive(self) -> None:
-        sim = build_sim(self.config, FIXTURE_DIR, speed=1.0)
+        sim = self._build_sim()
         before_any = datetime(2026, 6, 14, 8, 59, tzinfo=UTC)
         self.assertEqual(sim.feeder.feed(before_any), 0)
         self.assertEqual(sim.feeder.feed(self._at(10)), 3)  # e1, e2, e3
@@ -2124,7 +2223,7 @@ class SimReplayTests(unittest.TestCase):
         self.assertFalse(lifecycle.fleeting)
 
     def test_replay_drives_state_transitions(self) -> None:
-        sim = build_sim(self.config, FIXTURE_DIR, speed=1.0)
+        sim = self._build_sim()
         sim.feeder.feed(self._at(10))
         before = project_and_write(sim.config, now=self._at(10))
         sim.feeder.feed(self._at(30))  # through tool.completed + lifecycle.blocked
@@ -2137,7 +2236,7 @@ class SimReplayTests(unittest.TestCase):
         moment = self._at(30)
         dumps = []
         for _ in range(2):
-            sim = build_sim(self.config, FIXTURE_DIR, speed=1.0)
+            sim = self._build_sim()
             sim.feeder.feed(moment)
             dumps.append(project_and_write(sim.config, now=moment).model_dump(by_alias=True))
         self.assertEqual(dumps[0], dumps[1])
@@ -2165,7 +2264,9 @@ class ActionTests(unittest.TestCase):
         return _projection(lifecycles=(blocked, running))
 
     def test_enabled_action_is_received_with_attribution(self) -> None:
-        outcome = evaluate_action(self._projection(), "resume", "L1", actor="developer", now=_TS)
+        outcome = evaluate_action(
+            self._projection(), "resume", "L1", ActionEvaluationContext(actor="developer", now=_TS)
+        )
         self.assertEqual(outcome.status_code, 202)
         self.assertEqual(outcome.body["status"], "received")
         intent = outcome.body["intent"]
@@ -2176,7 +2277,9 @@ class ActionTests(unittest.TestCase):
         self.assertEqual(intent["ts"], _TS)
 
     def test_disabled_action_is_conflict_with_reason(self) -> None:
-        outcome = evaluate_action(self._projection(), "resume", "L2", actor="developer", now=_TS)
+        outcome = evaluate_action(
+            self._projection(), "resume", "L2", ActionEvaluationContext(actor="developer", now=_TS)
+        )
         self.assertEqual(outcome.status_code, 409)
         self.assertEqual(outcome.body["status"], "disabled")
         self.assertEqual(outcome.body["detail"], "lifecycle is not blocked")
@@ -2186,13 +2289,18 @@ class ActionTests(unittest.TestCase):
 
     def test_unknown_action_is_conflict(self) -> None:
         outcome = evaluate_action(
-            self._projection(), "frobnicate", "L1", actor="developer", now=_TS
+            self._projection(),
+            "frobnicate",
+            "L1",
+            ActionEvaluationContext(actor="developer", now=_TS),
         )
         self.assertEqual(outcome.status_code, 409)
         self.assertEqual(outcome.body["status"], "unavailable")
 
     def test_unknown_target_is_not_found(self) -> None:
-        outcome = evaluate_action(self._projection(), "resume", "ZZZ", actor="developer", now=_TS)
+        outcome = evaluate_action(
+            self._projection(), "resume", "ZZZ", ActionEvaluationContext(actor="developer", now=_TS)
+        )
         self.assertEqual(outcome.status_code, 404)
 
     def test_enclosure_target_resolves(self) -> None:
@@ -2200,7 +2308,10 @@ class ActionTests(unittest.TestCase):
             update={"actions": [ActionAvailability(action="integrate", enabled=True)]}
         )
         outcome = evaluate_action(
-            _projection(enclosures=(enclosure,)), "integrate", "e1", actor="developer", now=_TS
+            _projection(enclosures=(enclosure,)),
+            "integrate",
+            "e1",
+            ActionEvaluationContext(actor="developer", now=_TS),
         )
         self.assertEqual(outcome.status_code, 202)
 
@@ -2214,14 +2325,14 @@ class ActionEndpointTests(unittest.TestCase):
         self._dir.cleanup()
 
     def test_post_unknown_target_returns_404(self) -> None:
-        app = create_app(_config(self.tmp), interval=100)
+        app = create_app(_config(self.tmp), cadence=ProjectionCadence(interval=100))
         with TestClient(app) as client:
             response = client.post("/api/actions/resume", json={"target": "nope"})
         self.assertEqual(response.status_code, 404)
         self.assertEqual(response.json()["status"], "unknown-target")
 
     def test_post_rejects_unknown_actor(self) -> None:
-        app = create_app(_config(self.tmp), interval=100)
+        app = create_app(_config(self.tmp), cadence=ProjectionCadence(interval=100))
         with TestClient(app) as client:
             response = client.post("/api/actions/resume", json={"target": "x", "actor": "intruder"})
         self.assertEqual(response.status_code, 422)
@@ -2271,8 +2382,8 @@ class CliSimTests(unittest.TestCase):
         self.assertEqual(result, 0)
         serve.assert_called_once()
         _, kwargs = create.call_args
-        self.assertIn("now", kwargs)
-        self.assertIn("before_tick", kwargs)
+        self.assertIsNotNone(kwargs["replay"].now)
+        self.assertIsNotNone(kwargs["replay"].before_tick)
 
     def test_run_sim_bad_speed_returns_1(self) -> None:
         config = _config(self.tmp)

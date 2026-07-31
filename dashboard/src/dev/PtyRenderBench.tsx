@@ -2,6 +2,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import { TerminalSocketContext } from "../data/terminal";
 import { Terminal } from "../panels/Terminal";
+// `window.__ptyBench` is read by perf/cockpit.perf.spec.ts from the driver tsconfig project, so
+// the probe shapes and the `window` augmentation are declared once in benchProbes.ts.
+import type { PtyFrameStats, PtySerializeProbe } from "./benchProbes";
 import { benchLineLogSocketFactory, RUNNER_LINE_LOG_STREAM } from "./lineLogFixture";
 
 // The PTY renderer measurement harness (260715-FEUI-L6 S1, master OQ-B): N concurrent REAL
@@ -12,35 +15,7 @@ import { benchLineLogSocketFactory, RUNNER_LINE_LOG_STREAM } from "./lineLogFixt
 // The same page runs the @xterm/addon-serialize evaluation (`?probe=serialize`): a raw xterm is
 // filled with `lines` buffer lines and one serialize() pass is timed — the reattach-cost fact.
 
-interface FrameStats {
-  renderer: string;
-  panes: number;
-  linesPerSecondPerPane: number;
-  seconds: number;
-  frames: number;
-  meanMs: number;
-  p95Ms: number;
-  maxMs: number;
-  /** Frames over 33.4 ms (two 60 Hz budgets) — the visible-jank count. */
-  longFrames: number;
-}
-
-declare global {
-  interface Window {
-    __ptyBench?: { done: boolean; stats?: FrameStats; serialize?: SerializeProbe; error?: string };
-    /** Per-pane REAL column counts (the R8 ~80-col floor verification reads these). */
-    __ptyBenchCols?: Record<string, number>;
-  }
-}
-
-interface SerializeProbe {
-  bufferLines: number;
-  serializedBytes: number;
-  serializeMs: number;
-  restoreMs: number;
-}
-
-function measureFrames(seconds: number): Promise<Omit<FrameStats, "renderer" | "panes" | "linesPerSecondPerPane" | "seconds">> {
+function measureFrames(seconds: number): Promise<Omit<PtyFrameStats, "renderer" | "panes" | "linesPerSecondPerPane" | "seconds">> {
   return new Promise((resolve) => {
     const deltas: number[] = [];
     let last = performance.now();
@@ -65,7 +40,7 @@ function measureFrames(seconds: number): Promise<Omit<FrameStats, "renderer" | "
   });
 }
 
-async function runSerializeProbe(lines: number): Promise<SerializeProbe> {
+async function runSerializeProbe(lines: number): Promise<PtySerializeProbe> {
   const [{ Terminal: Xterm }, { SerializeAddon }] = await Promise.all([
     import("@xterm/xterm"),
     import("@xterm/addon-serialize"),
@@ -133,7 +108,7 @@ export function PtyRenderBench() {
         }
         await new Promise((resolve) => setTimeout(resolve, settle * 1000));
         const frames = await measureFrames(seconds);
-        const stats: FrameStats = {
+        const stats: PtyFrameStats = {
           renderer,
           panes,
           linesPerSecondPerPane: rate,

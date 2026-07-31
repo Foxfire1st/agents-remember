@@ -38,7 +38,9 @@ from agents_remember.serving.harness_control_models import (
 )
 from agents_remember.serving.harness_submission_authority import (
     DISPATCH_ACCEPTANCE_GRACE_SECONDS,
+    BridgeSnapshotPort,
     HarnessSubmissionAuthority,
+    SubmissionLimits,
 )
 
 NOW = "2026-07-17T12:00:00+00:00"
@@ -180,14 +182,18 @@ def _authority(
 ) -> HarnessSubmissionAuthority:
     authority = HarnessSubmissionAuthority(
         adapter,
-        timeline_limit=timeline_limit,
-        ledger_limit=ledger_limit,
-        clock=lambda: NOW,
-        snapshot=lambda: adapter.current,
-        set_snapshot=lambda value: setattr(adapter, "current", value),
-        publish=lambda: None,
+        BridgeSnapshotPort(
+            clock=lambda: NOW,
+            snapshot=lambda: adapter.current,
+            set_snapshot=lambda value: setattr(adapter, "current", value),
+            publish=lambda: None,
+        ),
+        SubmissionLimits(
+            timeline=timeline_limit,
+            ledger=ledger_limit,
+            dispatch_grace_seconds=dispatch_grace_seconds,
+        ),
         bridge_epoch=bridge_epoch,
-        dispatch_grace_seconds=dispatch_grace_seconds,
     )
     authority.start()
     return authority

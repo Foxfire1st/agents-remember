@@ -30,6 +30,8 @@ from agents_remember.errors import (
 from agents_remember.serving.conversation.control import attachments, recovery_assembly
 from agents_remember.serving.conversation.control.refs import (
     OperationIdentity,
+    RefBinding,
+    RefTarget,
     decode_ref,
     mint_ref,
     ref_identity,
@@ -39,6 +41,8 @@ from agents_remember.serving.conversation.control.service import (
     MAX_WITHDRAWALS_PER_CHANNEL,
     RECOVERY_TTL_SECONDS,
     ControlChannel,
+    ControlRequest,
+    ControlScope,
     ControlUnavailableError,
     ConversationControlService,
     OperationConflictError,
@@ -115,22 +119,23 @@ class WithdrawalRecord:
 
 
 async def withdraw(
-    service: ConversationControlService,
-    authorization: AuthorizationBinding,
-    ar_session_id: str,
+    request: ControlRequest,
     *,
-    expected_bridge_epoch: str,
     operation_ref: str,
     withdrawal_ref: str,
     withdraw_request_id: str,
 ) -> WithdrawnQueueResponse | FailedWithdrawalResponse:
     """One authorized atomic cockpit-only withdrawal with bounded recovery."""
 
+    service = request.service
+    authorization = request.authorization
+    ar_session_id = request.ar_session_id
+    expected_bridge_epoch = request.expected_bridge_epoch
+
     entry = service.resolve_entry(ar_session_id)
     epoch = await service.verify_epoch(entry, expected_bridge_epoch)
-    identity = _verify_refs(
-        service, authorization, ar_session_id, epoch, operation_ref, withdrawal_ref
-    )
+    scope = request.resolved(epoch)
+    identity = _verify_refs(scope, operation_ref, withdrawal_ref)
     channel = service.channel(ar_session_id, epoch)
     sweep_recoveries(service, channel)
     fingerprint = operation_fingerprint(
@@ -164,32 +169,34 @@ async def withdraw(
                 )
             return _replay_response(record)
         record = await _drive_withdrawal(
-            service,
-            authorization,
+            scope,
             entry,
             channel,
-            ar_session_id,
-            epoch,
-            identity,
-            operation_ref,
-            fingerprint,
-            withdraw_request_id,
+            WithdrawalTicket(
+                epoch=epoch,
+                identity=identity,
+                operation_ref=operation_ref,
+                fingerprint=fingerprint,
+                withdraw_request_id=withdraw_request_id,
+            ),
         )
         _store_withdrawal(channel, record)
         return record.response
 
 
 async def withdraw_status(
-    service: ConversationControlService,
-    authorization: AuthorizationBinding,
-    ar_session_id: str,
+    request: ControlRequest,
     *,
-    expected_bridge_epoch: str,
     operation_ref: str,
     withdraw_request_id: str,
     reconcile: bool,
 ) -> WithdrawalOperationProjection:
     """Read (and, for reconcile, actively re-drive) one withdrawal operation."""
+
+    service = request.service
+    authorization = request.authorization
+    ar_session_id = request.ar_session_id
+    expected_bridge_epoch = request.expected_bridge_epoch
 
     entry = service.resolve_entry(ar_session_id)
     epoch = await service.verify_epoch(entry, expected_bridge_epoch)
@@ -205,9 +212,7 @@ async def withdraw_status(
         service.secret,
         operation_ref,
         "operation-ref",
-        authorization,
-        ar_session_id=ar_session_id,
-        bridge_epoch=epoch,
+        RefBinding(authorization, ar_session_id, epoch),
     )
     if ref_identity(payload) != record.operation:
         raise OperationConflictError("operation ref does not name this withdrawal's operation")
@@ -219,13 +224,13 @@ async def withdraw_status(
 
 
 async def pending_recoveries(
-    service: ConversationControlService,
-    authorization: AuthorizationBinding,
-    ar_session_id: str,
-    *,
-    expected_bridge_epoch: str,
+    request: ControlRequest,
 ) -> PendingWithdrawalRecoveryList:
     """The opaque pending-recovery discovery list; never content of any kind."""
+
+    service = request.service
+    ar_session_id = request.ar_session_id
+    expected_bridge_epoch = request.expected_bridge_epoch
 
     entry = service.resolve_entry(ar_session_id)
     epoch = await service.verify_epoch(entry, expected_bridge_epoch)
@@ -240,9 +245,7 @@ async def pending_recoveries(
         items.append(
             PendingWithdrawalRecoveryProjection(
                 recovery_ref=recovery.recovery_ref,
-                operation_ref=_mint_operation_ref(
-                    service, authorization, ar_session_id, epoch, recovery.operation
-                ),
+                operation_ref=_mint_operation_ref(request.resolved(epoch), recovery.operation),
                 withdraw_request_id=recovery.withdraw_request_id,
                 revision=recovery.revision,
                 recovery_expires_at=recovery.expires_at,
@@ -261,14 +264,16 @@ async def pending_recoveries(
 
 
 async def fetch_recovery(
-    service: ConversationControlService,
-    authorization: AuthorizationBinding,
-    ar_session_id: str,
+    request: ControlRequest,
     *,
-    expected_bridge_epoch: str,
     recovery_ref: str,
 ) -> WithdrawalRecovery:
     """The authenticated exact recovery fetch; only while unacknowledged."""
+
+    service = request.service
+    authorization = request.authorization
+    ar_session_id = request.ar_session_id
+    expected_bridge_epoch = request.expected_bridge_epoch
 
     entry = service.resolve_entry(ar_session_id)
     epoch = await service.verify_epoch(entry, expected_bridge_epoch)
@@ -278,9 +283,7 @@ async def fetch_recovery(
         service.secret,
         recovery_ref,
         "recovery-ref",
-        authorization,
-        ar_session_id=ar_session_id,
-        bridge_epoch=epoch,
+        RefBinding(authorization, ar_session_id, epoch),
     )
     recovery = _find_recovery(channel, recovery_ref)
     if recovery.state != "recovery-unacknowledged" or recovery.text is None:
@@ -295,15 +298,17 @@ async def fetch_recovery(
 
 
 async def acknowledge_recovery(
-    service: ConversationControlService,
-    authorization: AuthorizationBinding,
-    ar_session_id: str,
+    request: ControlRequest,
     *,
-    expected_bridge_epoch: str,
     recovery_ref: str,
     disposition: str,
 ) -> WithdrawalOperationProjection:
     """Record the draft disposition, advance the revision, and permit disposal."""
+
+    service = request.service
+    authorization = request.authorization
+    ar_session_id = request.ar_session_id
+    expected_bridge_epoch = request.expected_bridge_epoch
 
     entry = service.resolve_entry(ar_session_id)
     epoch = await service.verify_epoch(entry, expected_bridge_epoch)
@@ -313,9 +318,7 @@ async def acknowledge_recovery(
         service.secret,
         recovery_ref,
         "recovery-ref",
-        authorization,
-        ar_session_id=ar_session_id,
-        bridge_epoch=epoch,
+        RefBinding(authorization, ar_session_id, epoch),
     )
     recovery = _find_recovery(channel, recovery_ref)
     if recovery.state != "recovery-unacknowledged":
@@ -334,37 +337,42 @@ async def acknowledge_recovery(
     return _withdrawal_projection(record)
 
 
+@dataclass(frozen=True)
+class WithdrawalTicket:
+    """The exact operation being withdrawn, and the request that is withdrawing it.
+
+    Every record this module builds -- settled, failed or unknown -- is stamped with the same five
+    facts: the epoch the withdrawal is bound to, the operation identity, the caller's opaque
+    operation ref, the fingerprint that makes the request idempotent, and its withdraw request id.
+    Passing them as one ticket is what keeps a failure record from being stamped with a different
+    operation's identity than the attempt it describes.
+    """
+
+    epoch: str
+    identity: OperationIdentity
+    operation_ref: str
+    fingerprint: OperationFingerprint
+    withdraw_request_id: str
+
+
 async def _drive_withdrawal(
-    service: ConversationControlService,
-    authorization: AuthorizationBinding,
+    scope: ControlScope,
     entry: TerminalCatalogEntry,
     channel: ControlChannel,
-    ar_session_id: str,
-    epoch: str,
-    identity: OperationIdentity,
-    operation_ref: str,
-    fingerprint: OperationFingerprint,
-    withdraw_request_id: str,
+    ticket: WithdrawalTicket,
 ) -> WithdrawalRecord:
+    service, epoch, identity = scope.service, ticket.epoch, ticket.identity
     row = await _live_row(service, entry, epoch, identity)
     if row is None or row.source != "cockpit":
         return _settled_failure(
-            epoch,
-            identity,
-            operation_ref,
-            fingerprint,
-            withdraw_request_id,
+            ticket,
             outcome="not-found",
             detail="the operation is not a retained cockpit queue row",
         )
     if row.state != "queued":
         outcome = "already-dispatching" if row.state == "dispatching" else "delivery-unknown"
         return _settled_failure(
-            epoch,
-            identity,
-            operation_ref,
-            fingerprint,
-            withdraw_request_id,
+            ticket,
             outcome=outcome,
             detail=f"the queue row is already {row.state}",
         )
@@ -377,88 +385,43 @@ async def _drive_withdrawal(
         )
     except HarnessBridgeEpochMismatchError:
         return _settled_failure(
-            epoch,
-            identity,
-            operation_ref,
-            fingerprint,
-            withdraw_request_id,
+            ticket,
             outcome="epoch-mismatch",
             detail="the bridge epoch flipped while the withdrawal crossed",
         )
     except HarnessControlClientError as exc:
         if not exc.may_have_sent:
             raise ControlUnavailableError(str(exc)) from exc
-        return _unknown_withdrawal(
-            epoch, identity, operation_ref, fingerprint, withdraw_request_id, str(exc)
-        )
+        return _unknown_withdrawal(ticket, str(exc))
     except HarnessControlError as exc:
         raise ControlUnavailableError(str(exc)) from exc
-    return _apply_withdrawal_result(
-        service,
-        authorization,
-        channel,
-        ar_session_id,
-        epoch,
-        identity,
-        fingerprint,
-        withdraw_request_id,
-        result,
-        operation_ref=operation_ref,
-    )
+    return _apply_withdrawal_result(scope, channel, ticket, result)
 
 
 def _apply_withdrawal_result(
-    service: ConversationControlService,
-    authorization: AuthorizationBinding,
+    scope: ControlScope,
     channel: ControlChannel,
-    ar_session_id: str,
-    epoch: str,
-    identity: OperationIdentity,
-    fingerprint: OperationFingerprint,
-    withdraw_request_id: str,
+    ticket: WithdrawalTicket,
     result: WithdrawalResult,
-    *,
-    operation_ref: str,
 ) -> WithdrawalRecord:
-    failure = _failure_for_result(
-        epoch, identity, operation_ref, fingerprint, withdraw_request_id, result
-    )
+    failure = _failure_for_result(ticket, result)
     if failure is not None:
         return failure
     # outcome == "withdrawn": the true transition, or the substrate's idempotent
     # replay of one (a replay carries no recovery payload — the journal is then
     # the only content source, and without it the recovery is honestly empty).
-    return _build_withdrawn_record(
-        service,
-        authorization,
-        channel,
-        ar_session_id,
-        epoch,
-        identity,
-        fingerprint,
-        withdraw_request_id,
-        result,
-        operation_ref=operation_ref,
-    )
+    return _build_withdrawn_record(scope, channel, ticket, result)
 
 
 def _failure_for_result(
-    epoch: str,
-    identity: OperationIdentity,
-    operation_ref: str,
-    fingerprint: OperationFingerprint,
-    withdraw_request_id: str,
+    ticket: WithdrawalTicket,
     result: WithdrawalResult,
 ) -> WithdrawalRecord | None:
     """Map any non-withdrawn substrate outcome to its failure record, or None."""
 
     if result.outcome == "not-found":
         return _settled_failure(
-            epoch,
-            identity,
-            operation_ref,
-            fingerprint,
-            withdraw_request_id,
+            ticket,
             outcome="not-found",
             detail=result.detail or "submission is not retained for this cockpit authority",
         )
@@ -470,29 +433,22 @@ def _failure_for_result(
     elif result.state == "unknown":
         outcome = "delivery-unknown"
     return _settled_failure(
-        epoch,
-        identity,
-        operation_ref,
-        fingerprint,
-        withdraw_request_id,
+        ticket,
         outcome=outcome,
         detail=result.detail or f"submission is already {result.state}",
     )
 
 
 def _build_withdrawn_record(
-    service: ConversationControlService,
-    authorization: AuthorizationBinding,
+    scope: ControlScope,
     channel: ControlChannel,
-    ar_session_id: str,
-    epoch: str,
-    identity: OperationIdentity,
-    fingerprint: OperationFingerprint,
-    withdraw_request_id: str,
+    ticket: WithdrawalTicket,
     result: WithdrawalResult,
-    *,
-    operation_ref: str,
 ) -> WithdrawalRecord:
+    service = scope.service
+    epoch, identity = ticket.epoch, ticket.identity
+    fingerprint, withdraw_request_id = ticket.fingerprint, ticket.withdraw_request_id
+    operation_ref = ticket.operation_ref
     recovery = result.recovery
     journal = channel.journal.get(identity.operation_id)
     text = recovery_assembly.recovery_text(recovery, journal)
@@ -503,21 +459,11 @@ def _build_withdrawn_record(
     recovery_ref = mint_ref(
         service.secret,
         "recovery-ref",
-        authorization,
-        ar_session_id=ar_session_id,
-        bridge_epoch=epoch,
-        identity=identity,
-        withdraw_request_id=withdraw_request_id,
+        RefBinding(scope.authorization, scope.ar_session_id, epoch),
+        RefTarget(identity=identity, withdraw_request_id=withdraw_request_id),
     )
     attachment_refs = recovery_assembly.recover_attachment_refs(
-        service,
-        authorization,
-        channel,
-        ar_session_id,
-        epoch,
-        identity,
-        withdraw_request_id,
-        expires_at,
+        scope, channel, identity, withdraw_request_id, expires_at
     )
     recovery_state: RecoveryState = (
         "recovery-unacknowledged" if (text is not None or attachment_refs) else "none"
@@ -566,15 +512,14 @@ def _build_withdrawn_record(
 
 
 def _settled_failure(
-    epoch: str,
-    identity: OperationIdentity,
-    operation_ref: str,
-    fingerprint: OperationFingerprint,
-    withdraw_request_id: str,
+    ticket: WithdrawalTicket,
     *,
     outcome: FailedOutcome,
     detail: str,
 ) -> WithdrawalRecord:
+    epoch, identity = ticket.epoch, ticket.identity
+    fingerprint, withdraw_request_id = ticket.fingerprint, ticket.withdraw_request_id
+    operation_ref = ticket.operation_ref
     response = FailedWithdrawalResponse(
         withdraw_request_id=withdraw_request_id,
         request_fingerprint=fingerprint,
@@ -600,14 +545,10 @@ def _settled_failure(
     )
 
 
-def _unknown_withdrawal(
-    epoch: str,
-    identity: OperationIdentity,
-    operation_ref: str,
-    fingerprint: OperationFingerprint,
-    withdraw_request_id: str,
-    detail: str,
-) -> WithdrawalRecord:
+def _unknown_withdrawal(ticket: WithdrawalTicket, detail: str) -> WithdrawalRecord:
+    epoch, identity = ticket.epoch, ticket.identity
+    fingerprint, withdraw_request_id = ticket.fingerprint, ticket.withdraw_request_id
+    operation_ref = ticket.operation_ref
     response = FailedWithdrawalResponse(
         withdraw_request_id=withdraw_request_id,
         request_fingerprint=fingerprint,
@@ -658,20 +599,23 @@ async def _redrive_withdrawal(
     except HarnessControlError as exc:
         record.detail = str(exc)
         return
-    operation_ref = _mint_operation_ref(
-        service, authorization, entry.id, record.bridge_epoch, record.operation
+    scope = ControlScope(
+        service=service,
+        authorization=authorization,
+        ar_session_id=entry.id,
+        epoch=record.bridge_epoch,
     )
     fresh = _apply_withdrawal_result(
-        service,
-        authorization,
+        scope,
         channel,
-        entry.id,
-        record.bridge_epoch,
-        record.operation,
-        record.fingerprint,
-        record.withdraw_request_id,
+        WithdrawalTicket(
+            epoch=record.bridge_epoch,
+            identity=record.operation,
+            operation_ref=_mint_operation_ref(scope, record.operation),
+            fingerprint=record.fingerprint,
+            withdraw_request_id=record.withdraw_request_id,
+        ),
         result,
-        operation_ref=operation_ref,
     )
     record.phase = fresh.phase
     record.outcome = fresh.outcome
@@ -801,47 +745,24 @@ def _withdrawal_projection(record: WithdrawalRecord) -> WithdrawalOperationProje
     )
 
 
-def _mint_operation_ref(
-    service: ConversationControlService,
-    authorization: AuthorizationBinding,
-    ar_session_id: str,
-    epoch: str,
-    identity: OperationIdentity,
-) -> str:
+def _mint_operation_ref(scope: ControlScope, identity: OperationIdentity) -> str:
     return mint_ref(
-        service.secret,
+        scope.service.secret,
         "operation-ref",
-        authorization,
-        ar_session_id=ar_session_id,
-        bridge_epoch=epoch,
-        identity=identity,
+        RefBinding(scope.authorization, scope.ar_session_id, scope.epoch),
+        RefTarget(identity=identity),
     )
 
 
 def _verify_refs(
-    service: ConversationControlService,
-    authorization: AuthorizationBinding,
-    ar_session_id: str,
-    epoch: str,
+    scope: ControlScope,
     operation_ref: str,
     withdrawal_ref: str,
 ) -> OperationIdentity:
-    operation_payload = decode_ref(
-        service.secret,
-        operation_ref,
-        "operation-ref",
-        authorization,
-        ar_session_id=ar_session_id,
-        bridge_epoch=epoch,
-    )
-    withdrawal_payload = decode_ref(
-        service.secret,
-        withdrawal_ref,
-        "withdrawal-ref",
-        authorization,
-        ar_session_id=ar_session_id,
-        bridge_epoch=epoch,
-    )
+    service = scope.service
+    binding = RefBinding(scope.authorization, scope.ar_session_id, scope.epoch)
+    operation_payload = decode_ref(service.secret, operation_ref, "operation-ref", binding)
+    withdrawal_payload = decode_ref(service.secret, withdrawal_ref, "withdrawal-ref", binding)
     operation_identity = ref_identity(operation_payload)
     if ref_identity(withdrawal_payload) != operation_identity:
         raise OperationConflictError("withdrawal ref does not name the operation ref's row")

@@ -8,6 +8,18 @@ version = "3.0.0rc6"
 description = "Model Context Protocol server for Agents Remember."
 readme = "README.md"
 requires-python = ">=3.11"
+# The supported floor and the supported platforms, in the one place a consumer can read
+# them without cloning. `[tool.ruff] target-version` in the repository-root pyproject is
+# pinned to the same floor, and .github/workflows/quality-checks.yml runs the gate on all
+# three interpreters listed here. Windows is supported through WSL, which presents as
+# Linux to the interpreter and therefore has no separate classifier.
+classifiers = [
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Operating System :: POSIX :: Linux",
+  "Operating System :: MacOS",
+]
 dependencies = [
   "mcp>=1.12.4,<2",
   "pydantic>=2,<3",

@@ -14,7 +14,9 @@ from agents_remember.observer import projection_inputs
 from agents_remember.observer.projection_inputs import (
     ProjectionDomain,
     ProjectionInputState,
+    ProjectionReaders,
     ProjectionRefresh,
+    RefreshPass,
 )
 from agents_remember.observer.snapshots import (
     TASK_DOCUMENT_SCHEMA,
@@ -96,30 +98,35 @@ class ProjectionInputStateTests(unittest.TestCase):
             ):
                 full = state.read(
                     config,
+                    ProjectionReaders(
+                        lifecycle=lambda _root: [],
+                        repo_surfaces=lambda _config, _now: ([], [], []),
+                    ),
                     observer_root=observer_root,
-                    now=NOW,
-                    refresh=ProjectionRefresh.full(),
-                    landing_state=None,
-                    lifecycle_reader=lambda _root: [],
-                    repo_surface_reader=lambda _config, _now: ([], [], []),
+                    pass_=RefreshPass(now=NOW, refresh=ProjectionRefresh.full()),
                 )
                 heartbeat = state.read(
                     config,
+                    ProjectionReaders(
+                        lifecycle=lambda _root: [],
+                        repo_surfaces=lambda _config, _now: ([], [], []),
+                    ),
                     observer_root=observer_root,
-                    now=NOW + timedelta(seconds=5),
-                    refresh=ProjectionRefresh.heartbeat(),
-                    landing_state=None,
-                    lifecycle_reader=lambda _root: [],
-                    repo_surface_reader=lambda _config, _now: ([], [], []),
+                    pass_=RefreshPass(
+                        now=NOW + timedelta(seconds=5), refresh=ProjectionRefresh.heartbeat()
+                    ),
                 )
                 state.read(
                     config,
+                    ProjectionReaders(
+                        lifecycle=lambda _root: [],
+                        repo_surfaces=lambda _config, _now: ([], [], []),
+                    ),
                     observer_root=observer_root,
-                    now=NOW + timedelta(seconds=6),
-                    refresh=ProjectionRefresh.change(frozenset({ProjectionDomain.LIFECYCLES})),
-                    landing_state=None,
-                    lifecycle_reader=lambda _root: [],
-                    repo_surface_reader=lambda _config, _now: ([], [], []),
+                    pass_=RefreshPass(
+                        now=NOW + timedelta(seconds=6),
+                        refresh=ProjectionRefresh.change(frozenset({ProjectionDomain.LIFECYCLES})),
+                    ),
                 )
 
             self.assertEqual(task_reader.call_count, 1)
@@ -144,12 +151,12 @@ class ProjectionInputStateTests(unittest.TestCase):
 
                 first = state.read(
                     config,
+                    ProjectionReaders(
+                        lifecycle=lambda _root: [],
+                        repo_surfaces=lambda _config, _now: ([], [], []),
+                    ),
                     observer_root=observer_root,
-                    now=NOW,
-                    refresh=ProjectionRefresh.full(),
-                    landing_state=None,
-                    lifecycle_reader=lambda _root: [],
-                    repo_surface_reader=lambda _config, _now: ([], [], []),
+                    pass_=RefreshPass(now=NOW, refresh=ProjectionRefresh.full()),
                 )
                 self.assertEqual(len(first.task_documents), min(size, TASK_DOCUMENT_SUMMARY_LIMIT))
 
@@ -157,12 +164,15 @@ class ProjectionInputStateTests(unittest.TestCase):
                     path.unlink()
                 refreshed = state.read(
                     config,
+                    ProjectionReaders(
+                        lifecycle=lambda _root: [],
+                        repo_surfaces=lambda _config, _now: ([], [], []),
+                    ),
                     observer_root=observer_root,
-                    now=NOW + timedelta(seconds=1),
-                    refresh=ProjectionRefresh.change(frozenset({ProjectionDomain.TASKS})),
-                    landing_state=None,
-                    lifecycle_reader=lambda _root: [],
-                    repo_surface_reader=lambda _config, _now: ([], [], []),
+                    pass_=RefreshPass(
+                        now=NOW + timedelta(seconds=1),
+                        refresh=ProjectionRefresh.change(frozenset({ProjectionDomain.TASKS})),
+                    ),
                 )
 
                 remaining = size // 2

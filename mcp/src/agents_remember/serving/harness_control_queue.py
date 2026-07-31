@@ -31,12 +31,10 @@ from agents_remember.serving.harness_control_models import (
     WithdrawalResult,
 )
 from agents_remember.serving.harness_submission_authority import (
-    Clock,
+    BridgeSnapshotPort,
     HarnessSubmissionAuthority,
     OperationResolution,
-    Publisher,
-    SnapshotGetter,
-    SnapshotSetter,
+    SubmissionLimits,
 )
 
 
@@ -46,26 +44,19 @@ class HarnessControlQueue:
     def __init__(
         self,
         adapter: HarnessProtocolAdapter,
+        port: BridgeSnapshotPort,
         *,
         queue_limit: int,
         submission_limit: int,
-        clock: Clock,
-        snapshot: SnapshotGetter,
-        set_snapshot: SnapshotSetter,
-        publish: Publisher,
     ) -> None:
         self._adapter = adapter
-        self._snapshot = snapshot
-        self._set_snapshot = set_snapshot
-        self._publish = publish
+        self._snapshot = port.snapshot
+        self._set_snapshot = port.set_snapshot
+        self._publish = port.publish
         self._authority = HarnessSubmissionAuthority(
             adapter,
-            timeline_limit=queue_limit,
-            ledger_limit=submission_limit,
-            clock=clock,
-            snapshot=snapshot,
-            set_snapshot=set_snapshot,
-            publish=publish,
+            port,
+            SubmissionLimits(timeline=queue_limit, ledger=submission_limit),
         )
         self._started = False
 

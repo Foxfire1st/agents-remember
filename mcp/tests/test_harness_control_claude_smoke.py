@@ -9,6 +9,8 @@ import sys
 import unittest
 from pathlib import Path
 
+import pytest
+
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
@@ -21,6 +23,7 @@ from agents_remember.serving.harness_control_models import (
 )
 
 
+@pytest.mark.ar_claude_stream_smoke
 @unittest.skipUnless(
     os.environ.get("AR_CLAUDE_STREAM_SMOKE") == "1",
     "set AR_CLAUDE_STREAM_SMOKE=1 and optionally AR_CLAUDE_STREAM_BINARY to run",

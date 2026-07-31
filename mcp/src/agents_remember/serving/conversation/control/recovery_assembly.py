@@ -12,15 +12,19 @@ from __future__ import annotations
 
 from agents_remember.serving.conversation.control import attachments
 from agents_remember.serving.conversation.control.previews import payload_digest
-from agents_remember.serving.conversation.control.refs import OperationIdentity, mint_ref
+from agents_remember.serving.conversation.control.refs import (
+    OperationIdentity,
+    RefBinding,
+    RefTarget,
+    mint_ref,
+)
 from agents_remember.serving.conversation.control.service import (
     ControlChannel,
-    ConversationControlService,
+    ControlScope,
     JournalEntry,
 )
 from agents_remember.serving.conversation.models import (
     AttachmentRecoveryRef,
-    AuthorizationBinding,
     WithdrawalRecovery,
 )
 from agents_remember.serving.harness_control_models import (
@@ -74,11 +78,8 @@ def recovery_payload(
 
 
 def recover_attachment_refs(
-    service: ConversationControlService,
-    authorization: AuthorizationBinding,
+    scope: ControlScope,
     channel: ControlChannel,
-    ar_session_id: str,
-    epoch: str,
     identity: OperationIdentity,
     withdraw_request_id: str,
     expires_at: str,
@@ -87,25 +88,13 @@ def recover_attachment_refs(
         channel, identity.operation_id, recovery_expires_at=expires_at
     )
     return tuple(
-        attachment_recovery_ref(
-            service,
-            authorization,
-            ar_session_id,
-            epoch,
-            identity,
-            withdraw_request_id,
-            asset,
-            expires_at,
-        )
+        attachment_recovery_ref(scope, identity, withdraw_request_id, asset, expires_at)
         for asset in recoverable
     )
 
 
 def attachment_recovery_ref(
-    service: ConversationControlService,
-    authorization: AuthorizationBinding,
-    ar_session_id: str,
-    epoch: str,
+    scope: ControlScope,
     identity: OperationIdentity,
     withdraw_request_id: str,
     asset: attachments.AssetRecord,
@@ -113,14 +102,14 @@ def attachment_recovery_ref(
 ) -> AttachmentRecoveryRef:
     return AttachmentRecoveryRef(
         recovery_asset_ref=mint_ref(
-            service.secret,
+            scope.service.secret,
             "recovery-asset-ref",
-            authorization,
-            ar_session_id=ar_session_id,
-            bridge_epoch=epoch,
-            identity=identity,
-            withdraw_request_id=withdraw_request_id,
-            asset_id=asset.asset_id,
+            RefBinding(scope.authorization, scope.ar_session_id, scope.epoch),
+            RefTarget(
+                identity=identity,
+                withdraw_request_id=withdraw_request_id,
+                asset_id=asset.asset_id,
+            ),
         ),
         revision=1,
         kind=asset.kind,

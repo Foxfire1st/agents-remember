@@ -22,6 +22,7 @@ import hashlib
 import os
 import shutil
 from collections.abc import Awaitable, Callable, Mapping, Sequence
+from dataclasses import dataclass
 from pathlib import Path
 
 from agents_remember.observer.events import now_iso
@@ -149,6 +150,23 @@ def _pi_supported(evidence: CapabilityEvidence) -> HistoryCapabilities:
     )
 
 
+@dataclass(frozen=True)
+class GateProbes:
+    """How the registry finds out what is actually installed, as one substitutable surface.
+
+    A gate answers "can this harness serve a library here?" only by probing the machine: the codex
+    app-server probe, PATH lookup and the process environment are the three ways it looks. Faking
+    one while leaving the others live probes two different machines.
+    """
+
+    codex_probe: CodexProbe | None = None
+    which: Which | None = None
+    environment: Callable[[], Mapping[str, str]] = lambda: os.environ
+
+
+DEFAULT_GATE_PROBES = GateProbes()
+
+
 class LibraryGateRegistry:
     """Live production-path capability gates, cached per installed executable fingerprint."""
 
@@ -158,10 +176,11 @@ class LibraryGateRegistry:
         harness_registry: Callable[[], Sequence[Harness]],
         workspace_root: Path,
         helper_host: ConversationLibraryHelperHost,
-        codex_probe: CodexProbe | None = None,
-        which: Which | None = None,
-        environment: Callable[[], Mapping[str, str]] = lambda: os.environ,
+        probes: GateProbes = DEFAULT_GATE_PROBES,
     ) -> None:
+        codex_probe = probes.codex_probe
+        which = probes.which
+        environment = probes.environment
         self._registry = harness_registry
         self._workspace_root = workspace_root
         self._helper_host = helper_host

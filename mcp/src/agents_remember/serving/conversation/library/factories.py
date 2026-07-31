@@ -32,6 +32,7 @@ from agents_remember.serving.conversation.library.helper_host import (
 )
 from agents_remember.serving.conversation.library.open_service import (
     ConversationOpenService,
+    LibraryBinding,
     OpenOperationLedger,
 )
 from agents_remember.serving.conversation.library.pi import PiConversationLibrary
@@ -146,9 +147,7 @@ def build_open_service(
         runtime, shared, authorization, harness_id
     )
     return ConversationOpenService(
-        runtime=runtime,
-        shared=shared,
-        authorization=authorization,
+        LibraryBinding(runtime=runtime, shared=shared, authorization=authorization),
         library=ConversationLibraryService(
             runtime=runtime,
             shared=shared,

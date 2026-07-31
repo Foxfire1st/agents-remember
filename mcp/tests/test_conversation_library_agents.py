@@ -21,6 +21,7 @@ from agents_remember.serving.codex_app_server_protocol import JsonObject
 from agents_remember.serving.conversation.library.claude import ClaudeConversationLibrary
 from agents_remember.serving.conversation.library.codex import (
     _AGENT_SOURCE_KINDS,
+    AppServerSeams,
     CodexConversationLibrary,
 )
 from agents_remember.serving.conversation.library.cursor import (
@@ -275,8 +276,7 @@ class CodexLibraryAgentTests(unittest.IsolatedAsyncioTestCase):
             cursor_authority=LibraryCursorAuthority(mint_signing_key()),
             capabilities=_capabilities,  # type: ignore[arg-type]
             harness=CODEX,
-            env=lambda: {},
-            transport_factory=lambda: transport,
+            seams=AppServerSeams(env=lambda: {}, transport_factory=lambda: transport),
         )
         library._test_transport = transport  # type: ignore[attr-defined]
         return library

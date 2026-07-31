@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
 from pathlib import Path
 
 from agents_remember.kernel.coordination_context_resolver import (
@@ -23,6 +24,23 @@ from agents_remember.memory_quality.integrity.onboarding_drift_check.models impo
     DriftRow,
     EntityFingerprint,
 )
+
+
+@dataclass(frozen=True)
+class EntityCatalog:
+    """The repo entity catalog being classified.
+
+    Its onboarding file, the onboarding root every emitted row is relative to, the repository
+    it documents, the storage settings that stamp each row, and the ``lastUpdated`` date the
+    rows inherit. All five are read out of one document before any row is emitted, and every
+    row builder needs all five -- so the catalog travels as the document it is.
+    """
+
+    onboarding_file: Path
+    onboarding_root: Path
+    repository: str
+    settings: StorageSettings
+    last_updated: str
 
 
 def split_table_row(line: str) -> list[str]:
@@ -115,15 +133,15 @@ def parse_entity_inventory_names(path: Path) -> list[str]:
 
 
 def classify_entity_fingerprint(
-    onboarding_file: Path,
-    onboarding_root: Path,
+    catalog: EntityCatalog,
     repo_root: Path,
-    settings: StorageSettings,
-    repository: str,
-    last_updated: str,
     row: EntityFingerprint,
 ) -> DriftRow:
-    onboarding_ref = rel(onboarding_file, onboarding_root)
+    onboarding_file = catalog.onboarding_file
+    settings = catalog.settings
+    repository = catalog.repository
+    last_updated = catalog.last_updated
+    onboarding_ref = rel(onboarding_file, catalog.onboarding_root)
     source_ref = f"entity:{row.entity}"
 
     def _early_classification() -> DriftRow | None:
@@ -240,22 +258,14 @@ def classify_entity_fingerprint(
     )
 
 
-def missing_entity_fingerprint_row(
-    onboarding_file: Path,
-    onboarding_root: Path,
-    repository: str,
-    settings: StorageSettings,
-    last_updated: str,
-    entity: str,
-    note: str,
-) -> DriftRow:
+def missing_entity_fingerprint_row(catalog: EntityCatalog, entity: str, note: str) -> DriftRow:
     return DriftRow(
-        onboarding_file=rel(onboarding_file, onboarding_root),
+        onboarding_file=rel(catalog.onboarding_file, catalog.onboarding_root),
         source_file=f"entity:{entity}",
-        repository=repository,
-        storage_mode=settings.mode,
+        repository=catalog.repository,
+        storage_mode=catalog.settings.mode,
         last_verified_hash="",
-        last_verified_date=last_updated,
+        last_verified_date=catalog.last_updated,
         classification="missing verification",
         trust="medium",
         affected_sections=f"entity catalog; {entity}; verification",
@@ -263,21 +273,14 @@ def missing_entity_fingerprint_row(
     )
 
 
-def orphaned_entity_fingerprint_row(
-    onboarding_file: Path,
-    onboarding_root: Path,
-    repository: str,
-    settings: StorageSettings,
-    last_updated: str,
-    row: EntityFingerprint,
-) -> DriftRow:
+def orphaned_entity_fingerprint_row(catalog: EntityCatalog, row: EntityFingerprint) -> DriftRow:
     return DriftRow(
-        onboarding_file=rel(onboarding_file, onboarding_root),
+        onboarding_file=rel(catalog.onboarding_file, catalog.onboarding_root),
         source_file=f"entity:{row.entity}",
-        repository=repository,
-        storage_mode=settings.mode,
+        repository=catalog.repository,
+        storage_mode=catalog.settings.mode,
         last_verified_hash=row.fingerprint,
-        last_verified_date=last_updated,
+        last_verified_date=catalog.last_updated,
         classification="orphaned",
         trust="low",
         affected_sections=f"entity catalog; {row.entity}; verification",
@@ -291,17 +294,20 @@ def classify_entity_catalog(
     metadata = parse_table_metadata(onboarding_file)
     repository = metadata.get("repository", repo_root.name)
     last_updated = metadata.get("lastUpdated", "")
+    catalog = EntityCatalog(
+        onboarding_file=onboarding_file,
+        onboarding_root=onboarding_root,
+        repository=repository,
+        settings=settings,
+        last_updated=last_updated,
+    )
     inventory_entities = parse_entity_inventory_names(onboarding_file)
     rows = parse_entity_fingerprint_rows(onboarding_file)
     if not rows:
         if inventory_entities:
             return [
                 missing_entity_fingerprint_row(
-                    onboarding_file,
-                    onboarding_root,
-                    repository,
-                    settings,
-                    last_updated,
+                    catalog,
                     entity,
                     "Repo entity catalog has no parseable Entity Fingerprints table for this inventory entry.",
                 )
@@ -338,22 +344,14 @@ def classify_entity_catalog(
         ]
     fingerprint_entities = {row.entity for row in rows}
     rows_by_inventory = [
-        classify_entity_fingerprint(
-            onboarding_file, onboarding_root, repo_root, settings, repository, last_updated, row
-        )
+        classify_entity_fingerprint(catalog, repo_root, row)
         if row.entity in inventory_entities
-        else orphaned_entity_fingerprint_row(
-            onboarding_file, onboarding_root, repository, settings, last_updated, row
-        )
+        else orphaned_entity_fingerprint_row(catalog, row)
         for row in rows
     ]
     missing_inventory_rows = [
         missing_entity_fingerprint_row(
-            onboarding_file,
-            onboarding_root,
-            repository,
-            settings,
-            last_updated,
+            catalog,
             entity,
             "Entity inventory entry has no matching fingerprint row. Add a git-blob-set-v1 row with curated evidence paths before treating it as verified.",
         )

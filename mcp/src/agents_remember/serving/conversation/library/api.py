@@ -40,6 +40,7 @@ from agents_remember.serving.conversation.library.factories import (
     build_open_service,
     require_normalized_harness,
 )
+from agents_remember.serving.conversation.library.open_service import OpenRequest
 from agents_remember.serving.conversation.library.scope import clamp_limit
 from agents_remember.serving.conversation.models import (
     LibraryListCursor,
@@ -155,10 +156,12 @@ async def api_library_open(
         return await service.open(
             harness,
             conversation_key,
-            request_id=body.request_id,
-            expected_identity_digest=body.expected_identity_digest,
-            cwd=body.cwd,
-            launch_context=_launch_context(body),
+            OpenRequest(
+                request_id=body.request_id,
+                expected_identity_digest=body.expected_identity_digest,
+                cwd=body.cwd,
+                launch_context=_launch_context(body),
+            ),
         )
 
     return await _open_call(run)

@@ -26,6 +26,7 @@ import base64
 import hashlib
 import hmac
 import json
+from dataclasses import dataclass
 from typing import Literal
 
 from agents_remember.errors import AgentsRememberError
@@ -109,34 +110,53 @@ def _sign(secret: bytes, body: str) -> str:
     return hmac.new(secret, body.encode("ascii"), hashlib.sha256).hexdigest()[:32]
 
 
+@dataclass(frozen=True)
+class RefBinding:
+    """What a reference is bound TO: the caller, the session, and the exact bridge epoch.
+
+    A ref is only meaningful re-bound to all three. Minting against one of them and verifying
+    against another is precisely the confused-deputy the branding exists to stop, so mint and
+    decode take the same binding value rather than three parallel arguments each.
+    """
+
+    authorization: AuthorizationBinding
+    ar_session_id: str
+    bridge_epoch: str
+
+
+@dataclass(frozen=True)
+class RefTarget:
+    """What a reference POINTS AT: the operation, and optionally the withdrawal or asset inside it."""
+
+    identity: OperationIdentity
+    withdraw_request_id: str | None = None
+    asset_id: str | None = None
+
+
 def mint_ref(
     secret: bytes,
     purpose: RefPurpose,
-    authorization: AuthorizationBinding,
-    *,
-    ar_session_id: str,
-    bridge_epoch: str,
-    identity: OperationIdentity,
-    withdraw_request_id: str | None = None,
-    asset_id: str | None = None,
+    binding: RefBinding,
+    target: RefTarget,
 ) -> str:
     """Mint one purpose-branded opaque reference over exact identity fields."""
 
+    identity = target.identity
     payload: dict[str, object] = {
         "v": REF_SCHEMA_VERSION,
         "purpose": purpose,
-        "principal": authorization.principal_id,
-        "tenant": authorization.tenant_id,
-        "session": ar_session_id,
-        "epoch": bridge_epoch,
+        "principal": binding.authorization.principal_id,
+        "tenant": binding.authorization.tenant_id,
+        "session": binding.ar_session_id,
+        "epoch": binding.bridge_epoch,
         "kind": identity.kind,
         "operationId": identity.operation_id,
         "sequence": identity.sequence,
     }
-    if withdraw_request_id is not None:
-        payload["withdrawRequestId"] = withdraw_request_id
-    if asset_id is not None:
-        payload["assetId"] = asset_id
+    if target.withdraw_request_id is not None:
+        payload["withdrawRequestId"] = target.withdraw_request_id
+    if target.asset_id is not None:
+        payload["assetId"] = target.asset_id
     body = _b64encode(_canonical(payload))
     return f"{_PREFIX_BY_PURPOSE[purpose]}{body}.{_sign(secret, body)}"
 
@@ -145,10 +165,7 @@ def decode_ref(
     secret: bytes,
     token: str,
     purpose: RefPurpose,
-    authorization: AuthorizationBinding,
-    *,
-    ar_session_id: str,
-    bridge_epoch: str,
+    binding: RefBinding,
 ) -> dict[str, object]:
     """Decode and fully re-bind one opaque reference; every failure is typed."""
 
@@ -169,9 +186,9 @@ def decode_ref(
     _check_payload(
         payload,
         purpose,
-        authorization,
-        ar_session_id=ar_session_id,
-        bridge_epoch=bridge_epoch,
+        binding.authorization,
+        ar_session_id=binding.ar_session_id,
+        bridge_epoch=binding.bridge_epoch,
     )
     return payload
 

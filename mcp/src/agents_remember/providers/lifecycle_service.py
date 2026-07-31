@@ -31,17 +31,29 @@ class ProviderLifecycleServiceConfig:
         )
 
 
+@dataclass(frozen=True)
+class CgcLifecycleRequest:
+    """One typed CGC lifecycle action and the inputs that action needs.
+
+    ``native_args`` carry a ``run`` query; ``port``/``context`` carry where a
+    ``visualize`` server binds and which graph it serves. The action and its
+    inputs are only meaningful together, so they arrive as one request.
+    """
+
+    action: str
+    repo_id: str | None = None
+    native_args: tuple[str, ...] = ()
+    port: int = 8000
+    context: str | None = None
+
+
 def run_cgc_lifecycle(
     service_config: ProviderLifecycleServiceConfig,
-    *,
-    action: str,
-    repo_id: str | None = None,
-    native_args: list[str] | None = None,
-    port: int = 8000,
-    context: str | None = None,
+    request: CgcLifecycleRequest,
 ) -> dict[str, Any]:
     """Run a typed CGC lifecycle action from trusted service settings."""
 
+    action = request.action
     allowed_actions = {"run", "visualize", "refresh-all"}
     if action not in allowed_actions:
         raise ValueError(f"unsupported CGC service action: {action}")
@@ -54,11 +66,11 @@ def run_cgc_lifecycle(
         dry_run=config.dry_run,
         json=False,
         timeout=config.timeout,
-        repo_id=stable_provider_id(repo_id) if repo_id else None,
+        repo_id=stable_provider_id(request.repo_id) if request.repo_id else None,
         code_repo_root=None,
-        native_args=list(native_args or []),
-        port=port,
-        context=context,
+        native_args=list(request.native_args),
+        port=request.port,
+        context=request.context,
         lifecycle_json=False,
     )
     try:

@@ -7,9 +7,15 @@ from pathlib import Path
 from unittest import mock
 
 import pytest
-from agents_remember.controlplane.operator_inbox_records import create_operator_inbox_entry
+from agents_remember.controlplane.operator_inbox_records import (
+    InboxAddress,
+    InboxMessage,
+    InboxPoster,
+    InboxRouting,
+    create_operator_inbox_entry,
+)
 from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
-from agents_remember.controlplane.records import GateRecord, decide_gate
+from agents_remember.controlplane.records import GateRecord, GateVerdict, decide_gate
 from agents_remember.controlplane.store import GateStore
 from agents_remember.errors import HarnessControlClientError, HarnessControlError
 from agents_remember.serving.harness_control_models import (
@@ -75,10 +81,7 @@ def test_pending_interaction_round_trips_through_durable_gate(tmp_path: Path) ->
     store.append(
         decide_gate(
             gate,
-            decision="approve",
-            by="developer",
-            via="dashboard",
-            note="allow",
+            GateVerdict(decision="approve", by="developer", via="dashboard", note="allow"),
             now=NOW,
         )
     )
@@ -146,10 +149,9 @@ def test_structured_gate_answer_map_round_trips_verbatim(tmp_path: Path) -> None
     store.append(
         decide_gate(
             gate,
-            decision="approve",
-            by="developer",
-            via="dashboard",
-            note=json.dumps(answers),
+            GateVerdict(
+                decision="approve", by="developer", via="dashboard", note=json.dumps(answers)
+            ),
             now=NOW,
         )
     )
@@ -174,10 +176,7 @@ def test_unusable_structured_note_reopens_the_gate_honestly(
     store.append(
         decide_gate(
             gate,
-            decision="approve",
-            by="developer",
-            via="dashboard",
-            note="Safe",
+            GateVerdict(decision="approve", by="developer", via="dashboard", note="Safe"),
             now=NOW,
         )
     )
@@ -209,10 +208,7 @@ def test_failed_respond_reopens_the_gate_instead_of_silently_swallowing(
     store.append(
         decide_gate(
             gate,
-            decision="approve",
-            by="developer",
-            via="dashboard",
-            note="allow",
+            GateVerdict(decision="approve", by="developer", via="dashboard", note="allow"),
             now=NOW,
         )
     )
@@ -251,12 +247,7 @@ def _decided_gate(
         candidate for candidate in store.current("L1").values() if candidate.state == "open"
     )
     decided = decide_gate(
-        gate,
-        decision="approve",
-        by="developer",
-        via="dashboard",
-        note=note,
-        now=NOW,
+        gate, GateVerdict(decision="approve", by="developer", via="dashboard", note=note), now=NOW
     )
     store.append(decided)
     return decided
@@ -363,10 +354,7 @@ def test_delivery_attempt_budget_belongs_to_one_decision_not_the_gate(tmp_path: 
     store.append(
         decide_gate(
             reopened,
-            decision="approve",
-            by="developer",
-            via="dashboard",
-            note="allow",
+            GateVerdict(decision="approve", by="developer", via="dashboard", note="allow"),
             now="2026-07-14T11:00:00+00:00",
         )
     )
@@ -393,10 +381,7 @@ def test_disappeared_interaction_expires_the_current_open_gate(tmp_path: Path) -
     store.append(
         decide_gate(
             first_gate,
-            decision="approve",
-            by="developer",
-            via="dashboard",
-            note="allow",
+            GateVerdict(decision="approve", by="developer", via="dashboard", note="allow"),
             now=NOW,
         )
     )
@@ -429,14 +414,11 @@ def test_transcript_completion_updates_but_never_consumes_inbox(tmp_path: Path) 
     entry = _entry(tmp_path)
     inbox = OperatorInboxStore(tmp_path)
     row = create_operator_inbox_entry(
+        InboxMessage(ask="Continue", response="Please continue"),
         entry_id="inbox-1",
         now=NOW,
-        lifecycle_id="L1",
-        agent_id="worker-1",
-        ask="Continue",
-        response="Please continue",
-        created_by="manager-1",
-        created_via="cli",
+        routing=InboxRouting(address=InboxAddress(lifecycle_id="L1", agent_id="worker-1")),
+        poster=InboxPoster(created_by="manager-1", created_via="cli"),
     ).model_copy(
         update={
             "deliveryState": "delivered",
@@ -482,14 +464,11 @@ def test_null_request_id_completion_uses_unique_accepted_vendor_correlation(
     entry = _entry(tmp_path)
     inbox = OperatorInboxStore(tmp_path)
     row = create_operator_inbox_entry(
+        InboxMessage(ask="Continue", response="Please continue"),
         entry_id="inbox-1",
         now=NOW,
-        lifecycle_id="L1",
-        agent_id="worker-1",
-        ask="Continue",
-        response="Please continue",
-        created_by="manager-1",
-        created_via="cli",
+        routing=InboxRouting(address=InboxAddress(lifecycle_id="L1", agent_id="worker-1")),
+        poster=InboxPoster(created_by="manager-1", created_via="cli"),
     ).model_copy(
         update={
             "deliveryState": "delivered",
@@ -573,14 +552,11 @@ def test_null_request_id_completion_rejects_ambiguous_vendor_correlation(
     for entry_id in ("inbox-1", "inbox-2"):
         inbox.append(
             create_operator_inbox_entry(
+                InboxMessage(ask="Continue", response="Please continue"),
                 entry_id=entry_id,
                 now=NOW,
-                lifecycle_id="L1",
-                agent_id="worker-1",
-                ask="Continue",
-                response="Please continue",
-                created_by="manager-1",
-                created_via="cli",
+                routing=InboxRouting(address=InboxAddress(lifecycle_id="L1", agent_id="worker-1")),
+                poster=InboxPoster(created_by="manager-1", created_via="cli"),
             ).model_copy(
                 update={
                     "deliveryState": "delivered",

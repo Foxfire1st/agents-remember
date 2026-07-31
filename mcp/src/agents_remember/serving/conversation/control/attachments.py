@@ -36,6 +36,8 @@ from agents_remember.serving.conversation.control.asset_spool import (
 from agents_remember.serving.conversation.control.previews import payload_digest
 from agents_remember.serving.conversation.control.refs import (
     OperationIdentity,
+    RefBinding,
+    RefTarget,
     decode_ref,
     mint_ref,
     ref_identity,
@@ -46,6 +48,8 @@ from agents_remember.serving.conversation.control.service import (
     MAX_SUBMITS_PER_CHANNEL,
     STAGED_ASSET_TTL_SECONDS,
     ControlChannel,
+    ControlRequest,
+    ControlScope,
     ConversationControlService,
     JournalEntry,
     OperationConflictError,
@@ -65,7 +69,10 @@ from agents_remember.serving.conversation.models import (
     OperationFingerprint,
     operation_fingerprint,
 )
-from agents_remember.serving.harness_control_client import submit_control_prompt
+from agents_remember.serving.harness_control_client import (
+    ControlSubmission,
+    submit_control_prompt,
+)
 from agents_remember.serving.harness_control_models import (
     OperationTimelineItem,
     SubmissionReceipt,
@@ -126,16 +133,18 @@ class StageAnswer:
 
 
 async def stage(
-    service: ConversationControlService,
-    authorization: AuthorizationBinding,
-    ar_session_id: str,
+    request: ControlRequest,
     *,
-    expected_bridge_epoch: str,
     request_id: str,
     kind_capabilities: dict[str, AttachmentCapability],
     uploads: list[StagedUpload],
 ) -> StageAnswer:
     """Stage and bind caller uploads; idempotent under the exact same content."""
+
+    service = request.service
+    authorization = request.authorization
+    ar_session_id = request.ar_session_id
+    expected_bridge_epoch = request.expected_bridge_epoch
 
     require_safe_component(request_id, label="requestId")
     if not 1 <= len(uploads) <= 4:
@@ -229,29 +238,20 @@ async def submit(
         submit_control_prompt,
         entry,
         text,
-        source="cockpit",
-        request_id=body.request_id,
-        expected_bridge_epoch=epoch,
-        assets=[wire_asset(record) for record in asset_records] or None,
+        ControlSubmission(
+            source="cockpit",
+            request_id=body.request_id,
+            expected_bridge_epoch=epoch,
+            assets=[wire_asset(record) for record in asset_records] or None,
+        ),
     )
     if receipt.acceptance not in _TERMINAL_SUBMIT_ACCEPTANCES:
         for record in asset_records:
             record.consumed = True
-    answer = await _admit(
-        service,
-        entry,
-        channel,
-        ar_session_id,
-        epoch,
-        body,
-        operation,
-        receipt,
-        text=text,
-        asset_records=asset_records,
-    )
-    operation_ref = await _mint_queue_ref(
-        service, authorization, entry, ar_session_id, epoch, body.request_id
-    )
+    content = SubmittedContent(body=body, receipt=receipt, text=text, asset_records=asset_records)
+    scope = ControlScope(service, authorization, ar_session_id, epoch)
+    answer = await _admit(epoch, content, operation)
+    operation_ref = await _mint_queue_ref(scope, entry, body.request_id)
     answer = SubmitAnswer(
         request_id=answer.request_id,
         acceptance=answer.acceptance,
@@ -266,7 +266,7 @@ async def submit(
         operation.submit_receipt = receipt
         operation.operation_ref = operation_ref
         operation.revision += 1
-    _store_submit_artifacts(channel, body, fingerprint, answer, receipt, text, asset_records)
+    _store_submit_artifacts(channel, content, fingerprint, answer)
     return answer
 
 
@@ -298,17 +298,31 @@ def _replay_prior_submit(
     return prior_answer
 
 
+@dataclass(frozen=True)
+class SubmittedContent:
+    """What one cockpit submit actually sent, and what the bridge said about it.
+
+    The request body, the sanitized text the daemon holds for recovery, the assets bound to it and
+    the receipt that came back describe a single submission. Splitting them let the journal entry
+    be written from one submission's text against another's receipt.
+    """
+
+    body: ConversationSubmitRequest
+    receipt: SubmissionReceipt
+    text: str
+    asset_records: list[AssetRecord]
+
+
 def _store_submit_artifacts(
     channel: ControlChannel,
-    body: ConversationSubmitRequest,
+    content: SubmittedContent,
     fingerprint: OperationFingerprint,
     answer: SubmitAnswer,
-    receipt: SubmissionReceipt,
-    text: str,
-    asset_records: list[AssetRecord],
 ) -> None:
     """Record the idempotent replay answer and the cockpit submit journal entry."""
 
+    body, receipt = content.body, content.receipt
+    text, asset_records = content.text, content.asset_records
     channel.submits[body.request_id] = (fingerprint, answer)
     channel.submits.move_to_end(body.request_id)
     while len(channel.submits) > MAX_SUBMITS_PER_CHANNEL:
@@ -329,15 +343,17 @@ def _store_submit_artifacts(
 
 
 async def attachment_status(
-    service: ConversationControlService,
-    authorization: AuthorizationBinding,
-    ar_session_id: str,
+    request: ControlRequest,
     *,
-    expected_bridge_epoch: str,
     request_id: str,
     reconcile: bool,
 ) -> AttachmentOperationProjection:
     """Read (and, for reconcile, advance from the retained timeline) one operation."""
+
+    service = request.service
+    authorization = request.authorization
+    ar_session_id = request.ar_session_id
+    expected_bridge_epoch = request.expected_bridge_epoch
 
     del authorization
     entry = service.resolve_entry(ar_session_id)
@@ -357,15 +373,17 @@ async def attachment_status(
 
 
 async def rebind(
-    service: ConversationControlService,
-    authorization: AuthorizationBinding,
-    ar_session_id: str,
+    request: ControlRequest,
     *,
-    expected_bridge_epoch: str,
     recovery_asset_ref: str,
     request_id: str,
 ) -> StageAnswer:
     """Exchange one authorized recovery asset for a new one-use staged asset."""
+
+    service = request.service
+    authorization = request.authorization
+    ar_session_id = request.ar_session_id
+    expected_bridge_epoch = request.expected_bridge_epoch
 
     require_safe_component(request_id, label="requestId")
     entry = service.resolve_entry(ar_session_id)
@@ -374,9 +392,7 @@ async def rebind(
         service.secret,
         recovery_asset_ref,
         "recovery-asset-ref",
-        authorization,
-        ar_session_id=ar_session_id,
-        bridge_epoch=epoch,
+        RefBinding(authorization, ar_session_id, epoch),
     )
     identity = ref_identity(payload)
     withdraw_request_id = payload.get("withdrawRequestId")
@@ -397,7 +413,11 @@ async def rebind(
     verify_recoverable_bytes(asset)
     assets_root = service.spool_assets_root(entry)
     target_operation = _rebind_target(
-        service, channel, authorization, ar_session_id, epoch, request_id, source_operation, asset
+        ControlScope(service, authorization, ar_session_id, epoch),
+        channel,
+        request_id,
+        source_operation,
+        asset,
     )
     new_record = exchange_bytes(
         assets_root, request_id, asset, position=len(target_operation.assets) + 1
@@ -542,19 +562,11 @@ def _recoverable_operation(channel: ControlChannel, request_id: str) -> Attachme
 
 
 async def _admit(
-    service: ConversationControlService,
-    entry: TerminalCatalogEntry,
-    channel: ControlChannel,
-    ar_session_id: str,
     epoch: str,
-    body: ConversationSubmitRequest,
+    content: SubmittedContent,
     operation: AttachmentOperation | None,
-    receipt: SubmissionReceipt,
-    *,
-    text: str,
-    asset_records: list[AssetRecord],
 ) -> SubmitAnswer:
-    del service, entry, channel, ar_session_id, text, asset_records
+    body, receipt = content.body, content.receipt
     if operation is not None:
         if receipt.acceptance in _TERMINAL_SUBMIT_ACCEPTANCES:
             operation.phase = "failed"
@@ -580,13 +592,12 @@ async def _admit(
 
 
 async def _mint_queue_ref(
-    service: ConversationControlService,
-    authorization: AuthorizationBinding,
+    scope: ControlScope,
     entry: TerminalCatalogEntry,
-    ar_session_id: str,
-    epoch: str,
     request_id: str,
 ) -> str | None:
+    service, authorization = scope.service, scope.authorization
+    ar_session_id, epoch = scope.ar_session_id, scope.epoch
     items = await service.read_full_timeline(entry, expected_bridge_epoch=epoch)
     row = next(
         (item for item in items if item.kind == "prompt" and item.operation_id == request_id),
@@ -597,11 +608,11 @@ async def _mint_queue_ref(
     return mint_ref(
         service.secret,
         "operation-ref",
-        authorization,
-        ar_session_id=ar_session_id,
-        bridge_epoch=epoch,
-        identity=OperationIdentity(
-            kind=row.kind, operation_id=row.operation_id, sequence=row.sequence
+        RefBinding(authorization, ar_session_id, epoch),
+        RefTarget(
+            identity=OperationIdentity(
+                kind=row.kind, operation_id=row.operation_id, sequence=row.sequence
+            )
         ),
     )
 
@@ -654,15 +665,14 @@ def _timeline_transition(
 
 
 def _rebind_target(
-    service: ConversationControlService,
+    scope: ControlScope,
     channel: ControlChannel,
-    authorization: AuthorizationBinding,
-    ar_session_id: str,
-    epoch: str,
     request_id: str,
     source: AttachmentOperation,
     asset: AssetRecord,
 ) -> AttachmentOperation:
+    service, authorization = scope.service, scope.authorization
+    ar_session_id, epoch = scope.ar_session_id, scope.epoch
     existing = channel.attachments.get(request_id)
     if existing is not None:
         target = _as_operation(existing)

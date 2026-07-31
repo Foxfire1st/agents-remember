@@ -33,13 +33,26 @@ class SkillsInstallSummary:
         }
 
 
-def _validate_install_skills_args(
-    *, install_root: Path, overwrite: bool, archive_existing: bool
-) -> None:
-    if not install_root.is_absolute():
-        raise ValueError("install_root must be an absolute path")
-    if overwrite and archive_existing:
-        raise ValueError("overwrite and archive_existing are mutually exclusive")
+@dataclass(frozen=True)
+class SkillsInstallRequest:
+    """What one skills install is asked to do.
+
+    Where the packaged skills land, whether it writes at all, and how it treats
+    a skill directory that is already there — the collision rule is what every
+    per-skill copy has to consult, so it rides with the destination.
+    """
+
+    install_root: Path
+    dry_run: bool = False
+    overwrite: bool = False
+    archive_existing: bool = False
+
+    def validated(self) -> SkillsInstallRequest:
+        if not self.install_root.is_absolute():
+            raise ValueError("install_root must be an absolute path")
+        if self.overwrite and self.archive_existing:
+            raise ValueError("overwrite and archive_existing are mutually exclusive")
+        return self
 
 
 def install_skills(
@@ -49,11 +62,12 @@ def install_skills(
     overwrite: bool = False,
     archive_existing: bool = False,
 ) -> dict[str, Any]:
-    _validate_install_skills_args(
+    request = SkillsInstallRequest(
         install_root=install_root,
+        dry_run=dry_run,
         overwrite=overwrite,
         archive_existing=archive_existing,
-    )
+    ).validated()
 
     with packaged_source_root() as source_root:
         skills_root = source_root / "runtime" / "skills"
@@ -76,13 +90,10 @@ def install_skills(
             if not re.fullmatch(r"[a-z0-9][a-z0-9-]*", name):
                 raise ValueError(f"unsupported skill name in {skill_file}: {name}")
             _copy_skill_tree(
+                request,
+                summary,
                 source=skill_dir,
                 destination=install_root / name,
-                install_root=install_root,
-                summary=summary,
-                dry_run=dry_run,
-                overwrite=overwrite,
-                archive_existing=archive_existing,
             )
 
     return {
@@ -96,20 +107,18 @@ def install_skills(
 
 
 def _copy_skill_tree(
+    request: SkillsInstallRequest,
+    summary: SkillsInstallSummary,
     *,
     source: Path,
     destination: Path,
-    install_root: Path,
-    summary: SkillsInstallSummary,
-    dry_run: bool,
-    overwrite: bool,
-    archive_existing: bool,
 ) -> None:
+    dry_run = request.dry_run
     if _exists_or_link(destination):
-        if archive_existing:
-            archived = _archive_path(destination, install_root, dry_run)
+        if request.archive_existing:
+            archived = _archive_path(destination, request.install_root, dry_run)
             summary.archived.append(archived.as_posix())
-        elif overwrite:
+        elif request.overwrite:
             if not dry_run:
                 if destination.is_dir() and not _is_link(destination):
                     shutil.rmtree(destination)

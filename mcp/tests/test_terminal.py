@@ -35,7 +35,9 @@ sys.path.insert(0, str(MCP_SRC))
 from agents_remember.serving.terminal import (
     PtyProcess,
     TerminalHost,
+    TerminalHostSeams,
     TerminalSession,
+    TerminalSessionSpec,
     _build_tmux_command,
     _parse_tmux_version,
     _spawn_pty,
@@ -311,11 +313,13 @@ class TerminalHostRegistryTests(unittest.TestCase):
         self.created_env: list[dict[str, str]] = []
         self.configured_tmux: list[str] = []
         self.host = TerminalHost(
-            spawn=self.spawner,
-            tmux_probe=self.existing_tmux.__contains__,
-            tmux_killer=self.killed_tmux.append,
-            tmux_creator=self._create_tmux,
-            tmux_configurer=self.configured_tmux.append,
+            TerminalHostSeams(
+                spawn=self.spawner,
+                tmux_probe=self.existing_tmux.__contains__,
+                tmux_killer=self.killed_tmux.append,
+                tmux_creator=self._create_tmux,
+                tmux_configurer=self.configured_tmux.append,
+            )
         )
         self.tmp = Path(tempfile.mkdtemp())
 
@@ -332,7 +336,9 @@ class TerminalHostRegistryTests(unittest.TestCase):
     def test_open_builds_tmux_command_and_registers(self) -> None:
         # Pinned to a known-modern tmux so the argv assertion does not depend on the host's binary.
         with mock.patch("agents_remember.serving.terminal._tmux_version", return_value=(3, 4)):
-            session = self.host.open("lc1", cwd=self.tmp, command=["claude"], lifecycle_id="LC-1")
+            session = self.host.open(
+                "lc1", TerminalSessionSpec(cwd=self.tmp, command=("claude",), lifecycle_id="LC-1")
+            )
         self.assertEqual(
             self.spawner.calls[0][:6], ["tmux", "-T", "sync", "new-session", "-A", "-s"]
         )
@@ -349,9 +355,14 @@ class TerminalHostRegistryTests(unittest.TestCase):
         # sole client-attaching global here, so keeping it would cost every browser attach (both
         # kinds), not just the synchronized-output framing it buys.
         with mock.patch("agents_remember.serving.terminal._tmux_version", return_value=(3, 1)):
-            durable = self.host.open("lc1", cwd=self.tmp, command=["claude"], lifecycle_id="LC-1")
+            durable = self.host.open(
+                "lc1", TerminalSessionSpec(cwd=self.tmp, command=("claude",), lifecycle_id="LC-1")
+            )
             self.host.attach(
-                "lc1", cwd=self.tmp, command=["claude"], lifecycle_id="LC-1", name=durable.tmux_name
+                "lc1",
+                TerminalSessionSpec(
+                    cwd=self.tmp, command=("claude",), lifecycle_id="LC-1", name=durable.tmux_name
+                ),
             )
         self.assertEqual(len(self.spawner.calls), 2)
         for argv in self.spawner.calls:
@@ -360,18 +371,26 @@ class TerminalHostRegistryTests(unittest.TestCase):
             self.assertEqual(argv[:4], ["tmux", "new-session", "-A", "-s"])
 
     def test_open_is_idempotent_for_live_session(self) -> None:
-        first = self.host.open("lc1", cwd=self.tmp, command=["cat"])
-        second = self.host.open("lc1", cwd=self.tmp, command=["cat"])
+        first = self.host.open("lc1", TerminalSessionSpec(cwd=self.tmp, command=("cat",)))
+        second = self.host.open("lc1", TerminalSessionSpec(cwd=self.tmp, command=("cat",)))
         self.assertIs(first, second)
         self.assertEqual(len(self.spawner.calls), 1)
 
     def test_attach_creates_unregistered_per_connection_clients(self) -> None:
-        durable = self.host.open("lc1", cwd=self.tmp, command=["cat"], lifecycle_id="LC-1")
+        durable = self.host.open(
+            "lc1", TerminalSessionSpec(cwd=self.tmp, command=("cat",), lifecycle_id="LC-1")
+        )
         first = self.host.attach(
-            "lc1", cwd=self.tmp, command=["cat"], lifecycle_id="LC-1", name=durable.tmux_name
+            "lc1",
+            TerminalSessionSpec(
+                cwd=self.tmp, command=("cat",), lifecycle_id="LC-1", name=durable.tmux_name
+            ),
         )
         second = self.host.attach(
-            "lc1", cwd=self.tmp, command=["cat"], lifecycle_id="LC-1", name=durable.tmux_name
+            "lc1",
+            TerminalSessionSpec(
+                cwd=self.tmp, command=("cat",), lifecycle_id="LC-1", name=durable.tmux_name
+            ),
         )
 
         self.assertIsNot(first, durable)
@@ -384,7 +403,9 @@ class TerminalHostRegistryTests(unittest.TestCase):
         self.assertTrue(second.is_alive)
 
     def test_ensure_creates_detached_tmux_without_registered_client(self) -> None:
-        binding = self.host.ensure("lc1", cwd=self.tmp, command=["cat"], lifecycle_id="LC-1")
+        binding = self.host.ensure(
+            "lc1", TerminalSessionSpec(cwd=self.tmp, command=("cat",), lifecycle_id="LC-1")
+        )
 
         self.assertEqual(binding.sid, "lc1")
         self.assertEqual(binding.tmux_name, "ar-lc1")
@@ -399,7 +420,7 @@ class TerminalHostRegistryTests(unittest.TestCase):
     def test_ensure_is_idempotent_when_tmux_session_exists(self) -> None:
         self.existing_tmux.add("ar-lc1")
 
-        binding = self.host.ensure("lc1", cwd=self.tmp, command=["cat"])
+        binding = self.host.ensure("lc1", TerminalSessionSpec(cwd=self.tmp, command=("cat",)))
 
         self.assertEqual(binding.tmux_name, "ar-lc1")
         self.assertEqual(self.created_tmux, [])
@@ -407,16 +428,16 @@ class TerminalHostRegistryTests(unittest.TestCase):
         self.assertEqual(self.configured_tmux, ["ar-lc1"])
 
     def test_open_replaces_dead_session(self) -> None:
-        first = self.host.open("lc1", cwd=self.tmp, command=["cat"])
+        first = self.host.open("lc1", TerminalSessionSpec(cwd=self.tmp, command=("cat",)))
         self.spawner.children[0].terminate()  # simulate the child exiting
         self.assertFalse(first.is_alive)
-        second = self.host.open("lc1", cwd=self.tmp, command=["cat"])
+        second = self.host.open("lc1", TerminalSessionSpec(cwd=self.tmp, command=("cat",)))
         self.assertIsNot(first, second)
         self.assertEqual(len(self.spawner.calls), 2)
         self.assertTrue(second.is_alive)
 
     def test_close_unregisters(self) -> None:
-        self.host.open("lc1", cwd=self.tmp, command=["cat"])
+        self.host.open("lc1", TerminalSessionSpec(cwd=self.tmp, command=("cat",)))
         self.host.close("lc1")
         self.assertIsNone(self.host.get("lc1"))
         self.assertEqual(self.host.sessions(), [])
@@ -433,7 +454,9 @@ class TerminalHostRegistryTests(unittest.TestCase):
             self.host.resize("ghost", cols=80, rows=24)
 
     def test_custom_name_overrides_derived(self) -> None:
-        session = self.host.open("lc1", cwd=self.tmp, command=["cat"], name="custom")
+        session = self.host.open(
+            "lc1", TerminalSessionSpec(cwd=self.tmp, command=("cat",), name="custom")
+        )
         self.assertEqual(session.tmux_name, "custom")
         self.assertEqual(self.spawner.calls[0][6], "custom")
 
@@ -443,7 +466,7 @@ class TerminalHostRegistryTests(unittest.TestCase):
         self.assertFalse(self.host.has_session("ar-missing"))
 
     def test_terminate_kills_tmux_and_unregisters(self) -> None:
-        self.host.open("lc1", cwd=self.tmp, command=["cat"])
+        self.host.open("lc1", TerminalSessionSpec(cwd=self.tmp, command=("cat",)))
         self.host.terminate("lc1")
         self.assertEqual(self.killed_tmux, ["ar-lc1"])
         self.assertIsNone(self.host.get("lc1"))
@@ -459,23 +482,25 @@ class TerminalHostPtyTests(unittest.TestCase):
     """Drive the host against a real kernel PTY (tmux wrapper stripped by ``_raw_spawn``)."""
 
     def setUp(self) -> None:
-        self.host = TerminalHost(spawn=_raw_spawn)
+        self.host = TerminalHost(TerminalHostSeams(spawn=_raw_spawn))
         self.tmp = Path(tempfile.mkdtemp())
 
     def tearDown(self) -> None:
         self.host.shutdown()
 
     def test_write_then_read_roundtrip(self) -> None:
-        self.host.open("io", cwd=self.tmp, command=["cat"])
+        self.host.open("io", TerminalSessionSpec(cwd=self.tmp, command=("cat",)))
         self.host.write("io", b"ar-terminal\n")  # cat echoes the line back through the PTY
         self.assertIn(b"ar-terminal", _read_until(self.host, "io", b"ar-terminal"))
 
     def test_read_nonblocking_returns_empty_when_idle(self) -> None:
-        self.host.open("io", cwd=self.tmp, command=["cat"])  # cat waits for stdin
+        self.host.open(
+            "io", TerminalSessionSpec(cwd=self.tmp, command=("cat",))
+        )  # cat waits for stdin
         self.assertEqual(self.host.read_nonblocking("io"), b"")
 
     def test_resize_sets_pty_winsize(self) -> None:
-        session = self.host.open("io", cwd=self.tmp, command=["cat"])
+        session = self.host.open("io", TerminalSessionSpec(cwd=self.tmp, command=("cat",)))
         self.host.resize("io", cols=120, rows=40)
         packed = fcntl_ioctl_getwinsize(session.master_fd)
         rows, cols, _, _ = struct.unpack("HHHH", packed)
@@ -484,7 +509,7 @@ class TerminalHostPtyTests(unittest.TestCase):
     def test_spawn_seeds_default_winsize(self) -> None:
         # A freshly opened PTY carries the seeded default (not 0x0) before any browser resize lands,
         # so tmux never starts degenerate; the real size follows from the first resize.
-        session = self.host.open("io", cwd=self.tmp, command=["cat"])
+        session = self.host.open("io", TerminalSessionSpec(cwd=self.tmp, command=("cat",)))
         packed = fcntl_ioctl_getwinsize(session.master_fd)
         rows, cols, _, _ = struct.unpack("HHHH", packed)
         self.assertEqual((rows, cols), (24, 80))
@@ -493,7 +518,9 @@ class TerminalHostPtyTests(unittest.TestCase):
         # For a suspend-unsafe (bare-pane harness) session, 0x1a (Ctrl-Z) is dropped before it reaches
         # the PTY -- it would suspend the harness with no shell to `fg` it back. `cat` echoes whatever it
         # receives, so the readback proves the byte never arrived (the surrounding "a"/"b" are contiguous).
-        self.host.open("z", cwd=self.tmp, command=["cat"], suspend_unsafe=True)
+        self.host.open(
+            "z", TerminalSessionSpec(cwd=self.tmp, command=("cat",), suspend_unsafe=True)
+        )
         self.host.write("z", b"a\x1ab\n")
         out = _read_until(self.host, "z", b"ab")
         self.assertIn(b"ab", out)
@@ -501,13 +528,15 @@ class TerminalHostPtyTests(unittest.TestCase):
 
     def test_harness_write_all_ctrl_z_is_noop(self) -> None:
         # An all-Ctrl-Z frame to a harness collapses to empty and must not write (or raise) -- nothing cat.
-        self.host.open("z2", cwd=self.tmp, command=["cat"], suspend_unsafe=True)
+        self.host.open(
+            "z2", TerminalSessionSpec(cwd=self.tmp, command=("cat",), suspend_unsafe=True)
+        )
         self.host.write("z2", b"\x1a\x1a")
         self.assertEqual(self.host.read_nonblocking("z2"), b"")
 
     @unittest.skipUnless(_HAS_TRUE, "needs `true` for an immediately-exiting child")
     def test_read_empty_after_child_exit(self) -> None:
-        self.host.open("done", cwd=self.tmp, command=["true"])
+        self.host.open("done", TerminalSessionSpec(cwd=self.tmp, command=("true",)))
         _wait_dead(self.host, "done")
         session = self.host.get("done")
         assert session is not None
@@ -539,7 +568,7 @@ class TerminalHostSuspendScopingTests(unittest.TestCase):
 
     def setUp(self) -> None:
         self.spawner = _PipeWriteSpawner()
-        self.host = TerminalHost(spawn=self.spawner)
+        self.host = TerminalHost(TerminalHostSeams(spawn=self.spawner))
         self.tmp = Path(tempfile.mkdtemp())
 
     def tearDown(self) -> None:
@@ -549,19 +578,23 @@ class TerminalHostSuspendScopingTests(unittest.TestCase):
                 os.close(read_fd)
 
     def test_harness_session_strips_ctrl_z(self) -> None:
-        self.host.open("h", cwd=self.tmp, command=["claude"], suspend_unsafe=True)
+        self.host.open(
+            "h", TerminalSessionSpec(cwd=self.tmp, command=("claude",), suspend_unsafe=True)
+        )
         self.host.write("h", b"a\x1ab")
         self.assertEqual(os.read(self.spawner.read_fds[0], 64), b"ab")
 
     def test_shell_session_keeps_ctrl_z(self) -> None:
         # A plain shell (suspend_unsafe defaults False) must NOT lose Ctrl-Z -- it is the legitimate
         # job-control keystroke to background a foreground program back to the prompt.
-        self.host.open("s", cwd=self.tmp, command=["bash"])
+        self.host.open("s", TerminalSessionSpec(cwd=self.tmp, command=("bash",)))
         self.host.write("s", b"a\x1ab")
         self.assertEqual(os.read(self.spawner.read_fds[0], 64), b"a\x1ab")
 
     def test_harness_all_ctrl_z_writes_nothing(self) -> None:
-        self.host.open("h2", cwd=self.tmp, command=["claude"], suspend_unsafe=True)
+        self.host.open(
+            "h2", TerminalSessionSpec(cwd=self.tmp, command=("claude",), suspend_unsafe=True)
+        )
         self.host.write("h2", b"\x1a\x1a")  # collapses to empty -> no os.write
         os.set_blocking(self.spawner.read_fds[0], False)
         with self.assertRaises(BlockingIOError):
@@ -581,7 +614,9 @@ class TerminalHostCopyModeCancelTests(unittest.TestCase):
     def setUp(self) -> None:
         self.spawner = _PipeWriteSpawner()
         self.cancelled: list[str] = []
-        self.host = TerminalHost(spawn=self.spawner, tmux_mode_canceller=self.cancelled.append)
+        self.host = TerminalHost(
+            TerminalHostSeams(spawn=self.spawner, tmux_mode_canceller=self.cancelled.append)
+        )
         self.tmp = Path(tempfile.mkdtemp())
 
     def tearDown(self) -> None:
@@ -591,19 +626,19 @@ class TerminalHostCopyModeCancelTests(unittest.TestCase):
                 os.close(read_fd)
 
     def test_mouse_reports_pass_through_without_cancel(self) -> None:
-        self.host.open("m", cwd=self.tmp, command=["codex"])
+        self.host.open("m", TerminalSessionSpec(cwd=self.tmp, command=("codex",)))
         self.host.write("m", b"\x1b[<64;10;5M\x1b[<65;10;6m")
         self.assertEqual(self.cancelled, [])
         self.assertEqual(os.read(self.spawner.read_fds[0], 64), b"\x1b[<64;10;5M\x1b[<65;10;6m")
 
     def test_typing_without_prior_mouse_never_cancels(self) -> None:
-        self.host.open("m", cwd=self.tmp, command=["codex"])
+        self.host.open("m", TerminalSessionSpec(cwd=self.tmp, command=("codex",)))
         self.host.write("m", b"hello")
         self.assertEqual(self.cancelled, [])
         self.assertEqual(os.read(self.spawner.read_fds[0], 64), b"hello")
 
     def test_first_typing_after_mouse_cancels_copy_mode_once(self) -> None:
-        self.host.open("m", cwd=self.tmp, command=["codex"])
+        self.host.open("m", TerminalSessionSpec(cwd=self.tmp, command=("codex",)))
         self.host.write("m", b"\x1b[<64;10;5M")  # wheel-up: tmux may now be in copy-mode
         self.host.write("m", b"h")  # first typed byte cancels, then passes through
         self.host.write("m", b"i")  # further typing does not cancel again
@@ -611,7 +646,7 @@ class TerminalHostCopyModeCancelTests(unittest.TestCase):
         self.assertEqual(os.read(self.spawner.read_fds[0], 64), b"\x1b[<64;10;5Mhi")
 
     def test_mouse_after_typing_rearms_the_cancel(self) -> None:
-        self.host.open("m", cwd=self.tmp, command=["codex"])
+        self.host.open("m", TerminalSessionSpec(cwd=self.tmp, command=("codex",)))
         self.host.write("m", b"\x1b[<64;10;5M")
         self.host.write("m", b"a")
         self.host.write("m", b"\x1b[<64;10;5M")
@@ -620,7 +655,7 @@ class TerminalHostCopyModeCancelTests(unittest.TestCase):
 
     def test_mixed_mouse_and_typing_frame_counts_as_typing(self) -> None:
         # A frame that is not purely mouse reports is treated as typing: cancel while armed.
-        self.host.open("m", cwd=self.tmp, command=["codex"])
+        self.host.open("m", TerminalSessionSpec(cwd=self.tmp, command=("codex",)))
         self.host.write("m", b"\x1b[<64;10;5M")
         self.host.write("m", b"\x1b[<64;10;5Mx")
         self.assertEqual(self.cancelled, ["ar-m"])
@@ -694,16 +729,20 @@ class TerminalHostTmuxIntegrationTests(unittest.TestCase):
         with mock.patch.dict(os.environ, contaminated, clear=False):
             binding = self.host.ensure(
                 "tmux-it",
-                cwd=self.tmp,
-                command=["sh", "-c", "printf AR_READY_MARKER; sleep 10"],
-                lifecycle_id="LC-tmux",
+                TerminalSessionSpec(
+                    cwd=self.tmp,
+                    command=("sh", "-c", "printf AR_READY_MARKER; sleep 10"),
+                    lifecycle_id="LC-tmux",
+                ),
             )
             session = self.host.attach(
                 "tmux-it",
-                cwd=self.tmp,
-                command=["sh", "-c", "printf AR_READY_MARKER; sleep 10"],
-                lifecycle_id="LC-tmux",
-                name=binding.tmux_name,
+                TerminalSessionSpec(
+                    cwd=self.tmp,
+                    command=("sh", "-c", "printf AR_READY_MARKER; sleep 10"),
+                    lifecycle_id="LC-tmux",
+                    name=binding.tmux_name,
+                ),
             )
         self.tmux_name = binding.tmux_name
         try:

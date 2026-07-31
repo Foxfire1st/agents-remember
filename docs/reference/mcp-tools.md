@@ -113,6 +113,7 @@ See [c-09-git-worktree-manager Worktrees And Closeout](worktrees-c09.md) for the
 
 ---
 
-The authoritative source for this surface is `mcp/server.py` (`@server.tool()`
-registrations); response shapes are enforced by the models in
+The authoritative source for this surface is `mcp/src/agents_remember/mcp/registration/`
+(one module per tool family, each holding that family's `@server.tool()` registrations;
+`create_server` only walks `TOOL_REGISTRARS`); response shapes are enforced by the models in
 `mcp/src/agents_remember/models/` via `tool_registry.PUBLIC_TOOL_RESPONSE_MODELS`.

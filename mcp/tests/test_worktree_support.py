@@ -22,6 +22,10 @@ sys.path.insert(0, str(MCP_SRC))
 from agents_remember.benchmarks import runner as benchmark_runner
 from agents_remember.kernel import coordination_context_resolver as resolver
 from agents_remember.kernel import filesystem
+from agents_remember.kernel.coordination_context_resolver import (
+    CoordinationHints,
+    EnclosureSelector,
+)
 from agents_remember.kernel.memory_ledger import (
     LedgerError,
     create_initial_ledger,
@@ -40,7 +44,10 @@ from agents_remember.tasks import TaskDocument, write_task_doc
 from agents_remember.worktrees import git_worktree_manager as worktree_manager
 from agents_remember.worktrees.modules import start as worktree_start
 from agents_remember.worktrees.modules import start_contract
-from agents_remember.worktrees.modules.integrate import _merge_integrated_commits
+from agents_remember.worktrees.modules.integrate import (
+    IntegratedCommits,
+    _merge_integrated_commits,
+)
 from agents_remember.worktrees.modules.models import (
     PATH_SAMPLE_LIMIT,
     OnboardingRefreshPlan,
@@ -57,6 +64,9 @@ from agents_remember.worktrees.task_resolver import (
     task_root_candidates,
 )
 from agents_remember.worktrees.worktree_contract import (
+    ContractTask,
+    LeafIdentity,
+    RepoBranchPlan,
     default_contract,
     load_contract,
     worktree_group_for,
@@ -262,20 +272,26 @@ def open_external_contract_fixture(root: Path):
     git(memory_repo, "commit", "-m", "Add memory ledger")
     memory_base = git(memory_repo, "rev-parse", "HEAD")
     contract = default_contract(
-        task_name="Commit Approval Thing",
-        repo_name="repo-a",
-        workflow_kind="chat",
-        memory_mode="external",
-        coordination_root=root / "ar-coordination",
-        code_repo_path=code_repo,
-        code_source_branch="main",
-        code_work_branch="ar/commit-approval-thing",
-        code_base_commit=code_base,
-        worktree_name="commit-approval-thing",
-        memory_repo_path=memory_repo,
-        memory_source_branch="main",
-        memory_work_branch="ar/commit-approval-thing",
-        memory_base_commit=memory_base,
+        ContractTask(
+            name="Commit Approval Thing",
+            repo_name="repo-a",
+            coordination_root=root / "ar-coordination",
+            workflow_kind="chat",
+            memory_mode="external",
+        ),
+        leaf=LeafIdentity(worktree_name="commit-approval-thing"),
+        code=RepoBranchPlan(
+            repo_path=code_repo,
+            source_branch="main",
+            work_branch="ar/commit-approval-thing",
+            base_commit=code_base,
+        ),
+        memory=RepoBranchPlan(
+            repo_path=memory_repo,
+            source_branch="main",
+            work_branch="ar/commit-approval-thing",
+            base_commit=memory_base,
+        ),
     )
     assert contract.memory_worktree is not None
     git(
@@ -330,20 +346,26 @@ def committed_range_external_contract_fixture(root: Path):
     git(memory_repo, "commit", "-m", "Add memory baseline")
     memory_base = git(memory_repo, "rev-parse", "HEAD")
     contract = default_contract(
-        task_name="Committed Range Thing",
-        repo_name="repo-a",
-        workflow_kind="chat",
-        memory_mode="external",
-        coordination_root=root / "ar-coordination",
-        code_repo_path=code_repo,
-        code_source_branch="main",
-        code_work_branch="ar/committed-range-thing",
-        code_base_commit=code_base,
-        worktree_name="committed-range-thing",
-        memory_repo_path=memory_repo,
-        memory_source_branch="main",
-        memory_work_branch="ar/committed-range-thing",
-        memory_base_commit=memory_base,
+        ContractTask(
+            name="Committed Range Thing",
+            repo_name="repo-a",
+            coordination_root=root / "ar-coordination",
+            workflow_kind="chat",
+            memory_mode="external",
+        ),
+        leaf=LeafIdentity(worktree_name="committed-range-thing"),
+        code=RepoBranchPlan(
+            repo_path=code_repo,
+            source_branch="main",
+            work_branch="ar/committed-range-thing",
+            base_commit=code_base,
+        ),
+        memory=RepoBranchPlan(
+            repo_path=memory_repo,
+            source_branch="main",
+            work_branch="ar/committed-range-thing",
+            base_commit=memory_base,
+        ),
     )
     assert contract.memory_worktree is not None
     git(
@@ -396,20 +418,26 @@ def closed_external_contract_fixture(
     git(memory_repo, "commit", "-m", "Add memory ledger")
     memory_base = git(memory_repo, "rev-parse", "HEAD")
     contract = default_contract(
-        task_name="Integrate Thing",
-        repo_name="repo-a",
-        workflow_kind="chat",
-        memory_mode="external",
-        coordination_root=root / "ar-coordination",
-        code_repo_path=code_repo,
-        code_source_branch="main",
-        code_work_branch="ar/integrate-thing",
-        code_base_commit=code_base,
-        worktree_name="integrate-thing",
-        memory_repo_path=memory_repo,
-        memory_source_branch="main",
-        memory_work_branch="ar/integrate-thing",
-        memory_base_commit=memory_base,
+        ContractTask(
+            name="Integrate Thing",
+            repo_name="repo-a",
+            coordination_root=root / "ar-coordination",
+            workflow_kind="chat",
+            memory_mode="external",
+        ),
+        leaf=LeafIdentity(worktree_name="integrate-thing"),
+        code=RepoBranchPlan(
+            repo_path=code_repo,
+            source_branch="main",
+            work_branch="ar/integrate-thing",
+            base_commit=code_base,
+        ),
+        memory=RepoBranchPlan(
+            repo_path=memory_repo,
+            source_branch="main",
+            work_branch="ar/integrate-thing",
+            base_commit=memory_base,
+        ),
     )
     assert contract.memory_worktree is not None
     git(
@@ -726,8 +754,9 @@ class WorktreeSupportTests(unittest.TestCase):
 
             context = resolver.resolve_coordination_context(
                 code_repository_root=code_repo,
-                requested_topology="external",
-                coordination_root=root / "ar-coordination",
+                hints=CoordinationHints(
+                    topology="external", coordination_root=root / "ar-coordination"
+                ),
             )
 
             self.assertEqual(context.task_root, root / "ar-coordination" / "tasks" / "repo-a")
@@ -748,20 +777,26 @@ class WorktreeSupportTests(unittest.TestCase):
     ):
         """Write a real external-memory contract at tasks/<repo>/<task>/contract.md."""
         contract = default_contract(
-            task_name=task_name,
-            repo_name="repo-a",
-            workflow_kind="light-task",
-            memory_mode="external",
-            coordination_root=coordination_root,
-            code_repo_path=code_repo,
-            code_source_branch="main",
-            code_work_branch=f"ar/{worktree_name}",
-            code_base_commit="abc123",
-            worktree_name=worktree_name,
-            memory_repo_path=coordination_root / "memory-repos" / "ar-repo-a",
-            memory_source_branch="main",
-            memory_work_branch=f"ar/{worktree_name}",
-            memory_base_commit="def456",
+            ContractTask(
+                name=task_name,
+                repo_name="repo-a",
+                coordination_root=coordination_root,
+                workflow_kind="light-task",
+                memory_mode="external",
+            ),
+            leaf=LeafIdentity(worktree_name=worktree_name),
+            code=RepoBranchPlan(
+                repo_path=code_repo,
+                source_branch="main",
+                work_branch=f"ar/{worktree_name}",
+                base_commit="abc123",
+            ),
+            memory=RepoBranchPlan(
+                repo_path=coordination_root / "memory-repos" / "ar-repo-a",
+                source_branch="main",
+                work_branch=f"ar/{worktree_name}",
+                base_commit="def456",
+            ),
         )
         write_contract(contract.contract_path, contract)
         return contract
@@ -779,9 +814,8 @@ class WorktreeSupportTests(unittest.TestCase):
 
             context = resolver.resolve_coordination_context(
                 code_repository_root=code_repo,
-                requested_topology="external",
-                coordination_root=coordination_root,
-                worktree_name="260610-browser-dashboard",
+                hints=CoordinationHints(topology="external", coordination_root=coordination_root),
+                selector=EnclosureSelector(worktree_name="260610-browser-dashboard"),
             )
 
             # Regression guard: contract-derived fields are populated, not blanked.
@@ -810,9 +844,8 @@ class WorktreeSupportTests(unittest.TestCase):
 
             context = resolver.resolve_coordination_context(
                 code_repository_root=code_repo,
-                requested_topology="external",
-                coordination_root=coordination_root,
-                worktree_name="no-such-worktree",
+                hints=CoordinationHints(topology="external", coordination_root=coordination_root),
+                selector=EnclosureSelector(worktree_name="no-such-worktree"),
             )
 
             self.assertIsNone(context.contract_path)
@@ -832,11 +865,10 @@ class WorktreeSupportTests(unittest.TestCase):
 
             context = resolver.resolve_coordination_context(
                 code_repository_root=code_repo,
-                requested_topology="external",
-                coordination_root=coordination_root,
-                task_name="task-a",
-                leaf_id="worktree-a",  # series enclosure leaf: completes the task-based lookup for contract A
-                worktree_name="worktree-b",  # would match contract B on its own
+                hints=CoordinationHints(topology="external", coordination_root=coordination_root),
+                selector=EnclosureSelector(
+                    task_name="task-a", leaf_id="worktree-a", worktree_name="worktree-b"
+                ),
             )
 
             # Task-based resolution (task_name + leaf_id) wins; the worktree_name match (B) is never consulted.
@@ -912,20 +944,26 @@ class WorktreeSupportTests(unittest.TestCase):
                 encoding="utf-8",
             )
             contract = default_contract(
-                task_name="Provider task",
-                repo_name="repo-a",
-                workflow_kind="light-task",
-                memory_mode="external",
-                coordination_root=coordination_root,
-                code_repo_path=code_repo,
-                code_source_branch="main",
-                code_work_branch="ar/provider-task",
-                code_base_commit="abc123",
-                worktree_name="provider-task",
-                memory_repo_path=memory_repo,
-                memory_source_branch="main",
-                memory_work_branch="ar/provider-task",
-                memory_base_commit="def456",
+                ContractTask(
+                    name="Provider task",
+                    repo_name="repo-a",
+                    coordination_root=coordination_root,
+                    workflow_kind="light-task",
+                    memory_mode="external",
+                ),
+                leaf=LeafIdentity(worktree_name="provider-task"),
+                code=RepoBranchPlan(
+                    repo_path=code_repo,
+                    source_branch="main",
+                    work_branch="ar/provider-task",
+                    base_commit="abc123",
+                ),
+                memory=RepoBranchPlan(
+                    repo_path=memory_repo,
+                    source_branch="main",
+                    work_branch="ar/provider-task",
+                    base_commit="def456",
+                ),
             )
             context = Namespace(
                 code_repository_name="repo-a",
@@ -1001,20 +1039,26 @@ class WorktreeSupportTests(unittest.TestCase):
                 encoding="utf-8",
             )
             contract = default_contract(
-                task_name="Fix Thing",
-                repo_name="repo-a",
-                workflow_kind="light-task",
-                memory_mode="external",
-                coordination_root=root / "ar-coordination",
-                code_repo_path=root / "repo-a",
-                code_source_branch="main",
-                code_work_branch="ar/fix-thing",
-                code_base_commit="c1",
-                worktree_name="fix-thing",
-                memory_repo_path=memory_repo,
-                memory_source_branch="main",
-                memory_work_branch="ar/fix-thing",
-                memory_base_commit="m1",
+                ContractTask(
+                    name="Fix Thing",
+                    repo_name="repo-a",
+                    coordination_root=root / "ar-coordination",
+                    workflow_kind="light-task",
+                    memory_mode="external",
+                ),
+                leaf=LeafIdentity(worktree_name="fix-thing"),
+                code=RepoBranchPlan(
+                    repo_path=root / "repo-a",
+                    source_branch="main",
+                    work_branch="ar/fix-thing",
+                    base_commit="c1",
+                ),
+                memory=RepoBranchPlan(
+                    repo_path=memory_repo,
+                    source_branch="main",
+                    work_branch="ar/fix-thing",
+                    base_commit="m1",
+                ),
             )
             result: dict[str, Any] = worktree_manager.prepare_memory_for_start(
                 contract, worktree_manager.WorktreeArgs(memory_choice=None, dry_run=True)
@@ -1035,20 +1079,26 @@ class WorktreeSupportTests(unittest.TestCase):
             (memory_repo / "onboarding" / "fresh.md").parent.mkdir(parents=True, exist_ok=True)
             (memory_repo / "onboarding" / "fresh.md").write_text("# fresh\n", encoding="utf-8")
             contract = default_contract(
-                task_name="Fix Thing",
-                repo_name="repo-a",
-                workflow_kind="light-task",
-                memory_mode="external",
-                coordination_root=root / "ar-coordination",
-                code_repo_path=root / "repo-a",
-                code_source_branch="main",
-                code_work_branch="ar/fix-thing",
-                code_base_commit="c1",
-                worktree_name="fix-thing",
-                memory_repo_path=memory_repo,
-                memory_source_branch="main",
-                memory_work_branch="ar/fix-thing",
-                memory_base_commit=memory_seed,
+                ContractTask(
+                    name="Fix Thing",
+                    repo_name="repo-a",
+                    coordination_root=root / "ar-coordination",
+                    workflow_kind="light-task",
+                    memory_mode="external",
+                ),
+                leaf=LeafIdentity(worktree_name="fix-thing"),
+                code=RepoBranchPlan(
+                    repo_path=root / "repo-a",
+                    source_branch="main",
+                    work_branch="ar/fix-thing",
+                    base_commit="c1",
+                ),
+                memory=RepoBranchPlan(
+                    repo_path=memory_repo,
+                    source_branch="main",
+                    work_branch="ar/fix-thing",
+                    base_commit=memory_seed,
+                ),
             )
             result: dict[str, Any] = worktree_manager.prepare_memory_for_start(
                 contract, worktree_manager.WorktreeArgs(memory_choice=None, dry_run=True)
@@ -1064,20 +1114,26 @@ class WorktreeSupportTests(unittest.TestCase):
             memory_repo.mkdir(parents=True)
             write_ledger(memory_repo / "memory.md", create_initial_ledger("repo-a", "c1", "m1"))
             contract = default_contract(
-                task_name="Fix Thing",
-                repo_name="repo-a",
-                workflow_kind="light-task",
-                memory_mode="external",
-                coordination_root=root / "ar-coordination",
-                code_repo_path=root / "repo-a",
-                code_source_branch="main",
-                code_work_branch="ar/fix-thing",
-                code_base_commit="c1",
-                worktree_name="fix-thing",
-                memory_repo_path=memory_repo,
-                memory_source_branch="main",
-                memory_work_branch="ar/fix-thing",
-                memory_base_commit="m1",
+                ContractTask(
+                    name="Fix Thing",
+                    repo_name="repo-a",
+                    coordination_root=root / "ar-coordination",
+                    workflow_kind="light-task",
+                    memory_mode="external",
+                ),
+                leaf=LeafIdentity(worktree_name="fix-thing"),
+                code=RepoBranchPlan(
+                    repo_path=root / "repo-a",
+                    source_branch="main",
+                    work_branch="ar/fix-thing",
+                    base_commit="c1",
+                ),
+                memory=RepoBranchPlan(
+                    repo_path=memory_repo,
+                    source_branch="main",
+                    work_branch="ar/fix-thing",
+                    base_commit="m1",
+                ),
             )
             result: dict[str, Any] = worktree_manager.prepare_memory_for_start(
                 contract, worktree_manager.WorktreeArgs(memory_choice=None, dry_run=True)
@@ -1089,16 +1145,20 @@ class WorktreeSupportTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             contract = default_contract(
-                task_name="Fix Thing",
-                repo_name="repo-a",
-                workflow_kind="light-task",
-                memory_mode="internal",
-                coordination_root=root / "ar-coordination",
-                code_repo_path=root / "repo-a",
-                code_source_branch="main",
-                code_work_branch="ar/fix-thing",
-                code_base_commit="c1",
-                worktree_name="fix-thing",
+                ContractTask(
+                    name="Fix Thing",
+                    repo_name="repo-a",
+                    coordination_root=root / "ar-coordination",
+                    workflow_kind="light-task",
+                    memory_mode="internal",
+                ),
+                leaf=LeafIdentity(worktree_name="fix-thing"),
+                code=RepoBranchPlan(
+                    repo_path=root / "repo-a",
+                    source_branch="main",
+                    work_branch="ar/fix-thing",
+                    base_commit="c1",
+                ),
             )
             result: dict[str, Any] = worktree_manager.prepare_memory_for_start(
                 contract, worktree_manager.WorktreeArgs(memory_choice=None, dry_run=True)
@@ -1118,20 +1178,26 @@ class WorktreeSupportTests(unittest.TestCase):
         # ledger-commit HEAD; reconciliation maps the unmapped code base to THIS, leaving it unchanged.
         content_commit = load_ledger(memory_repo / "memory.md").last_memory_content_commit
         contract = default_contract(
-            task_name="Fix Thing",
-            repo_name="repo-a",
-            workflow_kind="light-task",
-            memory_mode="external",
-            coordination_root=root / "ar-coordination",
-            code_repo_path=code_repo,
-            code_source_branch="main",
-            code_work_branch="ar/fix-thing",
-            code_base_commit=unmapped,
-            worktree_name="fix-thing",
-            memory_repo_path=memory_repo,
-            memory_source_branch="main",
-            memory_work_branch="ar/fix-thing",
-            memory_base_commit=memory_head,
+            ContractTask(
+                name="Fix Thing",
+                repo_name="repo-a",
+                coordination_root=root / "ar-coordination",
+                workflow_kind="light-task",
+                memory_mode="external",
+            ),
+            leaf=LeafIdentity(worktree_name="fix-thing"),
+            code=RepoBranchPlan(
+                repo_path=code_repo,
+                source_branch="main",
+                work_branch="ar/fix-thing",
+                base_commit=unmapped,
+            ),
+            memory=RepoBranchPlan(
+                repo_path=memory_repo,
+                source_branch="main",
+                work_branch="ar/fix-thing",
+                base_commit=memory_head,
+            ),
         )
         return contract, memory_repo, unmapped, content_commit
 
@@ -1215,20 +1281,26 @@ class WorktreeSupportTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             contract = default_contract(
-                task_name="Fix Platform Status",
-                repo_name="device-management",
-                workflow_kind="light-task",
-                memory_mode="external",
-                coordination_root=root / "ar-coordination",
-                code_repo_path=root / "device-management",
-                code_source_branch="dev",
-                code_work_branch="feature/fix-platform-status",
-                code_base_commit="abc123",
-                worktree_name="fix-platform-status",
-                memory_repo_path=root / "ar-coordination" / "memory-repos" / "ar-device-management",
-                memory_source_branch="dev",
-                memory_work_branch="feature/fix-platform-status",
-                memory_base_commit="def456",
+                ContractTask(
+                    name="Fix Platform Status",
+                    repo_name="device-management",
+                    coordination_root=root / "ar-coordination",
+                    workflow_kind="light-task",
+                    memory_mode="external",
+                ),
+                leaf=LeafIdentity(worktree_name="fix-platform-status"),
+                code=RepoBranchPlan(
+                    repo_path=root / "device-management",
+                    source_branch="dev",
+                    work_branch="feature/fix-platform-status",
+                    base_commit="abc123",
+                ),
+                memory=RepoBranchPlan(
+                    repo_path=root / "ar-coordination" / "memory-repos" / "ar-device-management",
+                    source_branch="dev",
+                    work_branch="feature/fix-platform-status",
+                    base_commit="def456",
+                ),
             )
             write_contract(contract.contract_path, contract)
             loaded = load_contract(contract.contract_path)
@@ -2043,7 +2115,7 @@ class WorktreeSupportTests(unittest.TestCase):
             context = resolver.resolve_coordination_context(
                 code_repository_name="my-app",
                 workspace_root=workspace,
-                requested_topology="internal",
+                hints=CoordinationHints(topology="internal"),
             )
             self.assertEqual(context.coordination_root, repo / "ar-coordination")
             self.assertEqual(context.memory_root, repo / "ar-memory")
@@ -2061,7 +2133,7 @@ class WorktreeSupportTests(unittest.TestCase):
             context = resolver.resolve_coordination_context(
                 code_repository_name="repo-a",
                 workspace_root=workspace,
-                coordination_root=workspace / "ar-coordination",
+                hints=CoordinationHints(coordination_root=workspace / "ar-coordination"),
             )
             self.assertEqual(context.topology, "internal")
             self.assertEqual(context.memory_root, repo / "ar-memory")
@@ -2077,7 +2149,7 @@ class WorktreeSupportTests(unittest.TestCase):
             context = resolver.resolve_coordination_context(
                 code_repository_name="repo-a",
                 workspace_root=workspace,
-                coordination_root=workspace / "ar-coordination",
+                hints=CoordinationHints(coordination_root=workspace / "ar-coordination"),
             )
             self.assertEqual(context.topology, "external")
             self.assertEqual(context.coordination_root, workspace / "ar-coordination")
@@ -2162,7 +2234,7 @@ class WorktreeSupportTests(unittest.TestCase):
                 resolver.resolve_coordination_context(
                     code_repository_name="repo-a",
                     workspace_root=workspace,
-                    coordination_root=coordination_root,
+                    hints=CoordinationHints(coordination_root=coordination_root),
                 )
 
     def test_resolver_does_not_select_external_from_path_rules_without_memory_repo(self) -> None:
@@ -2181,7 +2253,7 @@ class WorktreeSupportTests(unittest.TestCase):
                 resolver.resolve_coordination_context(
                     code_repository_name="repo-a",
                     workspace_root=workspace,
-                    coordination_root=coordination_root,
+                    hints=CoordinationHints(coordination_root=coordination_root),
                 )
 
     def test_resolver_errors_when_memory_is_missing(self) -> None:
@@ -2195,7 +2267,7 @@ class WorktreeSupportTests(unittest.TestCase):
                 resolver.resolve_coordination_context(
                     code_repository_name="repo-a",
                     workspace_root=workspace,
-                    coordination_root=workspace / "ar-coordination",
+                    hints=CoordinationHints(coordination_root=workspace / "ar-coordination"),
                 )
             self.assertEqual(raised.exception.internal_root, repo / "ar-memory")
             self.assertEqual(
@@ -2851,19 +2923,26 @@ class WorktreeSupportTests(unittest.TestCase):
             git(code_repo, "checkout", "main")
 
             contract = default_contract(
-                task_name="Atomic Integrate",
-                repo_name="repo-a",
-                workflow_kind="chat",
-                memory_mode="disabled",
-                coordination_root=root / "ar-coordination",
-                code_repo_path=code_repo,
-                code_source_branch="main",
-                code_work_branch="ar/atomic-integrate",
-                code_base_commit=base,
-                worktree_name="atomic-integrate",
+                ContractTask(
+                    name="Atomic Integrate",
+                    repo_name="repo-a",
+                    coordination_root=root / "ar-coordination",
+                    workflow_kind="chat",
+                    memory_mode="disabled",
+                ),
+                leaf=LeafIdentity(worktree_name="atomic-integrate"),
+                code=RepoBranchPlan(
+                    repo_path=code_repo,
+                    source_branch="main",
+                    work_branch="ar/atomic-integrate",
+                    base_commit=base,
+                ),
             )
             with self.assertRaisesRegex(RuntimeError, "not a fast-forward"):
-                _merge_integrated_commits(contract, divergent, "", "")
+                _merge_integrated_commits(
+                    contract,
+                    IntegratedCommits(code=divergent, memory_content="", ledger=""),
+                )
             self.assertEqual(git(code_repo, "rev-parse", "HEAD"), head_before)
 
 
@@ -3018,11 +3097,14 @@ class BenchmarkRunnerPortabilityTests(unittest.TestCase):
             )
 
             settings = benchmark_runner.benchmark_lifecycle_settings(
-                case=case,
-                coordination_root=coordination_root,
-                source_repo_root=source_repo,
-                memory_repo=memory_repo,
-                provider_ids=("grepai-memory", "codegraphcontext-code"),
+                benchmark_runner.BenchmarkWorkspace(
+                    case=case,
+                    workspace_root=coordination_root.parent,
+                    coordination_root=coordination_root,
+                    source_repo_root=source_repo,
+                    memory_repo=memory_repo,
+                    provider_ids=("grepai-memory", "codegraphcontext-code"),
+                )
             )
 
             self.assertFalse((coordination_root / "system" / "settings.json").exists())
@@ -3102,13 +3184,16 @@ class BenchmarkRunnerPortabilityTests(unittest.TestCase):
                 side_effect=fake_run_provider_setup,
             ) as run_provider_setup:
                 benchmark_runner.prepare_configured_providers(
-                    case,
-                    coordination_root,
-                    source_repo,
-                    memory_repo,
+                    benchmark_runner.BenchmarkWorkspace(
+                        case=case,
+                        workspace_root=coordination_root.parent,
+                        coordination_root=coordination_root,
+                        source_repo_root=source_repo,
+                        memory_repo=memory_repo,
+                        provider_ids=("codegraphcontext-code",),
+                    ),
                     dry_run=False,
                     provider_timeout=1,
-                    provider_ids=("codegraphcontext-code",),
                 )
 
             self.assertEqual(run_provider_setup.call_count, 1)
@@ -3153,13 +3238,16 @@ class BenchmarkRunnerPortabilityTests(unittest.TestCase):
                 side_effect=fake_run_provider_setup,
             ):
                 benchmark_runner.prepare_configured_providers(
-                    case,
-                    coordination_root,
-                    source_repo,
-                    memory_repo,
+                    benchmark_runner.BenchmarkWorkspace(
+                        case=case,
+                        workspace_root=coordination_root.parent,
+                        coordination_root=coordination_root,
+                        source_repo_root=source_repo,
+                        memory_repo=memory_repo,
+                        provider_ids=("grepai-memory", "codegraphcontext-code"),
+                    ),
                     dry_run=False,
                     provider_timeout=1,
-                    provider_ids=("grepai-memory", "codegraphcontext-code"),
                 )
 
             # Hermetic-cold: the benchmark wires no seed source for either provider.
@@ -3185,12 +3273,14 @@ class BenchmarkRunnerPortabilityTests(unittest.TestCase):
             )
 
             settings_path, config_path = benchmark_runner.write_benchmark_mcp_registration(
-                case=case,
-                workspace_root=workspace_root,
-                coordination_root=coordination_root,
-                source_repo_root=source_repo,
-                memory_repo=memory_repo,
-                provider_ids=("grepai-memory", "codegraphcontext-code"),
+                benchmark_runner.BenchmarkWorkspace(
+                    case=case,
+                    workspace_root=workspace_root,
+                    coordination_root=coordination_root,
+                    source_repo_root=source_repo,
+                    memory_repo=memory_repo,
+                    provider_ids=("grepai-memory", "codegraphcontext-code"),
+                ),
                 provider_timeout=123,
                 dry_run=False,
             )
@@ -3335,33 +3425,31 @@ class BenchmarkRunnerPortabilityTests(unittest.TestCase):
             variant = {"id": "with-onboarding", "promptPath": "prompt.md", "cwd": "workspace"}
             output_root = root / "runs"
 
-            def fake_run(
-                command: list[str],
-                *,
-                input: str,
-                stdout: Any,
-                stderr: object,
-                text: bool,
-                check: bool,
-            ) -> subprocess.CompletedProcess[str]:
-                stdout.write("{}\n")
-                return subprocess.CompletedProcess(command, 0)
-
             with (
                 mock.patch.object(
                     benchmark_runner.shutil, "which", return_value="C:/tools/codex.exe"
                 ),
-                mock.patch.object(benchmark_runner.subprocess, "run", side_effect=fake_run),
+                # The run itself is not under test here -- only the metadata the runner writes
+                # around it -- so the child exits 0 and writes nothing to the JSONL it was given.
+                mock.patch.object(
+                    benchmark_runner.subprocess,
+                    "run",
+                    return_value=subprocess.CompletedProcess([], 0),
+                ),
             ):
                 benchmark_runner.run_one(
-                    benchmarks_root=root,
-                    case=case,
-                    prompt=prompt,
-                    variant=variant,
-                    repetition=1,
-                    output_root=output_root,
-                    dry_run=False,
-                    codex_sandbox=benchmark_runner.CODEX_SANDBOX_DANGER_FULL_ACCESS,
+                    benchmark_runner.BenchmarkRun(
+                        benchmarks_root=root,
+                        case=case,
+                        output_root=output_root,
+                        dry_run=False,
+                        codex_sandbox=benchmark_runner.CODEX_SANDBOX_DANGER_FULL_ACCESS,
+                    ),
+                    benchmark_runner.BenchmarkTask(
+                        prompt=prompt,
+                        variant=variant,
+                        repetition=1,
+                    ),
                 )
 
             metadata = json.loads(

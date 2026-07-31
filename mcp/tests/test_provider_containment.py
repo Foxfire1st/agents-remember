@@ -138,9 +138,7 @@ class WorktreeStartVetoTests(unittest.TestCase):
             with mock.patch.object(worktree_tools.git_worktree_manager, "start_result", fake_start):
                 result = worktree_tools.worktree_start_tool(
                     config,
-                    repo_id="repo",
-                    task_name="t",
-                    worktree_name="w",
+                    worktree_tools.TaskIdentity(repo_id="repo", task_name="t", worktree_name="w"),
                 )
         # The launch side-channel never materializes: no settings file, no setup config.
         self.assertIsNone(captured["provider_setup_config"])
@@ -170,9 +168,7 @@ class WorktreeStartVetoTests(unittest.TestCase):
             with mock.patch.object(worktree_tools.git_worktree_manager, "start_result", fake_start):
                 result = worktree_tools.worktree_start_tool(
                     config,
-                    repo_id="repo",
-                    task_name="t",
-                    worktree_name="w",
+                    worktree_tools.TaskIdentity(repo_id="repo", task_name="t", worktree_name="w"),
                 )
         self.assertIsNotNone(captured["provider_setup_config"])
         settings = captured["settings"]
@@ -190,10 +186,11 @@ class QueryFunnelGateTests(unittest.TestCase):
             with self.assertRaises(ConfigError) as ctx:
                 provider_tools._provider_operation_result(
                     config,
-                    operation="cgc_symbol_search",
-                    launch_capable=True,
-                    launch_capable_provider="codegraphcontext-code",
-                    run=run,
+                    provider_tools.ProviderOperation(
+                        operation="cgc_symbol_search",
+                        required_provider="codegraphcontext-code",
+                        run=run,
+                    ),
                 )
         self.assertIn("codegraphcontext-code", str(ctx.exception))
         run.assert_not_called()

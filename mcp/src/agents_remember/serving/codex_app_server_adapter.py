@@ -134,6 +134,21 @@ class _ThreadState:
         return next(iter(self.pending_interactions.values()), None)
 
 
+@dataclass(frozen=True)
+class StartedTurn:
+    """What ``turn/start`` answered: which turn began, in what state, for which operation.
+
+    The buffered first frame belongs with them -- it is the notification that arrived before the
+    response and is only interpretable against this turn id -- so the four settle one submission
+    together.
+    """
+
+    turn_id: str
+    status: str
+    operation: ControlOperationRef
+    buffered: JsonObject | None
+
+
 class CodexAppServerAdapter:
     """One stable app-server connection/thread with exact request and turn correlation."""
 
@@ -513,24 +528,7 @@ class CodexAppServerAdapter:
     async def _start_turn(
         self, evidence: SubmissionEvidence, operation: ControlOperationRef
     ) -> SubmissionReceipt:
-        launch = self._session.launch
-        model = evidence.model
-        assert launch is not None
-        params: JsonObject = {
-            "threadId": self._require_thread_id(),
-            "input": self._turn_input(evidence.request),
-            "clientUserMessageId": evidence.request.request_id,
-            "model": model.model,
-            "cwd": str(launch.cwd),
-            "effort": evidence.effort,
-        }
-        for key, value in (
-            ("approvalPolicy", self._settings.approval_policy),
-            ("approvalsReviewer", self._settings.approvals_reviewer),
-            ("sandboxPolicy", self._settings.turn_sandbox_policy),
-        ):
-            if value is not None:
-                params[key] = dict(value) if isinstance(value, Mapping) else value
+        params = self._turn_start_params(evidence)
         try:
             result = await self._require_transport().request(
                 "turn/start",
@@ -556,6 +554,60 @@ class CodexAppServerAdapter:
         turn = parse_turn(result, context="turn/start response")
         turn_id = required_text(turn, "id", context="turn/start response.turn")
         parent = self._parent_state()
+        buffered = self._bind_started_turn(evidence, parent, turn_id=turn_id, operation=operation)
+        status = required_text(turn, "status", context="turn/start response.turn")
+        if status in {"failed", "interrupted"}:
+            return self._rejected_turn_receipt(
+                evidence, parent, turn_id=turn_id, status=status, operation=operation
+            )
+        return await self._accept_started_turn(
+            evidence,
+            parent,
+            StartedTurn(turn_id=turn_id, status=status, operation=operation, buffered=buffered),
+        )
+
+    def _turn_start_params(self, evidence: SubmissionEvidence) -> JsonObject:
+        """The ``turn/start`` params for one submission, carrying only the policies that are set.
+
+        An unset approval/sandbox policy is omitted rather than sent as null, so the server keeps
+        whatever the thread was configured with instead of being told to clear it.
+        """
+
+        launch = self._session.launch
+        assert launch is not None
+        params: JsonObject = {
+            "threadId": self._require_thread_id(),
+            "input": self._turn_input(evidence.request),
+            "clientUserMessageId": evidence.request.request_id,
+            "model": evidence.model.model,
+            "cwd": str(launch.cwd),
+            "effort": evidence.effort,
+        }
+        for key, value in (
+            ("approvalPolicy", self._settings.approval_policy),
+            ("approvalsReviewer", self._settings.approvals_reviewer),
+            ("sandboxPolicy", self._settings.turn_sandbox_policy),
+        ):
+            if value is not None:
+                params[key] = dict(value) if isinstance(value, Mapping) else value
+        return params
+
+    def _bind_started_turn(
+        self,
+        evidence: SubmissionEvidence,
+        parent: _ThreadState,
+        *,
+        turn_id: str,
+        operation: ControlOperationRef,
+    ) -> JsonObject | None:
+        """Bind the started turn to this submission; hand back any completion buffered before it.
+
+        ``turn/completed`` can win the race against the ``turn/start`` response it belongs to, and
+        is buffered unbound until the id is known. A buffered frame naming a different id means
+        the stream is describing some other turn, and a retained terminal id can never start
+        again -- both fail the start rather than being reconciled into it.
+        """
+
         buffered: JsonObject | None = None
         if parent.unbound_completions:
             buffered_turn_id, buffered = next(iter(parent.unbound_completions.items()))
@@ -568,24 +620,55 @@ class CodexAppServerAdapter:
             raise CodexAppServerError("turn/start reused a retained terminal turn id")
         evidence.turn_id = turn_id
         parent.turn_operations[turn_id] = operation
-        status = required_text(turn, "status", context="turn/start response.turn")
-        if status in {"failed", "interrupted"}:
-            evidence.state = "rejected"
-            self._remember_completed_turn(parent, turn_id, operation)
-            self._fresh_turn_required = self._session.has_pending_settings
-            self._refresh_capability_snapshot()
-            return SubmissionReceipt(
-                request_id=evidence.request.request_id,
-                acceptance="rejected",
-                submitted_at=evidence.request.submitted_at,
-                vendor_correlation_id=turn_id,
-                detail=f"Codex turn/start returned terminal status {status!r}",
-                raw={
-                    "method": "turn/start",
-                    "clientUserMessageId": evidence.request.request_id,
-                    "turnStatus": status,
-                },
-            )
+        return buffered
+
+    def _rejected_turn_receipt(
+        self,
+        evidence: SubmissionEvidence,
+        parent: _ThreadState,
+        *,
+        turn_id: str,
+        status: str,
+        operation: ControlOperationRef,
+    ) -> SubmissionReceipt:
+        """Retire a turn ``turn/start`` already reported terminal, without accepting its selection.
+
+        The pending model/effort selection stays pending precisely because the turn it would have
+        been proven on never ran.
+        """
+
+        evidence.state = "rejected"
+        self._remember_completed_turn(parent, turn_id, operation)
+        self._fresh_turn_required = self._session.has_pending_settings
+        self._refresh_capability_snapshot()
+        return SubmissionReceipt(
+            request_id=evidence.request.request_id,
+            acceptance="rejected",
+            submitted_at=evidence.request.submitted_at,
+            vendor_correlation_id=turn_id,
+            detail=f"Codex turn/start returned terminal status {status!r}",
+            raw={
+                "method": "turn/start",
+                "clientUserMessageId": evidence.request.request_id,
+                "turnStatus": status,
+            },
+        )
+
+    async def _accept_started_turn(
+        self,
+        evidence: SubmissionEvidence,
+        parent: _ThreadState,
+        started: StartedTurn,
+    ) -> SubmissionReceipt:
+        turn_id, status = started.turn_id, started.status
+        operation, buffered = started.operation, started.buffered
+        """Commit the accepted selection and settle a turn that started -- or already finished.
+
+        Anything other than ``inProgress`` completed inside the start call, so it is retired here
+        instead of waiting for a ``turn/completed`` that already arrived or will never come. A
+        buffered completion is replayed first so it is not counted as a second terminal event.
+        """
+
         evidence.state = "accepted" if status == "inProgress" else "completed"
         self._session.accept_settings_selection(model=evidence.model, effort=evidence.effort)
         self._fresh_turn_required = self._session.has_pending_settings
@@ -679,61 +762,80 @@ class CodexAppServerAdapter:
             return
         params = required_object(message.get("params"), context=f"{method} params")
         if method == "thread/status/changed":
-            state = self._thread_for(params, context="thread/status/changed params")
-            activity, acceptance = activity_from_thread_status(
-                required_object(params.get("status"), context="thread/status/changed status")
-            )
-            if state.is_parent:
-                self._snapshot = replace(
-                    await self.snapshot(),
-                    activity=activity,
-                    acceptance=self._busy_acceptance(activity, acceptance),
-                )
-                await self._emit("state", raw={"codexMethod": method, AR_EVIDENCE_KEY: params})
-                return
-            # A sub-agent thread's status never moves the parent-scoped activity;
-            # it is registry + raw evidence only.
-            candidate_status = required_text(
-                required_object(params.get("status"), context="thread/status/changed status"),
-                "type",
-                context="thread/status/changed status",
-            )
-            state.status = merge_agent_status(state.status, candidate_status)
-            self._publish_agent_registry()
-            await self._emit_notification(method, params)
-            return
-        if method == "turn/started":
-            state = self._thread_for(params, context="turn/started params")
-            turn = parse_turn(params, context="turn/started params")
-            turn_id = required_text(turn, "id", context="turn/started turn")
-            state.active_turn_id = turn_id
-            if state.is_parent:
-                await self._set_activity("running", turn_id=turn_id)
-                return
-            state.status = merge_agent_status(state.status, "running", explicit_turn_start=True)
-            self._publish_agent_registry()
-            await self._emit_notification(method, params)
-            return
-        if method == "turn/completed":
+            await self._handle_status_changed(method, params)
+        elif method == "turn/started":
+            await self._handle_turn_started(method, params)
+        elif method == "turn/completed":
             await self._handle_turn_completed(params)
-            return
-        if method == "item/completed":
+        elif method == "item/completed":
             await self._handle_item_completed(params)
-            return
-        if method == "serverRequest/resolved":
+        elif method == "serverRequest/resolved":
             await self._handle_server_request_resolved(params)
+        elif method == "thread/settings/updated":
+            await self._handle_settings_notification(method, params)
+        else:
+            await self._handle_foreign_notification(method, params)
+
+    async def _handle_status_changed(self, method: str, params: JsonObject) -> None:
+        """Apply one ``thread/status/changed``.
+
+        Only the parent thread's status is the session's status. A sub-agent's merges into the
+        agent registry and crosses as raw evidence, so a busy sub-agent never makes the seat read
+        as busy -- but its status shape is still validated, in either case, before anything moves.
+        """
+
+        state = self._thread_for(params, context="thread/status/changed params")
+        activity, acceptance = activity_from_thread_status(
+            required_object(params.get("status"), context="thread/status/changed status")
+        )
+        if state.is_parent:
+            self._snapshot = replace(
+                await self.snapshot(),
+                activity=activity,
+                acceptance=self._busy_acceptance(activity, acceptance),
+            )
+            await self._emit("state", raw={"codexMethod": method, AR_EVIDENCE_KEY: params})
             return
-        if method == "thread/settings/updated":
-            state = self._thread_for(params, context="thread/settings/updated params")
-            if state.is_parent:
-                self._handle_settings_updated(params)
-                await self._emit("state", raw={"codexMethod": method, AR_EVIDENCE_KEY: params})
-                return
+        candidate_status = required_text(
+            required_object(params.get("status"), context="thread/status/changed status"),
+            "type",
+            context="thread/status/changed status",
+        )
+        state.status = merge_agent_status(state.status, candidate_status)
+        self._publish_agent_registry()
+        await self._emit_notification(method, params)
+
+    async def _handle_turn_started(self, method: str, params: JsonObject) -> None:
+        """Record the thread's new active turn id; only the parent's start moves session activity."""
+
+        state = self._thread_for(params, context="turn/started params")
+        turn = parse_turn(params, context="turn/started params")
+        turn_id = required_text(turn, "id", context="turn/started turn")
+        state.active_turn_id = turn_id
+        if state.is_parent:
+            await self._set_activity("running", turn_id=turn_id)
+            return
+        state.status = merge_agent_status(state.status, "running", explicit_turn_start=True)
+        self._publish_agent_registry()
+        await self._emit_notification(method, params)
+
+    async def _handle_settings_notification(self, method: str, params: JsonObject) -> None:
+        """Apply a parent-thread settings update; a sub-agent's own settings are evidence only."""
+
+        state = self._thread_for(params, context="thread/settings/updated params")
+        if not state.is_parent:
             await self._emit_notification(method, params)
             return
-        # Generic vendor evidence: auto-register a well-formed foreign thread without
-        # ever failing on malformed threadIds — those cross as raw evidence exactly as
-        # they did before the demux existed.
+        self._handle_settings_updated(params)
+        await self._emit("state", raw={"codexMethod": method, AR_EVIDENCE_KEY: params})
+
+    async def _handle_foreign_notification(self, method: str, params: JsonObject) -> None:
+        """Cross any other notification as raw vendor evidence, registering well-formed threads.
+
+        A malformed ``threadId`` is never an error on this path -- unrecognized shapes crossed as
+        raw evidence before the demux existed and must keep doing so.
+        """
+
         thread_id = params.get("threadId")
         if isinstance(thread_id, str) and thread_id:
             self._thread_for(params, context=f"{method} params")
@@ -1290,39 +1392,62 @@ class CodexAppServerAdapter:
         """
 
         item_type = item.get("type")
-        learned = False
         if item_type == "subAgentActivity":
-            agent_thread_id = item.get("agentThreadId")
-            if isinstance(agent_thread_id, str) and agent_thread_id:
-                state = self._threads.get(agent_thread_id) or self._thread_for(
-                    {"threadId": agent_thread_id}, context="subAgentActivity item"
-                )
-                agent_path = item.get("agentPath")
-                if isinstance(agent_path, str) and agent_path:
-                    state.agent_path = agent_path
-                kind = item.get("kind")
-                if isinstance(kind, str) and kind:
-                    state.status = merge_agent_status(state.status, kind)
-                learned = True
+            learned = self._learn_sub_agent_activity(item)
         elif item_type == "collabAgentToolCall":
-            receivers = item.get("receiverThreadIds")
-            if isinstance(receivers, list):
-                for receiver in receivers:
-                    if isinstance(receiver, str) and receiver:
-                        self._thread_for({"threadId": receiver}, context="collabAgentToolCall item")
-                        learned = True
-            agents_states = item.get("agentsStates")
-            if isinstance(agents_states, Mapping):
-                for agent_thread_id, agent_state in agents_states.items():
-                    state = self._threads.get(agent_thread_id)
-                    if state is None or not isinstance(agent_state, Mapping):
-                        continue
-                    status = agent_state.get("status")
-                    if isinstance(status, str) and status:
-                        state.status = merge_agent_status(state.status, status)
-                        learned = True
+            learned = self._learn_collab_tool_call(item)
+        else:
+            learned = False
         if learned:
             self._publish_agent_registry()
+
+    def _learn_sub_agent_activity(self, item: Mapping[str, object]) -> bool:
+        """Bind one sub-agent's thread, path and kind from a ``subAgentActivity`` item.
+
+        Returns whether the registry changed. The thread id is the only required field: a path or
+        kind that is missing or malformed leaves that facet as it was rather than failing the item.
+        """
+
+        agent_thread_id = item.get("agentThreadId")
+        if not isinstance(agent_thread_id, str) or not agent_thread_id:
+            return False
+        state = self._threads.get(agent_thread_id) or self._thread_for(
+            {"threadId": agent_thread_id}, context="subAgentActivity item"
+        )
+        agent_path = item.get("agentPath")
+        if isinstance(agent_path, str) and agent_path:
+            state.agent_path = agent_path
+        kind = item.get("kind")
+        if isinstance(kind, str) and kind:
+            state.status = merge_agent_status(state.status, kind)
+        return True
+
+    def _learn_collab_tool_call(self, item: Mapping[str, object]) -> bool:
+        """Register receiver threads and merge reported agent states from a ``collabAgentToolCall``.
+
+        Returns whether the registry changed. ``receiverThreadIds`` may mint a thread because the
+        call names who it is addressed to; ``agentsStates`` only updates threads that are already
+        registered, so a status about an unknown thread is left to cross as raw evidence.
+        """
+
+        learned = False
+        receivers = item.get("receiverThreadIds")
+        if isinstance(receivers, list):
+            for receiver in receivers:
+                if isinstance(receiver, str) and receiver:
+                    self._thread_for({"threadId": receiver}, context="collabAgentToolCall item")
+                    learned = True
+        agents_states = item.get("agentsStates")
+        if isinstance(agents_states, Mapping):
+            for agent_thread_id, agent_state in agents_states.items():
+                state = self._threads.get(agent_thread_id)
+                if state is None or not isinstance(agent_state, Mapping):
+                    continue
+                status = agent_state.get("status")
+                if isinstance(status, str) and status:
+                    state.status = merge_agent_status(state.status, status)
+                    learned = True
+        return learned
 
     def _publish_agent_registry(self) -> None:
         """Publish the bounded agent registry into snapshot.raw for the serving projector."""

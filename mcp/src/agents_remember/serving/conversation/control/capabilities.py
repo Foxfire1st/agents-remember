@@ -64,22 +64,27 @@ _ATTACHMENT_MIME_TYPES = tuple(sorted(SUBMIT_ASSET_MIME_TYPES))
 def _fixture(
     state: CapabilityState,
     reason: str,
+    evidence: CapabilityEvidence,
+) -> FeatureCapability:
+    return FeatureCapability(
+        state=state, reason=reason, evidence_tier="runtime-fixture", evidence=evidence
+    )
+
+
+def _fixture_evidence(
     runtime_version: str,
     fixture_id: str,
     *,
     helper_version: str | None = None,
     observed_at: str = _OBSERVED_AT,
-) -> FeatureCapability:
-    return FeatureCapability(
-        state=state,
-        reason=reason,
-        evidence_tier="runtime-fixture",
-        evidence=CapabilityEvidence(
-            runtime_version=runtime_version,
-            helper_version=helper_version,
-            fixture_id=fixture_id,
-            observed_at=observed_at,
-        ),
+) -> CapabilityEvidence:
+    """The captured-fixture provenance one advertised capability rests on."""
+
+    return CapabilityEvidence(
+        runtime_version=runtime_version,
+        helper_version=helper_version,
+        fixture_id=fixture_id,
+        observed_at=observed_at,
     )
 
 
@@ -142,8 +147,7 @@ def _codex_controls() -> ControlCapabilities:
         "supported",
         "installed fixture observed one native turn/interrupt accepted on a live 0.144.5 thread "
         "through the production adapter-bridge-IPC seam with replay-once semantics",
-        _CODEX_RUNTIME,
-        _CODEX_FIXTURE,
+        _fixture_evidence(_CODEX_RUNTIME, _CODEX_FIXTURE),
     )
     image = _image_capability(
         "supported",
@@ -176,9 +180,11 @@ def _claude_controls() -> ControlCapabilities:
         "2.1.217 stream-json session through the production adapter-bridge-IPC seam "
         "(control_response success, still_queued []), with the correlated "
         "error_during_execution result settling interrupted under replay-once semantics",
-        _CLAUDE_INTERRUPT_RUNTIME,
-        _CLAUDE_INTERRUPT_FIXTURE,
-        observed_at=_CLAUDE_INTERRUPT_OBSERVED,
+        _fixture_evidence(
+            _CLAUDE_INTERRUPT_RUNTIME,
+            _CLAUDE_INTERRUPT_FIXTURE,
+            observed_at=_CLAUDE_INTERRUPT_OBSERVED,
+        ),
     )
     unprobed = _adapter("unverified", _CLAUDE_MISMATCH, _CLAUDE_RUNTIME)
     return ControlCapabilities(
@@ -208,9 +214,7 @@ def _pi_controls() -> ControlCapabilities:
         "supported",
         "installed fixture observed one guarded RPC abort accepted on a live 0.80.7 session "
         "through the production adapter-bridge-IPC seam with replay-once semantics",
-        _PI_RUNTIME,
-        _PI_FIXTURE,
-        helper_version=_PI_HELPER,
+        _fixture_evidence(_PI_RUNTIME, _PI_FIXTURE, helper_version=_PI_HELPER),
     )
     image = _image_capability(
         "supported",
@@ -238,8 +242,7 @@ def _codex_telemetry() -> TelemetryCapabilities:
         "supported",
         "installed fixture observed thread/tokenUsage/updated frames cross the production "
         "evidence seam on a live 0.144.5 thread",
-        _CODEX_RUNTIME,
-        _CODEX_FIXTURE,
+        _fixture_evidence(_CODEX_RUNTIME, _CODEX_FIXTURE),
     )
     return TelemetryCapabilities(
         context=_unavailable(

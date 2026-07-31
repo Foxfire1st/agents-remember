@@ -21,6 +21,7 @@ from pathlib import Path
 from unittest import mock
 
 import httpx
+import pytest
 import uvicorn
 from _control_plane import OPERATOR, TINY_PNG
 from agents_remember.serving.codex_app_server_adapter import (
@@ -191,6 +192,7 @@ class _LiveHarness:
         )
 
 
+@pytest.mark.ar_run_control_installed
 @unittest.skipUnless(
     os.environ.get(LIVE_OPT_IN) == "1",
     f"set {LIVE_OPT_IN}=1 to exercise installed runtimes through the L3 control routes",
@@ -265,99 +267,114 @@ class CodexInstalledControlApiTests(unittest.IsolatedAsyncioTestCase):
                 )
                 self.assertEqual(queue.status_code, 200)
                 self.assertNotIn("600-word", json.dumps(queue.json()))
-                # Withdrawal recovery through the production routes; the head
-                # is a fast-completing prompt so usage evidence arrives early.
-                head = await harness.typed_submit(
-                    "l3-codex-head", "Write one short sentence about the sky."
-                )
-                self.assertIn(head.json()["acceptance"], {"immediate", "queued"})
-                queued = await harness.typed_submit("l3-codex-recovery", "the exact queued body")
-                self.assertIn(queued.json()["acceptance"], {"immediate", "queued"})
-                queue = await harness.client.get(
-                    f"/api/terminal/{session}/operation-queue", params=harness.params()
-                )
-                row = next(
-                    item
-                    for item in queue.json()["items"]
-                    if item["phase"] == "queued" and item.get("cockpit")
-                )
-                withdrawn = await harness.client.post(
-                    f"/api/terminal/{session}/operation-queue/withdraw",
-                    params=harness.params(),
-                    json={
-                        "operationRef": row["operationRef"],
-                        "withdrawalRef": row["cockpit"]["withdrawalRef"],
-                        "withdrawRequestId": "l3-wd-1",
-                    },
-                )
-                self.assertEqual(withdrawn.status_code, 200, withdrawn.text)
-                self.assertEqual(withdrawn.json()["recovery"]["text"], "the exact queued body")
-                pending = await harness.client.get(
-                    f"/api/terminal/{session}/operation-queue/pending-withdrawal-recoveries",
-                    params=harness.params(),
-                )
-                self.assertEqual(len(pending.json()["items"]), 1)
-                recovery_ref = pending.json()["items"][0]["recoveryRef"]
-                fetched = await harness.client.post(
-                    f"/api/terminal/{session}/operation-queue/withdraw-recovery",
-                    params=harness.params(),
-                    json={"recoveryRef": recovery_ref},
-                )
-                self.assertEqual(fetched.json()["text"], "the exact queued body")
-                # Typed attachment submit through the production routes.
-                staged = await harness.client.post(
-                    f"/api/terminal/{session}/conversation/attachments",
-                    params=harness.params(),
-                    data={
-                        "requestId": "l3-codex-asset",
-                        "metadata": json.dumps([{"kind": "image"}]),
-                    },
-                    files=[("assets", ("dot.png", TINY_PNG, "image/png"))],
-                )
-                self.assertEqual(staged.status_code, 200, staged.text)
-                (receipt,) = staged.json()["receipts"]
-                asset_submit = await harness.client.post(
-                    f"/api/terminal/{session}/conversation/submit",
-                    json={
-                        "expectedBridgeEpoch": harness.epoch,
-                        "requestId": "l3-codex-asset",
-                        "disposition": "next",
-                        "content": [
-                            {"type": "text", "text": "Describe this image in one short sentence."},
-                            {
-                                "type": "asset-ref",
-                                "assetId": receipt["assetId"],
-                                "kind": receipt["kind"],
-                                "name": receipt["name"],
-                                "mimeType": receipt["mimeType"],
-                                "alt": receipt["alt"],
-                                "altProvenance": receipt["altProvenance"],
-                                "sha256": receipt["sha256"],
-                            },
-                        ],
-                        "draftRevision": 1,
-                    },
-                )
-                self.assertEqual(asset_submit.status_code, 200, asset_submit.text)
-                self.assertIn(asset_submit.json()["acceptance"], {"immediate", "queued"})
-                # Telemetry: the live turn produced token usage with full evidence.
-                await harness.wait_evidence(
-                    lambda frame: isinstance(frame.raw.get("tokenUsage"), dict),
-                    timeout=120.0,
-                    description="codex token usage",
-                )
-                telemetry = await harness.client.get(
-                    f"/api/terminal/{session}/conversation/telemetry", params=harness.params()
-                )
-                self.assertEqual(telemetry.status_code, 200)
-                usage = telemetry.json().get("usage")
-                self.assertIsNotNone(usage)
-                self.assertEqual(usage["unit"], "tokens")
-                self.assertEqual(usage["precision"], "exact")
-                self.assertEqual(usage["runtimeVersion"], CODEX_PINNED)
-                self.assertEqual(usage["fixtureId"], "codex-0.144.5-installed-20260718")
+                await self._assert_withdrawal_recovers_the_exact_body(harness)
+                await self._assert_typed_attachment_submit_is_accepted(harness)
+                await self._assert_telemetry_carries_exact_usage(harness)
             finally:
                 await harness.stop()
+
+    async def _assert_withdrawal_recovers_the_exact_body(self, harness: _LiveHarness) -> None:
+        """Withdrawal recovery through the production routes.
+
+        The head is a fast-completing prompt so usage evidence arrives early; the body under
+        test is the one behind it in the queue, which withdrawal must hand back verbatim.
+        """
+        session = harness.identity.ar_session_id
+        head = await harness.typed_submit(
+            "l3-codex-head", "Write one short sentence about the sky."
+        )
+        self.assertIn(head.json()["acceptance"], {"immediate", "queued"})
+        queued = await harness.typed_submit("l3-codex-recovery", "the exact queued body")
+        self.assertIn(queued.json()["acceptance"], {"immediate", "queued"})
+        queue = await harness.client.get(
+            f"/api/terminal/{session}/operation-queue", params=harness.params()
+        )
+        row = next(
+            item
+            for item in queue.json()["items"]
+            if item["phase"] == "queued" and item.get("cockpit")
+        )
+        withdrawn = await harness.client.post(
+            f"/api/terminal/{session}/operation-queue/withdraw",
+            params=harness.params(),
+            json={
+                "operationRef": row["operationRef"],
+                "withdrawalRef": row["cockpit"]["withdrawalRef"],
+                "withdrawRequestId": "l3-wd-1",
+            },
+        )
+        self.assertEqual(withdrawn.status_code, 200, withdrawn.text)
+        self.assertEqual(withdrawn.json()["recovery"]["text"], "the exact queued body")
+        pending = await harness.client.get(
+            f"/api/terminal/{session}/operation-queue/pending-withdrawal-recoveries",
+            params=harness.params(),
+        )
+        self.assertEqual(len(pending.json()["items"]), 1)
+        recovery_ref = pending.json()["items"][0]["recoveryRef"]
+        fetched = await harness.client.post(
+            f"/api/terminal/{session}/operation-queue/withdraw-recovery",
+            params=harness.params(),
+            json={"recoveryRef": recovery_ref},
+        )
+        self.assertEqual(fetched.json()["text"], "the exact queued body")
+
+    async def _assert_typed_attachment_submit_is_accepted(self, harness: _LiveHarness) -> None:
+        """Stage an asset, then submit a turn that references it by receipt, through the routes."""
+        session = harness.identity.ar_session_id
+        staged = await harness.client.post(
+            f"/api/terminal/{session}/conversation/attachments",
+            params=harness.params(),
+            data={
+                "requestId": "l3-codex-asset",
+                "metadata": json.dumps([{"kind": "image"}]),
+            },
+            files=[("assets", ("dot.png", TINY_PNG, "image/png"))],
+        )
+        self.assertEqual(staged.status_code, 200, staged.text)
+        (receipt,) = staged.json()["receipts"]
+        asset_submit = await harness.client.post(
+            f"/api/terminal/{session}/conversation/submit",
+            json={
+                "expectedBridgeEpoch": harness.epoch,
+                "requestId": "l3-codex-asset",
+                "disposition": "next",
+                "content": [
+                    {"type": "text", "text": "Describe this image in one short sentence."},
+                    {
+                        "type": "asset-ref",
+                        "assetId": receipt["assetId"],
+                        "kind": receipt["kind"],
+                        "name": receipt["name"],
+                        "mimeType": receipt["mimeType"],
+                        "alt": receipt["alt"],
+                        "altProvenance": receipt["altProvenance"],
+                        "sha256": receipt["sha256"],
+                    },
+                ],
+                "draftRevision": 1,
+            },
+        )
+        self.assertEqual(asset_submit.status_code, 200, asset_submit.text)
+        self.assertIn(asset_submit.json()["acceptance"], {"immediate", "queued"})
+
+    async def _assert_telemetry_carries_exact_usage(self, harness: _LiveHarness) -> None:
+        """The live turn produced token usage, reported as exact and version-locked."""
+        session = harness.identity.ar_session_id
+        await harness.wait_evidence(
+            lambda frame: isinstance(frame.raw.get("tokenUsage"), dict),
+            timeout=120.0,
+            description="codex token usage",
+        )
+        telemetry = await harness.client.get(
+            f"/api/terminal/{session}/conversation/telemetry", params=harness.params()
+        )
+        self.assertEqual(telemetry.status_code, 200)
+        usage = telemetry.json().get("usage")
+        self.assertIsNotNone(usage)
+        self.assertEqual(usage["unit"], "tokens")
+        self.assertEqual(usage["precision"], "exact")
+        self.assertEqual(usage["runtimeVersion"], CODEX_PINNED)
+        self.assertEqual(usage["fixtureId"], "codex-0.144.5-installed-20260718")
 
     async def test_settled_live_turn_projects_once_on_the_conversation_page(self) -> None:
         """260718-CHATS-L5 F1 (L4 verdict blocker): a settled live codex turn projects EXACTLY once.
@@ -467,6 +484,7 @@ class CodexInstalledControlApiTests(unittest.IsolatedAsyncioTestCase):
                 await harness.stop()
 
 
+@pytest.mark.ar_run_control_installed
 @unittest.skipUnless(
     os.environ.get(LIVE_OPT_IN) == "1",
     f"set {LIVE_OPT_IN}=1 to exercise installed runtimes through the L3 control routes",

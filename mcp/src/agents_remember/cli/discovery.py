@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
 SETTINGS_CONVENTION = Path(".claude") / "mcp" / "agents-remember-settings.json"
 MCP_REGISTRATION = ".mcp.json"
@@ -51,21 +52,37 @@ def discover_config(start: Path | None = None) -> Path:
 
 def _config_from_mcp_registration(mcp_json: Path) -> Path | None:
     """The ``--config`` path recorded for the agents-remember server, if any."""
-    if not mcp_json.is_file():
+    entry = _nested_object(_json_object(mcp_json), "mcpServers", _SERVER_NAME)
+    return None if entry is None else _config_argument(entry.get("args"))
+
+
+def _json_object(path: Path) -> dict[str, Any] | None:
+    """The file's top-level JSON object — None when absent, unreadable, or not an object.
+
+    Foreign and malformed files are someone else's: discovery skips them silently rather
+    than crashing the walk.
+    """
+    if not path.is_file():
         return None
     try:
-        data = json.loads(mcp_json.read_text(encoding="utf-8"))
+        data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return None
-    if not isinstance(data, dict):
-        return None
-    servers = data.get("mcpServers")
-    if not isinstance(servers, dict):
-        return None
-    entry = servers.get(_SERVER_NAME)
-    if not isinstance(entry, dict):
-        return None
-    arguments = entry.get("args")
+    return data if isinstance(data, dict) else None
+
+
+def _nested_object(container: dict[str, Any] | None, *keys: str) -> dict[str, Any] | None:
+    """Follow ``keys`` down nested JSON objects; None at the first missing or non-object step."""
+    current: Any = container
+    for key in keys:
+        if not isinstance(current, dict):
+            return None
+        current = current.get(key)
+    return current if isinstance(current, dict) else None
+
+
+def _config_argument(arguments: Any) -> Path | None:
+    """The value following ``--config`` in a recorded argv list, if it carries one."""
     if not isinstance(arguments, list):
         return None
     for index, argument in enumerate(arguments):
@@ -84,15 +101,8 @@ def _is_usable_settings(path: Path) -> bool:
     template carries ``<PATH/TO/YOUR/...>`` placeholders and fails this, so a source
     checkout never shadows the workspace's real settings.
     """
-    if not path.is_file():
-        return False
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return False
-    if not isinstance(data, dict):
-        return False
-    root = data.get("coordinationRoot")
+    data = _json_object(path)
+    root = data.get("coordinationRoot") if data is not None else None
     if not isinstance(root, str) or not root:
         return False
     candidate = Path(root)

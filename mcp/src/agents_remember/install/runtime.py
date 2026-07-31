@@ -15,6 +15,7 @@ from typing import Any
 
 from agents_remember.install.assets import long_path, packaged_source_root
 from agents_remember.install.provider_watchers import (
+    ProviderWatcherRebind,
     ProviderWatcherRebindReport,
     complete_provider_watcher_rebind,
     stop_provider_watchers_before_refresh,
@@ -65,6 +66,57 @@ PROVIDER_USER_DIRS = (
     "providers/runners/codegraphcontext",
     "providers/runners/grepai",
 )
+
+
+@dataclass(frozen=True)
+class RuntimeTreeSync:
+    """One packaged runtime tree mirrored into the coordination root.
+
+    Ownership rules travel with the pair of roots because they are what makes
+    the mirror non-destructive: ``preserve`` names destination paths a prune
+    never removes (user-owned coordinator state), ``prune_ignore`` names paths
+    pruned even when the packaged source still carries them, and
+    ``copy_ignore`` names source paths the copy never writes.
+    """
+
+    source_root: Path
+    destination_root: Path
+    preserve: frozenset[Path] = frozenset()
+    prune_ignore: frozenset[Path] = frozenset()
+    copy_ignore: frozenset[Path] = frozenset()
+
+
+@dataclass(frozen=True)
+class ProviderDependencyInstall:
+    """The provider-dependency step of a runtime install.
+
+    Whether the step runs at all, the live provider settings it installs
+    against, the budget each provider install gets, and whether it may reuse
+    caches. The watcher rebind is derived from the same object because it is
+    the same step's stop/start cycle.
+    """
+
+    settings: dict[str, Any]
+    timeout: int
+    enabled: bool = True
+    no_cache: bool = False
+
+
+@dataclass(frozen=True)
+class RuntimeInstallRequest:
+    """What one runtime install is asked to do.
+
+    ``provider_deps_timeout`` and ``source_root`` stay unset for MCP callers:
+    the timeout then falls back to the config's provider setup cap and the
+    source to the packaged runtime tree.
+    """
+
+    dry_run: bool = False
+    include_benchmarks: bool = False
+    install_provider_deps: bool = True
+    no_cache: bool = False
+    provider_deps_timeout: int | None = None
+    source_root: Path | None = None
 
 
 @dataclass
@@ -208,20 +260,11 @@ def is_ignored_package_path(relative: Path) -> bool:
     )
 
 
-def prune_tree(
-    source_root: Path,
-    destination_root: Path,
-    summary: InstallSummary,
-    dry_run: bool,
-    *,
-    preserve: set[Path] | None = None,
-    ignore: set[Path] | None = None,
-) -> None:
+def prune_tree(sync: RuntimeTreeSync, summary: InstallSummary, dry_run: bool) -> None:
+    destination_root = sync.destination_root
     if not destination_root.exists() or destination_root.is_symlink():
         return
 
-    preserve = preserve or set()
-    ignore = ignore or set()
     destinations = sorted(
         destination_root.rglob("*"),
         key=lambda path: len(path.parts),
@@ -229,32 +272,25 @@ def prune_tree(
     )
     for destination in destinations:
         relative = destination.relative_to(destination_root)
-        if is_preserved_path(relative, preserve):
+        if is_preserved_path(relative, set(sync.preserve)):
             continue
         if (
-            is_path_match(relative, ignore)
+            is_path_match(relative, set(sync.prune_ignore))
             or is_ignored_package_path(relative)
-            or not (source_root / relative).exists()
+            or not (sync.source_root / relative).exists()
         ):
             remove_path(destination, summary, dry_run)
 
 
-def copy_tree(
-    source_root: Path,
-    destination_root: Path,
-    summary: InstallSummary,
-    dry_run: bool,
-    *,
-    ignore: set[Path] | None = None,
-) -> None:
-    ensure_dir(destination_root, summary, dry_run)
-    ignore = ignore or set()
-    scan_root = long_path(source_root)
+def copy_tree(sync: RuntimeTreeSync, summary: InstallSummary, dry_run: bool) -> None:
+    ensure_dir(sync.destination_root, summary, dry_run)
+    ignore = set(sync.copy_ignore)
+    scan_root = long_path(sync.source_root)
     for source in sorted(scan_root.rglob("*")):
         relative = source.relative_to(scan_root)
         if is_path_match(relative, ignore) or is_ignored_package_path(relative):
             continue
-        destination = destination_root / relative
+        destination = sync.destination_root / relative
         if source.is_dir():
             ensure_dir(destination, summary, dry_run)
         elif source.is_file():
@@ -320,22 +356,15 @@ def install_benchmarks(
         dry_run,
     )
 
-    destination_root = coordination_root / "benchmarks"
-    prune_tree(
-        benchmarks_root,
-        destination_root,
-        summary,
-        dry_run,
-        preserve={Path("user-runs")},
-        ignore={Path("workspaces")},
+    sync = RuntimeTreeSync(
+        source_root=benchmarks_root,
+        destination_root=coordination_root / "benchmarks",
+        preserve=frozenset({Path("user-runs")}),
+        prune_ignore=frozenset({Path("workspaces")}),
+        copy_ignore=frozenset(BENCHMARK_SOURCE_IGNORE_PATHS),
     )
-    copy_tree(
-        benchmarks_root,
-        destination_root,
-        summary,
-        dry_run,
-        ignore=BENCHMARK_SOURCE_IGNORE_PATHS,
-    )
+    prune_tree(sync, summary, dry_run)
+    copy_tree(sync, summary, dry_run)
 
 
 def configured_provider_enabled(settings: dict[str, Any], provider_id: str) -> bool:
@@ -366,36 +395,31 @@ def any_provider_enabled(settings: dict[str, Any]) -> bool:
 
 def install_provider_dependencies(
     coordination_root: Path,
-    settings: dict[str, Any],
+    provider_deps: ProviderDependencyInstall,
     summary: InstallSummary,
     dry_run: bool,
-    timeout: int,
-    no_cache: bool = False,
 ) -> None:
-    if not any_provider_enabled(settings):
+    if not any_provider_enabled(provider_deps.settings):
         if dry_run:
             print("Would skip provider dependency install; no providers enabled")
         return
 
     install_provider_dependencies_from_settings(
         coordination_root,
-        settings,
+        provider_deps,
         summary,
         dry_run=dry_run,
-        timeout=timeout,
-        no_cache=no_cache,
     )
 
 
 def install_provider_dependencies_from_settings(
     coordination_root: Path,
-    settings: dict[str, Any],
+    provider_deps: ProviderDependencyInstall,
     summary: InstallSummary,
     *,
     dry_run: bool,
-    timeout: int,
-    no_cache: bool = False,
 ) -> list[dict[str, Any]]:
+    settings = provider_deps.settings
     settings_path = write_temp_provider_settings(settings)
     results: list[dict[str, Any]] = []
     try:
@@ -405,12 +429,12 @@ def install_provider_dependencies_from_settings(
                 coordination_root=coordination_root,
                 from_settings=settings_path,
                 dry_run=dry_run,
-                timeout=timeout,
+                timeout=provider_deps.timeout,
                 json=True,
                 force=False,
                 root=None,
                 runtime_root=None,
-                no_cache=no_cache,
+                no_cache=provider_deps.no_cache,
             )
             results.append(lifecycle.grepai_install(grepai_args))
         if configured_provider_enabled(settings, "codegraphcontext-code"):
@@ -419,11 +443,11 @@ def install_provider_dependencies_from_settings(
                 coordination_root=coordination_root,
                 from_settings=settings_path,
                 dry_run=dry_run,
-                timeout=timeout,
+                timeout=provider_deps.timeout,
                 json=True,
                 repo_id=None,
                 code_repo_root=None,
-                no_cache=no_cache,
+                no_cache=provider_deps.no_cache,
             )
             results.append(lifecycle.cgc_install_all(cgc_args))
     finally:
@@ -440,40 +464,36 @@ def install_runtime(
     coordination_root: Path,
     dry_run: bool,
     *,
+    provider_deps: ProviderDependencyInstall,
     include_benchmarks: bool = False,
-    install_provider_deps: bool = True,
-    provider_deps_timeout: int = 1800,
-    provider_settings: dict[str, Any],
-    no_cache: bool = False,
 ) -> InstallSummary:
     runtime_root = source_root / "runtime"
     require_runtime_tree(runtime_root)
 
+    install_provider_deps = provider_deps.enabled
+    provider_settings = provider_deps.settings
     summary = InstallSummary()
     ensure_dir(coordination_root, summary, dry_run)
 
-    prune_tree(
-        runtime_root / "skills",
-        coordination_root / "skills",
-        summary,
-        dry_run,
-        preserve={Path("AGENTS.md")},
+    skills_sync = RuntimeTreeSync(
+        source_root=runtime_root / "skills",
+        destination_root=coordination_root / "skills",
+        preserve=frozenset({Path("AGENTS.md")}),
     )
-    copy_tree(runtime_root / "skills", coordination_root / "skills", summary, dry_run)
+    prune_tree(skills_sync, summary, dry_run)
+    copy_tree(skills_sync, summary, dry_run)
     remove_path(coordination_root / "scripts", summary, dry_run)
-    provider_watcher_rebind = install_provider_deps and any_provider_enabled(provider_settings)
-    rebind_report: ProviderWatcherRebindReport | None = None
+    rebind: ProviderWatcherRebind | None = None
 
-    if provider_watcher_rebind:
-        rebind_report = ProviderWatcherRebindReport()
-        summary.provider_watcher_rebind = rebind_report
-        stop_provider_watchers_before_refresh(
-            rebind_report,
-            coordination_root,
-            provider_settings,
+    if install_provider_deps and any_provider_enabled(provider_settings):
+        rebind = ProviderWatcherRebind(
+            coordination_root=coordination_root,
+            settings=provider_settings,
             dry_run=dry_run,
-            timeout=provider_deps_timeout,
+            timeout=provider_deps.timeout,
         )
+        summary.provider_watcher_rebind = rebind.report
+        stop_provider_watchers_before_refresh(rebind)
 
     try:
         # Provider runtime scaffolding is disposable during a full reinstall. A
@@ -482,24 +502,17 @@ def install_runtime(
         # provider binaries and venvs are not managed runtime contracts.
         # Durable provider data and logs are user-owned coordinator state and must
         # not be removed by either install mode.
-        if install_provider_deps:
-            prune_tree(
-                runtime_root / "providers",
-                coordination_root / "providers",
-                summary,
-                dry_run,
-                preserve=PROVIDER_DATA_PATHS,
-            )
-            copy_tree(runtime_root / "providers", coordination_root / "providers", summary, dry_run)
-        else:
-            prune_tree(
-                runtime_root / "providers",
-                coordination_root / "providers",
-                summary,
-                dry_run,
-                preserve=PROVIDER_DEPENDENCY_PATHS | PROVIDER_DATA_PATHS,
-            )
-            copy_tree(runtime_root / "providers", coordination_root / "providers", summary, dry_run)
+        providers_sync = RuntimeTreeSync(
+            source_root=runtime_root / "providers",
+            destination_root=coordination_root / "providers",
+            preserve=frozenset(
+                PROVIDER_DATA_PATHS
+                if install_provider_deps
+                else PROVIDER_DEPENDENCY_PATHS | PROVIDER_DATA_PATHS
+            ),
+        )
+        prune_tree(providers_sync, summary, dry_run)
+        copy_tree(providers_sync, summary, dry_run)
 
         for source_rel, target_rel in AGENTS_MD_TARGETS.items():
             copy_file(runtime_root / source_rel, coordination_root / target_rel, summary, dry_run)
@@ -522,23 +535,10 @@ def install_runtime(
             install_benchmarks(source_root, coordination_root, summary, dry_run)
 
         if install_provider_deps:
-            install_provider_dependencies(
-                coordination_root,
-                provider_settings,
-                summary,
-                dry_run,
-                provider_deps_timeout,
-                no_cache=no_cache,
-            )
+            install_provider_dependencies(coordination_root, provider_deps, summary, dry_run)
     except Exception as error:
-        if rebind_report is not None:
-            complete_provider_watcher_rebind(
-                rebind_report,
-                coordination_root,
-                provider_settings,
-                dry_run=dry_run,
-                timeout=provider_deps_timeout,
-            )
+        if rebind is not None:
+            complete_provider_watcher_rebind(rebind)
             raise RuntimeError(
                 "runtime install failed after provider watchers were stopped; "
                 "attempted non-destructive watcher recovery. "
@@ -547,48 +547,36 @@ def install_runtime(
             ) from error
         raise
 
-    if rebind_report is not None:
-        complete_provider_watcher_rebind(
-            rebind_report,
-            coordination_root,
-            provider_settings,
-            dry_run=dry_run,
-            timeout=provider_deps_timeout,
-        )
+    if rebind is not None:
+        complete_provider_watcher_rebind(rebind)
 
     return summary
 
 
 def install_runtime_from_config(
     config: McpRuntimeConfig,
-    *,
-    dry_run: bool = False,
-    include_benchmarks: bool = False,
-    install_provider_deps: bool = True,
-    provider_deps_timeout: int | None = None,
-    source_root: Path | None = None,
-    no_cache: bool = False,
+    request: RuntimeInstallRequest,
 ) -> dict[str, Any]:
-    timeout = provider_deps_timeout or config.timeout_caps.get(
-        "providerSetupSeconds", DEFAULT_PROVIDER_SETUP_SECONDS
-    )
+    dry_run = request.dry_run
+    include_benchmarks = request.include_benchmarks
     # Containment R1 (260707-HFX-L1): the watcher rebind's stop→start cycle is a
     # launch path — derive its settings from the LIVE on-disk authority, never the
     # boot snapshot. An empty (or unreadable: fail-closed) live map disables the
     # rebind while the runtime install itself proceeds.
-    provider_settings = lifecycle_settings_from_config(
-        reload_provider_authority(config).apply(config)
+    provider_deps = ProviderDependencyInstall(
+        settings=lifecycle_settings_from_config(reload_provider_authority(config).apply(config)),
+        timeout=request.provider_deps_timeout
+        or config.timeout_caps.get("providerSetupSeconds", DEFAULT_PROVIDER_SETUP_SECONDS),
+        enabled=request.install_provider_deps,
+        no_cache=request.no_cache,
     )
-    if source_root is not None:
+    if request.source_root is not None:
         summary = install_runtime(
-            source_root.resolve(),
+            request.source_root.resolve(),
             config.coordination_root,
             dry_run,
+            provider_deps=provider_deps,
             include_benchmarks=include_benchmarks,
-            install_provider_deps=install_provider_deps,
-            provider_deps_timeout=timeout,
-            provider_settings=provider_settings,
-            no_cache=no_cache,
         )
     else:
         with packaged_source_root() as packaged_root:
@@ -596,11 +584,8 @@ def install_runtime_from_config(
                 packaged_root.resolve(),
                 config.coordination_root,
                 dry_run,
+                provider_deps=provider_deps,
                 include_benchmarks=include_benchmarks,
-                install_provider_deps=install_provider_deps,
-                provider_deps_timeout=timeout,
-                provider_settings=provider_settings,
-                no_cache=no_cache,
             )
     ok = summary.provider_watcher_rebind is None or summary.provider_watcher_rebind.ok is not False
     payload = {
@@ -609,7 +594,7 @@ def install_runtime_from_config(
         "dryRun": dry_run,
         "coordinationRoot": config.coordination_root.as_posix(),
         "includeBenchmarks": include_benchmarks,
-        "installProviderDeps": install_provider_deps,
+        "installProviderDeps": request.install_provider_deps,
         "summary": {
             "createdDirs": summary.created_dirs,
             "copiedFiles": summary.copied_files,

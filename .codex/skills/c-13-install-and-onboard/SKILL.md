@@ -225,8 +225,11 @@ If providers are enabled, make them index the configured code and memory:
    ```
 
    Use `provider_watchers(action="start", dry_run=true)` only when a preview is
-   requested or workflow policy requires one. Use `action="refresh"` to reseed
-   providers after repo or memory changes.
+   requested or workflow policy requires one. `action="refresh"` no longer exists --
+   it force-rebuilt every index while reading like a harmless restart, so it was split
+   in two. Use `action="restart"` to stop and start the watchers without touching their
+   indexes, or `action="invalidate-indexes"` to delete and rebuild every index from
+   scratch (a slow full re-embed and re-graph).
 3. Verify with `provider_status` or
    `context_packet(repo_id=..., include_providers=true)` that providers are
    `ready`, watchers are up, and the target repo is covered.

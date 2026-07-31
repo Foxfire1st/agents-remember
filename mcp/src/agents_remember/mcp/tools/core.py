@@ -8,6 +8,7 @@ from agents_remember.controllers.context_packet import ContextPacketRequest, bui
 from agents_remember.controllers.coordination_tools import resolve_context_tool
 from agents_remember.controllers.runtime_install import RuntimeInstallRequest, run_runtime_install
 from agents_remember.controllers.skill_tools import skills_install_tool
+from agents_remember.controllers.task_ref import TaskRef
 from agents_remember.mcp.tool_reports import write_tool_report
 
 from .. import SERVER_NAME, SERVER_VERSION
@@ -129,27 +130,14 @@ def compact_runtime_install_payload(full: dict[str, Any], report_path: str) -> d
 
 def resolve_context_payload(
     config: McpRuntimeConfig,
-    repo_id: str,
+    task: TaskRef,
     *,
-    task_name: str | None = None,
-    parent_task: str | None = None,
-    leaf_id: str | None = None,
-    contract_path: str | None = None,
     worktree_name: str | None = None,
     topology: str | None = None,
 ) -> dict[str, Any]:
     return _tool_payload(
         "resolve_context",
-        resolve_context_tool(
-            config,
-            repo_id=repo_id,
-            task_name=task_name,
-            parent_task=parent_task,
-            leaf_id=leaf_id,
-            contract_path=contract_path,
-            worktree_name=worktree_name,
-            topology=topology,
-        ),
+        resolve_context_tool(config, task, worktree_name=worktree_name, topology=topology),
     )
 
 

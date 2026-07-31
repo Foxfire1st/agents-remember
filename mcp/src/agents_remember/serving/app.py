@@ -38,8 +38,9 @@ import contextlib
 import json
 import logging
 import os
-from collections.abc import AsyncGenerator, AsyncIterator, Callable
-from contextlib import asynccontextmanager
+from collections.abc import AsyncGenerator, AsyncIterator, Callable, Sequence
+from contextlib import AbstractAsyncContextManager, asynccontextmanager
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Any
@@ -67,12 +68,20 @@ from agents_remember.controlplane.attention_dismissals import (
     AttentionDismissalStore,
 )
 from agents_remember.controlplane.expectation_rows import ExpectationRowStore
-from agents_remember.controlplane.operator_inbox_records import AgentRole, InboxMessageKind
+from agents_remember.controlplane.operator_inbox_records import (
+    AgentRole,
+    InboxAddress,
+    InboxMessage,
+    InboxMessageKind,
+    InboxPoster,
+)
 from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
 from agents_remember.controlplane.orchestration_nudges import OrchestrationNudgeStore
+from agents_remember.controlplane.records import GateVerdict
 from agents_remember.controlplane.supervisor_signals import SupervisorSignalCooldownStore
 from agents_remember.errors import HarnessControlError
 from agents_remember.kernel.agentic_settings import load_agentic_settings
+from agents_remember.mcp.tools.dispatch_brief import HostedDelivery
 from agents_remember.mcp.tools.gates import gate_decide_for_lifecycle, gate_decide_payload
 from agents_remember.mcp.tools.operator_inbox import operator_inbox_post_payload
 from agents_remember.observer import observer_root
@@ -91,10 +100,24 @@ from agents_remember.providers.metrics import (
     ProviderMetricsStore,
     sample_provider_containers,
 )
-from agents_remember.serving.actions import ActionRequest, evaluate_action
+from agents_remember.serving.actions import (
+    ActionEvaluationContext,
+    ActionOutcome,
+    ActionRequest,
+    DismissalIntent,
+    GateDecisionIntent,
+    evaluate_action,
+)
 from agents_remember.serving.build_info import ServingBuild, resolve_serving_build
 from agents_remember.serving.change_watcher import ProjectionInputWatcher
 from agents_remember.serving.changeset import register_changeset_routes
+from agents_remember.serving.conversation.authorization import (
+    LocalOperatorAuthorizationResolver,
+)
+from agents_remember.serving.conversation.runtime import (
+    ConversationRuntime,
+    ConversationScope,
+)
 from agents_remember.serving.events import stream_raw_events
 from agents_remember.serving.files import register_files_routes
 from agents_remember.serving.harness_capability_catalog import HarnessCapabilityCatalog
@@ -103,6 +126,7 @@ from agents_remember.serving.harness_control_api import (
     resolve_terminal_open_selection,
 )
 from agents_remember.serving.harness_control_client import (
+    ControlSubmission,
     stop_control_session,
     submit_control_prompt,
 )
@@ -115,10 +139,18 @@ from agents_remember.serving.heap_diag import (
     trim_malloc,
 )
 from agents_remember.serving.hosted_interactions import HostedInteractionSynchronizer
+from agents_remember.serving.hosted_session_runtime import HostedSessionRuntime
 from agents_remember.serving.leaf_ref_validation import resolve_catalog_leaf_key
 from agents_remember.serving.notes import register_notes_routes
-from agents_remember.serving.projector import Projector
-from agents_remember.serving.retire import retire_entry
+from agents_remember.serving.projector import (
+    DEFAULT_PROJECTION_CADENCE,
+    LIVE_PROJECTION_CLOCK,
+    ProjectionCadence,
+    ProjectionRefreshers,
+    ProjectionReplay,
+    Projector,
+)
+from agents_remember.serving.retire import SeatClosure, retire_entry
 from agents_remember.serving.retire_policy import (
     RetirePolicyError,
     SeatRef,
@@ -135,7 +167,11 @@ from agents_remember.serving.supervisor_heartbeat import (
     SupervisorHeartbeatStore,
     heartbeat_age_seconds,
 )
-from agents_remember.serving.terminal import TerminalHost, TerminalSession
+from agents_remember.serving.terminal import (
+    TerminalHost,
+    TerminalSession,
+    TerminalSessionSpec,
+)
 from agents_remember.serving.terminal_catalog import (
     TerminalCatalog,
     TerminalCatalogEntry,
@@ -143,12 +179,18 @@ from agents_remember.serving.terminal_catalog import (
 )
 from agents_remember.serving.terminal_leaf_assignment import assign_terminal_session_to_leaf
 from agents_remember.serving.terminal_liveness import (
+    LivenessProbe,
     TerminalCatalogLivenessConfig,
     TerminalCatalogLivenessSweeper,
     observe_terminal_liveness,
     utc_now,
 )
-from agents_remember.serving.terminal_opener import open_terminal_session
+from agents_remember.serving.terminal_opener import (
+    ControlRunnerRequest,
+    SpawnProvenance,
+    TerminalLaunchRequest,
+    open_terminal_session,
+)
 from agents_remember.serving.terminal_paste import TerminalPaster
 from agents_remember.worktrees.leaf_refs import LeafRefResolutionError
 
@@ -487,14 +529,15 @@ def _leaf_ref_response(error: LeafRefResolutionError, leaf_key: str) -> JSONResp
 
 
 def _attach_terminal_session(
+    sessions: HostedSessionRuntime,
     *,
-    catalog: TerminalCatalog,
-    host: TerminalHost,
     session_id: str,
     attached_at: str,
     checked_at: datetime,
     liveness_config: TerminalCatalogLivenessConfig,
 ) -> TerminalSession | None:
+    catalog = sessions.catalog
+    host = sessions.host
     entry = catalog.get(session_id)
     if entry is None or entry.status not in ("running", "landed"):
         return None
@@ -503,80 +546,128 @@ def _attach_terminal_session(
         host,
         entry,
         checked_at=checked_at,
-        config=liveness_config,
+        probe=LivenessProbe(hysteresis=liveness_config),
     )
     if not observation.alive or observation.entry.status not in ("running", "landed"):
         return None
     entry = observation.entry
     session = host.attach(
         session_id,
-        cwd=entry.cwd,
-        command=entry.command,
-        lifecycle_id=entry.lifecycle_id,
-        name=entry.tmux_name,
-        suspend_unsafe=entry.kind == "harness",
+        TerminalSessionSpec(
+            cwd=entry.cwd,
+            command=entry.command,
+            lifecycle_id=entry.lifecycle_id,
+            name=entry.tmux_name,
+            suspend_unsafe=entry.kind == "harness",
+        ),
     )
     catalog.mark_attached(session_id, attached_at)
     return session
 
 
+@dataclass(frozen=True)
+class _ResolvedLiveInputs:
+    provider_state: bool
+    landing_state: bool
+    change_watch: bool
+
+
+@dataclass(frozen=True)
+class LiveProjectionInputs:
+    """Which live world-inputs this app drives; ``None`` means "infer from the replay seam".
+
+    One value because it is one question -- is this app attached to a moving world, or replaying a
+    recorded one? Sim replay must disable all three together (the feeder writes only *inside* a
+    tick, so a change-gated loop would never wake), and answering it three times independently is
+    how a replay app ends up half-live.
+    """
+
+    provider_state: bool | None = None
+    landing_state: bool | None = None
+    change_watch: bool | None = None
+
+    def resolved(self, replay: ProjectionReplay) -> _ResolvedLiveInputs:
+        """Settle each unset toggle against the replay seam: a feeder means sim, so off."""
+
+        live = replay.before_tick is None
+        return _ResolvedLiveInputs(
+            provider_state=live if self.provider_state is None else self.provider_state,
+            landing_state=live if self.landing_state is None else self.landing_state,
+            change_watch=live if self.change_watch is None else self.change_watch,
+        )
+
+
+@dataclass(frozen=True)
+class ServingCollaborators:
+    """Long-lived collaborators supplied instead of letting :func:`create_app` construct them.
+
+    The same four objects :class:`_ServingRuntime` is built around. They are offered as one value
+    because substituting them is one decision -- a test that fakes the terminal host almost always
+    needs the catalog and paster that agree with it, and a host paired with someone else's catalog
+    observes sessions that do not exist. ``None`` on any field constructs the real one.
+    """
+
+    terminal_host: TerminalHost | None = None
+    terminal_catalog: TerminalCatalog | None = None
+    terminal_paster: TerminalPaster | None = None
+    harness_capability_catalog: HarnessCapabilityCatalog | None = None
+
+
+INFERRED_LIVE_INPUTS = LiveProjectionInputs()
+OWNED_SERVING_COLLABORATORS = ServingCollaborators()
+"""No injected collaborators: the app constructs and owns every one of them."""
+
+
 def create_app(
     config: McpRuntimeConfig,
     *,
-    interval: float = 1.0,
-    heartbeat: float | None = None,
-    now: Callable[[], datetime] | None = None,
-    before_tick: Callable[[datetime], object] | None = None,
-    refresh_provider_state: bool | None = None,
-    refresh_landing_state: bool | None = None,
-    watch_changes: bool | None = None,
-    terminal_host: TerminalHost | None = None,
-    terminal_catalog: TerminalCatalog | None = None,
-    terminal_paster: TerminalPaster | None = None,
-    harness_capability_catalog: HarnessCapabilityCatalog | None = None,
+    cadence: ProjectionCadence = DEFAULT_PROJECTION_CADENCE,
+    replay: ProjectionReplay = LIVE_PROJECTION_CLOCK,
+    live_inputs: LiveProjectionInputs = INFERRED_LIVE_INPUTS,
+    collaborators: ServingCollaborators = OWNED_SERVING_COLLABORATORS,
 ) -> FastAPI:
     """Build the dashboard app bound to one shared projector for ``config``.
 
-    ``now`` / ``before_tick`` default to live behaviour; sim wires a replay clock + feeder. Live
-    serving enables the landing-state refresher and the change-driven projection watcher by
-    default; sim disables both unless explicitly set (replay must stay time-driven -- the sim
-    feeder only writes *inside* a tick, so a change-gated loop would never wake). ``interval``
-    is the fast-path projection cadence floor; ``heartbeat`` bounds quiet-world ``/api/state``
-    staleness (default ``DEFAULT_HEARTBEAT_SECONDS``). ``terminal_host``
-    defaults to a fresh :class:`TerminalHost` (the Mode B2 terminal backend); tests inject a
-    fake to drive the WebSocket bridge without a real PTY.
+    ``replay`` defaults to live behaviour; sim wires a replay clock + feeder. Live serving enables
+    the landing-state refresher and the change-driven projection watcher by default; sim disables
+    both unless ``live_inputs`` says otherwise (replay must stay time-driven -- the sim feeder only
+    writes *inside* a tick, so a change-gated loop would never wake). ``cadence.interval`` is the
+    fast-path projection cadence floor; ``cadence.heartbeat`` bounds quiet-world ``/api/state``
+    staleness (default ``DEFAULT_HEARTBEAT_SECONDS``). ``collaborators`` default to freshly
+    constructed ones (the Mode B2 terminal backend and friends); tests inject fakes to drive the
+    WebSocket bridge without a real PTY.
     """
-    if refresh_provider_state is None:
-        refresh_provider_state = before_tick is None
-    if refresh_landing_state is None:
-        refresh_landing_state = before_tick is None
-    if watch_changes is None:
-        watch_changes = before_tick is None
+    enabled = live_inputs.resolved(replay)
     projector = Projector(
         config,
-        interval=interval,
-        heartbeat=heartbeat,
-        now=now,
-        before_tick=before_tick,
-        provider_refresher=ProviderStateRefresher() if refresh_provider_state else None,
-        landing_refresher=LandingStateRefresher(config) if refresh_landing_state else None,
-        change_watcher=ProjectionInputWatcher(config) if watch_changes else None,
+        cadence=cadence,
+        replay=replay,
+        refreshers=ProjectionRefreshers(
+            provider=ProviderStateRefresher() if enabled.provider_state else None,
+            landing=LandingStateRefresher(config) if enabled.landing_state else None,
+            change_watcher=ProjectionInputWatcher(config) if enabled.change_watch else None,
+        ),
     )
-    host = terminal_host if terminal_host is not None else TerminalHost()
-    catalog = terminal_catalog or TerminalCatalog(terminal_catalog_path(config.coordination_root))
-    paster = terminal_paster if terminal_paster is not None else TerminalPaster()
-    liveness_clock = now or utc_now
+    interval = cadence.interval
+    host = collaborators.terminal_host or TerminalHost()
+    catalog = collaborators.terminal_catalog or TerminalCatalog(
+        terminal_catalog_path(config.coordination_root)
+    )
+    paster = collaborators.terminal_paster or TerminalPaster()
+    liveness_clock = replay.now or utc_now
     liveness_config = TerminalCatalogLivenessConfig()
     interaction_synchronizer = HostedInteractionSynchronizer(observer_root(config))
     liveness_sweeper = TerminalCatalogLivenessSweeper(
         catalog,
         host,
-        now=now,
-        config=liveness_config,
+        now=replay.now,
+        probe=LivenessProbe(
+            hysteresis=liveness_config,
+            on_control_snapshot=interaction_synchronizer.observe,
+        ),
         on_turn_state_change=lambda observation: log_turn_state_change_event(
             config, observation.entry
         ),
-        on_control_snapshot=interaction_synchronizer.observe,
     )
     # Resolved ONCE at boot: the stamp that makes a stale serving process visible.
     build = resolve_serving_build()
@@ -586,86 +677,179 @@ def create_app(
     # the central metrics store — the feed for provider_status, the statistics
     # board, and the degradation protocol. Read-only + dockerless-safe.
     metrics_store = ProviderMetricsStore(config.coordination_root)
-
-    async def metrics_loop() -> None:
-        while True:
-            try:
-                snapshot = await asyncio.to_thread(
-                    sample_provider_containers, cwd=config.coordination_root
-                )
-                await asyncio.to_thread(metrics_store.record, snapshot)
-                await asyncio.to_thread(evaluate_provider_degradation, config)
-                # Reclaim the append-only metrics log (O(1) stat unless past its byte budget).
-                await asyncio.to_thread(metrics_store.compact)
-            except Exception:
-                logger.exception("provider metrics sample failed; retrying next interval")
-            await asyncio.sleep(DEFAULT_SAMPLE_INTERVAL_SECONDS)
-
-    # The deterministic supervisor sweep -- its own decoupled cadence
-    # (default ~10s, settings-controlled), zero tokens, pure code. "The model is never the
-    # polling layer": every predicate reads TerminalCatalog/OperatorInboxStore/
-    # ExpectationRowStore/the nudge log DIRECTLY, never the projection.
-    supervisor_heartbeat_store = SupervisorHeartbeatStore(observer_root(config))
-
-    def _supervisor_context() -> SupervisorContext:
-        settings = load_agentic_settings(config.coordination_root)
-        root = observer_root(config)
-        return SupervisorContext(
+    runtime = _ServingRuntime(
+        config=config,
+        projector=projector,
+        host=host,
+        catalog=catalog,
+        paster=paster,
+        liveness_clock=liveness_clock,
+        liveness_config=liveness_config,
+        liveness_sweeper=liveness_sweeper,
+        build=build,
+        # The deterministic supervisor sweep runs on its own decoupled cadence
+        # (default ~10s, settings-controlled), zero tokens, pure code. "The model is never the
+        # polling layer": every predicate reads TerminalCatalog/OperatorInboxStore/
+        # ExpectationRowStore/the nudge log DIRECTLY, never the projection.
+        heartbeat_store=SupervisorHeartbeatStore(observer_root(config)),
+        interval=interval,
+    )
+    app = FastAPI(
+        title="Agents Remember dashboard",
+        lifespan=_serving_lifespan(runtime, metrics_store),
+    )
+    # Gzip the multi-hundred-KB JSON bodies (/api/state ~1.3 MB, the files
+    # catalog) for the clients that negotiate it. compresslevel=6: on a ~1.3 MB JSON body it
+    # matches level 9's ratio for ~16% less CPU per serve. Starlette's responder excludes
+    # text/event-stream by content type, so the SSE channels (/api/stream, /api/events, the
+    # conversation event streams) keep streaming uncompressed and unbuffered (covered by test).
+    app.add_middleware(GZipMiddleware, compresslevel=6)
+    _register_projection_routes(app, runtime)
+    _register_action_routes(app, runtime)
+    _register_terminal_session_routes(app, runtime)
+    _register_terminal_control_routes(app, runtime)
+    register_files_routes(app, config)
+    register_changeset_routes(app, config)
+    register_notes_routes(app, config)
+    register_harness_control_routes(
+        app,
+        ConversationRuntime(
+            scope=ConversationScope(
+                workspace_root=config.workspace_root,
+                coordination_root=config.coordination_root,
+            ),
             catalog=catalog,
             host=host,
-            paster=paster,
-            inbox_store=OperatorInboxStore(root),
-            expectation_store=ExpectationRowStore(root),
-            nudge_store=OrchestrationNudgeStore(root),
-            signal_cooldown_store=SupervisorSignalCooldownStore(root),
-            event_store=EventStore(root),
-            heartbeat_store=supervisor_heartbeat_store,
-            coordination_root=config.coordination_root,
-            stale_seat_seconds=max(settings.supervisor.interval_seconds * 4, 60.0),
-            redeliver_rate_limit_seconds=settings.supervisor.redeliver_rate_limit_seconds,
-            signal_cooldown_seconds=settings.supervisor.signal_cooldown_seconds,
-            escalation_sla_seconds=settings.escalation.sla_seconds,
-            escalation_rung_seconds=settings.escalation.rung_seconds,
-            respawn_after_rung=settings.escalation.respawn_after_rung,
-            redeliver_budget=settings.supervisor.redeliver_budget,
-            escalation_budget=settings.supervisor.escalation_budget,
-        )
+            harness_registry=lambda: load_agentic_settings(config.coordination_root).harnesses,
+            liveness_clock=liveness_clock,
+            liveness_config=liveness_config,
+            capability_catalog=(
+                collaborators.harness_capability_catalog
+                or HarnessCapabilityCatalog(config.workspace_root)
+            ),
+            authorization=LocalOperatorAuthorizationResolver.for_workspace(config.workspace_root),
+        ),
+    )
+    mount_static(app)
+    return app
 
-    async def supervisor_loop() -> None:
-        while True:
-            settings = load_agentic_settings(config.coordination_root)
-            if not settings.supervisor.enabled:
-                await asyncio.sleep(settings.supervisor.interval_seconds)
-                continue
-            try:
-                ctx = _supervisor_context()
-                await asyncio.to_thread(run_supervisor_sweep, ctx, now=(now or utc_now)())
-            except Exception:
-                logger.exception("supervisor sweep failed; retrying next interval")
+
+@dataclass(frozen=True)
+class _ServingRuntime:
+    """The long-lived collaborators one serving app is built around.
+
+    Both the route handlers and the background loops read from exactly this set, which is what
+    lets each of them be an ordinary module-level function instead of a closure over
+    :func:`create_app`'s locals -- and what lets one move to its own package without rewriting.
+    """
+
+    config: McpRuntimeConfig
+    projector: Projector
+    host: TerminalHost
+    catalog: TerminalCatalog
+    paster: TerminalPaster
+    liveness_clock: Callable[[], datetime]
+    liveness_config: TerminalCatalogLivenessConfig
+    liveness_sweeper: TerminalCatalogLivenessSweeper
+    build: ServingBuild
+    heartbeat_store: SupervisorHeartbeatStore
+    interval: float
+
+    @property
+    def observer_root(self) -> Path:
+        """The observer store root every durable control-plane store is opened under."""
+
+        return observer_root(self.config)
+
+
+# --- background loops ---------------------------------------------------------------------------
+
+
+async def _metrics_loop(config: McpRuntimeConfig, metrics_store: ProviderMetricsStore) -> None:
+    while True:
+        try:
+            snapshot = await asyncio.to_thread(
+                sample_provider_containers, cwd=config.coordination_root
+            )
+            await asyncio.to_thread(metrics_store.record, snapshot)
+            await asyncio.to_thread(evaluate_provider_degradation, config)
+            # Reclaim the append-only metrics log (O(1) stat unless past its byte budget).
+            await asyncio.to_thread(metrics_store.compact)
+        except Exception:
+            logger.exception("provider metrics sample failed; retrying next interval")
+        await asyncio.sleep(DEFAULT_SAMPLE_INTERVAL_SECONDS)
+
+
+def _supervisor_context(runtime: _ServingRuntime) -> SupervisorContext:
+    """One sweep's view of every store its predicates read directly."""
+
+    settings = load_agentic_settings(runtime.config.coordination_root)
+    root = runtime.observer_root
+    return SupervisorContext(
+        catalog=runtime.catalog,
+        host=runtime.host,
+        paster=runtime.paster,
+        inbox_store=OperatorInboxStore(root),
+        expectation_store=ExpectationRowStore(root),
+        nudge_store=OrchestrationNudgeStore(root),
+        signal_cooldown_store=SupervisorSignalCooldownStore(root),
+        event_store=EventStore(root),
+        heartbeat_store=runtime.heartbeat_store,
+        coordination_root=runtime.config.coordination_root,
+        stale_seat_seconds=max(settings.supervisor.interval_seconds * 4, 60.0),
+        redeliver_rate_limit_seconds=settings.supervisor.redeliver_rate_limit_seconds,
+        signal_cooldown_seconds=settings.supervisor.signal_cooldown_seconds,
+        escalation_sla_seconds=settings.escalation.sla_seconds,
+        escalation_rung_seconds=settings.escalation.rung_seconds,
+        respawn_after_rung=settings.escalation.respawn_after_rung,
+        redeliver_budget=settings.supervisor.redeliver_budget,
+        escalation_budget=settings.supervisor.escalation_budget,
+    )
+
+
+async def _supervisor_loop(runtime: _ServingRuntime) -> None:
+    while True:
+        settings = load_agentic_settings(runtime.config.coordination_root)
+        if not settings.supervisor.enabled:
             await asyncio.sleep(settings.supervisor.interval_seconds)
+            continue
+        try:
+            ctx = _supervisor_context(runtime)
+            await asyncio.to_thread(run_supervisor_sweep, ctx, now=runtime.liveness_clock())
+        except Exception:
+            logger.exception("supervisor sweep failed; retrying next interval")
+        await asyncio.sleep(settings.supervisor.interval_seconds)
 
-    async def malloc_trim_loop() -> None:
-        # Opt-in glibc arena reclaim. The steady RSS growth is allocator
-        # fragmentation from per-tick projection churn (gc object count is flat while RSS climbs);
-        # malloc_trim(0) returns the freed arena pages to the OS and holds RSS flat. Off unless
-        # AR_MALLOC_TRIM is set, glibc-only, and run off the event loop since it walks the arenas.
-        interval = malloc_trim_interval_seconds()
-        while True:
-            await asyncio.sleep(interval)
-            try:
-                await asyncio.to_thread(trim_malloc)
-            except Exception:
-                logger.exception("malloc_trim failed; retrying next interval")
 
-    async def workspace_river_compaction_loop() -> None:
-        while True:
-            await asyncio.sleep(WORKSPACE_EVENT_COMPACT_INTERVAL_SECONDS)
-            try:
-                await asyncio.to_thread(
-                    compact_workspace_river, observer_root(config), now=(now or utc_now)()
-                )
-            except Exception:
-                logger.exception("workspace event-river compaction failed; retrying next interval")
+async def _malloc_trim_loop() -> None:
+    # Opt-in glibc arena reclaim. The steady RSS growth is allocator
+    # fragmentation from per-tick projection churn (gc object count is flat while RSS climbs);
+    # malloc_trim(0) returns the freed arena pages to the OS and holds RSS flat. Off unless
+    # AR_MALLOC_TRIM is set, glibc-only, and run off the event loop since it walks the arenas.
+    interval = malloc_trim_interval_seconds()
+    while True:
+        await asyncio.sleep(interval)
+        try:
+            await asyncio.to_thread(trim_malloc)
+        except Exception:
+            logger.exception("malloc_trim failed; retrying next interval")
+
+
+async def _workspace_river_compaction_loop(runtime: _ServingRuntime) -> None:
+    while True:
+        await asyncio.sleep(WORKSPACE_EVENT_COMPACT_INTERVAL_SECONDS)
+        try:
+            await asyncio.to_thread(
+                compact_workspace_river, runtime.observer_root, now=runtime.liveness_clock()
+            )
+        except Exception:
+            logger.exception("workspace event-river compaction failed; retrying next interval")
+
+
+def _serving_lifespan(
+    runtime: _ServingRuntime, metrics_store: ProviderMetricsStore
+) -> Callable[[FastAPI], AbstractAsyncContextManager[None]]:
+    """The app lifespan: prime the projection, run the background loops, stop them cleanly."""
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
@@ -673,119 +857,123 @@ def create_app(
         # cadence. Workspace cursors are virtual (base offset + physical offset), and append/compact/read
         # share a cross-process lock, so this is cursor-safe while MCP and serving processes both write.
         await asyncio.to_thread(
-            compact_workspace_river, observer_root(config), now=(now or utc_now)()
+            compact_workspace_river, runtime.observer_root, now=runtime.liveness_clock()
         )
-        await projector.prime()
-        task = asyncio.create_task(projector.run())
-        metrics_task = asyncio.create_task(metrics_loop())
-        supervisor_task = asyncio.create_task(supervisor_loop())
-        river_compaction_task = asyncio.create_task(workspace_river_compaction_loop())
+        await runtime.projector.prime()
+        projection_task = asyncio.create_task(runtime.projector.run())
+        metrics_task = asyncio.create_task(_metrics_loop(runtime.config, metrics_store))
+        supervisor_task = asyncio.create_task(_supervisor_loop(runtime))
+        river_compaction_task = asyncio.create_task(_workspace_river_compaction_loop(runtime))
+        optional: list[asyncio.Task[None]] = []
         # The heap-growth diagnostic only exists when AR_HEAP_DIAG is set (tracemalloc started here
         # so the very first snapshot has a full trace history); otherwise there is no extra task at all.
-        heap_task = asyncio.create_task(heap_diag_loop()) if start_heap_tracing() else None
+        if start_heap_tracing():
+            optional.append(asyncio.create_task(heap_diag_loop()))
         # Opt-in RSS bound (glibc arena reclaim), independent of the diagnostic above.
-        trim_task = asyncio.create_task(malloc_trim_loop()) if malloc_trim_enabled() else None
+        if malloc_trim_enabled():
+            optional.append(asyncio.create_task(_malloc_trim_loop()))
+        background = [
+            river_compaction_task,
+            supervisor_task,
+            metrics_task,
+            projection_task,
+            *optional,
+        ]
         try:
             yield
         finally:
-            river_compaction_task.cancel()
-            supervisor_task.cancel()
-            metrics_task.cancel()
-            task.cancel()
-            if heap_task is not None:
-                heap_task.cancel()
-            if trim_task is not None:
-                trim_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await river_compaction_task
-            with contextlib.suppress(asyncio.CancelledError):
-                await supervisor_task
-            with contextlib.suppress(asyncio.CancelledError):
-                await metrics_task
-            with contextlib.suppress(asyncio.CancelledError):
-                await task
-            if heap_task is not None:
+            for task in background:
+                task.cancel()
+            for task in background:
                 with contextlib.suppress(asyncio.CancelledError):
-                    await heap_task
-            if trim_task is not None:
-                with contextlib.suppress(asyncio.CancelledError):
-                    await trim_task
-            host.shutdown()
+                    await task
+            runtime.host.shutdown()
 
-    app = FastAPI(title="Agents Remember dashboard", lifespan=lifespan)
-    # Gzip the multi-hundred-KB JSON bodies (/api/state ~1.3 MB, the files
-    # catalog) for the clients that negotiate it. compresslevel=6: on a ~1.3 MB JSON body it
-    # matches level 9's ratio for ~16% less CPU per serve. Starlette's responder excludes
-    # text/event-stream by content type, so the SSE channels (/api/stream, /api/events, the
-    # conversation event streams) keep streaming uncompressed and unbuffered (covered by test).
-    app.add_middleware(GZipMiddleware, compresslevel=6)
+    return lifespan
 
-    def _supervisor_heartbeat_payload() -> dict[str, Any]:
-        # The tick age at RESPONSE time (not the ETag-gated content revision --
-        # a heartbeat is deliberately volatile, the same "ages excluded" posture delta.py already
-        # applies to other live ages, so it never busts the projection's change-gate revision).
-        settings = load_agentic_settings(config.coordination_root)
-        moment = liveness_clock()
-        heartbeat = supervisor_heartbeat_store.read()
-        age = heartbeat_age_seconds(heartbeat, now=moment)
-        stale_cutoff = settings.supervisor.stale_cutoff_seconds
-        return {
-            "lastTickAt": heartbeat.lastTickAt if heartbeat is not None else None,
-            "ageSeconds": age,
-            "staleCutoffSeconds": stale_cutoff,
-            "stale": age is None or age >= stale_cutoff,
-            "pendingInboxCount": heartbeat.pendingInboxCount if heartbeat is not None else 0,
-            "redeliverableInboxCount": (
-                heartbeat.redeliverableInboxCount if heartbeat is not None else 0
-            ),
-            "lastSweepDurationSeconds": (
-                heartbeat.lastSweepDurationSeconds if heartbeat is not None else None
-            ),
-        }
+
+# --- projection routes --------------------------------------------------------------------------
+
+
+def _supervisor_heartbeat_payload(runtime: _ServingRuntime) -> dict[str, Any]:
+    # The tick age at RESPONSE time (not the ETag-gated content revision --
+    # a heartbeat is deliberately volatile, the same "ages excluded" posture delta.py already
+    # applies to other live ages, so it never busts the projection's change-gate revision).
+    settings = load_agentic_settings(runtime.config.coordination_root)
+    moment = runtime.liveness_clock()
+    heartbeat = runtime.heartbeat_store.read()
+    age = heartbeat_age_seconds(heartbeat, now=moment)
+    stale_cutoff = settings.supervisor.stale_cutoff_seconds
+    return {
+        "lastTickAt": heartbeat.lastTickAt if heartbeat is not None else None,
+        "ageSeconds": age,
+        "staleCutoffSeconds": stale_cutoff,
+        "stale": age is None or age >= stale_cutoff,
+        "pendingInboxCount": heartbeat.pendingInboxCount if heartbeat is not None else 0,
+        "redeliverableInboxCount": (
+            heartbeat.redeliverableInboxCount if heartbeat is not None else 0
+        ),
+        "lastSweepDurationSeconds": (
+            heartbeat.lastSweepDurationSeconds if heartbeat is not None else None
+        ),
+    }
+
+
+def _state_response(runtime: _ServingRuntime, if_none_match: str | None) -> Response:
+    # The change gate: the ETag is the projector's content revision, which only
+    # advances when the stable projection form changes (volatile ages excluded -- delta.py).
+    # An If-None-Match poll of an unchanged projection therefore costs a header exchange
+    # instead of a ~780 KB dump+parse; when content DID change, the full fresh dump serves
+    # exactly as before. `Cache-Control: no-cache` keeps any cache honest (always revalidate).
+    seq, snapshot = runtime.projector.current()
+    if snapshot is None:
+        raise HTTPException(status_code=503, detail="projection not ready")
+    revision = runtime.projector.revision(seq)
+    headers = {"ETag": f'W/"{revision}"', "Cache-Control": "no-cache"}
+    if _if_none_match_matches(if_none_match, revision):
+        return Response(status_code=304, headers=headers)
+    # The dump rides the per-instance memo; only the volatile tail
+    # (build stamp + at-response-time heartbeat) is computed per request, on a copy.
+    body = dict(_projection_body_cache.body(snapshot))
+    body["servingBuild"] = runtime.build.payload()
+    body["supervisorHeartbeat"] = _supervisor_heartbeat_payload(runtime)
+    return JSONResponse(content=body, headers=headers)
+
+
+def _task_document_response(runtime: _ServingRuntime, path: str) -> JSONResponse:
+    _, snapshot = runtime.projector.current()
+    if snapshot is None:
+        raise HTTPException(status_code=503, detail="projection not ready")
+    doc = read_task_document_body(
+        runtime.config.coordination_root,
+        doc_path=path,
+        enclosures=snapshot.enclosures,
+        now=runtime.liveness_clock(),
+    )
+    if doc is None:
+        raise HTTPException(status_code=404, detail="task document not found")
+    return JSONResponse(content=doc.model_dump(by_alias=True, exclude_none=True))
+
+
+def _register_projection_routes(app: FastAPI, runtime: _ServingRuntime) -> None:
+    """The read side of the cockpit: the projection once, tailed, and the raw event river."""
 
     @app.get("/api/state")
     def api_state(
         if_none_match: Annotated[str | None, Header()] = None,
     ) -> Response:
-        # The change gate: the ETag is the projector's content revision, which only
-        # advances when the stable projection form changes (volatile ages excluded -- delta.py).
-        # An If-None-Match poll of an unchanged projection therefore costs a header exchange
-        # instead of a ~780 KB dump+parse; when content DID change, the full fresh dump serves
-        # exactly as before. `Cache-Control: no-cache` keeps any cache honest (always revalidate).
-        seq, snapshot = projector.current()
-        if snapshot is None:
-            raise HTTPException(status_code=503, detail="projection not ready")
-        revision = projector.revision(seq)
-        etag = f'W/"{revision}"'
-        headers = {"ETag": etag, "Cache-Control": "no-cache"}
-        if _if_none_match_matches(if_none_match, revision):
-            return Response(status_code=304, headers=headers)
-        # The dump rides the per-instance memo; only the volatile tail
-        # (build stamp + at-response-time heartbeat) is computed per request, on a copy.
-        body = dict(_projection_body_cache.body(snapshot))
-        body["servingBuild"] = build.payload()
-        body["supervisorHeartbeat"] = _supervisor_heartbeat_payload()
-        return JSONResponse(content=body, headers=headers)
+        return _state_response(runtime, if_none_match)
 
     @app.get("/api/task-document")
     def api_task_document(path: Annotated[str, Query()]) -> JSONResponse:
-        _, snapshot = projector.current()
-        if snapshot is None:
-            raise HTTPException(status_code=503, detail="projection not ready")
-        doc = read_task_document_body(
-            config.coordination_root,
-            doc_path=path,
-            enclosures=snapshot.enclosures,
-            now=(now or utc_now)(),
-        )
-        if doc is None:
-            raise HTTPException(status_code=404, detail="task document not found")
-        return JSONResponse(content=doc.model_dump(by_alias=True, exclude_none=True))
+        return _task_document_response(runtime, path)
 
     @app.get("/api/stream", response_class=EventSourceResponse)
     async def api_stream() -> AsyncIterator[ServerSentEvent]:
         async for event in stream_events(
-            projector, build=build, supervisor_heartbeat=_supervisor_heartbeat_payload()
+            runtime.projector,
+            build=runtime.build,
+            supervisor_heartbeat=_supervisor_heartbeat_payload(runtime),
         ):
             yield event
 
@@ -794,270 +982,363 @@ def create_app(
         last_event_id: Annotated[str | None, Header()] = None,
     ) -> AsyncIterator[ServerSentEvent]:
         async for event in stream_raw_events(
-            config, last_event_id=last_event_id, interval=interval
+            runtime.config, last_event_id=last_event_id, interval=runtime.interval
         ):
             yield event
 
-    @app.post("/api/actions/{action}")
-    def api_action(action: str, request: ActionRequest) -> Response:
-        _, snapshot = projector.current()
-        if snapshot is None:
-            raise HTTPException(status_code=503, detail="projection not ready")
-        outcome = evaluate_action(
-            snapshot,
-            action,
-            request.target,
+
+# --- action + operator-inbox routes -------------------------------------------------------------
+
+
+def _recorded_gate_decision(
+    config: McpRuntimeConfig, decision: GateDecisionIntent
+) -> dict[str, Any]:
+    """Durably record one gate decision as developer-attributed, and answer with the gate.
+
+    Developer attribution is the un-forgeable half of the contract -- the agent's own path is
+    model-attributed -- and it is what server-side closeout enforcement consumes.
+
+    Every intent that arrives here is ADDRESSED. Whether a request names a gate to decide is a
+    question about the request, so it is settled once, in the layer that validates requests:
+    ``actions._gate_decision_outcome`` refuses a decision naming neither a lifecycle target nor a
+    gate id with 400 ``missing-target`` and never builds an intent for that shape. A decision
+    without a lifecycle id is therefore the gate-id-only cancel that guard let through.
+    """
+
+    verdict = GateVerdict(
+        decision=decision.decision,
+        by="developer",
+        via="dashboard",
+        note=decision.note,
+    )
+    if decision.lifecycle_id is not None:
+        return gate_decide_for_lifecycle(
+            config,
+            lifecycle_id=decision.lifecycle_id,
+            verdict=verdict,
+            expected_gate_id=decision.gate_id,
+        )
+    assert decision.gate_id is not None
+    return gate_decide_payload(config, gate_id=decision.gate_id, lifecycle_id=None, verdict=verdict)
+
+
+def _gate_decision_response(
+    config: McpRuntimeConfig,
+    outcome: ActionOutcome,
+    decision: GateDecisionIntent,
+    *,
+    target: str | None,
+) -> Response:
+    """Record the operator's gate decision and answer with the gate it wrote."""
+
+    try:
+        gate = _recorded_gate_decision(config, decision)
+    except KeyError as exc:
+        return JSONResponse(
+            content={
+                "status": "stale-gate" if decision.gate_id else "no-open-gate",
+                "detail": str(exc),
+                "target": target,
+            },
+            status_code=409,
+        )
+    return JSONResponse(content={**outcome.body, "gate": gate}, status_code=outcome.status_code)
+
+
+def _dismissal_response(
+    config: McpRuntimeConfig, outcome: ActionOutcome, intent: DismissalIntent
+) -> Response:
+    """Apply one attention dismissal.
+
+    Dismissals are current acknowledgements, not history. A gate-open item is consumed by
+    cancelling the gate itself, so it needs no acknowledgement row once the source is gone.
+
+    Every intent that arrives here is SCOPED, because whether a request carries a scope is settled
+    once, in the layer that validates requests: ``actions._dismiss_action_outcome`` refuses an
+    acknowledgement that names neither a lifecycle, nor a gate to cancel, nor the repo-level
+    ``actionable-drift`` signal with 400 ``missing-lifecycle``. So a dismissal that is not the gate
+    cancel below is one of the two the acknowledgement row can be written for.
+    """
+
+    gate: dict[str, Any] | None = None
+    if intent.kind == "gate-open" and intent.gate_id is not None:
+        with contextlib.suppress(KeyError):
+            gate = gate_decide_payload(
+                config,
+                gate_id=intent.gate_id,
+                lifecycle_id=intent.lifecycle_id,
+                verdict=GateVerdict(
+                    decision="cancel",
+                    by="developer",
+                    via="dashboard",
+                    note=intent.note or "Dismissed from attention queue.",
+                ),
+            )
+    else:
+        AttentionDismissalStore(observer_root(config)).dismiss(
+            AttentionDismissalRecord(
+                itemId=intent.item_id,
+                dismissedAt=intent.dismissed_at,
+                kind=intent.kind,
+                lifecycleId=intent.lifecycle_id,
+                gateId=intent.gate_id,
+            )
+        )
+    body = outcome.body if gate is None else {**outcome.body, "gate": gate}
+    return JSONResponse(content=body, status_code=outcome.status_code)
+
+
+def _action_response(runtime: _ServingRuntime, action: str, request: ActionRequest) -> Response:
+    """Route one action: acknowledge it, apply its dismissal, or record its gate decision."""
+
+    _, snapshot = runtime.projector.current()
+    if snapshot is None:
+        raise HTTPException(status_code=503, detail="projection not ready")
+    outcome = evaluate_action(
+        snapshot,
+        action,
+        request.target,
+        ActionEvaluationContext(
             actor=request.actor,
             now=now_iso(),
             gate_id=request.gateId,
             note=request.note,
             item_id=request.itemId,
             kind=request.kind,
+        ),
+    )
+    if outcome.dismissal is not None:
+        return _dismissal_response(runtime.config, outcome, outcome.dismissal)
+    if outcome.gate_decision is not None:
+        return _gate_decision_response(
+            runtime.config, outcome, outcome.gate_decision, target=request.target
         )
-        if outcome.dismissal is not None:
-            # Attention dismissals are current acknowledgements, not
-            # history. A gate-open item is consumed by deleting/cancelling the gate
-            # itself, so it does not need an acknowledgement row after the source is gone.
-            intent = outcome.dismissal
-            gate: dict[str, Any] | None = None
-            if intent.kind == "gate-open" and intent.gate_id is not None:
-                with contextlib.suppress(KeyError):
-                    gate = gate_decide_payload(
-                        config,
-                        gate_id=intent.gate_id,
-                        lifecycle_id=intent.lifecycle_id,
-                        decision="cancel",
-                        decided_by="developer",
-                        decided_via="dashboard",
-                        note=intent.note or "Dismissed from attention queue.",
-                    )
-            elif intent.lifecycle_id is not None or intent.kind == "actionable-drift":
-                AttentionDismissalStore(observer_root(config)).dismiss(
-                    AttentionDismissalRecord(
-                        itemId=intent.item_id,
-                        dismissedAt=intent.dismissed_at,
-                        kind=intent.kind,
-                        lifecycleId=intent.lifecycle_id,
-                        gateId=intent.gate_id,
-                    )
-                )
-            body = outcome.body if gate is None else {**outcome.body, "gate": gate}
-            return JSONResponse(content=body, status_code=outcome.status_code)
-        if outcome.gate_decision is not None:
-            # The one durable side effect: record the operator's gate decision as
-            # developer-attributed -- un-forgeable vs. the agent's model-attributed
-            # path, and what server-side closeout enforcement consumes.
-            try:
-                if outcome.gate_decision.lifecycle_id is None:
-                    if outcome.gate_decision.gate_id is None:
-                        return JSONResponse(
-                            content={
-                                "status": "missing-gate-id",
-                                "detail": "gate-id-only decisions require gateId",
-                            },
-                            status_code=400,
-                        )
-                    gate = gate_decide_payload(
-                        config,
-                        gate_id=outcome.gate_decision.gate_id,
-                        lifecycle_id=None,
-                        decision=outcome.gate_decision.decision,
-                        decided_by="developer",
-                        decided_via="dashboard",
-                        note=outcome.gate_decision.note,
-                    )
-                else:
-                    gate = gate_decide_for_lifecycle(
-                        config,
-                        lifecycle_id=outcome.gate_decision.lifecycle_id,
-                        decision=outcome.gate_decision.decision,
-                        decided_by="developer",
-                        decided_via="dashboard",
-                        expected_gate_id=outcome.gate_decision.gate_id,
-                        note=outcome.gate_decision.note,
-                    )
-            except KeyError as exc:
-                status = "stale-gate" if outcome.gate_decision.gate_id else "no-open-gate"
-                return JSONResponse(
-                    content={
-                        "status": status,
-                        "detail": str(exc),
-                        "target": request.target,
-                    },
-                    status_code=409,
-                )
-            return JSONResponse(
-                content={**outcome.body, "gate": gate}, status_code=outcome.status_code
-            )
-        return JSONResponse(content=outcome.body, status_code=outcome.status_code)
+    return JSONResponse(content=outcome.body, status_code=outcome.status_code)
+
+
+def _operator_inbox_response(
+    runtime: _ServingRuntime, request: OperatorInboxPostRequest
+) -> Response:
+    # External-chat path: a dashboard response with no hosted session is written to the
+    # pull-based operator inbox. External agents read it through the MCP operator_inbox_poll /
+    # operator_inbox_consume tools; this endpoint only owns the developer/dashboard write side.
+    try:
+        payload = operator_inbox_post_payload(
+            runtime.config,
+            address=InboxAddress(
+                lifecycle_id=request.lifecycle_id,
+                agent_id=request.agent_id,
+                recipient_role=request.recipient_role,
+            ),
+            message=InboxMessage(
+                ask=request.ask,
+                response=request.response,
+                message_kind=request.message_kind,
+                gate_id=request.gate_id,
+                artifact_path=request.artifact_path,
+            ),
+            poster=InboxPoster(
+                created_by="developer",
+                created_via="dashboard",
+                sender_agent_id=request.sender_agent_id,
+                sender_role=request.sender_role,
+            ),
+            delivery=HostedDelivery(
+                enabled=request.deliver_to_hosted,
+                catalog=runtime.catalog,
+                host=runtime.host,
+                paster=runtime.paster,
+            ),
+        )
+    except ValueError as exc:
+        return JSONResponse(content={"status": "bad-address", "detail": str(exc)}, status_code=400)
+    return JSONResponse(content=payload, status_code=200)
+
+
+def _inbox_dismiss_response(runtime: _ServingRuntime, entry_id: str) -> Response:
+    removed = OperatorInboxStore(runtime.observer_root).delete(entry_id)
+    if not removed:
+        return JSONResponse(content={"status": "not-found", "entryId": entry_id}, status_code=404)
+    return JSONResponse(content={"status": "dismissed", "entryId": entry_id}, status_code=200)
+
+
+def _register_action_routes(app: FastAPI, runtime: _ServingRuntime) -> None:
+    """The write side the developer drives: the gate return channel and the operator inbox."""
+
+    @app.post("/api/actions/{action}")
+    def api_action(action: str, request: ActionRequest) -> Response:
+        return _action_response(runtime, action, request)
 
     @app.post("/api/operator-inbox")
     def api_operator_inbox(request: OperatorInboxPostRequest) -> Response:
-        # External-chat path: a dashboard response with no hosted session is written to the
-        # pull-based operator inbox. External agents read it through the MCP operator_inbox_poll /
-        # operator_inbox_consume tools; this endpoint only owns the developer/dashboard write side.
-        try:
-            payload = operator_inbox_post_payload(
-                config,
-                lifecycle_id=request.lifecycle_id,
-                agent_id=request.agent_id,
-                gate_id=request.gate_id,
-                sender_agent_id=request.sender_agent_id,
-                sender_role=request.sender_role,
-                recipient_role=request.recipient_role,
-                message_kind=request.message_kind,
-                artifact_path=request.artifact_path,
-                deliver_to_hosted=request.deliver_to_hosted,
-                terminal_catalog=catalog,
-                terminal_host=host,
-                terminal_paster=paster,
-                ask=request.ask,
-                response=request.response,
-                created_by="developer",
-                created_via="dashboard",
-            )
-        except ValueError as exc:
-            return JSONResponse(
-                content={"status": "bad-address", "detail": str(exc)}, status_code=400
-            )
-        return JSONResponse(content=payload, status_code=200)
+        return _operator_inbox_response(runtime, request)
 
     @app.post("/api/operator-inbox/{entry_id}/dismiss")
     def api_operator_inbox_dismiss(entry_id: str) -> Response:
-        removed = OperatorInboxStore(observer_root(config)).delete(entry_id)
-        if not removed:
-            return JSONResponse(
-                content={"status": "not-found", "entryId": entry_id}, status_code=404
-            )
-        return JSONResponse(content={"status": "dismissed", "entryId": entry_id}, status_code=200)
+        return _inbox_dismiss_response(runtime, entry_id)
+
+
+# --- terminal session routes --------------------------------------------------------------------
+
+
+async def _serve_terminal_websocket(
+    runtime: _ServingRuntime, websocket: WebSocket, session: str
+) -> None:
+    # Mode B2: bridge a live terminal-host session to xterm.js. Attach-only
+    # -- the session is opened out-of-band (the lifecycle-correlated launch comes
+    # later); an unknown id is refused with a private close code. Same localhost posture
+    # as the rest of the app (the host spawns a fixed argv, never a wire-supplied command).
+    await websocket.accept()
+    session_obj = _attach_terminal_session(
+        HostedSessionRuntime(catalog=runtime.catalog, host=runtime.host),
+        session_id=session,
+        attached_at=now_iso(),
+        checked_at=runtime.liveness_clock(),
+        liveness_config=runtime.liveness_config,
+    )
+    if session_obj is None:
+        await websocket.close(code=4404)
+        return
+    try:
+        await _bridge_terminal(websocket, runtime.host, session_obj)
+    finally:
+        if not session_obj.is_alive:
+            runtime.catalog.mark_exited(session)
+        else:
+            runtime.host.close_session(session_obj)
+        with contextlib.suppress(RuntimeError):
+            await websocket.close()
+
+
+def _detected_harnesses_payload(runtime: _ServingRuntime) -> dict[str, Any]:
+    # The supported TUI harnesses + whether each is installed here. The dashboard
+    # renders a launch button per *detected* harness; the argv stays server-side (open via POST).
+    # The EFFECTIVE registry (builtin merged with orchestration.harnesses in the
+    # GLOBAL agentic settings, per-use) -- settings-defined harnesses get buttons too. Repo-local
+    # overrides are leaf-scoped dispatch material (the MCP spawn tool), not workspace buttons.
+    registry = load_agentic_settings(runtime.config.coordination_root).harnesses
+    return {
+        "harnesses": [
+            {"id": h.id, "name": h.name, "detected": h.detected}
+            for h in detect_harnesses(registry=registry)
+        ]
+    }
+
+
+def _register_terminal_session_routes(app: FastAPI, runtime: _ServingRuntime) -> None:
+    """Attaching to a live pane, and what there is to attach to."""
 
     @app.websocket("/api/terminal/{session}")
     async def api_terminal(websocket: WebSocket, session: str) -> None:
-        # Mode B2: bridge a live terminal-host session to xterm.js. Attach-only
-        # -- the session is opened out-of-band (the lifecycle-correlated launch comes
-        # later); an unknown id is refused with a private close code. Same localhost posture
-        # as the rest of the app (the host spawns a fixed argv, never a wire-supplied command).
-        await websocket.accept()
-        session_obj = _attach_terminal_session(
-            catalog=catalog,
-            host=host,
-            session_id=session,
-            attached_at=now_iso(),
-            checked_at=liveness_clock(),
-            liveness_config=liveness_config,
-        )
-        if session_obj is None:
-            await websocket.close(code=4404)
-            return
-        try:
-            await _bridge_terminal(websocket, host, session_obj)
-        finally:
-            if not session_obj.is_alive:
-                catalog.mark_exited(session)
-            else:
-                host.close_session(session_obj)
-            with contextlib.suppress(RuntimeError):
-                await websocket.close()
+        await _serve_terminal_websocket(runtime, websocket, session)
 
     @app.get("/api/terminal/sessions")
     def api_terminal_sessions() -> dict[str, Any]:
-        return {"sessions": [_catalog_payload(entry) for entry in liveness_sweeper.refresh()]}
+        return {
+            "sessions": [_catalog_payload(entry) for entry in runtime.liveness_sweeper.refresh()]
+        }
 
     @app.get("/api/harnesses")
     def api_harnesses() -> dict[str, Any]:
-        # The supported TUI harnesses + whether each is installed here. The dashboard
-        # renders a launch button per *detected* harness; the argv stays server-side (open via POST).
-        # The EFFECTIVE registry (builtin merged with orchestration.harnesses in the
-        # GLOBAL agentic settings, per-use) -- settings-defined harnesses get buttons too. Repo-local
-        # overrides are leaf-scoped dispatch material (the MCP spawn tool), not workspace buttons.
-        registry = load_agentic_settings(config.coordination_root).harnesses
-        return {
-            "harnesses": [
-                {
-                    "id": h.id,
-                    "name": h.name,
-                    "detected": h.detected,
-                }
-                for h in detect_harnesses(registry=registry)
-            ]
-        }
+        return _detected_harnesses_payload(runtime)
 
-    @app.post("/api/terminal/landed-cleanup")
-    def api_terminal_landed_cleanup(request: TerminalLandedCleanupRequest) -> Response:
-        closed: list[str] = []
-        skipped: list[dict[str, str]] = []
-        closed_entries: list[TerminalCatalogEntry] = []
-        for session in request.session_ids:
-            entry = catalog.get(session)
-            if entry is None:
-                skipped.append({"session": session, "reason": "unknown-session"})
-                continue
-            if entry.status != "landed":
-                skipped.append({"session": session, "reason": f"status:{entry.status}"})
-                continue
-            updated = retire_entry(
-                catalog,
-                host,
-                entry,
+
+# --- terminal control routes --------------------------------------------------------------------
+
+
+def _landed_cleanup_response(runtime: _ServingRuntime, session_ids: Sequence[str]) -> Response:
+    closed: list[str] = []
+    skipped: list[dict[str, str]] = []
+    closed_entries: list[TerminalCatalogEntry] = []
+    for session in session_ids:
+        entry = runtime.catalog.get(session)
+        if entry is None:
+            skipped.append({"session": session, "reason": "unknown-session"})
+            continue
+        if entry.status != "landed":
+            skipped.append({"session": session, "reason": f"status:{entry.status}"})
+            continue
+        updated = retire_entry(
+            runtime.catalog,
+            runtime.host,
+            entry,
+            SeatClosure(
                 at=now_iso(),
                 by_session=None,
                 reason="landed group cleanup",
                 edge="landed-group-cleanup",
-            )
-            if updated is None:
-                skipped.append({"session": session, "reason": "unknown-session"})
-                continue
-            closed.append(session)
-            closed_entries.append(updated)
-        for entry in closed_entries:
-            log_retire_event(config, entry)
-        return JSONResponse(
-            content={
-                "status": "cleaned",
-                "closed": len(closed),
-                "skipped": len(skipped),
-                "closedSessions": closed,
-                "skippedSessions": skipped,
-            },
-            status_code=200,
+            ),
         )
+        if updated is None:
+            skipped.append({"session": session, "reason": "unknown-session"})
+            continue
+        closed.append(session)
+        closed_entries.append(updated)
+    for entry in closed_entries:
+        log_retire_event(runtime.config, entry)
+    return JSONResponse(
+        content={
+            "status": "cleaned",
+            "closed": len(closed),
+            "skipped": len(skipped),
+            "closedSessions": closed,
+            "skippedSessions": skipped,
+        },
+        status_code=200,
+    )
 
-    @app.post("/api/terminal/{session}")
-    def api_terminal_open(session: str, request: TerminalOpenRequest) -> Response:
-        # Mode B2 opener: the dashboard *spawns + owns* a
-        # session, then the WebSocket above attaches to it. The leaf-claim + ensure + upsert
-        # composition lives in the shared `open_terminal_session` so this route and the agent-facing
-        # `spawn_agent_session` MCP tool spawn through ONE opener (no parallel spawn path).
-        try:
-            leaf_key = _resolve_request_leaf_key(config, request.leaf_key)
-        except LeafRefResolutionError as exc:
-            return _leaf_ref_response(exc, request.leaf_key or "")
-        try:
-            resolved_launch = resolve_terminal_open_selection(
-                kind=request.kind,
-                harness=request.harness,
-                model=request.model,
-                effort=request.effort,
-                workspace=config.workspace_root,
-            )
-        except HarnessControlError as exc:
-            return JSONResponse(
-                content={"status": "launch-selection-invalid", "detail": str(exc)},
-                status_code=400,
-            )
-        shell = os.environ.get("SHELL") or DEFAULT_SHELL
-        result = open_terminal_session(
-            catalog=catalog,
-            host=host,
-            session_id=session,
+
+def _terminal_entry_payload(entry: TerminalCatalogEntry) -> dict[str, Any]:
+    """The catalog facts every open/conflict answer repeats about one durable row."""
+
+    return {
+        "session": entry.id,
+        "kind": entry.kind,
+        "harness": entry.harness,
+        "tmuxName": entry.tmux_name,
+        "controlState": entry.control_state,
+        "controlEndpoint": (
+            str(entry.control_endpoint) if entry.control_endpoint is not None else None
+        ),
+        "controlProtocol": entry.control_protocol,
+        "resolvedModel": entry.resolved_model,
+        "resolvedEffort": entry.resolved_effort,
+    }
+
+
+def _open_terminal_response(
+    runtime: _ServingRuntime, session: str, request: TerminalOpenRequest
+) -> Response:
+    # Mode B2 opener: the dashboard *spawns + owns* a
+    # session, then the WebSocket above attaches to it. The leaf-claim + ensure + upsert
+    # composition lives in the shared `open_terminal_session` so this route and the agent-facing
+    # `spawn_agent_session` MCP tool spawn through ONE opener (no parallel spawn path).
+    config = runtime.config
+    try:
+        leaf_key = _resolve_request_leaf_key(config, request.leaf_key)
+    except LeafRefResolutionError as exc:
+        return _leaf_ref_response(exc, request.leaf_key or "")
+    try:
+        resolved_launch = resolve_terminal_open_selection(
+            kind=request.kind,
+            harness=request.harness,
+            model=request.model,
+            effort=request.effort,
+            workspace=config.workspace_root,
+        )
+    except HarnessControlError as exc:
+        return JSONResponse(
+            content={"status": "launch-selection-invalid", "detail": str(exc)},
+            status_code=400,
+        )
+    result = open_terminal_session(
+        runtime=HostedSessionRuntime(catalog=runtime.catalog, host=runtime.host),
+        session_id=session,
+        launch=TerminalLaunchRequest(
             kind=request.kind,
             workspace_root=config.workspace_root,
-            shell=shell,
+            shell=os.environ.get("SHELL") or DEFAULT_SHELL,
             harness=request.harness,
-            label=request.label,
-            lifecycle_id=request.lifecycle_id,
-            leaf_key=leaf_key,
-            resolved_launch=resolved_launch,
             # Resolve harness ids against the effective GLOBAL registry (builtin merged
             # with orchestration.harnesses) so dashboard launches and MCP dispatches agree on argv.
             # Loaded only for harness-kind opens: a malformed settings file must
@@ -1067,368 +1348,410 @@ def create_app(
                 if request.kind == "harness" or request.harness
                 else None
             ),
-            control_root=config.coordination_root / "runtime" / "harness-control",
+            control=ControlRunnerRequest(
+                resolved_launch=resolved_launch,
+                endpoint_root=config.coordination_root / "runtime" / "harness-control",
+            ),
+        ),
+        provenance=SpawnProvenance(
+            label=request.label,
+            lifecycle_id=request.lifecycle_id,
+            leaf_key=leaf_key,
+        ),
+    )
+    if result.status == "bad-kind":
+        return JSONResponse(
+            content={"status": "bad-kind", "detail": result.detail}, status_code=400
         )
-        if result.status == "bad-kind":
-            return JSONResponse(
-                content={"status": "bad-kind", "detail": result.detail}, status_code=400
-            )
-        if result.status == "leaf-taken":
-            # Server-authoritative pair uniqueness; the client guard is only advisory.
-            return JSONResponse(
-                content={
-                    "status": "leaf-taken",
-                    "leafKey": leaf_key,
-                    "session": result.owner_session_id,
-                },
-                status_code=409,
-            )
-        entry = result.entry
-        assert entry is not None  # opened/conflict => the actual durable row
-        if result.status == "launch-conflict":
-            return JSONResponse(
-                content={
-                    "status": "launch-selection-conflict",
-                    "detail": result.detail,
-                    "session": entry.id,
-                    "kind": entry.kind,
-                    "harness": entry.harness,
-                    "tmuxName": entry.tmux_name,
-                    "controlState": entry.control_state,
-                    "controlEndpoint": (
-                        str(entry.control_endpoint) if entry.control_endpoint is not None else None
-                    ),
-                    "controlProtocol": entry.control_protocol,
-                    "resolvedModel": entry.resolved_model,
-                    "resolvedEffort": entry.resolved_effort,
-                },
-                status_code=409,
-            )
+    if result.status == "leaf-taken":
+        # Server-authoritative pair uniqueness; the client guard is only advisory.
         return JSONResponse(
             content={
-                "session": entry.id,
-                "label": entry.label,
-                "kind": entry.kind,
-                "harness": entry.harness,
-                "lifecycleId": entry.lifecycle_id,
-                "leafKey": entry.leaf_key,
-                "seatRole": entry.binding_role,
-                "cwd": str(entry.cwd),
-                "tmuxName": entry.tmux_name,
-                "status": "running",
-                "controlState": entry.control_state,
-                "controlEndpoint": (
-                    str(entry.control_endpoint) if entry.control_endpoint is not None else None
-                ),
-                "controlProtocol": entry.control_protocol,
-                "resolvedModel": entry.resolved_model,
-                "resolvedEffort": entry.resolved_effort,
+                "status": "leaf-taken",
+                "leafKey": leaf_key,
+                "session": result.owner_session_id,
             },
-            status_code=200,
+            status_code=409,
         )
+    entry = result.entry
+    assert entry is not None  # opened/conflict => the actual durable row
+    if result.status == "launch-conflict":
+        return JSONResponse(
+            content={
+                **_terminal_entry_payload(entry),
+                "status": "launch-selection-conflict",
+                "detail": result.detail,
+            },
+            status_code=409,
+        )
+    return JSONResponse(
+        content={
+            **_terminal_entry_payload(entry),
+            "label": entry.label,
+            "lifecycleId": entry.lifecycle_id,
+            "leafKey": entry.leaf_key,
+            "seatRole": entry.binding_role,
+            "cwd": str(entry.cwd),
+            "status": "running",
+        },
+        status_code=200,
+    )
 
-    @app.post("/api/terminal/{session}/attach-leaf")
-    def api_terminal_attach_leaf(session: str, request: TerminalAttachLeafRequest) -> Response:
-        # Claim or move one existing session's leaf-role binding (enclosure-free, no respawn).
-        try:
-            leaf_key = _resolve_request_leaf_key(config, request.leaf_key)
-        except LeafRefResolutionError as exc:
-            return _leaf_ref_response(exc, request.leaf_key)
-        assert leaf_key is not None
-        result = assign_terminal_session_to_leaf(
-            catalog,
-            host,
-            session_id=session,
-            leaf_key=leaf_key,
-            role=request.role,
+
+def _attach_leaf_response(
+    runtime: _ServingRuntime, session: str, request: TerminalAttachLeafRequest
+) -> Response:
+    # Claim or move one existing session's leaf-role binding (enclosure-free, no respawn).
+    try:
+        leaf_key = _resolve_request_leaf_key(runtime.config, request.leaf_key)
+    except LeafRefResolutionError as exc:
+        return _leaf_ref_response(exc, request.leaf_key)
+    assert leaf_key is not None
+    result = assign_terminal_session_to_leaf(
+        runtime.catalog,
+        runtime.host,
+        session_id=session,
+        leaf_key=leaf_key,
+        role=request.role,
+    )
+    if result.status == "unknown-session":
+        return JSONResponse(content={"status": "unknown-session"}, status_code=404)
+    if result.status == "leaf-taken":
+        return JSONResponse(
+            content={
+                "session": result.owner_session_id,
+                "status": "leaf-taken",
+                "leafKey": leaf_key,
+            },
+            status_code=409,
         )
-        if result.status == "unknown-session":
-            return JSONResponse(content={"status": "unknown-session"}, status_code=404)
-        if result.status == "leaf-taken":
-            return JSONResponse(
-                content={
-                    "session": result.owner_session_id,
-                    "status": "leaf-taken",
-                    "leafKey": leaf_key,
-                },
-                status_code=409,
-            )
-        if result.status == "role-required":
-            return JSONResponse(
-                content={
-                    "session": session,
-                    "status": "role-required",
-                    "leafKey": leaf_key,
-                    "detail": "role is required for a hand-opened harness session",
-                },
-                status_code=400,
-            )
+    if result.status == "role-required":
         return JSONResponse(
             content={
                 "session": session,
-                "status": "attached",
+                "status": "role-required",
                 "leafKey": leaf_key,
-                "role": result.role,
-                "seatRole": result.seat_role,
-                "previousSeatRole": result.previous_seat_role,
+                "detail": "role is required for a hand-opened harness session",
+            },
+            status_code=400,
+        )
+    return JSONResponse(
+        content={
+            "session": session,
+            "status": "attached",
+            "leafKey": leaf_key,
+            "role": result.role,
+            "seatRole": result.seat_role,
+            "previousSeatRole": result.previous_seat_role,
+        },
+        status_code=200,
+    )
+
+
+def _live_paste_target(runtime: _ServingRuntime, session: str) -> TerminalCatalogEntry | None:
+    """The running catalog row for one seat, re-proven live, or ``None`` if it is neither."""
+
+    entry = runtime.catalog.get(session)
+    if entry is None or entry.status != "running":
+        return None
+    observation = observe_terminal_liveness(
+        runtime.catalog,
+        runtime.host,
+        entry,
+        checked_at=runtime.liveness_clock(),
+        probe=LivenessProbe(hysteresis=runtime.liveness_config),
+    )
+    if not observation.alive or observation.entry.status != "running":
+        return None
+    return observation.entry
+
+
+def _harness_submit_response(
+    entry: TerminalCatalogEntry,
+    session: str,
+    request: TerminalPasteRequest,
+    *,
+    delivery_id: str,
+) -> Response:
+    """Deliver operator input to a protocol harness as one correlated whole message.
+
+    A harness never takes raw pane input, so a legacy session with no adapter and an unsubmitted
+    draft are both refused here rather than degraded to a keystroke path.
+    """
+
+    if entry.control_endpoint is None:
+        return JSONResponse(
+            content={
+                "session": session,
+                "status": "unsupported",
+                "detail": "legacy harness session has no protocol adapter",
+            },
+            status_code=409,
+        )
+    if not request.submit:
+        return JSONResponse(
+            content={
+                "session": session,
+                "status": "draft-not-submitted",
+                "detail": "harness drafts remain on the attached terminal surface",
+            },
+            status_code=409,
+        )
+    try:
+        receipt = submit_control_prompt(
+            entry, request.text, ControlSubmission(source="terminal", request_id=delivery_id)
+        )
+    except HarnessControlError as exc:
+        return JSONResponse(
+            content={
+                "session": session,
+                "entryId": delivery_id,
+                "status": "unconfirmed",
+                "delivered": False,
+                "submitted": True,
+                "detail": str(exc),
             },
             status_code=200,
         )
-
-    @app.post("/api/terminal/{session}/paste")
-    def api_terminal_paste(session: str, request: TerminalPasteRequest) -> Response:
-        # Explicit operator terminal input. Inter-agent messaging uses the durable inbox route;
-        # a protocol harness receives one correlated whole message, never raw pane input.
-        entry = catalog.get(session)
-        if entry is None or entry.status != "running":
-            return JSONResponse(content={"status": "unknown-session"}, status_code=404)
-        observation = observe_terminal_liveness(
-            catalog,
-            host,
-            entry,
-            checked_at=liveness_clock(),
-            config=liveness_config,
-        )
-        if not observation.alive or observation.entry.status != "running":
-            return JSONResponse(content={"status": "unknown-session"}, status_code=404)
-        entry = observation.entry
-        delivery_id = uuid4().hex
-        if entry.kind == "harness":
-            if entry.control_endpoint is None:
-                return JSONResponse(
-                    content={
-                        "session": session,
-                        "status": "unsupported",
-                        "detail": "legacy harness session has no protocol adapter",
-                    },
-                    status_code=409,
-                )
-            if not request.submit:
-                return JSONResponse(
-                    content={
-                        "session": session,
-                        "status": "draft-not-submitted",
-                        "detail": "harness drafts remain on the attached terminal surface",
-                    },
-                    status_code=409,
-                )
-            try:
-                receipt = submit_control_prompt(
-                    entry,
-                    request.text,
-                    source="terminal",
-                    request_id=delivery_id,
-                )
-            except HarnessControlError as exc:
-                return JSONResponse(
-                    content={
-                        "session": session,
-                        "entryId": delivery_id,
-                        "status": "unconfirmed",
-                        "delivered": False,
-                        "submitted": True,
-                        "detail": str(exc),
-                    },
-                    status_code=200,
-                )
-            delivered = receipt.acceptance in {"immediate", "queued"}
-            return JSONResponse(
-                content={
-                    "session": session,
-                    "entryId": delivery_id,
-                    "status": "delivered" if delivered else "unconfirmed",
-                    "delivered": delivered,
-                    "submitted": True,
-                    "acceptance": receipt.acceptance,
-                    "vendorCorrelationId": receipt.vendor_correlation_id,
-                    "acceptedAt": receipt.accepted_at,
-                    "detail": receipt.detail,
-                },
-                status_code=200,
-            )
-        outcome = paster.paste(
-            entry.tmux_name,
-            request.text,
-            submit=request.submit,
-            accepted=None,
-        )
-        delivered = outcome.delivered
-        content: dict[str, object] = {
+    delivered = receipt.acceptance in {"immediate", "queued"}
+    return JSONResponse(
+        content={
             "session": session,
             "entryId": delivery_id,
             "status": "delivered" if delivered else "unconfirmed",
             "delivered": delivered,
-            "submitted": request.submit and delivered,
-        }
-        if not delivered:
-            content["capture"] = outcome.capture
-        return JSONResponse(content=content, status_code=200)
+            "submitted": True,
+            "acceptance": receipt.acceptance,
+            "vendorCorrelationId": receipt.vendor_correlation_id,
+            "acceptedAt": receipt.accepted_at,
+            "detail": receipt.detail,
+        },
+        status_code=200,
+    )
+
+
+def _pane_paste_response(
+    runtime: _ServingRuntime,
+    entry: TerminalCatalogEntry,
+    session: str,
+    request: TerminalPasteRequest,
+    *,
+    delivery_id: str,
+) -> Response:
+    """Paste into an ordinary terminal's pane; transport is the only thing this path can prove."""
+
+    outcome = runtime.paster.paste(
+        entry.tmux_name,
+        request.text,
+        submit=request.submit,
+        accepted=None,
+    )
+    delivered = outcome.delivered
+    content: dict[str, object] = {
+        "session": session,
+        "entryId": delivery_id,
+        "status": "delivered" if delivered else "unconfirmed",
+        "delivered": delivered,
+        "submitted": request.submit and delivered,
+    }
+    if not delivered:
+        content["capture"] = outcome.capture
+    return JSONResponse(content=content, status_code=200)
+
+
+def _paste_response(
+    runtime: _ServingRuntime, session: str, request: TerminalPasteRequest
+) -> Response:
+    # Explicit operator terminal input. Inter-agent messaging uses the durable inbox route;
+    # a protocol harness receives one correlated whole message, never raw pane input.
+    entry = _live_paste_target(runtime, session)
+    if entry is None:
+        return JSONResponse(content={"status": "unknown-session"}, status_code=404)
+    delivery_id = uuid4().hex
+    if entry.kind == "harness":
+        return _harness_submit_response(entry, session, request, delivery_id=delivery_id)
+    return _pane_paste_response(runtime, entry, session, request, delivery_id=delivery_id)
+
+
+def _terminate_response(runtime: _ServingRuntime, session: str) -> Response:
+    entry = runtime.catalog.get(session)
+    live = runtime.host.get(session)
+    if entry is None and live is None:
+        return JSONResponse(content={"status": "unknown-session"}, status_code=404)
+    control_stop_detail = None
+    if entry is not None and entry.control_endpoint is not None:
+        try:
+            stop_control_session(entry)
+        except HarnessControlError as exc:
+            control_stop_detail = str(exc)
+    runtime.host.terminate(session, tmux_name=entry.tmux_name if entry is not None else None)
+    terminated_at = now_iso()
+    updated = runtime.catalog.mark_terminated(session, terminated_at)
+    return JSONResponse(
+        content={
+            "session": session,
+            "status": "terminated",
+            "terminatedAt": terminated_at,
+            **({"tmuxName": updated.tmux_name} if updated is not None else {}),
+            **({"controlStopDetail": control_stop_detail} if control_stop_detail else {}),
+        },
+        status_code=200,
+    )
+
+
+def _retire_response(
+    runtime: _ServingRuntime, session: str, request: TerminalRetireRequest
+) -> Response:
+    # The server-authoritative retire surface. Never a zombie row --
+    # a retire is the SAME terminal mark ``/terminate`` writes, plus retirement provenance
+    # (who, why, when, which edge); transcripts are never touched. Authority is enforced here,
+    # not trusted from the caller: owner-never-self-retires, a manager retires only its own
+    # master's worker/reviewer seats, the orchestrator retires anything.
+    target_entry = runtime.catalog.get(session)
+    if target_entry is None:
+        return JSONResponse(content={"status": "unknown-session"}, status_code=404)
+    actor_entry = runtime.catalog.get(request.actor_session)
+    if actor_entry is None:
+        return JSONResponse(
+            content={"status": "unknown-actor", "actorSession": request.actor_session},
+            status_code=404,
+        )
+    if target_entry.status == "terminated":
+        return JSONResponse(
+            content={
+                "session": session,
+                "status": "already-retired",
+                "retiredAt": target_entry.retired_at,
+            },
+            status_code=200,
+        )
+    try:
+        check_retire_authority(_seat_ref(actor_entry), _seat_ref(target_entry))
+    except RetirePolicyError as exc:
+        return JSONResponse(
+            content={"session": session, "status": "retire-refused", "detail": str(exc)},
+            status_code=403,
+        )
+    updated = retire_entry(
+        runtime.catalog,
+        runtime.host,
+        target_entry,
+        SeatClosure(
+            at=now_iso(), by_session=request.actor_session, reason=request.reason, edge="manual"
+        ),
+    )
+    assert updated is not None  # the entry existed above; no concurrent delete path removes rows
+    log_retire_event(runtime.config, updated)
+    return JSONResponse(
+        content={
+            "session": session,
+            "status": "retired",
+            "retiredAt": updated.retired_at,
+            "retiredBySession": updated.retired_by_session,
+            "retiredReason": updated.retired_reason,
+            "retiredEdge": updated.retired_edge,
+        },
+        status_code=200,
+    )
+
+
+def _seat_ref(entry: TerminalCatalogEntry) -> SeatRef:
+    """The three facts retire authority is decided from: who, on which leaf, in which role."""
+
+    return SeatRef(
+        session_id=entry.id,
+        leaf_key=entry.binding_leaf_key,
+        seat_role=entry.binding_role,
+    )
+
+
+def _rename_response(runtime: _ServingRuntime, session: str, label: str) -> Response:
+    # Post-spawn identity rename. Identity text ONLY -- spawn_role
+    # (the immutable seat role) is never touched by a rename.
+    entry = runtime.catalog.get(session)
+    if entry is None or entry.status == "terminated":
+        return JSONResponse(content={"status": "unknown-session"}, status_code=404)
+    updated = runtime.catalog.set_label(session, label)
+    assert updated is not None
+    log_rename_event(runtime.config, updated)
+    return JSONResponse(
+        content={
+            "session": session,
+            "status": "renamed",
+            "label": updated.label,
+            "spawnedLabel": updated.spawned_label,
+        },
+        status_code=200,
+    )
+
+
+async def _terminal_image_response(
+    runtime: _ServingRuntime, session: str, request: Request, file: UploadFile
+) -> Response:
+    # The terminal channel is text-only, so a pasted screenshot is carried by
+    # saving it under the session's own cwd and injecting the on-disk path (Claude Code auto-attaches
+    # an image path before the model runs). Same localhost posture as the rest of serving/; writes
+    # ONLY under the session cwd, with a uuid basename (no traversal) and validated type (extension +
+    # magic bytes) + size. Returns the absolute path the composer injects over {type:stdin}.
+    # SECURITY NOTE: like the rest of serving/ this is unauthenticated and 127.0.0.1-bound, but unlike
+    # the JSON POSTs it is multipart (a CORS "simple request", preflight-free). The write target is
+    # keyed by an unguessable client UUID, so cross-origin/CSRF writes can't target a real session;
+    # an Origin/Host allowlist for all write routes is folded into the documented remote-auth story.
+    session_obj = runtime.host.get(session)
+    entry = runtime.catalog.get(session)
+    cwd = session_obj.cwd if session_obj is not None else (entry.cwd if entry else None)
+    if cwd is None:
+        return JSONResponse(content={"status": "unknown-session"}, status_code=404)
+    declared = request.headers.get("content-length")
+    if declared is not None and declared.isdigit() and int(declared) > _MAX_IMAGE_BYTES + 4096:
+        return JSONResponse(content={"status": "too-large"}, status_code=413)  # fast reject
+    ext = Path(file.filename or "").suffix.lstrip(".").lower()
+    if ext not in _IMAGE_EXTS:
+        return JSONResponse(content={"status": "bad-type"}, status_code=400)
+    body = await file.read(_MAX_IMAGE_BYTES + 1)  # +1 so an at-cap read still detects oversize
+    if len(body) > _MAX_IMAGE_BYTES:
+        return JSONResponse(content={"status": "too-large"}, status_code=413)
+    if not body or not _looks_like_image(body, ext):
+        return JSONResponse(content={"status": "bad-type"}, status_code=400)  # empty / not an image
+    dest = cwd / ".dashboard-pastes" / f"{uuid4().hex}.{ext}"
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    dest.write_bytes(body)  # flush before the path is injected -- the harness validates existence
+    return JSONResponse(content={"path": str(dest.resolve())}, status_code=200)
+
+
+def _register_terminal_control_routes(app: FastAPI, runtime: _ServingRuntime) -> None:
+    """Everything that changes a seat: open it, bind it, feed it, rename it, retire it."""
+
+    @app.post("/api/terminal/landed-cleanup")
+    def api_terminal_landed_cleanup(request: TerminalLandedCleanupRequest) -> Response:
+        return _landed_cleanup_response(runtime, request.session_ids)
+
+    @app.post("/api/terminal/{session}")
+    def api_terminal_open(session: str, request: TerminalOpenRequest) -> Response:
+        return _open_terminal_response(runtime, session, request)
+
+    @app.post("/api/terminal/{session}/attach-leaf")
+    def api_terminal_attach_leaf(session: str, request: TerminalAttachLeafRequest) -> Response:
+        return _attach_leaf_response(runtime, session, request)
+
+    @app.post("/api/terminal/{session}/paste")
+    def api_terminal_paste(session: str, request: TerminalPasteRequest) -> Response:
+        return _paste_response(runtime, session, request)
 
     @app.post("/api/terminal/{session}/terminate")
     def api_terminal_terminate(session: str) -> Response:
-        entry = catalog.get(session)
-        live = host.get(session)
-        if entry is None and live is None:
-            return JSONResponse(content={"status": "unknown-session"}, status_code=404)
-        control_stop_detail = None
-        if entry is not None and entry.control_endpoint is not None:
-            try:
-                stop_control_session(entry)
-            except HarnessControlError as exc:
-                control_stop_detail = str(exc)
-        host.terminate(session, tmux_name=entry.tmux_name if entry is not None else None)
-        terminated_at = now_iso()
-        updated = catalog.mark_terminated(session, terminated_at)
-        return JSONResponse(
-            content={
-                "session": session,
-                "status": "terminated",
-                "terminatedAt": terminated_at,
-                **({"tmuxName": updated.tmux_name} if updated is not None else {}),
-                **({"controlStopDetail": control_stop_detail} if control_stop_detail else {}),
-            },
-            status_code=200,
-        )
+        return _terminate_response(runtime, session)
 
     @app.post("/api/terminal/{session}/retire")
     def api_terminal_retire(session: str, request: TerminalRetireRequest) -> Response:
-        # The server-authoritative retire surface. Never a zombie row --
-        # a retire is the SAME terminal mark ``/terminate`` writes, plus retirement provenance
-        # (who, why, when, which edge); transcripts are never touched. Authority is enforced here,
-        # not trusted from the caller: owner-never-self-retires, a manager retires only its own
-        # master's worker/reviewer seats, the orchestrator retires anything.
-        target_entry = catalog.get(session)
-        if target_entry is None:
-            return JSONResponse(content={"status": "unknown-session"}, status_code=404)
-        actor_entry = catalog.get(request.actor_session)
-        if actor_entry is None:
-            return JSONResponse(
-                content={"status": "unknown-actor", "actorSession": request.actor_session},
-                status_code=404,
-            )
-        if target_entry.status == "terminated":
-            return JSONResponse(
-                content={
-                    "session": session,
-                    "status": "already-retired",
-                    "retiredAt": target_entry.retired_at,
-                },
-                status_code=200,
-            )
-        try:
-            check_retire_authority(
-                SeatRef(
-                    session_id=actor_entry.id,
-                    leaf_key=actor_entry.binding_leaf_key,
-                    seat_role=actor_entry.binding_role,
-                ),
-                SeatRef(
-                    session_id=target_entry.id,
-                    leaf_key=target_entry.binding_leaf_key,
-                    seat_role=target_entry.binding_role,
-                ),
-            )
-        except RetirePolicyError as exc:
-            return JSONResponse(
-                content={"session": session, "status": "retire-refused", "detail": str(exc)},
-                status_code=403,
-            )
-        updated = retire_entry(
-            catalog,
-            host,
-            target_entry,
-            at=now_iso(),
-            by_session=request.actor_session,
-            reason=request.reason,
-            edge="manual",
-        )
-        assert (
-            updated is not None
-        )  # the entry existed above; no concurrent delete path removes rows
-        log_retire_event(config, updated)
-        return JSONResponse(
-            content={
-                "session": session,
-                "status": "retired",
-                "retiredAt": updated.retired_at,
-                "retiredBySession": updated.retired_by_session,
-                "retiredReason": updated.retired_reason,
-                "retiredEdge": updated.retired_edge,
-            },
-            status_code=200,
-        )
+        return _retire_response(runtime, session, request)
 
     @app.post("/api/terminal/{session}/rename")
     def api_terminal_rename(session: str, request: TerminalRenameRequest) -> Response:
-        # Post-spawn identity rename. Identity text ONLY -- spawn_role
-        # (the immutable seat role) is never touched by a rename.
-        entry = catalog.get(session)
-        if entry is None or entry.status == "terminated":
-            return JSONResponse(content={"status": "unknown-session"}, status_code=404)
-        updated = catalog.set_label(session, request.label)
-        assert updated is not None
-        log_rename_event(config, updated)
-        return JSONResponse(
-            content={
-                "session": session,
-                "status": "renamed",
-                "label": updated.label,
-                "spawnedLabel": updated.spawned_label,
-            },
-            status_code=200,
-        )
+        return _rename_response(runtime, session, request.label)
 
     @app.post("/api/terminal/{session}/image")
     async def api_terminal_image(
         session: str, request: Request, file: Annotated[UploadFile, File()]
     ) -> Response:
-        # The terminal channel is text-only, so a pasted screenshot is carried by
-        # saving it under the session's own cwd and injecting the on-disk path (Claude Code auto-attaches
-        # an image path before the model runs). Same localhost posture as the rest of serving/; writes
-        # ONLY under the session cwd, with a uuid basename (no traversal) and validated type (extension +
-        # magic bytes) + size. Returns the absolute path the composer injects over {type:stdin}.
-        # SECURITY NOTE: like the rest of serving/ this is unauthenticated and 127.0.0.1-bound, but unlike
-        # the JSON POSTs it is multipart (a CORS "simple request", preflight-free). The write target is
-        # keyed by an unguessable client UUID, so cross-origin/CSRF writes can't target a real session;
-        # an Origin/Host allowlist for all write routes is folded into the documented remote-auth story.
-        session_obj = host.get(session)
-        entry = catalog.get(session)
-        cwd = session_obj.cwd if session_obj is not None else (entry.cwd if entry else None)
-        if cwd is None:
-            return JSONResponse(content={"status": "unknown-session"}, status_code=404)
-        declared = request.headers.get("content-length")
-        if declared is not None and declared.isdigit() and int(declared) > _MAX_IMAGE_BYTES + 4096:
-            return JSONResponse(content={"status": "too-large"}, status_code=413)  # fast reject
-        ext = Path(file.filename or "").suffix.lstrip(".").lower()
-        if ext not in _IMAGE_EXTS:
-            return JSONResponse(content={"status": "bad-type"}, status_code=400)
-        body = await file.read(_MAX_IMAGE_BYTES + 1)  # +1 so an at-cap read still detects oversize
-        if len(body) > _MAX_IMAGE_BYTES:
-            return JSONResponse(content={"status": "too-large"}, status_code=413)
-        if not body or not _looks_like_image(body, ext):
-            return JSONResponse(
-                content={"status": "bad-type"}, status_code=400
-            )  # empty / not an image
-        dest = cwd / ".dashboard-pastes" / f"{uuid4().hex}.{ext}"
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        dest.write_bytes(
-            body
-        )  # flush before the path is injected -- the harness validates existence
-        return JSONResponse(content={"path": str(dest.resolve())}, status_code=200)
-
-    register_files_routes(app, config)
-    register_changeset_routes(app, config)
-    register_notes_routes(app, config)
-    register_harness_control_routes(
-        app,
-        workspace_root=config.workspace_root,
-        coordination_root=config.coordination_root,
-        harness_registry=lambda: load_agentic_settings(config.coordination_root).harnesses,
-        catalog=catalog,
-        host=host,
-        liveness_clock=liveness_clock,
-        liveness_config=liveness_config,
-        capability_catalog=harness_capability_catalog,
-    )
-    mount_static(app)
-    return app
+        return await _terminal_image_response(runtime, session, request, file)

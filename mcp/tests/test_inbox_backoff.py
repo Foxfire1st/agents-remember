@@ -21,24 +21,25 @@ from agents_remember.controlplane.inbox_backoff import (
     next_attempt_at,
     redeliverable,
 )
-from agents_remember.controlplane.operator_inbox_records import create_operator_inbox_entry
+from agents_remember.controlplane.operator_inbox_records import (
+    InboxAddress,
+    InboxMessage,
+    InboxPoster,
+    InboxRouting,
+    create_operator_inbox_entry,
+)
 
 T1 = "2026-06-23T10:00:00+00:00"
 
 
-def _entry(**overrides: object):
-    base: dict[str, object] = {
-        "entry_id": "A",
-        "now": T1,
-        "lifecycle_id": "L1",
-        "agent_id": "agent-a",
-        "ask": "Continue?",
-        "response": "Yes.",
-        "created_by": "developer",
-        "created_via": "dashboard",
-    }
-    base.update(overrides)
-    return create_operator_inbox_entry(**base)  # type: ignore[arg-type]
+def _entry(*, entry_id: str = "A", agent_id: str | None = "agent-a"):
+    return create_operator_inbox_entry(
+        InboxMessage(ask="Continue?", response="Yes."),
+        entry_id=entry_id,
+        now=T1,
+        routing=InboxRouting(address=InboxAddress(lifecycle_id="L1", agent_id=agent_id)),
+        poster=InboxPoster(created_by="developer", created_via="dashboard"),
+    )
 
 
 class BackoffMathTests(unittest.TestCase):

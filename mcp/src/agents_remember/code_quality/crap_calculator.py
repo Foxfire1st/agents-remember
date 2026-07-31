@@ -1,4 +1,11 @@
-"""CRAP-Calculator: combine function complexity with coverage data."""
+"""CRAP-Calculator: combine function complexity with branch coverage data.
+
+``crap = cc**2 * (1 - coverage)**3 + cc`` is defined over *branch* coverage, and the
+coverage term is the only thing a test can move. This module reads the branch fields
+Coverage.py emits under ``[tool.coverage.run] branch = true`` -- ``executed_branches``
+and ``missing_branches`` -- and refuses to score a report produced without them, so the
+formula cannot quietly be fed the statement coverage it is not defined over.
+"""
 
 from __future__ import annotations
 
@@ -23,14 +30,74 @@ IGNORED_PATH_PARTS = {
     "node_modules",
     "venv",
 }
-DEFAULT_CRAP_THRESHOLD = 30.0
+# The enforced threshold. There is no baseline, allowlist or exemption file beside it:
+# a function at or above this score fails the gate, and is cleared by covering its
+# branches or by being split.
+#
+# Chosen against the branch-coverage distribution of `mcp/src/agents_remember`, measured
+# on 2026-07-31 under the full suite with `[tool.coverage.run] branch = true`: 4,469
+# scored functions before this leaf's fixes, 4,672 after; aggregate 86.84% reported,
+# 89.85% statements alone, 76.51% branches alone.
+#
+# The number that decides this is not the failure count, it is *reach*: how much of the
+# tree a threshold is capable of failing at all. `crap = cc**2 * (1 - c)**3 + cc`, so a
+# function's ceiling is `cc**2 + cc` at zero coverage -- but no function reaches zero,
+# because its own `def` line is a statement that runs when the module is imported. The
+# floor observed across all 4,672 functions is 3.03%, and reach therefore moves in steps:
+#
+#   threshold 28..30   only cc >= 6 can ever fail    3,821 of 4,672 unreachable  81.8%
+#   threshold 19..27   cc >= 5 can fail              3,436 of 4,672 unreachable  73.5%
+#   threshold <= 18    cc >= 4 can fail              2,832 of 4,672 unreachable  60.6%
+#
+# That is the case against the historical 30 and against nudging it. Every value from 28
+# to 30 has identical reach, so moving inside that range changes which functions are named
+# and nothing about what the gate can see. 30 failed 0 functions while CRAP consumed
+# statement coverage and 3 once it consumed branch coverage: the same weak gate either way.
+#
+# 20 is the anchor at the bottom of the middle band, and it is a statement about code
+# rather than about this tree: `crap(4, 0) = 20` is the lowest score an entirely
+# unexercised four-path function can have, so a threshold of 20 is exactly the rule "four
+# independent paths that no test ever enters is a finding". Nothing between 21 and 27 buys
+# any reach over it, so within that band the strictest value is the honest one. Concretely
+# it demands branch coverage above 53.6% at C901's declared ceiling of cc = 10, above
+# 71.9% at cc = 15, and cannot be met at all at cc >= 20 -- which is not a second
+# complexity gate, because C901 already rejects anything past 10.
+#
+# One measured caveat, because it decides which failures are honest. The two terms are
+# measured by tools that disagree about what a branch is: Radon counts `and`/`or`
+# short-circuits as decisions, Coverage.py emits no arc for them. 69 of the 102 functions
+# at cc >= 11 still have fewer branch arcs than their Radon complexity. The extreme case
+# was `observer/reducer.py::project_workspace` -- Radon cc 25, *zero* branch arcs, 100%
+# covered, CRAP exactly 25.00, its complexity entirely ~20 `x or []` keyword defaults. No
+# test could move it; normalising those defaults once took it to cc 5. So a threshold in
+# this band is a claim about complexity as well as about testing, which is the reason it
+# belongs at a number defensible without reference to which functions sit above it today.
+#
+# Cost when it was armed, all of it paid rather than recorded: 46 of 4,469 functions.
+# 41 were undertested and got real behavioural tests; 5 could not be cleared by any test
+# (`crap(cc, 1.0) = cc`) and were split -- project_workspace 25 -> 5, _engine_process
+# 22 -> 6, _map_task_lifecycle 22 -> 3, _map_collab_tool_call 25 -> 4, parse_runner_config
+# 20 -> 5. The tree now tops out at 19.83
+# (`serving/claude_stream_state.py::ClaudeStreamState._complete_pending_on_disconnect`,
+# cc 10 at 53.8%), so the margin is 0.17 and the next regression is a failure.
+DEFAULT_CRAP_THRESHOLD = 20.0
 DEFAULT_TOP = 25
 
 
 @dataclass(frozen=True)
 class FileCoverage:
+    """One file's coverage, statements and branch arcs alike.
+
+    A branch arc is Coverage.py's ``[source_line, destination_line]`` pair. Arcs are
+    attributed to a function by their *source* line -- the branching statement -- because
+    a destination is frequently outside the span (a ``return`` arc leaves the function,
+    and Coverage.py writes the exit destination as a negative number).
+    """
+
     executed_lines: frozenset[int]
     missing_lines: frozenset[int]
+    executed_branches: frozenset[tuple[int, int]]
+    missing_branches: frozenset[tuple[int, int]]
     has_data: bool = True
 
     @property
@@ -49,6 +116,8 @@ class FunctionScore:
     covered_lines: int
     missing_lines: int
     executable_lines: int
+    covered_branches: int
+    missing_branches: int
     coverage_ratio: float
     crap: float
     missing_coverage_data: bool = False
@@ -64,8 +133,20 @@ class FileRollup:
 
 
 def crap_score(complexity: int, coverage_ratio: float) -> float:
+    """CRAP for one function. ``coverage_ratio`` is branch coverage, never statements."""
     bounded_coverage = max(0.0, min(coverage_ratio, 1.0))
     return complexity**2 * (1.0 - bounded_coverage) ** 3 + complexity
+
+
+def coverage_clearing(complexity: int, threshold: float) -> float | None:
+    """The branch coverage at which ``complexity`` first scores below ``threshold``.
+
+    ``crap = cc**2 * (1 - c)**3 + cc`` solved for ``c``. ``None`` when the complexity term
+    alone reaches the threshold, which is the case no amount of testing can fix.
+    """
+    if complexity >= threshold:
+        return None
+    return 1.0 - ((threshold - complexity) / complexity**2) ** (1.0 / 3.0)
 
 
 def read_json(path: Path) -> dict[str, Any]:
@@ -77,6 +158,7 @@ def read_json(path: Path) -> dict[str, Any]:
 
 def load_coverage_by_path(coverage_json: Path, project_root: Path) -> dict[str, FileCoverage]:
     data = read_json(coverage_json)
+    require_branch_measurement(data, coverage_json)
     files = data.get("files")
     if not isinstance(files, dict):
         raise RuntimeError(f"coverage JSON is missing a files object: {coverage_json}")
@@ -88,16 +170,58 @@ def load_coverage_by_path(coverage_json: Path, project_root: Path) -> dict[str, 
         coverage = FileCoverage(
             executed_lines=frozenset(parse_line_numbers(raw_data.get("executed_lines", []))),
             missing_lines=frozenset(parse_line_numbers(raw_data.get("missing_lines", []))),
+            executed_branches=frozenset(parse_branch_arcs(raw_data.get("executed_branches"))),
+            missing_branches=frozenset(parse_branch_arcs(raw_data.get("missing_branches"))),
         )
         for key in coverage_keys(Path(raw_path), project_root):
             coverage_by_path[key] = coverage
     return coverage_by_path
 
 
+def require_branch_measurement(data: dict[str, Any], coverage_json: Path) -> None:
+    """Refuse a report that was not produced with branch measurement on.
+
+    Without this the failure is invisible rather than loud. ``executed_branches`` and
+    ``missing_branches`` are simply absent from a statement-only report, so every
+    function would read as having no branches, every coverage ratio would silently
+    collapse back to the statement ratio, and CRAP would go on being computed over a
+    metric it is not defined against -- which is the exact defect this reader was
+    changed to remove. Turning ``[tool.coverage.run] branch`` off therefore has to break
+    the gate loudly, not soften it.
+    """
+    meta = data.get("meta")
+    branch = meta.get("branch_coverage") if isinstance(meta, dict) else None
+    if branch is not True:
+        raise RuntimeError(
+            f"{coverage_json}: meta.branch_coverage is {branch!r}, so this report carries no "
+            "branch data. CRAP is defined over branch coverage; re-run coverage with "
+            "[tool.coverage.run] branch = true."
+        )
+
+
 def parse_line_numbers(raw: object) -> set[int]:
     if not isinstance(raw, list):
         return set()
     return {int(value) for value in raw if isinstance(value, int) and value > 0}
+
+
+def parse_branch_arcs(raw: object) -> set[tuple[int, int]]:
+    """``[[source, destination], ...]`` as pairs.
+
+    A malformed entry raises rather than being dropped: a silently skipped arc is a
+    branch that reads as taken, which moves a score in the forgiving direction.
+    """
+    if not isinstance(raw, list):
+        raise RuntimeError(f"expected a list of branch arcs, got {type(raw).__name__}")
+    arcs: set[tuple[int, int]] = set()
+    for entry in raw:
+        if not isinstance(entry, list) or len(entry) != 2:
+            raise RuntimeError(f"expected a [source, destination] branch arc, got {entry!r}")
+        source, destination = entry
+        if not isinstance(source, int) or not isinstance(destination, int):
+            raise RuntimeError(f"branch arc endpoints must be integers, got {entry!r}")
+        arcs.add((source, destination))
+    return arcs
 
 
 def coverage_keys(path: Path, project_root: Path) -> set[str]:
@@ -157,7 +281,7 @@ def find_file_coverage(
         coverage = coverage_by_path.get(key)
         if coverage is not None:
             return coverage
-    return FileCoverage(frozenset(), frozenset(), has_data=False)
+    return FileCoverage(frozenset(), frozenset(), frozenset(), frozenset(), has_data=False)
 
 
 def complexity_blocks(path: Path) -> list[Any]:
@@ -179,7 +303,13 @@ def score_block(path: Path, block: Any, coverage: FileCoverage) -> FunctionScore
     executable = coverage.executable_lines & span
     covered = coverage.executed_lines & span
     missing = coverage.missing_lines & span
-    coverage_ratio = coverage_ratio_for_function(covered, executable, coverage.has_data)
+    taken = arcs_from(coverage.executed_branches, span)
+    untaken = arcs_from(coverage.missing_branches, span)
+    coverage_ratio = coverage_ratio_for_function(
+        len(covered) + taken,
+        len(executable) + taken + untaken,
+        coverage.has_data,
+    )
     complexity = int(block.complexity)
     return FunctionScore(
         path=path,
@@ -191,22 +321,40 @@ def score_block(path: Path, block: Any, coverage: FileCoverage) -> FunctionScore
         covered_lines=len(covered),
         missing_lines=len(missing),
         executable_lines=len(executable),
+        covered_branches=taken,
+        missing_branches=untaken,
         coverage_ratio=coverage_ratio,
         crap=crap_score(complexity, coverage_ratio),
         missing_coverage_data=not coverage.has_data,
     )
 
 
-def coverage_ratio_for_function(
-    covered: set[int] | frozenset[int],
-    executable: set[int] | frozenset[int],
-    has_data: bool,
-) -> float:
+def arcs_from(arcs: frozenset[tuple[int, int]], span: set[int]) -> int:
+    return sum(1 for source, _destination in arcs if source in span)
+
+
+def coverage_ratio_for_function(covered_units: int, total_units: int, has_data: bool) -> float:
+    """Branch coverage over one function span, as Coverage.py itself computes it.
+
+    The units are the file's statements plus its branch arcs, which is the ratio
+    Coverage.py reports as ``percent_covered`` when ``branch = true`` -- 85.40% for this
+    tree on 2026-07-31, against 88.59% for statements alone. One formula covers every
+    function, including a function that contains no branch at all: its arc terms are both
+    zero and the same division still applies. That degeneration is arithmetic, not a
+    fallback -- there is no branch in this code that switches metric, so two functions'
+    scores are always the same measurement and a threshold means one thing everywhere.
+
+    A zero denominator is not reachable for a function Coverage.py measured, because its
+    ``def`` line is itself a statement. It is reachable for a span that is entirely
+    excluded (``# pragma: no cover``), which is a deliberate opt-out and scores as covered;
+    a file the report never mentions is the different case ``has_data`` carries, and counts
+    as wholly uncovered.
+    """
     if not has_data:
         return 0.0
-    if not executable:
+    if not total_units:
         return 1.0
-    return len(covered) / len(executable)
+    return covered_units / total_units
 
 
 def calculate_scores(
@@ -252,6 +400,8 @@ def score_to_mapping(score: FunctionScore, project_root: Path) -> dict[str, Any]
         "coveredLines": score.covered_lines,
         "missingLines": score.missing_lines,
         "executableLines": score.executable_lines,
+        "coveredBranches": score.covered_branches,
+        "missingBranches": score.missing_branches,
         "crap": round(score.crap, 2),
         "missingCoverageData": score.missing_coverage_data,
     }
@@ -286,8 +436,8 @@ def render_table(
         "",
         "## Function Scores",
         "",
-        "| CRAP | CC | Coverage | Exec Lines | Function | Location |",
-        "| ---: | ---: | ---: | ---: | --- | --- |",
+        "| CRAP | CC | Branch Cov | Exec Lines | Branches | Function | Location |",
+        "| ---: | ---: | ---: | ---: | ---: | --- | --- |",
     ]
     lines.extend(function_row(score, project_root) for score in selected)
     lines.extend(
@@ -305,10 +455,11 @@ def render_table(
 
 def function_row(score: FunctionScore, project_root: Path) -> str:
     coverage = f"{score.coverage_ratio * 100:.1f}%"
+    branches = f"{score.covered_branches}/{score.covered_branches + score.missing_branches}"
     location = f"{display_path(score.path, project_root)}:{score.start_line}"
     return (
         f"| {score.crap:.2f} | {score.complexity} | {coverage} | "
-        f"{score.executable_lines} | `{score.function}` | `{location}` |"
+        f"{score.executable_lines} | {branches} | `{score.function}` | `{location}` |"
     )
 
 

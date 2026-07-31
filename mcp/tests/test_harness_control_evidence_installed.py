@@ -20,6 +20,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import cast
 
+import pytest
 from agents_remember.errors import HarnessControlError
 from agents_remember.serving.codex_app_server_adapter import (
     CodexAppServerAdapter,
@@ -27,6 +28,7 @@ from agents_remember.serving.codex_app_server_adapter import (
 )
 from agents_remember.serving.harness_control_bridge import HarnessControlBridge
 from agents_remember.serving.harness_control_client import (
+    ControlSubmission,
     read_control_evidence,
     read_control_native_page,
     read_control_snapshot,
@@ -40,6 +42,7 @@ from agents_remember.serving.harness_control_models import (
     AR_EVIDENCE_KEY,
     ControlIdentity,
     ControlOperationRef,
+    EvidencePage,
     LaunchSpec,
     NativeEvidenceFrame,
     PromptRequest,
@@ -108,6 +111,7 @@ async def _wait_for_evidence_kind(entry, kind: str, *, timeout_seconds: float) -
         await asyncio.sleep(1.0)
 
 
+@pytest.mark.ar_run_evidence_installed
 @unittest.skipUnless(
     os.environ.get(LIVE_OPT_IN) == "1",
     f"set {LIVE_OPT_IN}=1 to exercise installed runtimes through the production evidence seam",
@@ -142,44 +146,16 @@ class CodexInstalledEvidenceTests(unittest.IsolatedAsyncioTestCase):
                     submit_control_prompt,
                     entry,
                     PROMPT,
-                    source="cockpit",
-                    request_id="installed-codex-1",
-                    expected_bridge_epoch=descriptor.bridge_epoch,
+                    ControlSubmission(
+                        source="cockpit",
+                        request_id="installed-codex-1",
+                        expected_bridge_epoch=descriptor.bridge_epoch,
+                    ),
                 )
                 self.assertIn(receipt.acceptance, {"immediate", "queued"})
                 await _wait_for_evidence_kind(entry, "completed", timeout_seconds=180.0)
                 page = await asyncio.to_thread(read_control_evidence, entry)
-                kinds = [frame.kind for frame in page.frames]
-                self.assertIn("codex-notification", kinds)
-                payloads = [frame.raw for frame in page.frames]
-                item_payloads = [
-                    _obj(payload["item"])
-                    for payload in payloads
-                    if isinstance(payload.get("item"), dict)
-                ]
-                item_types = {payload.get("type") for payload in item_payloads}
-                self.assertIn("userMessage", item_types)
-                self.assertIn("agentMessage", item_types)
-                self.assertTrue(
-                    all(
-                        isinstance(payload.get("id"), str) and payload["id"]
-                        for payload in item_payloads
-                    )
-                )
-                usage = [
-                    payload
-                    for payload in payloads
-                    if payload.get("codexMethod") == "thread/tokenUsage/updated"  # type: ignore[attr-defined]
-                    or "tokenUsage" in payload
-                ]
-                self.assertTrue(usage, "thread/tokenUsage/updated never reached evidence")
-                turn_completed = [
-                    payload for payload in payloads if payload.get("turn", None) is not None
-                ]
-                self.assertTrue(
-                    turn_completed or any("turnId" in payload for payload in payloads),
-                    "turn/completed never reached evidence",
-                )
+                self._assert_evidence_family(page)
                 # Ephemeral threads honestly refuse thread/read includeTurns; the typed
                 # failure is the visible capability boundary, never a guessed page.
                 with self.assertRaises(HarnessControlError) as ephemeral_refusal:
@@ -200,28 +176,64 @@ class CodexInstalledEvidenceTests(unittest.IsolatedAsyncioTestCase):
                 await server.close()
                 await bridge.stop("forced")
 
-            # Persisted thread: the native page crosses with typed identity, and a second
-            # factory-built adapter resumes the exact thread through the new channel.
-            thread_id, persisted_frames = await self._live_completed_thread(root)
-            self.assertIn("userMessage", {f.native_type for f in persisted_frames})
-            resume_identity = _identity("codex-installed-resume")
-            resumed = create_harness_protocol_adapter(
-                "codex",
-                env=dict(os.environ),
-                resume_thread_id=thread_id,
-            )
-            assert isinstance(resumed, CodexAppServerAdapter)
-            resume_bridge = HarnessControlBridge(resume_identity, resumed)
-            await resume_bridge.start(
-                _launch(resume_identity, "codex", root, (self.executable, "app-server"))
-            )
-            try:
-                snapshot = await resumed.snapshot()
-                self.assertEqual(snapshot.vendor_session_id, thread_id)
-                page = await resumed.read_native_page(cursor=None, limit=200, byte_budget=48 * 1024)
-                self.assertIn("userMessage", {frame.native_type for frame in page.frames})
-            finally:
-                await resume_bridge.stop("forced")
+            await self._assert_resume_channel_reaches_the_persisted_thread(root)
+
+    def _assert_evidence_family(self, page: EvidencePage) -> None:
+        """One live turn must put the whole family on the seam, each item typed and identified.
+
+        The family is what the cockpit projects from: the notification kind, the user and agent
+        items with real ids, the token usage, and the turn completion.
+        """
+        self.assertIn("codex-notification", [frame.kind for frame in page.frames])
+        payloads = [frame.raw for frame in page.frames]
+        item_payloads = [
+            _obj(payload["item"]) for payload in payloads if isinstance(payload.get("item"), dict)
+        ]
+        item_types = {payload.get("type") for payload in item_payloads}
+        self.assertIn("userMessage", item_types)
+        self.assertIn("agentMessage", item_types)
+        self.assertTrue(
+            all(isinstance(payload.get("id"), str) and payload["id"] for payload in item_payloads)
+        )
+        usage = [
+            payload
+            for payload in payloads
+            if payload.get("codexMethod") == "thread/tokenUsage/updated"  # type: ignore[attr-defined]
+            or "tokenUsage" in payload
+        ]
+        self.assertTrue(usage, "thread/tokenUsage/updated never reached evidence")
+        turn_completed = [payload for payload in payloads if payload.get("turn", None) is not None]
+        self.assertTrue(
+            turn_completed or any("turnId" in payload for payload in payloads),
+            "turn/completed never reached evidence",
+        )
+
+    async def _assert_resume_channel_reaches_the_persisted_thread(self, root: Path) -> None:
+        """A persisted thread's native page crosses with typed identity, and resumes.
+
+        The second adapter is built by the production factory with only the thread id, which is
+        the whole resume channel: no state is carried over from the run that created the thread.
+        """
+        thread_id, persisted_frames = await self._live_completed_thread(root)
+        self.assertIn("userMessage", {f.native_type for f in persisted_frames})
+        resume_identity = _identity("codex-installed-resume")
+        resumed = create_harness_protocol_adapter(
+            "codex",
+            env=dict(os.environ),
+            resume_thread_id=thread_id,
+        )
+        assert isinstance(resumed, CodexAppServerAdapter)
+        resume_bridge = HarnessControlBridge(resume_identity, resumed)
+        await resume_bridge.start(
+            _launch(resume_identity, "codex", root, (self.executable, "app-server"))
+        )
+        try:
+            snapshot = await resumed.snapshot()
+            self.assertEqual(snapshot.vendor_session_id, thread_id)
+            page = await resumed.read_native_page(cursor=None, limit=200, byte_budget=48 * 1024)
+            self.assertIn("userMessage", {frame.native_type for frame in page.frames})
+        finally:
+            await resume_bridge.stop("forced")
 
     async def _live_completed_thread(
         self, cwd: Path
@@ -266,6 +278,7 @@ class CodexInstalledEvidenceTests(unittest.IsolatedAsyncioTestCase):
             await adapter.stop("forced")
 
 
+@pytest.mark.ar_run_evidence_installed
 @unittest.skipUnless(
     os.environ.get(LIVE_OPT_IN) == "1",
     f"set {LIVE_OPT_IN}=1 to exercise installed runtimes through the production evidence seam",
@@ -300,9 +313,11 @@ class PiInstalledEvidenceTests(unittest.IsolatedAsyncioTestCase):
                     submit_control_prompt,
                     entry,
                     PROMPT,
-                    source="cockpit",
-                    request_id="installed-pi-1",
-                    expected_bridge_epoch=descriptor.bridge_epoch,
+                    ControlSubmission(
+                        source="cockpit",
+                        request_id="installed-pi-1",
+                        expected_bridge_epoch=descriptor.bridge_epoch,
+                    ),
                 )
                 self.assertIn(receipt.acceptance, {"immediate", "queued"})
                 await _wait_for_evidence_kind(entry, "transcript", timeout_seconds=180.0)

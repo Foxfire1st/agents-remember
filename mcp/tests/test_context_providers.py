@@ -47,8 +47,10 @@ from agents_remember.providers.context import (
     CGC_VIZ_SERVER_ROUTE_PATCH_MARKER,
     CGC_VIZ_SERVER_RUN_ORIGINAL_SNIPPET,
     GREPAI_PIN,
+    CgcRepo,
     ContextProviderError,
     GrepaiMemoryRoot,
+    GrepaiWorkspace,
     apply_cgc_cgcignore_patch,
     apply_cgc_delete_patch,
     apply_cgc_discovery_extensions_patch,
@@ -91,9 +93,11 @@ class ContextProviderLayoutTests(unittest.TestCase):
             root = Path(tmp)
             code_root = root / "repos" / "My App"
             layout = cgc_runtime_layout(
-                coordination_root=root / "ar-coordination",
-                repo_id="My App",
-                code_repo_root=code_root,
+                CgcRepo(
+                    coordination_root=root / "ar-coordination",
+                    repo_id="My App",
+                    code_repo_root=code_root,
+                ),
             )
 
             self.assertEqual(layout.repo_id, "my-app")
@@ -141,9 +145,11 @@ class ContextProviderLayoutTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             layout = cgc_runtime_layout(
-                coordination_root=root / "ar-coordination",
-                repo_id="My App",
-                code_repo_root=root / "repos" / "My App",
+                CgcRepo(
+                    coordination_root=root / "ar-coordination",
+                    repo_id="My App",
+                    code_repo_root=root / "repos" / "My App",
+                ),
             )
 
             self.assertEqual(layout.container_runtime_root, to_container_path(layout.runtime_root))
@@ -159,9 +165,11 @@ class ContextProviderLayoutTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             layout = cgc_runtime_layout(
-                coordination_root=root / "ar-coordination",
-                repo_id="My App",
-                code_repo_root=root / "repos" / "My App",
+                CgcRepo(
+                    coordination_root=root / "ar-coordination",
+                    repo_id="My App",
+                    code_repo_root=root / "repos" / "My App",
+                ),
             )
 
             container_env = layout.env(for_container=True)
@@ -184,9 +192,11 @@ class ContextProviderLayoutTests(unittest.TestCase):
             root = Path(tmp)
             code_root = root / "repos" / "My App"
             layout = cgc_runtime_layout(
-                coordination_root=root / "ar-coordination",
-                repo_id="My App",
-                code_repo_root=code_root,
+                CgcRepo(
+                    coordination_root=root / "ar-coordination",
+                    repo_id="My App",
+                    code_repo_root=code_root,
+                ),
             )
 
             with patch.dict(
@@ -202,10 +212,12 @@ class ContextProviderLayoutTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             layout = cgc_runtime_layout(
-                coordination_root=root / "ar-coordination",
-                repo_id="agents-remember",
-                code_repo_root=root / "agents-remember",
-                cgcignore_patterns=("tools/ffmpeg/",),
+                CgcRepo(
+                    coordination_root=root / "ar-coordination",
+                    repo_id="agents-remember",
+                    code_repo_root=root / "agents-remember",
+                    cgcignore_patterns=("tools/ffmpeg/",),
+                ),
             )
 
             layout.code_repo_root.mkdir(parents=True)
@@ -252,9 +264,11 @@ class ContextProviderLayoutTests(unittest.TestCase):
             root = Path(tmp)
             coordination_root = root / "ar-coordination"
             layout = cgc_runtime_layout(
-                coordination_root=coordination_root,
-                repo_id="agents-remember",
-                code_repo_root=root / "agents-remember",
+                CgcRepo(
+                    coordination_root=coordination_root,
+                    repo_id="agents-remember",
+                    code_repo_root=root / "agents-remember",
+                ),
             )
             ensure_cgc_runtime_layout(layout)
             stale = layout.runtime_root.parent / "my-app" / ".codegraphcontext"
@@ -411,9 +425,11 @@ class ContextProviderLayoutTests(unittest.TestCase):
             memory_root = root / "ar-coordination" / "memory-repos" / "ar-my-app"
             memory_root.mkdir(parents=True)
             layout = grepai_runtime_layout(
-                coordination_root=root / "ar-coordination",
-                workspace_name="Agents Remember Memory",
-                roots=(GrepaiMemoryRoot(project_id="ar-my-app", path=memory_root),),
+                GrepaiWorkspace(
+                    coordination_root=root / "ar-coordination",
+                    name="Agents Remember Memory",
+                    roots=(GrepaiMemoryRoot(project_id="ar-my-app", path=memory_root),),
+                ),
             )
 
             self.assertEqual(layout.workspace_name, "agents-remember-memory")
@@ -527,8 +543,10 @@ class ContextProviderLayoutTests(unittest.TestCase):
             memory_root = root / "ar-coordination" / "memory-repos" / "ar-my-app"
             memory_root.mkdir(parents=True)
             layout = grepai_runtime_layout(
-                coordination_root=root / "ar-coordination",
-                roots=(GrepaiMemoryRoot(project_id="ar-my-app", path=memory_root),),
+                GrepaiWorkspace(
+                    coordination_root=root / "ar-coordination",
+                    roots=(GrepaiMemoryRoot(project_id="ar-my-app", path=memory_root),),
+                ),
             )
 
             ensure_grepai_runtime_layout(layout)

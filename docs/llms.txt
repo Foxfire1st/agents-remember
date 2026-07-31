@@ -430,9 +430,12 @@ becoming fragile:
 - **Benchmark tools** prepare paired source-only and memory-enabled Codex runs,
   capture JSONL results, and summarize metrics so claims about the memory layer
   can be checked instead of waved through.
-- **Source quality tooling** wraps repository-owned checks such as Ruff, Radon,
-  pytest coverage, and mandatory CRAP threshold enforcement so commit,
-  closeout, push, and CI gates use one command surface.
+- **Source quality tooling** wraps repository-owned checks — Ruff lint
+  (complexity rules included) and format, Pyright, pytest coverage, and mandatory
+  CRAP threshold enforcement — so commit, closeout, push, and CI gates use one
+  command surface. No rail carries a baseline, allowlist or exemption file. Radon
+  is carried alongside them as a labelled report, not as enforcement: `radon cc`
+  and `radon mi` exit 0 whatever they find.
 
 ## How the pieces fit
 

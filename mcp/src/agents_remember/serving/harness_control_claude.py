@@ -23,7 +23,7 @@ from agents_remember.serving.claude_stream_startup import (
     negotiate_claude_catalog,
     negotiate_claude_startup,
 )
-from agents_remember.serving.claude_stream_state import ClaudeStreamState
+from agents_remember.serving.claude_stream_state import ClaudeStreamSession, ClaudeStreamState
 from agents_remember.serving.claude_stream_transport import (
     ClaudeStreamTransport,
     ClaudeSubprocessTransport,
@@ -65,6 +65,20 @@ class _ClaudeSetExpectation:
     exact_result: str
     prefix_match: bool
     allowed_results: frozenset[str]
+
+
+@dataclass(frozen=True)
+class ExpectedEcho:
+    """What counts as the harness having ACCEPTED one set command, in its own words.
+
+    A Claude set is proven only by the echo it writes back, so the exact expected line, whether a
+    prefix is enough, and which other lines also settle it are one acceptance rule. Splitting them
+    is how a command gets matched against another command's echo.
+    """
+
+    expected_result: str
+    prefix_match: bool = False
+    allowed_results: frozenset[str] = frozenset()
 
 
 class ClaudeStreamJsonAdapter:
@@ -197,10 +211,12 @@ class ClaudeStreamJsonAdapter:
             },
         )
         self._state = ClaudeStreamState(
-            identity=launch.identity,
-            snapshot=snapshot,
-            transport=self._transport,
-            supported_commands=supported_commands,
+            ClaudeStreamSession(
+                identity=launch.identity,
+                snapshot=snapshot,
+                transport=self._transport,
+                supported_commands=supported_commands,
+            ),
             clock=self._clock,
             correlation_factory=self._correlation_factory,
             limits=self._limits,
@@ -278,8 +294,10 @@ class ClaudeStreamJsonAdapter:
         result = await self._submit_set_command(
             "model",
             model_key,
-            expected_result=f"Set model to {model.display_name} for this session only",
-            allowed_results=_model_terminal_results(model, capabilities),
+            ExpectedEcho(
+                expected_result=f"Set model to {model.display_name} for this session only",
+                allowed_results=_model_terminal_results(model, capabilities),
+            ),
             operation=operation,
         )
         if result.acceptance == "echo-verified":
@@ -306,8 +324,10 @@ class ClaudeStreamJsonAdapter:
         result = await self._submit_set_command(
             "effort",
             effort,
-            expected_result=f"Set effort level to {effort} (this session only)",
-            prefix_match=True,
+            ExpectedEcho(
+                expected_result=f"Set effort level to {effort} (this session only)",
+                prefix_match=True,
+            ),
             operation=operation,
         )
         if result.acceptance == "echo-verified":
@@ -318,12 +338,13 @@ class ClaudeStreamJsonAdapter:
         self,
         command: str,
         value: str,
+        echo: ExpectedEcho,
         *,
-        expected_result: str,
-        prefix_match: bool = False,
-        allowed_results: frozenset[str] = frozenset(),
         operation: ControlOperationRef | None = None,
     ) -> SetResult:
+        expected_result = echo.expected_result
+        prefix_match = echo.prefix_match
+        allowed_results = echo.allowed_results
         state = self._state
         if state is None:
             return self._unsupported_set(

@@ -19,6 +19,8 @@ derived state as a written fact.
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any, get_args
 
@@ -96,39 +98,42 @@ def project_lifecycle(events: list[Event], *, now: datetime) -> LifecycleProject
     )
 
 
+@dataclass(frozen=True)
+class WorkspaceStructure:
+    """The workspace as it exists (slice 3a): the enclosures and providers already read from
+    disk, plus the worktree-group admission set the Topology constellation and the Engine Room
+    share one definition of.
+
+    ``active_worktree_groups`` belongs here rather than in :class:`AnalyticalInputs`, where it
+    used to sit. It is not analytical -- it leaves as ``WorkspaceProjection.activeWorktreeGroups``,
+    a structural field beside ``enclosures`` and ``providers``, and never reaches ``Analytics``
+    at all. It was the one member of that bundle whose name was not true of it.
+    """
+
+    enclosures: list[EnclosureNode]
+    providers: list[ProviderNode]
+    active_worktree_groups: list[str] = field(default_factory=list)
+
+
 def project_workspace(
     logs: list[list[Event]],
     *,
-    enclosures: list[EnclosureNode],
-    providers: list[ProviderNode],
+    structure: WorkspaceStructure,
     now: datetime,
-    drift_snapshots: list[DriftSnapshotNode] | None = None,
-    sidecar_staleness: list[SidecarStaleNode] | None = None,
-    setup_summaries: list[SetupSummaryNode] | None = None,
-    setup_progress: list[SetupProgressNode] | None = None,
-    route_coverage: list[RouteCoverageNode] | None = None,
-    tool_reports: list[ToolReportNode] | None = None,
-    agent_pickups: list[AgentPickupNode] | None = None,
-    expectation_rows: list[ExpectationRowNode] | None = None,
-    ledgers: list[LedgerNode] | None = None,
-    task_documents: list[TaskDocNode] | None = None,
-    series: list[SeriesNode] | None = None,
-    engine_process_facts: list[EngineProcessFacts] | None = None,
-    engine_start_progress: list[dict[str, Any]] | None = None,
-    gates: list[GateRecord] | None = None,
-    attention_dismissals: dict[str, AttentionDismissalRecord] | None = None,
-    active_worktree_groups: list[str] | None = None,
-    stalest_limit: int = 10,
+    given: AnalyticalInputs | None = None,
 ) -> WorkspaceProjection:
     """Assemble the whole tree from already-read logs + structural + analytical snapshots.
 
-    The analytical inputs (slice 3b) are keyword-optional: a caller that wants only
-    the structural tree (the 3a contract) omits them and gets an empty ``analytics``.
+    The two bundles are the design's own two slices. ``structure`` is 3a, the workspace as it
+    exists. ``given`` is 3b and optional as a set: a caller that wants only the structural tree
+    omits it and gets an empty ``analytics``.
     """
+    given = given or AnalyticalInputs()
+    providers = structure.providers
     lifecycles = [project_lifecycle(log, now=now) for log in logs if log]
     enriched = [
         enclosure.model_copy(update={"actions": enclosure_actions(enclosure)})
-        for enclosure in enclosures
+        for enclosure in structure.enclosures
     ]
     lifecycles = _current_event_backed_lifecycles(enriched, lifecycles)
     # Abandon is terminal for the anchor too (L11): the single-writer store invariant means
@@ -140,50 +145,78 @@ def project_workspace(
     # worktrees appear as the lifecycles they are -- not as nothing. Fleeting + active promotion
     # lifecycles still come from the logs above.
     lifecycles = lifecycles + _persistent_lifecycles(enriched, lifecycles)
-    lifecycles = _attach_gates(lifecycles, gates or [])
-    sidecars = sidecar_staleness or []
+    lifecycles = _attach_gates(lifecycles, given.gates)
     engine_processes = build_engine_processes(
-        engine_process_facts or [],
+        given.engine_process_facts,
         enriched,
         providers,
-        setup_progress or [],
-        engine_start_progress or [],
+        given.setup_progress,
+        given.engine_start_progress,
     )
-    task_docs = task_documents or []
-    series_nodes = attach_series_token_totals(series or [], task_docs, lifecycles)
+    series_nodes = attach_series_token_totals(given.series, given.task_documents, lifecycles)
     analytics = build_analytics(
-        drift_snapshots=drift_snapshots or [],
-        sidecar_staleness=sidecars,
-        setup_summaries=setup_summaries or [],
-        setup_progress=setup_progress or [],
-        route_coverage=route_coverage or [],
-        tool_reports=tool_reports or [],
-        agent_pickups=agent_pickups or [],
-        expectation_rows=expectation_rows or [],
-        ledgers=ledgers or [],
-        task_documents=task_docs,
+        given,
         series=series_nodes,
-        attention_queue=build_attention_queue(
-            lifecycles,
-            providers,
-            drift_snapshots or [],
-            setup_progress or [],
-            engine_start_progress or [],
-            gates or [],
-            dismissals=attention_dismissals or {},
-        ),
+        attention_queue=build_attention_queue(lifecycles, providers, given),
         engine_processes=engine_processes,
-        stalest_limit=stalest_limit,
     )
     return WorkspaceProjection(
         generatedAt=now.isoformat(),
         lifecycles=lifecycles,
         enclosures=enriched,
         providers=providers,
-        activeWorktreeGroups=sorted(active_worktree_groups or []),
-        metrics=_metrics(lifecycles, sidecars),
+        activeWorktreeGroups=sorted(structure.active_worktree_groups),
+        metrics=_metrics(lifecycles, given.sidecar_staleness),
         analytics=analytics,
     )
+
+
+# --- the optional analytical inputs (slice 3b) --------------------------------
+
+
+@dataclass(frozen=True)
+class AnalyticalInputs:
+    """The pre-image of :class:`Analytics` (slice 3b): what the analytical surfaces are built
+    from, and nothing else.
+
+    Broad because ``Analytics`` is broad. It publishes thirteen independent surfaces, and these
+    sixteen fields are exactly what produces them. Ten map to one surface by name
+    (``drift_snapshots`` -> ``driftSnapshots``, ``route_coverage`` -> ``routeCoverage``,
+    ``ledgers`` -> ``ledgers``, ...); the other six produce the three DERIVED surfaces, in
+    pairs -- ``sidecar_staleness`` + ``stalest_limit`` -> ``stalestSidecars``,
+    ``engine_process_facts`` + ``engine_start_progress`` -> ``engineProcesses``, ``gates`` +
+    ``attention_dismissals`` -> ``attentionQueue``.
+
+    So there is no sub-concept left to split out. The surfaces are independent cockpit panels
+    with nothing binding any subset of them, which means a grouping here would have to be a
+    grouping of ``Analytics`` itself -- a change to the projection contract the dashboard
+    reads, not a tidy-up. The one field that DID break the name has been moved:
+    ``active_worktree_groups`` is structural and now lives in :class:`WorkspaceStructure`.
+
+    Optional as a set, not one by one: a caller wanting only the structural tree (the 3a
+    contract) passes none of them. Several feed more than one surface -- ``setup_progress``
+    alone is read by the Engine Room join, the analytics rollup and the attention queue -- so
+    the whole set is threaded to each builder rather than re-selected per call. Two also leave
+    through a second door: ``sidecar_staleness`` is counted into
+    ``WorkspaceProjection.metrics``, and ``gates`` is materialized onto ``lifecycle.gate``.
+    """
+
+    drift_snapshots: list[DriftSnapshotNode] = field(default_factory=list)
+    sidecar_staleness: list[SidecarStaleNode] = field(default_factory=list)
+    setup_summaries: list[SetupSummaryNode] = field(default_factory=list)
+    setup_progress: list[SetupProgressNode] = field(default_factory=list)
+    route_coverage: list[RouteCoverageNode] = field(default_factory=list)
+    tool_reports: list[ToolReportNode] = field(default_factory=list)
+    agent_pickups: list[AgentPickupNode] = field(default_factory=list)
+    expectation_rows: list[ExpectationRowNode] = field(default_factory=list)
+    ledgers: list[LedgerNode] = field(default_factory=list)
+    task_documents: list[TaskDocNode] = field(default_factory=list)
+    series: list[SeriesNode] = field(default_factory=list)
+    engine_process_facts: list[EngineProcessFacts] = field(default_factory=list)
+    engine_start_progress: list[dict[str, Any]] = field(default_factory=list)
+    gates: list[GateRecord] = field(default_factory=list)
+    attention_dismissals: dict[str, AttentionDismissalRecord] = field(default_factory=dict)
+    stalest_limit: int = 10
 
 
 # --- persistent lifecycles from worktree enclosures (note 01) ----------------
@@ -320,45 +353,76 @@ def _seed_from_started(event: Event) -> LifecycleProjection:
     )
 
 
+def _phase_changed_updates(proj: LifecycleProjection, event: Event) -> dict[str, Any]:
+    return {"phase": coerce_phase(str(event.data.get("phase", proj.phase)))}
+
+
+def _blocked_updates(_proj: LifecycleProjection, event: Event) -> dict[str, Any]:
+    return {"state": "blocked", "ask": event.data.get("ask")}
+
+
+def _awaiting_developer_updates(_proj: LifecycleProjection, event: Event) -> dict[str, Any]:
+    """NOTIFY-AND-CONTINUE turn end (leaf-28): non-terminal.
+
+    The summary rides on the projection's ``ask`` carrier (mirroring how the block ask rides
+    on ``lifecycle.blocked``) so the awaiting-developer attention item can surface it;
+    ``lifecycle.resumed`` clears it back to None on auto-resume.
+    """
+    summary = event.data.get("summary")
+    return {
+        "state": "awaiting-developer",
+        "ask": {"summary": summary} if summary is not None else None,
+    }
+
+
+def _resumed_updates(_proj: LifecycleProjection, _event: Event) -> dict[str, Any]:
+    """Carries both the parked blocked path and the awaiting-developer turn-end path back to
+    running (resume() / resume_from_await() both emit this)."""
+    return {"state": "running", "ask": None}
+
+
+def _paused_updates(_proj: LifecycleProjection, _event: Event) -> dict[str, Any]:
+    return {"state": "paused"}
+
+
+def _promoted_updates(_proj: LifecycleProjection, event: Event) -> dict[str, Any]:
+    """Promotion fixes the lifecycle's scope, and binds enclosure/repo when the event names them."""
+    updates: dict[str, Any] = {"fleeting": False, "scope": event.data.get("scope")}
+    if event.enclosure is not None:
+        updates["enclosure"] = event.enclosure
+    if event.repoId is not None:
+        updates["repoId"] = event.repoId
+    return updates
+
+
+def _ended_updates(_proj: LifecycleProjection, event: Event) -> dict[str, Any]:
+    return {"state": "completed" if event.data.get("outcome") == "completed" else "abandoned"}
+
+
+def _tool_completed_updates(proj: LifecycleProjection, event: Event) -> dict[str, Any]:
+    tokens = event.data.get("tokens")
+    return {"tokens": proj.tokens + tokens} if isinstance(tokens, int) else {}
+
+
+# Each kind owns the projection fields it writes. A kind absent from this table --
+# lifecycle.heartbeat and any unknown kind -- is liveness only: staleness is taken from
+# events[-1].ts, so no projection field changes for it.
+_KIND_UPDATES: dict[str, Callable[[LifecycleProjection, Event], dict[str, Any]]] = {
+    "lifecycle.phase-changed": _phase_changed_updates,
+    "lifecycle.blocked": _blocked_updates,
+    "lifecycle.awaiting-developer": _awaiting_developer_updates,
+    "lifecycle.resumed": _resumed_updates,
+    "lifecycle.paused": _paused_updates,
+    "lifecycle.promoted": _promoted_updates,
+    "lifecycle.ended": _ended_updates,
+    "tool.completed": _tool_completed_updates,
+}
+
+
 def _apply_kind(proj: LifecycleProjection, event: Event) -> LifecycleProjection:
-    data = event.data
-    updates: dict[str, Any] = {}
-    if event.kind == "lifecycle.phase-changed":
-        updates["phase"] = coerce_phase(str(data.get("phase", proj.phase)))
-    elif event.kind == "lifecycle.blocked":
-        updates["state"] = "blocked"
-        updates["ask"] = data.get("ask")
-    elif event.kind == "lifecycle.awaiting-developer":
-        # NOTIFY-AND-CONTINUE turn end (leaf-28): non-terminal. The summary rides
-        # on the projection's ``ask`` carrier (mirroring how the block ask rides on
-        # ``lifecycle.blocked``) so the awaiting-developer attention item can surface
-        # it; ``lifecycle.resumed`` clears it back to None on auto-resume.
-        updates["state"] = "awaiting-developer"
-        summary = data.get("summary")
-        updates["ask"] = {"summary": summary} if summary is not None else None
-    elif event.kind == "lifecycle.resumed":
-        # Carries both the parked blocked path and the awaiting-developer turn-end
-        # path back to running (resume() / resume_from_await() both emit this).
-        updates["state"] = "running"
-        updates["ask"] = None
-    elif event.kind == "lifecycle.paused":
-        updates["state"] = "paused"
-    elif event.kind == "lifecycle.promoted":
-        updates["fleeting"] = False
-        updates["scope"] = data.get("scope")
-        if event.enclosure is not None:
-            updates["enclosure"] = event.enclosure
-        if event.repoId is not None:
-            updates["repoId"] = event.repoId
-    elif event.kind == "lifecycle.ended":
-        updates["state"] = "completed" if data.get("outcome") == "completed" else "abandoned"
-    elif event.kind == "tool.completed":
-        tokens = data.get("tokens")
-        if isinstance(tokens, int):
-            updates["tokens"] = proj.tokens + tokens
-    # lifecycle.heartbeat (and any unknown kind): liveness only -- staleness is
-    # taken from events[-1].ts, so no projection field changes here.
-    return proj.model_copy(update=updates)
+    """Fold one event into the projection through the kind that owns its fields."""
+    updates = _KIND_UPDATES.get(event.kind)
+    return proj.model_copy(update={} if updates is None else updates(proj, event))
 
 
 def _index_corrections(events: list[Event]) -> dict[str, str]:
@@ -538,35 +602,30 @@ def _staleness_bucket(age: float | None) -> str:
 
 
 def build_analytics(
+    given: AnalyticalInputs,
     *,
-    drift_snapshots: list[DriftSnapshotNode],
-    sidecar_staleness: list[SidecarStaleNode],
-    setup_summaries: list[SetupSummaryNode],
-    setup_progress: list[SetupProgressNode],
-    route_coverage: list[RouteCoverageNode],
-    tool_reports: list[ToolReportNode],
-    agent_pickups: list[AgentPickupNode] | None = None,
-    expectation_rows: list[ExpectationRowNode] | None = None,
-    ledgers: list[LedgerNode],
-    task_documents: list[TaskDocNode] | None = None,
     series: list[SeriesNode] | None = None,
     attention_queue: list[AttentionItem] | None = None,
     engine_processes: list[EngineProcessNode] | None = None,
-    stalest_limit: int = 10,
 ) -> Analytics:
-    """Assemble the analytical surfaces; the full sidecar list collapses to a leaderboard."""
+    """Assemble the analytical surfaces; the full sidecar list collapses to a leaderboard.
+
+    ``series``, ``attention_queue`` and ``engine_processes`` are DERIVED surfaces the caller
+    computed from the same inputs (series carries token totals the raw nodes lack), so they
+    override what ``given`` holds rather than being read out of it.
+    """
     return Analytics(
-        driftSnapshots=drift_snapshots,
-        stalestSidecars=_stalest(sidecar_staleness, stalest_limit),
-        setupSummaries=setup_summaries,
-        setupProgress=setup_progress,
-        routeCoverage=route_coverage,
-        toolReports=tool_reports,
-        agentPickups=agent_pickups or [],
-        expectationRows=expectation_rows or [],
-        ledgers=ledgers,
-        taskDocuments=task_documents or [],
-        series=series or [],
+        driftSnapshots=given.drift_snapshots,
+        stalestSidecars=_stalest(given.sidecar_staleness, given.stalest_limit),
+        setupSummaries=given.setup_summaries,
+        setupProgress=given.setup_progress,
+        routeCoverage=given.route_coverage,
+        toolReports=given.tool_reports,
+        agentPickups=given.agent_pickups,
+        expectationRows=given.expectation_rows,
+        ledgers=given.ledgers,
+        taskDocuments=given.task_documents,
+        series=series if series is not None else given.series,
         attentionQueue=attention_queue or [],
         engineProcesses=engine_processes or [],
     )
@@ -596,12 +655,7 @@ def _ask_text(ask: dict[str, Any] | None) -> str | None:
 def build_attention_queue(
     lifecycles: list[LifecycleProjection],
     providers: list[ProviderNode],
-    drift_snapshots: list[DriftSnapshotNode],
-    setup_progress: list[SetupProgressNode],
-    start_progress: list[dict[str, Any]] | None = None,
-    gates: list[GateRecord] | None = None,
-    *,
-    dismissals: dict[str, AttentionDismissalRecord] | None = None,
+    given: AnalyticalInputs,
 ) -> list[AttentionItem]:
     """The home-screen attention queue: a ranked cross-section of what needs the human.
 
@@ -613,21 +667,21 @@ def build_attention_queue(
     small builder. Enclosure-derived items (pending review / worktree debt) are the
     hangar's job (5c).
 
-    ``dismissals`` (``{itemId: AttentionDismissalRecord}``, read from the compact
-    :class:`AttentionDismissalStore`, leaf-28 S5.2) suppresses a lifecycle-bound item
+    ``given.attention_dismissals`` (``{itemId: AttentionDismissalRecord}``, read from the
+    compact :class:`AttentionDismissalStore`, leaf-28 S5.2) suppresses a lifecycle-bound item
     the operator cleared while keeping the derivation pure: an item is dropped when a
     matching lifecycle acknowledgement exists at or after its triggering ``signalTs``,
     and re-surfaces the moment a *newer* signal arrives.
     """
     items = [
         *_lifecycle_attention(lifecycles),
-        *_gate_attention(gates or []),
+        *_gate_attention(given.gates),
         *_provider_attention(providers),
-        *_drift_attention(drift_snapshots),
-        *_setup_attention(setup_progress),
-        *_start_attention(start_progress or []),
+        *_drift_attention(given.drift_snapshots),
+        *_setup_attention(given.setup_progress),
+        *_start_attention(given.engine_start_progress),
     ]
-    dismissed = dismissals or {}
+    dismissed = given.attention_dismissals
     items = [item for item in items if not _is_dismissed(item, dismissed)]
     items.sort(
         key=lambda item: (_SEVERITY_RANK.get(item.severity, 9), -(item.waitSeconds or 0.0), item.id)
@@ -1109,6 +1163,13 @@ def _engine_process(
     providers_by_group: dict[str, list[ProviderNode]],
     setup_by_group: dict[str, SetupProgressNode],
 ) -> EngineProcessNode:
+    """One worktree contract as a process node: its two lanes, its boot facts, its conduits.
+
+    The three derivations that make up the node are each a unit of their own -- the code
+    lane's commit refs, the memory lane's (absent unless the contract runs external memory),
+    and the worktree group's provider-boot facts -- so each is composed by its own helper
+    below and this stays the assembly.
+    """
     cp = fact.contract
     status = fact.status or {}
     guidance = fact.guidance
@@ -1119,82 +1180,30 @@ def _engine_process(
 
     freshness = _as_dict(status.get("freshness"))
     behind_official = freshness.get("state") == "behind-official"
-    code_fresh = _as_dict(freshness.get("code"))
-    memory_fresh = _as_dict(freshness.get("memory"))
-
-    code_source = CommitRefNode(
-        branch=_str_or_none(cp.get("code_source_branch")),
-        commit=_str_or_none(cp.get("code_base_commit")),
-        path=_str_or_none(cp.get("code_repo_path")),
-        behindSource=_int_or_none(code_fresh.get("baseBehindSource")),
-        factState="observed" if status else "derived",
-    )
-    code_exists = status.get("code_worktree_exists")
-    code_worktree = CommitRefNode(
-        branch=_str_or_none(cp.get("code_work_branch")),
-        commit=_str_or_none(cp.get("code_commit")) or _str_or_none(cp.get("code_base_commit")),
-        path=_str_or_none(cp.get("code_worktree")),
-        exists=code_exists if isinstance(code_exists, bool) else None,
-        dirty=_bool_or_none(status.get("code_worktree_dirty")),
-        factState=_ref_fact_state(bool(status), code_exists),
-    )
-
-    memory_source: CommitRefNode | None = None
-    memory_worktree: CommitRefNode | None = None
-    ledger_path: str | None = None
-    if memory_mode == "external":
-        memory_exists = status.get("memory_worktree_exists")
-        memory_source = CommitRefNode(
-            branch=_str_or_none(cp.get("memory_source_branch")),
-            commit=_str_or_none(cp.get("memory_base_commit")),
-            path=_str_or_none(cp.get("memory_repo_path")),
-            behindSource=_int_or_none(memory_fresh.get("baseBehindSource")),
-            factState="observed" if status else "derived",
-        )
-        memory_worktree = CommitRefNode(
-            branch=_str_or_none(cp.get("memory_work_branch")),
-            commit=_str_or_none(cp.get("memory_content_commit"))
-            or _str_or_none(cp.get("memory_base_commit")),
-            path=_str_or_none(cp.get("memory_worktree")),
-            exists=memory_exists if isinstance(memory_exists, bool) else None,
-            dirty=_bool_or_none(status.get("memory_worktree_dirty")),
-            factState=_ref_fact_state(bool(status), memory_exists),
-        )
-        ledger_path = _str_or_none(cp.get("ledger_path"))
+    code = _code_refs(contract=cp, status=status, freshness=freshness)
+    memory = _memory_refs(contract=cp, status=status, freshness=freshness, memory_mode=memory_mode)
 
     setup_node = setup_by_group.get(group_key)
-    prov_status = _as_dict(status.get("providers"))
-    setup_state = setup_node.state if setup_node else _str_or_none(prov_status.get("state"))
-    current_phase = setup_node.currentPhase if setup_node else None
-    heartbeat = setup_node.heartbeatAgeSeconds if setup_node else None
-    failed_phases = (
-        list(setup_node.failedPhases)
-        if setup_node
-        else [str(line) for line in prov_status.get("failedPhases", []) or []]
-    )
-    completed_phases = [str(line) for line in prov_status.get("completedPhases", []) or []]
-    seed_fallback = bool(prov_status.get("seedFallback"))
-    retry = prov_status.get("retryArgs")
-    retry_args = retry if isinstance(retry, dict) else None
-
+    setup = _setup_facts(setup_node, status)
     observed_providers = providers_by_group.get(group_key, [])
     boot = _provider_boot_nodes(
         observed_providers,
         group_key=group_key,
         memory_mode=memory_mode,
-        setup_state=setup_state,
+        setup_state=setup.state,
     )
     has_provider_surface = bool(setup_node or observed_providers)
 
-    phase = _process_phase(guidance.get("phase"), setup_state, behind_official=behind_official)
-    health = _process_health(phase, setup_state, failed_phases)
+    phase = _process_phase(guidance.get("phase"), setup.state, behind_official=behind_official)
+    health = _process_health(phase, setup.state, setup.failed_phases)
     edges = _process_edges(
-        memory_mode=memory_mode,
-        code_worktree=code_worktree,
-        memory_worktree=memory_worktree,
-        boot=boot,
-        setup_state=setup_state,
-        failed_phases=failed_phases,
+        _ProcessLanes(
+            memory_mode=memory_mode,
+            code_worktree=code.worktree,
+            memory_worktree=memory.worktree,
+        ),
+        boot,
+        setup,
         behind_official=behind_official,
     )
 
@@ -1209,12 +1218,12 @@ def _engine_process(
         lifecycleId=_str_or_none(cp.get("lifecycle_id")),
         phase=phase,
         health=health,
-        codeSource=code_source,
-        codeWorktree=code_worktree,
+        codeSource=code.source,
+        codeWorktree=code.worktree,
         memoryMode=memory_mode,
-        memorySource=memory_source,
-        memoryWorktree=memory_worktree,
-        ledgerPath=ledger_path,
+        memorySource=memory.source,
+        memoryWorktree=memory.worktree,
+        ledgerPath=memory.ledger_path,
         ledgerRows=fact.ledger_rows,
         ledgerRowCount=fact.ledger_row_count,
         humanReviewStatus=str(cp.get("human_review_status", "")),
@@ -1223,13 +1232,13 @@ def _engine_process(
         integrationStrategy=_str_or_none(cp.get("integration_strategy")),
         cleanup=str(cp.get("cleanup", "")),
         carryoverDoneAt=_str_or_none(status.get("carryoverDoneAt")),
-        setupState=setup_state,
-        currentPhase=current_phase,
-        completedPhases=completed_phases,
-        failedPhases=failed_phases,
-        heartbeatAgeSeconds=heartbeat,
-        seedFallback=seed_fallback,
-        retryArgs=retry_args,
+        setupState=setup.state,
+        currentPhase=setup.current_phase,
+        completedPhases=setup.completed_phases,
+        failedPhases=setup.failed_phases,
+        heartbeatAgeSeconds=setup.heartbeat_age_seconds,
+        seedFallback=setup.seed_fallback,
+        retryArgs=setup.retry_args,
         providers=boot,
         edges=edges,
         landing=[LandingRefNode(**ref) for ref in (status.get("landing") or [])],
@@ -1240,10 +1249,134 @@ def _engine_process(
             has_status=bool(status),
             contract=cp,
             memory_mode=memory_mode,
-            setup_state=setup_state,
+            setup_state=setup.state,
             boot=boot,
         ),
         sourceFiles=_source_files(cp, memory_mode, group_full, has_setup=has_provider_surface),
+    )
+
+
+@dataclass(frozen=True)
+class _CodeRefs:
+    """The code lane of one worktree contract: the official source line and the checkout."""
+
+    source: CommitRefNode
+    worktree: CommitRefNode
+
+
+@dataclass(frozen=True)
+class _MemoryRefs:
+    """The memory lane of one worktree contract: its two refs plus the ledger that maps them.
+
+    All three are ``None`` unless the contract runs external memory -- an internal or disabled
+    contract has no memory lane, so the node leaves those fields unset rather than rendering
+    an empty lane as an observation.
+    """
+
+    source: CommitRefNode | None
+    worktree: CommitRefNode | None
+    ledger_path: str | None
+
+
+def _code_refs(
+    *, contract: dict[str, Any], status: dict[str, Any], freshness: dict[str, Any]
+) -> _CodeRefs:
+    """Compose the code lane's source/worktree refs from the contract + status probe.
+
+    The source ref is the official line the worktree was cut from -- recorded fields, plus how
+    far that recorded base now sits behind the source tip. The worktree ref is the checkout
+    itself, and reads ``observed`` only where the probe actually saw it on disk.
+    """
+    code_fresh = _as_dict(freshness.get("code"))
+    exists = status.get("code_worktree_exists")
+    return _CodeRefs(
+        source=CommitRefNode(
+            branch=_str_or_none(contract.get("code_source_branch")),
+            commit=_str_or_none(contract.get("code_base_commit")),
+            path=_str_or_none(contract.get("code_repo_path")),
+            behindSource=_int_or_none(code_fresh.get("baseBehindSource")),
+            factState="observed" if status else "derived",
+        ),
+        worktree=CommitRefNode(
+            branch=_str_or_none(contract.get("code_work_branch")),
+            commit=_str_or_none(contract.get("code_commit"))
+            or _str_or_none(contract.get("code_base_commit")),
+            path=_str_or_none(contract.get("code_worktree")),
+            exists=exists if isinstance(exists, bool) else None,
+            dirty=_bool_or_none(status.get("code_worktree_dirty")),
+            factState=_ref_fact_state(bool(status), exists),
+        ),
+    )
+
+
+def _memory_refs(
+    *,
+    contract: dict[str, Any],
+    status: dict[str, Any],
+    freshness: dict[str, Any],
+    memory_mode: str,
+) -> _MemoryRefs:
+    """Compose the memory lane, mirroring the code lane -- or an absent lane when not external."""
+    if memory_mode != "external":
+        return _MemoryRefs(source=None, worktree=None, ledger_path=None)
+    memory_fresh = _as_dict(freshness.get("memory"))
+    exists = status.get("memory_worktree_exists")
+    return _MemoryRefs(
+        source=CommitRefNode(
+            branch=_str_or_none(contract.get("memory_source_branch")),
+            commit=_str_or_none(contract.get("memory_base_commit")),
+            path=_str_or_none(contract.get("memory_repo_path")),
+            behindSource=_int_or_none(memory_fresh.get("baseBehindSource")),
+            factState="observed" if status else "derived",
+        ),
+        worktree=CommitRefNode(
+            branch=_str_or_none(contract.get("memory_work_branch")),
+            commit=_str_or_none(contract.get("memory_content_commit"))
+            or _str_or_none(contract.get("memory_base_commit")),
+            path=_str_or_none(contract.get("memory_worktree")),
+            exists=exists if isinstance(exists, bool) else None,
+            dirty=_bool_or_none(status.get("memory_worktree_dirty")),
+            factState=_ref_fact_state(bool(status), exists),
+        ),
+        ledger_path=_str_or_none(contract.get("ledger_path")),
+    )
+
+
+@dataclass(frozen=True)
+class _SetupFacts:
+    """A worktree group's provider-boot facts, as the process node reports them."""
+
+    state: str | None
+    current_phase: str | None
+    heartbeat_age_seconds: float | None
+    failed_phases: list[str]
+    completed_phases: list[str]
+    seed_fallback: bool
+    retry_args: dict[str, Any] | None
+
+
+def _setup_facts(setup_node: SetupProgressNode | None, status: dict[str, Any]) -> _SetupFacts:
+    """Derive the boot facts, preferring the live setup run over the recorded status block.
+
+    A group with a live ``SetupProgressNode`` has the better witness -- only it carries the
+    current phase and the heartbeat age -- so it wins field by field; the status payload's
+    ``providers`` block is the fallback, and remains the only source for the completed
+    phases, the seed fallback and the retry arguments.
+    """
+    provider_status = _as_dict(status.get("providers"))
+    retry = provider_status.get("retryArgs")
+    return _SetupFacts(
+        state=setup_node.state if setup_node else _str_or_none(provider_status.get("state")),
+        current_phase=setup_node.currentPhase if setup_node else None,
+        heartbeat_age_seconds=setup_node.heartbeatAgeSeconds if setup_node else None,
+        failed_phases=(
+            list(setup_node.failedPhases)
+            if setup_node
+            else _str_list(provider_status.get("failedPhases"))
+        ),
+        completed_phases=_str_list(provider_status.get("completedPhases")),
+        seed_fallback=bool(provider_status.get("seedFallback")),
+        retry_args=retry if isinstance(retry, dict) else None,
     )
 
 
@@ -1335,17 +1468,29 @@ def _process_health(phase: str, setup_state: str | None, failed_phases: list[str
     return "nominal"
 
 
+@dataclass(frozen=True)
+class _ProcessLanes:
+    """The two lanes of one engine process: the mode that decides which of them exist, and each
+    lane's worktree ref (the memory one absent unless the contract runs external memory)."""
+
+    memory_mode: str
+    code_worktree: CommitRefNode
+    memory_worktree: CommitRefNode | None
+
+
 def _process_edges(
-    *,
-    memory_mode: str,
-    code_worktree: CommitRefNode,
-    memory_worktree: CommitRefNode | None,
+    lanes: _ProcessLanes,
     boot: list[ProviderBootNode],
-    setup_state: str | None,
-    failed_phases: list[str],
+    setup: _SetupFacts,
+    *,
     behind_official: bool,
 ) -> list[EngineProcessEdge]:
     """The core conduits: worktree materialization, provider seed/clone, and a sync feedback edge."""
+    memory_mode = lanes.memory_mode
+    code_worktree = lanes.code_worktree
+    memory_worktree = lanes.memory_worktree
+    setup_state = setup.state
+    failed_phases = setup.failed_phases
     edges = [
         EngineProcessEdge(
             id="code-worktree-add",
@@ -1419,22 +1564,31 @@ def _materialize_edge_state(ref: CommitRefNode | None) -> str:
     return "planned"
 
 
+# Setup states that decide a seed edge on their own, whatever the engine reports.
+_DECISIVE_SETUP_EDGE_STATES: dict[str, str] = {
+    "running": "running",
+    "stale": "stale",
+    **dict.fromkeys(_SETUP_FAILED, "failed"),
+}
+
+
 def _seed_edge_state(
     setup_state: str | None, failed_phases: list[str], has_engine: bool, token: str
 ) -> str:
+    """The seed edge's state, strongest evidence first.
+
+    A failed phase naming this seed outranks everything; then the setup run's own state
+    where that is decisive; then the engine's presence, which is what turns a finished or
+    unobserved setup into a complete edge.
+    """
     if any(token in line for line in failed_phases):
         return "failed"
-    if setup_state == "running":
-        return "running"
-    if setup_state == "stale":
-        return "stale"
-    if setup_state in _SETUP_FAILED:
-        return "failed"
+    decisive = _DECISIVE_SETUP_EDGE_STATES.get(setup_state) if setup_state is not None else None
+    if decisive is not None:
+        return decisive
     if has_engine and (setup_state is None or setup_state in _SETUP_DONE):
         return "complete"
-    if setup_state == "skipped":
-        return "skipped"
-    return "planned"
+    return "skipped" if setup_state == "skipped" else "planned"
 
 
 def _missing_facts(
@@ -1484,6 +1638,11 @@ def _as_dict(value: object) -> dict[str, Any]:
 
 def _str_or_none(value: object) -> str | None:
     return value if isinstance(value, str) and value else None
+
+
+def _str_list(value: Any) -> list[str]:
+    """A recorded sequence as strings; an absent or empty value reads as no entries."""
+    return [str(line) for line in value or []]
 
 
 def _int_or_none(value: object) -> int | None:

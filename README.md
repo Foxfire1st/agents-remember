@@ -198,6 +198,8 @@ agents-remember/
   skills/                           # canonical skill source tree
   scripts/sync-skills.py            # sync skills into package/harness copies
   scripts/sync-runtime.py           # sync runtime assets into package data
+  scripts/sync-harness.py           # generate the nine harness configuration trees
+  scripts/harness/                  # canonical source for those trees
   agents-md-files/                  # canonical installed AGENTS.md templates
   benchmarks/                       # canonical optional benchmark package source
   providers/                        # canonical provider runtime assets
@@ -222,11 +224,20 @@ and `system/`, then run `python3 scripts/sync-runtime.py` to refresh MCP package
 data only. The pre-commit and pre-push hooks run
 `python3 scripts/sync-runtime.py --check`.
 
+Edit the self-hosted harness configuration in root `scripts/harness/`, then run
+`python3 scripts/sync-harness.py` to regenerate the nine `.claude/`, `.codex/`,
+`.cursor/`, `.github-vscode/`, `.vscode/`, `.hermes/`, `.openclaw/`, `.pi/` and
+`.agents/` trees. The pre-commit and pre-push hooks run
+`python3 scripts/sync-harness.py --check`, and `mcp/tests/test_sync_harness.py`
+runs the same check inside the suite.
+
 The hooks are tiered, and both are thin wrappers over `.githooks/_gate.sh`.
 pre-commit runs the fast tier over the **staged** content: the generated-copy
-checks above, plus Ruff and Pyright. pre-push runs the full tier:
-`python -m agents_remember.code_quality.check`, whose default command enforces
-Ruff, Pyright, the full pytest suite, and the configured CRAP threshold. CI runs
+checks above, plus Ruff, `ruff format --check`, and Pyright. pre-push runs the
+full tier: `python -m agents_remember.code_quality.check`, whose default command
+enforces Ruff, the formatter, Pyright, the full pytest suite, and the configured
+CRAP threshold. No rail carries a baseline or exemption list. Radon is printed as
+a report and cannot fail either tier — it exits 0 whatever it finds. CI runs
 that same wrapper on every branch push and pull request, and closeout runs it
 before creating an Agents Remember code commit even when hooks are not
 configured. See CONTRIBUTING.md for the tier table and the staged-content

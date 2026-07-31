@@ -22,16 +22,26 @@ sys.path.insert(0, str(MCP_SRC))
 from _scaling import assert_bounded_count
 from agents_remember.controlplane.escalation_ladder import MAX_RUNG
 from agents_remember.controlplane.expectation_rows import (
+    Expectation,
     ExpectationRowStore,
+    ExpectationSubject,
     write_expectation_row,
 )
-from agents_remember.controlplane.operator_inbox_records import create_operator_inbox_entry
+from agents_remember.controlplane.operator_inbox_records import (
+    InboxAddress,
+    InboxMessage,
+    InboxPoster,
+    InboxRouting,
+    InboxSubject,
+    create_operator_inbox_entry,
+)
 from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
 from agents_remember.controlplane.orchestration_nudges import OrchestrationNudgeStore
 from agents_remember.controlplane.supervisor_signals import SupervisorSignalCooldownStore
 from agents_remember.observer.store import EventStore
 from agents_remember.serving import supervisor as supervisor_module
 from agents_remember.serving.supervisor import (
+    EscalationSchedule,
     SupervisorContext,
     SupervisorFinding,
     act_on_finding,
@@ -49,7 +59,6 @@ from agents_remember.serving.supervisor import (
 from agents_remember.serving.supervisor_heartbeat import SupervisorHeartbeatStore
 from agents_remember.serving.terminal import TerminalHost
 from agents_remember.serving.terminal_catalog import (
-    SeatTurnState,
     TerminalCatalog,
     TerminalCatalogEntry,
     TerminalSessionKind,
@@ -66,10 +75,11 @@ def _entry(
     kind: TerminalSessionKind = "harness",
     status: TerminalSessionStatus = "running",
     leaf_key: str | None = None,
-    turn_state: SeatTurnState | None = None,
-    turn_state_changed_at: str | None = None,
-    liveness_failures: int = 0,
 ) -> TerminalCatalogEntry:
+    """A seat row. Turn state comes from the row's own ``with_turn_state``; anything else
+    from ``replace(...)`` -- ``TerminalCatalogEntry`` already carries every field, so the
+    builder supplies only what identifies the seat rather than mirroring the row's shape.
+    """
     return TerminalCatalogEntry(
         id=session_id,
         label=f"Chat {session_id}",
@@ -83,9 +93,6 @@ def _entry(
         last_attached_at="2026-07-08T00:00:00+00:00",
         status=status,
         leaf_key=leaf_key,
-        turn_state=turn_state,
-        turn_state_changed_at=turn_state_changed_at,
-        liveness_failures=liveness_failures,
     )
 
 
@@ -148,12 +155,12 @@ class ExpectationPredicateTests(unittest.TestCase):
             store = ExpectationRowStore(Path(tmp))
             write_expectation_row(
                 store,
+                Expectation(
+                    kind="briefed-by", source_id="s1", subject=ExpectationSubject(agent_id="s1")
+                ),
                 row_id="r1",
                 now=NOW - timedelta(minutes=10),
-                kind="briefed-by",
                 sla_seconds=60.0,
-                source_id="s1",
-                subject_agent_id="s1",
             )
             findings = evaluate_expectation_findings(store, now=NOW)
             self.assertEqual(len(findings), 1)
@@ -164,11 +171,10 @@ class ExpectationPredicateTests(unittest.TestCase):
             store = ExpectationRowStore(Path(tmp))
             write_expectation_row(
                 store,
+                Expectation(kind="briefed-by", source_id="s1"),
                 row_id="r1",
                 now=NOW,
-                kind="briefed-by",
                 sla_seconds=3600.0,
-                source_id="s1",
             )
             self.assertEqual(evaluate_expectation_findings(store, now=NOW), [])
 
@@ -180,13 +186,16 @@ class TurnReportStalenessTests(unittest.TestCase):
             store = ExpectationRowStore(coordination_root / "logs" / "observer")
             write_expectation_row(
                 store,
+                Expectation(
+                    kind="turn-report-by",
+                    source_id="s1",
+                    subject=ExpectationSubject(
+                        agent_id="s1", leaf_key="repo-a/260707_master/leaf-9"
+                    ),
+                ),
                 row_id="r1",
                 now=NOW - timedelta(hours=2),
-                kind="turn-report-by",
                 sla_seconds=60.0,
-                source_id="s1",
-                subject_agent_id="s1",
-                leaf_key="repo-a/260707_master/leaf-9",
             )
             findings = evaluate_turn_report_findings(
                 store, coordination_root=coordination_root, now=NOW
@@ -200,12 +209,14 @@ class TurnReportStalenessTests(unittest.TestCase):
             store = ExpectationRowStore(coordination_root / "logs" / "observer")
             write_expectation_row(
                 store,
+                Expectation(
+                    kind="turn-report-by",
+                    source_id="s1",
+                    subject=ExpectationSubject(leaf_key="repo-a/260707_master/leaf-9"),
+                ),
                 row_id="r1",
                 now=NOW - timedelta(hours=2),
-                kind="turn-report-by",
                 sla_seconds=60.0,
-                source_id="s1",
-                leaf_key="repo-a/260707_master/leaf-9",
             )
             path = turn_report_path_for_leaf_key(coordination_root, "repo-a/260707_master/leaf-9")
             assert path is not None
@@ -225,14 +236,11 @@ class InboxPredicateTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             store = OperatorInboxStore(Path(tmp))
             entry = create_operator_inbox_entry(
+                InboxMessage(ask="ask", response="resp"),
                 entry_id="e1",
                 now=NOW.isoformat(),
-                lifecycle_id=None,
-                agent_id="s1",
-                ask="ask",
-                response="resp",
-                created_by="system",
-                created_via="cli",
+                routing=InboxRouting(address=InboxAddress(lifecycle_id=None, agent_id="s1")),
+                poster=InboxPoster(created_by="system", created_via="cli"),
             )
             store.append(entry)
             findings = evaluate_inbox_findings(store, now=NOW)
@@ -245,14 +253,11 @@ class InboxPredicateTests(unittest.TestCase):
             store = OperatorInboxStore(root / "observer")
             catalog = TerminalCatalog(root / "catalog.json")
             entry = create_operator_inbox_entry(
+                InboxMessage(ask="ask", response="resp"),
                 entry_id="e1",
                 now=NOW.isoformat(),
-                lifecycle_id=None,
-                agent_id="dead-seat",
-                ask="ask",
-                response="resp",
-                created_by="system",
-                created_via="cli",
+                routing=InboxRouting(address=InboxAddress(lifecycle_id=None, agent_id="dead-seat")),
+                poster=InboxPoster(created_by="system", created_via="cli"),
             ).model_copy(update={"rung": 3})
             store.append(entry)
             findings = evaluate_ladder_terminal_findings(store, catalog)
@@ -266,10 +271,8 @@ class SeatLivenessPredicateTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             catalog = TerminalCatalog(Path(tmp) / "catalog.json")
             catalog.upsert(
-                _entry(
-                    "s1",
-                    turn_state="stale",
-                    turn_state_changed_at=(NOW - timedelta(minutes=5)).isoformat(),
+                _entry("s1").with_turn_state(
+                    "stale", changed_at=(NOW - timedelta(minutes=5)).isoformat()
                 )
             )
             findings = evaluate_seat_liveness_findings(catalog, now=NOW, stale_seconds=60.0)
@@ -279,7 +282,7 @@ class SeatLivenessPredicateTests(unittest.TestCase):
     def test_recently_stale_does_not_fire_yet(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             catalog = TerminalCatalog(Path(tmp) / "catalog.json")
-            catalog.upsert(_entry("s1", turn_state="stale", turn_state_changed_at=NOW.isoformat()))
+            catalog.upsert(_entry("s1").with_turn_state("stale", changed_at=NOW.isoformat()))
             self.assertEqual(
                 evaluate_seat_liveness_findings(catalog, now=NOW, stale_seconds=60.0), []
             )
@@ -287,7 +290,7 @@ class SeatLivenessPredicateTests(unittest.TestCase):
     def test_degraded_row_with_no_turn_state_uses_liveness_failures(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             catalog = TerminalCatalog(Path(tmp) / "catalog.json")
-            catalog.upsert(_entry("s1", liveness_failures=1))
+            catalog.upsert(replace(_entry("s1"), liveness_failures=1))
             findings = evaluate_seat_liveness_findings(catalog, now=NOW, stale_seconds=60.0)
             self.assertEqual(len(findings), 1)
             self.assertEqual(findings[0].detail, "liveness-degraded")
@@ -304,11 +307,8 @@ class SeatLivenessPredicateTests(unittest.TestCase):
             )
             catalog.upsert(
                 replace(
-                    _entry(
-                        "worker-1",
-                        leaf_key=leaf_key,
-                        turn_state="stale",
-                        turn_state_changed_at=(NOW - timedelta(minutes=10)).isoformat(),
+                    _entry("worker-1", leaf_key=leaf_key).with_turn_state(
+                        "stale", changed_at=(NOW - timedelta(minutes=10)).isoformat()
                     ),
                     spawn_role="worker",
                     spawned_by_session="manager-current",
@@ -341,11 +341,8 @@ class SeatLivenessPredicateTests(unittest.TestCase):
             )
             catalog.upsert(
                 replace(
-                    _entry(
-                        "worker-dead",
-                        leaf_key=leaf_key,
-                        turn_state="stale",
-                        turn_state_changed_at=(NOW - timedelta(minutes=10)).isoformat(),
+                    _entry("worker-dead", leaf_key=leaf_key).with_turn_state(
+                        "stale", changed_at=(NOW - timedelta(minutes=10)).isoformat()
                     ),
                     spawn_role="worker",
                     spawned_by_session="manager-current",
@@ -353,7 +350,7 @@ class SeatLivenessPredicateTests(unittest.TestCase):
             )
             catalog.upsert(
                 replace(
-                    _entry("worker-replacement", turn_state="working"),
+                    replace(_entry("worker-replacement"), turn_state="working"),
                     spawn_role="worker",
                     spawned_by_session="manager-current",
                     replacement_for_leaf=leaf_key,
@@ -412,10 +409,8 @@ class SweepIntegrationTests(unittest.TestCase):
 
         # R2e: a seat gone stale past the cutoff -- exercises the signal-emit action path.
         stale_seat = replace(
-            _entry(
-                "stale-1",
-                turn_state="stale",
-                turn_state_changed_at=(NOW - timedelta(minutes=5)).isoformat(),
+            _entry("stale-1").with_turn_state(
+                "stale", changed_at=(NOW - timedelta(minutes=5)).isoformat()
             ),
             spawn_role="worker",
             spawned_by_session="manager-1",
@@ -426,27 +421,27 @@ class SweepIntegrationTests(unittest.TestCase):
 
         # R2d: an unacked inbox row, immediately redeliverable.
         inbox_entry = create_operator_inbox_entry(
+            InboxMessage(ask="ask", response="resp"),
             entry_id="inbox-1",
             now=NOW.isoformat(),
-            lifecycle_id=None,
-            agent_id="worker-1",
-            ask="ask",
-            response="resp",
-            created_by="system",
-            created_via="cli",
+            routing=InboxRouting(address=InboxAddress(lifecycle_id=None, agent_id="worker-1")),
+            poster=InboxPoster(created_by="system", created_via="cli"),
         )
         self.inbox_store.append(inbox_entry)
 
         # R2b: an overdue briefed-by row for the worker.
         write_expectation_row(
             self.expectation_store,
+            Expectation(
+                kind="briefed-by",
+                source_id="worker-1",
+                subject=ExpectationSubject(
+                    agent_id="worker-1", leaf_key="repo-a/260707_master/leaf-9"
+                ),
+            ),
             row_id="exp-1",
             now=NOW - timedelta(minutes=10),
-            kind="briefed-by",
             sla_seconds=60.0,
-            source_id="worker-1",
-            subject_agent_id="worker-1",
-            leaf_key="repo-a/260707_master/leaf-9",
         )
 
         ctx = self._ctx()
@@ -498,21 +493,21 @@ class SweepIntegrationTests(unittest.TestCase):
         # the nudge and signal-emit actions must skip rather than raise or fabricate an address.
         self.catalog.upsert(
             replace(
-                _entry(
-                    "orphan-1",
-                    turn_state="stale",
-                    turn_state_changed_at=(NOW - timedelta(minutes=5)).isoformat(),
+                _entry("orphan-1").with_turn_state(
+                    "stale", changed_at=(NOW - timedelta(minutes=5)).isoformat()
                 )
             )
         )
         write_expectation_row(
             self.expectation_store,
+            Expectation(
+                kind="briefed-by",
+                source_id="orphan-1",
+                subject=ExpectationSubject(agent_id="orphan-1"),
+            ),
             row_id="exp-orphan",
             now=NOW - timedelta(minutes=10),
-            kind="briefed-by",
             sla_seconds=60.0,
-            source_id="orphan-1",
-            subject_agent_id="orphan-1",
         )
         ctx = self._ctx()
         result = run_supervisor_sweep(ctx, now=NOW)
@@ -539,14 +534,11 @@ class SweepIntegrationTests(unittest.TestCase):
 
     def test_terminal_dead_seat_row_becomes_ladder_resolved_not_redelivered(self) -> None:
         entry = create_operator_inbox_entry(
+            InboxMessage(ask="ask", response="resp"),
             entry_id="dead-row",
             now=NOW.isoformat(),
-            lifecycle_id=None,
-            agent_id="missing-seat",
-            ask="ask",
-            response="resp",
-            created_by="system",
-            created_via="cli",
+            routing=InboxRouting(address=InboxAddress(lifecycle_id=None, agent_id="missing-seat")),
+            poster=InboxPoster(created_by="system", created_via="cli"),
         ).model_copy(update={"rung": 3})
         self.inbox_store.append(entry)
 
@@ -564,14 +556,13 @@ class SweepIntegrationTests(unittest.TestCase):
         for index in range(3):
             self.inbox_store.append(
                 create_operator_inbox_entry(
+                    InboxMessage(ask="ask", response="resp"),
                     entry_id=f"row-{index}",
                     now=NOW.isoformat(),
-                    lifecycle_id=None,
-                    agent_id=f"missing-seat-{index}",
-                    ask="ask",
-                    response="resp",
-                    created_by="system",
-                    created_via="cli",
+                    routing=InboxRouting(
+                        address=InboxAddress(lifecycle_id=None, agent_id=f"missing-seat-{index}")
+                    ),
+                    poster=InboxPoster(created_by="system", created_via="cli"),
                 )
             )
 
@@ -591,14 +582,11 @@ class SweepIntegrationTests(unittest.TestCase):
         self.catalog.upsert(_entry("seat-1"))
         self.inbox_store.append(
             create_operator_inbox_entry(
+                InboxMessage(ask="ask", response="resp"),
                 entry_id="row-1",
                 now=NOW.isoformat(),
-                lifecycle_id=None,
-                agent_id="seat-1",
-                ask="ask",
-                response="resp",
-                created_by="system",
-                created_via="cli",
+                routing=InboxRouting(address=InboxAddress(lifecycle_id=None, agent_id="seat-1")),
+                poster=InboxPoster(created_by="system", created_via="cli"),
             )
         )
 
@@ -613,11 +601,8 @@ class SweepIntegrationTests(unittest.TestCase):
         self.catalog.upsert(replace(_entry("manager-1"), spawn_role="manager"))
         self.catalog.upsert(
             replace(
-                _entry(
-                    "worker-1",
-                    leaf_key="repo-a/260707_master/leaf-3",
-                    turn_state="stale",
-                    turn_state_changed_at=(NOW - timedelta(minutes=5)).isoformat(),
+                _entry("worker-1", leaf_key="repo-a/260707_master/leaf-3").with_turn_state(
+                    "stale", changed_at=(NOW - timedelta(minutes=5)).isoformat()
                 ),
                 spawn_role="worker",
                 spawned_by_session="manager-1",
@@ -708,14 +693,13 @@ class SweepIntegrationTests(unittest.TestCase):
     def test_pending_backlog_does_not_burst_redeliver_before_floor_after_restart(self) -> None:
         for index in range(3):
             entry = create_operator_inbox_entry(
+                InboxMessage(ask="ask", response="resp"),
                 entry_id=f"row-{index}",
                 now=NOW.isoformat(),
-                lifecycle_id=None,
-                agent_id=f"worker-{index}",
-                ask="ask",
-                response="resp",
-                created_by="system",
-                created_via="cli",
+                routing=InboxRouting(
+                    address=InboxAddress(lifecycle_id=None, agent_id=f"worker-{index}")
+                ),
+                poster=InboxPoster(created_by="system", created_via="cli"),
             ).model_copy(
                 update={
                     "deliveryState": "delivered",
@@ -736,11 +720,8 @@ class SweepIntegrationTests(unittest.TestCase):
         self.catalog.upsert(replace(_entry("manager-1"), spawn_role="manager"))
         self.catalog.upsert(
             replace(
-                _entry(
-                    "worker-1",
-                    leaf_key="repo-a/260707_master/leaf-3",
-                    turn_state="stale",
-                    turn_state_changed_at=(NOW - timedelta(minutes=5)).isoformat(),
+                _entry("worker-1", leaf_key="repo-a/260707_master/leaf-3").with_turn_state(
+                    "stale", changed_at=(NOW - timedelta(minutes=5)).isoformat()
                 ),
                 spawn_role="worker",
                 spawned_by_session="manager-1",
@@ -772,15 +753,13 @@ class EscalationPredicateTests(unittest.TestCase):
             ):
                 store.append(
                     create_operator_inbox_entry(
+                        InboxMessage(ask="ask", response="resp", message_kind="escalation"),
                         entry_id=entry_id,
                         now=(NOW - timedelta(minutes=10)).isoformat(),
-                        lifecycle_id=None,
-                        agent_id="worker-1",
-                        ask="ask",
-                        response="resp",
-                        created_by="system",
-                        created_via="cli",
-                        message_kind="escalation",
+                        routing=InboxRouting(
+                            address=InboxAddress(lifecycle_id=None, agent_id="worker-1")
+                        ),
+                        poster=InboxPoster(created_by="system", created_via="cli"),
                     ).model_copy(
                         update={
                             "deliveryState": "no-hosted-session",
@@ -790,7 +769,9 @@ class EscalationPredicateTests(unittest.TestCase):
                 )
 
             findings = evaluate_escalation_findings(
-                store, now=NOW, sla_seconds={"escalation": 60.0}, rung_seconds={}
+                store,
+                now=NOW,
+                schedule=EscalationSchedule(sla_seconds={"escalation": 60.0}, rung_seconds={}),
             )
 
             self.assertEqual([finding.source_id for finding in findings], ["exhausted"])
@@ -800,15 +781,13 @@ class EscalationPredicateTests(unittest.TestCase):
             store = OperatorInboxStore(Path(tmp))
             store.append(
                 create_operator_inbox_entry(
+                    InboxMessage(ask="brief", response="work", message_kind="dispatch-brief"),
                     entry_id="dispatch-1",
                     now=(NOW - timedelta(minutes=10)).isoformat(),
-                    lifecycle_id=None,
-                    agent_id="worker-1",
-                    ask="brief",
-                    response="work",
-                    created_by="manager-1",
-                    created_via="cli",
-                    message_kind="dispatch-brief",
+                    routing=InboxRouting(
+                        address=InboxAddress(lifecycle_id=None, agent_id="worker-1")
+                    ),
+                    poster=InboxPoster(created_by="manager-1", created_via="cli"),
                 ).model_copy(
                     update={
                         "deliveryState": "unconfirmed",
@@ -818,7 +797,9 @@ class EscalationPredicateTests(unittest.TestCase):
             )
 
             findings = evaluate_escalation_findings(
-                store, now=NOW, sla_seconds={"dispatch-brief": 60.0}, rung_seconds={}
+                store,
+                now=NOW,
+                schedule=EscalationSchedule(sla_seconds={"dispatch-brief": 60.0}, rung_seconds={}),
             )
 
             self.assertEqual(findings, [])
@@ -827,19 +808,17 @@ class EscalationPredicateTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             store = OperatorInboxStore(Path(tmp))
             entry = create_operator_inbox_entry(
+                InboxMessage(ask="ask", response="resp", message_kind="escalation"),
                 entry_id="e1",
                 now=(NOW - timedelta(minutes=10)).isoformat(),
-                lifecycle_id=None,
-                agent_id="worker-1",
-                ask="ask",
-                response="resp",
-                created_by="system",
-                created_via="cli",
-                message_kind="escalation",
+                routing=InboxRouting(address=InboxAddress(lifecycle_id=None, agent_id="worker-1")),
+                poster=InboxPoster(created_by="system", created_via="cli"),
             )
             store.append(entry)
             findings = evaluate_escalation_findings(
-                store, now=NOW, sla_seconds={"escalation": 60.0}, rung_seconds={}
+                store,
+                now=NOW,
+                schedule=EscalationSchedule(sla_seconds={"escalation": 60.0}, rung_seconds={}),
             )
             self.assertEqual(len(findings), 1)
             self.assertEqual(findings[0].kind, "escalation-due")
@@ -849,19 +828,17 @@ class EscalationPredicateTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             store = OperatorInboxStore(Path(tmp))
             entry = create_operator_inbox_entry(
+                InboxMessage(ask="ask", response="resp", message_kind="escalation"),
                 entry_id="e1",
                 now=NOW.isoformat(),
-                lifecycle_id=None,
-                agent_id="worker-1",
-                ask="ask",
-                response="resp",
-                created_by="system",
-                created_via="cli",
-                message_kind="escalation",
+                routing=InboxRouting(address=InboxAddress(lifecycle_id=None, agent_id="worker-1")),
+                poster=InboxPoster(created_by="system", created_via="cli"),
             )
             store.append(entry)
             findings = evaluate_escalation_findings(
-                store, now=NOW, sla_seconds={"escalation": 3600.0}, rung_seconds={}
+                store,
+                now=NOW,
+                schedule=EscalationSchedule(sla_seconds={"escalation": 3600.0}, rung_seconds={}),
             )
             self.assertEqual(findings, [])
 
@@ -895,18 +872,20 @@ class EscalationPredicateTests(unittest.TestCase):
             )
             store.append(
                 create_operator_inbox_entry(
+                    InboxMessage(
+                        ask="Supervisor observed seat-liveness: turn-state-stale",
+                        response="worker-1 inactive",
+                        message_kind="escalation",
+                        subject=InboxSubject(leaf_key=leaf_key, agent_id="worker-1"),
+                    ),
                     entry_id="e1",
                     now=(NOW - timedelta(minutes=10)).isoformat(),
-                    lifecycle_id=None,
-                    agent_id="manager-current",
-                    ask="Supervisor observed seat-liveness: turn-state-stale",
-                    response="worker-1 inactive",
-                    created_by="supervisor",
-                    created_via="cli",
-                    message_kind="escalation",
-                    recipient_role="manager",
-                    leaf_key=leaf_key,
-                    subject_agent_id="worker-1",
+                    routing=InboxRouting(
+                        address=InboxAddress(
+                            lifecycle_id=None, agent_id="manager-current", recipient_role="manager"
+                        )
+                    ),
+                    poster=InboxPoster(created_by="supervisor", created_via="cli"),
                 ).model_copy(
                     update={
                         "rung": 1,
@@ -919,9 +898,10 @@ class EscalationPredicateTests(unittest.TestCase):
                 evaluate_escalation_findings(
                     store,
                     now=NOW,
-                    sla_seconds={"escalation": 60.0},
-                    rung_seconds={1: 60.0},
                     catalog=catalog,
+                    schedule=EscalationSchedule(
+                        sla_seconds={"escalation": 60.0}, rung_seconds={1: 60.0}
+                    ),
                 ),
                 [],
             )
@@ -1002,16 +982,15 @@ class LadderWalkIntegrationTests(unittest.TestCase):
             replace(_entry("worker-1"), spawn_role="worker", spawned_by_session="manager-1")
         )
         entry = create_operator_inbox_entry(
+            InboxMessage(ask="brief", response="work", message_kind="dispatch-brief"),
             entry_id="dispatch-1",
             now=(NOW - timedelta(minutes=10)).isoformat(),
-            lifecycle_id=None,
-            agent_id="worker-1",
-            ask="brief",
-            response="work",
-            created_by="manager-1",
-            created_via="cli",
-            message_kind="dispatch-brief",
-            recipient_role="worker",
+            routing=InboxRouting(
+                address=InboxAddress(
+                    lifecycle_id=None, agent_id="worker-1", recipient_role="worker"
+                )
+            ),
+            poster=InboxPoster(created_by="manager-1", created_via="cli"),
         ).model_copy(
             update={
                 "deliveryState": "delivered",
@@ -1026,9 +1005,10 @@ class LadderWalkIntegrationTests(unittest.TestCase):
             evaluate_escalation_findings(
                 self.inbox_store,
                 now=NOW,
-                sla_seconds={"dispatch-brief": 60.0},
-                rung_seconds={1: 60.0},
                 catalog=self.catalog,
+                schedule=EscalationSchedule(
+                    sla_seconds={"dispatch-brief": 60.0}, rung_seconds={1: 60.0}
+                ),
             ),
             [],
         )
@@ -1056,16 +1036,15 @@ class LadderWalkIntegrationTests(unittest.TestCase):
             replace(_entry("worker-1"), spawn_role="worker", spawned_by_session="manager-1")
         )
         entry = create_operator_inbox_entry(
+            InboxMessage(ask="ask", response="resp", message_kind="escalation"),
             entry_id="e1",
             now=(NOW - timedelta(minutes=5)).isoformat(),
-            lifecycle_id=None,
-            agent_id="worker-1",
-            ask="ask",
-            response="resp",
-            created_by="system",
-            created_via="cli",
-            message_kind="escalation",
-            recipient_role="worker",
+            routing=InboxRouting(
+                address=InboxAddress(
+                    lifecycle_id=None, agent_id="worker-1", recipient_role="worker"
+                )
+            ),
+            poster=InboxPoster(created_by="system", created_via="cli"),
         )
         self.inbox_store.append(entry)
 
@@ -1113,16 +1092,15 @@ class LadderWalkIntegrationTests(unittest.TestCase):
         )
         self.inbox_store.append(
             create_operator_inbox_entry(
+                InboxMessage(ask="ask", response="resp", message_kind="escalation"),
                 entry_id="e1",
                 now=(NOW - timedelta(minutes=5)).isoformat(),
-                lifecycle_id=None,
-                agent_id="worker-1",
-                ask="ask",
-                response="resp",
-                created_by="system",
-                created_via="cli",
-                message_kind="escalation",
-                recipient_role="worker",
+                routing=InboxRouting(
+                    address=InboxAddress(
+                        lifecycle_id=None, agent_id="worker-1", recipient_role="worker"
+                    )
+                ),
+                poster=InboxPoster(created_by="system", created_via="cli"),
             )
         )
         duplicate = SupervisorFinding(
@@ -1153,16 +1131,15 @@ class LadderWalkIntegrationTests(unittest.TestCase):
             replace(_entry("worker-1"), spawn_role="worker", spawned_by_session="manager-1")
         )
         entry = create_operator_inbox_entry(
+            InboxMessage(ask="ask", response="resp", message_kind="escalation"),
             entry_id="e1",
             now=(NOW - timedelta(minutes=5)).isoformat(),
-            lifecycle_id=None,
-            agent_id="worker-1",
-            ask="ask",
-            response="resp",
-            created_by="system",
-            created_via="cli",
-            message_kind="escalation",
-            recipient_role="worker",
+            routing=InboxRouting(
+                address=InboxAddress(
+                    lifecycle_id=None, agent_id="worker-1", recipient_role="worker"
+                )
+            ),
+            poster=InboxPoster(created_by="system", created_via="cli"),
         ).model_copy(update={"rung": 1, "escalatedAt": (NOW - timedelta(minutes=5)).isoformat()})
         self.inbox_store.append(entry)
 
@@ -1196,16 +1173,15 @@ class LadderWalkIntegrationTests(unittest.TestCase):
             replace(_entry("worker-2"), spawn_role="worker", spawned_by_session="manager-1")
         )
         entry = create_operator_inbox_entry(
+            InboxMessage(ask="ask", response="resp", message_kind="escalation"),
             entry_id="e1",
             now=(NOW - timedelta(minutes=5)).isoformat(),
-            lifecycle_id=None,
-            agent_id="manager-1",
-            ask="ask",
-            response="resp",
-            created_by="system",
-            created_via="cli",
-            message_kind="escalation",
-            recipient_role="manager",
+            routing=InboxRouting(
+                address=InboxAddress(
+                    lifecycle_id=None, agent_id="manager-1", recipient_role="manager"
+                )
+            ),
+            poster=InboxPoster(created_by="system", created_via="cli"),
         ).model_copy(update={"rung": 1, "escalatedAt": (NOW - timedelta(minutes=5)).isoformat()})
         self.inbox_store.append(entry)
 
@@ -1245,16 +1221,15 @@ class LadderWalkIntegrationTests(unittest.TestCase):
         self.catalog.upsert(replace(_entry("architect-1"), spawn_role="architect"))
         self.catalog.upsert(replace(_entry("orchestrator-1"), spawn_role="orchestrator"))
         entry = create_operator_inbox_entry(
+            InboxMessage(ask="master completed", response="resp", message_kind="escalation"),
             entry_id="e1",
             now=(NOW - timedelta(minutes=30)).isoformat(),
-            lifecycle_id=None,
-            agent_id="orchestrator-1",
-            ask="master completed",
-            response="resp",
-            created_by="system",
-            created_via="cli",
-            message_kind="escalation",
-            recipient_role="orchestrator",
+            routing=InboxRouting(
+                address=InboxAddress(
+                    lifecycle_id=None, agent_id="orchestrator-1", recipient_role="orchestrator"
+                )
+            ),
+            poster=InboxPoster(created_by="system", created_via="cli"),
         ).model_copy(update={"rung": 2, "escalatedAt": (NOW - timedelta(minutes=5)).isoformat()})
         self.inbox_store.append(entry)
 
@@ -1276,16 +1251,19 @@ class LadderWalkIntegrationTests(unittest.TestCase):
         for index in range(seeded):
             self.inbox_store.append(
                 create_operator_inbox_entry(
+                    InboxMessage(
+                        ask=f"turn report {index}", response="resp", message_kind="turn-report"
+                    ),
                     entry_id=f"root-{index}",
                     now=NOW.isoformat(),
-                    lifecycle_id=None,
-                    agent_id=f"dead-seat-{index}",
-                    ask=f"turn report {index}",
-                    response="resp",
-                    created_by="system",
-                    created_via="cli",
-                    message_kind="turn-report",
-                    recipient_role="manager",
+                    routing=InboxRouting(
+                        address=InboxAddress(
+                            lifecycle_id=None,
+                            agent_id=f"dead-seat-{index}",
+                            recipient_role="manager",
+                        )
+                    ),
+                    poster=InboxPoster(created_by="system", created_via="cli"),
                 )
             )
 
@@ -1401,11 +1379,8 @@ class Cs6SweepScalingTests(unittest.TestCase):
             self.catalog.upsert(
                 replace(
                     _entry(
-                        f"worker-{index}",
-                        leaf_key=f"repo/260707_master/leaf-{index}",
-                        turn_state="stale",
-                        turn_state_changed_at=(NOW - timedelta(minutes=5)).isoformat(),
-                    ),
+                        f"worker-{index}", leaf_key=f"repo/260707_master/leaf-{index}"
+                    ).with_turn_state("stale", changed_at=(NOW - timedelta(minutes=5)).isoformat()),
                     spawn_role="worker",
                     spawned_by_session="manager-1",
                 )
@@ -1447,13 +1422,16 @@ class Cs6SweepScalingTests(unittest.TestCase):
             for index in range(overdue_count):
                 write_expectation_row(
                     self.expectation_store,
+                    Expectation(
+                        kind="briefed-by",
+                        source_id=f"seat-{index}",
+                        subject=ExpectationSubject(
+                            agent_id="worker-1", leaf_key="repo/260707_master/leaf-1"
+                        ),
+                    ),
                     row_id=f"exp-{index}",
                     now=NOW - timedelta(minutes=10),
-                    kind="briefed-by",
                     sla_seconds=60.0,
-                    source_id=f"seat-{index}",
-                    subject_agent_id="worker-1",
-                    leaf_key="repo/260707_master/leaf-1",
                 )
             counter = self._wrap_reads(self.expectation_store)
             result = run_supervisor_sweep(self._ctx(), now=NOW)
@@ -1477,15 +1455,13 @@ class Cs6SweepScalingTests(unittest.TestCase):
                 for index in range(pending_count):
                     self.inbox_store.append(
                         create_operator_inbox_entry(
+                            InboxMessage(ask="ask", response="resp", message_kind="escalation"),
                             entry_id=f"esc-{index}",
                             now=(NOW - timedelta(minutes=10)).isoformat(),
-                            lifecycle_id=None,
-                            agent_id=f"worker-{index}",
-                            ask="ask",
-                            response="resp",
-                            created_by="system",
-                            created_via="cli",
-                            message_kind="escalation",
+                            routing=InboxRouting(
+                                address=InboxAddress(lifecycle_id=None, agent_id=f"worker-{index}")
+                            ),
+                            poster=InboxPoster(created_by="system", created_via="cli"),
                         )
                     )
                 result = run_supervisor_sweep(

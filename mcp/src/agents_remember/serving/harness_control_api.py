@@ -20,13 +20,7 @@ from agents_remember.errors import (
     HarnessRequestConflictError,
 )
 from agents_remember.serving.conversation import register_conversation_routes
-from agents_remember.serving.conversation.authorization import (
-    LocalOperatorAuthorizationResolver,
-)
-from agents_remember.serving.conversation.runtime import (
-    ConversationRuntime,
-    ConversationScope,
-)
+from agents_remember.serving.conversation.runtime import ConversationRuntime
 from agents_remember.serving.harness_capabilities import (
     capability_snapshot_json,
     set_result_json,
@@ -37,6 +31,7 @@ from agents_remember.serving.harness_capability_catalog import (
 )
 from agents_remember.serving.harness_control_adapter import BUILTIN_PROTOCOL_HARNESSES
 from agents_remember.serving.harness_control_client import (
+    ControlSubmission,
     read_control_capabilities,
     read_submission_authority,
     read_submission_status,
@@ -57,15 +52,20 @@ from agents_remember.serving.harness_control_models import (
 )
 from agents_remember.serving.harness_launch import ResolvedLaunch, resolve_settings_launch
 from agents_remember.serving.harnesses import Harness
-from agents_remember.serving.terminal_catalog import TerminalCatalog, TerminalCatalogEntry
+from agents_remember.serving.terminal_catalog import TerminalCatalogEntry
 from agents_remember.serving.terminal_liveness import (
-    TerminalCatalogLivenessConfig,
-    TerminalLivenessHost,
+    LivenessProbe,
     observe_terminal_liveness,
 )
 
 HarnessRegistry = Callable[[], Sequence[Harness]]
 Clock = Callable[[], datetime]
+ControlEntryResolver = Callable[[str], "TerminalCatalogEntry | JSONResponse"]
+"""Resolve one seat to its live catalog row, or to the response that refuses the request."""
+ControlCall = Callable[["TerminalCatalogEntry"], JSONResponse]
+"""The one bridge call a control route makes, once its seat is proven live."""
+ControlFailureResponder = Callable[[HarnessControlError], JSONResponse]
+"""Turn a control failure into the response its route owes the caller."""
 
 
 class HarnessSetModelRequest(BaseModel):
@@ -163,42 +163,52 @@ def resolve_terminal_open_selection(
     )
 
 
-def register_harness_control_routes(
-    app: FastAPI,
-    *,
-    workspace_root: Path,
-    coordination_root: Path,
-    harness_registry: HarnessRegistry,
-    catalog: TerminalCatalog,
-    host: TerminalLivenessHost,
-    liveness_clock: Clock,
-    liveness_config: TerminalCatalogLivenessConfig,
-    capability_catalog: HarnessCapabilityCatalog | None = None,
-) -> None:
-    """Register request/response control routes; async output remains on existing streams."""
+def register_harness_control_routes(app: FastAPI, runtime: ConversationRuntime) -> None:
+    """Register request/response control routes; async output remains on existing streams.
 
-    pre_session = capability_catalog or HarnessCapabilityCatalog(workspace_root)
+    ``runtime`` is the app-scoped authority bundle these routes and the conversation routes share:
+    they must observe the SAME catalog, host, clock and hysteresis or the two surfaces can disagree
+    about whether a seat is live, so it arrives as one frozen value rather than seven parameters.
+    """
+
+    pre_session = runtime.capability_catalog
     # One-time composition binding: the immutable app-scoped conversation
     # runtime is installed exactly once, here, while every existing authority is
     # already in hand. Downstream call sites consume it through the request dependencies
     # and never edit this registration again.
-    conversation_runtime = ConversationRuntime(
-        scope=ConversationScope(
-            workspace_root=workspace_root,
-            coordination_root=coordination_root,
-        ),
-        catalog=catalog,
-        host=host,
-        harness_registry=harness_registry,
-        liveness_clock=liveness_clock,
-        liveness_config=liveness_config,
-        capability_catalog=pre_session,
-        authorization=LocalOperatorAuthorizationResolver.for_workspace(workspace_root),
-    )
-    register_conversation_routes(app, conversation_runtime)
+    register_conversation_routes(app, runtime)
     # One memo per app registration: the control routes below share it, and a fresh app (tests,
     # a restarted daemon) starts with an empty one.
     liveness_memo = _ControlLivenessMemo()
+
+    def control_entry(session: str) -> TerminalCatalogEntry | JSONResponse:
+        """The live, bridge-backed catalog row for one seat, or the response that refuses it."""
+
+        return _running_control_entry(
+            session,
+            runtime,
+            checked_at=runtime.liveness_clock(),
+            liveness_memo=liveness_memo,
+        )
+
+    _register_capability_routes(
+        app,
+        pre_session=pre_session,
+        harness_registry=runtime.harness_registry,
+        control_entry=control_entry,
+    )
+    _register_submission_routes(app, control_entry=control_entry)
+    _register_interaction_routes(app, control_entry=control_entry)
+
+
+def _register_capability_routes(
+    app: FastAPI,
+    *,
+    pre_session: HarnessCapabilityCatalog,
+    harness_registry: HarnessRegistry,
+    control_entry: ControlEntryResolver,
+) -> None:
+    """What a harness can do and how it is currently set: advertise, read, and live set."""
 
     @app.get("/api/harnesses/{harness}/capabilities")
     async def api_harness_capabilities(harness: str, refresh: bool = False) -> JSONResponse:
@@ -215,192 +225,122 @@ def register_harness_control_routes(
             )
         except HarnessControlError as exc:
             return _control_unavailable(exc)
-        return JSONResponse(content=result.to_json(), status_code=200)
+        return _ok(result.to_json())
 
     @app.get("/api/terminal/{session}/capabilities")
     def api_terminal_capabilities(session: str) -> JSONResponse:
-        entry_or_error = _running_control_entry(
+        return _control_route(
             session,
-            catalog=catalog,
-            host=host,
-            checked_at=liveness_clock(),
-            liveness_config=liveness_config,
-            liveness_memo=liveness_memo,
+            control_entry,
+            lambda entry: _ok(capability_snapshot_json(read_control_capabilities(entry))),
         )
-        if isinstance(entry_or_error, JSONResponse):
-            return entry_or_error
-        try:
-            snapshot = read_control_capabilities(entry_or_error)
-        except HarnessControlError as exc:
-            return _control_unavailable(exc)
-        return JSONResponse(content=capability_snapshot_json(snapshot), status_code=200)
 
     @app.post("/api/terminal/{session}/set-model")
     def api_terminal_set_model(session: str, request: HarnessSetModelRequest) -> JSONResponse:
-        entry_or_error = _running_control_entry(
+        return _control_route(
             session,
-            catalog=catalog,
-            host=host,
-            checked_at=liveness_clock(),
-            liveness_config=liveness_config,
-            liveness_memo=liveness_memo,
+            control_entry,
+            lambda entry: _ok(set_result_json(set_control_model(entry, request.model))),
         )
-        if isinstance(entry_or_error, JSONResponse):
-            return entry_or_error
-        try:
-            result = set_control_model(entry_or_error, request.model)
-        except HarnessControlError as exc:
-            return _control_unavailable(exc)
-        return JSONResponse(content=set_result_json(result), status_code=200)
 
     @app.post("/api/terminal/{session}/set-effort")
     def api_terminal_set_effort(session: str, request: HarnessSetEffortRequest) -> JSONResponse:
-        entry_or_error = _running_control_entry(
+        return _control_route(
             session,
-            catalog=catalog,
-            host=host,
-            checked_at=liveness_clock(),
-            liveness_config=liveness_config,
-            liveness_memo=liveness_memo,
+            control_entry,
+            lambda entry: _ok(set_result_json(set_control_effort(entry, request.effort))),
         )
-        if isinstance(entry_or_error, JSONResponse):
-            return entry_or_error
-        try:
-            result = set_control_effort(entry_or_error, request.effort)
-        except HarnessControlError as exc:
-            return _control_unavailable(exc)
-        return JSONResponse(content=set_result_json(result), status_code=200)
+
+
+def _register_submission_routes(app: FastAPI, *, control_entry: ControlEntryResolver) -> None:
+    """The submission authority's public surface: its epoch, its ledger, and writes against it."""
 
     @app.get("/api/terminal/{session}/submission-authority")
     def api_submission_authority(session: str) -> JSONResponse:
-        entry_or_error = _running_control_entry(
+        return _control_route(
             session,
-            catalog=catalog,
-            host=host,
-            checked_at=liveness_clock(),
-            liveness_config=liveness_config,
-            liveness_memo=liveness_memo,
+            control_entry,
+            lambda entry: _ok(submission_authority_json(read_submission_authority(entry))),
         )
-        if isinstance(entry_or_error, JSONResponse):
-            return entry_or_error
-        try:
-            descriptor = read_submission_authority(entry_or_error)
-        except HarnessControlError as exc:
-            return _control_unavailable(exc)
-        return JSONResponse(content=submission_authority_json(descriptor), status_code=200)
 
     @app.post("/api/terminal/{session}/submission-status")
     def api_submission_status(
         session: str,
         request: HarnessSubmissionStatusRequest,
     ) -> JSONResponse:
-        entry_or_error = _running_control_entry(
+        return _control_route(
             session,
-            catalog=catalog,
-            host=host,
-            checked_at=liveness_clock(),
-            liveness_config=liveness_config,
-            liveness_memo=liveness_memo,
+            control_entry,
+            lambda entry: _ok(
+                submission_status_batch_json(
+                    read_submission_status(
+                        entry,
+                        expected_bridge_epoch=request.expected_bridge_epoch,
+                        request_ids=tuple(request.request_ids),
+                    )
+                )
+            ),
         )
-        if isinstance(entry_or_error, JSONResponse):
-            return entry_or_error
-        try:
-            status = read_submission_status(
-                entry_or_error,
-                expected_bridge_epoch=request.expected_bridge_epoch,
-                request_ids=tuple(request.request_ids),
-            )
-        except HarnessBridgeEpochMismatchError as exc:
-            return _bridge_epoch_mismatch(exc)
-        except HarnessControlError as exc:
-            return _control_unavailable(exc)
-        return JSONResponse(content=submission_status_batch_json(status), status_code=200)
 
     @app.post("/api/terminal/{session}/withdraw")
     def api_withdraw_submission(
         session: str,
         request: HarnessWithdrawRequest,
     ) -> JSONResponse:
-        entry_or_error = _running_control_entry(
+        return _control_route(
             session,
-            catalog=catalog,
-            host=host,
-            checked_at=liveness_clock(),
-            liveness_config=liveness_config,
-            liveness_memo=liveness_memo,
+            control_entry,
+            lambda entry: _ok(
+                withdrawal_result_json(
+                    withdraw_control_submission(
+                        entry,
+                        expected_bridge_epoch=request.expected_bridge_epoch,
+                        request_id=request.request_id,
+                    )
+                )
+            ),
         )
-        if isinstance(entry_or_error, JSONResponse):
-            return entry_or_error
-        try:
-            result = withdraw_control_submission(
-                entry_or_error,
-                expected_bridge_epoch=request.expected_bridge_epoch,
-                request_id=request.request_id,
-            )
-        except HarnessBridgeEpochMismatchError as exc:
-            return _bridge_epoch_mismatch(exc)
-        except HarnessControlError as exc:
-            return _control_unavailable(exc)
-        return JSONResponse(content=withdrawal_result_json(result), status_code=200)
 
     @app.post("/api/terminal/{session}/submit")
     def api_terminal_submit(session: str, request: HarnessSubmitRequest) -> JSONResponse:
-        entry_or_error = _running_control_entry(
+        return _control_route(
             session,
-            catalog=catalog,
-            host=host,
-            checked_at=liveness_clock(),
-            liveness_config=liveness_config,
-            liveness_memo=liveness_memo,
+            control_entry,
+            lambda entry: _ok(
+                public_receipt_json(
+                    submit_control_prompt(
+                        entry,
+                        request.text,
+                        ControlSubmission(
+                            source="cockpit",
+                            request_id=request.request_id,
+                            expected_bridge_epoch=request.expected_bridge_epoch,
+                        ),
+                    )
+                )
+            ),
+            on_failure=_submit_failure_response,
         )
-        if isinstance(entry_or_error, JSONResponse):
-            return entry_or_error
-        try:
-            receipt = submit_control_prompt(
-                entry_or_error,
-                request.text,
-                source="cockpit",
-                request_id=request.request_id,
-                expected_bridge_epoch=request.expected_bridge_epoch,
-            )
-        except HarnessBridgeEpochMismatchError as exc:
-            return _bridge_epoch_mismatch(exc)
-        except HarnessRequestConflictError as exc:
-            return JSONResponse(
-                content={"status": "request-id-conflict", "detail": str(exc)},
-                status_code=409,
-            )
-        except HarnessControlClientError as exc:
-            if not exc.may_have_sent:
-                return _pre_dispatch_submit_failure(exc)
-            return _control_unavailable(exc)
-        except HarnessControlError as exc:
-            return _control_unavailable(exc)
-        return JSONResponse(content=public_receipt_json(receipt), status_code=200)
 
     @app.post("/api/terminal/{session}/reconcile")
     def api_terminal_reconcile(session: str, request: HarnessReconcileRequest) -> JSONResponse:
-        entry_or_error = _running_control_entry(
+        return _control_route(
             session,
-            catalog=catalog,
-            host=host,
-            checked_at=liveness_clock(),
-            liveness_config=liveness_config,
-            liveness_memo=liveness_memo,
+            control_entry,
+            lambda entry: _ok(
+                public_reconciliation_json(
+                    reconcile_control_prompt(
+                        entry,
+                        request.request_id,
+                        expected_bridge_epoch=request.expected_bridge_epoch,
+                    )
+                )
+            ),
         )
-        if isinstance(entry_or_error, JSONResponse):
-            return entry_or_error
-        try:
-            result = reconcile_control_prompt(
-                entry_or_error,
-                request.request_id,
-                expected_bridge_epoch=request.expected_bridge_epoch,
-            )
-        except HarnessBridgeEpochMismatchError as exc:
-            return _bridge_epoch_mismatch(exc)
-        except HarnessControlError as exc:
-            return _control_unavailable(exc)
-        return JSONResponse(content=public_reconciliation_json(result), status_code=200)
+
+
+def _register_interaction_routes(app: FastAPI, *, control_entry: ControlEntryResolver) -> None:
+    """Answering a vendor's own question, with no lifecycle required anywhere."""
 
     @app.post("/api/terminal/{session}/interaction-response")
     def api_terminal_interaction_response(
@@ -414,57 +354,114 @@ def register_harness_control_routes(
         enforce; the exact interaction id remains the respond authority's own guard.
         """
 
-        entry_or_error = _running_control_entry(
+        return _control_route(
             session,
-            catalog=catalog,
-            host=host,
-            checked_at=liveness_clock(),
-            liveness_config=liveness_config,
-            liveness_memo=liveness_memo,
+            control_entry,
+            lambda entry: _answer_interaction(entry, request),
+            on_failure=_interaction_failure_response,
         )
-        if isinstance(entry_or_error, JSONResponse):
-            return entry_or_error
-        try:
-            authority = read_submission_authority(entry_or_error)
-        except HarnessControlError as exc:
-            return _control_unavailable(exc)
-        if authority.bridge_epoch != request.expected_bridge_epoch:
-            return _bridge_epoch_mismatch(
-                HarnessBridgeEpochMismatchError(
-                    request.expected_bridge_epoch, authority.bridge_epoch
-                )
-            )
-        response_text = (
-            request.response
-            if request.response is not None
-            else json.dumps(request.answers, ensure_ascii=False)
-        )
-        try:
-            snapshot = respond_control_interaction(
-                entry_or_error,
-                interaction_id=request.interaction_id,
-                response=response_text,
-            )
-        except HarnessInteractionNotPendingError as exc:
-            return JSONResponse(
-                content={"status": "not-pending", "detail": str(exc)},
-                status_code=409,
-            )
-        except HarnessControlError as exc:
-            return _control_unavailable(exc)
+
+
+def _ok(content: object) -> JSONResponse:
+    """The 200 every successful control route returns, so each route names only its payload."""
+
+    return JSONResponse(content=content, status_code=200)
+
+
+def _control_route(
+    session: str,
+    resolve: ControlEntryResolver,
+    call: ControlCall,
+    *,
+    on_failure: ControlFailureResponder | None = None,
+) -> JSONResponse:
+    """Run one control route: resolve the exact seat, call the bridge, answer for any failure.
+
+    Every control route shares this shape, and hoisting it is what lets each route body be only
+    the call it actually makes. A seat that cannot be resolved answers with the resolver's own
+    refusal and the bridge is never touched.
+    """
+
+    entry_or_error = resolve(session)
+    if isinstance(entry_or_error, JSONResponse):
+        return entry_or_error
+    try:
+        return call(entry_or_error)
+    except HarnessControlError as exc:
+        return (on_failure or _control_failure_response)(exc)
+
+
+def _control_failure_response(exc: HarnessControlError) -> JSONResponse:
+    """The default control-failure answer: a stale epoch is the caller's fault, anything else ours."""
+
+    if isinstance(exc, HarnessBridgeEpochMismatchError):
+        return _bridge_epoch_mismatch(exc)
+    return _control_unavailable(exc)
+
+
+def _submit_failure_response(exc: HarnessControlError) -> JSONResponse:
+    """Answer a failed cockpit submit by what the failure proves about delivery.
+
+    A reused request id is the caller's own contradiction. A transport failure that certifies
+    nothing was written is a pre-dispatch failure the cockpit may safely retry; one that may have
+    written is reported as control-unavailable, because a retry could otherwise submit twice.
+    """
+
+    if isinstance(exc, HarnessRequestConflictError):
         return JSONResponse(
-            content={
-                "status": "accepted",
-                "activity": snapshot.activity,
-                "acceptance": snapshot.acceptance,
-                "pendingInteraction": pending_interaction_json(snapshot.pending_interaction),
-                # Multiplexed sub-agent pendings: additive.
-                "pendingInteractions": [
-                    pending_interaction_json(pending) for pending in snapshot.pending_interactions
-                ],
-            },
-            status_code=200,
+            content={"status": "request-id-conflict", "detail": str(exc)},
+            status_code=409,
         )
+    if isinstance(exc, HarnessControlClientError) and not exc.may_have_sent:
+        return _pre_dispatch_submit_failure(exc)
+    return _control_failure_response(exc)
+
+
+def _interaction_failure_response(exc: HarnessControlError) -> JSONResponse:
+    """Interaction answering adds one refusal no other control route can produce."""
+
+    if isinstance(exc, HarnessInteractionNotPendingError):
+        return JSONResponse(
+            content={"status": "not-pending", "detail": str(exc)},
+            status_code=409,
+        )
+    return _control_failure_response(exc)
+
+
+def _answer_interaction(
+    entry: TerminalCatalogEntry, request: HarnessInteractionResponseRequest
+) -> JSONResponse:
+    """Answer one pending vendor interaction on an exact seat and report the resulting snapshot.
+
+    The epoch is checked against the authority descriptor before the answer crosses, so a caller
+    holding a replaced runner generation cannot answer an interaction it never saw.
+    """
+
+    authority = read_submission_authority(entry)
+    if authority.bridge_epoch != request.expected_bridge_epoch:
+        raise HarnessBridgeEpochMismatchError(request.expected_bridge_epoch, authority.bridge_epoch)
+    response_text = (
+        request.response
+        if request.response is not None
+        else json.dumps(request.answers, ensure_ascii=False)
+    )
+    snapshot = respond_control_interaction(
+        entry,
+        interaction_id=request.interaction_id,
+        response=response_text,
+    )
+    return _ok(
+        {
+            "status": "accepted",
+            "activity": snapshot.activity,
+            "acceptance": snapshot.acceptance,
+            "pendingInteraction": pending_interaction_json(snapshot.pending_interaction),
+            # Multiplexed sub-agent pendings: additive.
+            "pendingInteractions": [
+                pending_interaction_json(pending) for pending in snapshot.pending_interactions
+            ],
+        }
+    )
 
 
 CONTROL_LIVENESS_MEMO_TTL_SECONDS = 2.5
@@ -541,13 +538,12 @@ class _ControlLivenessMemo:
 
 def _running_control_entry(
     session: str,
+    runtime: ConversationRuntime,
     *,
-    catalog: TerminalCatalog,
-    host: TerminalLivenessHost,
     checked_at: datetime,
-    liveness_config: TerminalCatalogLivenessConfig,
     liveness_memo: _ControlLivenessMemo,
 ) -> TerminalCatalogEntry | JSONResponse:
+    catalog = runtime.catalog
     entry = catalog.get(session)
     if entry is None or entry.status != "running":
         return JSONResponse(content={"status": "unknown-session"}, status_code=404)
@@ -556,10 +552,10 @@ def _running_control_entry(
         return memoized
     observation = observe_terminal_liveness(
         catalog,
-        host,
+        runtime.host,
         entry,
         checked_at=checked_at,
-        config=liveness_config,
+        probe=LivenessProbe(hysteresis=runtime.liveness_config),
     )
     if not observation.alive or observation.entry.status != "running":
         return JSONResponse(content={"status": "unknown-session"}, status_code=404)

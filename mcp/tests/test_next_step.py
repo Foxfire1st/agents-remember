@@ -30,11 +30,16 @@ from agents_remember.mcp.tools.next_step import (
 )
 from agents_remember.observer.ambient import (
     AmbientLifecycle,
+    AmbientTiming,
     install_ambient,
     reset_ambient,
 )
 from agents_remember.observer.lifecycle_state import LifecycleState
-from agents_remember.observer.reducer import build_attention_queue, project_lifecycle
+from agents_remember.observer.reducer import (
+    AnalyticalInputs,
+    build_attention_queue,
+    project_lifecycle,
+)
 from agents_remember.observer.store import EventStore
 from agents_remember.worktrees.worktree_contract import WorktreeContract, write_contract
 
@@ -210,7 +215,9 @@ class EdgeAndChokePointTests(unittest.TestCase):
     def setUp(self) -> None:
         self._dir = tempfile.TemporaryDirectory()
         self.root = Path(self._dir.name)
-        self.amb = AmbientLifecycle(EventStore(self.root), heartbeat_seconds=3600)
+        self.amb = AmbientLifecycle(
+            EventStore(self.root), timing=AmbientTiming(heartbeat_seconds=3600)
+        )
         install_ambient(self.amb)
         self.addCleanup(self._dir.cleanup)
         self.addCleanup(reset_ambient)
@@ -305,7 +312,12 @@ class EdgeAndChokePointTests(unittest.TestCase):
         self.assertIn("resumes automatically", payload["nextStep"]["summary"])
         parked = project_lifecycle(store.read(lc.id), now=datetime.now(UTC))
         self.assertEqual(
-            [i.kind for i in build_attention_queue([parked], [], [], [])],
+            [
+                i.kind
+                for i in build_attention_queue(
+                    [parked], [], AnalyticalInputs(drift_snapshots=[], setup_progress=[])
+                )
+            ],
             ["awaiting-developer"],
         )
 
@@ -315,7 +327,12 @@ class EdgeAndChokePointTests(unittest.TestCase):
         self.assertEqual(self.amb.current.state, "running")
         # ...and the awaiting-developer attention item disappears (state-derived).
         resumed = project_lifecycle(store.read(lc.id), now=datetime.now(UTC))
-        self.assertEqual(build_attention_queue([resumed], [], [], []), [])
+        self.assertEqual(
+            build_attention_queue(
+                [resumed], [], AnalyticalInputs(drift_snapshots=[], setup_progress=[])
+            ),
+            [],
+        )
 
 
 if __name__ == "__main__":

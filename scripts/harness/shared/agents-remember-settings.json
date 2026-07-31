@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "coordinationRoot": "<PATH/TO/YOUR/PROJECTS_FOLDER>/ar-coordination",
+  "workspaceRoot": "<PATH/TO/YOUR/PROJECTS_FOLDER>",
+  "transcriptRoot": "<PATH/TO/YOUR/PROJECTS_FOLDER>/ar-coordination/logs/mcp",
+  "repositories": {
+    "<YOUR_REPOSITORY_FOLDER_NAME>": {}
+  },
+  "providers": {
+    "codegraphcontext-code": {},
+    "grepai-memory": {}
+  },
+  "timeoutCaps": {
+    "toolSeconds": 60,
+    "providerSetupSeconds": 1800
+  }
+}

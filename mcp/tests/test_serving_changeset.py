@@ -21,6 +21,7 @@ sys.path.insert(0, str(MCP_SRC))
 from agents_remember.mcp.config import McpRuntimeConfig, RepositoryScope
 from agents_remember.serving import files, scope
 from agents_remember.serving.changeset import (
+    ChangesetFileRef,
     file_diff,
     leaf_changeset,
     leaf_file_diff,
@@ -31,7 +32,11 @@ from agents_remember.serving.changeset import (
 )
 from agents_remember.serving.scope import FileScope
 from agents_remember.worktrees.modules.git import changed_files_with_counts
-from agents_remember.worktrees.worktree_contract import WorktreeContract, write_contract
+from agents_remember.worktrees.worktree_contract import (
+    RepoBranchPlan,
+    WorktreeContract,
+    write_contract,
+)
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -119,17 +124,29 @@ class ChangedCountsTests(unittest.TestCase):
         self.assertNotIn("old.py", files)
 
 
+def _plan(repo: Path, base: str) -> RepoBranchPlan:
+    """These fixtures' branch plan for one repo: a ``work`` branch forked off ``main`` at ``base``."""
+    return RepoBranchPlan(
+        repo_path=repo, source_branch="main", work_branch="work", base_commit=base
+    )
+
+
 def _write_leaf_contract(
     contract_path: Path,
     *,
     coord: Path,
-    code: Path,
-    code_base: str,
-    memory: Path | None = None,
-    memory_base: str = "",
+    code: RepoBranchPlan,
+    memory: RepoBranchPlan | None = None,
     leaf_id: str = "l1",
 ) -> None:
+    """One leaf contract whose code (and optional memory) side is a ``RepoBranchPlan``.
+
+    That is the production grouping for a contract's ``code:``/``memory:`` sections -- repo,
+    the branch pair and the fork point -- so the fixture states each side once instead of
+    spreading a repo path and its base commit across separate arguments.
+    """
     external = memory is not None
+    memory_repo = memory.repo_path if memory else None
     contract = WorktreeContract(
         task_id="T",
         task_name="t",
@@ -141,17 +158,17 @@ def _write_leaf_contract(
         contract_path=contract_path,
         task_artifact=coord / "tasks" / "R" / "t" / "task.md",
         worktree_group=contract_path.parent,
-        code_repo_path=code,
-        code_source_branch="main",
-        code_work_branch="work",
-        code_base_commit=code_base,
-        code_worktree=code,
-        memory_repo_path=memory,
-        memory_source_branch="main" if external else "",
-        memory_work_branch="work" if external else "",
-        memory_base_commit=memory_base,
-        memory_worktree=memory,
-        ledger_path=(memory / "memory.md") if memory is not None else None,
+        code_repo_path=code.repo_path,
+        code_source_branch=code.source_branch,
+        code_work_branch=code.work_branch,
+        code_base_commit=code.base_commit,
+        code_worktree=code.repo_path,
+        memory_repo_path=memory_repo,
+        memory_source_branch=memory.source_branch if memory else "",
+        memory_work_branch=memory.work_branch if memory else "",
+        memory_base_commit=memory.base_commit if memory else "",
+        memory_worktree=memory_repo,
+        ledger_path=(memory_repo / "memory.md") if memory_repo is not None else None,
         kind="leaf",
         leaf_id=leaf_id,
         parent_task_name="t",
@@ -183,10 +200,8 @@ class TaskChangesetTests(unittest.TestCase):
         _write_leaf_contract(
             self.contract_path,
             coord=self.tmp / "coord",
-            code=self.code,
-            code_base=self.code_base,
-            memory=self.mem,
-            memory_base=self.mem_base,
+            code=_plan(self.code, self.code_base),
+            memory=_plan(self.mem, self.mem_base),
         )
         self.scope = FileScope(
             scope_id="l1",
@@ -323,8 +338,7 @@ class MasterChangesetTests(unittest.TestCase):
         _write_leaf_contract(
             self.coord / "tasks" / "R" / "t" / "enclosures" / "l1" / "series-contract.md",
             coord=self.coord,
-            code=leaf_code,
-            code_base=leaf_base,
+            code=_plan(leaf_code, leaf_base),
             leaf_id="l1",
         )
 
@@ -415,17 +429,19 @@ def _leaf_config(tmp: Path) -> McpRuntimeConfig:
     )
 
 
+_LEAF_MASTER = "t"
+
+
 def _write_leaf(
     config: McpRuntimeConfig,
     leaf_id: str,
     *,
-    code: Path,
-    code_base: str,
+    code: RepoBranchPlan,
     code_worktree: Path,
     code_commit: str = "",
-    parent_task_name: str = "t",
 ) -> Path:
-    """A leaf enclosure contract under tasks/R/<master>/enclosures/<leaf>/ for the leaf views."""
+    """A leaf enclosure contract under tasks/R/t/enclosures/<leaf>/ for the leaf views."""
+    parent_task_name = _LEAF_MASTER
     path = (
         config.coordination_root
         / "tasks"
@@ -448,10 +464,10 @@ def _write_leaf(
             contract_path=path,
             task_artifact=config.coordination_root / "tasks" / "R" / parent_task_name / "task.md",
             worktree_group=path.parent,
-            code_repo_path=code,
-            code_source_branch="main",
-            code_work_branch="work",
-            code_base_commit=code_base,
+            code_repo_path=code.repo_path,
+            code_source_branch=code.source_branch,
+            code_work_branch=code.work_branch,
+            code_base_commit=code.base_commit,
             code_commit=code_commit,
             code_worktree=code_worktree,
             kind="leaf",
@@ -491,8 +507,7 @@ class LeafChangesetTests(unittest.TestCase):
         _write_leaf(
             self.config,
             "260707-HFX2-L15",
-            code=code,
-            code_base=base,
+            code=_plan(code, base),
             code_commit=commit,
             code_worktree=self.tmp / "gone",
         )
@@ -513,7 +528,7 @@ class LeafChangesetTests(unittest.TestCase):
         (code / "f.py").write_text("a\nb\n", encoding="utf-8")
         _commit_all(code, "committed in worktree")
         (code / "f.py").write_text("a\nb\nDIRTY\n", encoding="utf-8")  # dirty — must be excluded
-        _write_leaf(self.config, "l2", code=code, code_base=base, code_worktree=code)
+        _write_leaf(self.config, "l2", code=_plan(code, base), code_worktree=code)
         files = _by_path(leaf_changeset(self.config, "R", "t", "l2", "committed")["code"])
         self.assertEqual(files["f.py"]["insertions"], 1)  # just the committed "b"
 
@@ -527,7 +542,7 @@ class LeafChangesetTests(unittest.TestCase):
         (code / "f.py").write_text("a\nb\nc\n", encoding="utf-8")  # dirty +1 over HEAD
         (code / "dirty_new.py").write_text("n\n", encoding="utf-8")  # untracked
         _write_leaf(
-            self.config, "l1", code=code, code_base=base, code_commit=commit, code_worktree=code
+            self.config, "l1", code=_plan(code, base), code_commit=commit, code_worktree=code
         )
         body = leaf_changeset(self.config, "R", "t", "l1", "working")
         files = _by_path(body["code"])
@@ -540,8 +555,7 @@ class LeafChangesetTests(unittest.TestCase):
         _write_leaf(
             self.config,
             "l3",
-            code=code,
-            code_base=base,
+            code=_plan(code, base),
             code_commit=commit,
             code_worktree=self.tmp / "gone",
         )
@@ -555,7 +569,7 @@ class LeafChangesetTests(unittest.TestCase):
     def test_leaf_is_scoped_by_master(self) -> None:
         code, base, commit = self._committed_repo()
         _write_leaf(
-            self.config, "l4", code=code, code_base=base, code_commit=commit, code_worktree=code
+            self.config, "l4", code=_plan(code, base), code_commit=commit, code_worktree=code
         )
         with self.assertRaises(FileNotFoundError):  # right leaf-id, wrong master
             leaf_changeset(self.config, "R", "other-master", "l4", "committed")
@@ -574,8 +588,7 @@ class LeafChangesetTests(unittest.TestCase):
         _write_leaf_contract(
             stray_path,
             coord=self.config.coordination_root,
-            code=code,
-            code_base=base,
+            code=_plan(code, base),
             leaf_id="stray",
         )
         with self.assertRaises(FileNotFoundError):
@@ -586,12 +599,21 @@ class LeafChangesetTests(unittest.TestCase):
         _write_leaf(
             self.config,
             "l5",
-            code=code,
-            code_base=base,
+            code=_plan(code, base),
             code_commit=commit,
             code_worktree=self.tmp / "gone",
         )
-        body = leaf_file_diff(self.config, "R", "t", "l5", "code", "f.py", "committed")
+        body = leaf_file_diff(
+            self.config,
+            ChangesetFileRef(
+                repo="R",
+                master="t",
+                leaf="l5",
+                kind="code",
+                path="f.py",
+                mode="committed",
+            ),
+        )
         self.assertEqual(body["before"]["content"], "a\n")
         self.assertEqual(body["after"]["content"], "a\nb\n")
         self.assertEqual(body["language"], "python")
@@ -605,9 +627,19 @@ class LeafChangesetTests(unittest.TestCase):
         commit = _commit_all(code, "committed")
         (code / "f.py").write_text("a\nb\nc\n", encoding="utf-8")  # dirty
         _write_leaf(
-            self.config, "l6", code=code, code_base=base, code_commit=commit, code_worktree=code
+            self.config, "l6", code=_plan(code, base), code_commit=commit, code_worktree=code
         )
-        body = leaf_file_diff(self.config, "R", "t", "l6", "code", "f.py", "working")
+        body = leaf_file_diff(
+            self.config,
+            ChangesetFileRef(
+                repo="R",
+                master="t",
+                leaf="l6",
+                kind="code",
+                path="f.py",
+                mode="working",
+            ),
+        )
         self.assertEqual(body["before"]["content"], "a\nb\n")  # at worktree HEAD
         self.assertEqual(body["after"]["content"], "a\nb\nc\n")  # the dirty worktree
 
@@ -626,19 +658,45 @@ class LeafChangesetRouteTests(unittest.TestCase):
         (code / "f.py").write_text("a\nb\n", encoding="utf-8")
         commit = _commit_all(code, "work")
         _write_leaf(
-            self.config, "ok", code=code, code_base=base, code_commit=commit, code_worktree=code
+            self.config, "ok", code=_plan(code, base), code_commit=commit, code_worktree=code
         )
         _write_leaf(
             self.config,
             "gonewt",
-            code=code,
-            code_base=base,
+            code=_plan(code, base),
             code_commit=commit,
             code_worktree=self.tmp / "gone",
+        )
+        # The series root the leaves hang off, so the same route can be asked for the MASTER
+        # change-set (base -> series tip) as well as one leaf's.
+        master_contract = self.config.coordination_root / "tasks" / "R" / "t" / "series-contract.md"
+        write_contract(
+            master_contract,
+            WorktreeContract(
+                task_id="T",
+                task_name="t",
+                repo_name="R",
+                workflow_kind="light-task",
+                memory_mode="disabled",
+                coordination_root=self.config.coordination_root,
+                task_root=master_contract.parent,
+                contract_path=master_contract,
+                task_artifact=master_contract.parent / "task.md",
+                worktree_group=master_contract.parent,
+                code_repo_path=code,
+                code_source_branch="main",
+                code_work_branch="work",
+                code_base_commit=base,
+                code_worktree=code,
+                kind="series",
+            ),
         )
         app = FastAPI()
         register_changeset_routes(app, self.config)
         self.client = TestClient(app)
+
+    def _file_diff(self, **params: str):
+        return self.client.get("/api/changeset/file-diff", params={"repo": "R", **params})
 
     def tearDown(self) -> None:
         self._dir.cleanup()
@@ -685,6 +743,48 @@ class LeafChangesetRouteTests(unittest.TestCase):
         )
         self.assertEqual(r.status_code, 200)
         self.assertEqual(r.json()["after"]["content"], "a\nb\n")
+
+    def test_file_diff_without_a_leaf_answers_the_master_series_diff(self) -> None:
+        # Same route, one selector removed: with no leaf the answer is the SERIES net diff
+        # (master base -> series tip), scoped by the master's own contract rather than a leaf's.
+        r = self._file_diff(master="t", kind="code", path="f.py")
+
+        self.assertEqual(r.status_code, 200)
+        body = r.json()
+        self.assertEqual(body["scope"], "t")
+        self.assertEqual(body["before"]["content"], "a\n")
+        self.assertEqual(body["after"]["content"], "a\nb\n")
+
+    def test_master_file_diff_maps_a_path_breach_to_bad_path(self) -> None:
+        # The series path has no enclosure scope, so it cannot borrow ``run_scoped``'s error
+        # mapping -- it has to answer confinement breaches in the same status idiom itself.
+        r = self._file_diff(master="t", kind="code", path="/etc/passwd")
+
+        self.assertEqual(r.status_code, 400)
+        self.assertEqual(r.json()["status"], "bad-path")
+
+    def test_master_file_diff_for_an_unknown_series_is_not_found(self) -> None:
+        r = self._file_diff(master="nosuch", kind="code", path="f.py")
+
+        self.assertEqual(r.status_code, 404)
+        self.assertEqual(r.json()["status"], "not-found")
+
+    def test_file_diff_without_leaf_or_master_falls_through_to_the_enclosure_scope(self) -> None:
+        # Neither selector given: the request is about a scope, not a change-set view, so it goes
+        # through the scoped runner and reads the enclosure's own base -> worktree diff.
+        r = self._file_diff(scope="ok", kind="code", path="f.py")
+
+        self.assertEqual(r.status_code, 200)
+        body = r.json()
+        self.assertEqual(body["scope"], "ok")
+        self.assertEqual(body["before"]["content"], "a\n")
+        self.assertEqual(body["after"]["content"], "a\nb\n")
+
+    def test_scoped_file_diff_reports_an_unknown_scope_rather_than_guessing(self) -> None:
+        r = self._file_diff(scope="nosuch", kind="code", path="f.py")
+
+        self.assertEqual(r.status_code, 404)
+        self.assertEqual(r.json()["status"], "unknown-scope")
 
 
 class ScopeExtractionTests(unittest.TestCase):

@@ -54,6 +54,7 @@ from agents_remember.serving.harness_capabilities import CapabilitySnapshot, Set
 from agents_remember.serving.harness_capability_catalog import HarnessCapabilityCatalog
 from agents_remember.serving.harness_control_bridge import HarnessControlBridge
 from agents_remember.serving.harness_control_client import (
+    ControlSubmission,
     read_submission_authority,
     submit_control_prompt,
 )
@@ -412,9 +413,9 @@ class ProductionRouteTests(unittest.IsolatedAsyncioTestCase):
             submit_control_prompt,
             self.harness.control_entry,
             f"prompt for {turn}",
-            source="cockpit",
-            request_id=request_id,
-            expected_bridge_epoch=self.epoch,
+            ControlSubmission(
+                source="cockpit", request_id=request_id, expected_bridge_epoch=self.epoch
+            ),
         )
         self.assertIn(receipt.acceptance, {"immediate", "queued"})
         await self._await_operations(expected_operations)

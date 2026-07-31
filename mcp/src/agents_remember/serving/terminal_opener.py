@@ -10,15 +10,21 @@ The opener is transport-agnostic. It returns a small :class:`OpenTerminalResult`
 an HTTP ``JSONResponse`` (200 / 409 / 400) and the MCP tool maps it to a validated tool payload. The
 leaf-uniqueness check stays **server-arbitrated**: a taken leaf returns ``leaf-taken`` (the 409) and the
 caller surfaces it, never overrides it.
+
+One open is described by exactly two values plus the runtime it lands in: a
+:class:`TerminalLaunchRequest` (the process to run -- the launch *identity* a live row is later
+compared against) and a :class:`SpawnProvenance` (what the dispatcher declares about the seat --
+recorded on the durable row, never part of the argv). Everything the opener passes down its internal
+chain is one of those two, so the chain carries concepts rather than re-listing fields at each layer.
 """
 
 from __future__ import annotations
 
 import os
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, NamedTuple
 
 import agents_remember
 from agents_remember.observer.events import now_iso
@@ -41,20 +47,155 @@ from agents_remember.serving.harnesses import (
     knob_argv,
     unknown_harness_detail,
 )
+from agents_remember.serving.hosted_session_runtime import HostedSessionRuntime
 from agents_remember.serving.seat_binding import migrated_seat_role
 from agents_remember.serving.terminal import (
     TerminalHost,
     TerminalSessionBinding,
+    TerminalSessionSpec,
     terminal_session_name,
 )
 from agents_remember.serving.terminal_catalog import (
-    TerminalCatalog,
     TerminalCatalogEntry,
     TerminalSessionKind,
 )
 from agents_remember.serving.terminal_leaf_assignment import leaf_conflict_owner
 
 OpenTerminalStatus = Literal["opened", "leaf-taken", "launch-conflict", "bad-kind"]
+
+
+@dataclass(frozen=True)
+class SpawnKnobs:
+    """The settings-owned free-form escape hatch, recorded VERBATIM and never validated.
+
+    The three arrive together from one ``RoleKnobs`` rung and are recorded together on the durable
+    row, because they are one decision made at three moments of the same launch: ``launch_args`` ride
+    the harness argv, ``session_commands`` are applied by the hosted runner before the brief, and
+    ``prompt_keywords`` are prepended to the brief the caller pastes afterwards. Splitting them across
+    parameter lists is what let them drift out of sync in the first place.
+    """
+
+    launch_args: Sequence[str] | None = None
+    prompt_keywords: Sequence[str] | None = None
+    session_commands: Sequence[str] | None = None
+
+
+@dataclass(frozen=True)
+class ControlRunnerRequest:
+    """The caller-supplied half of the hosted control runner's configuration.
+
+    The rest of :class:`~agents_remember.serving.harness_control_runner.RunnerConfig` is spawn
+    identity the opener derives. This is what the *caller* gets to say about the protocol bridge:
+    which resolved launch selection the adapter must apply, which vendor thread to resume, and where
+    the session's private control socket is placed.
+    """
+
+    resolved_launch: ResolvedLaunch | None = None
+    resume_thread_id: str | None = None
+    endpoint: Path | None = None
+    """An explicit socket path; ``None`` mints one for this session under :attr:`endpoint_root`."""
+    endpoint_root: Path | None = None
+    """The directory per-session sockets are minted in; ``None`` uses the workspace-local default."""
+
+
+@dataclass(frozen=True)
+class TerminalLaunchRequest:
+    """What the server was asked to launch: the process identity of one hosted session.
+
+    The opener resolves this to a :class:`LaunchCommand` (:func:`resolve_terminal_launch`) and later
+    compares it against a live row's recorded provenance (:func:`_launch_identity_conflict`) -- it IS
+    the launch identity of a hosted session, which is why it is one value and not a dozen parameters
+    repeated at every layer. Nothing here describes the *seat*; that is :class:`SpawnProvenance`.
+    """
+
+    kind: str
+    workspace_root: Path
+    shell: str
+    harness: str | None = None
+    which: Which | None = None
+    """How installed-ness is probed; ``None`` means :func:`shutil.which`."""
+    harnesses: Sequence[Harness] | None = None
+    """The EFFECTIVE registry ids resolve against; ``None`` means the builtin defaults."""
+    env: Mapping[str, str] | None = None
+    """Spawn env seeded at creation -- the L2 knob-injection seam, and the carrier of AR_SPAWN_ROLE."""
+    knobs: SpawnKnobs = field(default_factory=SpawnKnobs)
+    control: ControlRunnerRequest = field(default_factory=ControlRunnerRequest)
+    legacy_model: str | None = None
+    legacy_effort: str | None = None
+    """``legacy_model``/``legacy_effort`` are the compatibility seam for settings-defined non-native
+    harnesses, whose declared registry mappings are their only launch port. Native adapters take
+    their selection through :attr:`control` instead."""
+
+    @property
+    def resolved_kind(self) -> TerminalSessionKind:
+        """The durable row's kind: anything that is not an explicit harness is a plain terminal."""
+
+        return "harness" if self.kind == "harness" else "terminal"
+
+    @property
+    def is_controlled_harness(self) -> bool:
+        """Whether this launch runs a harness behind the protocol bridge (never a plain shell)."""
+
+        return self.resolved_kind == "harness" and self.harness is not None
+
+
+@dataclass(frozen=True)
+class SpawnProvenance:
+    """What the dispatcher declares ABOUT the seat it is creating, recorded on the durable row.
+
+    None of it reaches the argv: it is the seat's identity (its label, the lifecycle it correlates
+    to), its claim (the leaf it occupies, the leaf it replaces) and its origin (who dispatched it, at
+    which level, and whether that level was explicit). Reopening a session may relaunch the process,
+    but it must not rewrite this -- :func:`_preserved` keeps every field write-once, which is only
+    checkable because they travel as one value.
+    """
+
+    label: str | None = None
+    lifecycle_id: str | None = None
+    leaf_key: str | None = None
+    replacement_for_leaf: str | None = None
+    spawned_by_session: str | None = None
+    spawned_by_lifecycle: str | None = None
+    spawn_level: str | None = None
+    spawn_level_source: str | None = None
+
+
+NO_SPAWN_PROVENANCE = SpawnProvenance()
+"""A hand-opened seat: no dispatcher declared anything about it (the opener's default)."""
+
+
+class LaunchCommand(NamedTuple):
+    """The server-resolved launch: where the process runs and the exact argv it runs as."""
+
+    cwd: Path
+    argv: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class ReopenState:
+    """What a prior catalog row still owns when a second open reaches the same session id.
+
+    Only a row whose PROCESS IS GONE ever reaches this point: :func:`_live_open_result` answers
+    first and returns for every row whose tmux session is still alive, so reaching here is always a
+    respawn. A dead row therefore keeps exactly its durable identity -- its tmux name, and the
+    write-once spawn provenance :func:`_preserved` carries forward -- and owns nothing the departed
+    process decided: creation time restarts at this attach and control metadata is minted fresh.
+    """
+
+    existing: TerminalCatalogEntry | None
+    created_at: str
+    tmux_name: str
+
+
+@dataclass(frozen=True)
+class SpawnOutcome:
+    """What one open actually produced, once the tmux session is ensured and the seat resolved."""
+
+    binding: TerminalSessionBinding
+    label: str
+    seat_role: str | None
+    attached_at: str
+    control_endpoint: Path | None
 
 
 @dataclass(frozen=True)
@@ -69,49 +210,40 @@ class OpenTerminalResult:
     detail: str | None = None
 
 
-def resolve_terminal_launch(
-    kind: str,
-    *,
-    workspace_root: Path,
-    shell: str,
-    harness: str | None = None,
-    which: Which | None = None,
-    model: str | None = None,
-    effort: str | None = None,
-    launch_args: Sequence[str] | None = None,
-    harnesses: Sequence[Harness] | None = None,
-) -> tuple[Path, list[str]]:
-    """Resolve a launch ``kind`` to ``(cwd, argv)`` -- the server owns the command.
+def resolve_terminal_launch(launch: TerminalLaunchRequest) -> LaunchCommand:
+    """Resolve one launch request to ``(cwd, argv)`` -- the server owns the command.
 
-    ``terminal`` spawns ``shell`` at the workspace root (the dashboard-owned scratch terminal,
-    slice 6e-2a). ``harness`` spawns the registered TUI harness ``harness`` (its id) at the same
-    root (slice 6e-2b), rejecting an absent id, an unknown id, or one whose CLI is not installed
-    (``which`` defaults to :func:`shutil.which`). Every other kind raises ``ValueError`` -- the
+    ``terminal`` spawns ``launch.shell`` at the workspace root (the dashboard-owned scratch terminal,
+    slice 6e-2a). ``harness`` spawns the registered TUI harness ``launch.harness`` (its id) at the
+    same root (slice 6e-2b), rejecting an absent id, an unknown id, or one whose CLI is not installed
+    (``launch.which`` defaults to :func:`shutil.which`). Every other kind raises ``ValueError`` -- the
     opener endpoint turns that into a 400. (Lived in ``app.py`` before L2; moved here so the opener
     owns launch resolution and both the route and the MCP tool share it without importing ``app``.)
 
-    ``harnesses`` is the EFFECTIVE registry to resolve ids against (the builtin table merged with
-    the ``orchestration.harnesses`` settings family -- ``AgenticSettings.harnesses``); ``None``
+    ``launch.harnesses`` is the EFFECTIVE registry to resolve ids against (the builtin table merged
+    with the ``orchestration.harnesses`` settings family -- ``AgenticSettings.harnesses``); ``None``
     means the builtin defaults. An id known nowhere raises the loud teach-it-via-settings refusal
     (``unknown_harness_detail``), never a crash.
 
     L2 keeps native-adapter launches focused on the settings-owned base command and free-form launch
     args. Their typed :class:`ResolvedLaunch` rides the runner payload; the adapter validates it
-    against dynamic advertise and applies model/effort after this function returns. ``model`` and
-    ``effort`` remain an explicit compatibility seam for settings-defined non-native harnesses,
-    whose declared registry mappings are their only launch port. A plain ``terminal`` spawn ignores
-    harness launch material.
+    against dynamic advertise and applies model/effort after this function returns. The legacy
+    model/effort pair remains an explicit compatibility seam for settings-defined non-native
+    harnesses. A plain ``terminal`` spawn ignores harness launch material.
     """
-    if kind == "terminal":
-        return workspace_root, [shell]
-    if kind == "harness":
+    if launch.kind == "terminal":
+        return LaunchCommand(launch.workspace_root, (launch.shell,))
+    if launch.kind == "harness":
+        harness = launch.harness
         if harness is None:
             raise ValueError("harness kind requires a harness id")
-        found = find_harness(harness, registry=harnesses)
+        found = find_harness(harness, registry=launch.harnesses)
         if found is None:
-            raise ValueError(unknown_harness_detail(harness, registry=harnesses))
-        if not is_detected(found, which=which):
+            raise ValueError(unknown_harness_detail(harness, registry=launch.harnesses))
+        if not is_detected(found, which=launch.which):
             raise ValueError(f"harness not installed: {harness!r}")
+        model = launch.legacy_model
+        effort = launch.legacy_effort
         for detail in (
             invalid_model_detail(found, model) if model else None,
             invalid_effort_detail(found, effort) if effort else None,
@@ -120,10 +252,10 @@ def resolve_terminal_launch(
                 raise ValueError(detail)
         argv = list(found.argv)
         argv += knob_argv(found, model=model, effort=effort)
-        if launch_args:
-            argv += [str(arg) for arg in launch_args]
-        return workspace_root, argv
-    raise ValueError(f"unknown terminal kind: {kind!r}")
+        if launch.knobs.launch_args:
+            argv += [str(arg) for arg in launch.knobs.launch_args]
+        return LaunchCommand(launch.workspace_root, tuple(argv))
+    raise ValueError(f"unknown terminal kind: {launch.kind!r}")
 
 
 def _terminal_label(kind: TerminalSessionKind, harness: str | None, fallback: str) -> str:
@@ -133,26 +265,22 @@ def _terminal_label(kind: TerminalSessionKind, harness: str | None, fallback: st
 
 
 def _control_metadata(
-    existing: TerminalCatalogEntry | None,
     *,
     kind: TerminalSessionKind,
     harness: str | None,
     endpoint: Path | None,
 ) -> tuple[ControlState | None, Path | None, str | None]:
+    """The control columns of a row this open MINTS, for the process it is about to spawn.
+
+    Every open that gets this far spawns a new process (:func:`_live_open_result` already returned
+    for a row whose process still runs), so there is no prior control state to carry forward: the
+    row starts at the adapter's advertised status, on this protocol version, bound to the endpoint
+    this open resolved. A plain terminal has no bridge and therefore no control columns at all.
+    """
+
     if kind != "harness" or harness is None:
         return None, None, None
-    state = (
-        existing.control_state
-        if existing is not None and existing.control_endpoint == endpoint
-        else None
-    )
-    resolved_endpoint = endpoint or (existing.control_endpoint if existing is not None else None)
-    protocol = existing.control_protocol if existing is not None else None
-    return (
-        state or protocol_adapter_status(harness),
-        resolved_endpoint,
-        protocol or CONTROL_PROTOCOL_VERSION,
-    )
+    return protocol_adapter_status(harness), endpoint, CONTROL_PROTOCOL_VERSION
 
 
 def _previous(existing: TerminalCatalogEntry | None, name: str) -> Any:
@@ -173,10 +301,8 @@ def _live_launch_conflict(
     existing: TerminalCatalogEntry | None,
     *,
     host: TerminalHost,
-    requested_kind: TerminalSessionKind,
-    requested_harness: str | None,
-    requested_cwd: Path,
-    requested_launch: ResolvedLaunch | None,
+    launch: TerminalLaunchRequest,
+    cwd: Path,
 ) -> tuple[TerminalCatalogEntry, str | None] | None:
     """Return the immutable live row and any attempted launch-identity conflict.
 
@@ -187,50 +313,58 @@ def _live_launch_conflict(
 
     if existing is None or not host.has_session(existing.tmux_name):
         return None
-    if existing.kind != requested_kind or existing.harness != requested_harness:
-        return existing, (
+    return existing, _launch_identity_conflict(existing, launch=launch, cwd=cwd)
+
+
+def _launch_identity_conflict(
+    existing: TerminalCatalogEntry,
+    *,
+    launch: TerminalLaunchRequest,
+    cwd: Path,
+) -> str | None:
+    """Why the request disagrees with the live row's recorded provenance, or ``None`` if it agrees.
+
+    Ordered from coarsest identity to finest: what the session is, where it runs, then the
+    resolved launch it was created with. A request that carries no resolved launch cannot disagree
+    about model/effort, so it stops after the cwd check.
+    """
+
+    if existing.kind != launch.resolved_kind or existing.harness != launch.harness:
+        return (
             f"live session {existing.id!r} already runs {existing.kind} "
             f"harness {existing.harness!r}"
         )
-    if existing.cwd != requested_cwd:
-        return existing, (
+    if existing.cwd != cwd:
+        return (
             f"live session {existing.id!r} already runs in {str(existing.cwd)!r}; "
-            f"requested {str(requested_cwd)!r}"
+            f"requested {str(cwd)!r}"
         )
+    requested_launch = launch.control.resolved_launch
     if requested_launch is None:
-        return existing, None
+        return None
     if requested_launch.harness_id != existing.harness:
-        return existing, (
+        return (
             f"live session {existing.id!r} already runs harness {existing.harness!r}; "
             f"resolved launch requested {requested_launch.harness_id!r}"
         )
     actual = (existing.resolved_model, existing.resolved_effort)
     requested = (requested_launch.model_key, requested_launch.effort)
     if actual != requested:
-        return existing, (
+        return (
             f"live session {existing.id!r} already runs model/effort "
             f"{actual[0]!r}/{actual[1]!r}; requested {requested[0]!r}/{requested[1]!r}"
         )
-    return existing, None
+    return None
 
 
 def _live_open_result(
     existing: TerminalCatalogEntry | None,
     *,
     host: TerminalHost,
-    requested_kind: TerminalSessionKind,
-    requested_harness: str | None,
-    requested_cwd: Path,
-    requested_launch: ResolvedLaunch | None,
+    launch: TerminalLaunchRequest,
+    cwd: Path,
 ) -> OpenTerminalResult | None:
-    live_existing = _live_launch_conflict(
-        existing,
-        host=host,
-        requested_kind=requested_kind,
-        requested_harness=requested_harness,
-        requested_cwd=requested_cwd,
-        requested_launch=requested_launch,
-    )
+    live_existing = _live_launch_conflict(existing, host=host, launch=launch, cwd=cwd)
     if live_existing is None:
         return None
     actual, conflict = live_existing
@@ -243,35 +377,35 @@ def _live_open_result(
     )
 
 
-def _existing_launch_state(
+def _reopen_state(
     existing: TerminalCatalogEntry | None,
     *,
-    host: TerminalHost,
     session_id: str,
     attached_at: str,
-) -> tuple[TerminalCatalogEntry | None, str, str]:
-    """Resolve process-owned state separately from a reusable dead catalog identity."""
+) -> ReopenState:
+    """Resolve the reusable identity a dead catalog row still lends its replacement.
+
+    A row whose process is gone keeps its tmux name so the replacement lands on the same session
+    identity; a first open mints one. See :class:`ReopenState` for why no live row arrives here.
+    """
 
     if existing is None:
-        return None, attached_at, terminal_session_name(session_id)
-    if host.has_session(existing.tmux_name):
-        return existing, existing.created_at, existing.tmux_name
-    return None, attached_at, existing.tmux_name
+        return ReopenState(None, attached_at, terminal_session_name(session_id))
+    return ReopenState(existing, attached_at, existing.tmux_name)
 
 
 def _open_label(
-    label: str | None,
     existing: TerminalCatalogEntry | None,
     *,
-    kind: TerminalSessionKind,
-    harness: str | None,
+    launch: TerminalLaunchRequest,
+    provenance: SpawnProvenance,
     session_id: str,
 ) -> str:
-    if label:
-        return label
+    if provenance.label:
+        return provenance.label
     if existing is not None:
         return existing.label
-    return _terminal_label(kind, harness, session_id)
+    return _terminal_label(launch.resolved_kind, launch.harness, session_id)
 
 
 def _resolved_pair(resolved_launch: ResolvedLaunch | None) -> tuple[str | None, str | None]:
@@ -300,213 +434,134 @@ def _runner_spawn_env(env: Mapping[str, str]) -> dict[str, str]:
 
 def _session_command(
     *,
-    session_id: str,
-    resolved_kind: TerminalSessionKind,
-    harness: str | None,
-    cwd: Path,
-    vendor_command: list[str],
-    existing: TerminalCatalogEntry | None,
-    host: TerminalHost,
-    workspace_root: Path,
-    control_endpoint: Path | None,
-    control_root: Path | None,
-    session_commands: Sequence[str] | None,
-    resolved_launch: ResolvedLaunch | None,
-    resume_thread_id: str | None,
-    created_at: str,
-    tmux_name: str,
-) -> tuple[list[str], Path | None, bool]:
-    legacy_running = bool(
-        resolved_kind == "harness"
-        and existing is not None
-        and existing.control_endpoint is None
-        and host.has_session(existing.tmux_name)
+    identity: ControlIdentity,
+    command: LaunchCommand,
+    launch: TerminalLaunchRequest,
+) -> tuple[list[str], Path | None]:
+    """The argv this open actually spawns, plus the control endpoint it will listen on.
+
+    Every open that gets this far is a fresh spawn, so a controlled harness always runs behind the
+    bridge on a minted endpoint. A still-running session's recorded argv is never respawned from
+    here: :func:`_live_open_result` returns that row untouched before any of this runs.
+    """
+
+    if not launch.is_controlled_harness:
+        return list(command.argv), launch.control.endpoint
+    endpoint_root = launch.control.endpoint_root or (
+        launch.workspace_root / ".agents-remember-control"
     )
-    if legacy_running:
-        assert existing is not None
-        return list(existing.command), None, True
-    if resolved_kind != "harness" or harness is None:
-        return vendor_command, control_endpoint, False
-    endpoint_root = control_root or workspace_root / ".agents-remember-control"
-    identity = ControlIdentity(
-        ar_session_id=session_id,
-        tmux_name=tmux_name,
-        created_at=created_at,
+    endpoint = (
+        launch.control.endpoint or LocalControlEndpoint.for_session(endpoint_root, identity).path
     )
-    endpoint = control_endpoint or LocalControlEndpoint.for_session(endpoint_root, identity).path
-    command = control_runner_command(
+    runner = control_runner_command(
         RunnerConfig(
             identity=identity,
-            harness_id=harness,
-            cwd=cwd,
-            argv=tuple(vendor_command),
+            harness_id=launch.harness or "",
+            cwd=command.cwd,
+            argv=tuple(command.argv),
             endpoint_root=endpoint_root,
-            session_commands=tuple(session_commands or ()),
-            resolved_launch=resolved_launch,
-            resume_thread_id=resume_thread_id,
+            session_commands=tuple(launch.knobs.session_commands or ()),
+            resolved_launch=launch.control.resolved_launch,
+            resume_thread_id=launch.control.resume_thread_id,
         )
     )
-    return list(command), endpoint, False
+    return list(runner), endpoint
 
 
 def _opened_catalog_entry(
     *,
-    opened: TerminalSessionBinding,
-    existing: TerminalCatalogEntry | None,
-    process_existing: TerminalCatalogEntry | None,
-    resolved_label: str,
-    resolved_kind: TerminalSessionKind,
-    harness: str | None,
-    lifecycle_id: str | None,
-    command: list[str],
-    created_at: str,
-    attached_at: str,
-    leaf_key: str | None,
-    seat_role: str | None,
-    replacement_for_leaf: str | None,
-    spawned_by_session: str | None,
-    spawned_by_lifecycle: str | None,
-    spawn_env: Mapping[str, str],
-    launch_args: Sequence[str] | None,
-    prompt_keywords: Sequence[str] | None,
-    session_commands: Sequence[str] | None,
-    spawn_level: str | None,
-    spawn_level_source: str | None,
-    resolved_model: str | None,
-    resolved_effort: str | None,
-    legacy_running: bool,
-    control_endpoint: Path | None,
+    outcome: SpawnOutcome,
+    reopen: ReopenState,
+    launch: TerminalLaunchRequest,
+    provenance: SpawnProvenance,
 ) -> TerminalCatalogEntry:
+    """The durable row for the process this open just spawned.
+
+    Only two things survive from a prior row of the same id, and they are the two the departed
+    process never owned: the seat's write-once spawn provenance (:func:`_preserved`) and the tmux
+    identity carried on :class:`ReopenState`. Everything the *process* decided -- its knobs, its
+    resolved pair, its session log, every live control observation -- belongs to the process that
+    is gone, so the new row states this spawn's own values and leaves the observations unset until
+    the bridge reports them. A row whose process still runs never reaches here at all.
+    """
+
+    existing = reopen.existing
+    knobs = launch.knobs
+    spawn_env = launch.env or {}
+    resolved_model, resolved_effort = _resolved_pair(launch.control.resolved_launch)
     control_state, resolved_endpoint, control_protocol = _control_metadata(
-        process_existing,
-        kind=resolved_kind,
-        harness=harness,
-        endpoint=control_endpoint,
+        kind=launch.resolved_kind,
+        harness=launch.harness,
+        endpoint=outcome.control_endpoint,
     )
-    if legacy_running:
-        control_state = "unsupported"
-        resolved_endpoint = None
-        control_protocol = None
     return TerminalCatalogEntry(
-        id=opened.sid,
-        label=resolved_label,
-        kind=resolved_kind,
-        harness=harness,
-        lifecycle_id=lifecycle_id,
-        cwd=opened.cwd,
-        tmux_name=opened.tmux_name,
-        command=tuple(command),
-        created_at=created_at,
-        last_attached_at=attached_at,
+        id=outcome.binding.sid,
+        label=outcome.label,
+        kind=launch.resolved_kind,
+        harness=launch.harness,
+        lifecycle_id=provenance.lifecycle_id,
+        cwd=outcome.binding.cwd,
+        tmux_name=outcome.binding.tmux_name,
+        command=outcome.binding.command,
+        created_at=reopen.created_at,
+        last_attached_at=outcome.attached_at,
         status="running",
-        leaf_key=_preserved(existing, leaf_key, "leaf_key"),
-        seat_role=seat_role,
-        replacement_for_leaf=_preserved(existing, replacement_for_leaf, "replacement_for_leaf"),
-        spawned_by_session=_preserved(existing, spawned_by_session, "spawned_by_session"),
-        spawned_by_lifecycle=_preserved(existing, spawned_by_lifecycle, "spawned_by_lifecycle"),
-        spawn_role=_preserved(process_existing, spawn_env.get("AR_SPAWN_ROLE"), "spawn_role"),
-        launch_args=_preserved(
-            process_existing, tuple(launch_args) if launch_args else None, "launch_args"
+        leaf_key=_preserved(existing, provenance.leaf_key, "leaf_key"),
+        seat_role=outcome.seat_role,
+        replacement_for_leaf=_preserved(
+            existing, provenance.replacement_for_leaf, "replacement_for_leaf"
         ),
-        prompt_keywords=_preserved(
-            process_existing,
-            tuple(prompt_keywords) if prompt_keywords else None,
-            "prompt_keywords",
+        spawned_by_session=_preserved(
+            existing, provenance.spawned_by_session, "spawned_by_session"
         ),
-        session_commands=_preserved(
-            process_existing,
-            tuple(session_commands) if session_commands else None,
-            "session_commands",
+        spawned_by_lifecycle=_preserved(
+            existing, provenance.spawned_by_lifecycle, "spawned_by_lifecycle"
         ),
-        spawn_level=_preserved(process_existing, spawn_level, "spawn_level"),
-        spawn_level_source=_preserved(process_existing, spawn_level_source, "spawn_level_source"),
-        resolved_model=_preserved(process_existing, resolved_model, "resolved_model"),
-        resolved_effort=_preserved(process_existing, resolved_effort, "resolved_effort"),
-        session_log_entry_id=_previous(process_existing, "session_log_entry_id"),
-        session_log_path=_previous(process_existing, "session_log_path"),
+        spawn_role=spawn_env.get("AR_SPAWN_ROLE"),
+        launch_args=tuple(knobs.launch_args) if knobs.launch_args else None,
+        prompt_keywords=tuple(knobs.prompt_keywords) if knobs.prompt_keywords else None,
+        session_commands=tuple(knobs.session_commands) if knobs.session_commands else None,
+        spawn_level=provenance.spawn_level,
+        spawn_level_source=provenance.spawn_level_source,
+        resolved_model=resolved_model,
+        resolved_effort=resolved_effort,
         control_state=control_state,
         control_endpoint=resolved_endpoint,
         control_protocol=control_protocol,
-        control_activity=(
-            "unknown" if legacy_running else _previous(process_existing, "control_activity")
-        ),
-        control_acceptance=(
-            "unsupported" if legacy_running else _previous(process_existing, "control_acceptance")
-        ),
-        control_vendor_session_id=_previous(process_existing, "control_vendor_session_id"),
-        control_pending_interaction=_previous(process_existing, "control_pending_interaction"),
-        control_last_event_sequence=_previous(process_existing, "control_last_event_sequence"),
-        control_raw=(
-            {"detail": "legacy raw-TUI session has no protocol bridge"}
-            if legacy_running
-            else _previous(process_existing, "control_raw")
-        ),
     )
 
 
 def _open_terminal_transaction(
     *,
-    catalog: TerminalCatalog,
-    host: TerminalHost,
+    runtime: HostedSessionRuntime,
     session_id: str,
-    resolved_kind: TerminalSessionKind,
-    workspace_root: Path,
-    cwd: Path,
-    vendor_command: list[str],
-    harness: str | None,
-    label: str | None,
-    lifecycle_id: str | None,
-    leaf_key: str | None,
-    replacement_for_leaf: str | None,
-    spawn_env: Mapping[str, str],
-    launch_args: Sequence[str] | None,
-    prompt_keywords: Sequence[str] | None,
-    session_commands: Sequence[str] | None,
-    spawn_level: str | None,
-    spawn_level_source: str | None,
-    resolved_launch: ResolvedLaunch | None,
-    resume_thread_id: str | None,
-    spawned_by_session: str | None,
-    spawned_by_lifecycle: str | None,
-    control_endpoint: Path | None,
-    control_root: Path | None,
+    launch: TerminalLaunchRequest,
+    provenance: SpawnProvenance,
+    command: LaunchCommand,
 ) -> OpenTerminalResult:
+    catalog = runtime.catalog
+    host = runtime.host
+    resolved_kind = launch.resolved_kind
     existing = catalog.get(session_id)
-    live_result = _live_open_result(
-        existing,
-        host=host,
-        requested_kind=resolved_kind,
-        requested_harness=harness,
-        requested_cwd=cwd,
-        requested_launch=resolved_launch,
-    )
+    live_result = _live_open_result(existing, host=host, launch=launch, cwd=command.cwd)
     if live_result is not None:
         return live_result
 
+    # Past this point the open is a SPAWN: ``_live_open_result`` has already returned for every row
+    # whose process still runs, so ``existing`` is either absent or dead and nothing below has to
+    # weigh a live process's decisions against this request's.
     attached_at = now_iso()
-    process_existing, created_at, tmux_name = _existing_launch_state(
-        existing,
-        host=host,
-        session_id=session_id,
-        attached_at=attached_at,
+    reopen = _reopen_state(existing, session_id=session_id, attached_at=attached_at)
+    argv, resolved_control_endpoint = _session_command(
+        identity=ControlIdentity(
+            ar_session_id=session_id,
+            tmux_name=reopen.tmux_name,
+            created_at=reopen.created_at,
+        ),
+        command=command,
+        launch=launch,
     )
-    command, resolved_control_endpoint, legacy_running = _session_command(
-        session_id=session_id,
-        resolved_kind=resolved_kind,
-        harness=harness,
-        cwd=cwd,
-        vendor_command=vendor_command,
-        existing=existing,
-        host=host,
-        workspace_root=workspace_root,
-        control_endpoint=control_endpoint,
-        control_root=control_root,
-        session_commands=session_commands,
-        resolved_launch=resolved_launch,
-        resume_thread_id=resume_thread_id,
-        created_at=created_at,
-        tmux_name=tmux_name,
-    )
+    spawn_env = dict(launch.env or {})
     seat_role = migrated_seat_role(
         persisted=existing.seat_role if existing is not None else None,
         spawn_role=spawn_env.get("AR_SPAWN_ROLE") or (existing.spawn_role if existing else None),
@@ -514,7 +569,7 @@ def _open_terminal_transaction(
     )
     owner = leaf_conflict_owner(
         catalog,
-        leaf_key=leaf_key,
+        leaf_key=provenance.leaf_key,
         session_id=session_id,
         seat_role=seat_role,
         host=host,
@@ -530,54 +585,31 @@ def _open_terminal_transaction(
     # A fresh harness spawn launches the control runner under the tmux *server* environment,
     # which lacks the daemon's PYTHONPATH -- seed the daemon's own package source root so the
     # runner imports the same agents_remember code. Plain terminal spawns keep their env
-    # byte-identical, and a legacy live session ignores env entirely.
-    runner_env = (
-        _runner_spawn_env(spawn_env)
-        if resolved_kind == "harness" and harness is not None and not legacy_running
-        else spawn_env
-    )
+    # byte-identical.
+    runner_env = _runner_spawn_env(spawn_env) if launch.is_controlled_harness else spawn_env
     opened = host.ensure(
         session_id,
-        cwd=cwd,
-        command=command,
-        lifecycle_id=lifecycle_id,
-        suspend_unsafe=resolved_kind == "harness",
-        env=runner_env,
+        TerminalSessionSpec(
+            cwd=command.cwd,
+            command=tuple(argv),
+            lifecycle_id=provenance.lifecycle_id,
+            suspend_unsafe=resolved_kind == "harness",
+            env=runner_env,
+        ),
     )
-    resolved_label = _open_label(
-        label,
-        existing,
-        kind=resolved_kind,
-        harness=harness,
-        session_id=session_id,
-    )
-    resolved_model, resolved_effort = _resolved_pair(resolved_launch)
     entry = _opened_catalog_entry(
-        opened=opened,
-        existing=existing,
-        process_existing=process_existing,
-        resolved_label=resolved_label,
-        resolved_kind=resolved_kind,
-        harness=harness,
-        lifecycle_id=lifecycle_id,
-        command=command,
-        created_at=created_at,
-        attached_at=attached_at,
-        leaf_key=leaf_key,
-        seat_role=seat_role,
-        replacement_for_leaf=replacement_for_leaf,
-        spawned_by_session=spawned_by_session,
-        spawned_by_lifecycle=spawned_by_lifecycle,
-        spawn_env=spawn_env,
-        launch_args=launch_args,
-        prompt_keywords=prompt_keywords,
-        session_commands=session_commands,
-        spawn_level=spawn_level,
-        spawn_level_source=spawn_level_source,
-        resolved_model=resolved_model,
-        resolved_effort=resolved_effort,
-        legacy_running=legacy_running,
-        control_endpoint=resolved_control_endpoint,
+        outcome=SpawnOutcome(
+            binding=opened,
+            label=_open_label(
+                existing, launch=launch, provenance=provenance, session_id=session_id
+            ),
+            seat_role=seat_role,
+            attached_at=attached_at,
+            control_endpoint=resolved_control_endpoint,
+        ),
+        reopen=reopen,
+        launch=launch,
+        provenance=provenance,
     )
     catalog.upsert(entry)
     return OpenTerminalResult(
@@ -587,57 +619,30 @@ def _open_terminal_transaction(
 
 def open_terminal_session(
     *,
-    catalog: TerminalCatalog,
-    host: TerminalHost,
+    runtime: HostedSessionRuntime,
     session_id: str,
-    kind: str,
-    workspace_root: Path,
-    shell: str,
-    harness: str | None = None,
-    label: str | None = None,
-    lifecycle_id: str | None = None,
-    leaf_key: str | None = None,
-    replacement_for_leaf: str | None = None,
-    env: Mapping[str, str] | None = None,
-    launch_args: Sequence[str] | None = None,
-    prompt_keywords: Sequence[str] | None = None,
-    session_commands: Sequence[str] | None = None,
-    spawn_level: str | None = None,
-    spawn_level_source: str | None = None,
-    resolved_launch: ResolvedLaunch | None = None,
-    resume_thread_id: str | None = None,
-    legacy_model: str | None = None,
-    legacy_effort: str | None = None,
-    spawned_by_session: str | None = None,
-    spawned_by_lifecycle: str | None = None,
-    control_endpoint: Path | None = None,
-    control_root: Path | None = None,
-    which: Which | None = None,
-    harnesses: Sequence[Harness] | None = None,
+    launch: TerminalLaunchRequest,
+    provenance: SpawnProvenance = NO_SPAWN_PROVENANCE,
 ) -> OpenTerminalResult:
     """Spawn + own one hosted session, the single opener both the route and the MCP tool call.
 
     Resolves the launch command server-side (``resolve_terminal_launch`` -- a harness **id**, never a
-    wire argv), claims ``leaf_key`` under the per-(leaf, role) uniqueness rule, ensures the detached
-    tmux session (seeding ``env`` at spawn -- the L2 knob-injection seam), and upserts the durable
-    catalog row (carrying spawned-by provenance). A taken leaf returns ``leaf-taken`` WITHOUT spawning
-    or mutating; an unknown/undetected kind/harness returns ``bad-kind``.
+    wire argv), claims ``provenance.leaf_key`` under the per-(leaf, role) uniqueness rule, ensures the
+    detached tmux session (seeding ``launch.env`` at spawn -- the L2 knob-injection seam), and upserts
+    the durable catalog row (carrying spawned-by provenance). A taken leaf returns ``leaf-taken``
+    WITHOUT spawning or mutating; an unknown/undetected kind/harness returns ``bad-kind``.
 
-    L2 carries one typed ``ResolvedLaunch`` into the hosted runner. The runner performs token-free
-    dynamic catalog validation and applies adapter-native launch knobs before the real vendor
-    process starts. ``legacy_model``/``legacy_effort`` are used only for explicitly mapped
+    L2 carries one typed ``ResolvedLaunch`` into the hosted runner (``launch.control``). The runner
+    performs token-free dynamic catalog validation and applies adapter-native launch knobs before the
+    real vendor process starts. The legacy model/effort pair is used only for explicitly mapped
     settings-defined non-native harnesses. The namespaced spawn env remains as settings provenance.
-    ``harnesses`` is the effective registry (builtin merged with the
-    ``orchestration.harnesses`` settings family) ids resolve against; ``None`` = builtin defaults.
-    The free-form escape hatch is recorded on the durable row as spawn provenance:
-    ``launch_args`` (appended verbatim to the argv), ``prompt_keywords`` (the caller prepends them
-    to the brief paste), and ``session_commands`` (the caller pastes them post-launch, before the
-    brief) -- all three are never validated, only recorded. ``resume_thread_id`` is a codex-only
-    native-identity selector in the same authority class: it rides the runner payload to the
-    adapter factory, and the opener never validates or authorizes the target.
+    The free-form escape hatch (``launch.knobs``) is never validated, only recorded.
+    ``launch.control.resume_thread_id`` is a codex-only native-identity selector in the same
+    authority class: it rides the runner payload to the adapter factory, and the opener never
+    validates or authorizes the target.
     """
-    spawn_env = dict(env or {})
-    if resume_thread_id is not None and (kind != "harness" or harness != "codex"):
+    resume_thread_id = launch.control.resume_thread_id
+    if resume_thread_id is not None and (launch.kind != "harness" or launch.harness != "codex"):
         return OpenTerminalResult(
             status="bad-kind",
             detail="resume_thread_id is only supported for the codex harness",
@@ -650,48 +655,18 @@ def open_terminal_session(
             detail="resume_thread_id must be non-empty with no outer whitespace",
         )
     try:
-        cwd, vendor_command = resolve_terminal_launch(
-            kind,
-            workspace_root=workspace_root,
-            shell=shell,
-            harness=harness,
-            which=which,
-            model=legacy_model,
-            effort=legacy_effort,
-            launch_args=launch_args,
-            harnesses=harnesses,
-        )
+        command = resolve_terminal_launch(launch)
     except ValueError as exc:
         return OpenTerminalResult(status="bad-kind", detail=str(exc))
 
     # ``batch`` is the existing cross-thread/process session-open fence. It must span the complete
     # read/probe/ensure/upsert transaction: otherwise two callers can both observe no row, the tmux
     # loser can reuse the winner's process, and then overwrite the catalog with its attempted argv.
-    with catalog.batch():
-        resolved_kind: TerminalSessionKind = "harness" if kind == "harness" else "terminal"
+    with runtime.catalog.batch():
         return _open_terminal_transaction(
-            catalog=catalog,
-            host=host,
+            runtime=runtime,
             session_id=session_id,
-            resolved_kind=resolved_kind,
-            workspace_root=workspace_root,
-            cwd=cwd,
-            vendor_command=vendor_command,
-            harness=harness,
-            label=label,
-            lifecycle_id=lifecycle_id,
-            leaf_key=leaf_key,
-            replacement_for_leaf=replacement_for_leaf,
-            spawn_env=spawn_env,
-            launch_args=launch_args,
-            prompt_keywords=prompt_keywords,
-            session_commands=session_commands,
-            spawn_level=spawn_level,
-            spawn_level_source=spawn_level_source,
-            resolved_launch=resolved_launch,
-            resume_thread_id=resume_thread_id,
-            spawned_by_session=spawned_by_session,
-            spawned_by_lifecycle=spawned_by_lifecycle,
-            control_endpoint=control_endpoint,
-            control_root=control_root,
+            launch=launch,
+            provenance=provenance,
+            command=command,
         )

@@ -30,7 +30,7 @@ from agents_remember.serving.harness_control_models import (
     SubmissionReceipt,
     SubmissionSource,
 )
-from agents_remember.serving.pi_rpc_adapter import PiRpcAdapter
+from agents_remember.serving.pi_rpc_adapter import PiAdapterLimits, PiRpcAdapter
 from agents_remember.serving.pi_rpc_protocol import (
     PI_RPC_DIALOG_METHODS,
     PI_RPC_FIRE_AND_FORGET_METHODS,
@@ -40,6 +40,7 @@ from agents_remember.serving.pi_rpc_protocol import (
     parse_pi_models,
     pi_rpc_launch,
 )
+from test_pi_rpc_real_smoke import PI_RPC_VERSION
 
 FIXTURES = Path(__file__).parent / "fixtures" / "pi_rpc"
 
@@ -131,9 +132,31 @@ class _FakePiTransport:
         *,
         before_write: Callable[[], None] | None = None,
     ) -> Mapping[str, object]:
-        copied = dict(command)
-        request_id = cast(str, command["id"])
+        """Record the command, apply whatever the test armed, then answer it.
+
+        The two halves are separate on purpose: the arming hooks (write hooks, injected
+        failures, hangs) are per-transport and apply to every command, while the answers
+        below are per-command-type and are what each Pi RPC verb actually returns.
+        """
         command_type = cast(str, command["type"])
+        await self._record_and_apply_arming(command, command_type, before_write)
+        reply = self._replies().get(command_type)
+        if reply is None:
+            raise AssertionError(f"unexpected fake command: {command_type}")
+        return reply(cast(str, command["id"]), command)
+
+    async def _record_and_apply_arming(
+        self,
+        command: Mapping[str, object],
+        command_type: str,
+        before_write: Callable[[], None] | None,
+    ) -> None:
+        """Everything a test can arm ahead of a command, in the order Pi would hit it.
+
+        A prompt failure that could not have reached Pi is raised *before* the command is
+        recorded, because such a command never went out; every other arming applies after.
+        """
+        copied = dict(command)
         if self.before_write_hook is not None:
             self.before_write_hook(copied)
         if before_write is not None:
@@ -150,84 +173,78 @@ class _FakePiTransport:
         failures = self.command_failures.get(command_type)
         if failures:
             raise failures.popleft()
-        if command_type == "get_state":
-            return _success(request_id, "get_state", dict(self.session))
-        if command_type == "get_entries":
-            entries = self.entries
-            since = command.get("since")
-            if since is not None:
-                index = next(
-                    (
-                        position
-                        for position, entry in enumerate(entries)
-                        if entry.get("id") == since
-                    ),
-                    None,
-                )
-                if index is None:
-                    return {
-                        "id": request_id,
-                        "type": "response",
-                        "command": "get_entries",
-                        "success": False,
-                        "error": f"Entry not found: {since}",
-                    }
-                entries = entries[index + 1 :]
-            return _success(
-                request_id,
-                "get_entries",
-                {"entries": entries, "leafId": self.leaf_id},
-            )
-        if command_type == "get_available_models":
-            return _success(
-                request_id,
-                "get_available_models",
-                {"models": self.models},
-            )
-        if command_type == "set_model":
-            key = f"{command.get('provider')}/{command.get('modelId')}"
-            selected = next(
-                (model for model in self.models if f"{model['provider']}/{model['id']}" == key),
+
+    def _reply_get_state(
+        self, request_id: str, _command: Mapping[str, object]
+    ) -> Mapping[str, object]:
+        return _success(request_id, "get_state", dict(self.session))
+
+    def _reply_get_entries(
+        self, request_id: str, command: Mapping[str, object]
+    ) -> Mapping[str, object]:
+        entries = self.entries
+        since = command.get("since")
+        if since is not None:
+            index = next(
+                (position for position, entry in enumerate(entries) if entry.get("id") == since),
                 None,
             )
-            if selected is None:
-                return {
-                    "id": request_id,
-                    "type": "response",
-                    "command": "set_model",
-                    "success": False,
-                    "error": f"Model not found: {key}",
-                }
-            self.session["model"] = dict(selected)
-            if selected.get("reasoning") is False:
-                self.session["thinkingLevel"] = "off"
-            if self.hide_selected_model_after_set:
-                self.models.remove(selected)
-            return {
-                "id": request_id,
-                "type": "response",
-                "command": "set_model",
-                "success": True,
-            }
-        if command_type == "set_thinking_level":
-            requested = cast(str, command["level"])
-            self.session["thinkingLevel"] = self.thinking_clamps.get(requested, requested)
-            return {
-                "id": request_id,
-                "type": "response",
-                "command": "set_thinking_level",
-                "success": True,
-            }
-        if command_type == "prompt":
-            if self.prompt_failures:
-                raise self.prompt_failures.popleft()
-            return {
-                "id": request_id,
-                "type": "response",
-                "command": "prompt",
-                "success": True,
-            }
-        raise AssertionError(f"unexpected fake command: {command_type}")
+            if index is None:
+                return _failure(request_id, "get_entries", f"Entry not found: {since}")
+            entries = entries[index + 1 :]
+        return _success(
+            request_id,
+            "get_entries",
+            {"entries": entries, "leafId": self.leaf_id},
+        )
+
+    def _reply_get_available_models(
+        self, request_id: str, _command: Mapping[str, object]
+    ) -> Mapping[str, object]:
+        return _success(request_id, "get_available_models", {"models": self.models})
+
+    def _reply_set_model(
+        self, request_id: str, command: Mapping[str, object]
+    ) -> Mapping[str, object]:
+        key = f"{command.get('provider')}/{command.get('modelId')}"
+        selected = next(
+            (model for model in self.models if f"{model['provider']}/{model['id']}" == key),
+            None,
+        )
+        if selected is None:
+            return _failure(request_id, "set_model", f"Model not found: {key}")
+        self.session["model"] = dict(selected)
+        if selected.get("reasoning") is False:
+            self.session["thinkingLevel"] = "off"
+        if self.hide_selected_model_after_set:
+            self.models.remove(selected)
+        return _acknowledgement(request_id, "set_model")
+
+    def _reply_set_thinking_level(
+        self, request_id: str, command: Mapping[str, object]
+    ) -> Mapping[str, object]:
+        requested = cast(str, command["level"])
+        self.session["thinkingLevel"] = self.thinking_clamps.get(requested, requested)
+        return _acknowledgement(request_id, "set_thinking_level")
+
+    def _reply_prompt(
+        self, request_id: str, _command: Mapping[str, object]
+    ) -> Mapping[str, object]:
+        if self.prompt_failures:
+            raise self.prompt_failures.popleft()
+        return _acknowledgement(request_id, "prompt")
+
+    def _replies(self) -> Mapping[str, Callable[[str, Mapping[str, object]], Mapping[str, object]]]:
+        """The verbs this fake answers. A command type absent here is a test asking for
+        something Pi's RPC surface does not have, which ``request`` reports as such."""
+        return {
+            "get_state": self._reply_get_state,
+            "get_entries": self._reply_get_entries,
+            "get_available_models": self._reply_get_available_models,
+            "set_model": self._reply_set_model,
+            "set_thinking_level": self._reply_set_thinking_level,
+            "prompt": self._reply_prompt,
+        }
 
     async def send(
         self,
@@ -282,6 +299,26 @@ def _success(request_id: str, command: str, data: object) -> dict[str, object]:
         "command": command,
         "success": True,
         "data": data,
+    }
+
+
+def _acknowledgement(request_id: str, command: str) -> dict[str, object]:
+    """A success frame for a verb Pi acknowledges without a data payload."""
+    return {
+        "id": request_id,
+        "type": "response",
+        "command": command,
+        "success": True,
+    }
+
+
+def _failure(request_id: str, command: str, error: str) -> dict[str, object]:
+    return {
+        "id": request_id,
+        "type": "response",
+        "command": command,
+        "success": False,
+        "error": error,
     }
 
 
@@ -424,11 +461,24 @@ class PiRpcProtocolTests(unittest.TestCase):
             )
 
     def test_capability_fixture_documents_the_smoke_baseline(self) -> None:
-        fixture = json.loads((FIXTURES / "0.80.6-capabilities.json").read_text())
+        """The recording describes the pinned build, and the adapter agrees with it.
+
+        The fixture is named after ``PI_RPC_VERSION``, so this reads the file the smoke
+        test re-records rather than a second, older baseline: there is exactly one
+        recording in the tree and it belongs to the version the product ships.
+        """
+        fixture = json.loads(
+            (FIXTURES / f"{PI_RPC_VERSION}-capabilities.json").read_text(encoding="utf-8")
+        )
         self.assertEqual(fixture["package"], PI_RPC_PACKAGE)
-        self.assertEqual(fixture["version"], "0.80.6")
+        self.assertEqual(fixture["version"], PI_RPC_VERSION)
         self.assertEqual(set(fixture["dialogMethods"]), PI_RPC_DIALOG_METHODS)
         self.assertEqual(set(fixture["fireAndForgetMethods"]), PI_RPC_FIRE_AND_FORGET_METHODS)
+        self.assertEqual(
+            sorted(path.name for path in FIXTURES.glob("*-capabilities.json")),
+            [f"{PI_RPC_VERSION}-capabilities.json"],
+            "a second capability recording leaves no rule about which one is authoritative",
+        )
 
     def test_available_models_preserve_provider_identity_and_model_gated_thinking(self) -> None:
         models = parse_pi_models(
@@ -712,7 +762,7 @@ class PiRpcAdapterTests(unittest.IsolatedAsyncioTestCase):
                 transport = _FakePiTransport()
                 adapter = PiRpcAdapter(
                     transport_factory=_TransportSequence(transport),
-                    configuration_timeout_seconds=0.01,
+                    limits=PiAdapterLimits(configuration_timeout_seconds=0.01),
                 )
                 bridge = HarnessControlBridge(_identity(), adapter)
                 await bridge.start(_launch())
@@ -891,7 +941,7 @@ class PiRpcAdapterTests(unittest.IsolatedAsyncioTestCase):
                 transport = _FakePiTransport()
                 adapter = PiRpcAdapter(
                     transport_factory=_TransportSequence(transport),
-                    interaction_limit=4,
+                    limits=PiAdapterLimits(interaction=4),
                 )
                 await adapter.start(_launch())
                 operation = _operation(f"interaction-{size}")

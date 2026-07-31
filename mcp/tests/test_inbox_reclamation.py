@@ -15,6 +15,12 @@ sys.path.insert(0, str(MCP_SRC))
 
 from agents_remember.controlplane.expectation_rows import ExpectationRowStore
 from agents_remember.controlplane.operator_inbox_records import (
+    InboxAddress,
+    InboxMessage,
+    InboxMessageKind,
+    InboxPoster,
+    InboxRouting,
+    InboxSubject,
     OperatorInboxEntry,
     create_operator_inbox_entry,
 )
@@ -59,21 +65,21 @@ def _inbox_entry(
     entry_id: str,
     *,
     subject: str | None = "subject-1",
-    kind: str = "nudge",
+    kind: InboxMessageKind = "nudge",
     created_by: str = "supervisor",
     created_at: datetime = NOW,
 ) -> OperatorInboxEntry:
     return create_operator_inbox_entry(
+        InboxMessage(
+            ask=f"ask-{entry_id}",
+            response=f"body-{entry_id}",
+            message_kind=kind,
+            subject=InboxSubject(agent_id=subject),
+        ),
         entry_id=entry_id,
         now=created_at.isoformat(),
-        lifecycle_id=None,
-        agent_id="manager-1",
-        ask=f"ask-{entry_id}",
-        response=f"body-{entry_id}",
-        created_by=created_by,
-        created_via="cli",
-        message_kind=kind,  # type: ignore[arg-type]
-        subject_agent_id=subject,
+        routing=InboxRouting(address=InboxAddress(lifecycle_id=None, agent_id="manager-1")),
+        poster=InboxPoster(created_by=created_by, created_via="cli"),
     )
 
 

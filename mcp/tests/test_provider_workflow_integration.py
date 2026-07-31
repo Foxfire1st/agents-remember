@@ -12,7 +12,7 @@ from typing import Any, cast
 
 import pytest
 from agents_remember.benchmarks import runner as benchmark_runner
-from agents_remember.controllers.worktree_tools import worktree_start_tool
+from agents_remember.controllers.worktree_tools import TaskIdentity, worktree_start_tool
 from agents_remember.kernel.memory_ledger import create_initial_ledger, ledger_to_text
 from agents_remember.mcp.config import load_config
 from agents_remember.providers import lifecycle, provider_setup
@@ -260,38 +260,16 @@ def test_worktree_and_benchmark_providers_run_end_to_end(tmp_path: Path) -> None
 
         worktree_payload = worktree_start_tool(
             config,
-            repo_id=repo_id,
-            task_name="Provider Integration Worktree",
-            worktree_name="provider-integration",
-            workflow_kind="light-task",
-            dry_run=False,
+            TaskIdentity(
+                repo_id=repo_id,
+                task_name="Provider Integration Worktree",
+                worktree_name="provider-integration",
+                workflow_kind="light-task",
+            ),
         )
         assert worktree_payload["state"] == "started", json.dumps(worktree_payload, indent=2)
-        # Provider setup now runs on a background thread (GitHub #53): the start
-        # returns `starting` plus a progress file, and readiness is polled.
-        providers_block = worktree_payload["providers"]
-        assert providers_block["state"] == "starting", json.dumps(worktree_payload, indent=2)
-        progress_path = Path(providers_block["progressFile"])
-        deadline = time.monotonic() + _provider_timeout()
-        progress: dict[str, Any] | None = None
-        while time.monotonic() < deadline:
-            progress = read_setup_progress(progress_path)
-            if progress is not None and progress["state"] != "running":
-                break
-            time.sleep(2)
-        assert progress is not None and progress["state"] == "ok", json.dumps(
-            progress or {"error": "background provider setup never finished"}, indent=2
-        )
-        worktree_provider_state = Path(progress["summary"]["providerStateFile"])
-        worktree_state = json.loads(worktree_provider_state.read_text(encoding="utf-8"))
-        worktree_settings_info = worktree_state["isolatedProviderSettings"]
-        worktree_settings_path = Path(worktree_settings_info["path"])
-        worktree_settings = json.loads(worktree_settings_path.read_text(encoding="utf-8"))
-        cleanup_settings.append(worktree_settings)
-        assert set(worktree_settings_info["providers"]) == {
-            "codegraphcontext-code",
-            "grepai-memory",
-        }
+        progress = _await_background_provider_setup(worktree_payload)
+        worktree_settings_path = _isolated_worktree_settings(progress, cleanup_settings)
         worktree_status = _watchers_status(coordination_root, worktree_settings_path)
         assert worktree_status["enabled"] == {
             "grepai-memory": True,
@@ -299,43 +277,13 @@ def test_worktree_and_benchmark_providers_run_end_to_end(tmp_path: Path) -> None
         }
         assert worktree_status["ok"], json.dumps(worktree_status, indent=2)
 
-        benchmark_coordination = tmp_path / "benchmark" / "ar-coordination"
-        benchmark_repo = tmp_path / "benchmark" / "workspace" / repo_id
-        benchmark_memory = benchmark_coordination / "memory-repos" / f"ar-{repo_id}"
-        shutil.copytree(code_root, benchmark_repo, ignore=shutil.ignore_patterns(".git"))
-        shutil.copytree(memory_root, benchmark_memory, ignore=shutil.ignore_patterns(".git"))
-        benchmark_case = benchmark_runner.BenchmarkCase(
-            Path("case.json"),
-            {
-                "id": "provider-integration",
-                "repository": {"name": repo_id},
-                "memoryRepository": {"name": f"ar-{repo_id}"},
-                "workspace": {"fixturePath": "provider-integration"},
-            },
+        benchmark_status = _run_benchmark_provider_stack(
+            tmp_path,
+            repo_id=repo_id,
+            code_root=code_root,
+            memory_root=memory_root,
+            cleanup_settings=cleanup_settings,
         )
-        benchmark_settings = benchmark_runner.benchmark_lifecycle_settings(
-            case=benchmark_case,
-            coordination_root=benchmark_coordination,
-            source_repo_root=benchmark_repo,
-            memory_repo=benchmark_memory,
-            provider_ids=("grepai-memory", "codegraphcontext-code"),
-        )
-        cleanup_settings.append(benchmark_settings)
-        benchmark_settings_path = tmp_path / "benchmark-provider-settings.json"
-        benchmark_settings_path.write_text(
-            json.dumps(benchmark_settings, indent=2) + "\n",
-            encoding="utf-8",
-        )
-        benchmark_runner.prepare_configured_providers(
-            benchmark_case,
-            benchmark_coordination,
-            benchmark_repo,
-            benchmark_memory,
-            dry_run=False,
-            provider_timeout=_provider_timeout(),
-            provider_ids=("grepai-memory", "codegraphcontext-code"),
-        )
-        benchmark_status = _watchers_status(benchmark_coordination, benchmark_settings_path)
         assert benchmark_status["enabled"] == {
             "grepai-memory": True,
             "codegraphcontext-code": True,
@@ -344,3 +292,96 @@ def test_worktree_and_benchmark_providers_run_end_to_end(tmp_path: Path) -> None
     finally:
         for settings in reversed(cleanup_settings):
             _cleanup_provider_settings(settings)
+
+
+def _await_background_provider_setup(worktree_payload: dict[str, Any]) -> dict[str, Any]:
+    """Poll the progress file a started worktree hands back until setup stops running.
+
+    Provider setup runs on a background thread (GitHub #53), so `worktree_start` returns
+    `starting` plus a progress file rather than a finished stack; readiness is polled.
+    """
+    providers_block = worktree_payload["providers"]
+    assert providers_block["state"] == "starting", json.dumps(worktree_payload, indent=2)
+    progress_path = Path(providers_block["progressFile"])
+    deadline = time.monotonic() + _provider_timeout()
+    progress: dict[str, Any] | None = None
+    while time.monotonic() < deadline:
+        progress = read_setup_progress(progress_path)
+        if progress is not None and progress["state"] != "running":
+            break
+        time.sleep(2)
+    assert progress is not None and progress["state"] == "ok", json.dumps(
+        progress or {"error": "background provider setup never finished"}, indent=2
+    )
+    return progress
+
+
+def _isolated_worktree_settings(
+    progress: dict[str, Any], cleanup_settings: list[dict[str, Any]]
+) -> Path:
+    """The provider settings the worktree wrote for itself, with both providers isolated.
+
+    Registered for teardown before the isolation is asserted, so a stack that came up wrong
+    is still a stack that gets reclaimed.
+    """
+    worktree_state = json.loads(
+        Path(progress["summary"]["providerStateFile"]).read_text(encoding="utf-8")
+    )
+    settings_info = worktree_state["isolatedProviderSettings"]
+    settings_path = Path(settings_info["path"])
+    cleanup_settings.append(json.loads(settings_path.read_text(encoding="utf-8")))
+    assert set(settings_info["providers"]) == {"codegraphcontext-code", "grepai-memory"}
+    return settings_path
+
+
+def _run_benchmark_provider_stack(
+    tmp_path: Path,
+    *,
+    repo_id: str,
+    code_root: Path,
+    memory_root: Path,
+    cleanup_settings: list[dict[str, Any]],
+) -> dict[str, object]:
+    """Stand the same two providers up through the benchmark runner's own entry point.
+
+    The benchmark copies the repo and memory pair into its own coordination root, so this
+    proves the runner configures a stack of its own rather than reusing the worktree's.
+
+    The settings are registered for teardown the moment they exist and before anything is
+    started from them, so a failure part-way through still leaves containers to be reclaimed.
+    """
+    benchmark_coordination = tmp_path / "benchmark" / "ar-coordination"
+    benchmark_repo = tmp_path / "benchmark" / "workspace" / repo_id
+    benchmark_memory = benchmark_coordination / "memory-repos" / f"ar-{repo_id}"
+    shutil.copytree(code_root, benchmark_repo, ignore=shutil.ignore_patterns(".git"))
+    shutil.copytree(memory_root, benchmark_memory, ignore=shutil.ignore_patterns(".git"))
+    benchmark_case = benchmark_runner.BenchmarkCase(
+        Path("case.json"),
+        {
+            "id": "provider-integration",
+            "repository": {"name": repo_id},
+            "memoryRepository": {"name": f"ar-{repo_id}"},
+            "workspace": {"fixturePath": "provider-integration"},
+        },
+    )
+    benchmark_workspace = benchmark_runner.BenchmarkWorkspace(
+        case=benchmark_case,
+        workspace_root=benchmark_coordination.parent,
+        coordination_root=benchmark_coordination,
+        source_repo_root=benchmark_repo,
+        memory_repo=benchmark_memory,
+        provider_ids=("grepai-memory", "codegraphcontext-code"),
+    )
+    benchmark_settings = benchmark_runner.benchmark_lifecycle_settings(benchmark_workspace)
+    cleanup_settings.append(benchmark_settings)
+    benchmark_settings_path = tmp_path / "benchmark-provider-settings.json"
+    benchmark_settings_path.write_text(
+        json.dumps(benchmark_settings, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    benchmark_runner.prepare_configured_providers(
+        benchmark_workspace,
+        dry_run=False,
+        provider_timeout=_provider_timeout(),
+    )
+    return _watchers_status(benchmark_coordination, benchmark_settings_path)

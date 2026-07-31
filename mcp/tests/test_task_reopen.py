@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import cast
 
 from agents_remember.controllers.worktree_tools import _end_ambient_lifecycle_if_anchored
-from agents_remember.observer.ambient import AmbientLifecycle, install_ambient
+from agents_remember.observer.ambient import AmbientLifecycle, AmbientTiming, install_ambient
 from agents_remember.observer.store import EventStore
 from agents_remember.tasks import TaskDocument, read_task_doc, write_task_doc
 from agents_remember.tasks.leaf_doc import (
@@ -26,6 +26,9 @@ from agents_remember.worktrees import git_worktree_manager as worktree_manager
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.task_resolver import leaf_enclosure_path
 from agents_remember.worktrees.worktree_contract import (
+    ContractTask,
+    LeafIdentity,
+    RepoBranchPlan,
     default_contract,
     load_contract,
     write_contract,
@@ -39,18 +42,20 @@ def _completed_leaf_contract(workspace: Path):
     code_repo = workspace / "repo-a"
     code_repo.mkdir(parents=True, exist_ok=True)
     contract = default_contract(
-        task_name="260698_demo-series",
-        repo_name="repo-a",
-        workflow_kind="light-task",
-        memory_mode="disabled",
-        coordination_root=coordination_root,
-        code_repo_path=code_repo,
-        code_source_branch="main",
-        code_work_branch="ar/01-demo-leaf",
-        code_base_commit="abc123",
-        worktree_name="01-demo-leaf",
-        leaf_id="260698-l1",
-        lifecycle_id="LC-OLD",
+        ContractTask(
+            name="260698_demo-series",
+            repo_name="repo-a",
+            coordination_root=coordination_root,
+            workflow_kind="light-task",
+            memory_mode="disabled",
+        ),
+        leaf=LeafIdentity(worktree_name="01-demo-leaf", leaf_id="260698-l1", lifecycle_id="LC-OLD"),
+        code=RepoBranchPlan(
+            repo_path=code_repo,
+            source_branch="main",
+            work_branch="ar/01-demo-leaf",
+            base_commit="abc123",
+        ),
     )
     contract = replace(
         contract,
@@ -259,7 +264,7 @@ class AbandonAmbientLifecycleTests(unittest.TestCase):
     def test_ends_the_ambient_lifecycle_when_it_anchors_the_abandoned_worktree(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             store = EventStore(Path(tmp))
-            amb = AmbientLifecycle(store, heartbeat_seconds=3600)
+            amb = AmbientLifecycle(store, timing=AmbientTiming(heartbeat_seconds=3600))
             install_ambient(amb)
             try:
                 lc = amb.start()
@@ -288,17 +293,20 @@ class StartAfterReopenTests(unittest.TestCase):
 
             # A reopened enclosure: landed history wiped back to planning, no lifecycle.
             contract = default_contract(
-                task_name="260698_demo-series",
-                repo_name="repo-a",
-                workflow_kind="light-task",
-                memory_mode="disabled",
-                coordination_root=coordination_root,
-                code_repo_path=code_repo,
-                code_source_branch="main",
-                code_work_branch="ar/01-demo-leaf",
-                code_base_commit="stale",
-                worktree_name="01-demo-leaf",
-                leaf_id="260698-l1",
+                ContractTask(
+                    name="260698_demo-series",
+                    repo_name="repo-a",
+                    coordination_root=coordination_root,
+                    workflow_kind="light-task",
+                    memory_mode="disabled",
+                ),
+                leaf=LeafIdentity(worktree_name="01-demo-leaf", leaf_id="260698-l1"),
+                code=RepoBranchPlan(
+                    repo_path=code_repo,
+                    source_branch="main",
+                    work_branch="ar/01-demo-leaf",
+                    base_commit="stale",
+                ),
             )
             contract = replace(contract, cleanup="reopened")
             write_contract(contract.contract_path, contract)
@@ -342,18 +350,22 @@ class StartAfterReopenTests(unittest.TestCase):
             _master_doc(task_root)
 
             contract = default_contract(
-                task_name="260698_demo-series",
-                repo_name="repo-a",
-                workflow_kind="light-task",
-                memory_mode="disabled",
-                coordination_root=coordination_root,
-                code_repo_path=code_repo,
-                code_source_branch="main",
-                code_work_branch="ar/01-demo-leaf",
-                code_base_commit="abc",
-                worktree_name="01-demo-leaf",
-                leaf_id="260698-l1",
-                lifecycle_id="LC-LIVE",
+                ContractTask(
+                    name="260698_demo-series",
+                    repo_name="repo-a",
+                    coordination_root=coordination_root,
+                    workflow_kind="light-task",
+                    memory_mode="disabled",
+                ),
+                leaf=LeafIdentity(
+                    worktree_name="01-demo-leaf", leaf_id="260698-l1", lifecycle_id="LC-LIVE"
+                ),
+                code=RepoBranchPlan(
+                    repo_path=code_repo,
+                    source_branch="main",
+                    work_branch="ar/01-demo-leaf",
+                    base_commit="abc",
+                ),
             )
             write_contract(contract.contract_path, contract)
 

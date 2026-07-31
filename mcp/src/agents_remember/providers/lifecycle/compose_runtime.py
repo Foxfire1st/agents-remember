@@ -30,6 +30,22 @@ class ComposeRender:
         return hashlib.sha256(self.override_yaml.encode("utf-8")).hexdigest()
 
 
+@dataclass(frozen=True)
+class BackendStartReconciliation:
+    """What a backend start already did to the host before bringing a container up.
+
+    Every managed provider start reconciles the host first: it adopts the
+    compose-owned network, migrates containers and networks left behind by an
+    unmanaged project, and force-removes a container whose data mount no longer
+    matches the layout. All three land together in the start result's
+    ``network``/``commands`` payload, so they travel together.
+    """
+
+    network: dict[str, Any]
+    migration: dict[str, Any] | None = None
+    forced_remove: dict[str, Any] | None = None
+
+
 def provider_asset_path(*parts: str) -> Path:
     resource = files("agents_remember").joinpath("package_data", "runtime", "providers", *parts)
     return Path(str(resource))

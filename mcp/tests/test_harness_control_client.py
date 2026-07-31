@@ -12,10 +12,12 @@ from unittest import mock
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
-from agents_remember.errors import HarnessControlClientError
+from agents_remember.errors import HarnessControlClientError, HarnessControlError
 from agents_remember.serving.harness_control_client import (
     SUBMIT_TIMEOUT_SECONDS,
+    ControlSubmission,
     read_control_native_page,
+    read_submission_status,
     request_control,
     set_control_model,
     submit_control_prompt,
@@ -207,8 +209,7 @@ class HarnessControlClientRetrySafetyTests(unittest.TestCase):
             receipt = submit_control_prompt(
                 _Entry(),
                 "one whole message",
-                source="terminal",
-                request_id="request-7",
+                ControlSubmission(source="terminal", request_id="request-7"),
             )
         self.assertEqual((receipt.request_id, receipt.acceptance), ("request-7", "unknown"))
         request.assert_called_once()
@@ -240,8 +241,7 @@ class HarnessControlClientRetrySafetyTests(unittest.TestCase):
             receipt = submit_control_prompt(
                 _Entry(),
                 "one whole message",
-                source="terminal",
-                request_id="request-9",
+                ControlSubmission(source="terminal", request_id="request-9"),
             )
         self.assertEqual((receipt.request_id, receipt.acceptance), ("request-9", "immediate"))
         self.assertEqual(receipt.vendor_correlation_id, "vendor-9")
@@ -275,8 +275,7 @@ class HarnessControlClientRetrySafetyTests(unittest.TestCase):
             receipt = submit_control_prompt(
                 _Entry(),
                 "one whole message",
-                source="terminal",
-                request_id="request-7",
+                ControlSubmission(source="terminal", request_id="request-7"),
             )
         self.assertEqual((receipt.request_id, receipt.acceptance), ("request-7", "unknown"))
         self.assertNotEqual(receipt.vendor_correlation_id, "vendor-different")
@@ -318,6 +317,95 @@ class HarnessControlClientRetrySafetyTests(unittest.TestCase):
         ) as request:
             read_control_native_page(_Entry(), cursor="entry-2")
         self.assertEqual(request.call_args.args[2], {"limit": 200, "cursor": "entry-2"})
+
+
+def _status_batch(*lookups: object) -> dict[str, object]:
+    return {"bridgeEpoch": "epoch-1", "submissions": list(lookups)}
+
+
+def _found(request_id: str = "req-1", **overrides: object) -> dict[str, object]:
+    submission: dict[str, object] = {
+        "state": "delivered",
+        "submittedAt": "2026-07-16T08:00:00+00:00",
+        "updatedAt": "2026-07-16T08:00:01+00:00",
+        "acceptedAt": "2026-07-16T08:00:01+00:00",
+        "withdrawable": False,
+        "detail": "adapter accepted",
+    }
+    submission.update(overrides)
+    return {"requestId": request_id, "outcome": "found", "submission": submission}
+
+
+class SubmissionStatusLookupTests(unittest.TestCase):
+    """One lookup out of a positional status batch: attributed exactly, or refused loudly.
+
+    The cockpit asks about specific request ids and writes what comes back into its own view of
+    which submissions are live. A lookup that cannot be attributed to the id asked for at that
+    position, or that carries no usable lifecycle state, is worse than no answer -- so every one of
+    these refusals is typed rather than being coerced into a default.
+    """
+
+    def _read(self, body: object) -> object:
+        with mock.patch(
+            "agents_remember.serving.harness_control_client.request_control",
+            return_value=body,
+        ):
+            return read_submission_status(
+                _Entry(), expected_bridge_epoch="epoch-1", request_ids=("req-1",)
+            )
+
+    def test_a_found_lookup_carries_its_status_verbatim(self) -> None:
+        batch = self._read(_status_batch(_found()))
+        lookup = batch.submissions[0]  # type: ignore[attr-defined]
+        self.assertEqual(lookup.outcome, "found")
+        assert lookup.submission is not None
+        self.assertEqual(lookup.submission.state, "delivered")
+        self.assertEqual(lookup.submission.accepted_at, "2026-07-16T08:00:01+00:00")
+        self.assertFalse(lookup.submission.withdrawable)
+        self.assertEqual(lookup.submission.detail, "adapter accepted")
+
+    def test_a_not_found_lookup_needs_no_evidence(self) -> None:
+        batch = self._read(_status_batch({"requestId": "req-1", "outcome": "not-found"}))
+        lookup = batch.submissions[0]  # type: ignore[attr-defined]
+        self.assertEqual(lookup.outcome, "not-found")
+        self.assertIsNone(lookup.submission)
+
+    def test_a_non_object_lookup_is_refused(self) -> None:
+        with self.assertRaises(HarnessControlError) as ctx:
+            self._read(_status_batch("req-1"))
+        self.assertIn("submission lookup must be an object", str(ctx.exception))
+
+    def test_a_lookup_for_another_request_id_is_refused_rather_than_re_keyed(self) -> None:
+        # The batch is positional. Accepting a lookup whose id does not match its slot would
+        # attribute another submission's lifecycle to the one the cockpit asked about.
+        with self.assertRaises(HarnessControlError) as ctx:
+            self._read(_status_batch(_found("req-2")))
+        self.assertIn("request id or order mismatch", str(ctx.exception))
+
+    def test_an_unknown_outcome_or_missing_evidence_is_refused(self) -> None:
+        for lookup in (
+            {"requestId": "req-1", "outcome": "maybe", "submission": {}},
+            {"requestId": "req-1", "outcome": "found"},
+            {"requestId": "req-1", "outcome": "found", "submission": "accepted"},
+        ):
+            with self.assertRaises(HarnessControlError) as ctx:
+                self._read(_status_batch(lookup))
+            self.assertIn("invalid outcome or evidence", str(ctx.exception))
+
+    def test_a_non_boolean_withdrawable_is_refused(self) -> None:
+        # Withdrawability decides whether the cockpit may offer to cancel; a truthy string would
+        # silently become "yes you may" for a submission that is already committed.
+        with self.assertRaises(HarnessControlError) as ctx:
+            self._read(_status_batch(_found(withdrawable="yes")))
+        self.assertIn("withdrawable must be boolean", str(ctx.exception))
+
+    def test_a_found_lookup_without_a_usable_lifecycle_state_is_refused(self) -> None:
+        # A found submission whose state is missing or unknown cannot be projected onto the
+        # cockpit's queued/delivered/withdrawn view, so it is rejected rather than defaulted.
+        for state in (None, "", "half-done"):
+            with self.assertRaises(HarnessControlError) as ctx:
+                self._read(_status_batch(_found(state=state)))
+            self.assertIn("invalid submission lifecycle state", str(ctx.exception))
 
 
 if __name__ == "__main__":

@@ -37,16 +37,32 @@ class HostedReadinessResult:
     snapshot: AdapterSnapshot | None = None
 
 
+@dataclass(frozen=True)
+class ReadinessWait:
+    """How long to keep observing a bridge, how often, and by whose clock.
+
+    A bound without a poll interval never re-observes and a poll interval without a bound never
+    stops, so the four are one decision -- and the clock/sleep pair must be the same one the bound
+    is measured in, which separate parameters cannot guarantee.
+    """
+
+    seconds: float = 0.0
+    poll_interval: float = 0.1
+    monotonic: Callable[[], float] = time.monotonic
+    sleep: Callable[[float], None] = time.sleep
+
+
+NO_READINESS_WAIT = ReadinessWait()
+"""Observe exactly once and answer with what is true right now."""
+
+
 def hosted_session_readiness(
     catalog: TerminalCatalog,
     host: HostedReadinessHost,
     *,
     session_id: str,
-    wait_seconds: float = 0.0,
     snapshot_reader: SnapshotReader = read_control_snapshot,
-    monotonic: Callable[[], float] = time.monotonic,
-    sleep: Callable[[float], None] = time.sleep,
-    poll_interval: float = 0.1,
+    wait: ReadinessWait = NO_READINESS_WAIT,
     **_diagnostic_only: object,
 ) -> HostedReadinessResult:
     """Observe one bridge until it is ready or the caller's wait bound expires.
@@ -56,8 +72,8 @@ def hosted_session_readiness(
     callers fail by result instead of crashing while they migrate; they are never invoked.
     """
 
-    started = monotonic()
-    bound = min(MAX_HOSTED_READINESS_WAIT_SECONDS, max(0.0, wait_seconds))
+    started = wait.monotonic()
+    bound = min(MAX_HOSTED_READINESS_WAIT_SECONDS, max(0.0, wait.seconds))
     while True:
         observed = _observe_exact_session(
             catalog,
@@ -67,11 +83,11 @@ def hosted_session_readiness(
         )
         if observed.status != "not-ready":
             return observed
-        remaining = bound - (monotonic() - started)
+        remaining = bound - (wait.monotonic() - started)
         if remaining <= 0.0:
             return observed
         with contextlib.suppress(OSError):
-            sleep(min(max(0.01, poll_interval), remaining))
+            wait.sleep(min(max(0.01, wait.poll_interval), remaining))
 
 
 def _observe_exact_session(
@@ -84,6 +100,31 @@ def _observe_exact_session(
     entry = catalog.get(session_id)
     if entry is None:
         return HostedReadinessResult("unknown-session", session_id, detail="no catalog row")
+    unreachable = _bridge_unreachable(entry, host, session_id=session_id)
+    if unreachable is not None:
+        return unreachable
+    try:
+        snapshot = snapshot_reader(entry)
+    except HarnessControlError as exc:
+        return HostedReadinessResult("not-ready", session_id, entry=entry, detail=str(exc))
+    return _readiness_from_snapshot(
+        catalog, session_id=session_id, observed=entry, snapshot=snapshot
+    )
+
+
+def _bridge_unreachable(
+    entry: TerminalCatalogEntry,
+    host: HostedReadinessHost,
+    *,
+    session_id: str,
+) -> HostedReadinessResult | None:
+    """The result to report when this row has no bridge to read, or ``None`` to go read it.
+
+    Every branch here is settled from the catalog row and the tmux host alone -- no bridge call is
+    made until all of them pass, so an unaddressable, non-harness or legacy raw-TUI session never
+    reaches the protocol read.
+    """
+
     if entry.status == "terminated":
         return HostedReadinessResult(
             "terminated", session_id, entry=entry, detail=f"catalog status is {entry.status}"
@@ -113,13 +154,25 @@ def _observe_exact_session(
             entry=legacy,
             detail="legacy raw-TUI session is unsupported until restarted through the bridge",
         )
-    try:
-        snapshot = snapshot_reader(entry)
-    except HarnessControlError as exc:
-        return HostedReadinessResult("not-ready", session_id, entry=entry, detail=str(exc))
+    return None
+
+
+def _readiness_from_snapshot(
+    catalog: TerminalCatalog,
+    *,
+    session_id: str,
+    observed: TerminalCatalogEntry,
+    snapshot: AdapterSnapshot,
+) -> HostedReadinessResult:
+    """Re-read the catalog after the bridge call and project the snapshot onto the current row.
+
+    The snapshot read is not instantaneous, so the row it described may have been replaced or
+    terminated meanwhile. A changed identity is reported as ``unknown-session`` rather than being
+    silently attributed to whatever now holds that id.
+    """
 
     current = catalog.get(session_id)
-    if current is None or hosted_session_identity(current) != hosted_session_identity(entry):
+    if current is None or hosted_session_identity(current) != hosted_session_identity(observed):
         return HostedReadinessResult(
             "unknown-session", session_id, detail="catalog identity changed during readiness check"
         )
@@ -131,9 +184,12 @@ def _observe_exact_session(
     ready = snapshot.control == "ready" and snapshot.acceptance in {"immediate", "queued"}
     if ready:
         return HostedReadinessResult("ready", session_id, entry=current, snapshot=snapshot)
-    detail = _snapshot_detail(snapshot)
     return HostedReadinessResult(
-        "not-ready", session_id, entry=current, detail=detail, snapshot=snapshot
+        "not-ready",
+        session_id,
+        entry=current,
+        detail=_snapshot_detail(snapshot),
+        snapshot=snapshot,
     )
 
 

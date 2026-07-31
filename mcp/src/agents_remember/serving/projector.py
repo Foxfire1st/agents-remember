@@ -37,6 +37,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import AsyncGenerator, Callable
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 from uuid import uuid4
@@ -45,7 +46,8 @@ from agents_remember.observer.projection_inputs import (
     ProjectionInputState,
     ProjectionRefresh,
 )
-from agents_remember.observer.projection_store import project_and_write
+from agents_remember.observer.projection_store import ProjectionTickState, project_and_write
+from agents_remember.serving.cadence import DEFAULT_PROJECTION_CADENCE, ProjectionCadence
 from agents_remember.serving.change_watcher import DEFAULT_HEARTBEAT_SECONDS, ChangePacer
 from agents_remember.serving.delta import (
     DeltaEvent,
@@ -89,6 +91,38 @@ async def _shutdown_task(task: asyncio.Task[None] | None, label: str) -> None:
         logger.exception("%s task failed before projector shutdown", label)
 
 
+@dataclass(frozen=True)
+class ProjectionReplay:
+    """The sim/replay seam: the clock the projector reads and the feeder that runs each tick.
+
+    They are one substitution. Sim wires a replay clock together with the feeder that writes the
+    world that clock is about; a replay clock without its feeder ticks over a world that never
+    moves. Both ``None`` is live serving.
+    """
+
+    now: Callable[[], datetime] | None = None
+    before_tick: Callable[[datetime], object] | None = None
+
+
+@dataclass(frozen=True)
+class ProjectionRefreshers:
+    """The side-inputs a LIVE tick drives, and the watcher that lets it wake early.
+
+    All three are enabled together for live serving and disabled together for sim replay (the
+    feeder only writes *inside* a tick, so a change-gated loop would never wake). They are one
+    choice -- "is this projector attached to a moving world?" -- not three independent hooks.
+    """
+
+    provider: ProviderStateRefresh | None = None
+    landing: LandingStateRefresh | None = None
+    change_watcher: ChangeWatch | None = None
+
+
+LIVE_PROJECTION_CLOCK = ProjectionReplay()
+"""No replay clock and no feeder: the projector reads real time and drives a moving world."""
+NO_PROJECTION_REFRESHERS = ProjectionRefreshers()
+
+
 class Projector:
     """Owns the latest projection, a monotonic sequence, and the subscriber fan-out."""
 
@@ -96,20 +130,19 @@ class Projector:
         self,
         config: McpRuntimeConfig,
         *,
-        interval: float = 1.0,
-        heartbeat: float | None = None,
-        now: Callable[[], datetime] | None = None,
-        before_tick: Callable[[datetime], object] | None = None,
-        provider_refresher: ProviderStateRefresh | None = None,
-        landing_refresher: LandingStateRefresh | None = None,
-        change_watcher: ChangeWatch | None = None,
+        cadence: ProjectionCadence = DEFAULT_PROJECTION_CADENCE,
+        replay: ProjectionReplay = LIVE_PROJECTION_CLOCK,
+        refreshers: ProjectionRefreshers = NO_PROJECTION_REFRESHERS,
     ) -> None:
+        interval = cadence.interval
+        heartbeat = cadence.heartbeat
+        change_watcher = refreshers.change_watcher
         self._config = config
         self._interval = interval
-        self._now: Callable[[], datetime] = now or _utcnow
-        self._before_tick = before_tick
-        self._provider_refresher = provider_refresher
-        self._landing_refresher = landing_refresher
+        self._now: Callable[[], datetime] = replay.now or _utcnow
+        self._before_tick = replay.before_tick
+        self._provider_refresher = refreshers.provider
+        self._landing_refresher = refreshers.landing
         # Adaptive waking (260712-PTS-L3): with a watcher, the run loop paces via the
         # ChangePacer (change-driven + heartbeat, floored to one tick per ``interval``).
         # Without one -- sim replay and the injected-now() tests -- it keeps the exact
@@ -224,10 +257,12 @@ class Projector:
         return project_and_write(
             self._config,
             now=moment,
-            provider_refresher=self._provider_refresher,
-            landing_state=self._landing_refresher,
-            input_state=self._input_state,
             refresh=refresh,
+            tick=ProjectionTickState(
+                input_state=self._input_state,
+                provider_refresher=self._provider_refresher,
+                landing_state=self._landing_refresher,
+            ),
         )
 
     def _publish_projection(self, current: WorkspaceProjection) -> None:

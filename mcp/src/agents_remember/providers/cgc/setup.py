@@ -22,6 +22,7 @@ from agents_remember.providers.identity import (
     scoped_name,
 )
 from agents_remember.providers.setup_common import (
+    LifecycleCommand,
     provider_settings,
     run_lifecycle,
     selected_provider_enabled,
@@ -225,11 +226,13 @@ def install_enabled_provider(args: Any, settings: dict[str, Any]) -> list[dict[s
     progress.phase_start("codegraphcontext", "install-all")
     result = run_lifecycle(
         args.coordination_root,
-        "cgc",
-        "install-all",
+        LifecycleCommand(
+            provider="cgc",
+            action="install-all",
+            extra_args=tuple(cgc_extra_args(args)),
+        ),
         timeout=args.timeout,
         dry_run=args.dry_run,
-        extra_args=cgc_extra_args(args),
     )
     progress.phase_done(result)
     return [result]
@@ -277,11 +280,13 @@ def _refresh_after_seed(args: Any, seed: dict[str, Any], progress: SetupProgress
         )
         result = run_lifecycle(
             args.coordination_root,
-            "cgc",
-            "refresh-all",
+            LifecycleCommand(
+                provider="cgc",
+                action="refresh-all",
+                extra_args=tuple(cgc_extra_args(args)),
+            ),
             timeout=args.timeout,
             dry_run=args.dry_run,
-            extra_args=cgc_extra_args(args),
         )
         progress.phase_done(result)
         return result

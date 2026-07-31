@@ -29,11 +29,19 @@ MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
 from agents_remember.controlplane.expectation_rows import (
+    Expectation,
     ExpectationRowStore,
+    ExpectationSubject,
     write_expectation_row,
 )
 from agents_remember.controlplane.interaction_retention import INBOX_MAX_CURRENT_ROWS
-from agents_remember.controlplane.operator_inbox_records import create_operator_inbox_entry
+from agents_remember.controlplane.operator_inbox_records import (
+    InboxAddress,
+    InboxMessage,
+    InboxPoster,
+    InboxRouting,
+    create_operator_inbox_entry,
+)
 from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
 from agents_remember.controlplane.orchestration_nudges import OrchestrationNudgeStore
 from agents_remember.controlplane.supervisor_signals import SupervisorSignalCooldownStore
@@ -49,32 +57,23 @@ from agents_remember.serving.supervisor_heartbeat import (
     supervisor_staleness_banner,
 )
 from agents_remember.serving.terminal import TerminalHost
-from agents_remember.serving.terminal_catalog import (
-    SeatTurnState,
-    TerminalCatalog,
-    TerminalCatalogEntry,
-    TerminalSessionKind,
-    TerminalSessionStatus,
-)
+from agents_remember.serving.terminal_catalog import TerminalCatalog, TerminalCatalogEntry
 from agents_remember.serving.terminal_paste import PasteResult, TerminalPaster
 
 NOW = datetime(2026, 7, 8, 12, 0, 0, tzinfo=UTC)
 
 
-def _entry(
-    session_id: str,
-    *,
-    kind: TerminalSessionKind = "harness",
-    status: TerminalSessionStatus = "running",
-    leaf_key: str | None = None,
-    turn_state: SeatTurnState | None = None,
-    turn_state_changed_at: str | None = None,
-    liveness_failures: int = 0,
-) -> TerminalCatalogEntry:
+def _entry(session_id: str, *, leaf_key: str | None = None) -> TerminalCatalogEntry:
+    """A running harness seat. Vary anything else with ``replace(...)`` on the frozen row.
+
+    ``TerminalCatalogEntry`` already carries every knob these scenarios need, so the builder
+    only supplies what makes a seat a seat here (its id and the leaf it holds) rather than
+    re-declaring the row's fields as parameters that drift from it.
+    """
     return TerminalCatalogEntry(
         id=session_id,
         label=f"Chat {session_id}",
-        kind=kind,
+        kind="harness",
         harness="codex",
         lifecycle_id=None,
         cwd=Path("/workspace"),
@@ -82,11 +81,8 @@ def _entry(
         command=("codex",),
         created_at="2026-07-08T00:00:00+00:00",
         last_attached_at="2026-07-08T00:00:00+00:00",
-        status=status,
+        status="running",
         leaf_key=leaf_key,
-        turn_state=turn_state,
-        turn_state_changed_at=turn_state_changed_at,
-        liveness_failures=liveness_failures,
     )
 
 
@@ -215,13 +211,16 @@ class NeverBriefedSeatTests(_LivenessSimulationCase):
         # met because the worker's very first paste (the brief) never landed.
         write_expectation_row(
             self.expectation_store,
+            Expectation(
+                kind="briefed-by",
+                source_id="worker-1",
+                subject=ExpectationSubject(
+                    agent_id="worker-1", leaf_key="repo-a/260707_master/leaf-9"
+                ),
+            ),
             row_id="briefed-worker-1",
             now=NOW - timedelta(minutes=10),
-            kind="briefed-by",
             sla_seconds=60.0,
-            source_id="worker-1",
-            subject_agent_id="worker-1",
-            leaf_key="repo-a/260707_master/leaf-9",
         )
         ctx = self._ctx()
 
@@ -257,15 +256,11 @@ class NoHostedSessionTests(_LivenessSimulationCase):
             replace(_entry("worker-1"), spawn_role="worker", spawned_by_session="manager-1")
         )
         entry = create_operator_inbox_entry(
+            InboxMessage(ask="dispatch", response="you are the worker", message_kind="message"),
             entry_id="e1",
             now=NOW.isoformat(),
-            lifecycle_id=None,
-            agent_id="worker-1",
-            ask="dispatch",
-            response="you are the worker",
-            created_by="manager",
-            created_via="cli",
-            message_kind="message",
+            routing=InboxRouting(address=InboxAddress(lifecycle_id=None, agent_id="worker-1")),
+            poster=InboxPoster(created_by="manager", created_via="cli"),
         )
         self.inbox_store.append(entry)
         ctx = self._ctx(
@@ -301,15 +296,13 @@ class DeadSeatStormTests(_LivenessSimulationCase):
         row_count = 2000
         for index in range(row_count):
             entry = create_operator_inbox_entry(
+                InboxMessage(ask="dispatch", response="you are the worker", message_kind="message"),
                 entry_id=f"storm-{index}",
                 now=NOW.isoformat(),
-                lifecycle_id=None,
-                agent_id=f"dead-seat-{index}",
-                ask="dispatch",
-                response="you are the worker",
-                created_by="manager",
-                created_via="cli",
-                message_kind="message",
+                routing=InboxRouting(
+                    address=InboxAddress(lifecycle_id=None, agent_id=f"dead-seat-{index}")
+                ),
+                poster=InboxPoster(created_by="manager", created_via="cli"),
             ).model_copy(
                 update={
                     "deliveryState": "no-hosted-session",
@@ -376,15 +369,13 @@ class ManagerMidTurnSignalLandsTests(_LivenessSimulationCase):
             replace(_entry("manager-1"), spawn_role="manager", spawned_by_session="orchestrator-1")
         )
         entry = create_operator_inbox_entry(
+            InboxMessage(
+                ask="escalation", response="worker-1 is silent", message_kind="escalation"
+            ),
             entry_id="e1",
             now=NOW.isoformat(),
-            lifecycle_id=None,
-            agent_id="manager-1",
-            ask="escalation",
-            response="worker-1 is silent",
-            created_by="system",
-            created_via="cli",
-            message_kind="escalation",
+            routing=InboxRouting(address=InboxAddress(lifecycle_id=None, agent_id="manager-1")),
+            poster=InboxPoster(created_by="system", created_via="cli"),
         )
         self.inbox_store.append(entry)
         # A busy-pane marker is diagnostic only. A legacy raw-TUI session has no adapter receipt,
@@ -438,16 +429,15 @@ class DeadManagerLiveWorkersTests(_LivenessSimulationCase):
             )
         )
         entry = create_operator_inbox_entry(
+            InboxMessage(ask="ask", response="resp", message_kind="escalation"),
             entry_id="e1",
             now=(NOW - timedelta(minutes=5)).isoformat(),
-            lifecycle_id=None,
-            agent_id="manager-1",
-            ask="ask",
-            response="resp",
-            created_by="system",
-            created_via="cli",
-            message_kind="escalation",
-            recipient_role="manager",
+            routing=InboxRouting(
+                address=InboxAddress(
+                    lifecycle_id=None, agent_id="manager-1", recipient_role="manager"
+                )
+            ),
+            poster=InboxPoster(created_by="system", created_via="cli"),
         ).model_copy(update={"rung": 1, "escalatedAt": (NOW - timedelta(minutes=5)).isoformat()})
         self.inbox_store.append(entry)
 
@@ -544,21 +534,17 @@ class CodexQuotaModalTests(_LivenessSimulationCase):
         self.catalog.upsert(replace(_entry("manager-1"), spawn_role="manager"))
         self.catalog.upsert(
             replace(
-                _entry("worker-1", kind="harness"),
+                _entry("worker-1"),
                 spawn_role="worker",
                 spawned_by_session="manager-1",
             )
         )
         entry = create_operator_inbox_entry(
+            InboxMessage(ask="dispatch", response="you are the worker", message_kind="message"),
             entry_id="e1",
             now=NOW.isoformat(),
-            lifecycle_id=None,
-            agent_id="worker-1",
-            ask="dispatch",
-            response="you are the worker",
-            created_by="manager",
-            created_via="cli",
-            message_kind="message",
+            routing=InboxRouting(address=InboxAddress(lifecycle_id=None, agent_id="worker-1")),
+            poster=InboxPoster(created_by="manager", created_via="cli"),
         )
         self.inbox_store.append(entry)
         # The pane permanently shows the codex quota modal. The classifier may diagnose it in
@@ -598,11 +584,7 @@ class FalseDeadSeatHysteresisTests(_LivenessSimulationCase):
         self.catalog.upsert(replace(_entry("orchestrator-1"), spawn_role="orchestrator"))
         self.catalog.upsert(
             replace(
-                _entry(
-                    "worker-1",
-                    turn_state="stale",
-                    turn_state_changed_at=NOW.isoformat(),
-                ),
+                _entry("worker-1").with_turn_state("stale", changed_at=NOW.isoformat()),
                 spawn_role="worker",
                 spawned_by_session="orchestrator-1",
             )
@@ -642,10 +624,8 @@ class FalseDeadSeatHysteresisTests(_LivenessSimulationCase):
         with tempfile.TemporaryDirectory() as tmp:
             catalog = TerminalCatalog(Path(tmp) / "catalog.json")
             catalog.upsert(
-                _entry(
-                    "worker-1",
-                    turn_state="stale",
-                    turn_state_changed_at=(NOW - timedelta(minutes=5)).isoformat(),
+                _entry("worker-1").with_turn_state(
+                    "stale", changed_at=(NOW - timedelta(minutes=5)).isoformat()
                 )
             )
             findings = evaluate_seat_liveness_findings(catalog, now=NOW, stale_seconds=60.0)

@@ -16,7 +16,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
@@ -29,7 +29,7 @@ from agents_remember.controlplane.attention_dismissals import (
     AttentionDismissalRecord,
     AttentionDismissalStore,
 )
-from agents_remember.controlplane.records import create_gate, decide_gate
+from agents_remember.controlplane.records import GateAnchor, GateVerdict, create_gate, decide_gate
 from agents_remember.controlplane.store import GateStore
 from agents_remember.kernel.memory_ledger import (
     create_initial_ledger,
@@ -72,6 +72,8 @@ from agents_remember.observer.projection_store import (
 from agents_remember.observer.reducer import (
     TOKEN_SERIES_MAX,
     TOKEN_SERIES_RECENT,
+    AnalyticalInputs,
+    WorkspaceStructure,
     build_analytics,
     build_attention_queue,
     build_engine_processes,
@@ -111,12 +113,20 @@ from agents_remember.providers.current_state import current_state_path
 from agents_remember.providers.setup_progress import PROGRESS_SCHEMA
 from agents_remember.tasks import TaskDocument, write_task_doc
 from agents_remember.worktrees.start_progress import (
+    StartBeat,
+    StartingEnclosure,
     clear_start_progress,
     read_start_progress,
     start_progress_path,
     write_start_progress,
 )
-from agents_remember.worktrees.worktree_contract import default_contract, write_contract
+from agents_remember.worktrees.worktree_contract import (
+    ContractTask,
+    LeafIdentity,
+    RepoBranchPlan,
+    default_contract,
+    write_contract,
+)
 
 T0 = "2026-06-13T18:00:00+00:00"
 FRESH = datetime(2026, 6, 13, 18, 0, 30, tzinfo=UTC)  # 30s after T0  (< STALE)
@@ -124,26 +134,56 @@ STALE = datetime(2026, 6, 13, 18, 10, 0, tzinfo=UTC)  # 600s after T0 (> STALE, 
 DORMANT = datetime(2026, 6, 13, 19, 30, 0, tzinfo=UTC)  # 5400s after T0 (> TTL)
 
 
+@dataclass(frozen=True)
+class Attribution:
+    """Who produced an event and how far it can be trusted.
+
+    The observer never reads one without the other: ``declared`` from a model is a claim,
+    ``observed`` from the system is a measurement, and the projection's trust ladder grades
+    the pair. Naming the four combinations the suite uses keeps a case from inventing a
+    fifth by accident.
+    """
+
+    trust: str = "declared"
+    actor: str = "model"
+
+
+DECLARED_BY_MODEL = Attribution()
+OBSERVED_BY_MODEL = Attribution(trust="observed")
+OBSERVED_BY_SYSTEM = Attribution(trust="observed", actor="system")
+INFERRED_BY_SYSTEM = Attribution(trust="inferred", actor="system")
+
+
+@dataclass(frozen=True)
+class EnclosureRef:
+    """The enclosure an event points at: its contract path and the repo that contract governs.
+
+    A promotion carries both or neither -- the path identifies the enclosure and the repo id
+    is how the projection joins it to a repository -- so they are one reference.
+    """
+
+    path: str
+    repo_id: str
+
+
 def _event(
     kind: str,
     *,
     lifecycle_id: str = "LC1",
     ts: str = T0,
-    trust: str = "declared",
-    actor: str = "model",
-    enclosure: str | None = None,
-    repo_id: str | None = None,
+    by: Attribution = DECLARED_BY_MODEL,
+    enclosure: EnclosureRef | None = None,
     **data: object,
 ) -> Event:
     return Event(
         id=new_ulid(),
         ts=ts,
         kind=kind,
-        trust=trust,  # type: ignore[arg-type]
-        actor=actor,  # type: ignore[arg-type]
+        trust=by.trust,  # type: ignore[arg-type]
+        actor=by.actor,  # type: ignore[arg-type]
         lifecycleId=lifecycle_id,
-        enclosure=enclosure,
-        repoId=repo_id,
+        enclosure=enclosure.path if enclosure else None,
+        repoId=enclosure.repo_id if enclosure else None,
         data=dict(data),
     )
 
@@ -406,7 +446,7 @@ class FoldTests(unittest.TestCase):
             _event(
                 "tool.completed",
                 ts="2026-06-13T18:00:05+00:00",
-                trust="observed",
+                by=OBSERVED_BY_MODEL,
                 tool="a",
                 tokens=100,
                 ok=True,
@@ -414,7 +454,7 @@ class FoldTests(unittest.TestCase):
             _event(
                 "tool.completed",
                 ts="2026-06-13T18:00:10+00:00",
-                trust="observed",
+                by=OBSERVED_BY_MODEL,
                 tool="b",
                 tokens=50,
                 ok=True,
@@ -428,10 +468,8 @@ class FoldTests(unittest.TestCase):
             _event(
                 "lifecycle.promoted",
                 ts="2026-06-13T18:00:05+00:00",
-                trust="observed",
-                actor="system",
-                enclosure="/c.md",
-                repo_id="repo-a",
+                by=OBSERVED_BY_SYSTEM,
+                enclosure=EnclosureRef("/c.md", "repo-a"),
                 scope="repo-a",
             ),
         ]
@@ -470,7 +508,7 @@ class DeterminismTests(unittest.TestCase):
             _event(
                 "tool.completed",
                 ts="2026-06-13T18:00:10+00:00",
-                trust="observed",
+                by=OBSERVED_BY_MODEL,
                 tool="a",
                 tokens=7,
                 ok=True,
@@ -504,8 +542,7 @@ class InferredLayerTests(unittest.TestCase):
             _event(
                 "lifecycle.promoted",
                 ts="2026-06-13T18:00:05+00:00",
-                trust="observed",
-                actor="system",
+                by=OBSERVED_BY_SYSTEM,
                 scope="repo-a",
             ),
         ]
@@ -531,8 +568,7 @@ class CorrectionTests(unittest.TestCase):
         correction = _event(
             "correction.recorded",
             ts="2026-06-13T18:00:10+00:00",
-            trust="inferred",
-            actor="system",
+            by=INFERRED_BY_SYSTEM,
             corrects=ended.id,
             state="abandoned",
         )
@@ -544,8 +580,7 @@ class CorrectionTests(unittest.TestCase):
         bogus = _event(
             "correction.recorded",
             ts="2026-06-13T18:00:10+00:00",
-            trust="inferred",
-            actor="system",
+            by=INFERRED_BY_SYSTEM,
             corrects=ended.id,
             state="not-a-state",
         )
@@ -589,10 +624,12 @@ class WorkspaceTests(unittest.TestCase):
     def test_active_worktree_groups_passthrough_sorted(self) -> None:
         proj = project_workspace(
             [[_started(lifecycle_id="LC1", ts=T0)]],
-            enclosures=[_enclosure()],
-            providers=[],
+            structure=WorkspaceStructure(
+                enclosures=[_enclosure()],
+                providers=[],
+                active_worktree_groups=["b-ar", "a-ar"],
+            ),
             now=FRESH,
-            active_worktree_groups=["b-ar", "a-ar"],
         )
         # The Topology active set is exposed deterministically (sorted) on the projection.
         self.assertEqual(proj.activeWorktreeGroups, ["a-ar", "b-ar"])
@@ -600,8 +637,7 @@ class WorkspaceTests(unittest.TestCase):
     def test_active_worktree_groups_default_empty(self) -> None:
         proj = project_workspace(
             [[_started(lifecycle_id="LC1", ts=T0)]],
-            enclosures=[_enclosure()],
-            providers=[],
+            structure=WorkspaceStructure(enclosures=[_enclosure()], providers=[]),
             now=FRESH,
         )
         self.assertEqual(proj.activeWorktreeGroups, [])
@@ -621,12 +657,14 @@ class WorkspaceTests(unittest.TestCase):
         ]
         proj = project_workspace(
             logs,
-            enclosures=[_enclosure()],
-            providers=[
-                ProviderNode(
-                    id="cgc", state="ready", ok=True, watcherUp=True, indexingState="indexed"
-                )
-            ],
+            structure=WorkspaceStructure(
+                enclosures=[_enclosure()],
+                providers=[
+                    ProviderNode(
+                        id="cgc", state="ready", ok=True, watcherUp=True, indexingState="indexed"
+                    )
+                ],
+            ),
             now=FRESH,
         )
         # 2 event-backed (running, blocked) + 1 synthesized persistent paused from the enclosure
@@ -717,11 +755,9 @@ class WorkspaceTests(unittest.TestCase):
 
         proj = project_workspace(
             logs,
-            enclosures=[],
-            providers=[],
+            structure=WorkspaceStructure(enclosures=[], providers=[]),
             now=FRESH,
-            task_documents=task_documents,
-            series=series,
+            given=AnalyticalInputs(task_documents=task_documents, series=series),
         )
 
         self.assertEqual(proj.analytics.series[0].seriesTokenTotal, 150)
@@ -730,8 +766,7 @@ class WorkspaceTests(unittest.TestCase):
         # An enclosure already represented by an event-backed lifecycle is not duplicated.
         proj = project_workspace(
             [[_started(lifecycle_id="LC1", ts=T0)]],
-            enclosures=[_enclosure(lifecycleId="LC1")],
-            providers=[],
+            structure=WorkspaceStructure(enclosures=[_enclosure(lifecycleId="LC1")], providers=[]),
             now=FRESH,
         )
         self.assertEqual([lc.id for lc in proj.lifecycles], ["LC1"])
@@ -742,12 +777,14 @@ class WorkspaceTests(unittest.TestCase):
         # a paused zombie into the operations tree.
         proj = project_workspace(
             [],
-            enclosures=[
-                _enclosure(enclosure="/a.md", lifecycleId="LC-GONE", cleanup="abandoned"),
-                _enclosure(enclosure="/b.md", lifecycleId="", cleanup="reopened"),
-                _enclosure(enclosure="/c.md", lifecycleId="", cleanup="pending"),
-            ],
-            providers=[],
+            structure=WorkspaceStructure(
+                enclosures=[
+                    _enclosure(enclosure="/a.md", lifecycleId="LC-GONE", cleanup="abandoned"),
+                    _enclosure(enclosure="/b.md", lifecycleId="", cleanup="reopened"),
+                    _enclosure(enclosure="/c.md", lifecycleId="", cleanup="pending"),
+                ],
+                providers=[],
+            ),
             now=FRESH,
         )
         self.assertEqual([lc.enclosure for lc in proj.lifecycles], ["/c.md"])
@@ -763,17 +800,16 @@ class WorkspaceTests(unittest.TestCase):
                 "lifecycle.promoted",
                 lifecycle_id="LC-DEAD",
                 ts="2026-06-13T18:00:05+00:00",
-                trust="observed",
-                actor="system",
-                enclosure="/c.md",
-                repo_id="r",
+                by=OBSERVED_BY_SYSTEM,
+                enclosure=EnclosureRef("/c.md", "r"),
                 scope="r",
             ),
         ]
         proj = project_workspace(
             [log],
-            enclosures=[_enclosure(lifecycleId="LC-DEAD", cleanup="abandoned")],
-            providers=[],
+            structure=WorkspaceStructure(
+                enclosures=[_enclosure(lifecycleId="LC-DEAD", cleanup="abandoned")], providers=[]
+            ),
             now=FRESH,
         )
         dead = next(lc for lc in proj.lifecycles if lc.id == "LC-DEAD")
@@ -788,15 +824,12 @@ class WorkspaceTests(unittest.TestCase):
                         "lifecycle.promoted",
                         lifecycle_id="LC1",
                         ts="2026-06-13T18:00:05+00:00",
-                        trust="observed",
-                        actor="system",
-                        enclosure="/deleted.md",
-                        repo_id="repo-a",
+                        by=OBSERVED_BY_SYSTEM,
+                        enclosure=EnclosureRef("/deleted.md", "repo-a"),
                     ),
                 ]
             ],
-            enclosures=[],
-            providers=[],
+            structure=WorkspaceStructure(enclosures=[], providers=[]),
             now=STALE,
         )
         self.assertEqual(proj.lifecycles, [])
@@ -811,10 +844,8 @@ class WorkspaceTests(unittest.TestCase):
                         "lifecycle.promoted",
                         lifecycle_id="LC1",
                         ts="2026-06-13T18:00:05+00:00",
-                        trust="observed",
-                        actor="system",
-                        enclosure="/deleted.md",
-                        repo_id="repo-a",
+                        by=OBSERVED_BY_SYSTEM,
+                        enclosure=EnclosureRef("/deleted.md", "repo-a"),
                     ),
                     _event(
                         "lifecycle.ended",
@@ -824,8 +855,7 @@ class WorkspaceTests(unittest.TestCase):
                     ),
                 ]
             ],
-            enclosures=[],
-            providers=[],
+            structure=WorkspaceStructure(enclosures=[], providers=[]),
             now=FRESH,
         )
         self.assertEqual(proj.lifecycles, [])
@@ -840,15 +870,12 @@ class WorkspaceTests(unittest.TestCase):
                         "lifecycle.promoted",
                         lifecycle_id="LC1",
                         ts="2026-06-13T18:00:05+00:00",
-                        trust="observed",
-                        actor="system",
-                        enclosure="/incoming.md",
-                        repo_id="repo-a",
+                        by=OBSERVED_BY_SYSTEM,
+                        enclosure=EnclosureRef("/incoming.md", "repo-a"),
                     ),
                 ]
             ],
-            enclosures=[],
-            providers=[],
+            structure=WorkspaceStructure(enclosures=[], providers=[]),
             now=FRESH,
         )
         self.assertEqual([lc.id for lc in proj.lifecycles], ["LC1"])
@@ -862,10 +889,8 @@ class WorkspaceTests(unittest.TestCase):
                         "lifecycle.promoted",
                         lifecycle_id="LC1",
                         ts="2026-06-13T18:00:05+00:00",
-                        trust="observed",
-                        actor="system",
-                        enclosure="/incoming.md",
-                        repo_id="repo-a",
+                        by=OBSERVED_BY_SYSTEM,
+                        enclosure=EnclosureRef("/incoming.md", "repo-a"),
                     ),
                     _event(
                         "lifecycle.blocked",
@@ -875,8 +900,7 @@ class WorkspaceTests(unittest.TestCase):
                     ),
                 ]
             ],
-            enclosures=[],
-            providers=[],
+            structure=WorkspaceStructure(enclosures=[], providers=[]),
             now=FRESH,
         )
         self.assertEqual([(lc.id, lc.state) for lc in proj.lifecycles], [("LC1", "blocked")])
@@ -889,10 +913,8 @@ class WorkspaceTests(unittest.TestCase):
                     "lifecycle.promoted",
                     lifecycle_id="OLD",
                     ts="2026-06-13T18:00:05+00:00",
-                    trust="observed",
-                    actor="system",
-                    enclosure="/c.md",
-                    repo_id="repo-a",
+                    by=OBSERVED_BY_SYSTEM,
+                    enclosure=EnclosureRef("/c.md", "repo-a"),
                 ),
             ],
             [
@@ -901,17 +923,16 @@ class WorkspaceTests(unittest.TestCase):
                     "lifecycle.promoted",
                     lifecycle_id="NEW",
                     ts="2026-06-13T18:00:05+00:00",
-                    trust="observed",
-                    actor="system",
-                    enclosure="/c.md",
-                    repo_id="repo-a",
+                    by=OBSERVED_BY_SYSTEM,
+                    enclosure=EnclosureRef("/c.md", "repo-a"),
                 ),
             ],
         ]
         proj = project_workspace(
             logs,
-            enclosures=[_enclosure(enclosure="/c.md", lifecycleId="NEW")],
-            providers=[],
+            structure=WorkspaceStructure(
+                enclosures=[_enclosure(enclosure="/c.md", lifecycleId="NEW")], providers=[]
+            ),
             now=FRESH,
         )
         self.assertEqual([lc.id for lc in proj.lifecycles], ["NEW"])
@@ -919,8 +940,7 @@ class WorkspaceTests(unittest.TestCase):
     def test_fleeting_lifecycle_does_not_need_enclosure(self) -> None:
         proj = project_workspace(
             [[_started(lifecycle_id="LC1", ts=T0, fleeting=True)]],
-            enclosures=[],
-            providers=[],
+            structure=WorkspaceStructure(enclosures=[], providers=[]),
             now=FRESH,
         )
         self.assertEqual([lc.id for lc in proj.lifecycles], ["LC1"])
@@ -934,22 +954,23 @@ class WorkspaceTests(unittest.TestCase):
                         "lifecycle.promoted",
                         lifecycle_id="LC1",
                         ts="2026-06-13T18:00:05+00:00",
-                        trust="observed",
-                        actor="system",
-                        enclosure="/c.md",
-                        repo_id="repo-a",
+                        by=OBSERVED_BY_SYSTEM,
+                        enclosure=EnclosureRef("/c.md", "repo-a"),
                     ),
                 ]
             ],
-            enclosures=[_enclosure(enclosure="/c.md", lifecycleId="")],
-            providers=[],
+            structure=WorkspaceStructure(
+                enclosures=[_enclosure(enclosure="/c.md", lifecycleId="")], providers=[]
+            ),
             now=FRESH,
         )
         self.assertEqual([lc.id for lc in proj.lifecycles], ["LC1"])
 
     def test_dormant_persistent_worktree_stays_out_of_the_attention_queue(self) -> None:
         # A synthesized paused persistent worktree (no events) is the hangar's job, not the queue.
-        proj = project_workspace([], enclosures=[_enclosure()], providers=[], now=FRESH)
+        proj = project_workspace(
+            [], structure=WorkspaceStructure(enclosures=[_enclosure()], providers=[]), now=FRESH
+        )
         self.assertEqual([lc.state for lc in proj.lifecycles], ["paused"])
         self.assertEqual(proj.analytics.attentionQueue, [])
 
@@ -971,7 +992,9 @@ class StoreIOTests(unittest.TestCase):
         self.assertEqual(read_lifecycle_logs(self.root), [])
 
     def test_write_projection_round_trips_atomically(self) -> None:
-        proj = project_workspace([[_started()]], enclosures=[], providers=[], now=FRESH)
+        proj = project_workspace(
+            [[_started()]], structure=WorkspaceStructure(enclosures=[], providers=[]), now=FRESH
+        )
         write_projection(self.root, proj)
         state = json.loads((self.root / "latest-state.json").read_text(encoding="utf-8"))
         WorkspaceProjection.model_validate(state)
@@ -1345,17 +1368,20 @@ class SnapshotReaderTests(unittest.TestCase):
     def test_read_enclosures_from_contract(self) -> None:
         coord = (self.tmp / "coord").resolve()
         contract = default_contract(
-            task_name="Observe Lifecycle",
-            repo_name="repo-a",
-            workflow_kind="light-task",
-            memory_mode="disabled",
-            coordination_root=coord,
-            code_repo_path=coord / "repo-a",
-            code_source_branch="main",
-            code_work_branch="ar/observe",
-            code_base_commit="0" * 40,
-            worktree_name="observe",
-            lifecycle_id="LC-1",
+            ContractTask(
+                name="Observe Lifecycle",
+                repo_name="repo-a",
+                coordination_root=coord,
+                workflow_kind="light-task",
+                memory_mode="disabled",
+            ),
+            leaf=LeafIdentity(worktree_name="observe", lifecycle_id="LC-1"),
+            code=RepoBranchPlan(
+                repo_path=coord / "repo-a",
+                source_branch="main",
+                work_branch="ar/observe",
+                base_commit="0" * 40,
+            ),
         )
         contract.contract_path.parent.mkdir(parents=True, exist_ok=True)
         write_contract(contract.contract_path, contract)
@@ -1369,21 +1395,26 @@ class SnapshotReaderTests(unittest.TestCase):
 
     def _existence_contract(self, coord: Path):  # -> WorktreeContract
         contract = default_contract(
-            task_name="Observe Lifecycle",
-            repo_name="repo-a",
-            workflow_kind="light-task",
-            memory_mode="external",
-            coordination_root=coord,
-            code_repo_path=coord / "repo-a",
-            code_source_branch="main",
-            code_work_branch="ar/observe",
-            code_base_commit="0" * 40,
-            worktree_name="observe",
-            memory_repo_path=coord / "repo-a-memory",
-            memory_source_branch="main",
-            memory_work_branch="ar/observe-memory",
-            memory_base_commit="1" * 40,
-            lifecycle_id="LC-1",
+            ContractTask(
+                name="Observe Lifecycle",
+                repo_name="repo-a",
+                coordination_root=coord,
+                workflow_kind="light-task",
+                memory_mode="external",
+            ),
+            leaf=LeafIdentity(worktree_name="observe", lifecycle_id="LC-1"),
+            code=RepoBranchPlan(
+                repo_path=coord / "repo-a",
+                source_branch="main",
+                work_branch="ar/observe",
+                base_commit="0" * 40,
+            ),
+            memory=RepoBranchPlan(
+                repo_path=coord / "repo-a-memory",
+                source_branch="main",
+                work_branch="ar/observe-memory",
+                base_commit="1" * 40,
+            ),
         )
         contract.contract_path.parent.mkdir(parents=True, exist_ok=True)
         write_contract(contract.contract_path, contract)
@@ -1483,7 +1514,7 @@ class TokenSeriesTests(unittest.TestCase):
             _event(
                 "tool.completed",
                 ts="2026-06-13T18:00:05+00:00",
-                trust="observed",
+                by=OBSERVED_BY_MODEL,
                 tool="a",
                 tokens=100,
                 ok=True,
@@ -1491,7 +1522,7 @@ class TokenSeriesTests(unittest.TestCase):
             _event(
                 "tool.completed",
                 ts="2026-06-13T18:00:10+00:00",
-                trust="observed",
+                by=OBSERVED_BY_MODEL,
                 tool="b",
                 tokens=50,
                 ok=True,
@@ -1508,7 +1539,7 @@ class TokenSeriesTests(unittest.TestCase):
             _event(
                 "tool.completed",
                 ts="2026-06-13T18:00:05+00:00",
-                trust="observed",
+                by=OBSERVED_BY_MODEL,
                 tool="a",
                 tokens=7,
                 ok=True,
@@ -1527,7 +1558,7 @@ class TokenSeriesTests(unittest.TestCase):
                 _event(
                     "tool.completed",
                     ts=f"2026-06-13T18:{index // 60000:02d}:{(index // 1000) % 60:02d}.{index % 1000:03d}+00:00",
-                    trust="observed",
+                    by=OBSERVED_BY_MODEL,
                     tool="a",
                     tokens=10,
                     ok=True,
@@ -1587,14 +1618,16 @@ class AnalyticsAssemblyTests(unittest.TestCase):
     def test_stalest_leaderboard_is_bounded_and_oldest_first(self) -> None:
         nodes = [self._stale(float(i) * 86400.0) for i in range(20)]
         analytics = build_analytics(
-            drift_snapshots=[],
-            sidecar_staleness=nodes,
-            setup_summaries=[],
-            setup_progress=[],
-            route_coverage=[],
-            tool_reports=[],
-            ledgers=[],
-            stalest_limit=5,
+            AnalyticalInputs(
+                drift_snapshots=[],
+                sidecar_staleness=nodes,
+                setup_summaries=[],
+                setup_progress=[],
+                route_coverage=[],
+                tool_reports=[],
+                ledgers=[],
+                stalest_limit=5,
+            ),
         )
         self.assertEqual(len(analytics.stalestSidecars), 5)
         self.assertEqual(analytics.stalestSidecars[0].ageSeconds, 19 * 86400.0)
@@ -1603,15 +1636,16 @@ class AnalyticsAssemblyTests(unittest.TestCase):
         sidecars = [self._stale(3600.0), self._stale(200 * 86400.0)]
         proj = project_workspace(
             [[_started()]],
-            enclosures=[],
-            providers=[],
+            structure=WorkspaceStructure(enclosures=[], providers=[]),
             now=FRESH,
-            sidecar_staleness=sidecars,
-            drift_snapshots=[
-                DriftSnapshotNode(
-                    repository="r", branch="main", counts={"drifted": 1}, actionableCount=1
-                )
-            ],
+            given=AnalyticalInputs(
+                drift_snapshots=[
+                    DriftSnapshotNode(
+                        repository="r", branch="main", counts={"drifted": 1}, actionableCount=1
+                    )
+                ],
+                sidecar_staleness=sidecars,
+            ),
         )
         self.assertEqual(proj.metrics.stalenessHistogram["<7d"], 1)
         self.assertEqual(proj.metrics.stalenessHistogram[">90d"], 1)
@@ -1619,7 +1653,9 @@ class AnalyticsAssemblyTests(unittest.TestCase):
         self.assertEqual(len(proj.analytics.stalestSidecars), 2)
 
     def test_3a_callers_get_empty_analytics(self) -> None:
-        proj = project_workspace([[_started()]], enclosures=[], providers=[], now=FRESH)
+        proj = project_workspace(
+            [[_started()]], structure=WorkspaceStructure(enclosures=[], providers=[]), now=FRESH
+        )
         self.assertEqual(proj.analytics.driftSnapshots, [])
         self.assertEqual(proj.metrics.stalenessHistogram, {})
 
@@ -1639,8 +1675,9 @@ class AttentionQueueTests(unittest.TestCase):
                     ),
                 ],
             ],
-            enclosures=[],
-            providers=[ProviderNode(id="cgc", state="stopped", ok=False)],
+            structure=WorkspaceStructure(
+                enclosures=[], providers=[ProviderNode(id="cgc", state="stopped", ok=False)]
+            ),
             now=FRESH,
         )
         queue = proj.analytics.attentionQueue
@@ -1650,7 +1687,9 @@ class AttentionQueueTests(unittest.TestCase):
 
     def test_stale_session_is_info(self) -> None:
         proj = project_workspace(
-            [[_started(lifecycle_id="LC1")]], enclosures=[], providers=[], now=STALE
+            [[_started(lifecycle_id="LC1")]],
+            structure=WorkspaceStructure(enclosures=[], providers=[]),
+            now=STALE,
         )
         item = proj.analytics.attentionQueue[0]
         self.assertEqual(
@@ -1660,8 +1699,7 @@ class AttentionQueueTests(unittest.TestCase):
     def test_dormant_fleeting_is_info(self) -> None:
         proj = project_workspace(
             [[_started(fleeting=True, lifecycle_id="LC1")]],
-            enclosures=[],
-            providers=[],
+            structure=WorkspaceStructure(enclosures=[], providers=[]),
             now=DORMANT,
         )
         self.assertEqual(proj.analytics.attentionQueue[0].kind, "dormant-fleeting")
@@ -1681,8 +1719,7 @@ class AttentionQueueTests(unittest.TestCase):
                     ),
                 ]
             ],
-            enclosures=[],
-            providers=[],
+            structure=WorkspaceStructure(enclosures=[], providers=[]),
             now=FRESH,
         )
         queue = proj.analytics.attentionQueue
@@ -1698,21 +1735,24 @@ class AttentionQueueTests(unittest.TestCase):
     def test_drift_and_failed_setup_surface(self) -> None:
         proj = project_workspace(
             [[_started()]],
-            enclosures=[],
-            providers=[],
+            structure=WorkspaceStructure(enclosures=[], providers=[]),
             now=FRESH,
-            drift_snapshots=[
-                DriftSnapshotNode(
-                    repository="repo-a",
-                    branch="main",
-                    counts={"drifted": 2},
-                    actionableCount=2,
-                    checkedAt="2026-06-13T18:00:00+00:00",
-                    memoryRoot="/memory/ar-repo-a",
-                    reportPath="/tmp/drift-report.md",
-                )
-            ],
-            setup_progress=[SetupProgressNode(group="g1", state="ok", failedPhases=["cgc setup"])],
+            given=AnalyticalInputs(
+                drift_snapshots=[
+                    DriftSnapshotNode(
+                        repository="repo-a",
+                        branch="main",
+                        counts={"drifted": 2},
+                        actionableCount=2,
+                        checkedAt="2026-06-13T18:00:00+00:00",
+                        memoryRoot="/memory/ar-repo-a",
+                        reportPath="/tmp/drift-report.md",
+                    )
+                ],
+                setup_progress=[
+                    SetupProgressNode(group="g1", state="ok", failedPhases=["cgc setup"])
+                ],
+            ),
         )
         self.assertEqual(
             {item.kind for item in proj.analytics.attentionQueue},
@@ -1728,7 +1768,9 @@ class AttentionQueueTests(unittest.TestCase):
         self.assertIn("/tmp/drift-report.md", drift.detail or "")
 
     def test_calm_tree_has_empty_queue(self) -> None:
-        proj = project_workspace([[_started()]], enclosures=[], providers=[], now=FRESH)
+        proj = project_workspace(
+            [[_started()]], structure=WorkspaceStructure(enclosures=[], providers=[]), now=FRESH
+        )
         self.assertEqual(proj.analytics.attentionQueue, [])
 
 
@@ -1753,11 +1795,11 @@ class AttentionDismissalTests(unittest.TestCase):
     def _queue_for(self, logs, *, now, dismissals=None, **kw):  # type: ignore[no-untyped-def]
         return project_workspace(
             logs,
-            enclosures=[],
-            providers=kw.get("providers", []),
+            structure=WorkspaceStructure(enclosures=[], providers=kw.get("providers", [])),
             now=now,
-            gates=kw.get("gates"),
-            attention_dismissals=dismissals,
+            given=AnalyticalInputs(
+                gates=kw.get("gates") or [], attention_dismissals=dismissals or {}
+            ),
         ).analytics.attentionQueue
 
     def _dismissal(
@@ -1838,7 +1880,9 @@ class AttentionDismissalTests(unittest.TestCase):
         )
 
     def test_dismiss_suppresses_gate_open(self) -> None:
-        gate = create_gate(kind="closeout-approval", lifecycle_id="LC1", gate_id="G1", now=T0)
+        gate = create_gate(
+            "closeout-approval", gate_id="G1", now=T0, anchor=GateAnchor(lifecycle_id="LC1")
+        )
         self.assertEqual(
             self._queue_for(
                 [[_started(lifecycle_id="LC1")]],
@@ -1876,7 +1920,15 @@ class AttentionDismissalTests(unittest.TestCase):
             checkedAt="2026-06-13T18:00:00+00:00",
         )
         self.assertEqual(
-            build_attention_queue([], [], [old_snapshot], [], dismissals=dismissed),
+            build_attention_queue(
+                [],
+                [],
+                AnalyticalInputs(
+                    drift_snapshots=[old_snapshot],
+                    setup_progress=[],
+                    attention_dismissals=dismissed,
+                ),
+            ),
             [],
         )
 
@@ -1886,7 +1938,13 @@ class AttentionDismissalTests(unittest.TestCase):
             actionableCount=1,
             checkedAt="2026-06-13T18:00:11+00:00",
         )
-        queue = build_attention_queue([], [], [newer_snapshot], [], dismissals=dismissed)
+        queue = build_attention_queue(
+            [],
+            [],
+            AnalyticalInputs(
+                drift_snapshots=[newer_snapshot], setup_progress=[], attention_dismissals=dismissed
+            ),
+        )
         self.assertEqual([item.kind for item in queue], ["actionable-drift"])
 
     def test_newer_turn_end_supersedes_dismissal(self) -> None:
@@ -1924,15 +1982,16 @@ class GateProjectionTests(unittest.TestCase):
     LATER = "2026-06-13T18:05:00+00:00"
 
     def _open(self, *, gate_id: str = "G1", ts: str = T0):
-        return create_gate(kind="closeout-approval", lifecycle_id="LC1", gate_id=gate_id, now=ts)
+        return create_gate(
+            "closeout-approval", gate_id=gate_id, now=ts, anchor=GateAnchor(lifecycle_id="LC1")
+        )
 
     def test_open_gate_materializes_onto_lifecycle(self) -> None:
         proj = project_workspace(
             [[_started(lifecycle_id="LC1")]],
-            enclosures=[],
-            providers=[],
+            structure=WorkspaceStructure(enclosures=[], providers=[]),
             now=FRESH,
-            gates=[self._open()],
+            given=AnalyticalInputs(gates=[self._open()]),
         )
         gate = proj.lifecycles[0].gate
         assert gate is not None
@@ -1942,28 +2001,25 @@ class GateProjectionTests(unittest.TestCase):
     def test_decided_gate_is_not_attached(self) -> None:
         decided = decide_gate(
             self._open(),
-            decision="approve",
-            by="developer",
-            via="dashboard",
-            note=None,
+            GateVerdict(decision="approve", by="developer", via="dashboard", note=None),
             now=self.LATER,
         )
         proj = project_workspace(
             [[_started(lifecycle_id="LC1")]],
-            enclosures=[],
-            providers=[],
+            structure=WorkspaceStructure(enclosures=[], providers=[]),
             now=FRESH,
-            gates=[decided],
+            given=AnalyticalInputs(gates=[decided]),
         )
         self.assertIsNone(proj.lifecycles[0].gate)
 
     def test_latest_open_gate_wins(self) -> None:
         proj = project_workspace(
             [[_started(lifecycle_id="LC1")]],
-            enclosures=[],
-            providers=[],
+            structure=WorkspaceStructure(enclosures=[], providers=[]),
             now=FRESH,
-            gates=[self._open(gate_id="A", ts=T0), self._open(gate_id="B", ts=self.LATER)],
+            given=AnalyticalInputs(
+                gates=[self._open(gate_id="A", ts=T0), self._open(gate_id="B", ts=self.LATER)]
+            ),
         )
         gate = proj.lifecycles[0].gate
         assert gate is not None
@@ -1972,17 +2028,18 @@ class GateProjectionTests(unittest.TestCase):
     def test_open_gate_adds_attention_item(self) -> None:
         proj = project_workspace(
             [[_started(lifecycle_id="LC1")]],
-            enclosures=[],
-            providers=[],
+            structure=WorkspaceStructure(enclosures=[], providers=[]),
             now=FRESH,
-            gates=[self._open()],
+            given=AnalyticalInputs(gates=[self._open()]),
         )
         item = next(i for i in proj.analytics.attentionQueue if i.kind == "gate-open")
         self.assertEqual((item.severity, item.lane, item.lifecycleId), ("warn", "lifecycle", "LC1"))
 
     def test_no_gates_leaves_lifecycle_and_queue_clean(self) -> None:
         proj = project_workspace(
-            [[_started(lifecycle_id="LC1")]], enclosures=[], providers=[], now=FRESH
+            [[_started(lifecycle_id="LC1")]],
+            structure=WorkspaceStructure(enclosures=[], providers=[]),
+            now=FRESH,
         )
         self.assertIsNone(proj.lifecycles[0].gate)
         self.assertEqual([i for i in proj.analytics.attentionQueue if i.kind == "gate-open"], [])
@@ -2004,10 +2061,9 @@ class GateProjectionTests(unittest.TestCase):
         # yields ONE lifecycle-lane item -- the gate-open -- not two.
         proj = project_workspace(
             [self._blocked_log()],
-            enclosures=[],
-            providers=[],
+            structure=WorkspaceStructure(enclosures=[], providers=[]),
             now=FRESH,
-            gates=[self._open()],
+            given=AnalyticalInputs(gates=[self._open()]),
         )
         lane_items = [i for i in proj.analytics.attentionQueue if i.lane == "lifecycle"]
         self.assertEqual(len(lane_items), 1)
@@ -2016,7 +2072,11 @@ class GateProjectionTests(unittest.TestCase):
 
     def test_bare_block_without_gate_still_yields_blocked_gate(self) -> None:
         # PARK, not delete: a bare block() with no GateRecord still raises blocked-gate.
-        proj = project_workspace([self._blocked_log()], enclosures=[], providers=[], now=FRESH)
+        proj = project_workspace(
+            [self._blocked_log()],
+            structure=WorkspaceStructure(enclosures=[], providers=[]),
+            now=FRESH,
+        )
         kinds = [i.kind for i in proj.analytics.attentionQueue]
         self.assertEqual(kinds, ["blocked-gate"])
 
@@ -2027,9 +2087,13 @@ class GateReaderTests(unittest.TestCase):
             coord = Path(tmp)
             store = GateStore(observer_logs_root(coord))
             store.append(
-                create_gate(kind="closeout-approval", lifecycle_id="LC1", gate_id="G1", now=T0)
+                create_gate(
+                    "closeout-approval", gate_id="G1", now=T0, anchor=GateAnchor(lifecycle_id="LC1")
+                )
             )
-            store.append(create_gate(kind="alarm-ack", lifecycle_id=None, gate_id="W1", now=T0))
+            store.append(
+                create_gate("alarm-ack", gate_id="W1", now=T0, anchor=GateAnchor(lifecycle_id=None))
+            )
             self.assertEqual({g.id for g in read_gates(coord)}, {"G1", "W1"})
 
     def test_missing_root_reads_empty(self) -> None:
@@ -2630,16 +2694,20 @@ class ProjectAndWriteAnalyticsTests(unittest.TestCase):
         config = self._config()
         official = self._write_snapshot("repo-a", "main")
         active_contract = default_contract(
-            task_name="active task",
-            repo_name="repo-a",
-            workflow_kind="light-task",
-            memory_mode="disabled",
-            coordination_root=self.coord,
-            code_repo_path=(self.tmp / "ws" / "repo-a").resolve(),
-            code_source_branch="feat/dashboard",
-            code_work_branch="ar/active",
-            code_base_commit="base",
-            worktree_name="active-worktree",
+            ContractTask(
+                name="active task",
+                repo_name="repo-a",
+                coordination_root=self.coord,
+                workflow_kind="light-task",
+                memory_mode="disabled",
+            ),
+            leaf=LeafIdentity(worktree_name="active-worktree"),
+            code=RepoBranchPlan(
+                repo_path=(self.tmp / "ws" / "repo-a").resolve(),
+                source_branch="feat/dashboard",
+                work_branch="ar/active",
+                base_commit="base",
+            ),
         )
         active_contract.code_worktree.mkdir(parents=True)
         write_contract(active_contract.contract_path, active_contract)
@@ -2752,17 +2820,20 @@ class TaskDocumentsReaderTests(unittest.TestCase):
 
     def test_leaf_contract_alone_is_not_a_task_document(self) -> None:
         contract = default_contract(
-            task_name="demo",
-            repo_name="repo-a",
-            workflow_kind="light-task",
-            memory_mode="disabled",
-            coordination_root=self.coord,
-            code_repo_path=self.coord / "repos" / "repo-a",
-            code_source_branch="ar/demo",
-            code_work_branch="ar/demo-leaf",
-            code_base_commit="abc123",
-            worktree_name="01_leaf-work",
-            lifecycle_id="LC-LEAF",
+            ContractTask(
+                name="demo",
+                repo_name="repo-a",
+                coordination_root=self.coord,
+                workflow_kind="light-task",
+                memory_mode="disabled",
+            ),
+            leaf=LeafIdentity(worktree_name="01_leaf-work", lifecycle_id="LC-LEAF"),
+            code=RepoBranchPlan(
+                repo_path=self.coord / "repos" / "repo-a",
+                source_branch="ar/demo",
+                work_branch="ar/demo-leaf",
+                base_commit="abc123",
+            ),
         )
         write_contract(contract.contract_path, contract)
 
@@ -2775,18 +2846,20 @@ class TaskDocumentsReaderTests(unittest.TestCase):
         root = self.coord / "tasks" / "repo-a" / "demo"
         leaf_id = "17_task-reader-top-progress-and-master-content"
         contract = default_contract(
-            task_name="demo",
-            repo_name="repo-a",
-            workflow_kind="light-task",
-            memory_mode="disabled",
-            coordination_root=self.coord,
-            code_repo_path=self.coord / "repos" / "repo-a",
-            code_source_branch="ar/demo",
-            code_work_branch="ar/demo-leaf",
-            code_base_commit="abc123",
-            worktree_name=leaf_id,
-            leaf_id=leaf_id,
-            lifecycle_id="LC-LEAF",
+            ContractTask(
+                name="demo",
+                repo_name="repo-a",
+                coordination_root=self.coord,
+                workflow_kind="light-task",
+                memory_mode="disabled",
+            ),
+            leaf=LeafIdentity(worktree_name=leaf_id, leaf_id=leaf_id, lifecycle_id="LC-LEAF"),
+            code=RepoBranchPlan(
+                repo_path=self.coord / "repos" / "repo-a",
+                source_branch="ar/demo",
+                work_branch="ar/demo-leaf",
+                base_commit="abc123",
+            ),
         )
         write_contract(contract.contract_path, contract)
         write_task_doc(
@@ -2810,18 +2883,24 @@ class TaskDocumentsReaderTests(unittest.TestCase):
         # no enclosures[] refs. The doc must still bind to the enclosure's lifecycle.
         root = self.coord / "tasks" / "repo-a" / "demo"
         contract = default_contract(
-            task_name="demo",
-            repo_name="repo-a",
-            workflow_kind="light-task",
-            memory_mode="disabled",
-            coordination_root=self.coord,
-            code_repo_path=self.coord / "repos" / "repo-a",
-            code_source_branch="ar/demo",
-            code_work_branch="ar/demo-leaf",
-            code_base_commit="abc123",
-            worktree_name="cgc-dependency-command-repair",
-            leaf_id="260628-l7",
-            lifecycle_id="LC-LEAF-CASE",
+            ContractTask(
+                name="demo",
+                repo_name="repo-a",
+                coordination_root=self.coord,
+                workflow_kind="light-task",
+                memory_mode="disabled",
+            ),
+            leaf=LeafIdentity(
+                worktree_name="cgc-dependency-command-repair",
+                leaf_id="260628-l7",
+                lifecycle_id="LC-LEAF-CASE",
+            ),
+            code=RepoBranchPlan(
+                repo_path=self.coord / "repos" / "repo-a",
+                source_branch="ar/demo",
+                work_branch="ar/demo-leaf",
+                base_commit="abc123",
+            ),
         )
         write_contract(contract.contract_path, contract)
         write_task_doc(
@@ -2945,14 +3024,16 @@ class TaskDocumentsReaderTests(unittest.TestCase):
             docPath="p",
         )
         analytics = build_analytics(
-            drift_snapshots=[],
-            sidecar_staleness=[],
-            setup_summaries=[],
-            setup_progress=[],
-            route_coverage=[],
-            tool_reports=[],
-            ledgers=[],
-            task_documents=[node],
+            AnalyticalInputs(
+                drift_snapshots=[],
+                sidecar_staleness=[],
+                setup_summaries=[],
+                setup_progress=[],
+                route_coverage=[],
+                tool_reports=[],
+                ledgers=[],
+                task_documents=[node],
+            ),
         )
         self.assertEqual(len(analytics.taskDocuments), 1)
         self.assertEqual(analytics.taskDocuments[0].lifecycleId, "LC1")
@@ -3104,13 +3185,15 @@ class TaskDocumentsReaderTests(unittest.TestCase):
             totalCount=2,
         )
         analytics = build_analytics(
-            drift_snapshots=[],
-            sidecar_staleness=[],
-            setup_summaries=[],
-            setup_progress=[],
-            route_coverage=[],
-            tool_reports=[],
-            ledgers=[],
+            AnalyticalInputs(
+                drift_snapshots=[],
+                sidecar_staleness=[],
+                setup_summaries=[],
+                setup_progress=[],
+                route_coverage=[],
+                tool_reports=[],
+                ledgers=[],
+            ),
             series=[node],
         )
         self.assertEqual(len(analytics.series), 1)
@@ -3450,16 +3533,20 @@ class EngineProcessTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             contract = default_contract(
-                task_name="landing-frozen",
-                repo_name="repo-frozen",
-                workflow_kind="light",
-                memory_mode="disabled",
-                coordination_root=root,
-                code_repo_path=root / "repo-frozen",
-                code_source_branch="feat/frozen",
-                code_work_branch="ar/frozen",
-                code_base_commit="base-frozen",
-                worktree_name="landing-frozen",
+                ContractTask(
+                    name="landing-frozen",
+                    repo_name="repo-frozen",
+                    coordination_root=root,
+                    workflow_kind="light",
+                    memory_mode="disabled",
+                ),
+                leaf=LeafIdentity(worktree_name="landing-frozen"),
+                code=RepoBranchPlan(
+                    repo_path=root / "repo-frozen",
+                    source_branch="feat/frozen",
+                    work_branch="ar/frozen",
+                    base_commit="base-frozen",
+                ),
             )
             contract = replace(contract, closeout_status="completed", cleanup="completed")
             contract.contract_path.parent.mkdir(parents=True, exist_ok=True)
@@ -3496,32 +3583,39 @@ class EngineProcessTests(unittest.TestCase):
     def test_project_workspace_wires_engine_processes(self) -> None:
         proj = project_workspace(
             [],
-            enclosures=[],
-            providers=[],
+            structure=WorkspaceStructure(enclosures=[], providers=[]),
             now=FRESH,
-            engine_process_facts=[_facts(status={"code_worktree_exists": True})],
+            given=AnalyticalInputs(
+                engine_process_facts=[_facts(status={"code_worktree_exists": True})]
+            ),
         )
         self.assertEqual(len(proj.analytics.engineProcesses), 1)
         self.assertEqual(proj.version, 2)
 
     def test_3a_callers_get_empty_engine_processes(self) -> None:
-        proj = project_workspace([[_started()]], enclosures=[], providers=[], now=FRESH)
+        proj = project_workspace(
+            [[_started()]], structure=WorkspaceStructure(enclosures=[], providers=[]), now=FRESH
+        )
         self.assertEqual(proj.analytics.engineProcesses, [])
 
     def test_reader_emits_one_fact_per_contract(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             contract = default_contract(
-                task_name="demo task",
-                repo_name="r",
-                workflow_kind="light",
-                memory_mode="disabled",
-                coordination_root=root,
-                code_repo_path=root / "repo",
-                code_source_branch="main",
-                code_work_branch="ar/x",
-                code_base_commit="abc",
-                worktree_name="demo-wt",
+                ContractTask(
+                    name="demo task",
+                    repo_name="r",
+                    coordination_root=root,
+                    workflow_kind="light",
+                    memory_mode="disabled",
+                ),
+                leaf=LeafIdentity(worktree_name="demo-wt"),
+                code=RepoBranchPlan(
+                    repo_path=root / "repo",
+                    source_branch="main",
+                    work_branch="ar/x",
+                    base_commit="abc",
+                ),
             )
             contract.contract_path.parent.mkdir(parents=True, exist_ok=True)
             write_contract(contract.contract_path, contract)
@@ -3534,16 +3628,20 @@ class EngineProcessTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             contract = default_contract(
-                task_name="demo task",
-                repo_name="r",
-                workflow_kind="light",
-                memory_mode="disabled",
-                coordination_root=root,
-                code_repo_path=root / "repo",
-                code_source_branch="main",
-                code_work_branch="ar/x",
-                code_base_commit="abc",
-                worktree_name="demo-wt",
+                ContractTask(
+                    name="demo task",
+                    repo_name="r",
+                    coordination_root=root,
+                    workflow_kind="light",
+                    memory_mode="disabled",
+                ),
+                leaf=LeafIdentity(worktree_name="demo-wt"),
+                code=RepoBranchPlan(
+                    repo_path=root / "repo",
+                    source_branch="main",
+                    work_branch="ar/x",
+                    base_commit="abc",
+                ),
             )
             contract.contract_path.parent.mkdir(parents=True, exist_ok=True)
             write_contract(contract.contract_path, contract)
@@ -3602,15 +3700,19 @@ class EngineProcessTests(unittest.TestCase):
             root = Path(tmp)
             write_start_progress(
                 root,
-                repo_name="r",
-                task_name="t",
-                worktree_name="wt",
-                worktree_group="/w/r/wt-ar",
-                phase="memory-blocked",
-                memory_mode="external",
-                blocked_reason="no ledger mapping",
-                completed_phases=("preflight", "code-worktree"),
-                choices=("reconciliation",),
+                StartingEnclosure(
+                    repo_name="r",
+                    task_name="t",
+                    worktree_name="wt",
+                    worktree_group="/w/r/wt-ar",
+                    memory_mode="external",
+                ),
+                StartBeat(
+                    phase="memory-blocked",
+                    completed_phases=("preflight", "code-worktree"),
+                    choices=("reconciliation",),
+                    blocked_reason="no ledger mapping",
+                ),
             )
             payload = read_start_progress(start_progress_path(root, "r", "wt"))
             assert payload is not None
@@ -3632,7 +3734,13 @@ class EngineProcessTests(unittest.TestCase):
             "blockedReason": "no exact ledger mapping for selected code base commit",
         }
         happy = {"worktreeGroup": "/w/agents-remember/dm-ar", "phase": "code-worktree"}
-        items = build_attention_queue([], [], [], [], [blocked, happy])
+        items = build_attention_queue(
+            [],
+            [],
+            AnalyticalInputs(
+                drift_snapshots=[], setup_progress=[], engine_start_progress=[blocked, happy]
+            ),
+        )
         self.assertEqual(len(items), 1)  # only the blocked start is an alarm
         item = items[0]
         self.assertEqual(item.kind, "blocked-start")
@@ -3651,7 +3759,10 @@ class EngineProcessTests(unittest.TestCase):
             "blockedReason": "no ledger mapping",
         }
         proj = project_workspace(
-            [], enclosures=[], providers=[], now=FRESH, engine_start_progress=[blocked]
+            [],
+            structure=WorkspaceStructure(enclosures=[], providers=[]),
+            now=FRESH,
+            given=AnalyticalInputs(engine_start_progress=[blocked]),
         )
         kinds = [item.kind for item in proj.analytics.attentionQueue]
         self.assertIn("blocked-start", kinds)
@@ -3669,7 +3780,16 @@ class EngineProcessTests(unittest.TestCase):
         }
         nodes = build_engine_processes([], [], [], [], [happy])
         self.assertEqual(len(nodes), 1)  # observable as a (non-blocked) synthesized node
-        self.assertEqual(build_attention_queue([], [], [], [], [happy]), [])  # not an alarm
+        self.assertEqual(
+            build_attention_queue(
+                [],
+                [],
+                AnalyticalInputs(
+                    drift_snapshots=[], setup_progress=[], engine_start_progress=[happy]
+                ),
+            ),
+            [],
+        )  # not an alarm
 
 
 if __name__ == "__main__":

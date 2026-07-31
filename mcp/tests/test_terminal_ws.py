@@ -18,7 +18,7 @@ import socket
 import sys
 import tempfile
 import unittest
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import cast
 from unittest import mock
@@ -34,17 +34,27 @@ from agents_remember.mcp.config import McpRuntimeConfig
 from agents_remember.serving.app import (
     _MAX_IMAGE_BYTES,
     _TERMINAL_EXIT_FRAME,
+    ServingCollaborators,
     _apply_terminal_input,
     create_app,
 )
 from agents_remember.serving.harness_control_runner import parse_runner_config
-from agents_remember.serving.terminal import TerminalHost, TerminalSessionBinding
+from agents_remember.serving.projector import ProjectionCadence
+from agents_remember.serving.terminal import (
+    TerminalHost,
+    TerminalSessionBinding,
+    TerminalSessionSpec,
+)
 from agents_remember.serving.terminal_catalog import (
     TerminalCatalog,
     TerminalCatalogEntry,
     TerminalSessionStatus,
 )
-from agents_remember.serving.terminal_opener import resolve_terminal_launch
+from agents_remember.serving.terminal_opener import (
+    SpawnKnobs,
+    TerminalLaunchRequest,
+    resolve_terminal_launch,
+)
 from agents_remember.tasks import TaskDocument, write_task_doc
 
 
@@ -151,27 +161,45 @@ class _RecordingHost:
         self.resizes.append((cols, rows))
 
 
-class _FakeSession:
-    """A terminal-session stand-in: the fields `_bridge_terminal` reads."""
+def _binding(sid: str, cwd: Path) -> TerminalSessionBinding:
+    """The durable identity of a plain ``bash`` session the fake host starts out holding."""
+    return TerminalSessionBinding(
+        sid=sid,
+        tmux_name=f"ar-{sid}",
+        cwd=cwd,
+        command=("bash",),
+        lifecycle_id=None,
+    )
 
-    def __init__(
-        self,
-        sid: str,
-        master_fd: int,
-        *,
-        cwd: Path | None = None,
-        tmux_name: str | None = None,
-        command: Sequence[str] = ("bash",),
-        lifecycle_id: str | None = None,
-        suspend_unsafe: bool = False,
-    ) -> None:
-        self.sid = sid
+
+def _binding_from(sid: str, spec: TerminalSessionSpec) -> TerminalSessionBinding:
+    """The binding ``spec`` asks for -- the same answer the real host returns from ``ensure``."""
+    return TerminalSessionBinding(
+        sid=sid,
+        tmux_name=spec.tmux_name_for(sid),
+        cwd=spec.cwd,
+        command=spec.command,
+        lifecycle_id=spec.lifecycle_id,
+        suspend_unsafe=spec.suspend_unsafe,
+    )
+
+
+class _FakeSession:
+    """A terminal-session stand-in: the fields `_bridge_terminal` reads.
+
+    Everything about the session other than its PTY fd is the durable identity the host
+    already answers with, so the stand-in is built from a ``TerminalSessionBinding`` rather
+    than from a second, hand-kept copy of that model's fields.
+    """
+
+    def __init__(self, binding: TerminalSessionBinding, master_fd: int) -> None:
+        self.sid = binding.sid
         self.master_fd = master_fd
-        self.cwd = cwd
-        self.tmux_name = tmux_name or f"ar-{sid}"
-        self.command = tuple(command)
-        self.lifecycle_id = lifecycle_id
-        self.suspend_unsafe = suspend_unsafe
+        self.cwd = binding.cwd
+        self.tmux_name = binding.tmux_name
+        self.command = binding.command
+        self.lifecycle_id = binding.lifecycle_id
+        self.suspend_unsafe = binding.suspend_unsafe
         self.alive = True
 
     @property
@@ -186,10 +214,10 @@ class _FakeTerminalHost:
     one durable tmux session name, multiple independent local PTY clients.
     """
 
-    def __init__(self, sid: str = "live", cwd: Path | None = None) -> None:
+    def __init__(self, sid: str = "live", *, cwd: Path) -> None:
         self._masters: dict[int, socket.socket] = {}
         self._peers: dict[int, socket.socket] = {}
-        self.registry_session: _FakeSession | None = self._new_client(sid, cwd=cwd)
+        self.registry_session: _FakeSession | None = self._new_client(_binding(sid, cwd))
         self.session = self.registry_session
         self.attachments: list[_FakeSession] = []
         self.resizes: list[tuple[int, int]] = []
@@ -206,101 +234,58 @@ class _FakeTerminalHost:
             return self.registry_session
         return None
 
-    def open(
-        self,
-        sid: str,
-        *,
-        cwd: Path,
-        command: Sequence[str],
-        lifecycle_id: str | None = None,
-        name: str | None = None,
-        suspend_unsafe: bool = False,
-        env: Mapping[str, str] | None = None,
-    ) -> _FakeSession:
+    def open(self, sid: str, spec: TerminalSessionSpec) -> _FakeSession:
         self.opened.append(
             {
                 "sid": sid,
-                "cwd": cwd,
-                "command": list(command),
-                "lifecycle_id": lifecycle_id,
-                "name": name,
-                "suspend_unsafe": suspend_unsafe,
-                "env": dict(env or {}),
+                "cwd": spec.cwd,
+                "command": list(spec.command),
+                "lifecycle_id": spec.lifecycle_id,
+                "name": spec.name,
+                "suspend_unsafe": spec.suspend_unsafe,
+                "env": dict(spec.env or {}),
             }
         )
-        self.registry_session = self._new_client(
-            sid,
-            cwd=cwd,
-            tmux_name=name or f"ar-{sid}",
-            command=command,
-            lifecycle_id=lifecycle_id,
-            suspend_unsafe=suspend_unsafe,
-        )
+        self.registry_session = self._new_client(_binding_from(sid, spec))
         self.session = self.registry_session
         self.probe_names.add(self.session.tmux_name)
         return self.session
 
-    def ensure(
-        self,
-        sid: str,
-        *,
-        cwd: Path,
-        command: Sequence[str],
-        lifecycle_id: str | None = None,
-        name: str | None = None,
-        suspend_unsafe: bool = False,
-        env: Mapping[str, str] | None = None,
-    ) -> TerminalSessionBinding:
-        tmux_name = name or f"ar-{sid}"
+    def ensure(self, sid: str, spec: TerminalSessionSpec) -> TerminalSessionBinding:
+        tmux_name = spec.tmux_name_for(sid)
         self.ensured.append(
             {
                 "sid": sid,
-                "cwd": cwd,
-                "command": list(command),
-                "lifecycle_id": lifecycle_id,
-                "name": name,
-                "suspend_unsafe": suspend_unsafe,
-                "env": dict(env or {}),
+                "cwd": spec.cwd,
+                "command": list(spec.command),
+                "lifecycle_id": spec.lifecycle_id,
+                "name": spec.name,
+                "suspend_unsafe": spec.suspend_unsafe,
+                "env": dict(spec.env or {}),
             }
         )
         self.probe_names.add(tmux_name)
         return TerminalSessionBinding(
             sid=sid,
             tmux_name=tmux_name,
-            cwd=cwd,
-            command=tuple(command),
-            lifecycle_id=lifecycle_id,
-            suspend_unsafe=suspend_unsafe,
+            cwd=spec.cwd,
+            command=spec.command,
+            lifecycle_id=spec.lifecycle_id,
+            suspend_unsafe=spec.suspend_unsafe,
         )
 
-    def attach(
-        self,
-        sid: str,
-        *,
-        cwd: Path,
-        command: Sequence[str],
-        lifecycle_id: str | None = None,
-        name: str | None = None,
-        suspend_unsafe: bool = False,
-    ) -> _FakeSession:
+    def attach(self, sid: str, spec: TerminalSessionSpec) -> _FakeSession:
         self.attached.append(
             {
                 "sid": sid,
-                "cwd": cwd,
-                "command": list(command),
-                "lifecycle_id": lifecycle_id,
-                "name": name,
-                "suspend_unsafe": suspend_unsafe,
+                "cwd": spec.cwd,
+                "command": list(spec.command),
+                "lifecycle_id": spec.lifecycle_id,
+                "name": spec.name,
+                "suspend_unsafe": spec.suspend_unsafe,
             }
         )
-        session = self._new_client(
-            sid,
-            cwd=cwd,
-            tmux_name=name or f"ar-{sid}",
-            command=command,
-            lifecycle_id=lifecycle_id,
-            suspend_unsafe=suspend_unsafe,
-        )
+        session = self._new_client(_binding_from(sid, spec))
         self.attachments.append(session)
         self.session = session
         return session
@@ -394,28 +379,12 @@ class _FakeTerminalHost:
         target.alive = False
         self._peers[id(target)].close()
 
-    def _new_client(
-        self,
-        sid: str,
-        *,
-        cwd: Path | None = None,
-        tmux_name: str | None = None,
-        command: Sequence[str] = ("bash",),
-        lifecycle_id: str | None = None,
-        suspend_unsafe: bool = False,
-    ) -> _FakeSession:
+    def _new_client(self, binding: TerminalSessionBinding) -> _FakeSession:
+        """One PTY client for the durable session ``binding`` names, backed by a socketpair."""
         master, peer = socket.socketpair()
         master.setblocking(False)
         peer.settimeout(2.0)
-        session = _FakeSession(
-            sid,
-            master.fileno(),
-            cwd=cwd,
-            tmux_name=tmux_name,
-            command=command,
-            lifecycle_id=lifecycle_id,
-            suspend_unsafe=suspend_unsafe,
-        )
+        session = _FakeSession(binding, master.fileno())
         self._masters[id(session)] = master
         self._peers[id(session)] = peer
         return session
@@ -476,9 +445,10 @@ class TerminalWebSocketTests(unittest.TestCase):
         self.catalog = TerminalCatalog(self.tmp / "terminal-sessions.json")
         self.app = create_app(
             _config(self.tmp),
-            interval=100,
-            terminal_host=cast(TerminalHost, self.host),
-            terminal_catalog=self.catalog,
+            cadence=ProjectionCadence(interval=100),
+            collaborators=ServingCollaborators(
+                terminal_host=cast(TerminalHost, self.host), terminal_catalog=self.catalog
+            ),
         )
 
     def tearDown(self) -> None:
@@ -1058,9 +1028,10 @@ class TerminalImageEndpointTests(unittest.TestCase):
         self.catalog = TerminalCatalog(self.tmp / "terminal-sessions.json")
         self.app = create_app(
             _config(self.tmp),
-            interval=100,
-            terminal_host=cast(TerminalHost, self.host),
-            terminal_catalog=self.catalog,
+            cadence=ProjectionCadence(interval=100),
+            collaborators=ServingCollaborators(
+                terminal_host=cast(TerminalHost, self.host), terminal_catalog=self.catalog
+            ),
         )
 
     def tearDown(self) -> None:
@@ -1191,58 +1162,61 @@ class MalformedSettingsScratchTerminalTests(unittest.TestCase):
             with mock.patch("agents_remember.serving.app.open_terminal_session", fake_open):
                 client = TestClient(app, raise_server_exceptions=False)
                 client.post("/api/terminal/scratch-1", json={"kind": "terminal"})
-            # The registry load never ran for a scratch terminal: harnesses arrives as
-            # None (builtin fallback) despite the malformed settings file on disk.
-            self.assertIn("harnesses", seen)
-            self.assertIsNone(seen["harnesses"])
+            # The registry load never ran for a scratch terminal: the launch request carries
+            # harnesses=None (builtin fallback) despite the malformed settings file on disk.
+            launch = seen["launch"]
+            assert isinstance(launch, TerminalLaunchRequest)
+            self.assertIsNone(launch.harnesses)
 
 
 class ResolveTerminalLaunchTests(unittest.TestCase):
-    def test_terminal_kind_is_shell_at_workspace_root(self) -> None:
-        cwd, argv = resolve_terminal_launch(
-            "terminal", workspace_root=Path("/ws"), shell="/bin/zsh"
+    @staticmethod
+    def _launch(kind: str, **fields: object) -> TerminalLaunchRequest:
+        return TerminalLaunchRequest(
+            kind=kind,
+            workspace_root=Path("/ws"),
+            shell=fields.pop("shell", "/bin/sh"),  # type: ignore[arg-type]
+            **fields,  # type: ignore[arg-type]
         )
-        self.assertEqual((cwd, argv), (Path("/ws"), ["/bin/zsh"]))
+
+    def test_terminal_kind_is_shell_at_workspace_root(self) -> None:
+        cwd, argv = resolve_terminal_launch(self._launch("terminal", shell="/bin/zsh"))
+        self.assertEqual((cwd, argv), (Path("/ws"), ("/bin/zsh",)))
 
     def test_unknown_kind_raises(self) -> None:
         with self.assertRaises(ValueError):
-            resolve_terminal_launch("nope", workspace_root=Path("/ws"), shell="/bin/sh")
+            resolve_terminal_launch(self._launch("nope"))
 
     def test_harness_kind_resolves_registry_argv_at_workspace_root(self) -> None:
         cwd, argv = resolve_terminal_launch(
-            "harness",
-            workspace_root=Path("/ws"),
-            shell="/bin/sh",
-            harness="claude",
-            which=_which("claude"),
+            self._launch("harness", harness="claude", which=_which("claude"))
         )
-        self.assertEqual((cwd, argv), (Path("/ws"), ["claude"]))
+        self.assertEqual((cwd, argv), (Path("/ws"), ("claude",)))
 
     def test_harness_kind_without_id_raises(self) -> None:
         with self.assertRaises(ValueError):
-            resolve_terminal_launch(
-                "harness", workspace_root=Path("/ws"), shell="/bin/sh", which=_which("claude")
-            )
+            resolve_terminal_launch(self._launch("harness", which=_which("claude")))
 
     def test_harness_kind_unknown_id_raises(self) -> None:
         with self.assertRaises(ValueError):
             resolve_terminal_launch(
-                "harness",
-                workspace_root=Path("/ws"),
-                shell="/bin/sh",
-                harness="gemini",
-                which=_which("gemini"),
+                self._launch("harness", harness="gemini", which=_which("gemini"))
             )
 
     def test_harness_kind_not_installed_raises(self) -> None:
         with self.assertRaises(ValueError):
-            resolve_terminal_launch(
+            resolve_terminal_launch(self._launch("harness", harness="claude", which=_which()))
+
+    def test_launch_args_ride_the_resolved_argv(self) -> None:
+        _cwd, argv = resolve_terminal_launch(
+            self._launch(
                 "harness",
-                workspace_root=Path("/ws"),
-                shell="/bin/sh",
                 harness="claude",
-                which=_which(),
+                which=_which("claude"),
+                knobs=SpawnKnobs(launch_args=["--flag"]),
             )
+        )
+        self.assertEqual(argv, ("claude", "--flag"))
 
 
 if __name__ == "__main__":

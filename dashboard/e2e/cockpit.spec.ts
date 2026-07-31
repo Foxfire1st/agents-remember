@@ -717,7 +717,9 @@ test("focused landed cleanup preserves the exact live terminal and its scrollbac
   await page.keyboard.insertText(sentinel);
   await page.keyboard.press("Enter");
   await expect(workerLayer.locator(".xterm-rows")).toContainText(sentinel);
-  const before = await workerHost.evaluate((node) => {
+  // `node: HTMLElement` narrows Playwright's default `HTMLElement | SVGElement`: the terminal
+  // host is a div, and the identity sentinels below are declared as HTMLElement.
+  const before = await workerHost.evaluate((node: HTMLElement) => {
     const viewport = node.querySelector<HTMLElement>(".xterm-viewport");
     const rows = node.querySelector<HTMLElement>(".xterm-rows");
     if (!viewport || !rows) throw new Error("terminal viewport is unavailable");
@@ -748,7 +750,7 @@ test("focused landed cleanup preserves the exact live terminal and its scrollbac
   );
   await expect(page.getByTestId("rail-row-landed-w1")).toHaveCount(0);
   await expect(workerLayer).toBeVisible();
-  const after = await workerHost.evaluate((node) => {
+  const after = await workerHost.evaluate((node: HTMLElement) => {
     const viewport = node.querySelector<HTMLElement>(".xterm-viewport");
     const rows = node.querySelector<HTMLElement>(".xterm-rows");
     if (!viewport || !rows) throw new Error("terminal viewport is unavailable");

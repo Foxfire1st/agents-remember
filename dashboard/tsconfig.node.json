@@ -15,5 +15,5 @@
     "noUnusedLocals": true,
     "noUnusedParameters": true
   },
-  "include": ["vite.config.ts", "vitest.config.ts"]
+  "include": ["panda.config.ts", "vite.config.ts", "vitest.config.ts"]
 }

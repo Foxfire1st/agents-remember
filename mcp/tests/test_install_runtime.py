@@ -101,8 +101,9 @@ class InstallRuntimeTests(unittest.TestCase):
                 source_root,
                 coordination_root,
                 dry_run=False,
-                install_provider_deps=False,
-                provider_settings={},
+                provider_deps=install_runtime.ProviderDependencyInstall(
+                    settings={}, timeout=1800, enabled=False
+                ),
             )
 
             self.assertEqual(summary.dependency_runs, 0)
@@ -138,8 +139,9 @@ class InstallRuntimeTests(unittest.TestCase):
                 source_root,
                 coordination_root,
                 dry_run=False,
-                install_provider_deps=False,
-                provider_settings={},
+                provider_deps=install_runtime.ProviderDependencyInstall(
+                    settings={}, timeout=1800, enabled=False
+                ),
             )
 
             self.assertEqual(summary.dependency_runs, 0)
@@ -211,8 +213,9 @@ class InstallRuntimeTests(unittest.TestCase):
                     source_root,
                     coordination_root,
                     dry_run=False,
-                    install_provider_deps=True,
-                    provider_settings=enabled_provider_settings("grepai-memory"),
+                    provider_deps=install_runtime.ProviderDependencyInstall(
+                        settings=enabled_provider_settings("grepai-memory"), timeout=1800
+                    ),
                 )
 
             self.assertEqual(
@@ -279,8 +282,9 @@ class InstallRuntimeTests(unittest.TestCase):
                     source_root,
                     coordination_root,
                     dry_run=True,
-                    install_provider_deps=True,
-                    provider_settings=enabled_provider_settings("grepai-memory"),
+                    provider_deps=install_runtime.ProviderDependencyInstall(
+                        settings=enabled_provider_settings("grepai-memory"), timeout=1800
+                    ),
                 )
 
             self.assertEqual(
@@ -336,8 +340,9 @@ class InstallRuntimeTests(unittest.TestCase):
                     source_root,
                     coordination_root,
                     dry_run=False,
-                    install_provider_deps=True,
-                    provider_settings=enabled_provider_settings("grepai-memory"),
+                    provider_deps=install_runtime.ProviderDependencyInstall(
+                        settings=enabled_provider_settings("grepai-memory"), timeout=1800
+                    ),
                 )
 
             self.assertEqual(
@@ -386,8 +391,9 @@ class InstallRuntimeTests(unittest.TestCase):
                     source_root,
                     coordination_root,
                     dry_run=False,
-                    install_provider_deps=True,
-                    provider_settings=enabled_provider_settings("grepai-memory"),
+                    provider_deps=install_runtime.ProviderDependencyInstall(
+                        settings=enabled_provider_settings("grepai-memory"), timeout=1800
+                    ),
                 )
 
             report = summary.provider_watcher_rebind
@@ -441,8 +447,9 @@ class InstallRuntimeTests(unittest.TestCase):
                     source_root,
                     coordination_root,
                     dry_run=False,
-                    install_provider_deps=True,
-                    provider_settings=enabled_provider_settings("grepai-memory"),
+                    provider_deps=install_runtime.ProviderDependencyInstall(
+                        settings=enabled_provider_settings("grepai-memory"), timeout=1800
+                    ),
                 )
 
             self.assertEqual(
@@ -469,8 +476,9 @@ class AgenticSettingsSeedTests(unittest.TestCase):
                 source_root,
                 coordination_root,
                 dry_run=False,
-                install_provider_deps=False,
-                provider_settings={},
+                provider_deps=install_runtime.ProviderDependencyInstall(
+                    settings={}, timeout=1800, enabled=False
+                ),
             )
 
             settings_path = coordination_root / "system" / "settings.json"
@@ -492,8 +500,9 @@ class AgenticSettingsSeedTests(unittest.TestCase):
                 source_root,
                 coordination_root,
                 dry_run=False,
-                install_provider_deps=False,
-                provider_settings={},
+                provider_deps=install_runtime.ProviderDependencyInstall(
+                    settings={}, timeout=1800, enabled=False
+                ),
             )
 
             self.assertEqual(settings_path.read_text(encoding="utf-8"), developer_content)
@@ -508,8 +517,9 @@ class AgenticSettingsSeedTests(unittest.TestCase):
                 source_root,
                 coordination_root,
                 dry_run=True,
-                install_provider_deps=False,
-                provider_settings={},
+                provider_deps=install_runtime.ProviderDependencyInstall(
+                    settings={}, timeout=1800, enabled=False
+                ),
             )
 
             self.assertFalse((coordination_root / "system" / "settings.json").exists())
@@ -574,10 +584,11 @@ class ProviderDependencyHelperTests(unittest.TestCase):
         summary = install_runtime.InstallSummary()
         results = install_runtime.install_provider_dependencies_from_settings(
             Path("/unused-coordination-root"),
-            {"contextProviders": {"enabled": True, "providers": {}}},
+            install_runtime.ProviderDependencyInstall(
+                settings={"contextProviders": {"enabled": True, "providers": {}}}, timeout=1
+            ),
             summary,
             dry_run=True,
-            timeout=1,
         )
         self.assertEqual(results, [])
         self.assertEqual(summary.dependency_runs, 0)
@@ -603,10 +614,9 @@ class ProviderDependencyHelperTests(unittest.TestCase):
         ):
             results = install_runtime.install_provider_dependencies_from_settings(
                 Path("/unused-coordination-root"),
-                settings,
+                install_runtime.ProviderDependencyInstall(settings=settings, timeout=1),
                 summary,
                 dry_run=True,
-                timeout=1,
             )
         self.assertEqual(len(results), 2)
         self.assertEqual(summary.dependency_runs, 2)
@@ -646,11 +656,11 @@ class ProviderDependencyHelperTests(unittest.TestCase):
         ):
             install_runtime.install_provider_dependencies_from_settings(
                 Path("/unused-coordination-root"),
-                settings,
+                install_runtime.ProviderDependencyInstall(
+                    settings=settings, timeout=1, no_cache=True
+                ),
                 summary,
                 dry_run=True,
-                timeout=1,
-                no_cache=True,
             )
         self.assertTrue(captured["grepai_no_cache"])
         self.assertTrue(captured["cgc_no_cache"])
@@ -674,10 +684,9 @@ class ProviderDependencyHelperTests(unittest.TestCase):
         ):
             install_runtime.install_provider_dependencies_from_settings(
                 Path("/unused-coordination-root"),
-                settings,
+                install_runtime.ProviderDependencyInstall(settings=settings, timeout=1),
                 summary,
                 dry_run=True,
-                timeout=1,
             )
         self.assertFalse(captured["grepai_no_cache"])
 
@@ -699,10 +708,9 @@ class ProviderDependencyHelperTests(unittest.TestCase):
         ):
             install_runtime.install_provider_dependencies_from_settings(
                 Path("/unused-coordination-root"),
-                settings,
+                install_runtime.ProviderDependencyInstall(settings=settings, timeout=1),
                 summary,
                 dry_run=True,
-                timeout=1,
             )
 
 

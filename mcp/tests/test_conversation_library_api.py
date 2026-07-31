@@ -12,6 +12,7 @@ import json
 import tempfile
 import unittest
 from collections.abc import Mapping
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 from unittest import mock
@@ -29,7 +30,10 @@ from agents_remember.serving.conversation.library.cursor import (
 )
 from agents_remember.serving.conversation.library.errors import LibraryStoreError
 from agents_remember.serving.conversation.library.factories import LibraryShared
-from agents_remember.serving.conversation.library.open_service import OpenOperationLedger
+from agents_remember.serving.conversation.library.open_service import (
+    LibraryBinding,
+    OpenOperationLedger,
+)
 from agents_remember.serving.conversation.library.scope import canonical_library_scope
 from agents_remember.serving.conversation.library.service import ConversationLibraryService
 from agents_remember.serving.conversation.models import (
@@ -138,15 +142,32 @@ def _supported_caps():
 _SUPPORTED_CAPS = _supported_caps()
 
 
+LOOPBACK = ("127.0.0.1", 5000)
+
+
+@dataclass(frozen=True)
+class AsgiClient:
+    """The app under test together with the peer address it will see.
+
+    These routes are loopback-guarded, so "who is calling" belongs to the connection, not to
+    any single request: the guard test keeps the requests identical and moves only the peer.
+    Binding the two together means a call site cannot accidentally describe a request as
+    coming from somewhere the app was never handed.
+    """
+
+    app: FastAPI
+    peer: tuple[str, int] | None = LOOPBACK
+
+
 async def asgi_request(
-    app: FastAPI,
+    client: AsgiClient,
     method: str,
     path: str,
     *,
     query: Mapping[str, str] | None = None,
     body: Mapping[str, object] | None = None,
-    client: tuple[str, int] | None = ("127.0.0.1", 5000),
 ) -> tuple[int, object]:
+    app = client.app
     payload = json.dumps(body).encode("utf-8") if body is not None else b""
     headers = [(b"host", b"testserver")]
     if body is not None:
@@ -161,7 +182,7 @@ async def asgi_request(
         "raw_path": path.encode("ascii"),
         "query_string": urlencode(query or {}).encode("ascii"),
         "headers": headers,
-        "client": client,
+        "client": client.peer,
         "server": ("testserver", 80),
         "app": app,
         "state": {},
@@ -306,6 +327,7 @@ class LibraryApiTests(unittest.IsolatedAsyncioTestCase):
         self.opener_calls: list[Mapping[str, object]] = []
         self.app = FastAPI()
         register_conversation_routes(self.app, self.runtime)
+        self.client = AsgiClient(self.app)
         self._patches = [
             mock.patch.object(factories, "library_shared", lambda _runtime: self.shared),
             mock.patch.object(factories, "build_port", lambda *_a, **_k: self.port),
@@ -322,7 +344,7 @@ class LibraryApiTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_list_route_returns_wire_page_and_authorizes_scope(self) -> None:
         status, body = await asgi_request(
-            self.app, "GET", "/api/harnesses/pi/conversations", query={"limit": "5"}
+            self.client, "GET", "/api/harnesses/pi/conversations", query={"limit": "5"}
         )
         assert status == 200, body
         assert body["scope"]["harnessId"] == "pi"  # type: ignore[index]
@@ -339,7 +361,7 @@ class LibraryApiTests(unittest.IsolatedAsyncioTestCase):
         child = self.tmp / "sub"
         child.mkdir()
         status, _body = await asgi_request(
-            self.app,
+            self.client,
             "GET",
             "/api/harnesses/pi/conversations",
             query={"cwd": str(child), "limit": "500"},
@@ -352,7 +374,7 @@ class LibraryApiTests(unittest.IsolatedAsyncioTestCase):
     async def test_list_route_maps_null_byte_cwd_to_typed_refusal(self) -> None:
         # Review F2: an embedded NUL must surface as the typed scope refusal, never a raw 500.
         status, body = await asgi_request(
-            self.app,
+            self.client,
             "GET",
             "/api/harnesses/pi/conversations",
             query={"cwd": "sub\\x00dir"},
@@ -363,17 +385,17 @@ class LibraryApiTests(unittest.IsolatedAsyncioTestCase):
     async def test_list_route_rejects_scope_escapes_and_unknown_harness(self) -> None:
         for query in ({"cwd": ".."}, {"cwd": "/etc"}, {"cwd": "missing"}):
             status, body = await asgi_request(
-                self.app, "GET", "/api/harnesses/pi/conversations", query=query
+                self.client, "GET", "/api/harnesses/pi/conversations", query=query
             )
             assert status == 403, (query, body)
             assert body["status"] == "scope-denied"  # type: ignore[index]
-        status, body = await asgi_request(self.app, "GET", "/api/harnesses/tmux/conversations")
+        status, body = await asgi_request(self.client, "GET", "/api/harnesses/tmux/conversations")
         assert status == 404
         assert body["status"] == "unknown-harness"  # type: ignore[index]
 
     async def test_list_route_maps_malformed_cursor_and_capability(self) -> None:
         status, body = await asgi_request(
-            self.app, "GET", "/api/harnesses/pi/conversations", query={"cursor": "garbage"}
+            self.client, "GET", "/api/harnesses/pi/conversations", query={"cursor": "garbage"}
         )
         assert status == 400
         assert body["status"] == "invalid-cursor"  # type: ignore[index]
@@ -383,7 +405,7 @@ class LibraryApiTests(unittest.IsolatedAsyncioTestCase):
         self.gates.history_capabilities = (  # type: ignore[method-assign]
             _unavailable_gates_history
         )
-        status, body = await asgi_request(self.app, "GET", "/api/harnesses/pi/conversations")
+        status, body = await asgi_request(self.client, "GET", "/api/harnesses/pi/conversations")
         assert status == 422
         assert body["status"] == "capability-unavailable"  # type: ignore[index]
         assert body["capabilityState"] == "unavailable"  # type: ignore[index]
@@ -393,7 +415,7 @@ class LibraryApiTests(unittest.IsolatedAsyncioTestCase):
             raise LibraryStoreError("Codex native payload failed shape validation: nope")
 
         self.port.list = _failing_list  # type: ignore[method-assign]
-        status, body = await asgi_request(self.app, "GET", "/api/harnesses/pi/conversations")
+        status, body = await asgi_request(self.client, "GET", "/api/harnesses/pi/conversations")
         assert status == 503
         assert body["status"] == "library-unavailable"  # type: ignore[index]
 
@@ -406,7 +428,7 @@ class LibraryApiTests(unittest.IsolatedAsyncioTestCase):
         for harness in ("codex", "claude", "pi"):
             self.port.harness_id = harness
             status, body = await asgi_request(
-                self.app, "GET", f"/api/harnesses/{harness}/conversations"
+                self.client, "GET", f"/api/harnesses/{harness}/conversations"
             )
             assert status == 503, (harness, body)
             assert body["status"] == "library-unavailable"  # type: ignore[index]
@@ -414,7 +436,7 @@ class LibraryApiTests(unittest.IsolatedAsyncioTestCase):
     async def test_read_route_returns_historical_page(self) -> None:
         key = self._mint_key()
         status, body = await asgi_request(
-            self.app, "GET", f"/api/harnesses/pi/conversations/{key}", query={"limit": "10"}
+            self.client, "GET", f"/api/harnesses/pi/conversations/{key}", query={"limit": "10"}
         )
         assert status == 200, body
         assert body["ref"]["vendorConversationId"] == "vendor-1"  # type: ignore[index]
@@ -437,7 +459,7 @@ class LibraryApiTests(unittest.IsolatedAsyncioTestCase):
             )
         )
         status, body = await asgi_request(
-            self.app, "GET", f"/api/harnesses/pi/conversations/{foreign_key}"
+            self.client, "GET", f"/api/harnesses/pi/conversations/{foreign_key}"
         )
         assert status == 403
         assert body["status"] == "authorization-failed"  # type: ignore[index]
@@ -450,7 +472,7 @@ class LibraryApiTests(unittest.IsolatedAsyncioTestCase):
             ("POST", f"/api/harnesses/pi/conversations/{key}/open", {"requestId": "r"}),
         ):
             status, payload = await asgi_request(
-                self.app, method, path, body=body, client=("10.0.0.5", 9000)
+                AsgiClient(self.app, peer=("10.0.0.5", 9000)), method, path, body=body
             )
             assert status == 403, (path, payload)
             assert payload["status"] == "authorization-failed"  # type: ignore[index]
@@ -516,16 +538,16 @@ class LibraryApiTests(unittest.IsolatedAsyncioTestCase):
                 library_api,
                 "build_open_service",
                 lambda runtime, authorization: open_module.ConversationOpenService(
-                    runtime=runtime,
-                    shared=self.shared,
-                    authorization=authorization,
+                    LibraryBinding(
+                        runtime=runtime, shared=self.shared, authorization=authorization
+                    ),
                     library=ConversationLibraryService(
                         runtime=runtime,
                         shared=self.shared,
                         authorization=authorization,
                         port_builder=lambda _h: self.port,  # type: ignore[arg-type]
                     ),
-                    port_builder=lambda _h: self.port,  # type: ignore[arg-type]
+                    port_builder=lambda _h: self.port,
                     opener=self._opener,
                     proof_wait_seconds=0.01,
                 ),
@@ -540,7 +562,7 @@ class LibraryApiTests(unittest.IsolatedAsyncioTestCase):
         try:
             payload = {"requestId": "req-1", "expectedIdentityDigest": self._digest()}
             status, body = await asgi_request(
-                self.app, "POST", f"/api/harnesses/pi/conversations/{key}/open", body=payload
+                self.client, "POST", f"/api/harnesses/pi/conversations/{key}/open", body=payload
             )
             assert status == 201, body
             assert body["outcome"] == "opened"  # type: ignore[index]
@@ -551,13 +573,13 @@ class LibraryApiTests(unittest.IsolatedAsyncioTestCase):
             assert len(self.opener_calls) == 1
 
             replay = await asgi_request(
-                self.app, "POST", f"/api/harnesses/pi/conversations/{key}/open", body=payload
+                self.client, "POST", f"/api/harnesses/pi/conversations/{key}/open", body=payload
             )
             assert replay == (status, body)
             assert len(self.opener_calls) == 1
 
             conflict = await asgi_request(
-                self.app,
+                self.client,
                 "POST",
                 f"/api/harnesses/pi/conversations/{key}/open",
                 body={**payload, "launchContext": {"leafKey": "other"}},
@@ -576,7 +598,7 @@ class LibraryApiTests(unittest.IsolatedAsyncioTestCase):
         builder_patch.start()
         try:
             stale = await asgi_request(
-                self.app,
+                self.client,
                 "POST",
                 f"/api/harnesses/pi/conversations/{key}/open",
                 body={"requestId": "req-x", "expectedIdentityDigest": "sha256:" + "0" * 64},
@@ -585,7 +607,7 @@ class LibraryApiTests(unittest.IsolatedAsyncioTestCase):
             assert stale[1]["status"] == "stale-identity"  # type: ignore[index]
 
             unknown = await asgi_request(
-                self.app,
+                self.client,
                 "POST",
                 f"/api/harnesses/pi/conversations/{key}/open-status",
                 body={"requestId": "never-seen"},
@@ -605,7 +627,7 @@ class LibraryApiTests(unittest.IsolatedAsyncioTestCase):
         not_ready.start()
         try:
             status, body = await asgi_request(
-                self.app,
+                self.client,
                 "POST",
                 f"/api/harnesses/pi/conversations/{key}/open",
                 body={"requestId": "req-t", "expectedIdentityDigest": self._digest()},
@@ -613,7 +635,7 @@ class LibraryApiTests(unittest.IsolatedAsyncioTestCase):
             assert status == 202
             assert body["outcome"] == "timeout-unknown"  # type: ignore[index]
             status_route = await asgi_request(
-                self.app,
+                self.client,
                 "POST",
                 f"/api/harnesses/pi/conversations/{key}/open-status",
                 body={"requestId": "req-t"},
@@ -630,16 +652,14 @@ class LibraryApiTests(unittest.IsolatedAsyncioTestCase):
             library_api,
             "build_open_service",
             lambda runtime, authorization: open_module.ConversationOpenService(
-                runtime=runtime,
-                shared=self.shared,
-                authorization=authorization,
+                LibraryBinding(runtime=runtime, shared=self.shared, authorization=authorization),
                 library=ConversationLibraryService(
                     runtime=runtime,
                     shared=self.shared,
                     authorization=authorization,
                     port_builder=lambda _h: self.port,  # type: ignore[arg-type]
                 ),
-                port_builder=lambda _h: self.port,  # type: ignore[arg-type]
+                port_builder=lambda _h: self.port,
                 opener=lambda **_k: OpenTerminalResult(status="bad-kind", detail="no binary"),
                 proof_wait_seconds=0.01,
             ),
@@ -647,7 +667,7 @@ class LibraryApiTests(unittest.IsolatedAsyncioTestCase):
         failing_opener.start()
         try:
             status, body = await asgi_request(
-                self.app,
+                self.client,
                 "POST",
                 f"/api/harnesses/pi/conversations/{key}/open",
                 body={"requestId": "req-f", "expectedIdentityDigest": self._digest()},
@@ -663,14 +683,14 @@ class LibraryApiTests(unittest.IsolatedAsyncioTestCase):
             mock.patch.object(
                 open_module,
                 "retire_entry",
-                lambda _c, _h, entry, **_k: retired.append(entry.id),
+                lambda _c, _h, entry, *_a, **_k: retired.append(entry.id),
             ),
         ]
         for patch in patches:
             patch.start()
         try:
             status, body = await asgi_request(
-                self.app,
+                self.client,
                 "POST",
                 f"/api/harnesses/pi/conversations/{key}/open",
                 body={"requestId": "req-m", "expectedIdentityDigest": self._digest()},

@@ -44,6 +44,7 @@ from agents_remember.serving.harness_control_models import (
 from agents_remember.serving.harness_launch import ResolvedLaunch, verify_effective_launch
 from agents_remember.serving.pi_rpc_configuration import (
     DEFAULT_PI_MUTATION_TIMEOUT_SECONDS,
+    ConfigurationPorts,
     PiRpcConfiguration,
 )
 from agents_remember.serving.pi_rpc_events import PiRpcEventMapper
@@ -78,6 +79,23 @@ class _SubmissionEvidence:
     state: SubmissionKnowledge
 
 
+@dataclass(frozen=True)
+class PiAdapterLimits:
+    """How much one Pi adapter may retain, and how long a set transaction may take.
+
+    The retained submission and interaction ledgers plus the mutation timeout are one bounded
+    budget for a single live Pi session -- raising one alone just moves where the session first
+    misbehaves under load.
+    """
+
+    submission: int = 256
+    interaction: int = 64
+    configuration_timeout_seconds: float = DEFAULT_PI_MUTATION_TIMEOUT_SECONDS
+
+
+DEFAULT_PI_ADAPTER_LIMITS = PiAdapterLimits()
+
+
 class PiRpcAdapter:
     """Own a Pi RPC subprocess and translate only structurally validated protocol semantics."""
 
@@ -85,12 +103,12 @@ class PiRpcAdapter:
         self,
         *,
         transport_factory: TransportFactory = PiRpcSubprocess,
-        submission_limit: int = 256,
-        interaction_limit: int = 64,
-        configuration_timeout_seconds: float = DEFAULT_PI_MUTATION_TIMEOUT_SECONDS,
+        limits: PiAdapterLimits = DEFAULT_PI_ADAPTER_LIMITS,
         clock: Clock = lambda: datetime.now(UTC).isoformat(),
         expected_launch: ResolvedLaunch | None = None,
     ) -> None:
+        submission_limit = limits.submission
+        interaction_limit = limits.interaction
         if submission_limit < 1 or interaction_limit < 1:
             raise HarnessControlError("Pi RPC adapter limits must be positive")
         self._transport_factory = transport_factory
@@ -114,13 +132,15 @@ class PiRpcAdapter:
         self._stopped = False
         self._last_abort: tuple[tuple[str, str], InterruptResult] | None = None
         self._configuration = PiRpcConfiguration(
-            transport=self._require_transport,
-            read_state=self._read_configuration_state,
-            read_capabilities=self._read_available_models,
-            capabilities=self.advertise,
-            commit=self._commit_configuration,
-            request_id=self._internal_id,
-            timeout_seconds=configuration_timeout_seconds,
+            ConfigurationPorts(
+                transport=self._require_transport,
+                read_state=self._read_configuration_state,
+                read_capabilities=self._read_available_models,
+                capabilities=self.advertise,
+                commit=self._commit_configuration,
+                request_id=self._internal_id,
+            ),
+            timeout_seconds=limits.configuration_timeout_seconds,
         )
 
     async def start(self, launch: LaunchSpec) -> AdapterHandshake:

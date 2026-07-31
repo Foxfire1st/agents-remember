@@ -12,6 +12,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import TypeGuard
 
 from agents_remember.errors import HarnessControlError
 from agents_remember.serving.harness_control_adapter import (
@@ -66,34 +67,19 @@ def control_runner_command(config: RunnerConfig) -> tuple[str, ...]:
 
 
 def parse_runner_config(encoded: str) -> RunnerConfig:
-    try:
-        raw = json.loads(base64.urlsafe_b64decode(encoded.encode("ascii")))
-    except (ValueError, UnicodeDecodeError, json.JSONDecodeError) as exc:
-        raise HarnessControlError("hosted control runner config is malformed") from exc
-    if not isinstance(raw, dict):
-        raise HarnessControlError("hosted control runner config must be an object")
+    raw = _decode_runner_payload(encoded)
     identity = raw.get("identity")
     argv = raw.get("argv")
     session_commands = raw.get("sessionCommands", [])
     if (
         not isinstance(identity, dict)
-        or not isinstance(argv, list)
-        or not all(isinstance(part, str) and part for part in argv)
-        or not isinstance(session_commands, list)
-        or not all(isinstance(command, str) and command for command in session_commands)
+        or not _is_text_list(argv)
+        or not _is_text_list(session_commands)
     ):
         raise HarnessControlError("hosted control runner requires identity and argv")
     resolved_raw = raw.get("resolvedLaunch")
     resolved_launch = ResolvedLaunch.from_json(resolved_raw) if resolved_raw is not None else None
-    resume_thread_id = raw.get("resumeThreadId")
-    if resume_thread_id is not None and (
-        not isinstance(resume_thread_id, str)
-        or not resume_thread_id
-        or resume_thread_id != resume_thread_id.strip()
-    ):
-        raise HarnessControlError(
-            "hosted control runner resumeThreadId must be non-empty trimmed text or null"
-        )
+    resume_thread_id = _optional_resume_thread_id(raw)
     config = RunnerConfig(
         identity=ControlIdentity.from_json(identity),
         harness_id=_required_text(raw, "harnessId"),
@@ -104,12 +90,51 @@ def parse_runner_config(encoded: str) -> RunnerConfig:
         resolved_launch=resolved_launch,
         resume_thread_id=resume_thread_id,
     )
-    if resolved_launch is not None:
-        if resolved_launch.harness_id != config.harness_id:
-            raise HarnessControlError("runner resolved launch harness does not match harnessId")
-        if resolved_launch.workspace != config.cwd:
-            raise HarnessControlError("runner resolved launch workspace does not match cwd")
+    _require_launch_agrees_with_config(config)
     return config
+
+
+def _decode_runner_payload(encoded: str) -> dict[str, object]:
+    """Decode the base64url argv token the opener hands the runner into its JSON object."""
+
+    try:
+        raw = json.loads(base64.urlsafe_b64decode(encoded.encode("ascii")))
+    except (ValueError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise HarnessControlError("hosted control runner config is malformed") from exc
+    if not isinstance(raw, dict):
+        raise HarnessControlError("hosted control runner config must be an object")
+    return raw
+
+
+def _is_text_list(value: object) -> TypeGuard[list[str]]:
+    """A list whose every entry is non-empty text, which is the only argv shape accepted."""
+
+    return isinstance(value, list) and all(isinstance(item, str) and item for item in value)
+
+
+def _optional_resume_thread_id(raw: Mapping[str, object]) -> str | None:
+    """``resumeThreadId`` is additive, so an absent or null field stays a legal payload."""
+
+    value = raw.get("resumeThreadId")
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value or value != value.strip():
+        raise HarnessControlError(
+            "hosted control runner resumeThreadId must be non-empty trimmed text or null"
+        )
+    return value
+
+
+def _require_launch_agrees_with_config(config: RunnerConfig) -> None:
+    """Refuse a payload whose settings-owned selection contradicts the session it launches."""
+
+    resolved_launch = config.resolved_launch
+    if resolved_launch is None:
+        return
+    if resolved_launch.harness_id != config.harness_id:
+        raise HarnessControlError("runner resolved launch harness does not match harnessId")
+    if resolved_launch.workspace != config.cwd:
+        raise HarnessControlError("runner resolved launch workspace does not match cwd")
 
 
 async def run_controlled_session(config: RunnerConfig) -> None:

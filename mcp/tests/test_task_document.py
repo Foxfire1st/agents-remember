@@ -21,7 +21,12 @@ from pydantic import ValidationError
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
-from agents_remember.controllers.task_doc_tools import TaskDocError, task_doc_tool
+from agents_remember.controllers.task_doc_tools import (
+    TaskDocEdit,
+    TaskDocError,
+    TaskDocTarget,
+    task_doc_tool,
+)
 from agents_remember.mcp.config import McpRuntimeConfig
 from agents_remember.mcp.tools import task_doc_payload
 from agents_remember.mcp.tools.base import PUBLIC_TOOLS
@@ -41,7 +46,13 @@ from agents_remember.tasks import (
     step_total,
     write_task_doc,
 )
-from agents_remember.worktrees.worktree_contract import default_contract, write_contract
+from agents_remember.worktrees.worktree_contract import (
+    ContractTask,
+    LeafIdentity,
+    RepoBranchPlan,
+    default_contract,
+    write_contract,
+)
 
 
 def _doc(**over: Any) -> TaskDocument:
@@ -572,10 +583,9 @@ class ControllerTests(unittest.TestCase):
         payload.update(fields)
         return task_doc_tool(
             self.cfg,
-            repo_id="agents-remember",
+            TaskDocTarget(repo_id="agents-remember", task_name="3c-x"),
             operation="create",
-            task_name="3c-x",
-            fields=payload,
+            edit=TaskDocEdit(fields=payload),
         )
 
     def _create_parent_master(self, **fields: Any) -> dict[str, Any]:
@@ -592,10 +602,9 @@ class ControllerTests(unittest.TestCase):
         payload.update(fields)
         return task_doc_tool(
             self.cfg,
-            repo_id="agents-remember",
+            TaskDocTarget(repo_id="agents-remember", task_name="3c-x"),
             operation="create",
-            task_name="3c-x",
-            fields=payload,
+            edit=TaskDocEdit(fields=payload),
         )
 
     def _call(
@@ -609,13 +618,9 @@ class ControllerTests(unittest.TestCase):
     ) -> dict[str, Any]:
         return task_doc_tool(
             self.cfg,
-            repo_id="agents-remember",
+            TaskDocTarget(repo_id="agents-remember", task_name="3c-x", slug="03c_x"),
             operation=operation,
-            task_name="3c-x",
-            slug="03c_x",
-            fields=fields,
-            step=step,
-            decision=decision,
+            edit=TaskDocEdit(fields=fields, step=step, decision=decision),
             dry_run=dry_run,
         )
 
@@ -647,10 +652,9 @@ class ControllerTests(unittest.TestCase):
         self._create(master="task.md")
         task_doc_tool(
             self.cfg,
-            repo_id="agents-remember",
+            TaskDocTarget(repo_id="agents-remember", task_name="3c-x"),
             operation="set_subtask",
-            task_name="3c-x",
-            subtask={"number": "3C", "scope": "keep this prose"},
+            edit=TaskDocEdit(subtask={"number": "3C", "scope": "keep this prose"}),
         )
 
         result = self._call("set_field", fields={"title": "Renamed", "status": "inProgress"})
@@ -676,6 +680,67 @@ class ControllerTests(unittest.TestCase):
         done = self._call("set_step", step={"id": "S1", "title": "One", "status": "done"})
         master = read_task_doc(Path(str(done["masterSync"]["masterDocPath"])))
         self.assertEqual(master.subTasks[0].status, "Completed")
+
+    def test_an_unreadable_parent_master_refuses_the_leaf_edit_rather_than_dropping_the_row(
+        self,
+    ) -> None:
+        """A leaf that names a master owes it a row on every edit.
+
+        If the master cannot be read the row cannot be computed, and writing the leaf anyway
+        would leave the series silently describing the previous title forever. So the whole
+        edit is refused, naming the file to repair -- and the leaf on disk is exactly what it
+        was before the call.
+        """
+
+        self._create_parent_master()
+        self._create(master="task.md")
+        task_root = self.coord / "tasks" / "agents-remember" / "3c-x"
+        master_path = task_root / "task.json"
+        leaf_path = task_root / "03c_x.json"
+        leaf_before = leaf_path.read_text(encoding="utf-8")
+        master_path.write_text('{"schema": "ar-task-document/v1",', encoding="utf-8")
+
+        with self.assertRaises(TaskDocError) as raised:
+            self._call("set_field", fields={"title": "Renamed"})
+
+        self.assertIn("cannot read parent master task document", str(raised.exception))
+        self.assertIn("task.json", str(raised.exception))
+        self.assertEqual(leaf_path.read_text(encoding="utf-8"), leaf_before)
+        self.assertEqual(read_task_doc(leaf_path).title, "Smoke")
+
+    def test_a_master_ref_naming_a_sibling_leaf_is_refused_by_kind(self) -> None:
+        # The contrast case for the refusal above: the file parses perfectly, so the failure
+        # is about what it is rather than about reading it. A leaf cannot own a subTasks
+        # table, so syncing a row into one would either invent a section or drop the row.
+        self._create_parent_master()
+        task_doc_tool(
+            self.cfg,
+            TaskDocTarget(repo_id="agents-remember", task_name="3c-x"),
+            operation="create",
+            edit=TaskDocEdit(
+                fields={
+                    "id": "3D",
+                    "slug": "03c_y",
+                    "title": "Sibling",
+                    "kind": "subTask",
+                    "repo": "agents-remember",
+                    "type": "Code",
+                    "createdAt": "2026-01-01T00:00",
+                }
+            ),
+        )
+
+        with self.assertRaises(TaskDocError) as raised:
+            self._create(master="03c_y.md")
+
+        self.assertIn("parent task document is not a master", str(raised.exception))
+        self.assertIn("03c_y.json", str(raised.exception))
+        # The refused leaf was never written, and the sibling grew no subTasks table.
+        self.assertFalse(
+            (self.coord / "tasks" / "agents-remember" / "3c-x" / "03c_x.json").exists()
+        )
+        sibling = read_task_doc(self.coord / "tasks" / "agents-remember" / "3c-x" / "03c_y.json")
+        self.assertEqual(sibling.subTasks, [])
 
     def test_leaf_dry_run_includes_master_sync_preview_without_writing(self) -> None:
         self._create_parent_master()
@@ -723,10 +788,9 @@ class ControllerTests(unittest.TestCase):
         self._create_parent_master()
         updated = task_doc_tool(
             self.cfg,
-            repo_id="agents-remember",
+            TaskDocTarget(repo_id="agents-remember", task_name="3c-x"),
             operation="set_field",
-            task_name="3c-x",
-            fields={"orchestrates": ["260706_management-repo"]},
+            edit=TaskDocEdit(fields={"orchestrates": ["260706_management-repo"]}),
         )
         doc = read_task_doc(Path(str(updated["docPath"])))
         self.assertEqual(doc.orchestrates, ["260706_management-repo"])
@@ -741,19 +805,20 @@ class ControllerTests(unittest.TestCase):
     def test_dry_run_create_renders_without_writing(self) -> None:
         result = task_doc_tool(
             self.cfg,
-            repo_id="agents-remember",
+            TaskDocTarget(repo_id="agents-remember", task_name="3c-x"),
             operation="create",
-            task_name="3c-x",
-            fields={
-                "id": "3C",
-                "slug": "03c_x",
-                "title": "Smoke",
-                "kind": "subTask",
-                "repo": "agents-remember",
-                "type": "Code",
-                "createdAt": "2026-01-01T00:00",
-                "objective": "Preview me.",
-            },
+            edit=TaskDocEdit(
+                fields={
+                    "id": "3C",
+                    "slug": "03c_x",
+                    "title": "Smoke",
+                    "kind": "subTask",
+                    "repo": "agents-remember",
+                    "type": "Code",
+                    "createdAt": "2026-01-01T00:00",
+                    "objective": "Preview me.",
+                }
+            ),
             dry_run=True,
         )
         self.assertTrue(result["dryRun"])
@@ -770,11 +835,9 @@ class ControllerTests(unittest.TestCase):
         before_md = md_path.read_text(encoding="utf-8")
         result = task_doc_tool(
             self.cfg,
-            repo_id="agents-remember",
+            TaskDocTarget(repo_id="agents-remember", task_name="3c-x", slug="03c_x"),
             operation="set_field",
-            task_name="3c-x",
-            slug="03c_x",
-            fields={"objective": "changed"},
+            edit=TaskDocEdit(fields={"objective": "changed"}),
             dry_run=True,
         )
         self.assertIn("changed", str(result["rendered"]))  # the would-be render reflects the edit
@@ -788,11 +851,9 @@ class ControllerTests(unittest.TestCase):
         # a clean re-preview (no real change) matches disk exactly: no loss, empty diff
         clean = task_doc_tool(
             self.cfg,
-            repo_id="agents-remember",
+            TaskDocTarget(repo_id="agents-remember", task_name="3c-x", slug="03c_x"),
             operation="set_field",
-            task_name="3c-x",
-            slug="03c_x",
-            fields={"objective": "orig"},
+            edit=TaskDocEdit(fields={"objective": "orig"}),
             dry_run=True,
         )
         self.assertFalse(clean["wouldLose"])
@@ -804,11 +865,9 @@ class ControllerTests(unittest.TestCase):
         )
         lossy = task_doc_tool(
             self.cfg,
-            repo_id="agents-remember",
+            TaskDocTarget(repo_id="agents-remember", task_name="3c-x", slug="03c_x"),
             operation="set_field",
-            task_name="3c-x",
-            slug="03c_x",
-            fields={"objective": "orig"},
+            edit=TaskDocEdit(fields={"objective": "orig"}),
             dry_run=True,
         )
         self.assertTrue(lossy["wouldLose"])
@@ -930,17 +989,17 @@ class ControllerTests(unittest.TestCase):
 
     def test_create_picks_up_contract_lifecycle_id(self) -> None:
         contract = default_contract(
-            task_name="3c-x",
-            repo_name="agents-remember",
-            workflow_kind="chat-task",
-            memory_mode="disabled",
-            coordination_root=self.coord,
-            code_repo_path=self.coord,
-            code_source_branch="main",
-            code_work_branch="wb",
-            code_base_commit="abc123",
-            worktree_name="3c-x",
-            lifecycle_id="LC-CONTRACT",
+            ContractTask(
+                name="3c-x",
+                repo_name="agents-remember",
+                coordination_root=self.coord,
+                workflow_kind="chat-task",
+                memory_mode="disabled",
+            ),
+            leaf=LeafIdentity(worktree_name="3c-x", lifecycle_id="LC-CONTRACT"),
+            code=RepoBranchPlan(
+                repo_path=self.coord, source_branch="main", work_branch="wb", base_commit="abc123"
+            ),
         )
         write_contract(contract.contract_path, contract)
         result = self._create()  # no lifecycleId in fields
@@ -958,59 +1017,56 @@ class ControllerTests(unittest.TestCase):
         with self.assertRaises(TaskDocError):
             task_doc_tool(
                 self.cfg,
-                repo_id="agents-remember",
+                TaskDocTarget(repo_id="agents-remember", task_name="kind-x"),
                 operation="create",
-                task_name="kind-x",
-                fields={**base, "kind": "light"},
+                edit=TaskDocEdit(fields={**base, "kind": "light"}),
             )
         # No contract + no kind defaults to a standalone master (not the retired "light" default).
         created = task_doc_tool(
             self.cfg,
-            repo_id="agents-remember",
+            TaskDocTarget(repo_id="agents-remember", task_name="kind-x"),
             operation="create",
-            task_name="kind-x",
-            fields=base,
+            edit=TaskDocEdit(fields=base),
         )
         self.assertEqual(created["kind"], "master")
         # replace shares _build_doc, so it refuses light on the same path.
         with self.assertRaises(TaskDocError):
             task_doc_tool(
                 self.cfg,
-                repo_id="agents-remember",
+                TaskDocTarget(repo_id="agents-remember", task_name="kind-x", slug="task"),
                 operation="replace",
-                task_name="kind-x",
-                slug="task",
-                fields={**base, "kind": "light"},
+                edit=TaskDocEdit(fields={**base, "kind": "light"}),
             )
 
     def test_create_defaults_subtask_under_leaf_contract(self) -> None:
         contract = default_contract(
-            task_name="leaf-x",
-            repo_name="agents-remember",
-            workflow_kind="chat-task",
-            memory_mode="disabled",
-            coordination_root=self.coord,
-            code_repo_path=self.coord,
-            code_source_branch="main",
-            code_work_branch="wb",
-            code_base_commit="abc123",
-            worktree_name="leaf-x",
-            lifecycle_id="LC-LEAF",
+            ContractTask(
+                name="leaf-x",
+                repo_name="agents-remember",
+                coordination_root=self.coord,
+                workflow_kind="chat-task",
+                memory_mode="disabled",
+            ),
+            leaf=LeafIdentity(worktree_name="leaf-x", lifecycle_id="LC-LEAF"),
+            code=RepoBranchPlan(
+                repo_path=self.coord, source_branch="main", work_branch="wb", base_commit="abc123"
+            ),
         )
         write_contract(contract.contract_path, contract)
         # A bare create against a leaf contract is the leaf sub-task (context-aware default).
         result = task_doc_tool(
             self.cfg,
-            repo_id="agents-remember",
+            TaskDocTarget(repo_id="agents-remember", task_name="leaf-x"),
             operation="create",
-            task_name="leaf-x",
-            fields={
-                "id": "L1",
-                "slug": "01_leaf",
-                "title": "Leaf",
-                "repo": "agents-remember",
-                "createdAt": "2026-01-01T00:00",
-            },
+            edit=TaskDocEdit(
+                fields={
+                    "id": "L1",
+                    "slug": "01_leaf",
+                    "title": "Leaf",
+                    "repo": "agents-remember",
+                    "createdAt": "2026-01-01T00:00",
+                }
+            ),
         )
         self.assertEqual(result["kind"], "subTask")
 
@@ -1019,18 +1075,28 @@ class ControllerTests(unittest.TestCase):
         task_root = Path(str(created["docPath"])).parent
         result = task_doc_tool(
             self.cfg,
-            repo_id="agents-remember",
+            TaskDocTarget(
+                repo_id="agents-remember",
+                contract_path=str(task_root / "series-contract.md"),
+                slug="03c_x",
+            ),
             operation="get",
-            contract_path=str(task_root / "series-contract.md"),
-            slug="03c_x",
         )
         self.assertEqual(result["taskId"], "3C")
 
     def test_error_paths(self) -> None:
         with self.assertRaises(TaskDocError):
-            task_doc_tool(self.cfg, repo_id="agents-remember", operation="frob", task_name="x")
+            task_doc_tool(
+                self.cfg,
+                TaskDocTarget(repo_id="agents-remember", task_name="x"),
+                operation="frob",
+            )
         with self.assertRaises(TaskDocError):
-            task_doc_tool(self.cfg, repo_id="agents-remember", operation="get")
+            task_doc_tool(
+                self.cfg,
+                TaskDocTarget(repo_id="agents-remember"),
+                operation="get",
+            )
         with self.assertRaises(TaskDocError):
             self._call("get")  # doc not created yet
         self._create()
@@ -1063,19 +1129,18 @@ class MasterControllerTests(unittest.TestCase):
         payload.update(fields)
         return task_doc_tool(
             self.cfg,
-            repo_id="agents-remember",
+            TaskDocTarget(repo_id="agents-remember", task_name="series"),
             operation="create",
-            task_name="series",
-            fields=payload,
+            edit=TaskDocEdit(fields=payload),
         )
 
-    def _op(self, operation: str, **kw: Any) -> dict[str, Any]:
+    def _op(self, operation: str, dry_run: bool = False, **kw: Any) -> dict[str, Any]:
         return task_doc_tool(
             self.cfg,
-            repo_id="agents-remember",
+            TaskDocTarget(repo_id="agents-remember", task_name="series"),
             operation=operation,
-            task_name="series",
-            **kw,
+            edit=TaskDocEdit(**kw),
+            dry_run=dry_run,
         )
 
     def test_create_master_writes_task_json_without_lifecycle(self) -> None:
@@ -1108,17 +1173,17 @@ class MasterControllerTests(unittest.TestCase):
 
     def test_master_create_ignores_contract_lifecycle_id(self) -> None:
         contract = default_contract(
-            task_name="series",
-            repo_name="agents-remember",
-            workflow_kind="light-task",
-            memory_mode="disabled",
-            coordination_root=self.coord,
-            code_repo_path=self.coord,
-            code_source_branch="main",
-            code_work_branch="wb",
-            code_base_commit="abc123",
-            worktree_name="series",
-            lifecycle_id="LC-X",
+            ContractTask(
+                name="series",
+                repo_name="agents-remember",
+                coordination_root=self.coord,
+                workflow_kind="light-task",
+                memory_mode="disabled",
+            ),
+            leaf=LeafIdentity(worktree_name="series", lifecycle_id="LC-X"),
+            code=RepoBranchPlan(
+                repo_path=self.coord, source_branch="main", work_branch="wb", base_commit="abc123"
+            ),
         )
         write_contract(contract.contract_path, contract)
         self.assertIsNone(self._create()["lifecycleId"])
@@ -1133,36 +1198,33 @@ class MasterControllerTests(unittest.TestCase):
         # slug is distinct from "task" so master-sync does not treat its own task.json as a master.
         task_doc_tool(
             self.cfg,
-            repo_id="agents-remember",
+            TaskDocTarget(repo_id="agents-remember", task_name="lite"),
             operation="create",
-            task_name="lite",
-            fields={
-                "id": "L",
-                "slug": "01_leaf",
-                "title": "L",
-                "kind": "subTask",
-                "repo": "r",
-                "createdAt": "2026-01-01T00:00",
-            },
+            edit=TaskDocEdit(
+                fields={
+                    "id": "L",
+                    "slug": "01_leaf",
+                    "title": "L",
+                    "kind": "subTask",
+                    "repo": "r",
+                    "createdAt": "2026-01-01T00:00",
+                }
+            ),
         )
         # set_subtask stays master-only (the series index has no meaning on a leaf)
         with self.assertRaises(TaskDocError):
             task_doc_tool(
                 self.cfg,
-                repo_id="agents-remember",
+                TaskDocTarget(repo_id="agents-remember", task_name="lite", slug="01_leaf"),
                 operation="set_subtask",
-                task_name="lite",
-                slug="01_leaf",
-                subtask={"number": "1", "name": "x"},
+                edit=TaskDocEdit(subtask={"number": "1", "name": "x"}),
             )
         # set_section on a leaf adds a freeform extra section (R4)
         result = task_doc_tool(
             self.cfg,
-            repo_id="agents-remember",
+            TaskDocTarget(repo_id="agents-remember", task_name="lite", slug="01_leaf"),
             operation="set_section",
-            task_name="lite",
-            slug="01_leaf",
-            section={"heading": "Status history", "body": "old."},
+            edit=TaskDocEdit(section={"heading": "Status history", "body": "old."}),
         )
         doc = read_task_doc(Path(str(result["docPath"])))
         self.assertEqual([s.heading for s in doc.sections], ["Status history"])
@@ -1170,11 +1232,9 @@ class MasterControllerTests(unittest.TestCase):
         with self.assertRaises(TaskDocError):
             task_doc_tool(
                 self.cfg,
-                repo_id="agents-remember",
+                TaskDocTarget(repo_id="agents-remember", task_name="lite", slug="01_leaf"),
                 operation="set_section",
-                task_name="lite",
-                slug="01_leaf",
-                section={"heading": "X", "kind": "subTasks"},
+                edit=TaskDocEdit(section={"heading": "X", "kind": "subTasks"}),
             )
 
     def test_master_op_argument_errors(self) -> None:
@@ -1187,18 +1247,19 @@ class MasterControllerTests(unittest.TestCase):
     def _author_leaf(self, *, number: str = "1", slug: str = "01_a") -> tuple[Path, Path]:
         leaf = task_doc_tool(
             self.cfg,
-            repo_id="agents-remember",
+            TaskDocTarget(repo_id="agents-remember", task_name="series"),
             operation="create",
-            task_name="series",
-            fields={
-                "id": number,
-                "slug": slug,
-                "title": f"Leaf {number}",
-                "kind": "subTask",
-                "master": "task.md",
-                "repo": "agents-remember",
-                "createdAt": "2026-01-01T00:00",
-            },
+            edit=TaskDocEdit(
+                fields={
+                    "id": number,
+                    "slug": slug,
+                    "title": f"Leaf {number}",
+                    "kind": "subTask",
+                    "master": "task.md",
+                    "repo": "agents-remember",
+                    "createdAt": "2026-01-01T00:00",
+                }
+            ),
         )
         return Path(str(leaf["docPath"])), Path(str(leaf["renderedPath"]))
 
@@ -1248,11 +1309,9 @@ class MasterControllerTests(unittest.TestCase):
         with self.assertRaises(TaskDocError):
             task_doc_tool(
                 self.cfg,
-                repo_id="agents-remember",
+                TaskDocTarget(repo_id="agents-remember", task_name="series", slug="01_a"),
                 operation="remove_subtask",
-                task_name="series",
-                slug="01_a",
-                subtask={"number": "1"},
+                edit=TaskDocEdit(subtask={"number": "1"}),
             )
 
     def test_remove_subtask_response_validates_on_both_paths(self) -> None:
@@ -1292,17 +1351,18 @@ class RegistrationTests(unittest.TestCase):
     def test_payload_builder_returns_valid_token_stamped_response(self) -> None:
         payload = task_doc_payload(
             self.cfg,
-            repo_id="agents-remember",
+            TaskDocTarget(repo_id="agents-remember", task_name="3c-reg"),
             operation="create",
-            task_name="3c-reg",
-            fields={
-                "id": "R1",
-                "slug": "task",
-                "title": "Reg",
-                "kind": "master",
-                "repo": "agents-remember",
-                "createdAt": "2026-01-01T00:00",
-            },
+            edit=TaskDocEdit(
+                fields={
+                    "id": "R1",
+                    "slug": "task",
+                    "title": "Reg",
+                    "kind": "master",
+                    "repo": "agents-remember",
+                    "createdAt": "2026-01-01T00:00",
+                }
+            ),
         )
         self.assertTrue(payload["ok"])
         self.assertEqual(payload["operation"], "task_doc.create")

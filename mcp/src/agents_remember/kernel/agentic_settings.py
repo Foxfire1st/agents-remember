@@ -1291,36 +1291,10 @@ def _parse_escalation(raw: object, *, source: str) -> EscalationSettings:
         return EscalationSettings()
     block = _require_object(raw, "orchestration.escalation", source)
     _refuse_unknown(block, KNOWN_ESCALATION_FIELDS, "orchestration.escalation", source)
-    sla_seconds = dict(DEFAULT_ESCALATION_SLA_SECONDS)
-    raw_sla = block.get("slaSeconds")
-    if raw_sla is not None:
-        sla_block = _require_object(raw_sla, "orchestration.escalation.slaSeconds", source)
-        for kind, value in sla_block.items():
-            if kind not in KNOWN_ESCALATION_MESSAGE_KINDS:
-                allowed = ", ".join(sorted(KNOWN_ESCALATION_MESSAGE_KINDS))
-                raise AgenticSettingsError(
-                    f"orchestration.escalation.slaSeconds key {kind!r} is not a known "
-                    f"message kind; allowed: {allowed}: {source}"
-                )
-            owner = f"orchestration.escalation.slaSeconds.{kind}"
-            sla_seconds[kind] = _require_positive_number(value, owner, source)
-    rung_seconds = dict(DEFAULT_ESCALATION_RUNG_SECONDS)
-    raw_rungs = block.get("rungSeconds")
-    if raw_rungs is not None:
-        rung_block = _require_object(raw_rungs, "orchestration.escalation.rungSeconds", source)
-        for raw_rung, value in rung_block.items():
-            try:
-                rung = int(raw_rung)
-            except (TypeError, ValueError):
-                rung = -1
-            if rung not in KNOWN_ESCALATION_RUNGS:
-                allowed = ", ".join(str(r) for r in KNOWN_ESCALATION_RUNGS)
-                raise AgenticSettingsError(
-                    f"orchestration.escalation.rungSeconds key {raw_rung!r} must be one of: "
-                    f"{allowed}: {source}"
-                )
-            owner = f"orchestration.escalation.rungSeconds.{rung}"
-            rung_seconds[rung] = _require_positive_number(value, owner, source)
+    # Field order is the refusal order: a settings file with more than one bad field is
+    # reported against the first one, as it was before these parsers were split out.
+    sla_seconds = _parse_escalation_sla_seconds(block.get("slaSeconds"), source=source)
+    rung_seconds = _parse_escalation_rung_seconds(block.get("rungSeconds"), source=source)
     nudge_rate_limit_seconds = 900
     if "nudgeRateLimitSeconds" in block:
         nudge_rate_limit_seconds = _require_positive_int(
@@ -1328,22 +1302,71 @@ def _parse_escalation(raw: object, *, source: str) -> EscalationSettings:
             "orchestration.escalation.nudgeRateLimitSeconds",
             source,
         )
-    respawn_after_rung = DEFAULT_RESPAWN_AFTER_RUNG
-    if "respawnAfterRung" in block:
-        respawn_after_rung = _require_positive_int(
-            block["respawnAfterRung"], "orchestration.escalation.respawnAfterRung", source
-        )
-        if respawn_after_rung not in KNOWN_ESCALATION_RUNGS:
-            allowed = ", ".join(str(r) for r in KNOWN_ESCALATION_RUNGS)
-            raise AgenticSettingsError(
-                f"orchestration.escalation.respawnAfterRung must be one of: {allowed}: {source}"
-            )
     return EscalationSettings(
         sla_seconds=sla_seconds,
         rung_seconds=rung_seconds,
         nudge_rate_limit_seconds=nudge_rate_limit_seconds,
-        respawn_after_rung=respawn_after_rung,
+        respawn_after_rung=_parse_respawn_after_rung(block, source=source),
     )
+
+
+def _parse_escalation_sla_seconds(raw: object, *, source: str) -> dict[str, float]:
+    """``orchestration.escalation.slaSeconds``: per-``message_kind`` ack SLAs over the defaults."""
+    sla_seconds = dict(DEFAULT_ESCALATION_SLA_SECONDS)
+    if raw is None:
+        return sla_seconds
+    sla_block = _require_object(raw, "orchestration.escalation.slaSeconds", source)
+    for kind, value in sla_block.items():
+        if kind not in KNOWN_ESCALATION_MESSAGE_KINDS:
+            allowed = ", ".join(sorted(KNOWN_ESCALATION_MESSAGE_KINDS))
+            raise AgenticSettingsError(
+                f"orchestration.escalation.slaSeconds key {kind!r} is not a known "
+                f"message kind; allowed: {allowed}: {source}"
+            )
+        owner = f"orchestration.escalation.slaSeconds.{kind}"
+        sla_seconds[kind] = _require_positive_number(value, owner, source)
+    return sla_seconds
+
+
+def _parse_escalation_rung_seconds(raw: object, *, source: str) -> dict[int, float]:
+    """``orchestration.escalation.rungSeconds``: per-rung dwell timings over the defaults.
+
+    Keys arrive as JSON object names, so a rung is read as an int; anything that is not a
+    known rung (including a non-numeric key) is refused by name.
+    """
+    rung_seconds = dict(DEFAULT_ESCALATION_RUNG_SECONDS)
+    if raw is None:
+        return rung_seconds
+    rung_block = _require_object(raw, "orchestration.escalation.rungSeconds", source)
+    for raw_rung, value in rung_block.items():
+        try:
+            rung = int(raw_rung)
+        except (TypeError, ValueError):
+            rung = -1
+        if rung not in KNOWN_ESCALATION_RUNGS:
+            allowed = ", ".join(str(r) for r in KNOWN_ESCALATION_RUNGS)
+            raise AgenticSettingsError(
+                f"orchestration.escalation.rungSeconds key {raw_rung!r} must be one of: "
+                f"{allowed}: {source}"
+            )
+        owner = f"orchestration.escalation.rungSeconds.{rung}"
+        rung_seconds[rung] = _require_positive_number(value, owner, source)
+    return rung_seconds
+
+
+def _parse_respawn_after_rung(block: dict[str, Any], *, source: str) -> int:
+    """``orchestration.escalation.respawnAfterRung``: the rung a respawn follows."""
+    if "respawnAfterRung" not in block:
+        return DEFAULT_RESPAWN_AFTER_RUNG
+    respawn_after_rung = _require_positive_int(
+        block["respawnAfterRung"], "orchestration.escalation.respawnAfterRung", source
+    )
+    if respawn_after_rung not in KNOWN_ESCALATION_RUNGS:
+        allowed = ", ".join(str(r) for r in KNOWN_ESCALATION_RUNGS)
+        raise AgenticSettingsError(
+            f"orchestration.escalation.respawnAfterRung must be one of: {allowed}: {source}"
+        )
+    return respawn_after_rung
 
 
 def _parse_spawn(raw: object, *, source: str, harness_ids: tuple[str, ...] | None) -> str | None:

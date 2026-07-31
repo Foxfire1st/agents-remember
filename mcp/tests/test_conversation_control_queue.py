@@ -23,9 +23,12 @@ from agents_remember.serving.conversation.control.previews import (
 from agents_remember.serving.conversation.control.refs import (
     ControlRefError,
     OperationIdentity,
+    RefBinding,
+    RefTarget,
     mint_ref,
 )
 from agents_remember.serving.conversation.control.service import (
+    ControlRequest,
     ConversationControlService,
     OperationConflictError,
     OperationNotFoundError,
@@ -36,6 +39,7 @@ from agents_remember.serving.conversation.models import (
     WithdrawnQueueResponse,
 )
 from agents_remember.serving.harness_control_client import (
+    ControlSubmission,
     set_control_model,
     submit_control_prompt,
 )
@@ -74,9 +78,11 @@ class QueueProjectionTests(unittest.IsolatedAsyncioTestCase):
             submit_control_prompt,
             self.harness.control_entry,
             text,
-            source=source,
-            request_id=request_id,
-            expected_bridge_epoch=self.epoch if source == "cockpit" else None,
+            ControlSubmission(
+                source=source,
+                request_id=request_id,
+                expected_bridge_epoch=self.epoch if source == "cockpit" else None,
+            ),
         )
 
     async def _queue(self):
@@ -238,10 +244,12 @@ class WithdrawalRecoveryTests(unittest.IsolatedAsyncioTestCase):
     async def _withdraw(self, row, withdraw_request_id: str):
         assert row.cockpit is not None
         return await withdrawals.withdraw(
-            self.service,
-            OPERATOR,
-            SESSION,
-            expected_bridge_epoch=self.epoch,
+            ControlRequest(
+                service=self.service,
+                authorization=OPERATOR,
+                ar_session_id=SESSION,
+                expected_bridge_epoch=self.epoch,
+            ),
             operation_ref=row.operation_ref,
             withdrawal_ref=row.cockpit.withdrawal_ref,
             withdraw_request_id=withdraw_request_id,
@@ -317,8 +325,7 @@ class WithdrawalRecoveryTests(unittest.IsolatedAsyncioTestCase):
             submit_control_prompt,
             self.harness.control_entry,
             "durable body",
-            source="durable",
-            request_id="w-durable",
+            ControlSubmission(source="durable", request_id="w-durable"),
         )
         projection = await queue_projection.operation_queue(
             self.service, OPERATOR, SESSION, expected_bridge_epoch=self.epoch
@@ -327,18 +334,20 @@ class WithdrawalRecoveryTests(unittest.IsolatedAsyncioTestCase):
         forged_withdrawal_ref = mint_ref(
             self.service.secret,
             "withdrawal-ref",
-            OPERATOR,
-            ar_session_id=SESSION,
-            bridge_epoch=self.epoch,
-            identity=OperationIdentity(
-                kind="prompt", operation_id="w-durable", sequence=terminal_row.sequence
+            RefBinding(OPERATOR, SESSION, self.epoch),
+            RefTarget(
+                identity=OperationIdentity(
+                    kind="prompt", operation_id="w-durable", sequence=terminal_row.sequence
+                )
             ),
         )
         response = await withdrawals.withdraw(
-            self.service,
-            OPERATOR,
-            SESSION,
-            expected_bridge_epoch=self.epoch,
+            ControlRequest(
+                service=self.service,
+                authorization=OPERATOR,
+                ar_session_id=SESSION,
+                expected_bridge_epoch=self.epoch,
+            ),
             operation_ref=terminal_row.operation_ref,
             withdrawal_ref=forged_withdrawal_ref,
             withdraw_request_id="wd-5",
@@ -352,7 +361,12 @@ class WithdrawalRecoveryTests(unittest.IsolatedAsyncioTestCase):
         row = await self._queue_row(1)
         await self._withdraw(row, "wd-6")
         pending = await withdrawals.pending_recoveries(
-            self.service, OPERATOR, SESSION, expected_bridge_epoch=self.epoch
+            ControlRequest(
+                service=self.service,
+                authorization=OPERATOR,
+                ar_session_id=SESSION,
+                expected_bridge_epoch=self.epoch,
+            )
         )
         self.assertEqual(len(pending.items), 1)
         item = pending.items[0]
@@ -361,18 +375,22 @@ class WithdrawalRecoveryTests(unittest.IsolatedAsyncioTestCase):
         serialized = json.dumps(pending.model_dump(mode="json", by_alias=True))
         self.assertNotIn("discoverable draft", serialized)
         recovery = await withdrawals.fetch_recovery(
-            self.service,
-            OPERATOR,
-            SESSION,
-            expected_bridge_epoch=self.epoch,
+            ControlRequest(
+                service=self.service,
+                authorization=OPERATOR,
+                ar_session_id=SESSION,
+                expected_bridge_epoch=self.epoch,
+            ),
             recovery_ref=item.recovery_ref,
         )
         self.assertEqual(recovery.text, "discoverable draft")
         projection = await withdrawals.acknowledge_recovery(
-            self.service,
-            OPERATOR,
-            SESSION,
-            expected_bridge_epoch=self.epoch,
+            ControlRequest(
+                service=self.service,
+                authorization=OPERATOR,
+                ar_session_id=SESSION,
+                expected_bridge_epoch=self.epoch,
+            ),
             recovery_ref=item.recovery_ref,
             disposition="replace-current-draft",
         )
@@ -380,20 +398,24 @@ class WithdrawalRecoveryTests(unittest.IsolatedAsyncioTestCase):
         self.assertGreater(projection.revision, 1)
         with self.assertRaises(OperationNotFoundError):
             await withdrawals.fetch_recovery(
-                self.service,
-                OPERATOR,
-                SESSION,
-                expected_bridge_epoch=self.epoch,
+                ControlRequest(
+                    service=self.service,
+                    authorization=OPERATOR,
+                    ar_session_id=SESSION,
+                    expected_bridge_epoch=self.epoch,
+                ),
                 recovery_ref=item.recovery_ref,
             )
         replay = await self._withdraw(row, "wd-6")
         assert isinstance(replay, WithdrawnQueueResponse)
         self.assertEqual(replay.recovery.text, "")
         status = await withdrawals.withdraw_status(
-            self.service,
-            OPERATOR,
-            SESSION,
-            expected_bridge_epoch=self.epoch,
+            ControlRequest(
+                service=self.service,
+                authorization=OPERATOR,
+                ar_session_id=SESSION,
+                expected_bridge_epoch=self.epoch,
+            ),
             operation_ref=row.operation_ref,
             withdraw_request_id="wd-6",
             reconcile=False,
@@ -408,9 +430,9 @@ class WithdrawalRecoveryTests(unittest.IsolatedAsyncioTestCase):
             submit_control_prompt,
             self.harness.control_entry,
             "legacy exact body",
-            source="cockpit",
-            request_id="w-legacy",
-            expected_bridge_epoch=self.epoch,
+            ControlSubmission(
+                source="cockpit", request_id="w-legacy", expected_bridge_epoch=self.epoch
+            ),
         )
         projection = await queue_projection.operation_queue(
             self.service, OPERATOR, SESSION, expected_bridge_epoch=self.epoch
@@ -435,10 +457,12 @@ class WithdrawalRecoveryTests(unittest.IsolatedAsyncioTestCase):
             side_effect=HarnessControlClientError("socket died mid-read", may_have_sent=True),
         ):
             response = await withdrawals.withdraw(
-                self.service,
-                OPERATOR,
-                SESSION,
-                expected_bridge_epoch=self.epoch,
+                ControlRequest(
+                    service=self.service,
+                    authorization=OPERATOR,
+                    ar_session_id=SESSION,
+                    expected_bridge_epoch=self.epoch,
+                ),
                 operation_ref=row.operation_ref,
                 withdrawal_ref=row.cockpit.withdrawal_ref,
                 withdraw_request_id="wd-8",
@@ -446,10 +470,12 @@ class WithdrawalRecoveryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.outcome, "delivery-unknown")
         self.assertEqual(withdrawals.withdraw_http_status(response), 202)
         projection = await withdrawals.withdraw_status(
-            self.service,
-            OPERATOR,
-            SESSION,
-            expected_bridge_epoch=self.epoch,
+            ControlRequest(
+                service=self.service,
+                authorization=OPERATOR,
+                ar_session_id=SESSION,
+                expected_bridge_epoch=self.epoch,
+            ),
             operation_ref=row.operation_ref,
             withdraw_request_id="wd-8",
             reconcile=True,
@@ -457,14 +483,21 @@ class WithdrawalRecoveryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(projection.phase, "settled")
         self.assertEqual(projection.outcome, "withdrawn")
         pending = await withdrawals.pending_recoveries(
-            self.service, OPERATOR, SESSION, expected_bridge_epoch=self.epoch
+            ControlRequest(
+                service=self.service,
+                authorization=OPERATOR,
+                ar_session_id=SESSION,
+                expected_bridge_epoch=self.epoch,
+            )
         )
         self.assertEqual(len(pending.items), 1)
         recovery = await withdrawals.fetch_recovery(
-            self.service,
-            OPERATOR,
-            SESSION,
-            expected_bridge_epoch=self.epoch,
+            ControlRequest(
+                service=self.service,
+                authorization=OPERATOR,
+                ar_session_id=SESSION,
+                expected_bridge_epoch=self.epoch,
+            ),
             recovery_ref=pending.items[0].recovery_ref,
         )
         self.assertEqual(recovery.text, "lost response draft")
@@ -491,24 +524,33 @@ class WithdrawalRecoveryTests(unittest.IsolatedAsyncioTestCase):
         row = projection.items[0]
         assert row.cockpit is not None
         await withdrawals.withdraw(
-            timed_service,
-            OPERATOR,
-            SESSION,
-            expected_bridge_epoch=self.epoch,
+            ControlRequest(
+                service=timed_service,
+                authorization=OPERATOR,
+                ar_session_id=SESSION,
+                expected_bridge_epoch=self.epoch,
+            ),
             operation_ref=row.operation_ref,
             withdrawal_ref=row.cockpit.withdrawal_ref,
             withdraw_request_id="wd-9",
         )
         clock["now"] = "2026-07-20T09:16:01+00:00"
         pending = await withdrawals.pending_recoveries(
-            timed_service, OPERATOR, SESSION, expected_bridge_epoch=self.epoch
+            ControlRequest(
+                service=timed_service,
+                authorization=OPERATOR,
+                ar_session_id=SESSION,
+                expected_bridge_epoch=self.epoch,
+            )
         )
         self.assertEqual(pending.items, ())
         status = await withdrawals.withdraw_status(
-            timed_service,
-            OPERATOR,
-            SESSION,
-            expected_bridge_epoch=self.epoch,
+            ControlRequest(
+                service=timed_service,
+                authorization=OPERATOR,
+                ar_session_id=SESSION,
+                expected_bridge_epoch=self.epoch,
+            ),
             operation_ref=row.operation_ref,
             withdraw_request_id="wd-9",
             reconcile=False,
@@ -524,17 +566,17 @@ class WithdrawalRecoveryTests(unittest.IsolatedAsyncioTestCase):
         foreign_session_ref = mint_ref(
             self.service.secret,
             "withdrawal-ref",
-            OPERATOR,
-            ar_session_id="ar-other",
-            bridge_epoch=self.epoch,
-            identity=identity,
+            RefBinding(OPERATOR, "ar-other", self.epoch),
+            RefTarget(identity=identity),
         )
         with self.assertRaises(ControlRefError) as raised:
             await withdrawals.withdraw(
-                self.service,
-                OPERATOR,
-                SESSION,
-                expected_bridge_epoch=self.epoch,
+                ControlRequest(
+                    service=self.service,
+                    authorization=OPERATOR,
+                    ar_session_id=SESSION,
+                    expected_bridge_epoch=self.epoch,
+                ),
                 operation_ref=row.operation_ref,
                 withdrawal_ref=foreign_session_ref,
                 withdraw_request_id="wd-10",
@@ -543,17 +585,17 @@ class WithdrawalRecoveryTests(unittest.IsolatedAsyncioTestCase):
         foreign_epoch_ref = mint_ref(
             self.service.secret,
             "withdrawal-ref",
-            OPERATOR,
-            ar_session_id=SESSION,
-            bridge_epoch="other-epoch",
-            identity=identity,
+            RefBinding(OPERATOR, SESSION, "other-epoch"),
+            RefTarget(identity=identity),
         )
         with self.assertRaises(ControlRefError) as raised:
             await withdrawals.withdraw(
-                self.service,
-                OPERATOR,
-                SESSION,
-                expected_bridge_epoch=self.epoch,
+                ControlRequest(
+                    service=self.service,
+                    authorization=OPERATOR,
+                    ar_session_id=SESSION,
+                    expected_bridge_epoch=self.epoch,
+                ),
                 operation_ref=row.operation_ref,
                 withdrawal_ref=foreign_epoch_ref,
                 withdraw_request_id="wd-10",
@@ -564,10 +606,12 @@ class WithdrawalRecoveryTests(unittest.IsolatedAsyncioTestCase):
         )
         with self.assertRaises(ControlRefError) as raised:
             await withdrawals.withdraw(
-                self.service,
-                OPERATOR,
-                SESSION,
-                expected_bridge_epoch=self.epoch,
+                ControlRequest(
+                    service=self.service,
+                    authorization=OPERATOR,
+                    ar_session_id=SESSION,
+                    expected_bridge_epoch=self.epoch,
+                ),
                 operation_ref=row.operation_ref,
                 withdrawal_ref=tampered,
                 withdraw_request_id="wd-10",

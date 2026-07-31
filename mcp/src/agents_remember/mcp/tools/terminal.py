@@ -28,8 +28,9 @@ from agents_remember.serving.harnesses import (
     is_detected,
     unknown_harness_detail,
 )
+from agents_remember.serving.hosted_session_runtime import HostedSessionRuntime
 from agents_remember.serving.leaf_ref_validation import resolve_catalog_leaf_key
-from agents_remember.serving.retire import retire_entry
+from agents_remember.serving.retire import SeatClosure, retire_entry
 from agents_remember.serving.retire_policy import (
     RetirePolicyError,
     SeatRef,
@@ -46,7 +47,14 @@ from agents_remember.serving.terminal_leaf_assignment import (
     LeafAssignmentHost,
     assign_terminal_session_to_leaf,
 )
-from agents_remember.serving.terminal_opener import open_terminal_session
+from agents_remember.serving.terminal_opener import (
+    ControlRunnerRequest,
+    OpenTerminalResult,
+    SpawnKnobs,
+    SpawnProvenance,
+    TerminalLaunchRequest,
+    open_terminal_session,
+)
 from agents_remember.serving.terminal_paste import TerminalPaster
 from agents_remember.worktrees.leaf_refs import LeafRefResolutionError
 
@@ -199,42 +207,60 @@ def _resolve_spawn_harness(
     loader (a malformed file raises -- never a silent fallback). Returns
     ``(harness, refusal_payload)`` with exactly one side set.
     """
-    registry = settings.harnesses
     if harness is not None:
-        found = find_harness(harness, registry=registry)
-        if found is None:
-            return None, _spawn_refusal(
-                "harness-unknown",
-                harness,
-                "harness",
-                detail=unknown_harness_detail(harness, registry=registry),
-            )
-        if not is_detected(found, which=which):
-            return None, _spawn_refusal(
-                "harness-not-detected",
-                harness,
-                "harness",
-                detail=f"harness not installed: {harness!r}",
-            )
-        return found, None
-
+        return _requested_harness(harness, settings.harnesses, which)
     preferred = settings.spawn_harness
     if preferred is not None:
-        found = find_harness(preferred, registry=registry)
-        assert found is not None  # the loader validates against the effective ids
-        if not is_detected(found, which=which):
-            source = ", ".join(str(path) for path in settings.sources)
-            return None, _spawn_refusal(
-                "harness-not-detected",
-                preferred,
-                "harness",
-                detail=(
-                    f"configured spawn harness not installed: {preferred!r} "
-                    f"(orchestration.spawn.harness in {source})"
-                ),
-            )
-        return found, None
+        return _preferred_harness(preferred, settings, which)
+    return _first_detected_harness(settings.harnesses, which)
 
+
+def _requested_harness(
+    harness: str, registry: tuple[Harness, ...], which: Which | None
+) -> tuple[Harness | None, dict[str, Any] | None]:
+    """The caller named a harness: it must be a known id AND installed."""
+    found = find_harness(harness, registry=registry)
+    if found is None:
+        return None, _spawn_refusal(
+            "harness-unknown",
+            harness,
+            "harness",
+            detail=unknown_harness_detail(harness, registry=registry),
+        )
+    if not is_detected(found, which=which):
+        return None, _spawn_refusal(
+            "harness-not-detected",
+            harness,
+            "harness",
+            detail=f"harness not installed: {harness!r}",
+        )
+    return found, None
+
+
+def _preferred_harness(
+    preferred: str, settings: AgenticSettings, which: Which | None
+) -> tuple[Harness | None, dict[str, Any] | None]:
+    """Settings named a spawn harness: a configured-but-missing one names its source file."""
+    found = find_harness(preferred, registry=settings.harnesses)
+    assert found is not None  # the loader validates against the effective ids
+    if not is_detected(found, which=which):
+        source = ", ".join(str(path) for path in settings.sources)
+        return None, _spawn_refusal(
+            "harness-not-detected",
+            preferred,
+            "harness",
+            detail=(
+                f"configured spawn harness not installed: {preferred!r} "
+                f"(orchestration.spawn.harness in {source})"
+            ),
+        )
+    return found, None
+
+
+def _first_detected_harness(
+    registry: tuple[Harness, ...], which: Which | None
+) -> tuple[Harness | None, dict[str, Any] | None]:
+    """Nothing asked for and nothing configured: the first registry harness on PATH."""
     for candidate in registry:
         if is_detected(candidate, which=which):
             return candidate, None
@@ -387,33 +413,109 @@ def _knob_refusal(
     return None
 
 
+@dataclass(frozen=True)
+class SpawnSeat:
+    """The seat a spawn creates: which leaf it binds to (or replaces), at what dispatch level,
+    under what display label, as a harness or a plain terminal, and the environment that
+    declares its role (``env.AR_SPAWN_ROLE``) to the settings-owned knob resolution."""
+
+    kind: str = "harness"
+    leaf_key: str | None = None
+    replacement_for_leaf: str | None = None
+    level: str | None = None
+    label: str | None = None
+    env: dict[str, str] | None = None
+
+
+@dataclass(frozen=True)
+class RetiredSpawnInputs:
+    """Spawn inputs this tool no longer honours, accepted only so they can be refused loudly
+    before any settings, catalog, or terminal side effect.
+
+    ``context`` / ``submit`` are the retired one-call brief contract (brief delivery is now a
+    separate readiness-gated inbox post); the rest are caller-selected spend knobs that
+    agentic settings now own. A non-``None`` value in any of them is a refusal, never a
+    setting -- which is why they travel as one bundle the refusal walks.
+    """
+
+    context: str | None = None
+    submit: bool = False
+    harness: str | None = None
+    model: str | None = None
+    effort: str | None = None
+    launch_args: list[str] | None = None
+    prompt_keywords: list[str] | None = None
+    session_commands: list[str] | None = None
+
+
+@dataclass(frozen=True)
+class SpawnedBy:
+    """The spawner's own provenance: the catalog session and lifecycle that requested the
+    spawn, recorded on the new row so the dashboard can draw the orchestration tree."""
+
+    session_id: str | None = None
+    lifecycle_id: str | None = None
+
+
+@dataclass(frozen=True)
+class SpawnOverrides:
+    """Real collaborators a caller may substitute. The seam is the whole content of this
+    bundle, and naming it plainly is the point.
+
+    It was called ``SpawnPorts``, which implied a hexagonal boundary the spawn talks to the
+    domain through. It is not one: ``session_id`` is a value rather than a collaborator, and
+    ``paster`` / ``session_log`` are collaborators this path deliberately never talks to.
+    ``None`` everywhere means "use the real thing" -- a freshly minted session id, a real
+    :class:`TerminalHost`, the real executable lookup that decides which harnesses are
+    detected -- so production always passes :data:`NO_SPAWN_OVERRIDES` and only a test passes
+    anything else.
+
+    ``paster`` and ``session_log`` are accepted precisely because the spawn path never reads
+    them. A spawn delivers no brief and writes no session log (the readiness-gated inbox post
+    does the first, the bridge runner the second), and a test hands in a fake to assert it was
+    never called. Dropping them would delete that assertion's subject, not an unused field.
+    """
+
+    session_id: str | None = None
+    host: TerminalHost | None = None
+    paster: TerminalPaster | None = None
+    session_log: object | None = None
+    which: Which | None = None
+
+
+DEFAULT_SPAWN_SEAT = SpawnSeat()
+"""An unbound harness seat: no leaf, no label, settings-resolved knobs."""
+
+NO_RETIRED_INPUTS = RetiredSpawnInputs()
+"""The supported call shape -- none of the retired inputs supplied."""
+
+UNATTRIBUTED_SPAWN = SpawnedBy()
+"""No declared spawner; the ambient lifecycle is used when one is active."""
+
+NO_SPAWN_OVERRIDES = SpawnOverrides()
+"""Nothing substituted: the real terminal host and executable lookup, a fresh session id."""
+
+
 def _caller_spend_override_refusal(
-    *,
-    harness: str | None,
-    model: str | None,
-    effort: str | None,
-    env: dict[str, str] | None,
-    launch_args: list[str] | None,
-    prompt_keywords: list[str] | None,
-    session_commands: list[str] | None,
-    kind: str,
+    seat: SpawnSeat,
+    retired: RetiredSpawnInputs,
 ) -> dict[str, Any] | None:
     """Reject legacy caller-controlled spend knobs before any spawn-side effect."""
 
     removed = []
     values = {
-        "harness": harness,
-        "model": model,
-        "effort": effort,
-        "launch_args": launch_args,
-        "prompt_keywords": prompt_keywords,
-        "session_commands": session_commands,
+        "harness": retired.harness,
+        "model": retired.model,
+        "effort": retired.effort,
+        "launch_args": retired.launch_args,
+        "prompt_keywords": retired.prompt_keywords,
+        "session_commands": retired.session_commands,
     }
     for field in _REMOVED_CALLER_SPEND_FIELDS:
         if values[field] is not None:
             removed.append(field)
     for key in _SPEND_ENV_KEYS:
-        if env is not None and key in env:
+        if seat.env is not None and key in seat.env:
             removed.append(f"env.{key}")
     if not removed:
         return None
@@ -428,8 +530,8 @@ def _caller_spend_override_refusal(
     )
     return _spawn_refusal(
         "spend-override-unsupported",
-        harness,
-        kind,
+        retired.harness,
+        seat.kind,
         detail=detail,
     )
 
@@ -459,6 +561,19 @@ class _SpawnDelivery:
     failure_capture: str | None = None
 
 
+def _spawn_request_refusal(
+    seat: SpawnSeat,
+    retired: RetiredSpawnInputs,
+) -> dict[str, Any] | None:
+    """Refuse a request this tool no longer honours, before any settings, catalog, or spawn work."""
+    brief_refusal = _brief_delivery_separate_refusal(
+        retired.context, retired.submit, kind=seat.kind
+    )
+    if brief_refusal is not None:
+        return brief_refusal
+    return _caller_spend_override_refusal(seat, retired)
+
+
 def _resolve_spawn_leaf(
     config: McpRuntimeConfig, leaf_ref: str | None, *, kind: str
 ) -> tuple[str | None, dict[str, Any] | None]:
@@ -471,30 +586,59 @@ def _resolve_spawn_leaf(
         return None, leaf_ref_refusal_payload("spawn_agent_session", leaf_ref, exc, kind=kind)
 
 
+def _resolve_spawn_leaves(
+    config: McpRuntimeConfig,
+    leaf_key: str | None,
+    replacement_for_leaf: str | None,
+    *,
+    kind: str,
+) -> tuple[str | None, str | None, dict[str, Any] | None]:
+    """Resolve both spawn leaf references; the first unresolvable one refuses the spawn."""
+    resolved_leaf, refusal = _resolve_spawn_leaf(config, leaf_key, kind=kind)
+    if refusal is not None:
+        return None, None, refusal
+    resolved_replacement, refusal = _resolve_spawn_leaf(config, replacement_for_leaf, kind=kind)
+    return resolved_leaf, resolved_replacement, refusal
+
+
+def _open_terminal_refusal(
+    result: OpenTerminalResult,
+    *,
+    harness: str | None,
+    kind: str,
+    session_id: str,
+    leaf_key: str | None,
+) -> dict[str, Any] | None:
+    """Translate a non-opened terminal outcome into its public refusal payload."""
+    if result.status == "bad-kind":
+        return _spawn_refusal("bad-kind", harness, kind, detail=result.detail)
+    if result.status == "launch-conflict":
+        return _spawn_refusal("launch-selection-invalid", harness, kind, detail=result.detail)
+    if result.status == "leaf-taken":
+        return _tool_payload(
+            "spawn_agent_session",
+            {
+                "ok": False,
+                "operation": "spawn_agent_session",
+                "status": "leaf-taken",
+                "session": session_id,
+                "harness": harness,
+                "kind": result.kind,
+                "leafKey": leaf_key,
+                "seatRole": result.seat_role,
+                "ownerSession": result.owner_session_id,
+            },
+        )
+    return None
+
+
 def spawn_agent_session_payload(
     config: McpRuntimeConfig,
     *,
-    harness: str | None = None,
-    leaf_key: str | None = None,
-    replacement_for_leaf: str | None = None,
-    context: str | None = None,
-    submit: bool = False,
-    label: str | None = None,
-    model: str | None = None,
-    effort: str | None = None,
-    env: dict[str, str] | None = None,
-    launch_args: list[str] | None = None,
-    prompt_keywords: list[str] | None = None,
-    session_commands: list[str] | None = None,
-    level: str | None = None,
-    spawned_by_session: str | None = None,
-    spawned_by_lifecycle: str | None = None,
-    kind: str = "harness",
-    session_id: str | None = None,
-    host: TerminalHost | None = None,
-    paster: TerminalPaster | None = None,
-    session_log: object | None = None,
-    which: Which | None = None,
+    seat: SpawnSeat = DEFAULT_SPAWN_SEAT,
+    retired: RetiredSpawnInputs = NO_RETIRED_INPUTS,
+    spawned_by: SpawnedBy = UNATTRIBUTED_SPAWN,
+    overrides: SpawnOverrides = NO_SPAWN_OVERRIDES,
 ) -> dict[str, Any]:
     """Spawn one role-configured, leaf-attached hosted session without a leaf brief.
 
@@ -516,30 +660,26 @@ def spawn_agent_session_payload(
     is synthesized. Free-form settings values remain recorded verbatim and caller-controlled spend
     inputs still refuse before spawning.
     """
-    del paster, session_log  # retained injection parameters; bridge runner owns launch commands
-    brief_refusal = _brief_delivery_separate_refusal(context, submit, kind=kind)
-    if brief_refusal is not None:
-        return brief_refusal
-    spend_refusal = _caller_spend_override_refusal(
-        harness=harness,
-        model=model,
-        effort=effort,
-        env=env,
-        launch_args=launch_args,
-        prompt_keywords=prompt_keywords,
-        session_commands=session_commands,
-        kind=kind,
+    # overrides.paster / overrides.session_log are read by nothing here on purpose; the bridge
+    # runner owns launch commands, so the spawn path never pastes and never writes a log.
+    kind = seat.kind
+    env = seat.env
+    which = overrides.which
+    harness = retired.harness
+    model = retired.model
+    effort = retired.effort
+    launch_args = retired.launch_args
+    prompt_keywords = retired.prompt_keywords
+    caller_refusal = _spawn_request_refusal(seat, retired)
+    if caller_refusal is not None:
+        return caller_refusal
+    leaf_key, replacement_for_leaf, refusal = _resolve_spawn_leaves(
+        config, seat.leaf_key, seat.replacement_for_leaf, kind=kind
     )
-    if spend_refusal is not None:
-        return spend_refusal
-    leaf_key, refusal = _resolve_spawn_leaf(config, leaf_key, kind=kind)
-    if refusal is not None:
-        return refusal
-    replacement_for_leaf, refusal = _resolve_spawn_leaf(config, replacement_for_leaf, kind=kind)
     if refusal is not None:
         return refusal
 
-    resolved_session_commands = list(session_commands or [])
+    resolved_session_commands = list(retired.session_commands or [])
     spawn_level: str | None = None
     spawn_level_source: str | None = None
     resolved_launch: ResolvedLaunch | None = None
@@ -548,7 +688,7 @@ def spawn_agent_session_payload(
         dispatch, refusal = _resolve_harness_dispatch(
             config,
             leaf_key=leaf_key or replacement_for_leaf,
-            level=level,
+            level=seat.level,
             env=env,
             which=which,
         )
@@ -566,59 +706,52 @@ def spawn_agent_session_payload(
         spawn_level_source = dispatch.spawn_level_source
         harnesses = dispatch.registry
 
-    sid = session_id or uuid4().hex
+    sid = overrides.session_id or uuid4().hex
     spawn_env = _spawn_env(model, effort, env)
-    provenance_lifecycle = spawned_by_lifecycle or _ambient_lifecycle_id()
+    provenance_lifecycle = spawned_by.lifecycle_id or _ambient_lifecycle_id()
 
     catalog = TerminalCatalog(terminal_catalog_path(config.coordination_root))
-    spawn_host = host if host is not None else TerminalHost()
+    spawn_host = overrides.host if overrides.host is not None else TerminalHost()
     shell = os.environ.get("SHELL") or _DEFAULT_SHELL
     result = open_terminal_session(
-        catalog=catalog,
-        host=spawn_host,
+        runtime=HostedSessionRuntime(catalog=catalog, host=spawn_host),
         session_id=sid,
-        kind=kind,
-        workspace_root=config.workspace_root,
-        shell=shell,
-        harness=harness,
-        label=label,
-        leaf_key=leaf_key,
-        replacement_for_leaf=replacement_for_leaf,
-        env=spawn_env,
-        launch_args=launch_args,
-        prompt_keywords=prompt_keywords,
-        session_commands=resolved_session_commands or None,
-        spawn_level=spawn_level,
-        spawn_level_source=spawn_level_source,
-        resolved_launch=resolved_launch,
-        legacy_model=model if resolved_launch is None else None,
-        legacy_effort=effort if resolved_launch is None else None,
-        spawned_by_session=spawned_by_session,
-        spawned_by_lifecycle=provenance_lifecycle,
-        control_root=config.coordination_root / "runtime" / "harness-control",
-        which=which,
-        harnesses=harnesses,
+        launch=TerminalLaunchRequest(
+            kind=kind,
+            workspace_root=config.workspace_root,
+            shell=shell,
+            harness=harness,
+            which=which,
+            harnesses=harnesses,
+            env=spawn_env,
+            knobs=SpawnKnobs(
+                launch_args=launch_args,
+                prompt_keywords=prompt_keywords,
+                session_commands=resolved_session_commands or None,
+            ),
+            control=ControlRunnerRequest(
+                resolved_launch=resolved_launch,
+                endpoint_root=config.coordination_root / "runtime" / "harness-control",
+            ),
+            legacy_model=model if resolved_launch is None else None,
+            legacy_effort=effort if resolved_launch is None else None,
+        ),
+        provenance=SpawnProvenance(
+            label=seat.label,
+            leaf_key=leaf_key,
+            replacement_for_leaf=replacement_for_leaf,
+            spawn_level=spawn_level,
+            spawn_level_source=spawn_level_source,
+            spawned_by_session=spawned_by.session_id,
+            spawned_by_lifecycle=provenance_lifecycle,
+        ),
     )
 
-    if result.status == "bad-kind":
-        return _spawn_refusal("bad-kind", harness, kind, detail=result.detail)
-    if result.status == "launch-conflict":
-        return _spawn_refusal("launch-selection-invalid", harness, kind, detail=result.detail)
-    if result.status == "leaf-taken":
-        return _tool_payload(
-            "spawn_agent_session",
-            {
-                "ok": False,
-                "operation": "spawn_agent_session",
-                "status": "leaf-taken",
-                "session": sid,
-                "harness": harness,
-                "kind": result.kind,
-                "leafKey": leaf_key,
-                "seatRole": result.seat_role,
-                "ownerSession": result.owner_session_id,
-            },
-        )
+    open_refusal = _open_terminal_refusal(
+        result, harness=harness, kind=kind, session_id=sid, leaf_key=leaf_key
+    )
+    if open_refusal is not None:
+        return open_refusal
 
     entry = result.entry
     assert entry is not None  # opened => an upserted row
@@ -768,10 +901,7 @@ def session_retire_payload(
         catalog,
         retire_host,
         target_entry,
-        at=now_iso(),
-        by_session=actor_session_id,
-        reason=reason,
-        edge="manual",
+        SeatClosure(at=now_iso(), by_session=actor_session_id, reason=reason, edge="manual"),
     )
     assert updated is not None  # the entry existed above; nothing between here removes rows
     log_retire_event(config, updated)

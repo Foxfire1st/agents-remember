@@ -16,7 +16,7 @@ from pathlib import Path
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
-from agents_remember.errors import HarnessControlError
+from agents_remember.errors import HarnessAdapterBusyError, HarnessControlError
 from agents_remember.serving.claude_stream_transport import ClaudeSubprocessTransport
 from agents_remember.serving.harness_capabilities import SetResult
 from agents_remember.serving.harness_control_bridge import HarnessControlBridge
@@ -1146,6 +1146,49 @@ class ClaudeStreamJsonAdapterTests(unittest.IsolatedAsyncioTestCase):
             transport.feed(_result("Set model to Haiku for this session only"))
             retry = await asyncio.wait_for(retry_task, timeout=1.0)
             self.assertEqual(retry.acceptance, "echo-verified")
+        finally:
+            await adapter.stop("forced")
+
+    async def test_repeated_late_replay_of_an_expired_set_restores_one_turn_not_two(self) -> None:
+        # A tombstoned set command can be replayed more than once (Claude re-emits its replay on a
+        # resume). Each replay restores the abandoned turn so the seat does not read idle while the
+        # command is still running -- but restoring it TWICE would leave a phantom turn behind that
+        # the single terminal result cannot clear, and the seat would never go idle again.
+        transport = _FakeClaudeTransport(_load_fixture("initialization.jsonl"))
+        adapter = _adapter(
+            transport,
+            correlations=["expired-correlation"],
+            limits=ClaudeAdapterLimits(acceptance_timeout_seconds=0.005),
+        )
+        await adapter.start(_launch())
+        try:
+            expired = await _set_model(adapter, "haiku")
+            self.assertEqual((expired.ok, expired.acceptance), (False, "unknown"))
+            expired_frame = transport.writes[3]
+
+            operation = ControlOperationRef(
+                bridge_epoch="e", sequence=1, operation_id="op-probe", kind="prompt"
+            )
+
+            transport.feed(_replay(expired_frame))
+            await _settle()
+            first = await adapter.snapshot()
+            self.assertEqual(first.raw.get("lateClaudeReplayIgnored"), "ar-claude-set-model-1")
+            self.assertIsNotNone(first.raw.get("activeTurnId"))
+            # The restored turn holds the seat: no other operation may start on top of it.
+            with self.assertRaises(HarnessAdapterBusyError):
+                await adapter.preflight_operation(operation)
+
+            transport.feed(_replay(expired_frame))
+            await _settle()
+            again = await adapter.snapshot()
+            self.assertEqual(again.raw.get("activeTurnId"), first.raw.get("activeTurnId"))
+
+            # One turn was restored, so ONE terminal result frees the seat completely. A second
+            # restore would leave a turn the result never pops and the seat would stay busy.
+            transport.feed(_result("Set model to Haiku for this session only"))
+            await _settle()
+            await adapter.preflight_operation(operation)
         finally:
             await adapter.stop("forced")
 

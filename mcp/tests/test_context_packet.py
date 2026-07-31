@@ -24,6 +24,9 @@ from agents_remember.mcp.config import load_config
 from agents_remember.mcp.tools.core import context_packet_payload
 from agents_remember.worktrees.git_worktree_manager import status_payload
 from agents_remember.worktrees.worktree_contract import (
+    ContractTask,
+    LeafIdentity,
+    RepoBranchPlan,
     default_contract,
     write_contract,
 )
@@ -141,20 +144,26 @@ class ContextPacketTests(unittest.TestCase):
             repo = root / "workspace" / "agents-remember"
             coordination_root = root / "ar-coordination"
             contract = default_contract(
-                task_name="Context Packet",
-                repo_name="agents-remember",
-                workflow_kind="light",
-                memory_mode="external",
-                coordination_root=coordination_root,
-                code_repo_path=repo,
-                code_source_branch=current_branch(repo),
-                code_work_branch="ar/context-packet",
-                code_base_commit=current_head(repo),
-                worktree_name="context-packet",
-                memory_repo_path=coordination_root / "memory-repos" / "ar-agents-remember",
-                memory_source_branch="main",
-                memory_work_branch="ar/context-packet-memory",
-                memory_base_commit=current_head(repo),
+                ContractTask(
+                    name="Context Packet",
+                    repo_name="agents-remember",
+                    coordination_root=coordination_root,
+                    workflow_kind="light",
+                    memory_mode="external",
+                ),
+                leaf=LeafIdentity(worktree_name="context-packet"),
+                code=RepoBranchPlan(
+                    repo_path=repo,
+                    source_branch=current_branch(repo),
+                    work_branch="ar/context-packet",
+                    base_commit=current_head(repo),
+                ),
+                memory=RepoBranchPlan(
+                    repo_path=coordination_root / "memory-repos" / "ar-agents-remember",
+                    source_branch="main",
+                    work_branch="ar/context-packet-memory",
+                    base_commit=current_head(repo),
+                ),
             )
             write_contract(contract.contract_path, contract)
             payload = settings_payload(root)

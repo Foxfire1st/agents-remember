@@ -24,6 +24,7 @@ sys.path.insert(0, str(MCP_SRC))
 from agents_remember.mcp.config import McpRuntimeConfig, RepositoryScope
 from agents_remember.serving.app import create_app
 from agents_remember.serving.notes import _MAX_FILE_BYTES
+from agents_remember.serving.projector import ProjectionCadence
 
 _MASTER = "260703_agent-orchestration"
 
@@ -49,7 +50,7 @@ class NotesRouteTests(unittest.TestCase):
             transcript_root=self.tmp / "logs",
             repositories={"R": RepositoryScope(repo_id="R", path=self.code_root)},
         )
-        return TestClient(create_app(config, interval=100))
+        return TestClient(create_app(config, cadence=ProjectionCadence(interval=100)))
 
     def _seed_notes(self) -> None:
         (self.notes / "reports").mkdir(parents=True)

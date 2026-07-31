@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Literal
 
 from agents_remember.kernel import coordination_context_resolver as resolver
+from agents_remember.kernel.coordination_context_resolver import CoordinationHints
 from agents_remember.kernel.memory_ledger import (
     LedgerError,
     create_initial_ledger,
@@ -54,9 +55,10 @@ def resolve_request_context(request: BaselineRequest):
     return resolver.resolve_coordination_context(
         code_repository_name=request.code_repository_name,
         workspace_root=request.workspace_root,
-        requested_topology=request.topology,
-        coordination_root=request.coordination_root,
         code_repository_root=request.code_repository_root,
+        hints=CoordinationHints(
+            topology=request.topology, coordination_root=request.coordination_root
+        ),
     )
 
 

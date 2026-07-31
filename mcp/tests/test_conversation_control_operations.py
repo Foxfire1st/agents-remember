@@ -25,6 +25,7 @@ from agents_remember.serving.conversation.control.capabilities import (
     interrupt_capability_for,
 )
 from agents_remember.serving.conversation.control.service import (
+    ControlRequest,
     ConversationControlService,
     OperationConflictError,
     OperationNotFoundError,
@@ -53,10 +54,12 @@ class CodexInterruptTests(unittest.IsolatedAsyncioTestCase):
 
     async def _interrupt(self, turn: str = "turn-req-1", request_id: str = "req-1"):
         return await operations.interrupt(
-            self.service,
-            OPERATOR,
-            "ar-ops-1",
-            expected_bridge_epoch=self.epoch,
+            ControlRequest(
+                service=self.service,
+                authorization=OPERATOR,
+                ar_session_id="ar-ops-1",
+                expected_bridge_epoch=self.epoch,
+            ),
             turn_id=turn,
             request_id=request_id,
         )
@@ -65,10 +68,12 @@ class CodexInterruptTests(unittest.IsolatedAsyncioTestCase):
         self, turn: str = "turn-req-1", request_id: str = "req-1", *, reconcile=False
     ):
         return await operations.interrupt_status(
-            self.service,
-            OPERATOR,
-            "ar-ops-1",
-            expected_bridge_epoch=self.epoch,
+            ControlRequest(
+                service=self.service,
+                authorization=OPERATOR,
+                ar_session_id="ar-ops-1",
+                expected_bridge_epoch=self.epoch,
+            ),
             turn_id=turn,
             request_id=request_id,
             reconcile=reconcile,
@@ -176,10 +181,12 @@ class CodexInterruptTests(unittest.IsolatedAsyncioTestCase):
     async def test_epoch_mismatch_fails_typed(self) -> None:
         with self.assertRaises(HarnessBridgeEpochMismatchError):
             await operations.interrupt(
-                self.service,
-                OPERATOR,
-                "ar-ops-1",
-                expected_bridge_epoch="wrong-epoch",
+                ControlRequest(
+                    service=self.service,
+                    authorization=OPERATOR,
+                    ar_session_id="ar-ops-1",
+                    expected_bridge_epoch="wrong-epoch",
+                ),
                 turn_id="turn-req-1",
                 request_id="req-1",
             )
@@ -203,10 +210,12 @@ class PiInterruptTests(unittest.IsolatedAsyncioTestCase):
     async def test_pi_interrupt_uses_operation_identity_and_settles_aborted(self) -> None:
         await self._submit("req-pi-1")
         operation = await operations.interrupt(
-            self.service,
-            OPERATOR,
-            "ar-ops-pi",
-            expected_bridge_epoch=self.epoch,
+            ControlRequest(
+                service=self.service,
+                authorization=OPERATOR,
+                ar_session_id="ar-ops-pi",
+                expected_bridge_epoch=self.epoch,
+            ),
             turn_id="req-pi-1",
             request_id="int-pi-1",
         )
@@ -216,10 +225,12 @@ class PiInterruptTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(self.adapter.interrupt_calls[0]["turn_id"])
         self.adapter.pi_settle("aborted")
         status = await operations.interrupt_status(
-            self.service,
-            OPERATOR,
-            "ar-ops-pi",
-            expected_bridge_epoch=self.epoch,
+            ControlRequest(
+                service=self.service,
+                authorization=OPERATOR,
+                ar_session_id="ar-ops-pi",
+                expected_bridge_epoch=self.epoch,
+            ),
             turn_id="req-pi-1",
             request_id="int-pi-1",
             reconcile=False,
@@ -229,10 +240,12 @@ class PiInterruptTests(unittest.IsolatedAsyncioTestCase):
     async def test_pi_stale_expected_identity_refuses_before_write(self) -> None:
         await self._submit("req-pi-1")
         operation = await operations.interrupt(
-            self.service,
-            OPERATOR,
-            "ar-ops-pi",
-            expected_bridge_epoch=self.epoch,
+            ControlRequest(
+                service=self.service,
+                authorization=OPERATOR,
+                ar_session_id="ar-ops-pi",
+                expected_bridge_epoch=self.epoch,
+            ),
             turn_id="req-pi-stale",
             request_id="int-pi-2",
         )
@@ -243,19 +256,23 @@ class PiInterruptTests(unittest.IsolatedAsyncioTestCase):
     async def test_pi_natural_completion_settles_already_settled(self) -> None:
         await self._submit("req-pi-1")
         await operations.interrupt(
-            self.service,
-            OPERATOR,
-            "ar-ops-pi",
-            expected_bridge_epoch=self.epoch,
+            ControlRequest(
+                service=self.service,
+                authorization=OPERATOR,
+                ar_session_id="ar-ops-pi",
+                expected_bridge_epoch=self.epoch,
+            ),
             turn_id="req-pi-1",
             request_id="int-pi-3",
         )
         self.adapter.pi_settle("stop")
         status = await operations.interrupt_status(
-            self.service,
-            OPERATOR,
-            "ar-ops-pi",
-            expected_bridge_epoch=self.epoch,
+            ControlRequest(
+                service=self.service,
+                authorization=OPERATOR,
+                ar_session_id="ar-ops-pi",
+                expected_bridge_epoch=self.epoch,
+            ),
             turn_id="req-pi-1",
             request_id="int-pi-3",
             reconcile=False,
@@ -269,19 +286,23 @@ class PiInterruptTests(unittest.IsolatedAsyncioTestCase):
         # is that _pi_stop_reason once matched on event kind and never saw this frame.
         await self._submit("req-pi-1")
         await operations.interrupt(
-            self.service,
-            OPERATOR,
-            "ar-ops-pi",
-            expected_bridge_epoch=self.epoch,
+            ControlRequest(
+                service=self.service,
+                authorization=OPERATOR,
+                ar_session_id="ar-ops-pi",
+                expected_bridge_epoch=self.epoch,
+            ),
             turn_id="req-pi-1",
             request_id="int-pi-4",
         )
         self.adapter.pi_settle_with_content("stop")
         status = await operations.interrupt_status(
-            self.service,
-            OPERATOR,
-            "ar-ops-pi",
-            expected_bridge_epoch=self.epoch,
+            ControlRequest(
+                service=self.service,
+                authorization=OPERATOR,
+                ar_session_id="ar-ops-pi",
+                expected_bridge_epoch=self.epoch,
+            ),
             turn_id="req-pi-1",
             request_id="int-pi-4",
             reconcile=False,
@@ -293,10 +314,12 @@ class PiInterruptTests(unittest.IsolatedAsyncioTestCase):
         # streamed before the abort took effect); it likewise crosses as kind "transcript".
         await self._submit("req-pi-1")
         operation = await operations.interrupt(
-            self.service,
-            OPERATOR,
-            "ar-ops-pi",
-            expected_bridge_epoch=self.epoch,
+            ControlRequest(
+                service=self.service,
+                authorization=OPERATOR,
+                ar_session_id="ar-ops-pi",
+                expected_bridge_epoch=self.epoch,
+            ),
             turn_id="req-pi-1",
             request_id="int-pi-5",
         )
@@ -304,10 +327,12 @@ class PiInterruptTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(operation.settlement, "pending")
         self.adapter.pi_settle_with_content("aborted")
         status = await operations.interrupt_status(
-            self.service,
-            OPERATOR,
-            "ar-ops-pi",
-            expected_bridge_epoch=self.epoch,
+            ControlRequest(
+                service=self.service,
+                authorization=OPERATOR,
+                ar_session_id="ar-ops-pi",
+                expected_bridge_epoch=self.epoch,
+            ),
             turn_id="req-pi-1",
             request_id="int-pi-5",
             reconcile=False,
@@ -323,20 +348,24 @@ class PiInterruptTests(unittest.IsolatedAsyncioTestCase):
         # bridge clip path does the clipping (40 KB text > 32 KiB budget).
         await self._submit("req-pi-1")
         await operations.interrupt(
-            self.service,
-            OPERATOR,
-            "ar-ops-pi",
-            expected_bridge_epoch=self.epoch,
+            ControlRequest(
+                service=self.service,
+                authorization=OPERATOR,
+                ar_session_id="ar-ops-pi",
+                expected_bridge_epoch=self.epoch,
+            ),
             turn_id="req-pi-1",
             request_id="int-pi-big",
         )
         self.adapter.pi_emit_message_end(text="x" * 40_000, stop_reason="stop")
         self.adapter.pi_release()
         status = await operations.interrupt_status(
-            self.service,
-            OPERATOR,
-            "ar-ops-pi",
-            expected_bridge_epoch=self.epoch,
+            ControlRequest(
+                service=self.service,
+                authorization=OPERATOR,
+                ar_session_id="ar-ops-pi",
+                expected_bridge_epoch=self.epoch,
+            ),
             turn_id="req-pi-1",
             request_id="int-pi-big",
             reconcile=False,
@@ -353,10 +382,12 @@ class PiInterruptTests(unittest.IsolatedAsyncioTestCase):
         # `interrupted`, never `already-settled`.
         await self._submit("req-pi-1")
         operation = await operations.interrupt(
-            self.service,
-            OPERATOR,
-            "ar-ops-pi",
-            expected_bridge_epoch=self.epoch,
+            ControlRequest(
+                service=self.service,
+                authorization=OPERATOR,
+                ar_session_id="ar-ops-pi",
+                expected_bridge_epoch=self.epoch,
+            ),
             turn_id="req-pi-1",
             request_id="int-pi-mix",
         )
@@ -365,10 +396,12 @@ class PiInterruptTests(unittest.IsolatedAsyncioTestCase):
         self.adapter.pi_emit_message_end(text="y" * 40_000, stop_reason="aborted")
         self.adapter.pi_release()
         status = await operations.interrupt_status(
-            self.service,
-            OPERATOR,
-            "ar-ops-pi",
-            expected_bridge_epoch=self.epoch,
+            ControlRequest(
+                service=self.service,
+                authorization=OPERATOR,
+                ar_session_id="ar-ops-pi",
+                expected_bridge_epoch=self.epoch,
+            ),
             turn_id="req-pi-1",
             request_id="int-pi-mix",
             reconcile=False,
@@ -394,20 +427,24 @@ class ClaudeInterruptTests(unittest.IsolatedAsyncioTestCase):
 
     async def _interrupt(self, turn: str = "req-cl-1", request_id: str = "int-cl-1"):
         return await operations.interrupt(
-            self.service,
-            OPERATOR,
-            "ar-ops-cl",
-            expected_bridge_epoch=self.epoch,
+            ControlRequest(
+                service=self.service,
+                authorization=OPERATOR,
+                ar_session_id="ar-ops-cl",
+                expected_bridge_epoch=self.epoch,
+            ),
             turn_id=turn,
             request_id=request_id,
         )
 
     async def _status(self, turn: str = "req-cl-1", request_id: str = "int-cl-1"):
         return await operations.interrupt_status(
-            self.service,
-            OPERATOR,
-            "ar-ops-cl",
-            expected_bridge_epoch=self.epoch,
+            ControlRequest(
+                service=self.service,
+                authorization=OPERATOR,
+                ar_session_id="ar-ops-cl",
+                expected_bridge_epoch=self.epoch,
+            ),
             turn_id=turn,
             request_id=request_id,
             reconcile=False,

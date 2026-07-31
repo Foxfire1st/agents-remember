@@ -26,6 +26,13 @@ from agents_remember.errors import (
     HarnessRequestConflictError,
 )
 from agents_remember.serving import harness_control_api
+from agents_remember.serving.conversation.authorization import (
+    LocalOperatorAuthorizationResolver,
+)
+from agents_remember.serving.conversation.runtime import (
+    ConversationRuntime,
+    ConversationScope,
+)
 from agents_remember.serving.harness_capabilities import CapabilitySnapshot, SetResult
 from agents_remember.serving.harness_capability_catalog import CapabilityCatalogResult
 from agents_remember.serving.harness_control_api import register_harness_control_routes
@@ -94,14 +101,16 @@ class HarnessControlApiTests(unittest.TestCase):
         app = FastAPI()
         register_harness_control_routes(
             app,
-            workspace_root=self.tmp,
-            coordination_root=self.tmp,
-            harness_registry=lambda: HARNESSES,
-            catalog=self.catalog,
-            host=mock.Mock(),
-            liveness_clock=lambda: self.moment,
-            liveness_config=TerminalCatalogLivenessConfig(),
-            capability_catalog=self.capabilities,  # type: ignore[arg-type]
+            ConversationRuntime(
+                scope=ConversationScope(workspace_root=self.tmp, coordination_root=self.tmp),
+                harness_registry=lambda: HARNESSES,
+                catalog=self.catalog,
+                host=mock.Mock(),
+                liveness_clock=lambda: self.moment,
+                liveness_config=TerminalCatalogLivenessConfig(),
+                capability_catalog=self.capabilities,  # type: ignore[arg-type]
+                authorization=LocalOperatorAuthorizationResolver.for_workspace(self.tmp),
+            ),
         )
         self.client = TestClient(app)
         self.alive = mock.patch(
@@ -212,14 +221,10 @@ class HarnessControlApiTests(unittest.TestCase):
         self.assertNotIn("VENDOR_AUTH_TOKEN", str(response.json()))
         self.assertEqual(submit.call_args.args[0].id, self.live.id)
         self.assertEqual(submit.call_args.args[1], "one complete\nmessage")
-        self.assertEqual(
-            submit.call_args.kwargs,
-            {
-                "source": "cockpit",
-                "request_id": "request-7",
-                "expected_bridge_epoch": BRIDGE_EPOCH,
-            },
-        )
+        submission = submit.call_args.args[2]
+        self.assertEqual(submission.source, "cockpit")
+        self.assertEqual(submission.request_id, "request-7")
+        self.assertEqual(submission.expected_bridge_epoch, BRIDGE_EPOCH)
 
     def test_authority_status_and_withdraw_routes_are_epoch_bound_and_raw_free(self) -> None:
         status = SubmissionStatusBatch(
@@ -798,14 +803,16 @@ class ControlLivenessMemoRetentionTests(unittest.TestCase):
         with mock.patch.object(harness_control_api, "_ControlLivenessMemo", _capture_memo):
             register_harness_control_routes(
                 app,
-                workspace_root=self.tmp,
-                coordination_root=self.tmp,
-                harness_registry=lambda: HARNESSES,
-                catalog=self.catalog,
-                host=mock.Mock(),
-                liveness_clock=lambda: self.moment,
-                liveness_config=TerminalCatalogLivenessConfig(),
-                capability_catalog=_CapabilityCatalog(),  # type: ignore[arg-type]
+                ConversationRuntime(
+                    scope=ConversationScope(workspace_root=self.tmp, coordination_root=self.tmp),
+                    harness_registry=lambda: HARNESSES,
+                    catalog=self.catalog,
+                    host=mock.Mock(),
+                    liveness_clock=lambda: self.moment,
+                    liveness_config=TerminalCatalogLivenessConfig(),
+                    capability_catalog=_CapabilityCatalog(),  # type: ignore[arg-type]
+                    authorization=LocalOperatorAuthorizationResolver.for_workspace(self.tmp),
+                ),
             )
         (self.memo,) = memos
         self.client = TestClient(app)

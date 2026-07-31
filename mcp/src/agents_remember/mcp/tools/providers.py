@@ -5,6 +5,12 @@ from __future__ import annotations
 from typing import Any
 
 from agents_remember.controllers.provider_tools import (
+    ALL_INDEXED_REPOS,
+    WORKSPACE_QUERY_SCOPE,
+    GrepaiRepoScope,
+    GrepaiSearchQuery,
+    GrepaiTraceQuery,
+    ProviderQueryScope,
     cgc_callees_tool,
     cgc_callers_tool,
     cgc_complexity_tool,
@@ -122,59 +128,27 @@ def _compact_watcher_results(results: Any) -> list[dict[str, Any]]:
 
 def grepai_search_payload(
     config: McpRuntimeConfig,
-    query: str,
+    query: GrepaiSearchQuery,
     *,
-    repo_ids: list[str] | None = None,
-    all_repos: bool = True,
-    limit: int = 10,
-    output_format: str = "json",
-    dry_run: bool = False,
-    timeout: int | None = None,
-    worktree: str | None = None,
+    repos: GrepaiRepoScope = ALL_INDEXED_REPOS,
+    scope: ProviderQueryScope = WORKSPACE_QUERY_SCOPE,
 ) -> dict[str, Any]:
     return _tool_payload(
         "grepai_search",
-        grepai_search_tool(
-            config,
-            query=query,
-            repo_ids=repo_ids,
-            all_repos=all_repos,
-            limit=limit,
-            output_format=output_format,
-            dry_run=dry_run,
-            timeout=timeout,
-            worktree=worktree,
-        ),
+        grepai_search_tool(config, query=query, repos=repos, scope=scope),
     )
 
 
 def grepai_trace_payload(
     config: McpRuntimeConfig,
-    trace_action: str,
-    symbol: str,
+    trace: GrepaiTraceQuery,
     *,
-    repo_ids: list[str] | None = None,
-    all_repos: bool = True,
-    depth: int | None = None,
-    output_format: str = "json",
-    dry_run: bool = False,
-    timeout: int | None = None,
-    worktree: str | None = None,
+    repos: GrepaiRepoScope = ALL_INDEXED_REPOS,
+    scope: ProviderQueryScope = WORKSPACE_QUERY_SCOPE,
 ) -> dict[str, Any]:
     return _tool_payload(
         "grepai_trace",
-        grepai_trace_tool(
-            config,
-            trace_action=trace_action,
-            symbol=symbol,
-            repo_ids=repo_ids,
-            all_repos=all_repos,
-            depth=depth,
-            output_format=output_format,
-            dry_run=dry_run,
-            timeout=timeout,
-            worktree=worktree,
-        ),
+        grepai_trace_tool(config, trace=trace, repos=repos, scope=scope),
     )
 
 
@@ -183,20 +157,11 @@ def cgc_symbol_search_payload(
     repo_id: str,
     name: str,
     *,
-    dry_run: bool = False,
-    timeout: int | None = None,
-    worktree: str | None = None,
+    scope: ProviderQueryScope = WORKSPACE_QUERY_SCOPE,
 ) -> dict[str, Any]:
     return _tool_payload(
         "cgc_symbol_search",
-        cgc_symbol_search_tool(
-            config,
-            repo_id=repo_id,
-            name=name,
-            dry_run=dry_run,
-            timeout=timeout,
-            worktree=worktree,
-        ),
+        cgc_symbol_search_tool(config, repo_id=repo_id, name=name, scope=scope),
     )
 
 
@@ -206,21 +171,11 @@ def cgc_callers_payload(
     function: str,
     *,
     file: str | None = None,
-    dry_run: bool = False,
-    timeout: int | None = None,
-    worktree: str | None = None,
+    scope: ProviderQueryScope = WORKSPACE_QUERY_SCOPE,
 ) -> dict[str, Any]:
     return _tool_payload(
         "cgc_callers",
-        cgc_callers_tool(
-            config,
-            repo_id=repo_id,
-            function=function,
-            file=file,
-            dry_run=dry_run,
-            timeout=timeout,
-            worktree=worktree,
-        ),
+        cgc_callers_tool(config, repo_id=repo_id, function=function, file=file, scope=scope),
     )
 
 
@@ -229,20 +184,11 @@ def cgc_callees_payload(
     repo_id: str,
     function: str,
     *,
-    dry_run: bool = False,
-    timeout: int | None = None,
-    worktree: str | None = None,
+    scope: ProviderQueryScope = WORKSPACE_QUERY_SCOPE,
 ) -> dict[str, Any]:
     return _tool_payload(
         "cgc_callees",
-        cgc_callees_tool(
-            config,
-            repo_id=repo_id,
-            function=function,
-            dry_run=dry_run,
-            timeout=timeout,
-            worktree=worktree,
-        ),
+        cgc_callees_tool(config, repo_id=repo_id, function=function, scope=scope),
     )
 
 
@@ -251,20 +197,11 @@ def cgc_dependencies_payload(
     repo_id: str,
     module: str,
     *,
-    dry_run: bool = False,
-    timeout: int | None = None,
-    worktree: str | None = None,
+    scope: ProviderQueryScope = WORKSPACE_QUERY_SCOPE,
 ) -> dict[str, Any]:
     return _tool_payload(
         "cgc_dependencies",
-        cgc_dependencies_tool(
-            config,
-            repo_id=repo_id,
-            module=module,
-            dry_run=dry_run,
-            timeout=timeout,
-            worktree=worktree,
-        ),
+        cgc_dependencies_tool(config, repo_id=repo_id, module=module, scope=scope),
     )
 
 
@@ -273,20 +210,11 @@ def cgc_complexity_payload(
     repo_id: str,
     *,
     function: str | None = None,
-    dry_run: bool = False,
-    timeout: int | None = None,
-    worktree: str | None = None,
+    scope: ProviderQueryScope = WORKSPACE_QUERY_SCOPE,
 ) -> dict[str, Any]:
     return _tool_payload(
         "cgc_complexity",
-        cgc_complexity_tool(
-            config,
-            repo_id=repo_id,
-            function=function,
-            dry_run=dry_run,
-            timeout=timeout,
-            worktree=worktree,
-        ),
+        cgc_complexity_tool(config, repo_id=repo_id, function=function, scope=scope),
     )
 
 
@@ -296,19 +224,9 @@ def cgc_visualize_payload(
     *,
     port: int = 8000,
     context: str | None = None,
-    dry_run: bool = False,
-    timeout: int | None = None,
-    worktree: str | None = None,
+    scope: ProviderQueryScope = WORKSPACE_QUERY_SCOPE,
 ) -> dict[str, Any]:
     return _tool_payload(
         "cgc_visualize",
-        cgc_visualize_tool(
-            config,
-            repo_id=repo_id,
-            port=port,
-            context=context,
-            dry_run=dry_run,
-            timeout=timeout,
-            worktree=worktree,
-        ),
+        cgc_visualize_tool(config, repo_id=repo_id, port=port, context=context, scope=scope),
     )

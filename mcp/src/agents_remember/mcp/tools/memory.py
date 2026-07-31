@@ -5,6 +5,11 @@ from __future__ import annotations
 from typing import Any
 
 from agents_remember.controllers.memory_tools import (
+    DEFAULT_CARRYOVER_MESSAGES,
+    DEFAULT_MEMORY_BRANCHES,
+    CarryoverCommitMessages,
+    CarryoverSelection,
+    MemoryBranches,
     drift_check_tool,
     memory_baseline_adopt_tool,
     memory_baseline_status_tool,
@@ -92,8 +97,7 @@ def memory_baseline_adopt_payload(
     repo_id: str,
     *,
     accept_drift: bool = False,
-    source_branch: str | None = None,
-    work_branch: str | None = None,
+    branches: MemoryBranches = DEFAULT_MEMORY_BRANCHES,
     dry_run: bool = False,
 ) -> dict[str, Any]:
     return _tool_payload(
@@ -102,8 +106,7 @@ def memory_baseline_adopt_payload(
             config,
             repo_id=repo_id,
             accept_drift=accept_drift,
-            source_branch=source_branch,
-            work_branch=work_branch,
+            branches=branches,
             dry_run=dry_run,
         ),
     )
@@ -145,23 +148,9 @@ def compact_carryover_payload(full: dict[str, Any], report_path: str) -> dict[st
 
 def memory_carryover_plan_payload(
     config: McpRuntimeConfig,
-    repo_id: str,
-    source_memory: str,
-    official_code_ref: str,
-    source_code_ref: str,
-    old_base: str,
-    *,
-    replace_existing: bool = False,
+    selection: CarryoverSelection,
 ) -> dict[str, Any]:
-    full = memory_carryover_plan_tool(
-        config,
-        repo_id=repo_id,
-        source_memory=source_memory,
-        official_code_ref=official_code_ref,
-        source_code_ref=source_code_ref,
-        old_base=old_base,
-        replace_existing=replace_existing,
-    )
+    full = memory_carryover_plan_tool(config, selection)
     report_path = write_tool_report(
         config.coordination_root, "memory_carryover_plan", full, label="plan"
     )
@@ -173,30 +162,18 @@ def memory_carryover_plan_payload(
 
 def memory_carryover_apply_payload(
     config: McpRuntimeConfig,
-    repo_id: str,
-    source_memory: str,
-    official_code_ref: str,
-    source_code_ref: str,
-    old_base: str,
-    intent_note: str,
+    selection: CarryoverSelection,
     *,
-    replace_existing: bool = False,
+    intent_note: str,
     include_review_required: list[str] | None = None,
-    memory_commit_message: str = "Carry over landed branch memory",
-    ledger_commit_message: str = "Record branch memory carryover",
+    messages: CarryoverCommitMessages = DEFAULT_CARRYOVER_MESSAGES,
 ) -> dict[str, Any]:
     full = memory_carryover_apply_tool(
         config,
-        repo_id=repo_id,
-        source_memory=source_memory,
-        official_code_ref=official_code_ref,
-        source_code_ref=source_code_ref,
-        old_base=old_base,
+        selection,
         intent_note=intent_note,
-        replace_existing=replace_existing,
         include_review_required=include_review_required,
-        memory_commit_message=memory_commit_message,
-        ledger_commit_message=ledger_commit_message,
+        messages=messages,
     )
     report_path = write_tool_report(
         config.coordination_root, "memory_carryover_apply", full, label="apply"

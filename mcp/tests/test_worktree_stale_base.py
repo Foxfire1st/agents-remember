@@ -6,6 +6,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -20,7 +21,12 @@ from agents_remember.worktrees.modules.start import (
     _stale_base_preflight,
     prepare_memory_for_start,
 )
-from agents_remember.worktrees.worktree_contract import default_contract
+from agents_remember.worktrees.worktree_contract import (
+    ContractTask,
+    LeafIdentity,
+    RepoBranchPlan,
+    default_contract,
+)
 
 CONTEXT = SimpleNamespace(code_repository_name="repo-a")
 
@@ -30,7 +36,7 @@ class StaleBasePreflightTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             code_repo = make_repo(root / "repo-a")
-            contract = make_contract(root, code_repo)
+            contract = make_contract(root, RepoSide(code_repo))
             self.assertIsNone(_stale_base_preflight(CONTEXT, contract, WorktreeArgs()))
 
     def test_behind_code_source_branch_blocks_with_recovery_guidance(self) -> None:
@@ -39,7 +45,7 @@ class StaleBasePreflightTests(unittest.TestCase):
             code_repo, other = make_clone_pair(root)
             commit_file(other, "remote.txt", "remote change")
             git(other, "push", "origin", "HEAD")
-            contract = make_contract(root, code_repo)
+            contract = make_contract(root, RepoSide(code_repo))
 
             block = _stale_base_preflight(CONTEXT, contract, WorktreeArgs())
 
@@ -58,7 +64,7 @@ class StaleBasePreflightTests(unittest.TestCase):
             code_repo, other = make_clone_pair(root)
             commit_file(other, "remote.txt", "remote change")
             git(other, "push", "origin", "HEAD")
-            contract = make_contract(root, code_repo)
+            contract = make_contract(root, RepoSide(code_repo))
 
             self.assertIsNone(
                 _stale_base_preflight(
@@ -75,7 +81,7 @@ class StaleBasePreflightTests(unittest.TestCase):
             commit_file(other, "remote.txt", "remote change")
             git(other, "push", "origin", "HEAD")
             remote_head = git(other, "rev-parse", "HEAD")
-            contract = make_contract(root, code_repo, source_branch=branch)
+            contract = make_contract(root, RepoSide(code_repo), source_branch=branch)
 
             block = _stale_base_preflight(
                 CONTEXT, contract, WorktreeArgs(stale_base_choice="fast-forward")
@@ -92,7 +98,7 @@ class StaleBasePreflightTests(unittest.TestCase):
             commit_file(other, "remote.txt", "remote change")
             git(other, "push", "origin", "HEAD")
             remote_head = git(other, "rev-parse", "HEAD")
-            contract = make_contract(root, code_repo, source_branch=branch)
+            contract = make_contract(root, RepoSide(code_repo), source_branch=branch)
 
             block = _stale_base_preflight(
                 CONTEXT, contract, WorktreeArgs(stale_base_choice="fast-forward")
@@ -108,7 +114,7 @@ class StaleBasePreflightTests(unittest.TestCase):
             commit_file(other, "remote.txt", "remote change")
             git(other, "push", "origin", "HEAD")
             commit_file(code_repo, "local.txt", "local change")
-            contract = make_contract(root, code_repo)
+            contract = make_contract(root, RepoSide(code_repo))
 
             block = _stale_base_preflight(
                 CONTEXT, contract, WorktreeArgs(stale_base_choice="fast-forward")
@@ -126,7 +132,7 @@ class StaleBasePreflightTests(unittest.TestCase):
             code_repo, _ = make_clone_pair(root)
             missing = (root / "missing-origin.git").as_posix()
             git(code_repo, "remote", "set-url", "origin", missing)
-            contract = make_contract(root, code_repo)
+            contract = make_contract(root, RepoSide(code_repo))
 
             self.assertIsNone(_stale_base_preflight(CONTEXT, contract, WorktreeArgs()))
 
@@ -137,7 +143,7 @@ class StaleBasePreflightTests(unittest.TestCase):
             memory_repo, memory_other = make_clone_pair(root / "mem", name="ar-repo-a")
             commit_file(memory_other, "onboarding-note.md", "newer official memory")
             git(memory_other, "push", "origin", "HEAD")
-            contract = make_contract(root, code_repo, memory_repo=memory_repo)
+            contract = make_contract(root, RepoSide(code_repo), memory=RepoSide(memory_repo))
 
             block = _stale_base_preflight(CONTEXT, contract, WorktreeArgs())
 
@@ -164,11 +170,9 @@ class MemorySourceBranchTemplateTests(unittest.TestCase):
             memory_base = git(memory_repo, "rev-parse", "HEAD")
             contract = make_contract(
                 root,
-                code_repo,
-                memory_repo=memory_repo,
+                RepoSide(code_repo, code_base),
+                memory=RepoSide(memory_repo, memory_base),
                 source_branch="fix/new-task",
-                code_base_commit=code_base,
-                memory_base_commit=memory_base,
             )
 
             result = prepare_memory_for_start(contract, WorktreeArgs(dry_run=False))
@@ -186,10 +190,9 @@ class MemorySourceBranchTemplateTests(unittest.TestCase):
             base = git(memory_repo, "rev-parse", "HEAD")
             contract = make_contract(
                 root,
-                make_repo(root / "repo-a"),
-                memory_repo=memory_repo,
+                RepoSide(make_repo(root / "repo-a")),
+                memory=RepoSide(memory_repo, base),
                 source_branch="fix/new-task",
-                memory_base_commit=base,
             )
 
             state = _ensure_memory_source_branch(contract, dry_run=True)
@@ -205,8 +208,8 @@ class MemorySourceBranchTemplateTests(unittest.TestCase):
             branch = git(memory_repo, "branch", "--show-current")
             contract = make_contract(
                 root,
-                make_repo(root / "repo-a"),
-                memory_repo=memory_repo,
+                RepoSide(make_repo(root / "repo-a")),
+                memory=RepoSide(memory_repo),
                 source_branch=branch,
             )
 
@@ -215,31 +218,52 @@ class MemorySourceBranchTemplateTests(unittest.TestCase):
             self.assertEqual(state, {"state": "existing", "branch": branch})
 
 
+PLACEHOLDER_CODE_BASE = "c1"
+PLACEHOLDER_MEMORY_BASE = "m1"
+
+
+@dataclass(frozen=True)
+class RepoSide:
+    """One repository a contract pairs, and the commit it records as that side's fork point.
+
+    The stale-base preflight compares exactly these two per side, so they travel together.
+    ``base_commit=None`` keeps the fixture's placeholder (never a real commit) for a case
+    that only cares about the other side.
+    """
+
+    repo: Path
+    base_commit: str | None = None
+
+
 def make_contract(
     root: Path,
-    code_repo: Path,
+    code: RepoSide,
     *,
+    memory: RepoSide | None = None,
     source_branch: str | None = None,
-    memory_repo: Path | None = None,
-    code_base_commit: str = "c1",
-    memory_base_commit: str = "m1",
 ):
-    branch = source_branch or git(code_repo, "branch", "--show-current")
+    branch = source_branch or git(code.repo, "branch", "--show-current")
     return default_contract(
-        task_name="Fix Thing",
-        repo_name="repo-a",
-        workflow_kind="light-task",
-        memory_mode="external",
-        coordination_root=root / "ar-coordination",
-        code_repo_path=code_repo,
-        code_source_branch=branch,
-        code_work_branch="ar/fix-thing",
-        code_base_commit=code_base_commit,
-        worktree_name="fix-thing",
-        memory_repo_path=memory_repo,
-        memory_source_branch=branch,
-        memory_work_branch="ar/fix-thing",
-        memory_base_commit=memory_base_commit,
+        ContractTask(
+            name="Fix Thing",
+            repo_name="repo-a",
+            coordination_root=root / "ar-coordination",
+            workflow_kind="light-task",
+            memory_mode="external",
+        ),
+        leaf=LeafIdentity(worktree_name="fix-thing"),
+        code=RepoBranchPlan(
+            repo_path=code.repo,
+            source_branch=branch,
+            work_branch="ar/fix-thing",
+            base_commit=code.base_commit or PLACEHOLDER_CODE_BASE,
+        ),
+        memory=RepoBranchPlan(
+            repo_path=memory.repo if memory else None,  # type: ignore[arg-type]
+            source_branch=branch,
+            work_branch="ar/fix-thing",
+            base_commit=(memory.base_commit if memory else None) or PLACEHOLDER_MEMORY_BASE,
+        ),
     )
 
 

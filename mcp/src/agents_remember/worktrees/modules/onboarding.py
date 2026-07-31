@@ -35,6 +35,7 @@ from agents_remember.worktrees.modules.models import (
     RouteOverviewBodyClassification,
     RouteOverviewRefreshPlan,
     SidecarBodyClassification,
+    VerifiedChange,
 )
 from agents_remember.worktrees.worktree_contract import WorktreeContract
 
@@ -202,32 +203,79 @@ def classify_route_overview_updates(
     }
     for item in required:
         route = normalize_route(item["source_route"])
-        overview_path = Path(item["onboarding_file"]).resolve()
-        try:
-            relative = overview_path.relative_to(memory_root).as_posix()
-        except ValueError:
-            continue
-        baseline_text = commit_text_or_none(memory_root, baseline_ref, relative)
-        if baseline_text is None:
-            continue
-        current = filesystem.read_text(overview_path, encoding="utf-8")
-        body_changed = relative in changed_memory and meaningful_body_changed(
-            baseline_text, current
+        bucket = _route_overview_bucket(
+            Path(item["onboarding_file"]).resolve(),
+            memory_root=memory_root,
+            baseline_ref=baseline_ref,
+            changed_memory=changed_memory,
+            domain_evident=route in domain_routes,
         )
-        added_history = new_history_lines(baseline_text, current)
-        if route not in domain_routes:
-            if not body_changed:
-                classification["stamped_without_body_review"].append(route)
-            continue
-        if body_changed and added_history:
-            continue
-        if body_changed:
-            classification["untraced"].append(route)
-        elif added_history and has_no_impact_marker(added_history):
-            classification["attested_no_impact"].append(route)
-        else:
-            classification["stale"].append(route)
+        if bucket is not None:
+            classification[bucket].append(route)
     return classification
+
+
+def _overview_revision(
+    overview_path: Path,
+    *,
+    memory_root: Path,
+    baseline_ref: str,
+    changed_memory: set[str],
+) -> tuple[bool, list[str]] | None:
+    """``(body meaningfully changed, history lines added)`` against the baseline revision.
+
+    ``None`` when the overview is outside the memory tree or absent from the baseline —
+    neither is a stale-overview signal, so those overviews drop out of the classification.
+    """
+    try:
+        relative = overview_path.relative_to(memory_root).as_posix()
+    except ValueError:
+        return None
+    baseline_text = commit_text_or_none(memory_root, baseline_ref, relative)
+    if baseline_text is None:
+        return None
+    current = filesystem.read_text(overview_path, encoding="utf-8")
+    body_changed = relative in changed_memory and meaningful_body_changed(baseline_text, current)
+    return body_changed, new_history_lines(baseline_text, current)
+
+
+def _governing_overview_bucket(body_changed: bool, added_history: list[str]) -> str | None:
+    """The gating bucket for a nearest-governor overview; ``None`` once it is properly updated."""
+    if body_changed and added_history:
+        return None
+    if body_changed:
+        return "untraced"
+    if added_history and has_no_impact_marker(added_history):
+        return "attested_no_impact"
+    return "stale"
+
+
+def _route_overview_bucket(
+    overview_path: Path,
+    *,
+    memory_root: Path,
+    baseline_ref: str,
+    changed_memory: set[str],
+    domain_evident: bool,
+) -> str | None:
+    """Which classification bucket one matched route overview falls in, if any.
+
+    Only a nearest governor (``domain_evident``) is classified like a sidecar; an
+    overview matched merely as an ancestor is reported when its body went unreviewed
+    and never gates.
+    """
+    revision = _overview_revision(
+        overview_path,
+        memory_root=memory_root,
+        baseline_ref=baseline_ref,
+        changed_memory=changed_memory,
+    )
+    if revision is None:
+        return None
+    body_changed, added_history = revision
+    if not domain_evident:
+        return None if body_changed else "stamped_without_body_review"
+    return _governing_overview_bucket(body_changed, added_history)
 
 
 def require_updated_route_overview_content(
@@ -309,16 +357,16 @@ def validate_route_overview_refresh_plan_for_context(
 
 def refresh_route_overview_metadata_for_context(
     context,
-    changed_paths: list[str],
-    verified_commit: str,
-    verified_date: str,
+    change: VerifiedChange,
     *,
     memory_tree: Path | None = None,
     memory_verified_commit: str = "",
 ) -> list[dict[str, str]]:
+    verified_commit = change.commit
+    verified_date = change.commit_date
     plan = validate_route_overview_refresh_plan_for_context(
         context,
-        changed_paths,
+        change.changed_paths,
         memory_tree=memory_tree,
         memory_verified_commit=memory_verified_commit,
     )
@@ -702,18 +750,17 @@ def validate_onboarding_refresh_plan(
 
 def refresh_onboarding_metadata_for_context(
     context,
-    changed_paths: list[str],
-    verified_commit: str,
-    verified_date: str,
+    change: VerifiedChange,
     *,
-    working_paths: list[str] | None = None,
     memory_tree: Path | None = None,
     memory_verified_commit: str = "",
 ) -> list[dict[str, str]]:
+    verified_commit = change.commit
+    verified_date = change.commit_date
     plan = validate_onboarding_refresh_plan_for_context(
         context,
-        changed_paths,
-        working_paths=working_paths,
+        change.changed_paths,
+        working_paths=change.working_paths,
         memory_tree=memory_tree,
         memory_verified_commit=memory_verified_commit,
     )
@@ -737,19 +784,11 @@ def refresh_onboarding_metadata_for_context(
 
 
 def refresh_onboarding_metadata(
-    contract: WorktreeContract,
-    changed_paths: list[str],
-    verified_commit: str,
-    verified_date: str,
-    *,
-    working_paths: list[str] | None = None,
+    contract: WorktreeContract, change: VerifiedChange
 ) -> list[dict[str, str]]:
     return refresh_onboarding_metadata_for_context(
         contract_context(contract),
-        changed_paths,
-        verified_commit,
-        verified_date,
-        working_paths=working_paths,
+        change,
         memory_tree=contract.memory_worktree,
         memory_verified_commit=contract_memory_verified_commit(contract),
     )

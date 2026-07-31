@@ -17,7 +17,7 @@ MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
 from agents_remember.controllers.worktree_tools import _attribute_attach, _attribute_start
-from agents_remember.observer.ambient import AmbientLifecycle
+from agents_remember.observer.ambient import AmbientLifecycle, AmbientTiming
 from agents_remember.observer.save_gate import SaveGateRequired
 from agents_remember.observer.store import EventStore
 
@@ -27,7 +27,7 @@ class _AttributionCase(unittest.TestCase):
         self._dir = tempfile.TemporaryDirectory()
         self.addCleanup(self._dir.cleanup)
         self.store = EventStore(Path(self._dir.name))
-        self.amb = AmbientLifecycle(self.store, heartbeat_seconds=3600)
+        self.amb = AmbientLifecycle(self.store, timing=AmbientTiming(heartbeat_seconds=3600))
         self.addCleanup(self.amb.shutdown)
 
     def kinds(self, lifecycle_id: str) -> list[str]:

@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 from collections import deque
 from collections.abc import AsyncGenerator, Callable, Mapping
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from uuid import uuid4
 
@@ -55,10 +55,34 @@ from agents_remember.serving.harness_control_models import (
     clip_evidence_payload,
     evidence_frame_wire_bytes,
 )
-from agents_remember.serving.harness_control_queue import HarnessControlQueue
+from agents_remember.serving.harness_control_queue import (
+    BridgeSnapshotPort,
+    HarnessControlQueue,
+)
 from agents_remember.serving.harness_submission_authority import OperationResolution
 
 Clock = Callable[[], str]
+
+
+@dataclass(frozen=True)
+class BridgeLimits:
+    """Every bound one control bridge holds itself to, chosen as one memory budget.
+
+    A bridge retains a transcript, an evidence window (capped in frames AND in bytes per frame), a
+    command queue, a submission ledger and a per-subscriber fan-out queue. They are one decision --
+    how much a single live session may hold -- and raising any one alone silently moves the
+    process's real ceiling somewhere else.
+    """
+
+    queue: int = 64
+    transcript: int = 1000
+    submission: int = 256
+    subscriber_queue: int = 16
+    evidence: int = 2000
+    evidence_frame_bytes: int = 32 * 1024
+
+
+DEFAULT_BRIDGE_LIMITS = BridgeLimits()
 
 
 class HarnessControlBridge:
@@ -69,14 +93,15 @@ class HarnessControlBridge:
         identity: ControlIdentity,
         adapter: HarnessProtocolAdapter,
         *,
-        queue_limit: int = 64,
-        transcript_limit: int = 1000,
-        submission_limit: int = 256,
-        subscriber_queue_limit: int = 16,
-        evidence_limit: int = 2000,
-        evidence_frame_bytes: int = 32 * 1024,
+        limits: BridgeLimits = DEFAULT_BRIDGE_LIMITS,
         clock: Clock = lambda: datetime.now(UTC).isoformat(),
     ) -> None:
+        queue_limit = limits.queue
+        transcript_limit = limits.transcript
+        submission_limit = limits.submission
+        subscriber_queue_limit = limits.subscriber_queue
+        evidence_limit = limits.evidence
+        evidence_frame_bytes = limits.evidence_frame_bytes
         for name, value in (
             ("queue_limit", queue_limit),
             ("transcript_limit", transcript_limit),
@@ -108,12 +133,14 @@ class HarnessControlBridge:
         self._event_task: asyncio.Task[None] | None = None
         self._command_queue = HarnessControlQueue(
             adapter,
+            BridgeSnapshotPort(
+                clock=clock,
+                snapshot=self.snapshot,
+                set_snapshot=self._set_snapshot,
+                publish=self._publish,
+            ),
             queue_limit=queue_limit,
             submission_limit=submission_limit,
-            clock=clock,
-            snapshot=self.snapshot,
-            set_snapshot=self._set_snapshot,
-            publish=self._publish,
         )
 
     async def start(self, launch: LaunchSpec) -> AdapterSnapshot:

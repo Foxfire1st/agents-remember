@@ -33,7 +33,7 @@ import struct
 import subprocess
 import termios
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from functools import lru_cache
 from pathlib import Path
 from typing import Literal
@@ -133,6 +133,24 @@ TmuxModeCanceller = Callable[[str], None]
 
 TmuxPaneModeProbe = Callable[[str], bool | None]
 """Return whether the target pane is in a tmux mode, or ``None`` when it cannot be queried."""
+
+
+@dataclass(frozen=True)
+class TerminalHostSeams:
+    """The one impure boundary of :class:`TerminalHost`: the PTY spawner and the tmux commands.
+
+    These are not independent switches -- they are a single surface, the host's entire contact with
+    the operating system. A test that fakes tmux replaces the surface, not a handful of unrelated
+    arguments, so the substitution is visible as one decision at the call site. ``None`` on any
+    field keeps that seam's real implementation.
+    """
+
+    spawn: Spawner | None = None
+    tmux_probe: TmuxProbe | None = None
+    tmux_killer: TmuxKiller | None = None
+    tmux_creator: TmuxCreator | None = None
+    tmux_configurer: TmuxConfigurer | None = None
+    tmux_mode_canceller: TmuxModeCanceller | None = None
 
 
 def _tmux_client_environment(parent: Mapping[str, str]) -> dict[str, str]:
@@ -421,6 +439,36 @@ class TerminalSessionBinding:
     suspend_unsafe: bool = False
 
 
+@dataclass(frozen=True)
+class TerminalSessionSpec:
+    """How ONE hosted tmux session is created: what runs, where, and under whose identity.
+
+    The request half of the pair whose answer is :class:`TerminalSessionBinding` /
+    :class:`TerminalSession`. :meth:`TerminalHost.open`, :meth:`TerminalHost.ensure` and
+    :meth:`TerminalHost.attach` all take the same spec because they create (or re-reach) the *same*
+    durable session through different client shapes -- keeping it one object is what makes that
+    sameness checkable instead of six parallel parameter lists drifting apart.
+    """
+
+    cwd: Path
+    command: tuple[str, ...]
+    lifecycle_id: str | None = None
+    name: str | None = None
+    suspend_unsafe: bool = False
+    env: Mapping[str, str] | None = None
+    """Spawn env seeded at CREATION (``tmux new-session -e KEY=VALUE``, the L2 knob-injection seam);
+    inert once the durable session exists, and never used by :meth:`TerminalHost.attach`."""
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "cwd", Path(self.cwd))
+        object.__setattr__(self, "command", tuple(self.command))
+
+    def tmux_name_for(self, sid: str) -> str:
+        """The durable tmux identity for ``sid``: the spec's explicit name or the derived one."""
+
+        return self.name or _tmux_session_name(sid)
+
+
 def _tmux_session_name(sid: str) -> str:
     """Derive a tmux-safe session name from an arbitrary session id (deterministic)."""
     safe = _UNSAFE_TMUX_CHARS.sub("-", sid).strip("-")
@@ -530,107 +578,65 @@ class TerminalHost:
     The WebSocket endpoint (slice 6d-2) is the live driver; the visual (xterm.js) is slice 6e.
     """
 
-    def __init__(
-        self,
-        *,
-        spawn: Spawner | None = None,
-        tmux_probe: TmuxProbe | None = None,
-        tmux_killer: TmuxKiller | None = None,
-        tmux_creator: TmuxCreator | None = None,
-        tmux_configurer: TmuxConfigurer | None = None,
-        tmux_mode_canceller: TmuxModeCanceller | None = None,
-    ) -> None:
-        self._spawn: Spawner = spawn or _spawn_pty
+    def __init__(self, seams: TerminalHostSeams | None = None) -> None:
+        resolved = seams or TerminalHostSeams()
+        self._spawn: Spawner = resolved.spawn or _spawn_pty
+        probe = resolved.tmux_probe
         self._tmux_probe: Callable[[str], TmuxProbeResult] = (
             _tmux_probe_session
-            if tmux_probe is None
-            else lambda name: _tmux_probe_result_from_bool(tmux_probe(name))
+            if probe is None
+            else lambda name: _tmux_probe_result_from_bool(probe(name))
         )
-        self._tmux_killer: TmuxKiller = tmux_killer or _tmux_kill_session
-        self._tmux_creator: TmuxCreator = tmux_creator or _tmux_create_detached
-        self._tmux_configurer: TmuxConfigurer = tmux_configurer or _tmux_enable_mouse
-        self._tmux_mode_canceller: TmuxModeCanceller = tmux_mode_canceller or _tmux_cancel_copy_mode
+        self._tmux_killer: TmuxKiller = resolved.tmux_killer or _tmux_kill_session
+        self._tmux_creator: TmuxCreator = resolved.tmux_creator or _tmux_create_detached
+        self._tmux_configurer: TmuxConfigurer = resolved.tmux_configurer or _tmux_enable_mouse
+        self._tmux_mode_canceller: TmuxModeCanceller = (
+            resolved.tmux_mode_canceller or _tmux_cancel_copy_mode
+        )
         self._sessions: dict[str, TerminalSession] = {}
 
-    def open(
-        self,
-        sid: str,
-        *,
-        cwd: Path | str,
-        command: Sequence[str],
-        lifecycle_id: str | None = None,
-        name: str | None = None,
-        suspend_unsafe: bool = False,
-        env: Mapping[str, str] | None = None,
-    ) -> TerminalSession:
-        """Open (or re-attach) the session ``sid`` running ``command`` in ``cwd``.
+    def open(self, sid: str, spec: TerminalSessionSpec) -> TerminalSession:
+        """Open (or re-attach) the session ``sid`` as described by ``spec``.
 
         Idempotent: a live session for ``sid`` is returned as-is (tmux ``-A`` would re-attach the
-        same session anyway); a dead one is reaped and replaced. ``lifecycle_id`` correlates the
-        session to a lifecycle/worktree for the registry views. ``env`` seeds spawn env at creation
-        (L2 knob injection); it is inert on a re-attach (the durable session keeps its original env).
+        same session anyway); a dead one is reaped and replaced. ``spec.lifecycle_id`` correlates the
+        session to a lifecycle/worktree for the registry views. ``spec.env`` seeds spawn env at
+        creation (L2 knob injection); it is inert on a re-attach (the durable session keeps its
+        original env).
         """
         existing = self._sessions.get(sid)
         if existing is not None and existing.is_alive:
             return existing
         if existing is not None:
             self._discard(existing)
-        session = self._spawn_session(
-            sid,
-            cwd=cwd,
-            command=command,
-            lifecycle_id=lifecycle_id,
-            name=name,
-            suspend_unsafe=suspend_unsafe,
-            env=env,
-        )
+        session = self._spawn_session(sid, spec)
         self._sessions[sid] = session
         return session
 
-    def ensure(
-        self,
-        sid: str,
-        *,
-        cwd: Path | str,
-        command: Sequence[str],
-        lifecycle_id: str | None = None,
-        name: str | None = None,
-        suspend_unsafe: bool = False,
-        env: Mapping[str, str] | None = None,
-    ) -> TerminalSessionBinding:
+    def ensure(self, sid: str, spec: TerminalSessionSpec) -> TerminalSessionBinding:
         """Ensure the durable tmux session exists without attaching a PTY client.
 
-        ``env`` seeds spawn env (``tmux new-session -e KEY=VALUE``) when the session is created here;
-        it is inert once the session already exists (durable sessions keep their creation env). This
-        is the detached path the agent-facing spawn tool composes over, so knob injection lands here.
+        ``spec.env`` seeds spawn env (``tmux new-session -e KEY=VALUE``) when the session is created
+        here; it is inert once the session already exists (durable sessions keep their creation env).
+        This is the detached path the agent-facing spawn tool composes over, so knob injection lands
+        here.
         """
-        root = Path(cwd)
-        harness = tuple(command)
-        tmux_name = name or _tmux_session_name(sid)
+        tmux_name = spec.tmux_name_for(sid)
         if not self.has_session(tmux_name):
-            self._tmux_creator(tmux_name, root, harness, env or {})
+            self._tmux_creator(tmux_name, spec.cwd, spec.command, spec.env or {})
         # Session options are (re-)asserted on every ensure so pre-existing durable sessions
         # created before an option was introduced pick it up too.
         self._tmux_configurer(tmux_name)
         return TerminalSessionBinding(
             sid=sid,
             tmux_name=tmux_name,
-            cwd=root,
-            command=harness,
-            lifecycle_id=lifecycle_id,
-            suspend_unsafe=suspend_unsafe,
+            cwd=spec.cwd,
+            command=spec.command,
+            lifecycle_id=spec.lifecycle_id,
+            suspend_unsafe=spec.suspend_unsafe,
         )
 
-    def attach(
-        self,
-        sid: str,
-        *,
-        cwd: Path | str,
-        command: Sequence[str],
-        lifecycle_id: str | None = None,
-        name: str | None = None,
-        suspend_unsafe: bool = False,
-    ) -> TerminalSession:
+    def attach(self, sid: str, spec: TerminalSessionSpec) -> TerminalSession:
         """Attach one unregistered PTY client to the durable tmux session ``sid``.
 
         Browser tabs cannot share one PTY master fd: reads race and one tab closing would close the
@@ -638,14 +644,9 @@ class TerminalHost:
         attached to the same tmux server-side session. The catalog/tmux name remains the durable identity;
         this returned object is a per-connection handle closed with :meth:`close_session`.
         """
-        session = self._spawn_session(
-            sid,
-            cwd=cwd,
-            command=command,
-            lifecycle_id=lifecycle_id,
-            name=name,
-            suspend_unsafe=suspend_unsafe,
-        )
+        # Attach reaches an ALREADY-created session, so it never seeds spawn env: the durable
+        # session keeps the environment it was created with.
+        session = self._spawn_session(sid, replace(spec, env=None))
         # Attach targets an existing durable session, so option assertion cannot race creation here.
         self._tmux_configurer(session.tmux_name)
         return session
@@ -765,29 +766,18 @@ class TerminalHost:
         with contextlib.suppress(OSError):
             os.close(session.master_fd)
 
-    def _spawn_session(
-        self,
-        sid: str,
-        *,
-        cwd: Path | str,
-        command: Sequence[str],
-        lifecycle_id: str | None,
-        name: str | None,
-        suspend_unsafe: bool,
-        env: Mapping[str, str] | None = None,
-    ) -> TerminalSession:
-        root = Path(cwd)
-        harness = tuple(command)
-        tmux_name = name or _tmux_session_name(sid)
-        process = self._spawn(_build_tmux_command(tmux_name, root, harness, env), root)
+    def _spawn_session(self, sid: str, spec: TerminalSessionSpec) -> TerminalSession:
+        tmux_name = spec.tmux_name_for(sid)
+        argv = _build_tmux_command(tmux_name, spec.cwd, spec.command, spec.env)
+        process = self._spawn(argv, spec.cwd)
         return TerminalSession(
             sid=sid,
             tmux_name=tmux_name,
-            cwd=root,
-            command=harness,
-            lifecycle_id=lifecycle_id,
+            cwd=spec.cwd,
+            command=spec.command,
+            lifecycle_id=spec.lifecycle_id,
             process=process,
-            suspend_unsafe=suspend_unsafe,
+            suspend_unsafe=spec.suspend_unsafe,
         )
 
     def _require(self, sid: str) -> TerminalSession:

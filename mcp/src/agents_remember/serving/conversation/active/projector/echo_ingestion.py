@@ -5,18 +5,15 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Callable, Mapping
 
-from agents_remember.serving.conversation.projectors import HarnessProjector
 from agents_remember.serving.conversation.projectors.common import (
     MappedUnknownVendor,
     MapperOutput,
     UnmappableShape,
 )
-from agents_remember.serving.harness_control_client import ControlledSession
 from agents_remember.serving.harness_control_models import EvidenceFrame
 
-from .mutation_stream import ProjectionMutationStream
 from .native_ingestion import EVIDENCE_PAGE_LIMIT
-from .references import ProjectionEvidenceRefs
+from .wiring import BridgeReaders, SessionProjectionSpine
 
 TranscriptReader = Callable[..., tuple[Mapping[str, object], ...]]
 EvidenceMapper = Callable[[EvidenceFrame, str], list[MapperOutput]]
@@ -40,19 +37,15 @@ class EchoIngestion:
 
     def __init__(
         self,
-        *,
-        entry: ControlledSession,
-        mapper: HarnessProjector,
-        stream: ProjectionMutationStream,
-        refs: ProjectionEvidenceRefs,
-        transcript_reader: TranscriptReader,
+        spine: SessionProjectionSpine,
+        readers: BridgeReaders,
         evidence_mapper: EvidenceMapper,
     ) -> None:
-        self._entry = entry
-        self._mapper = mapper
-        self._stream = stream
-        self._refs = refs
-        self._read_transcript = transcript_reader
+        self._entry = spine.entry
+        self._mapper = spine.mapper
+        self._stream = spine.stream
+        self._refs = spine.refs
+        self._read_transcript = readers.transcript
         self._map_evidence = evidence_mapper
         self.transcript_after = 0
         self.pending_frames: list[EvidenceFrame] = []
@@ -82,25 +75,40 @@ class EchoIngestion:
         if not hydrated and not evidence_window_complete:
             entries = self._realign_evicted(entries)
         for entry in entries:
-            if entry.get("role") != "user":
-                self._advance(entry)
-                continue
-            if self.turn_open:
-                self.turn_open = False
-                while self.pending_frames:
-                    frame = self.pending_frames.pop(0)
-                    self._apply_frame(frame)
-                    if frame.raw.get("type") == "result":
-                        break
-            self._apply_echo(entry)
-            self.turn_open = True
+            self._zip_entry(entry)
+        if self._drain_one_turn_body():
+            self.turn_open = False
+
+    def _zip_entry(self, entry: Mapping[str, object]) -> None:
+        """Place one transcript entry in turn order.
+
+        A user echo opens the next turn, so any frames still queued behind the previous echo belong
+        to the turn it closes and are flushed first. Non-echo entries only advance the cursor.
+        """
+
+        if entry.get("role") != "user":
             self._advance(entry)
+            return
+        if self.turn_open:
+            self.turn_open = False
+            self._drain_one_turn_body()
+        self._apply_echo(entry)
+        self.turn_open = True
+        self._advance(entry)
+
+    def _drain_one_turn_body(self) -> bool:
+        """Apply queued frames up to and including the next ``result``.
+
+        Returns whether a ``result`` was reached -- that is, whether the drained frames closed a
+        turn rather than running out mid-body.
+        """
+
         while self.pending_frames:
             frame = self.pending_frames.pop(0)
             self._apply_frame(frame)
             if frame.raw.get("type") == "result":
-                self.turn_open = False
-                break
+                return True
+        return False
 
     def _realign_evicted(
         self, entries: tuple[Mapping[str, object], ...]

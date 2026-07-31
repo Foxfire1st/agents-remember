@@ -15,6 +15,7 @@ from agents_remember.providers.grepai.seed import (
     grepai_extra_args,
 )
 from agents_remember.providers.setup_common import (
+    LifecycleCommand,
     load_settings,
     run_lifecycle,
     selected_provider_enabled,
@@ -40,11 +41,13 @@ def install_enabled_provider(args: Any, settings: dict[str, Any]) -> list[dict[s
     progress.phase_start("grepai", "install")
     result = run_lifecycle(
         args.coordination_root,
-        "grepai",
-        "install",
+        LifecycleCommand(
+            provider="grepai",
+            action="install",
+            extra_args=tuple(grepai_extra_args(args)),
+        ),
         timeout=args.timeout,
         dry_run=args.dry_run,
-        extra_args=grepai_extra_args(args),
     )
     progress.phase_done(result)
     return [result]
@@ -74,10 +77,12 @@ def refresh_enabled_provider(args: Any, settings: dict[str, Any]) -> list[dict[s
     return [
         run_lifecycle(
             args.coordination_root,
-            "grepai",
-            "refresh",
+            LifecycleCommand(
+                provider="grepai",
+                action="refresh",
+                extra_args=tuple(grepai_extra_args(args)),
+            ),
             timeout=args.timeout,
             dry_run=args.dry_run,
-            extra_args=grepai_extra_args(args),
         )
     ]

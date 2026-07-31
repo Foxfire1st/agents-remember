@@ -21,6 +21,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import cast
 
+import pytest
 from agents_remember.errors import HarnessControlError
 from agents_remember.serving.codex_app_server_adapter import (
     CodexAppServerAdapter,
@@ -28,6 +29,7 @@ from agents_remember.serving.codex_app_server_adapter import (
 )
 from agents_remember.serving.harness_control_bridge import HarnessControlBridge
 from agents_remember.serving.harness_control_client import (
+    ControlSubmission,
     interrupt_control,
     read_control_evidence,
     read_operation_timeline,
@@ -119,6 +121,7 @@ def _stage_png(root: Path, request_id: str, asset_id: str) -> dict[str, object]:
     }
 
 
+@pytest.mark.ar_run_control_plane_installed
 @unittest.skipUnless(
     os.environ.get(LIVE_OPT_IN) == "1",
     f"set {LIVE_OPT_IN}=1 to exercise installed runtimes through the control-plane seam",
@@ -154,9 +157,9 @@ class CodexInstalledControlPlaneTests(unittest.IsolatedAsyncioTestCase):
                     submit_control_prompt,
                     entry,
                     LONG_PROMPT,
-                    source="cockpit",
-                    request_id="plane-codex-long",
-                    expected_bridge_epoch=epoch,
+                    ControlSubmission(
+                        source="cockpit", request_id="plane-codex-long", expected_bridge_epoch=epoch
+                    ),
                 )
                 self.assertIn(receipt.acceptance, {"immediate", "queued"})
                 await _wait_evidence(
@@ -214,10 +217,12 @@ class CodexInstalledControlPlaneTests(unittest.IsolatedAsyncioTestCase):
                     submit_control_prompt,
                     entry,
                     "Describe this image in one short sentence.",
-                    source="cockpit",
-                    request_id="plane-codex-asset",
-                    expected_bridge_epoch=epoch,
-                    assets=[staged],
+                    ControlSubmission(
+                        source="cockpit",
+                        request_id="plane-codex-asset",
+                        expected_bridge_epoch=epoch,
+                        assets=[staged],
+                    ),
                 )
                 self.assertEqual(asset_receipt.acceptance, "immediate")
                 self.assertEqual(asset_receipt.raw.get("assetIds"), ["img-1"])
@@ -226,17 +231,19 @@ class CodexInstalledControlPlaneTests(unittest.IsolatedAsyncioTestCase):
                     submit_control_prompt,
                     entry,
                     LONG_PROMPT,
-                    source="cockpit",
-                    request_id="plane-codex-head",
-                    expected_bridge_epoch=epoch,
+                    ControlSubmission(
+                        source="cockpit", request_id="plane-codex-head", expected_bridge_epoch=epoch
+                    ),
                 )
                 await asyncio.to_thread(
                     submit_control_prompt,
                     entry,
                     "the exact queued body",
-                    source="cockpit",
-                    request_id="plane-codex-recovery",
-                    expected_bridge_epoch=epoch,
+                    ControlSubmission(
+                        source="cockpit",
+                        request_id="plane-codex-recovery",
+                        expected_bridge_epoch=epoch,
+                    ),
                 )
                 withdrawn = await asyncio.to_thread(
                     withdraw_control_submission,
@@ -259,6 +266,7 @@ class CodexInstalledControlPlaneTests(unittest.IsolatedAsyncioTestCase):
                 await bridge.stop("forced")
 
 
+@pytest.mark.ar_run_control_plane_installed
 @unittest.skipUnless(
     os.environ.get(LIVE_OPT_IN) == "1",
     f"set {LIVE_OPT_IN}=1 to exercise installed runtimes through the control-plane seam",
@@ -294,9 +302,9 @@ class PiInstalledControlPlaneTests(unittest.IsolatedAsyncioTestCase):
                     submit_control_prompt,
                     entry,
                     LONG_PROMPT,
-                    source="cockpit",
-                    request_id="plane-pi-long",
-                    expected_bridge_epoch=epoch,
+                    ControlSubmission(
+                        source="cockpit", request_id="plane-pi-long", expected_bridge_epoch=epoch
+                    ),
                 )
                 self.assertIn(receipt.acceptance, {"immediate", "queued"})
                 await _wait_evidence(
@@ -329,9 +337,9 @@ class PiInstalledControlPlaneTests(unittest.IsolatedAsyncioTestCase):
                     submit_control_prompt,
                     entry,
                     "Write one short sentence about the sky.",
-                    source="cockpit",
-                    request_id="plane-pi-second",
-                    expected_bridge_epoch=epoch,
+                    ControlSubmission(
+                        source="cockpit", request_id="plane-pi-second", expected_bridge_epoch=epoch
+                    ),
                 )
                 self.assertIn(second.acceptance, {"immediate", "queued"})
                 with self.assertRaises(HarnessControlError):
@@ -351,10 +359,12 @@ class PiInstalledControlPlaneTests(unittest.IsolatedAsyncioTestCase):
                     submit_control_prompt,
                     entry,
                     "Describe this image in one short sentence.",
-                    source="cockpit",
-                    request_id="plane-pi-asset",
-                    expected_bridge_epoch=epoch,
-                    assets=[staged],
+                    ControlSubmission(
+                        source="cockpit",
+                        request_id="plane-pi-asset",
+                        expected_bridge_epoch=epoch,
+                        assets=[staged],
+                    ),
                 )
                 self.assertIn(asset_receipt.acceptance, {"immediate", "queued"})
                 self.assertEqual(asset_receipt.raw.get("assetIds"), ["img-1"])

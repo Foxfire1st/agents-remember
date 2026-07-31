@@ -35,6 +35,7 @@ from agents_remember.serving.files import (
     resolve_onboarding,
     resolve_partner,
 )
+from agents_remember.serving.projector import ProjectionCadence
 from agents_remember.worktrees.worktree_contract import WorktreeContract, write_contract
 
 _SIDECAR = (
@@ -251,16 +252,23 @@ class CatalogTests(unittest.TestCase):
         self.assertEqual({r["repo"] for r in body["repos"]}, {"R"})
 
 
+_CATALOG_TASK = "t"
+
+
 def _write_leaf_contract(
     tasks_root: Path,
     *,
     repo: str,
-    task: str,
     leaf: str,
     code_worktree: Path,
     cleanup: str = "pending",
 ) -> None:
-    """One leaf-enclosure contract on disk in the shape worktree_start writes it."""
+    """One leaf-enclosure contract on disk in the shape worktree_start writes it.
+
+    Every catalog case varies the repo and the leaf; the master task is fixed scaffolding,
+    so it is a constant here rather than an argument no call site turns.
+    """
+    task = _CATALOG_TASK
     contract_path = tasks_root / repo / task / "enclosures" / leaf / "series-contract.md"
     write_contract(
         contract_path,
@@ -314,9 +322,7 @@ class CatalogAssemblyTests(unittest.TestCase):
     def _enclosure(self, tasks: Path, repo: str, leaf: str, *, cleanup: str = "pending") -> None:
         worktree = self.tmp / "wt" / repo / leaf
         worktree.mkdir(parents=True, exist_ok=True)
-        _write_leaf_contract(
-            tasks, repo=repo, task="t", leaf=leaf, code_worktree=worktree, cleanup=cleanup
-        )
+        _write_leaf_contract(tasks, repo=repo, leaf=leaf, code_worktree=worktree, cleanup=cleanup)
 
     def test_response_shape_and_filtering_are_unchanged(self) -> None:
         config = self._config("R1", "R2", "R3")
@@ -330,7 +336,6 @@ class CatalogAssemblyTests(unittest.TestCase):
         _write_leaf_contract(
             tasks,
             repo="R1",
-            task="t",
             leaf="ghost",
             code_worktree=self.tmp / "wt-ghost",  # never created: worktree gone
         )
@@ -453,7 +458,7 @@ class RouteTests(unittest.TestCase):
             transcript_root=self.tmp / "logs",
             repositories={"R": RepositoryScope(repo_id="R", path=code_root)},
         )
-        return TestClient(create_app(config, interval=100))
+        return TestClient(create_app(config, cadence=ProjectionCadence(interval=100)))
 
     def test_repos_route_does_not_fall_through_to_static(self) -> None:
         with self._client(with_memory=True) as client:

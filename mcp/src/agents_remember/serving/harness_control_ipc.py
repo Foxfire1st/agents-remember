@@ -7,7 +7,7 @@ import hashlib
 import json
 import os
 import stat
-from collections.abc import Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
@@ -170,72 +170,54 @@ class HarnessControlServer:
         return await self._dispatch_action(action, payload)
 
     async def _dispatch_action(self, action: str, payload: Mapping[str, object]) -> object:
-        if action in {"handshake", "snapshot"}:
-            return {
-                "protocol": CONTROL_PROTOCOL_VERSION,
-                "snapshot": snapshot_json(self.bridge.snapshot()),
-            }
-        if action in {"advertise", "set-model", "set-effort"}:
-            return await self._dispatch_capability_action(action, payload)
-        if action == "submit":
-            return await self._submit(payload)
-        if action == "submission-authority":
-            return submission_authority_json(self.bridge.submission_authority())
-        if action == "submission-status":
-            return submission_status_batch_json(
-                await self.bridge.submission_status(
-                    _required_text(payload, "expectedBridgeEpoch"),
-                    _required_text_list(payload, "requestIds", minimum=1, maximum=64),
-                    cockpit_only=True,
-                )
-            )
-        if action == "withdraw":
-            return withdrawal_result_json(
-                await self.bridge.withdraw_submission(
-                    _required_text(payload, "expectedBridgeEpoch"),
-                    _required_text(payload, "requestId"),
-                    cockpit_only=True,
-                )
-            )
-        if action == "respond":
-            return await self._respond(payload)
-        if action == "reconcile":
-            return reconciliation_json(
-                await self.bridge.reconcile(
-                    _required_text(payload, "requestId"),
-                    expected_bridge_epoch=_optional_text(payload, "expectedBridgeEpoch"),
-                )
-            )
-        if action == "resolve":
-            return await self._resolve(payload)
-        if action == "resolve-operation":
-            return await self._resolve_operation(payload)
-        if action == "transcript":
-            return self._transcript(payload)
-        if action == "evidence":
-            return self._evidence(payload)
-        if action == "evidence-native-page":
-            return await self._evidence_native_page(payload)
-        if action == "submission-provenance":
-            return await self._submission_provenance(payload)
-        if action == "interrupt":
-            return await self._interrupt(payload)
-        if action == "operation-timeline":
-            return await self._operation_timeline(payload)
-        if action == "stop":
-            return await self._stop(payload)
-        raise HarnessControlError(f"unknown control action: {action}")
+        handler = _CONTROL_ACTIONS.get(action)
+        if handler is None:
+            raise HarnessControlError(f"unknown control action: {action}")
+        return await handler(self, payload)
 
-    async def _dispatch_capability_action(
-        self, action: str, payload: Mapping[str, object]
-    ) -> object:
-        if action == "advertise":
-            return capability_snapshot_json(self.bridge.advertise())
-        if action == "set-model":
-            return set_result_json(await self.bridge.set_model(_required_text(payload, "modelKey")))
-        if action == "set-effort":
-            return set_result_json(await self.bridge.set_effort(_required_text(payload, "effort")))
-        raise HarnessControlError(f"unknown capability action: {action}")
+    async def _handshake(self, _payload: Mapping[str, object]) -> dict[str, object]:
+        return {
+            "protocol": CONTROL_PROTOCOL_VERSION,
+            "snapshot": snapshot_json(self.bridge.snapshot()),
+        }
+
+    async def _advertise(self, _payload: Mapping[str, object]) -> dict[str, object]:
+        return capability_snapshot_json(self.bridge.advertise())
+
+    async def _set_model(self, payload: Mapping[str, object]) -> dict[str, object]:
+        return set_result_json(await self.bridge.set_model(_required_text(payload, "modelKey")))
+
+    async def _set_effort(self, payload: Mapping[str, object]) -> dict[str, object]:
+        return set_result_json(await self.bridge.set_effort(_required_text(payload, "effort")))
+
+    async def _submission_authority(self, _payload: Mapping[str, object]) -> dict[str, str]:
+        return submission_authority_json(self.bridge.submission_authority())
+
+    async def _submission_status(self, payload: Mapping[str, object]) -> dict[str, object]:
+        return submission_status_batch_json(
+            await self.bridge.submission_status(
+                _required_text(payload, "expectedBridgeEpoch"),
+                _required_text_list(payload, "requestIds", minimum=1, maximum=64),
+                cockpit_only=True,
+            )
+        )
+
+    async def _withdraw(self, payload: Mapping[str, object]) -> dict[str, object]:
+        return withdrawal_result_json(
+            await self.bridge.withdraw_submission(
+                _required_text(payload, "expectedBridgeEpoch"),
+                _required_text(payload, "requestId"),
+                cockpit_only=True,
+            )
+        )
+
+    async def _reconcile(self, payload: Mapping[str, object]) -> dict[str, object]:
+        return reconciliation_json(
+            await self.bridge.reconcile(
+                _required_text(payload, "requestId"),
+                expected_bridge_epoch=_optional_text(payload, "expectedBridgeEpoch"),
+            )
+        )
 
     async def _submit(self, payload: Mapping[str, object]) -> dict[str, object]:
         source = payload.get("source")
@@ -280,7 +262,14 @@ class HarnessControlServer:
             seen.add(asset_id)
             refs.append(
                 await self._verify_staged_asset(
-                    assets_root, request_id, asset_id, mime_type, byte_size, sha256
+                    assets_root,
+                    request_id,
+                    StagedAssetClaim(
+                        asset_id=asset_id,
+                        mime_type=mime_type,
+                        byte_size=byte_size,
+                        sha256=sha256,
+                    ),
                 )
             )
         return tuple(refs)
@@ -289,11 +278,10 @@ class HarnessControlServer:
         self,
         assets_root: Path,
         request_id: str,
-        asset_id: str,
-        mime_type: str,
-        byte_size: int,
-        sha256: str,
+        claim: StagedAssetClaim,
     ) -> AssetReference:
+        asset_id, mime_type = claim.asset_id, claim.mime_type
+        byte_size, sha256 = claim.byte_size, claim.sha256
         candidate = _confined_asset_path(assets_root, request_id, asset_id)
         digest, size, _data = await asyncio.to_thread(read_asset_bytes, candidate)
         if size != byte_size:
@@ -366,7 +354,7 @@ class HarnessControlServer:
         )
         return {"resolved": True}
 
-    def _transcript(self, payload: Mapping[str, object]) -> dict[str, object]:
+    async def _transcript(self, payload: Mapping[str, object]) -> dict[str, object]:
         after = _optional_non_negative_int(payload, "afterSequence", default=0)
         limit = min(
             MAX_TRANSCRIPT_PAGE,
@@ -379,7 +367,7 @@ class HarnessControlServer:
             ]
         }
 
-    def _evidence(self, payload: Mapping[str, object]) -> dict[str, object]:
+    async def _evidence(self, payload: Mapping[str, object]) -> dict[str, object]:
         after = _optional_non_negative_int(payload, "afterSequence", default=0)
         limit = min(
             MAX_EVIDENCE_PAGE,
@@ -415,6 +403,36 @@ class HarnessControlServer:
             raise HarnessControlError("shutdown mode must be graceful or forced")
         await self.bridge.stop(cast(ShutdownMode, mode))
         return {"stopped": True, "mode": mode}
+
+
+ControlActionHandler = Callable[[HarnessControlServer, Mapping[str, object]], Awaitable[object]]
+
+# The wire action vocabulary, in one place. ``_dispatch`` has already proven protocol version and
+# exact endpoint identity by the time an entry here is chosen, so every handler may assume it is
+# serving this endpoint's own session; an action absent from this table is refused by name rather
+# than falling through to a default.
+_CONTROL_ACTIONS: dict[str, ControlActionHandler] = {
+    "handshake": HarnessControlServer._handshake,
+    "snapshot": HarnessControlServer._handshake,
+    "advertise": HarnessControlServer._advertise,
+    "set-model": HarnessControlServer._set_model,
+    "set-effort": HarnessControlServer._set_effort,
+    "submit": HarnessControlServer._submit,
+    "submission-authority": HarnessControlServer._submission_authority,
+    "submission-status": HarnessControlServer._submission_status,
+    "submission-provenance": HarnessControlServer._submission_provenance,
+    "withdraw": HarnessControlServer._withdraw,
+    "respond": HarnessControlServer._respond,
+    "reconcile": HarnessControlServer._reconcile,
+    "resolve": HarnessControlServer._resolve,
+    "resolve-operation": HarnessControlServer._resolve_operation,
+    "transcript": HarnessControlServer._transcript,
+    "evidence": HarnessControlServer._evidence,
+    "evidence-native-page": HarnessControlServer._evidence_native_page,
+    "interrupt": HarnessControlServer._interrupt,
+    "operation-timeline": HarnessControlServer._operation_timeline,
+    "stop": HarnessControlServer._stop,
+}
 
 
 class HarnessControlClient:
@@ -479,6 +497,22 @@ def _submit_asset_schema(raw: object) -> tuple[str, str, int, str]:
     if len(sha256) != 64 or any(character not in "0123456789abcdef" for character in sha256):
         raise HarnessControlError("submit asset sha256 must be 64 lowercase hex characters")
     return asset_id, mime_type, byte_size, sha256
+
+
+@dataclass(frozen=True)
+class StagedAssetClaim:
+    """What the wire CLAIMS about one staged asset, before the spooled file is read.
+
+    Every field is a claim to be verified against the file on disk: the id locates it, and the
+    mime type, byte size and digest are what must match. Verifying one field against another
+    asset's claim is exactly the substitution the digest check exists to catch, so the claim
+    travels as one value.
+    """
+
+    asset_id: str
+    mime_type: str
+    byte_size: int
+    sha256: str
 
 
 def _confined_asset_path(assets_root: Path, request_id: str, asset_id: str) -> Path:

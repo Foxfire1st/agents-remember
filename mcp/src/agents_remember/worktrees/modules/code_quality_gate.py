@@ -24,6 +24,12 @@ def quality_wrapper_path(code_worktree: Path) -> Path:
     return code_worktree / QUALITY_WRAPPER
 
 
+def _gate_command(diff_base: str) -> str:
+    """The command as reported, so a payload reader can rerun exactly what ran."""
+    base = f" --diff-base {diff_base}" if diff_base else ""
+    return f"python -m {QUALITY_MODULE}{base}"
+
+
 def requires_strict_code_quality(code_worktree: Path, *, code_would_commit: bool) -> bool:
     """Whether this closeout must run the wrapper the checkout carries.
 
@@ -34,7 +40,9 @@ def requires_strict_code_quality(code_worktree: Path, *, code_would_commit: bool
     return code_would_commit and quality_wrapper_path(code_worktree).is_file()
 
 
-def code_quality_gate_preview(code_worktree: Path, *, code_would_commit: bool) -> dict[str, object]:
+def code_quality_gate_preview(
+    code_worktree: Path, *, code_would_commit: bool, diff_base: str = ""
+) -> dict[str, object]:
     """Report which of the three gate states this closeout is in.
 
     A consuming repository that carries no wrapper reaches ``wrapper-unavailable``,
@@ -62,7 +70,8 @@ def code_quality_gate_preview(code_worktree: Path, *, code_would_commit: bool) -
     return {
         "required": True,
         "status": GATE_ENFORCED,
-        "command": f"python -m {QUALITY_MODULE}",
+        "command": _gate_command(diff_base),
+        "diffBase": diff_base,
         "reason": "strict project-owned quality wrapper runs before the code commit",
     }
 
@@ -85,9 +94,19 @@ def run_subprocess(
 def run_strict_code_quality_gate(
     code_worktree: Path,
     *,
+    diff_base: str = "",
     runner: QualityRunner = run_subprocess,
 ) -> dict[str, object]:
-    """Run this worktree's mandatory quality wrapper or refuse the commit."""
+    """Run this worktree's mandatory quality wrapper or refuse the commit.
+
+    ``diff_base`` must be the leaf's recorded base commit. Without it the wrapper
+    falls back to ``origin/HEAD``/``main``, and the per-diff coverage floor then
+    demands 100% branch coverage of every change on the whole integration branch
+    rather than of this leaf's own diff -- which no leaf can pass, so the gate
+    would be as useless as one that cannot fail. CI keeps the ``main`` default
+    because a pull request genuinely is measured against ``main``; a leaf closeout
+    is measured against the leaf.
+    """
     wrapper = quality_wrapper_path(code_worktree)
     if not wrapper.is_file():
         raise RuntimeError(
@@ -96,6 +115,8 @@ def run_strict_code_quality_gate(
         )
     python = quality_python(code_worktree)
     command = [python.as_posix(), "-m", QUALITY_MODULE]
+    if diff_base:
+        command += ["--diff-base", diff_base]
     result = runner(command, code_worktree, quality_environment(code_worktree))
     if result.returncode != 0:
         details = _failure_output(result.stdout)
@@ -108,7 +129,8 @@ def run_strict_code_quality_gate(
         "required": True,
         "status": GATE_ENFORCED,
         "passed": True,
-        "command": f"python -m {QUALITY_MODULE}",
+        "command": _gate_command(diff_base),
+        "diffBase": diff_base,
     }
 
 

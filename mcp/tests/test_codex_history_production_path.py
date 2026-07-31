@@ -10,6 +10,7 @@ from pathlib import Path
 
 import pytest
 from _agent_wire_fixtures import (
+    CollabAgents,
     agent_message_item,
     collab_agent_tool_call_item,
     item_completed_params,
@@ -21,6 +22,8 @@ from agents_remember.serving.codex_app_server_adapter import (
     CodexAppServerSettings,
 )
 from agents_remember.serving.conversation.active.projector import ActiveSessionProjector
+from agents_remember.serving.conversation.active.projector.facade import ProjectedSession
+from agents_remember.serving.conversation.active.projector.wiring import BridgeReaders
 from agents_remember.serving.conversation.models import (
     ActiveConversationRef,
     AuthorizationBinding,
@@ -44,6 +47,7 @@ from agents_remember.serving.harness_control_models import (
     EvidenceFrame,
     EvidencePage,
     LaunchSpec,
+    SubmissionAuthorityDescriptor,
 )
 
 NOW = "2026-07-27T11:00:00+00:00"
@@ -101,8 +105,7 @@ class _RosterEvidence:
                             collab_agent_tool_call_item(
                                 f"spawn-{index}",
                                 "spawnAgent",
-                                sender_thread_id=PARENT,
-                                receiver_thread_ids=[child],
+                                agents=CollabAgents(PARENT, receiver_thread_ids=[child]),
                             ),
                         ),
                         PARENT,
@@ -318,33 +321,7 @@ async def test_measured_history_crosses_transport_probe_ipc_and_selected_project
     entry = _ControlledEntry(control_identity, endpoint.path)
     try:
         descriptor = await asyncio.to_thread(read_submission_authority, entry)
-        mapper = projector_for("codex")
-        assert mapper is not None
-        projection_identity = ActiveConversationRef(
-            harness_id="codex",
-            vendor_conversation_id=PARENT,
-            project_scope=str(tmp_path),
-            identity_digest="production-history-digest",
-            ar_session_id=control_identity.ar_session_id,
-            bridge_epoch=descriptor.bridge_epoch,
-        )
-        roster = _RosterEvidence(descriptor.bridge_epoch)
-        projector = ActiveSessionProjector(
-            identity=projection_identity,
-            authorization=AuthorizationBinding(
-                principal_id="local-operator:1000",
-                tenant_id=str(tmp_path),
-            ),
-            entry=entry,
-            mapper=mapper,
-            secret=SECRET,
-            clock=lambda: NOW,
-            evidence_reader=roster.read,
-            native_page_reader=read_control_native_page,
-            transcript_reader=read_control_transcript,
-            provenance_reader=read_submission_provenance,
-            snapshot_reader=read_control_snapshot,
-        )
+        projector = _projector_over_control_entry(entry, control_identity, descriptor, tmp_path)
 
         initial = await projector.page(before_ordinal=None, limit=100)
         initial_ids = {item.item_id for item in initial.items}
@@ -380,27 +357,71 @@ async def test_measured_history_crosses_transport_probe_ipc_and_selected_project
         assert f"{WAVE_TWO_GOOD}:history-good" in final_ids
         assert (await asyncio.to_thread(read_control_snapshot, entry)).control == "ready"
 
-        records = [json.loads(line) for line in log_path.read_text(encoding="utf-8").splitlines()]
-        item_probes = [record for record in records if record["method"] == "thread/items/list"]
-        assert len(item_probes) == 1
-        assert item_probes[0]["responseError"] == -32601
-        turns = [record for record in records if record["method"] == "thread/turns/list"]
-        measured_record = next(
-            record for record in turns if record["params"]["threadId"] == WAVE_ONE
-        )
-        assert measured_record["responseBytes"] == MEASURED_RESPONSE_BYTES
-        cycle_records = [
-            record for record in turns if record["params"]["threadId"] == WAVE_TWO_CYCLE
-        ]
-        assert [record["params"].get("cursor") for record in cycle_records] == [
-            None,
-            "opaque-A",
-            "opaque-B",
-        ]
-        assert any(record["params"]["threadId"] == WAVE_TWO_GOOD for record in turns)
-        assert all(record["method"] != "thread/read" for record in records)
+        _assert_wire_evidence(log_path)
     finally:
         if projector is not None:
             await projector.close()
         await server.close()
         await bridge.stop("forced")
+
+
+def _projector_over_control_entry(
+    entry: _ControlledEntry,
+    control_identity: ControlIdentity,
+    descriptor: SubmissionAuthorityDescriptor,
+    tmp_path: Path,
+) -> ActiveSessionProjector:
+    """The projector the production routes build, reading only through the control entry."""
+    mapper = projector_for("codex")
+    assert mapper is not None
+    roster = _RosterEvidence(descriptor.bridge_epoch)
+    return ActiveSessionProjector(
+        ProjectedSession(
+            identity=ActiveConversationRef(
+                harness_id="codex",
+                vendor_conversation_id=PARENT,
+                project_scope=str(tmp_path),
+                identity_digest="production-history-digest",
+                ar_session_id=control_identity.ar_session_id,
+                bridge_epoch=descriptor.bridge_epoch,
+            ),
+            authorization=AuthorizationBinding(
+                principal_id="local-operator:1000",
+                tenant_id=str(tmp_path),
+            ),
+            entry=entry,
+            mapper=mapper,
+            secret=SECRET,
+        ),
+        clock=lambda: NOW,
+        readers=BridgeReaders(
+            evidence=roster.read,
+            native_page=read_control_native_page,
+            transcript=read_control_transcript,
+            provenance=read_submission_provenance,
+            snapshot=read_control_snapshot,
+        ),
+    )
+
+
+def _assert_wire_evidence(log_path: Path) -> None:
+    """What actually crossed the transport: one refused probe, one measured wave, one cycle.
+
+    The child records every method it served, so this is the difference between "the page
+    looked right" and "the page was built from these calls and no others".
+    """
+    records = [json.loads(line) for line in log_path.read_text(encoding="utf-8").splitlines()]
+    item_probes = [record for record in records if record["method"] == "thread/items/list"]
+    assert len(item_probes) == 1
+    assert item_probes[0]["responseError"] == -32601
+    turns = [record for record in records if record["method"] == "thread/turns/list"]
+    measured_record = next(record for record in turns if record["params"]["threadId"] == WAVE_ONE)
+    assert measured_record["responseBytes"] == MEASURED_RESPONSE_BYTES
+    cycle_records = [record for record in turns if record["params"]["threadId"] == WAVE_TWO_CYCLE]
+    assert [record["params"].get("cursor") for record in cycle_records] == [
+        None,
+        "opaque-A",
+        "opaque-B",
+    ]
+    assert any(record["params"]["threadId"] == WAVE_TWO_GOOD for record in turns)
+    assert all(record["method"] != "thread/read" for record in records)

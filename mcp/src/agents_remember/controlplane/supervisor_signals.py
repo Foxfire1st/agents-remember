@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Literal
@@ -33,6 +34,30 @@ class SupervisorSignalRecord(BaseModel):
     findingKind: str
     detail: str
     deliveryState: InboxDeliveryState
+
+
+@dataclass(frozen=True)
+class SupervisorSignalTarget:
+    """The owner inbox a supervisor signal is addressed to: the agent, the lifecycle it runs,
+    the role it fills, and the leaf/seat it occupies. Derived as one routing decision by
+    ``derive_signal_owner`` and stamped verbatim onto every :class:`SupervisorSignalRecord`."""
+
+    agent_id: str | None = None
+    lifecycle_id: str | None = None
+    role: AgentRole | None = None
+    leaf_key: str | None = None
+    seat_role: str | None = None
+
+
+@dataclass(frozen=True)
+class SupervisorSignalKey:
+    """What makes two supervisor signals "the same signal" for cooldown purposes: the same
+    target told the same thing. Every field is compared, all of them or none -- a partial
+    match is a different signal and must not suppress delivery."""
+
+    target: SupervisorSignalTarget
+    finding_kind: str
+    detail: str
 
 
 class SupervisorSignalCooldownStore:
@@ -81,43 +106,32 @@ class SupervisorSignalCooldownStore:
 
     def last_sent(
         self,
+        signal: SupervisorSignalKey,
         *,
-        target_agent_id: str | None,
-        target_lifecycle_id: str | None,
-        target_role: AgentRole | None,
-        leaf_key: str | None,
-        finding_kind: str,
-        detail: str,
-        seat_role: str | None = None,
         records: list[SupervisorSignalRecord] | None = None,
     ) -> SupervisorSignalRecord | None:
         source = self.read() if records is None else records
+        target = signal.target
         matches = [
             record
             for record in source
             if record.state == "sent"
-            and record.targetAgentId == target_agent_id
-            and record.targetLifecycleId == target_lifecycle_id
-            and record.targetRole == target_role
-            and record.leafKey == leaf_key
-            and record.seatRole == seat_role
-            and record.findingKind == finding_kind
-            and record.detail == detail
+            and record.targetAgentId == target.agent_id
+            and record.targetLifecycleId == target.lifecycle_id
+            and record.targetRole == target.role
+            and record.leafKey == target.leaf_key
+            and record.seatRole == target.seat_role
+            and record.findingKind == signal.finding_kind
+            and record.detail == signal.detail
         ]
         return max(matches, key=lambda record: record.ts, default=None)
 
     def in_cooldown(
         self,
+        signal: SupervisorSignalKey,
         *,
-        target_agent_id: str | None,
-        target_lifecycle_id: str | None,
-        target_role: AgentRole | None,
-        leaf_key: str | None,
-        finding_kind: str,
-        detail: str,
         now: datetime,
         cooldown_seconds: float,
-        seat_role: str | None = None,
         records: list[SupervisorSignalRecord] | None = None,
     ) -> bool:
         """Whether an identical signal was sent within the cooldown window.
@@ -129,16 +143,7 @@ class SupervisorSignalCooldownStore:
         floor = require_redelivery_floor_seconds(
             cooldown_seconds, owner="supervisor signal cooldown"
         )
-        previous = self.last_sent(
-            target_agent_id=target_agent_id,
-            target_lifecycle_id=target_lifecycle_id,
-            target_role=target_role,
-            leaf_key=leaf_key,
-            seat_role=seat_role,
-            finding_kind=finding_kind,
-            detail=detail,
-            records=records,
-        )
+        previous = self.last_sent(signal, records=records)
         if previous is None:
             return False
         try:

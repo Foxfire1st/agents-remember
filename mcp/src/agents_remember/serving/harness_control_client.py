@@ -13,9 +13,10 @@ import errno
 import json
 import socket
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Protocol, cast
+from typing import Literal, Protocol, cast, overload
 
 from agents_remember.errors import (
     HarnessBridgeEpochMismatchError,
@@ -193,25 +194,32 @@ def set_control_effort(entry: ControlledSession, effort: str) -> SetResult:
     return _set_control_value(entry, "set-effort", "effort", effort)
 
 
+@dataclass(frozen=True)
+class ControlSubmission:
+    """Everything about one submission EXCEPT its text: who sent it, as what, against which epoch.
+
+    The request id makes the submission idempotent, the source decides which authority owns it, the
+    epoch is the bridge generation it is valid against, and the assets are the bytes it references.
+    They are one envelope: a request id replayed with a different source or epoch is a different
+    submission, and the wire payload is built from all of them at once.
+    """
+
+    source: SubmissionSource
+    request_id: str
+    submitted_at: str | None = None
+    expected_bridge_epoch: str | None = None
+    assets: Sequence[Mapping[str, object]] | None = None
+
+
 def submit_control_prompt(
     entry: ControlledSession,
     text: str,
-    *,
-    source: SubmissionSource,
-    request_id: str,
-    submitted_at: str | None = None,
-    expected_bridge_epoch: str | None = None,
-    assets: Sequence[Mapping[str, object]] | None = None,
+    submission: ControlSubmission,
 ) -> SubmissionReceipt:
-    stamp = submitted_at or datetime.now(UTC).isoformat()
-    payload = _submit_payload(
-        text,
-        source=source,
-        request_id=request_id,
-        submitted_at=stamp,
-        expected_bridge_epoch=expected_bridge_epoch,
-        assets=assets,
-    )
+    request_id = submission.request_id
+    expected_bridge_epoch = submission.expected_bridge_epoch
+    stamp = submission.submitted_at or datetime.now(UTC).isoformat()
+    payload = _submit_payload(text, replace(submission, submitted_at=stamp))
     try:
         result = request_control(
             entry,
@@ -244,20 +252,14 @@ def submit_control_prompt(
         )
 
 
-def _submit_payload(
-    text: str,
-    *,
-    source: SubmissionSource,
-    request_id: str,
-    submitted_at: str,
-    expected_bridge_epoch: str | None,
-    assets: Sequence[Mapping[str, object]] | None,
-) -> dict[str, object]:
+def _submit_payload(text: str, submission: ControlSubmission) -> dict[str, object]:
+    assets = submission.assets
+    expected_bridge_epoch = submission.expected_bridge_epoch
     payload: dict[str, object] = {
-        "requestId": request_id,
-        "source": source,
+        "requestId": submission.request_id,
+        "source": submission.source,
         "text": text,
-        "submittedAt": submitted_at,
+        "submittedAt": submission.submitted_at,
     }
     if assets is not None:
         if isinstance(assets, (str, bytes)) or not isinstance(assets, Sequence):
@@ -676,42 +678,50 @@ def _submission_status_batch(
     raw_submissions = result.get("submissions")
     if not isinstance(raw_submissions, list) or len(raw_submissions) != len(request_ids):
         raise HarnessControlError("submission status response has the wrong result count")
-    lookups: list[SubmissionLookup] = []
-    for expected_id, raw_lookup in zip(request_ids, raw_submissions, strict=True):
-        if not isinstance(raw_lookup, Mapping):
-            raise HarnessControlError("submission lookup must be an object")
-        request_id = _required_text(raw_lookup, "requestId")
-        if request_id != expected_id:
-            raise HarnessControlError("submission lookup request id or order mismatch")
-        outcome = raw_lookup.get("outcome")
-        if outcome == "not-found":
-            lookups.append(SubmissionLookup(request_id=request_id, outcome="not-found"))
-            continue
-        if outcome != "found" or not isinstance(raw_lookup.get("submission"), Mapping):
-            raise HarnessControlError("submission lookup has invalid outcome or evidence")
-        raw_status = cast(Mapping[str, object], raw_lookup["submission"])
-        withdrawable = raw_status.get("withdrawable")
-        if not isinstance(withdrawable, bool):
-            raise HarnessControlError("submission status withdrawable must be boolean")
-        state = _submission_state(raw_status.get("state"))
-        if state is None:
-            raise HarnessControlError("found submission status requires lifecycle state")
-        lookups.append(
-            SubmissionLookup(
-                request_id=request_id,
-                outcome="found",
-                submission=SubmissionStatus(
-                    request_id=request_id,
-                    state=state,
-                    submitted_at=_required_text(raw_status, "submittedAt"),
-                    updated_at=_required_text(raw_status, "updatedAt"),
-                    accepted_at=_optional_text(raw_status, "acceptedAt"),
-                    withdrawable=withdrawable,
-                    detail=_optional_text(raw_status, "detail"),
-                ),
-            )
-        )
-    return SubmissionStatusBatch(bridge_epoch=bridge_epoch, submissions=tuple(lookups))
+    return SubmissionStatusBatch(
+        bridge_epoch=bridge_epoch,
+        submissions=tuple(
+            _submission_lookup(raw_lookup, expected_id=expected_id)
+            for expected_id, raw_lookup in zip(request_ids, raw_submissions, strict=True)
+        ),
+    )
+
+
+def _submission_lookup(raw_lookup: object, *, expected_id: str) -> SubmissionLookup:
+    """One lookup out of a status batch, verified against the id asked for at that position.
+
+    The batch is positional, so an id that does not match its slot means the response cannot be
+    attributed to the request and is rejected rather than re-keyed by whatever the adapter sent.
+    """
+
+    if not isinstance(raw_lookup, Mapping):
+        raise HarnessControlError("submission lookup must be an object")
+    request_id = _required_text(raw_lookup, "requestId")
+    if request_id != expected_id:
+        raise HarnessControlError("submission lookup request id or order mismatch")
+    outcome = raw_lookup.get("outcome")
+    if outcome == "not-found":
+        return SubmissionLookup(request_id=request_id, outcome="not-found")
+    if outcome != "found" or not isinstance(raw_lookup.get("submission"), Mapping):
+        raise HarnessControlError("submission lookup has invalid outcome or evidence")
+    raw_status = cast(Mapping[str, object], raw_lookup["submission"])
+    withdrawable = raw_status.get("withdrawable")
+    if not isinstance(withdrawable, bool):
+        raise HarnessControlError("submission status withdrawable must be boolean")
+    state = _submission_state(raw_status.get("state"))
+    return SubmissionLookup(
+        request_id=request_id,
+        outcome="found",
+        submission=SubmissionStatus(
+            request_id=request_id,
+            state=state,
+            submitted_at=_required_text(raw_status, "submittedAt"),
+            updated_at=_required_text(raw_status, "updatedAt"),
+            accepted_at=_optional_text(raw_status, "acceptedAt"),
+            withdrawable=withdrawable,
+            detail=_optional_text(raw_status, "detail"),
+        ),
+    )
 
 
 def _withdrawal_result(result: object, *, request_id: str) -> WithdrawalResult:
@@ -840,8 +850,6 @@ def _operation_timeline_item(raw_item: object) -> OperationTimelineItem:
     if not isinstance(sequence, int) or isinstance(sequence, bool) or sequence < 1:
         raise HarnessControlError("operation timeline item requires a positive sequence")
     state = _submission_state(raw_item.get("state"))
-    if state is None:
-        raise HarnessControlError("operation timeline item requires lifecycle state")
     digest_present = raw_item.get("payloadDigestPresent")
     if not isinstance(digest_present, bool):
         raise HarnessControlError("operation timeline payloadDigestPresent must be boolean")
@@ -1037,11 +1045,29 @@ def _required_non_negative_int(raw: Mapping[str, object], key: str) -> int:
     return value
 
 
+@overload
+def _submission_state(value: object) -> SubmissionLifecycleState: ...
+
+
+@overload
+def _submission_state(
+    value: object, *, optional: Literal[True]
+) -> SubmissionLifecycleState | None: ...
+
+
 def _submission_state(
     value: object,
     *,
     optional: bool = False,
 ) -> SubmissionLifecycleState | None:
+    """The lifecycle state a control response claims, refused if it is not one of the seven.
+
+    ``optional=True`` is the only way to get ``None`` back, and it means the field was
+    absent. Without it a missing state is a malformed response like any other value outside
+    the set -- ``None`` never survives this call, which is why callers that require a state
+    do not re-check for it.
+    """
+
     if value is None and optional:
         return None
     if value not in {

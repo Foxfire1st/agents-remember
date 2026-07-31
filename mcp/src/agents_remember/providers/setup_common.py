@@ -7,6 +7,7 @@ import os
 import subprocess
 import sys
 import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -155,16 +156,31 @@ def parse_json_stdout(stdout: str) -> Any:
         return None
 
 
+@dataclass(frozen=True)
+class LifecycleCommand:
+    """One provider lifecycle command line.
+
+    The provider CLI splits its arguments either side of the action:
+    ``extra_args`` are provider-level flags that precede it, ``native_args``
+    are the action's own arguments. The three parts are only ever meaningful
+    together, so they travel as one command.
+    """
+
+    provider: str
+    action: str
+    extra_args: tuple[str, ...] = ()
+    native_args: tuple[str, ...] = ()
+
+
 def run_lifecycle(
     coordination_root: Path,
-    provider: str,
-    action: str,
+    command_spec: LifecycleCommand,
     *,
     timeout: int,
     dry_run: bool,
-    extra_args: list[str] | None = None,
-    native_args: list[str] | None = None,
 ) -> dict[str, Any]:
+    provider = command_spec.provider
+    action = command_spec.action
     argv = [
         provider,
         "--coordination-root",
@@ -172,9 +188,9 @@ def run_lifecycle(
         "--timeout",
         str(timeout),
         "--json",
-        *(extra_args or []),
+        *command_spec.extra_args,
         action,
-        *(native_args or []),
+        *command_spec.native_args,
     ]
     command = [sys.executable, "-m", "agents_remember.providers.lifecycle", *argv]
     if dry_run:

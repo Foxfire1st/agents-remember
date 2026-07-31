@@ -14,6 +14,7 @@ durable-timer lesson (R2): a row survives a daemon/MCP restart; a timer does not
 from __future__ import annotations
 
 import os
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Literal
@@ -56,33 +57,52 @@ class ExpectationRow(BaseModel):
     missedAt: str | None = None
 
 
+@dataclass(frozen=True)
+class ExpectationSubject:
+    """Who owes the expectation: the agent, the lifecycle it runs, and the leaf/seat it
+    claimed. A row addressed to only some of these is addressed to nobody, so the dispatch
+    surface resolves the whole address once and hands it over as one thing."""
+
+    agent_id: str | None = None
+    lifecycle_id: str | None = None
+    leaf_key: str | None = None
+    seat_role: str | None = None
+
+
+@dataclass(frozen=True)
+class Expectation:
+    """What must happen: which kind of expectation, who owes it, which dispatch it rides
+    beside, and an optional human note. The clock (``dueAt``) and the row identity are
+    minted separately by the caller -- everything else about an expectation is here."""
+
+    kind: ExpectationKind
+    source_id: str
+    subject: ExpectationSubject = ExpectationSubject()
+    note: str | None = None
+
+
 def create_expectation_row(
+    expectation: Expectation,
     *,
     row_id: str,
     now: str,
-    kind: ExpectationKind,
     due_at: str,
-    source_id: str,
-    subject_agent_id: str | None = None,
-    subject_lifecycle_id: str | None = None,
-    leaf_key: str | None = None,
-    seat_role: str | None = None,
-    note: str | None = None,
 ) -> ExpectationRow:
     """Create a pending expectation row. Pure: the caller mints ``row_id``/``now``/``due_at``."""
+    subject = expectation.subject
     return ExpectationRow(
         id=row_id,
         ts=now,
-        kind=kind,
+        kind=expectation.kind,
         state="pending",
         createdAt=now,
         dueAt=due_at,
-        sourceId=source_id,
-        subjectAgentId=subject_agent_id,
-        subjectLifecycleId=subject_lifecycle_id,
-        leafKey=leaf_key,
-        seatRole=seat_role,
-        note=note,
+        sourceId=expectation.source_id,
+        subjectAgentId=subject.agent_id,
+        subjectLifecycleId=subject.lifecycle_id,
+        leafKey=subject.leaf_key,
+        seatRole=subject.seat_role,
+        note=expectation.note,
     )
 
 
@@ -272,33 +292,20 @@ class ExpectationRowStore:
 
 def write_expectation_row(
     store: ExpectationRowStore,
+    expectation: Expectation,
     *,
     row_id: str,
     now: datetime,
-    kind: ExpectationKind,
     sla_seconds: float,
-    source_id: str,
-    subject_agent_id: str | None = None,
-    subject_lifecycle_id: str | None = None,
-    leaf_key: str | None = None,
-    seat_role: str | None = None,
-    note: str | None = None,
 ) -> ExpectationRow:
     """Create + append one expectation row in one call -- the atomic-write-at-dispatch helper
     every dispatch surface calls (spawn / gate-open / inbox-post), so the row is never a
     forgettable follow-up step."""
-    now_text = now.isoformat()
     row = create_expectation_row(
+        expectation,
         row_id=row_id,
-        now=now_text,
-        kind=kind,
+        now=now.isoformat(),
         due_at=due_at_from_sla(now=now, sla_seconds=sla_seconds),
-        source_id=source_id,
-        subject_agent_id=subject_agent_id,
-        subject_lifecycle_id=subject_lifecycle_id,
-        leaf_key=leaf_key,
-        seat_role=seat_role,
-        note=note,
     )
     store.append(row)
     return row

@@ -12,7 +12,9 @@ MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
 from agents_remember.controlplane.expectation_rows import (
+    Expectation,
     ExpectationRowStore,
+    ExpectationSubject,
     create_expectation_row,
     due_at_from_sla,
     mark_met,
@@ -32,11 +34,10 @@ class ExpectationRowRecordTests(unittest.TestCase):
     def test_create_is_pending_with_dueAt_from_sla(self) -> None:
         now = datetime.fromisoformat(T1)
         row = create_expectation_row(
+            Expectation(kind="ack-by", source_id="entry-1"),
             row_id="R1",
             now=T1,
-            kind="ack-by",
             due_at=due_at_from_sla(now=now, sla_seconds=300.0),
-            source_id="entry-1",
         )
         self.assertEqual(row.state, "pending")
         self.assertEqual(row.kind, "ack-by")
@@ -44,7 +45,7 @@ class ExpectationRowRecordTests(unittest.TestCase):
 
     def test_mark_met_is_idempotent(self) -> None:
         row = create_expectation_row(
-            row_id="R1", now=T1, kind="verdict-by", due_at=T1, source_id="gate-1"
+            Expectation(kind="verdict-by", source_id="gate-1"), row_id="R1", now=T1, due_at=T1
         )
         met = mark_met(row, now="2026-06-23T10:05:00+00:00")
         self.assertEqual(met.state, "met")
@@ -54,7 +55,10 @@ class ExpectationRowRecordTests(unittest.TestCase):
 
     def test_mark_missed_is_idempotent_and_wont_overwrite_met(self) -> None:
         row = create_expectation_row(
-            row_id="R1", now=T1, kind="turn-report-by", due_at=T1, source_id="session-1"
+            Expectation(kind="turn-report-by", source_id="session-1"),
+            row_id="R1",
+            now=T1,
+            due_at=T1,
         )
         met = mark_met(row, now="2026-06-23T10:05:00+00:00")
         missed = mark_missed(met, now="2026-06-23T11:00:00+00:00")
@@ -72,12 +76,14 @@ class ExpectationRowStoreTests(unittest.TestCase):
         now = datetime.fromisoformat(T1)
         row = write_expectation_row(
             self.store,
+            Expectation(
+                kind="briefed-by",
+                source_id="session-1",
+                subject=ExpectationSubject(agent_id="worker-1"),
+            ),
             row_id="R1",
             now=now,
-            kind="briefed-by",
             sla_seconds=120.0,
-            source_id="session-1",
-            subject_agent_id="worker-1",
         )
         self.assertEqual(row.state, "pending")
         self.assertEqual(self.store.pending(), [row])
@@ -85,11 +91,10 @@ class ExpectationRowStoreTests(unittest.TestCase):
     def test_pending_excludes_met_rows(self) -> None:
         write_expectation_row(
             self.store,
+            Expectation(kind="ack-by", source_id="entry-1"),
             row_id="R1",
             now=datetime.fromisoformat(T1),
-            kind="ack-by",
             sla_seconds=300.0,
-            source_id="entry-1",
         )
         self.store.mark_met("R1", now="2026-06-23T10:01:00+00:00")
         self.assertEqual(self.store.pending(), [])
@@ -97,19 +102,17 @@ class ExpectationRowStoreTests(unittest.TestCase):
     def test_overdue_returns_only_rows_past_dueAt(self) -> None:
         write_expectation_row(
             self.store,
+            Expectation(kind="ack-by", source_id="entry-1"),
             row_id="R1",
             now=datetime.fromisoformat(T1),
-            kind="ack-by",
             sla_seconds=60.0,
-            source_id="entry-1",
         )
         write_expectation_row(
             self.store,
+            Expectation(kind="ack-by", source_id="entry-2"),
             row_id="R2",
             now=datetime.fromisoformat(T1),
-            kind="ack-by",
             sla_seconds=3600.0,
-            source_id="entry-2",
         )
         later = datetime.fromisoformat("2026-06-23T10:02:00+00:00")
         overdue_ids = [row.id for row in self.store.overdue(now=later)]
@@ -118,11 +121,10 @@ class ExpectationRowStoreTests(unittest.TestCase):
     def test_find_by_source_matches_kind_and_source(self) -> None:
         write_expectation_row(
             self.store,
+            Expectation(kind="ack-by", source_id="entry-1"),
             row_id="R1",
             now=datetime.fromisoformat(T1),
-            kind="ack-by",
             sla_seconds=300.0,
-            source_id="entry-1",
         )
         found = self.store.find_by_source("entry-1", kind="ack-by")
         assert found is not None
@@ -133,11 +135,10 @@ class ExpectationRowStoreTests(unittest.TestCase):
     def test_mark_missed_via_store_is_reserved_for_the_ladder(self) -> None:
         write_expectation_row(
             self.store,
+            Expectation(kind="verdict-by", source_id="gate-1"),
             row_id="R1",
             now=datetime.fromisoformat(T1),
-            kind="verdict-by",
             sla_seconds=60.0,
-            source_id="gate-1",
         )
         missed = self.store.mark_missed("R1", now="2026-06-23T10:05:00+00:00")
         self.assertEqual(missed.state, "missed")
