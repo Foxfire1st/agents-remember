@@ -1,37 +1,10 @@
 #!/usr/bin/env sh
-# Pre-commit gate: verify generated copies and run the same mandatory source
-# quality wrapper used by closeout, pre-push, and CI.
+# Fast pre-commit tier: certify the STAGED content — the thing the commit will
+# actually contain — with ruff, Pyright, and the generated-copy checks. Under
+# half a minute on a warm checkout. The full suite (pytest + CRAP) runs on push.
+#
+# Bypass intentionally with `git commit --no-verify`, remembering that the flag
+# turns off every check, not just the one that annoyed you.
 
-root="$(git rev-parse --show-toplevel)" || exit 1
-cd "$root" || exit 1
-
-common_git="$(git rev-parse --git-common-dir 2>/dev/null)"
-main_root=""
-if [ -n "$common_git" ]; then
-  main_root="$(CDPATH= cd -- "$common_git/.." 2>/dev/null && pwd)"
-fi
-
-if [ -x ".venv/bin/python" ]; then
-  py=".venv/bin/python"
-elif [ -n "$main_root" ] && [ -x "$main_root/.venv/bin/python" ]; then
-  py="$main_root/.venv/bin/python"
-else
-  py="$(command -v python3 || command -v python)"
-fi
-if [ -z "$py" ]; then
-  echo "[pre-commit] no python found; install the dev env: pip install -e 'mcp[dev]'" >&2
-  exit 1
-fi
-
-echo "[pre-commit] checking generated skill copies..."
-"$py" scripts/sync-skills.py --check || exit 1
-echo "[pre-commit] checking generated runtime asset copies..."
-"$py" scripts/sync-runtime.py --check || exit 1
-echo "[pre-commit] checking shipped dashboard bundle..."
-"$py" scripts/sync-dashboard.py --check || exit 1
-echo "[pre-commit] running quality wrapper (ruff + Pyright + pytest + CRAP, enforcing)..."
-checkout_pythonpath="$root/mcp/src"
-if [ -n "${PYTHONPATH:-}" ]; then
-  checkout_pythonpath="$checkout_pythonpath:$PYTHONPATH"
-fi
-PYTHONPATH="$checkout_pythonpath" "$py" -m agents_remember.code_quality.check
+hook_dir="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)" || exit 1
+exec "$hook_dir/_gate.sh" fast

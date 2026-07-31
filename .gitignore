@@ -15,3 +15,15 @@ uv.lock
 mcp/tests/fixtures/sim-rich/
 .dashboard-pastes/
 /.deepsec/
+
+# The built cockpit bundle is a generated artifact, produced by the release job
+# (npm --prefix dashboard run build, then scripts/sync-dashboard.py) and shipped inside
+# the wheel and sdist -- never committed. A 28 MB generated tree in version control is
+# what made the pre-commit gate unpassable and trained the --no-verify habit.
+/mcp/src/agents_remember/package_data/dashboard/
+/mcp/src/agents_remember/package_data/dashboard.fingerprint
+
+# `python -m build` in mcp/ (the release job's packaging step, and how anyone checks a
+# wheel locally) drops these in-tree; an untracked build product must not dirty the gate.
+/mcp/build/
+/mcp/dist/

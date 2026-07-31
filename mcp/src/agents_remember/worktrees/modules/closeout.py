@@ -280,7 +280,7 @@ def closeout_preview_payload(contract, args: WorktreeArgs) -> dict[str, object]:
         metadata_refresh, entity_refresh, route_overview_refresh, route_index_refresh
     )
     code_quality_gate = code_quality_gate_preview(
-        contract.repo_name, code_would_commit=code_dirty
+        contract.code_worktree, code_would_commit=code_dirty
     )
     return {
         "state": "would-closeout",
@@ -587,10 +587,10 @@ def closeout_result(args: WorktreeArgs) -> WorktreeCommandResult:
         stamped_overviews = overview_gate["stamped_without_body_review"]
     code_would_commit = worktree_dirty(contract.code_worktree)
     code_quality_gate = code_quality_gate_preview(
-        contract.repo_name, code_would_commit=code_would_commit
+        contract.code_worktree, code_would_commit=code_would_commit
     )
     if requires_strict_code_quality(
-        contract.repo_name, code_would_commit=code_would_commit
+        contract.code_worktree, code_would_commit=code_would_commit
     ):
         code_quality_gate = run_strict_code_quality_gate(contract.code_worktree)
     code_commit = commit_if_dirty(contract.code_worktree, args.code_commit_message)

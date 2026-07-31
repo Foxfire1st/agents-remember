@@ -120,10 +120,13 @@ class CodeQualityCheckTests(unittest.TestCase):
         self.assertIn("mandatory CRAP threshold enforcement", help_text)
 
     def test_repository_gates_use_default_strict_wrapper(self) -> None:
+        # The git hooks no longer inline the wrapper command: both delegate to the
+        # shared tiered body, and the full tier is where the wrapper runs. Follow the
+        # indirection rather than dropping the assertion -- every repository gate must
+        # still reach the wrapper with no threshold opt-out.
         repository_root = Path(__file__).resolve().parents[2]
         gate_files = [
-            repository_root / ".githooks" / "pre-commit",
-            repository_root / ".githooks" / "pre-push",
+            repository_root / ".githooks" / "_gate.sh",
             repository_root / ".github" / "workflows" / "quality-checks.yml",
         ]
 
@@ -131,6 +134,17 @@ class CodeQualityCheckTests(unittest.TestCase):
             content = gate_file.read_text(encoding="utf-8")
             with self.subTest(gate_file=gate_file):
                 self.assertIn("agents_remember.code_quality.check", content)
+                self.assertNotIn("fail-on-crap-threshold", content)
+
+    def test_git_hooks_delegate_to_the_shared_tiered_gate(self) -> None:
+        repository_root = Path(__file__).resolve().parents[2]
+        hook_tiers = {"pre-commit": "fast", "pre-push": "full"}
+
+        for hook_name, tier in hook_tiers.items():
+            hook = repository_root / ".githooks" / hook_name
+            with self.subTest(hook=hook_name):
+                content = hook.read_text(encoding="utf-8")
+                self.assertIn(f'exec "$hook_dir/_gate.sh" {tier}', content)
                 self.assertNotIn("fail-on-crap-threshold", content)
 
     def test_run_fixed_checks_threads_checkout_source_onto_pythonpath(self) -> None:

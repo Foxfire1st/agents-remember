@@ -38,6 +38,13 @@ agents-remember-mcp = "agents_remember.mcp.__main__:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
+# Recursive (setuptools globs package-data with recursive=True), so whatever is present
+# under package_data at build time ships. That includes the cockpit bundle at
+# package_data/dashboard/, which is NOT in version control: the release job runs the
+# frontend build and the sync before packaging, and the wheel and sdist carry the result.
+# Build from a checkout with no bundle and packaging still succeeds -- the glob simply
+# matches nothing and the server reports the absence (serving/static.py).
+# Dotfiles need an explicit entry; `**/*` does not match them.
 agents_remember = [
   "package_data/**/*",
   "package_data/benchmarks/.gitignore",

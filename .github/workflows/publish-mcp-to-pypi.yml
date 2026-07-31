@@ -16,8 +16,21 @@ on:
       - "mcp-v*"
 
 jobs:
+  # A tag can point at any commit, including one that never reached `main` and was
+  # therefore never seen by the branch ruleset. Re-running the gate on the tagged
+  # tree is what makes the publish path safe.
+  #
+  # This single call runs BOTH rails of quality-checks.yml -- the `Quality wrapper`
+  # matrix and `Dashboard frontend rail`. `workflow_call` invokes a whole workflow
+  # rather than one of its jobs, so a second caller job would duplicate the run, not
+  # add coverage.
+  quality:
+    name: Quality gate
+    uses: ./.github/workflows/quality-checks.yml
+
   build:
     name: Build MCP package
+    needs: [quality]
     runs-on: ubuntu-latest
 
     steps:
@@ -25,10 +38,37 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: dashboard/package-lock.json
+
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
           python-version: "3.12"
+
+      - name: Install dashboard dependencies
+        working-directory: dashboard
+        run: npm ci
+
+      # The cockpit bundle is a generated artifact and is no longer committed, so the
+      # release job owns building it. A failure here fails the release; there is no
+      # path that publishes a wheel without a dashboard.
+      - name: Build dashboard bundle
+        working-directory: dashboard
+        run: npm run build
+
+      # Package data is read from the source tree at build time, so the bundle has to be
+      # in place before `python -m build` runs. `scripts/sync-dashboard.py` owns that
+      # placement: it refuses a `dist` that was not built from the current source, and it
+      # writes the `dashboard.fingerprint` sidecar that serving/build_info.py reports as
+      # `servingBuild.dashboardBuild`. A plain copy would ship the bundle without its
+      # build identity.
+      - name: Place dashboard bundle into MCP package data
+        run: python scripts/sync-dashboard.py
 
       - name: Install build
         run: python -m pip install --upgrade build
@@ -36,6 +76,49 @@ jobs:
       - name: Build wheel and sdist
         working-directory: mcp
         run: python -m build
+
+      # Removing the bundle from version control makes "the release quietly shipped no
+      # dashboard" a reachable failure. Assert both distributions carry the bundle and the
+      # fingerprint sidecar serving/build_info.py reads to report `servingBuild`.
+      - name: Verify the distributions ship the dashboard bundle
+        working-directory: mcp
+        run: |
+          python - <<'PY'
+          import pathlib
+          import sys
+          import tarfile
+          import zipfile
+
+          REQUIRED = (
+              "agents_remember/package_data/dashboard/index.html",
+              "agents_remember/package_data/dashboard.fingerprint",
+          )
+          dist = pathlib.Path("dist")
+
+          def only(pattern: str) -> pathlib.Path:
+              matches = sorted(dist.glob(pattern))
+              if len(matches) != 1:
+                  sys.exit(f"expected exactly one {pattern} in {dist}, found {len(matches)}")
+              return matches[0]
+
+          wheel = only("*.whl")
+          sdist = only("*.tar.gz")
+
+          with zipfile.ZipFile(wheel) as archive:
+              wheel_names = archive.namelist()
+          with tarfile.open(sdist) as archive:
+              sdist_names = archive.getnames()
+
+          missing = [
+              f"{path.name}: {needle}"
+              for path, names in ((wheel, wheel_names), (sdist, sdist_names))
+              for needle in REQUIRED
+              if not any(name.endswith(needle) for name in names)
+          ]
+          if missing:
+              sys.exit("release artifact is incomplete -- missing " + "; ".join(missing))
+          print(f"dashboard bundle and fingerprint present in {wheel.name} and {sdist.name}")
+          PY
 
       - name: Upload package distributions
         uses: actions/upload-artifact@v5

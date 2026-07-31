@@ -103,7 +103,14 @@ def _git_worktree_dirty(anchor: Path) -> bool | None:
 
 
 def _dashboard_build_fingerprint() -> str | None:
-    """Fingerprint of the shipped browser inputs, or ``None`` for a legacy bundle."""
+    """Fingerprint of the shipped browser inputs, or ``None`` when no bundle was built.
+
+    The sidecar is a generated artifact written next to the generated bundle, so both are
+    absent together: an installation carrying a cockpit stamps which sources produced it,
+    and a source checkout that never ran a frontend build stamps nothing. ``None`` drops
+    ``dashboardBuild`` from the wire rather than reporting a build identity for a bundle
+    that is not being served -- the same honest-unknown rule ``commit`` and ``dirty`` follow.
+    """
     fingerprint = resources.files("agents_remember").joinpath(
         "package_data", "dashboard.fingerprint"
     )

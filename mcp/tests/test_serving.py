@@ -504,15 +504,38 @@ class AppTests(unittest.TestCase):
         self.assertEqual(body["lifecycles"], [])
 
     def test_root_serves_dashboard_bundle(self) -> None:
-        app = create_app(_config(self.tmp), interval=100)
+        # Rewritten: this used to read the committed bundle straight out of the repository.
+        # The bundle is a release-built artifact that ships only inside the wheel, so the
+        # test supplies its own stand-in and asserts the serving contract instead -- the SPA
+        # mount point plus the revalidated-HTML cache header, both stable across rebuilds.
+        bundle = self.tmp / "bundle"
+        (bundle / "assets").mkdir(parents=True)
+        (bundle / "index.html").write_text(
+            '<title>Agents Remember</title><div id="root"></div>', encoding="utf-8"
+        )
+        with mock.patch("agents_remember.serving.static.dashboard_static_dir", return_value=bundle):
+            app = create_app(_config(self.tmp), interval=100)
         with TestClient(app) as client:
             response = client.get("/")
         self.assertEqual(response.status_code, 200)
-        # Slice 05 ships the built React bundle (the slice-04 placeholder is gone). The SPA
-        # mount point and the app title are stable across rebuilds; hashed asset names are not.
         self.assertIn('<div id="root">', response.text)
         self.assertIn("Agents Remember", response.text)
         self.assertEqual(response.headers["cache-control"], "no-cache")
+
+    def test_root_diagnoses_a_missing_bundle_instead_of_a_bare_404(self) -> None:
+        # A source checkout that never ran a frontend build now legitimately has no bundle.
+        # The server must still boot, the API must still own /api ahead of the greedy mount,
+        # and the static surface must name the remedy rather than 404 into silence.
+        with mock.patch("agents_remember.serving.static.dashboard_static_dir", return_value=None):
+            app = create_app(_config(self.tmp), interval=100)
+        with TestClient(app) as client:
+            root = client.get("/")
+            api = client.get("/api/state")
+        self.assertEqual(root.status_code, 503)  # unavailable, not "not found"
+        self.assertIn("no built cockpit bundle", root.text)
+        self.assertIn("npm --prefix dashboard run build", root.text)  # carries its own remedy
+        self.assertEqual(root.headers["cache-control"], "no-store")
+        self.assertEqual(api.status_code, 200)  # the API is unaffected by the missing bundle
 
     def test_terminal_host_shutdown_survives_dead_landing_refresher(self) -> None:
         failed = threading.Event()
@@ -897,7 +920,13 @@ class BuildInfoTests(unittest.TestCase):
         payload = build.payload()
         self.assertEqual(payload["commit"], build.commit)
         self.assertEqual(payload["bootedAt"], build.booted_at)
-        self.assertEqual(payload["dashboardBuild"], build.dashboard_build)
+        # Rewritten: this used to index ``dashboardBuild`` unconditionally, which only held
+        # while the fingerprint sidecar was committed alongside the bundle. Both are now
+        # generated at release time, so the stamp is present-or-omitted, never fabricated.
+        if build.dashboard_build is None:
+            self.assertNotIn("dashboardBuild", payload)
+        else:
+            self.assertEqual(payload["dashboardBuild"], build.dashboard_build)
 
     def test_off_checkout_serves_version_only(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -1438,10 +1467,14 @@ class ActionDismissTests(unittest.TestCase):
 
 
 class StaticTests(unittest.TestCase):
-    def test_static_dir_resolves_to_shipped_bundle(self) -> None:
+    def test_static_dir_resolves_only_a_real_built_bundle(self) -> None:
+        # Rewritten: the old assertion (never ``None``) encoded the removed contract that the
+        # 28 MB generated bundle lives in version control. What survives is the honest half --
+        # when resolution succeeds it points at a real build, never at an empty directory.
+        # The ``None`` half is asserted deterministically in test_static.py.
         static_dir = dashboard_static_dir()
-        self.assertIsNotNone(static_dir)
-        assert static_dir is not None
+        if static_dir is None:
+            self.skipTest("no frontend build in this checkout (see test_static.py)")
         self.assertTrue((static_dir / "index.html").is_file())
         self.assertTrue((static_dir / "assets").is_dir())
 

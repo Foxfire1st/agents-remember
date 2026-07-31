@@ -1,10 +1,19 @@
 name: Quality checks
 
 on:
+  # Every branch, not only `main`. The gate has to reach work while it is still
+  # small; scoping it to `main` meant the first automated verdict on a long-lived
+  # branch arrived once, in one enormous pull request.
+  #
+  # Naming `branches` also excludes tag pushes, so a release tag runs this workflow
+  # exactly once -- through the `workflow_call` below, from publish-mcp-to-pypi.yml.
   push:
-    branches: ["main"]
+    branches: ["**"]
+  # Every pull request, whatever its base branch.
   pull_request:
-    branches: ["main"]
+  # Callable so the release path can require this gate on the tagged tree.
+  # Consumer: .github/workflows/publish-mcp-to-pypi.yml (job `quality`).
+  workflow_call:
 
 concurrency:
   group: quality-${{ github.ref }}
@@ -77,11 +86,9 @@ jobs:
         working-directory: dashboard
         run: npm run test
 
+      # The bundle is a generated artifact and is no longer committed, so there is
+      # nothing to compare a fresh build against. Proving the frontend still builds
+      # is the whole check here; the release job builds it again and ships it.
       - name: Build
         working-directory: dashboard
         run: npm run build
-
-      # Catches a stale shipped bundle: the committed package_data/dashboard must match a
-      # fresh build (the same check the pre-commit/pre-push githooks run locally).
-      - name: Verify shipped bundle matches a fresh build
-        run: python3 scripts/sync-dashboard.py --check

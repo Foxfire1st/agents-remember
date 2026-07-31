@@ -222,10 +222,15 @@ and `system/`, then run `python3 scripts/sync-runtime.py` to refresh MCP package
 data only. The pre-commit and pre-push hooks run
 `python3 scripts/sync-runtime.py --check`.
 
-Both hooks also run `python -m agents_remember.code_quality.check`. Its default
-command enforces Ruff, Pyright, the full pytest suite, and the configured CRAP
-threshold; closeout runs the same strict wrapper before creating an Agents
-Remember code commit even when hooks are not configured.
+The hooks are tiered, and both are thin wrappers over `.githooks/_gate.sh`.
+pre-commit runs the fast tier over the **staged** content: the generated-copy
+checks above, plus Ruff and Pyright. pre-push runs the full tier:
+`python -m agents_remember.code_quality.check`, whose default command enforces
+Ruff, Pyright, the full pytest suite, and the configured CRAP threshold. CI runs
+that same wrapper on every branch push and pull request, and closeout runs it
+before creating an Agents Remember code commit even when hooks are not
+configured. See CONTRIBUTING.md for the tier table and the staged-content
+stash contract.
 
 The installed runtime lives in `ar-coordination/` — by default `<workspace>/ar-coordination/`,
 inside the workspace (never your home directory) — not in the source checkout. The
