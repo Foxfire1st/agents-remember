@@ -1432,7 +1432,17 @@ class ActionDismissTests(unittest.TestCase):
 
         self.assertEqual(store.prune_lifecycles(set()), 1)
         self.assertEqual(store.current(), {})
-        self.assertFalse(store.log_path().exists())
+        # Pruning to nothing leaves an EMPTY FILE, never a missing one (260731-EFA-L5 R5).
+        # This line used to assert the log was unlinked; that unlink is the defect the leaf
+        # removed. `dismiss` is a whole-file read-modify-write reached from the dashboard's
+        # HTTP dismiss route, so a concurrent dismisser holding a handle across the unlink
+        # wrote into an inode with no remaining links and the dismissal vanished with the
+        # file -- no error, no torn line. The proof that the prune actually happened is
+        # unweakened and now reads as emptiness: zero rows through the reader, zero bytes on
+        # disk, the same one row having been there a moment ago.
+        self.assertEqual(store.read(), [])
+        self.assertTrue(store.log_path().is_file())
+        self.assertEqual(store.log_path().read_bytes(), b"")
 
     def test_attention_store_keeps_actionable_drift_current_acknowledgements(self) -> None:
         store = AttentionDismissalStore(observer_logs_root(self.tmp))

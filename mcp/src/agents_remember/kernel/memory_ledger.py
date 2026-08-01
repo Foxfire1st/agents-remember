@@ -191,6 +191,26 @@ def load_ledger(path: Path) -> MemoryLedger:
 
 
 def write_ledger(path: Path, ledger: MemoryLedger) -> None:
+    """Write the ledger. A plain whole-file write, and deliberately still one.
+
+    260731-EFA-L5 R12, verified 2026-08-01. The review panel argued this needed the durability
+    treatment the control-plane JSONL stores just got -- an atomic temp+rename, or a lock. The
+    editor ruled it degraded rather than unrecoverable, and the tree agrees on both counts:
+
+    * Every one of the five callers -- ``worktrees/modules/closeout.py``,
+      ``worktrees/modules/integrate.py``, ``worktrees/modules/start.py``,
+      ``memory/carryover.py`` (twice) and ``memory/baseline.py`` -- follows this call with
+      ``require_git(..., ["add", "memory.md"])`` and ``commit_if_dirty(...)`` in the next two
+      lines. A truncated ledger costs the uncommitted delta, never the mapping history: the
+      durable authority is the git object, and ``git checkout -- memory.md`` restores it.
+    * All five are reached only through MCP tool registrations. The dashboard reads the ledger
+      (``observer/snapshots.py`` imports ``load_ledger`` and nothing else) and never writes it,
+      so there is no second process to serialize against and a lock here would protect nothing.
+
+    Recorded as a no-action finding. If a writer ever appears outside the MCP process, or one
+    stops committing immediately, this stops being true and the ledger joins the contract in
+    ``controlplane/durable_store.py``.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(ledger_to_text(ledger), encoding="utf-8")
 

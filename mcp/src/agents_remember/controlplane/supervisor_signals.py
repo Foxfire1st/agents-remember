@@ -2,14 +2,21 @@
 
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import Field, ValidationError
 
+from agents_remember.controlplane.durable_store import (
+    SUPERVISOR_SIGNAL_OWNERSHIP,
+    DurableRecord,
+    append_line,
+    exclusive_access,
+    read_log_text,
+    rewrite_lines,
+)
 from agents_remember.controlplane.inbox_backoff import require_redelivery_floor_seconds
 from agents_remember.controlplane.operator_inbox_records import AgentRole, InboxDeliveryState
 
@@ -17,10 +24,8 @@ SUPERVISOR_SIGNAL_SCHEMA = "ar-supervisor-signal/v1"
 SupervisorSignalState = Literal["sent"]
 
 
-class SupervisorSignalRecord(BaseModel):
+class SupervisorSignalRecord(DurableRecord):
     """One supervisor signal actually posted to an owner inbox."""
-
-    model_config = ConfigDict(extra="forbid")
 
     schema_version: str = Field(default=SUPERVISOR_SIGNAL_SCHEMA, alias="schema")
     id: str
@@ -85,11 +90,8 @@ class SupervisorSignalCooldownStore:
         freeze the supervisor sweep that folds this non-authoritative cooldown log
         (mirrors ``ProviderMetricsStore.read_recent`` tolerance).
         """
-        path = self.log_path()
-        if not path.exists():
-            return []
         records: list[SupervisorSignalRecord] = []
-        for line in path.read_text(encoding="utf-8").splitlines():
+        for line in read_log_text(self.log_path()).splitlines():
             if not line.strip():
                 continue
             try:
@@ -99,10 +101,10 @@ class SupervisorSignalCooldownStore:
         return records
 
     def append(self, record: SupervisorSignalRecord) -> None:
+        SUPERVISOR_SIGNAL_OWNERSHIP.check_declared_writer()
         path = self.log_path()
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with path.open("a", encoding="utf-8") as handle:
-            handle.write(record.model_dump_json(by_alias=True, exclude_none=True) + "\n")
+        with exclusive_access(path, SUPERVISOR_SIGNAL_OWNERSHIP):
+            append_line(path, record.model_dump_json(by_alias=True, exclude_none=True))
 
     def last_sent(
         self,
@@ -160,11 +162,23 @@ class SupervisorSignalCooldownStore:
         A record older than ``retain_seconds`` can never satisfy ``elapsed < floor``
         in :meth:`in_cooldown` (the floor is the same window), so dropping it is
         provenance-safe -- it can no longer suppress any signal. Records with an
-        unparseable ``ts`` are always kept (never silently aged out). The rewrite is
-        atomic (tmp + ``os.replace``); the observer server is the single writer.
+        unparseable ``ts`` are always kept (never silently aged out). The rewrite is atomic
+        and single-owner: the dashboard's supervisor sweep is the only process that appends to
+        or reclaims this log (``SUPERVISOR_SIGNAL_OWNERSHIP``). It is LOCKED all the same, and
+        the read is held under the same lock as the rewrite. "One process writes this file" is a
+        deployment fact, not a structural one; a draft of this leaf left this store unlocked on
+        exactly that reasoning and the proof run measured 31.45% loss on its twin
+        (attention-dismissals), whose single-writer claim was just as true.
         The returned ``kept`` list is the sweep's cooldown snapshot, so the caller
         reads + compacts the log in one pass.
         """
+        with exclusive_access(self.log_path(), SUPERVISOR_SIGNAL_OWNERSHIP):
+            return self._compact_locked(now=now, retain_seconds=retain_seconds)
+
+    def _compact_locked(
+        self, *, now: datetime, retain_seconds: float
+    ) -> tuple[int, list[SupervisorSignalRecord]]:
+        """The read-filter-rewrite half of :meth:`compact`, with the log's lock held."""
         records = self.read()
         if not records:
             return 0, []
@@ -190,17 +204,12 @@ class SupervisorSignalCooldownStore:
         return removed, kept
 
     def _replace(self, records: list[SupervisorSignalRecord]) -> None:
-        path = self.log_path()
-        if not records:
-            path.unlink(missing_ok=True)
-            return
-        path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
-        tmp.write_text(
-            "\n".join(
-                record.model_dump_json(by_alias=True, exclude_none=True) for record in records
-            )
-            + "\n",
-            encoding="utf-8",
+        """Rewrite the log. Its lock -- held by the caller across the read too -- is what makes
+        this safe, and it is the ONLY thing checked: ``rewrite_lines`` verifies the lock is held
+        and nothing else. No owner check happens here or anywhere below here;
+        ``SUPERVISOR_SIGNAL_OWNERSHIP`` is passed so a refusal can name the store."""
+        rewrite_lines(
+            self.log_path(),
+            [record.model_dump_json(by_alias=True, exclude_none=True) for record in records],
+            SUPERVISOR_SIGNAL_OWNERSHIP,
         )
-        os.replace(tmp, path)

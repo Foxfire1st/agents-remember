@@ -2,22 +2,30 @@
 
 from __future__ import annotations
 
-import os
+from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import Field, ValidationError
+
+from agents_remember.controlplane.durable_store import (
+    ORCHESTRATION_NUDGE_OWNERSHIP,
+    DurableRecord,
+    append_line,
+    exclusive_access,
+    read_log_text,
+    require_lock_held,
+    rewrite_lines,
+)
 
 ORCHESTRATION_NUDGE_SCHEMA = "ar-orchestration-nudge/v1"
 NudgeReason = Literal["inactive", "missing-turn-report", "manual"]
 NudgeState = Literal["sent", "rate-limited"]
 
 
-class OrchestrationNudgeRecord(BaseModel):
+class OrchestrationNudgeRecord(DurableRecord):
     """One durable nudge attempt keyed by target, subject, and reason."""
-
-    model_config = ConfigDict(extra="forbid")
 
     schema_version: str = Field(default=ORCHESTRATION_NUDGE_SCHEMA, alias="schema")
     id: str
@@ -43,11 +51,8 @@ class OrchestrationNudgeStore:
 
     def read(self) -> list[OrchestrationNudgeRecord]:
         """Read the nudge log, skipping any torn/legacy line (F12: dashboard-tolerant reader)."""
-        path = self.log_path()
-        if not path.exists():
-            return []
         records: list[OrchestrationNudgeRecord] = []
-        for line in path.read_text(encoding="utf-8").splitlines():
+        for line in read_log_text(self.log_path()).splitlines():
             if not line.strip():
                 continue
             try:
@@ -57,10 +62,10 @@ class OrchestrationNudgeStore:
         return records
 
     def append(self, record: OrchestrationNudgeRecord) -> None:
+        ORCHESTRATION_NUDGE_OWNERSHIP.check_declared_writer()
         path = self.log_path()
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with path.open("a", encoding="utf-8") as handle:
-            handle.write(record.model_dump_json(by_alias=True, exclude_none=True) + "\n")
+        with exclusive_access(path, ORCHESTRATION_NUDGE_OWNERSHIP):
+            append_line(path, record.model_dump_json(by_alias=True, exclude_none=True))
 
     def last_sent(
         self,
@@ -82,6 +87,24 @@ class OrchestrationNudgeStore:
             and record.subjectLifecycleId == subject_lifecycle_id
         ]
         return max(matches, key=lambda record: record.ts, default=None)
+
+    def compact(self, *, keep: Callable[[OrchestrationNudgeRecord], bool]) -> int:
+        """Reclaim the log to the records ``keep`` selects, returning how many were dropped.
+
+        The read, the filter and the rewrite happen under ONE hold of the log's lock. That is
+        the whole point: :func:`replace_records` takes a list the caller computed from its own
+        earlier read, so anything appended between that read and the rewrite is discarded --
+        the exact defect this leaf exists to remove, reachable through the store's own API. Use
+        this; the raw primitive is for a caller that already holds the lock.
+        """
+        path = self.log_path()
+        with exclusive_access(path, ORCHESTRATION_NUDGE_OWNERSHIP):
+            records = self.read()
+            kept = [record for record in records if keep(record)]
+            if len(kept) == len(records):
+                return 0
+            _rewrite(path, kept)
+            return len(records) - len(kept)
 
     def record(
         self,
@@ -120,18 +143,28 @@ def missing_artifact(path: Path) -> bool:
 
 
 def replace_records(path: Path, records: list[OrchestrationNudgeRecord]) -> None:
-    """Rewrite a nudge log after tests or future compaction select records to keep."""
-    if not records:
-        path.unlink(missing_ok=True)
-        return
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
-    tmp.write_text(
-        "\n".join(record.model_dump_json(by_alias=True, exclude_none=True) for record in records)
-        + "\n",
-        encoding="utf-8",
+    """Rewrite a nudge log after tests or future compaction select records to keep.
+
+    ``records`` was chosen by a read this call did not make, so this REFUSES unless the caller
+    already holds the log's lock -- if it did not, everything appended since its read is about
+    to be discarded. Locking only the write here would have looked safe and lost records, which
+    is the whole defect in miniature. Prefer :meth:`OrchestrationNudgeStore.compact`, which
+    holds the lock across the read and the rewrite so a caller cannot get this wrong.
+    """
+    require_lock_held(path, ORCHESTRATION_NUDGE_OWNERSHIP.store)
+    _rewrite(path, records)
+
+
+def _rewrite(path: Path, records: list[OrchestrationNudgeRecord]) -> None:
+    """Rewrite a nudge log. Its lock -- held by the caller across the read too -- is what makes
+    this safe, and it is the ONLY thing checked: ``rewrite_lines`` verifies the lock is held and
+    nothing else. No owner check happens here or anywhere below here;
+    ``ORCHESTRATION_NUDGE_OWNERSHIP`` is passed so a refusal can name the store."""
+    rewrite_lines(
+        path,
+        [record.model_dump_json(by_alias=True, exclude_none=True) for record in records],
+        ORCHESTRATION_NUDGE_OWNERSHIP,
     )
-    os.replace(tmp, path)
 
 
 def _elapsed_seconds(previous: str, current: str) -> float | None:

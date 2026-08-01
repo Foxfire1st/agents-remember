@@ -25,10 +25,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from agents_remember.controlplane.attention_dismissals import (
-    AttentionDismissalRecord,
-    AttentionDismissalStore,
-)
+from pydantic import ValidationError
+
 from agents_remember.controlplane.expectation_rows import ExpectationRowStore
 from agents_remember.controlplane.interaction_retention import (
     AGENT_PICKUP_TTL_SECONDS,
@@ -122,12 +120,6 @@ logger = logging.getLogger(__name__)
 
 WORKTREE_PROVIDER_STATE_SCHEMA = "ar-worktree-provider-state/v1"
 WORKTREE_PROVIDER_INSPECT_SECONDS = 5
-
-# 260707-HFX2-L12 F8: cadence for the (write-amplifying) physical gate-log prune. The projection
-# folds the keep-filtered live set every tick regardless; only the on-disk reclamation is throttled
-# to this interval so no whole-file rewrite rides the 1s hot path. Keyed by observer-logs root.
-GATE_COMPACT_TTL_SECONDS = 30.0
-_last_gate_compact: dict[str, datetime] = {}
 
 # Task and series readers share one stat-identity parse cache. Runtime-only
 # watcher changes still trigger a projection, but unchanged task JSON is never
@@ -524,51 +516,51 @@ def read_gates(coordination_root: Path, *, now: datetime | None = None) -> list[
     and folds each by id (last-wins), so the projection sees live gate state with no
     event machinery. A malformed log is skipped, never fatal to the tick.
 
-    260707-HFX2-L12 F8/CS-6 D2: one directory scan + one read per gate log per tick
-    (was ``lifecycle_ids()`` + a ``glob`` scan, and ``compact()``'s read + ``current()``'s
-    read per lifecycle). Physical prune is gated to ``GATE_COMPACT_TTL_SECONDS`` so no
-    whole-file rewrite rides the 1s hot path, while the projection stays keep-filtered
-    every tick.
+    260707-HFX2-L12 F8/CS-6 D2: one directory scan + one read per gate log per tick.
+
+    260731-EFA-L5: this tick no longer rewrites anything. It used to physically prune every
+    gate log on a 30s cadence -- compaction running in the process that owns nothing here,
+    racing the MCP server's appends, which is where the measured record loss came from. The
+    projection output is unchanged (the same keep-filter is applied in memory by
+    ``projected_current``); on-disk reclamation is ``GateStore.compact`` in the gate log's
+    owner, the MCP process. The read is deliberately the TOLERANT one: a torn line must cost
+    the dashboard one row for one tick, never a crashed tick -- the STRICT read is what the
+    enforcement fold uses, and it still raises.
+
+    THE SUPPRESSION IS NAMED, NOT BROAD, for the reason ``mcp/tools/gates.py::_reclaim_gate_log``
+    gives: ``ValidationError`` subclasses ``ValueError``, so a ``suppress`` written for I/O
+    silently swallows a malformed record too, and this leaf narrowed that spelling there on
+    principle. Two spellings of one decision is what the principle is against. Here the narrowing
+    removes a net rather than a catch: ``projected_current`` is the TOLERANT read and already
+    skips an unreadable row per row, so no ``ValidationError`` can reach this line, and
+    ``age_seconds`` -- the only other thing in the fold that parses -- returns ``None`` on a stamp
+    it cannot read rather than raising. What is left to suppress is the I/O the suppress was
+    always for: a log removed or made unreadable between ``lifecycle_ids`` and the read.
     """
-    root = observer_logs_root(coordination_root)
-    store = GateStore(root)
-    prune = False
-    if now is not None:
-        key = str(root)
-        last = _last_gate_compact.get(key)
-        if last is None or (now - last).total_seconds() >= GATE_COMPACT_TTL_SECONDS:
-            prune = True
-            _last_gate_compact[key] = now
+    store = GateStore(observer_logs_root(coordination_root))
     gates: list[GateRecord] = []
     for lifecycle_id in store.lifecycle_ids():
-        with contextlib.suppress(OSError, ValueError):
-            if now is None:
-                gates.extend(store.current(lifecycle_id).values())
-            else:
-                gates.extend(store.compact_current(lifecycle_id, now=now, rewrite=prune).values())
+        with contextlib.suppress(OSError):
+            gates.extend(store.projected_current(lifecycle_id, now=now).values())
     return gates
 
 
-def read_attention_dismissals(coordination_root: Path) -> dict[str, AttentionDismissalRecord]:
-    """The operator's current lifecycle attention acknowledgements (leaf-28 S5.2).
-
-    Reads ``<observer_root>/workspace/attention-dismissals.jsonl`` (co-located with
-    the gate logs) into ``{itemId: AttentionDismissalRecord}`` so the reducer can
-    suppress a cleared lifecycle item across projection passes.
-    """
-    store = AttentionDismissalStore(observer_logs_root(coordination_root))
-    with contextlib.suppress(OSError, ValueError):
-        return store.current()
-    return {}
-
-
 def read_agent_pickups(coordination_root: Path, *, now: datetime) -> list[AgentPickupNode]:
-    """Pending dashboard responses waiting for agent-side inbox consumption."""
+    """Pending dashboard responses waiting for agent-side inbox consumption.
+
+    260731-EFA-L5: ``ValidationError`` by name, and unlike ``read_gates`` above it is genuinely
+    load-bearing here -- ``OperatorInboxStore._read_unlocked`` is STRICT on purpose (an inbox row
+    nobody can parse is an ack nobody can account for, and ``consume`` decides on that fold), so a
+    torn row really does raise out of both calls below and really must not crash the tick. Spelt
+    ``ValidationError`` rather than ``ValueError`` all the same: the wide net would also swallow
+    an unrelated ``ValueError`` from anywhere in the loop, which is the trap this leaf closed in
+    ``mcp/tools/gates.py``. ``DurableStoreError`` is a ``RuntimeError`` and still propagates.
+    """
     store = OperatorInboxStore(observer_logs_root(coordination_root))
-    with contextlib.suppress(OSError, ValueError):
+    with contextlib.suppress(OSError, ValidationError):
         store.compact(now=now)
     pickups: list[AgentPickupNode] = []
-    with contextlib.suppress(OSError, ValueError):
+    with contextlib.suppress(OSError, ValidationError):
         for entry in store.current().values():
             if entry.state != "pending":
                 continue
@@ -606,11 +598,20 @@ def read_expectation_rows(coordination_root: Path, *, now: datetime) -> list[Exp
 
     Surfacing only: an L2 predicate reads ``ExpectationRowStore`` directly and never this
     projection (the #22 correctness half stays L2's rule; this is the visibility half).
+
+    260731-EFA-L5 R8: ``pending_for_projection`` and not ``pending``. The strict read raises
+    ``ValidationError``, which subclasses ``ValueError`` -- so the ``suppress`` below used to
+    swallow ONE torn line by discarding EVERY deadline in the file, and the dashboard showed an
+    operator nothing due. The tolerant read degrades per row instead, so the suppress is now
+    ``OSError`` only -- it is the I/O it was always for, and keeping ``ValueError`` beside a
+    tolerant read would leave the same wide net this leaf narrowed in ``mcp/tools/gates.py``. The
+    inner ``except ValueError`` below is a different question and stays: it is the per-row parse
+    of one ``dueAt``, and an unparseable deadline means "not overdue", not "drop every row".
     """
     store = ExpectationRowStore(observer_logs_root(coordination_root))
     rows: list[ExpectationRowNode] = []
-    with contextlib.suppress(OSError, ValueError):
-        for row in store.pending():
+    with contextlib.suppress(OSError):
+        for row in store.pending_for_projection():
             try:
                 due_at = datetime.fromisoformat(row.dueAt)
                 overdue = now >= due_at

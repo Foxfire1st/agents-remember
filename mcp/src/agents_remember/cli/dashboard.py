@@ -17,6 +17,7 @@ import uvicorn
 
 import agents_remember
 from agents_remember.cli.discovery import ConfigDiscoveryError, discover_config
+from agents_remember.controlplane.durable_store import declare_process_role
 from agents_remember.mcp.config import ConfigError, load_config
 from agents_remember.serving import daemon as serving_daemon
 from agents_remember.serving.app import create_app
@@ -49,7 +50,26 @@ DASHBOARD_GRACEFUL_SHUTDOWN_SECONDS = 3
 
 
 def _dev_app():
-    """Zero-arg app factory for ``uvicorn --reload`` (live state only; never sim)."""
+    """Zero-arg app factory for ``uvicorn --reload`` (live state only; never sim).
+
+    This is the reload worker's PROCESS ENTRY POINT, which is why it declares the durable-store
+    role even though :func:`run` declares it too and ``create_app`` deliberately does not.
+    uvicorn 0.49.0 starts the reload worker with ``multiprocessing.get_context("spawn")``
+    (``uvicorn/_subprocess.py``, ``supervisors/basereload.py``), and a spawn child re-imports
+    every module: it does NOT inherit the parent's ``declare_process_role("dashboard")`` and it
+    never runs :func:`run`. Measured before this line existed, the reload worker saw an empty
+    declaration and so counted as compaction owner of every control-plane log -- running the gate
+    reclaim a foreground dashboard deliberately skips. Not a durability defect (the per-log lock
+    is unconditional and covered the rewrite), but it made the three serving modes disagree about
+    what this process is. Foreground and ``--daemon`` already declared correctly (the daemon
+    re-enters ``run`` via ``-m agents_remember.cli dashboard``); this makes ``--reload`` agree.
+
+    Declaring in THIS factory and not in ``create_app`` is the distinction that matters: this one
+    is reload-only -- it reads its config from ``AR_DASHBOARD_DEV_CONFIG`` and cannot serve a sim
+    -- whereas ``create_app`` is called in-process by the test suite, where a declaration would
+    stamp "dashboard" onto every later test in the same interpreter.
+    """
+    declare_process_role("dashboard")
     config = load_config(os.environ[_DEV_CONFIG_ENV])
     heartbeat_env = os.environ.get(_DEV_HEARTBEAT_ENV)
     return create_app(
@@ -139,6 +159,12 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
 
 
 def run(args: argparse.Namespace) -> int:
+    # Which of the two concurrent durable-store writers THIS PROCESS is
+    # (controlplane/durable_store.py). Declared at the process entry point rather than inside
+    # create_app, because the role is a fact about the process: create_app is a factory the
+    # test suite calls in-process, and declaring there would stamp "dashboard" onto every
+    # later test in the same interpreter.
+    declare_process_role("dashboard")
     resolved = _resolve_settings(args)
     if resolved is None:
         return 1

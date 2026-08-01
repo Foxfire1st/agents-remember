@@ -22,12 +22,16 @@ distinction binding; this slice only records it.
 
 from __future__ import annotations
 
+import contextlib
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, cast
 
+from pydantic import ValidationError
+
+from agents_remember.controlplane.durable_store import GATE_OWNERSHIP
 from agents_remember.controlplane.expectation_rows import (
     Expectation,
     ExpectationRowStore,
@@ -448,6 +452,42 @@ def lifecycle_gate_payload(
     return _tool_payload("lifecycle_gate", payload)
 
 
+def _reclaim_gate_log(store: GateStore, lifecycle_id: str | None) -> None:
+    """Reclaim one gate log here, in the process that owns it (260731-EFA-L5 R1).
+
+    Gate compaction used to ride the dashboard's projection tick, which owns nothing about
+    gates and raced this process's appends. The MCP server mints, decides, applies and deletes
+    gates, so reclamation belongs to it -- and specifically to the moment a record BECOMES
+    reclaimable, which is a terminal decision. It is deliberately NOT on the read paths:
+    ``gate_list`` and the wait loop stay pure reads, so moving the reclaim pass here changes
+    who prunes and when, never what a caller is shown. A reclaim failure must not cost the
+    caller their decision, so it is suppressed here and retried after the next decision;
+    ``GateStore.compact`` itself never swallows anything.
+
+    Guarded on ownership because this function is NOT MCP-only: the dashboard decides gates by
+    calling ``gate_decide_payload`` directly (see this module's docstring), in the process that
+    declared itself the dashboard. Reclaiming there is precisely the misplaced reclaim pass this
+    leaf removed, so the dashboard skips it and the MCP does it on its next decision.
+
+    THE SUPPRESSION IS NAMED, NOT BROAD. It used to catch ``ValueError``, which
+    ``pydantic.ValidationError`` subclasses -- the exact widened-except trap this leaf closed
+    elsewhere. The two things ``compact`` can raise are an I/O failure and a torn line, so it now
+    catches those two by name; a ``DurableStoreError`` (an unlockable filesystem, a rewrite without
+    the lock) is a contract violation and still propagates.
+
+    Suppressing at all is safe here for a reason that changed under R1 and must be re-checked by
+    anyone who changes it back. A skipped reclaim can only leave garbage in the log, never remove
+    a record: retention no longer prunes the ``applied`` snapshot of a kind a mutating tool
+    consumes (``interaction_retention.CONSUMED_APPROVAL_GATE_KINDS``), so nothing this pass does or
+    fails to do can decide anything. If that ever stops being true -- if reclamation is given a
+    say over an authority record again -- this suppression stops being benign and must go with it.
+    """
+    if not GATE_OWNERSHIP.is_compaction_owner():
+        return
+    with contextlib.suppress(OSError, ValidationError):
+        store.compact(lifecycle_id, now=datetime.now(UTC))
+
+
 def _gate_to_decide(store: GateStore, gate_id: str, lifecycle_id: str | None) -> GateRecord:
     """Resolve the gate a decision targets, by lifecycle when given and by id otherwise."""
     gate = store.current(lifecycle_id).get(gate_id)
@@ -511,6 +551,7 @@ def gate_decide_payload(
         store.delete(updated.id, updated.lifecycleId)
         _inbox_store(config).delete_by_gate(updated.id)
     _meet_verdict_by_expectation(config, updated)
+    _reclaim_gate_log(store, updated.lifecycleId)
     return _tool_payload(
         "gate_decide",
         {

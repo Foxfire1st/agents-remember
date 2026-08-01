@@ -4,8 +4,11 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
-from agents_remember.controlplane.enforcement import CloseoutGuard, evaluate_closeout_gate
-from agents_remember.controlplane.records import apply_gate
+from agents_remember.controlplane.enforcement import (
+    CLOSEOUT_GATE_KIND,
+    CloseoutGuard,
+    evaluate_closeout_gate,
+)
 from agents_remember.controlplane.store import GateStore
 from agents_remember.kernel.memory_ledger import (
     find_mapping,
@@ -418,26 +421,82 @@ def _closeout_gate_guard(contract, args: WorktreeArgs) -> CloseoutGuard | None:
     return evaluate_closeout_gate(store.current(contract.lifecycle_id), policy=args.gate_policy)
 
 
-def _enforce_closeout_gate(contract, args: WorktreeArgs) -> CloseoutGuard | None:
-    """Server-side gate enforcement (slice 6b): block closeout on an unsatisfied gate.
+def _refuse_unsatisfied_closeout_gate(contract, args: WorktreeArgs) -> None:
+    """Refuse early, on a pure read, when the gate is visibly unsatisfied. DECIDES NOTHING.
 
-    A dashboard-opened ``closeout-approval`` gate is binding; a gateless lifecycle
-    falls back to the chat commit gate (``--approved`` + note), unchanged. The agent
-    cannot satisfy the gate itself: its own ``gate_decide`` is ``decidedBy="model"``,
-    which :func:`evaluate_closeout_gate` rejects.
+    Server-side gate enforcement (slice 6b): a dashboard-opened ``closeout-approval`` gate is
+    binding; a gateless lifecycle falls back to the chat commit gate (``--approved`` + note),
+    unchanged. The agent cannot satisfy the gate itself: its own ``gate_decide`` is
+    ``decidedBy="model"``, which :func:`evaluate_closeout_gate` rejects.
+
+    THIS IS NOT THE ENFORCEMENT ANY MORE, and reading it as such is the check-then-act mistake
+    leaf 260731-EFA-L5 R2 was called in to remove. The approval is consumed by
+    :func:`_claim_closeout_gate`, under the gate log's lock, immediately before the first
+    irreversible act. This call exists only so an unapproved closeout is refused BEFORE it stages
+    the worktree and spends a minute in the strict code-quality gate.
+
+    It is safe to keep precisely because it can only DENY. Its read is unlocked and therefore
+    already stale by the time it returns, but a stale read here has exactly two outcomes: it
+    refuses a gate that has since been approved (the operator reruns, and nothing was consumed),
+    or it permits and the claim re-evaluates the same policy under the lock and refuses there. It
+    can never be the reason an approval is spent, because it never writes.
     """
     guard = _closeout_gate_guard(contract, args)
     if guard is not None and not guard.permitted:
         raise RuntimeError(f"closeout blocked by gate enforcement: {guard.reason}")
-    return guard
 
 
-def _mark_closeout_gate_applied(contract, gate_id: str) -> None:
-    """Append an ``applied`` snapshot so one approval cannot be replayed by a second closeout."""
+def _claim_closeout_gate(contract, args: WorktreeArgs) -> CloseoutGuard | None:
+    """Spend the lifecycle's closeout approval, atomically, BEFORE anything irreversible happens.
+
+    Two properties, and both are the point (leaf 260731-EFA-L5 R2/R3):
+
+    ATOMIC. :meth:`GateStore.claim_approval` folds the log, applies the policy and appends the
+    ``applied`` snapshot inside one held lock, so two closeouts racing this line resolve to exactly
+    one spend. The old shape checked here and marked applied ~100 lines later, with every commit in
+    between; two real processes and a 0.4s body were enough to have both permitted and two
+    ``applied`` snapshots on disk.
+
+    CLAIMED BEFORE THE SPEND, WHICH IS A DELIBERATE SEMANTIC CHANGE: an approval now authorises ONE
+    ATTEMPT, not one success. A closeout that dies after this line -- a crashed process, a failed
+    memory quality gate, a git error, an ENOSPC -- leaves the approval consumed, and the next
+    closeout needs a fresh gate. ``controlplane/enforcement.py`` already words the remedy: "was
+    already applied; open a fresh gate for a new mutation".
+
+    That is the correct trade and the alternative is not a milder version of it. Marking applied at
+    the END means the marker is attempted only once the code commit, the memory commit, the ledger
+    commit and the contract rewrite have all happened -- so every way that write can fail to land
+    (the process dies; the append raises) leaves a live approval sitting on top of an unknown
+    amount of completed, irreversible work. Both were reproduced. Fail-closed costs a re-approval
+    after a failure the operator can see; fail-open silently hands the next closeout an approval
+    the human granted for work that is already done.
+
+    A two-phase claim (a ``claimed`` state, finalised to ``applied`` on success and released back
+    to ``approved`` on a clean failure) was considered and rejected: the release is exactly the
+    step that cannot be guaranteed -- it is the same write, at the same late position, with the
+    same failure modes -- so it would need a reaper to age a stuck ``claimed`` gate back to
+    spendable, which re-opens this window on a timer and cannot tell a died-mid-commit closeout
+    from a died-before-commit one.
+
+    The call site is one statement above the first irreversible act. Everything upstream of it --
+    source-head validation, the onboarding/route plans, the mixed reset and staging, the strict
+    code-quality gate -- either only reads or only touches the index of the task's own disposable
+    worktree, so a refusal there changes nothing and must not cost the developer their approval.
+    ``mcp/tests/test_gate_replay_window.py`` pins both halves: the gate is already ``applied`` by
+    the time ``commit_if_dirty`` runs, and a gate failure leaves it ``approved``.
+    """
+    if not contract.lifecycle_id:
+        return None
     store = GateStore(observer_logs_root(contract.coordination_root))
-    gate = store.current(contract.lifecycle_id).get(gate_id)
-    if gate is not None:
-        store.append(apply_gate(gate, now=now_iso()))
+    guard = store.claim_approval(
+        contract.lifecycle_id,
+        kind=CLOSEOUT_GATE_KIND,
+        now=now_iso(),
+        policy=args.gate_policy,
+    )
+    if not guard.permitted:
+        raise RuntimeError(f"closeout blocked by gate enforcement: {guard.reason}")
+    return guard
 
 
 def _closeout_gate_payload(guard: CloseoutGuard | None) -> dict[str, object]:
@@ -688,7 +747,7 @@ def closeout_result(args: WorktreeArgs) -> WorktreeCommandResult:
     if args.dry_run:
         return WorktreeCommandResult(0, closeout_preview_payload(contract, args))
     approval_note = _closeout_approval_note(args)
-    gate_guard = _enforce_closeout_gate(contract, args)
+    _refuse_unsatisfied_closeout_gate(contract, args)
 
     worklist = closeout_changed_paths(contract)
     changed_paths = worklist["all"]
@@ -727,6 +786,13 @@ def closeout_result(args: WorktreeArgs) -> WorktreeCommandResult:
         code_quality_gate = _gate_staged_code(
             contract.code_worktree, diff_base=contract.code_base_commit
         )
+    # THE CLAIM, and it goes exactly here: the last line before the first irreversible act.
+    # Everything above only reads or touches the index of the task's own disposable worktree, so a
+    # refusal up there must not spend the approval; everything below writes a commit somebody
+    # would have to undo, so none of it may run on an approval this closeout has not already
+    # consumed. Do not move this line down past the commit -- that is R3, and it is what let a
+    # closeout finish its mutations and leave the approval spendable.
+    gate_guard = _claim_closeout_gate(contract, args)
     code_commit = commit_if_dirty(contract.code_worktree, args.code_commit_message)
     code_commit_date = commit_date(contract.code_worktree, code_commit)
     memory_commit = ""
@@ -787,8 +853,6 @@ def closeout_result(args: WorktreeArgs) -> WorktreeCommandResult:
         ),
     )
     write_contract(contract.contract_path, updated)
-    if gate_guard is not None and gate_guard.gate_id is not None:
-        _mark_closeout_gate_applied(contract, gate_guard.gate_id)
     return WorktreeCommandResult(
         0,
         {

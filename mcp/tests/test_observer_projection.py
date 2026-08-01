@@ -1527,7 +1527,15 @@ class SnapshotReaderTests(unittest.TestCase):
         project_and_write(config, now=FRESH)
 
         self.assertEqual(dismissals.current(), {})
-        self.assertFalse(dismissals.log_path().exists())
+        # The projection pass pruned the acknowledgement for the completed lifecycle, and the
+        # log it lived in is now an EMPTY FILE rather than a deleted one (260731-EFA-L5 R5):
+        # rewriting to empty by unlinking stranded a concurrent dismisser's "a"-mode handle in
+        # an inode with no name, which is how 31.45% of dismissals were being lost. Same proof,
+        # different mechanism -- the row that was written above is gone from the reader and the
+        # file holds nothing, which is what "pruned" has to mean now.
+        self.assertEqual(dismissals.read(), [])
+        self.assertTrue(dismissals.log_path().is_file())
+        self.assertEqual(dismissals.log_path().read_bytes(), b"")
 
 
 class TokenSeriesTests(unittest.TestCase):

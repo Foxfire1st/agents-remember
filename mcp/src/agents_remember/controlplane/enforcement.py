@@ -28,7 +28,7 @@ from agents_remember.controlplane.gate_policy import (
 )
 from agents_remember.controlplane.records import GateKind, GateRecord
 
-CLOSEOUT_GATE_KIND = "closeout-approval"
+CLOSEOUT_GATE_KIND: GateKind = "closeout-approval"
 
 
 @dataclass(frozen=True)

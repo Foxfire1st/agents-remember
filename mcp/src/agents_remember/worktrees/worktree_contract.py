@@ -13,6 +13,7 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Literal, TypeVar, cast, get_args
 
+from agents_remember.controlplane.durable_store import SCHEMA_VERSION, schema_version_supported
 from agents_remember.errors import AgentsRememberError
 from agents_remember.worktrees.leaf_refs import (
     LeafRefResolutionError,
@@ -32,6 +33,17 @@ from agents_remember.worktrees.task_resolver import (
 logger = logging.getLogger(__name__)
 
 CONTRACT_SCHEMA = "ar-series-contract/v1"
+CONTRACT_SCHEMA_VERSION = SCHEMA_VERSION
+"""The durable-record contract version stamped into the front matter (260731-EFA-L5 R6).
+
+Deliberately the SAME constant the control-plane JSONL records carry, and read back through the
+same :func:`schema_version_supported` rule -- an unknown major is rejected, an unknown minor is
+accepted -- because two version policies in one tree is how they drift apart. ``schema`` above
+names the document vocabulary; this versions the durable-record contract it is written under.
+A contract written before this field existed has no ``schemaVersion`` line and is 1.0 by
+definition: that is what "telling an old record from a new one" means here, and it is why no
+migration is needed.
+"""
 
 # The persisted contract vocabularies, declared once, here. This is where each of these
 # values is born and where it dies: `worktree_start` writes the file, the lifecycle tools
@@ -681,6 +693,7 @@ def contract_to_text(contract: WorktreeContract) -> str:
     lines = [
         "---",
         f"schema: {CONTRACT_SCHEMA}",
+        f"schemaVersion: {CONTRACT_SCHEMA_VERSION}",
         f"kind: {contract.kind}",
         f"task_id: {contract.task_id}",
         f"task_name: {contract.task_name}",
@@ -867,11 +880,28 @@ def _optional_path(value: str) -> Path | None:
     return Path(value) if value else None
 
 
+def _require_supported_schema_version(data: dict[str, object], contract_path: Path) -> None:
+    """Reject a contract whose ``schemaVersion`` major this build does not implement.
+
+    An absent version is a contract written before the field existed, which is 1.0 -- accepted.
+    An unknown MINOR is accepted (additive). An unknown MAJOR is refused rather than parsed
+    optimistically: the cells would still read, and that is exactly the failure mode -- a
+    document that means something else answering questions as though it did not.
+    """
+    raw = _scalar(data.get("schemaVersion"))
+    if raw and not schema_version_supported(raw):
+        raise ContractError(
+            f"unsupported series contract schemaVersion: {raw} (in {contract_path}); "
+            f"this build implements {CONTRACT_SCHEMA_VERSION}"
+        )
+
+
 def _contract_from_data(data: dict[str, object], contract_path: Path) -> WorktreeContract:
     if data.get("schema") != CONTRACT_SCHEMA:
         raise ContractError(
             f"unsupported series contract schema: {data.get('schema', '')} (in {contract_path})"
         )
+    _require_supported_schema_version(data, contract_path)
     coordination = _section(data, "coordination")
     code = _section(data, "code")
     memory = _section(data, "memory")

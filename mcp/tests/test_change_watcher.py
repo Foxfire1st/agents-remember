@@ -124,7 +124,11 @@ class InputEventFilterTests(unittest.TestCase):
             "/c/logs/observer/workspace/events.lock",
             # Created "a+b" by every inbox access (incl. each tick's read_agent_pickups):
             # its boot-time creation must not cost a spurious change-tick (review F1).
-            "/c/logs/observer/workspace/operator-inbox.lock",
+            # Named by durable_store.lock_path_for, i.e. the whole log name plus ".lock".
+            "/c/logs/observer/workspace/operator-inbox.jsonl.lock",
+            # The same rule outside workspace/: gates.jsonl (and its lock) exist once per
+            # lifecycle, which a workspace-scoped name list could not have excluded.
+            "/c/logs/observer/lifecycles/L1/gates.jsonl.lock",
             "/c/logs/observer/workspace/supervisor-heartbeat.json",
             "/c/logs/observer/workspace/.events.cursor.json.123.tmp",
         ):

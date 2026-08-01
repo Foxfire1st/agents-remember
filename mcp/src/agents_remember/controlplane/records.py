@@ -21,6 +21,8 @@ from typing import Any, Literal, cast, get_args
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from agents_remember.controlplane.durable_store import DurableRecord
+
 GATE_RECORD_SCHEMA = "ar-gate-record/v1"
 
 # What needs the human/operator. Extensible: a new gate kind is one literal.
@@ -79,7 +81,7 @@ class GateEvidenceRef(BaseModel):
     verdict: str | None = None
 
 
-class GateRecord(BaseModel):
+class GateRecord(DurableRecord):
     """One ``ar-gate-record/v1`` snapshot.
 
     Append a fresh snapshot per state change (same ``id``, new ``ts``); fold the
@@ -88,9 +90,13 @@ class GateRecord(BaseModel):
     alias because ``schema`` is an awkward attribute name -- always dump with
     ``model_dump_json(by_alias=True, exclude_none=True)`` so it renders as
     ``schema``.
-    """
 
-    model_config = ConfigDict(extra="forbid")
+    Two version fields, and they answer different questions: ``schema`` names the record
+    vocabulary (what these fields mean), while the inherited ``schemaVersion`` versions the
+    durable-store contract this log is written under (how the file behaves -- ownership,
+    serialization, torn-line policy). A reader rejects an unknown ``schemaVersion`` major and
+    accepts an unknown minor; see ``controlplane/durable_store.py``.
+    """
 
     schema_version: str = Field(default=GATE_RECORD_SCHEMA, alias="schema")
     id: str  # ULID, stable across the gate's life (minted once, reused per snapshot)

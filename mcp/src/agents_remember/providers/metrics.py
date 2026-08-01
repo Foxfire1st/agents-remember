@@ -10,6 +10,32 @@ statistics board (260703_statistics-component) consumes the same rows later.
 The sampler is deliberately dockerless-safe and read-only: a missing docker
 binary or a stopped daemon yields an error-annotated empty sample, never a
 launch or a crash — status must stay legal while providers are disabled.
+
+DURABILITY: THIS LOG IS ON ``ar-durable-store/1.0`` (260731-EFA-L5)
+
+``metrics.jsonl`` is written by BOTH long-lived processes and rewritten whole by one of
+them, which is the same shape as the six ``controlplane/`` logs and the same defect. The MCP
+process appends index-lifecycle rows on its provider-setup thread
+(``providers/provider_setup.py`` ``_record_index_state``, reached from ``worktree_start`` /
+``runtime_install``) while the dashboard's ``_metrics_loop`` (``serving/app.py``) runs
+``record`` and then ``compact`` — a tail rewrite. Measured before this change, appenders against
+that loop lost records the store had reported written, and tore a line doing it; the
+``.compact.tmp`` / ``.tmp`` names also carried no pid, so two rewriters could ``os.replace`` each
+other's temp away.
+
+NO LOSS RATE IS QUOTED HERE, and that is deliberate rather than an omission. The percentages this
+leaf measured move with a pacing that nothing in the suite records, so they are not a property of
+any shape a reader can re-run — ``mcp/tests/test_provider_store_durability.py`` says exactly that
+about its own figures, and measures different ones for the same named shape. What reproduces is
+the DIRECTION: this log lost accepted records and now loses none, and
+``ProviderHarnessSensitivityTests`` re-establishes that on every run against a ``git archive`` of
+the base commit.
+
+Every append and every rewrite here now takes ``metrics.jsonl``'s lock through
+:func:`~agents_remember.controlplane.durable_store.exclusive_access`, and the one destructive
+rewrite is :func:`~agents_remember.controlplane.durable_store.rewrite_lines` — pid-scoped
+temp, fsynced file and directory, and a refusal if the caller is not holding the lock. See
+:data:`PROVIDER_METRICS_OWNERSHIP` for who compacts and why the read stays tolerant.
 """
 
 from __future__ import annotations
@@ -21,12 +47,48 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from agents_remember.controlplane.durable_store import (
+    SCHEMA_VERSION,
+    StoreOwnership,
+    append_line,
+    exclusive_access,
+    rewrite_lines,
+    schema_version_supported,
+)
 from agents_remember.providers.context import ContextProviderError
 from agents_remember.providers.lifecycle.command_runner import run_command
 from agents_remember.providers.lifecycle.docker_runtime import docker_command
 
 PROVIDER_METRICS_SCHEMA = "ar-provider-metrics-sample/v1"
 PROVIDER_INDEX_STATE_SCHEMA = "ar-provider-index-state/v1"
+
+PROVIDER_METRICS_OWNERSHIP = StoreOwnership(
+    store="provider-metrics",
+    writers=("mcp", "dashboard"),
+    compaction_owner="dashboard",
+    rationale=(
+        "Both processes append: the dashboard's _metrics_loop records container samples "
+        "(serving/app.py) and the MCP process appends index-lifecycle rows from the "
+        "provider-setup thread (providers/provider_setup.py _record_index_state). Compaction "
+        "belongs to the dashboard because the reclaim is a step of that same sampling loop -- "
+        "it is the only thing that knows the log just grew -- and because the MCP process has "
+        "no reason to remove a row it does not read. NOT the operator-inbox exception: that "
+        "store earned compaction_owner=None because BOTH processes must physically remove "
+        "rows and neither removal can travel to the other process without the decision it "
+        "implements. Nothing in the MCP process removes a metrics row at all, so a single "
+        "owner is available here and is therefore required. The owner is enforced "
+        "structurally rather than by a runtime predicate: compact() has exactly one caller and "
+        "it is inside the dashboard's loop."
+    ),
+)
+"""Who writes and who compacts ``metrics.jsonl``.
+
+Declared here rather than in ``controlplane/durable_store.py`` for two reasons. The register in
+that module is titled for the six control-plane logs and is the CONTRACT, not a directory of
+every store in the tree; and 260731-EFA-L5 has a second worker in ``controlplane/`` closing the
+gate replay window, so a store outside that folder states its own ownership beside the store it
+describes. The contract itself is imported, never re-implemented.
+"""
 
 # Ownership labels every provider container carries (identity.provider_ownership_labels);
 # the sampler discovers stacks by label so it needs no settings at all — a
@@ -114,14 +176,68 @@ class MetricsSnapshot:
         return payload
 
 
+def _stamped(payload: dict[str, Any]) -> dict[str, Any]:
+    """One row carrying its ``schemaVersion``. The store stamps it; a caller cannot override it.
+
+    ``ar-durable-store/1.0``: MAJOR.MINOR, unknown major refused, unknown minor accepted, and an
+    ABSENT field means ``1.0``. That last part is what makes this additive rather than a
+    migration — every row already on disk was written by this same build under the same meaning,
+    so :func:`_parse_row` reads an existing ``metrics.jsonl`` unchanged and the field only starts
+    appearing on rows written from now on.
+    """
+    return {**payload, "schemaVersion": SCHEMA_VERSION}
+
+
+def _parse_row(text: str) -> dict[str, Any] | None:
+    """One stored row, or ``None`` when it is blank, torn, not an object, or a newer major.
+
+    TOLERANT, per row, and that is a decision rather than an inheritance. The leaf's rule is that
+    a store may read tolerantly only if it carries no authority, because a tolerant read that
+    feeds a rewrite drops the unreadable row PERMANENTLY. Neither applies here, and both halves
+    are worth stating:
+
+    * NOTHING IS DECIDED ON THE PRESENCE OF A METRICS ROW. The distinguishing property of an
+      authority log is that the ABSENCE of a row reads as "the thing it records never happened",
+      which then permits what the row existed to refuse — a dropped ``applied`` gate marker
+      re-opens a replay window. This log has no such marker. Its one consumer that mutates
+      anything, the degradation detector's critical failsafe (``providers/degradation.py``),
+      re-derives the whole state machine from a ROLLING WINDOW OF LIVE SAMPLES every 30s and
+      consumes nothing; a row lost to a torn line costs at most one tick's accuracy and the next
+      sample corrects it. That is the same self-correcting category the contract already accepts
+      for attention-dismissals and supervisor cooldowns, and it is a structural property of the
+      consumer, not the "it is only telemetry" hand-wave.
+    * NOTHING THIS RETURNS IS EVER WRITTEN BACK. :meth:`ProviderMetricsStore.compact` reclaims
+      from a RAW byte tail (:func:`_tail_lines`) and drops rows by age alone, so a row this
+      skipped is skipped for one call and stays on disk — the permanent-drop cost the rule warns
+      about is not on the table at all.
+
+    If either of those ever changes — a decision keyed to a specific row, or a rewrite that
+    filters by parsing — this must become a strict read IN THE SAME CHANGE.
+    """
+    if not text.strip():
+        return None
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(payload, dict):
+        return None
+    version = payload.get("schemaVersion", SCHEMA_VERSION)
+    if not isinstance(version, str) or not schema_version_supported(version):
+        return None
+    return payload
+
+
 class ProviderMetricsStore:
     """Append-log + rolling-current store under the observer root.
 
     ``metrics.jsonl`` accretes samples for trend/statistics consumers;
     ``metrics-current.json`` is the cheap always-fresh read for status packets
-    and the projection. Writes are replace-atomic like the sibling observer
-    stores; a torn append line only costs one sample row to a reader that
-    skips invalid lines.
+    and the projection. Both are written through ``ar-durable-store/1.0``: every append and
+    every rewrite holds ``metrics.jsonl``'s lock, so an append landing inside a compaction is
+    serialized rather than discarded, and the temp files are pid-scoped and fsynced. A torn
+    append line still only costs one sample row to a reader, because the read is tolerant
+    per row (:func:`_parse_row` says why that is safe here and what would end it).
     """
 
     def __init__(self, coordination_root: Path) -> None:
@@ -136,13 +252,19 @@ class ProviderMetricsStore:
         return self._root / "metrics-current.json"
 
     def record(self, snapshot: MetricsSnapshot) -> None:
-        self._root.mkdir(parents=True, exist_ok=True)
-        line = json.dumps(snapshot.to_payload(), sort_keys=True)
-        with self.log_path.open("a", encoding="utf-8") as handle:
-            handle.write(line + "\n")
-        tmp = self.current_path.with_name(self.current_path.name + ".tmp")
-        tmp.write_text(line + "\n", encoding="utf-8")
-        os.replace(tmp, self.current_path)
+        """Append one container sample and republish it as the rolling current state.
+
+        Both files are written under ONE hold of the log's lock, so ``metrics-current.json``
+        always names a row that is really in ``metrics.jsonl``. LOCK ORDER, and it is the only
+        place two of these locks are held at once: the log's lock is taken FIRST and the
+        current-state file's inside it, never the other way round.
+        """
+        PROVIDER_METRICS_OWNERSHIP.check_declared_writer()
+        line = json.dumps(_stamped(snapshot.to_payload()), sort_keys=True)
+        with exclusive_access(self.log_path, PROVIDER_METRICS_OWNERSHIP):
+            append_line(self.log_path, line)
+            with exclusive_access(self.current_path, PROVIDER_METRICS_OWNERSHIP):
+                rewrite_lines(self.current_path, [line], PROVIDER_METRICS_OWNERSHIP)
 
     def record_index_state(self, payload: dict[str, Any]) -> None:
         """Append one index-lifecycle row (seed catch-up, staleness) to the log.
@@ -150,18 +272,23 @@ class ProviderMetricsStore:
         260707-HFX-L2: rides the same JSONL as the container samples — the
         schema field tells consumers (degradation detector, statistics board)
         apart; the rolling current-state file stays container-only.
+
+        This is the MCP process's write, and the one that made the two-process pairing real:
+        it runs on the provider-setup thread while the dashboard is compacting the same log.
         """
-        self._root.mkdir(parents=True, exist_ok=True)
+        PROVIDER_METRICS_OWNERSHIP.check_declared_writer()
         row = {"schema": PROVIDER_INDEX_STATE_SCHEMA, **payload}
         row.setdefault("sampledAt", datetime.now(UTC).isoformat())
-        with self.log_path.open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(row, sort_keys=True) + "\n")
+        with exclusive_access(self.log_path, PROVIDER_METRICS_OWNERSHIP):
+            append_line(self.log_path, json.dumps(_stamped(row), sort_keys=True))
 
     def read_current(self) -> dict[str, Any] | None:
+        """The newest recorded sample, or ``None`` when there is none this build can read."""
         try:
-            return json.loads(self.current_path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
+            text = self.current_path.read_text(encoding="utf-8")
+        except OSError:
             return None
+        return _parse_row(text)
 
     def read_recent_index_states(self, limit: int = 20) -> list[dict[str, Any]]:
         """The newest index-lifecycle rows (260707-HFX-L2), oldest first."""
@@ -182,43 +309,54 @@ class ProviderMetricsStore:
 
         260707-HFX2-L12 F5/CS-6 D3: cheap enough to call every sampler tick — a byte-budget stat
         guards the common case (O(1)), and when the log exceeds ~2x the target it is rewritten from a
-        bounded EOF tail (O(retain_rows)), never a whole-file fold. Metrics are lossy-tolerant (a
-        sample racing the atomic replace is acceptable, same as the torn-line tolerance in read)."""
+        bounded EOF tail (O(retain_rows)), never a whole-file fold.
+
+        260731-EFA-L5: the stat, the tail read and the rewrite are all inside ONE hold of the
+        log's lock, and that is the whole fix. Holding it only around the rewrite would leave the
+        tail a stale choice — every row appended after it was read is not in the temp file and is
+        gone at ``os.replace``, which is the lost update wearing a lock. The old docstring called
+        that acceptable ("a sample racing the atomic replace is acceptable"); it was not a
+        tolerance — accepted records were lost and now none are. No rate is put on that here, for
+        the reason this module's header gives; the assertion that re-establishes the direction is
+        ``test_provider_store_durability.py::ProviderHarnessSensitivityTests``. The byte-budget
+        stat costs one uncontended ``flock`` on the sampler's 30s tick.
+
+        The reclaim drops rows BY AGE and never by content: :func:`_tail_lines` keeps raw lines,
+        so a row no reader could parse is retained here rather than quietly deleted."""
         path = self.log_path
-        try:
-            size = path.stat().st_size
-        except OSError:
-            return 0
         budget = (
             max_bytes if max_bytes is not None else retain_rows * _APPROX_METRICS_LINE_BYTES * 2
         )
-        if size <= budget:
-            return 0
-        kept = _tail_lines(path, retain_rows)
-        if not kept:
-            return 0
-        self._root.mkdir(parents=True, exist_ok=True)
-        tmp = path.with_name(path.name + ".compact.tmp")
-        tmp.write_text("\n".join(kept) + "\n", encoding="utf-8")
-        os.replace(tmp, path)
-        return len(kept)
+        with exclusive_access(path, PROVIDER_METRICS_OWNERSHIP):
+            try:
+                size = path.stat().st_size
+            except OSError:
+                return 0
+            if size <= budget:
+                return 0
+            kept = _tail_lines(path, retain_rows)
+            if not kept:
+                return 0
+            rewrite_lines(path, kept, PROVIDER_METRICS_OWNERSHIP)
+            return len(kept)
 
     def read_recent(self, limit: int = 120) -> list[dict[str, Any]]:
-        """The newest ``limit`` samples, oldest first; invalid lines skipped.
+        """The newest ``limit`` samples, oldest first; unreadable rows skipped per row.
 
         CS-6 D2 (260707-HFX2-L12): reads a bounded tail from the end of the file
         instead of ``read_text().splitlines()`` on the whole log, so a metrics.jsonl
         that grows for months does not cost O(filesize) on the 30s degradation
         sampler + per-request status hot paths.
+
+        Deliberately LOCK-FREE, like every other read in this contract: a reader that took the
+        log's lock would queue the dashboard's status route behind a compaction, and the worst a
+        concurrent append can cost this read is the torn last line :func:`_parse_row` skips.
         """
         rows: list[dict[str, Any]] = []
         for line in _tail_lines(self.log_path, limit):
-            if not line.strip():
-                continue
-            try:
-                rows.append(json.loads(line))
-            except json.JSONDecodeError:
-                continue
+            row = _parse_row(line)
+            if row is not None:
+                rows.append(row)
         return rows
 
 

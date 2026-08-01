@@ -1,15 +1,32 @@
-"""Append-only operator inbox store for external chat polling."""
+"""Append-only operator inbox store for external chat polling.
+
+THE DECLARED LOCK EXCEPTION of leaf 260731-EFA-L5. Every other control-plane log was given a
+single compaction owner so that no two processes read-modify-write it. This one cannot be:
+both long-lived processes must physically REMOVE rows, not merely append them. The MCP deletes
+the inbox rows tied to a cancelled gate at the moment it cancels the gate
+(``mcp/tools/gates.py`` -> :meth:`delete_by_gate`), and the dashboard's supervisor sweep must
+resolve and compact under one continuously held lock (:meth:`reconcile_and_compact`) so that a
+consume which won the lock stays terminal. Moving either to the other process means moving the
+decision it implements. So the advisory lock this store already had is kept, and it is the only
+place in the control plane where locking -- rather than ownership -- is the mechanism. Its
+filesystem is verified rather than assumed; see ``controlplane/durable_store.py``.
+"""
 
 from __future__ import annotations
 
-import fcntl
-import os
 from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
+from agents_remember.controlplane.durable_store import (
+    OPERATOR_INBOX_OWNERSHIP,
+    append_line,
+    exclusive_access,
+    read_log_text,
+    rewrite_lines,
+)
 from agents_remember.controlplane.inbox_backoff import (
     DEFAULT_RATE_LIMIT_SECONDS,
     is_ladder_resolved,
@@ -95,6 +112,7 @@ class OperatorInboxStore:
 
     def append(self, record: OperatorInboxEntry) -> None:
         """Append one inbox snapshot, creating parent dirs on first write."""
+        OPERATOR_INBOX_OWNERSHIP.check_declared_writer()
         with self._exclusive_access():
             self._append_unlocked(record)
 
@@ -448,49 +466,30 @@ class OperatorInboxStore:
             return removed, kept_current, tuple(resolved)
 
     def _append_unlocked(self, record: OperatorInboxEntry) -> None:
-        path = self.log_path()
-        path.parent.mkdir(parents=True, exist_ok=True)
-        line = record.model_dump_json(by_alias=True, exclude_none=True)
-        with path.open("a", encoding="utf-8") as handle:
-            handle.write(line + "\n")
+        append_line(self.log_path(), record.model_dump_json(by_alias=True, exclude_none=True))
 
     def _read_unlocked(self) -> list[OperatorInboxEntry]:
-        path = self.log_path()
-        if not path.exists():
-            return []
+        """STRICT, unchanged: an inbox row that cannot be parsed is an ack nobody can account
+        for, and :meth:`consume` decides on this fold. The tolerant policy belongs to reads that
+        only render."""
         return [
             OperatorInboxEntry.model_validate_json(line)
-            for line in path.read_text(encoding="utf-8").splitlines()
+            for line in read_log_text(self.log_path()).splitlines()
             if line.strip()
         ]
 
     def _replace_unlocked(self, records: list[OperatorInboxEntry]) -> None:
-        path = self.log_path()
-        if not records:
-            path.unlink(missing_ok=True)
-            return
-        path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = path.with_name(f"{path.name}.tmp")
-        tmp.write_text(
-            "\n".join(
-                record.model_dump_json(by_alias=True, exclude_none=True) for record in records
-            )
-            + "\n",
-            encoding="utf-8",
+        rewrite_lines(
+            self.log_path(),
+            [record.model_dump_json(by_alias=True, exclude_none=True) for record in records],
+            OPERATOR_INBOX_OWNERSHIP,
         )
-        os.replace(tmp, path)
 
     @contextmanager
     def _exclusive_access(self) -> Iterator[None]:
         """Serialize append and physical compaction across dashboard and MCP processes."""
-        lock_path = self.log_path().with_name("operator-inbox.lock")
-        lock_path.parent.mkdir(parents=True, exist_ok=True)
-        with lock_path.open("a+b") as handle:
-            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
-            try:
-                yield
-            finally:
-                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+        with exclusive_access(self.log_path(), OPERATOR_INBOX_OWNERSHIP):
+            yield
 
     def _entry_from_current(
         self,

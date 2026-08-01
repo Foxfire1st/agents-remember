@@ -5,6 +5,7 @@ from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
+from agents_remember.controlplane.durable_store import declare_process_role
 from agents_remember.observer import AmbientLifecycle, EventStore, install_ambient, observer_root
 from agents_remember.serving.daemon import maybe_autostart_dashboard
 
@@ -44,6 +45,11 @@ def main(argv: list[str] | None = None) -> int:
     except ConfigError as error:
         parser.error(str(error))
 
+    # Which of the two concurrent durable-store writers THIS PROCESS is
+    # (controlplane/durable_store.py). Declared here, at the process entry point, and
+    # deliberately not in create_server: the role is a fact about the process, and a factory
+    # that tests call in-process would stamp this one onto whatever ran next.
+    declare_process_role("mcp")
     # Boot-time dashboard supervision (dashboard.autoStart): total and threaded —
     # it must never delay or break the stdio handshake this process exists for.
     maybe_autostart_dashboard(config)

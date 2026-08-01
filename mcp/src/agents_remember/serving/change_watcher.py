@@ -48,7 +48,10 @@ Self-trigger safety: the projection's own per-tick outputs (``latest-state.json`
 ``latest-metrics.json`` and their ``*.tmp`` siblings) live at the observer root, *outside*
 every watched subdirectory, so a tick cannot re-wake itself. Inside ``<obs>/workspace``
 the non-input churn (the raw event river + cursor/lock, the supervisor heartbeat) is
-name-filtered. TTL-gated writers that run inside a tick (gate-log compaction, event
+name-filtered, and the control-plane lockfiles are suffix-filtered in every watched
+directory (they are the busiest writes in the tree -- every durable-store append and every
+rewrite opens one ``a+b`` -- and none is an input). TTL-gated writers that run inside a tick
+(gate-log compaction, event
 retention, provider current-state refresh) cost at most one debounced echo tick per TTL
 window, whose diff emits nothing.
 
@@ -77,6 +80,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
+from agents_remember.controlplane.durable_store import lock_path_for
 from agents_remember.observer.paths import drift_snapshot_dir, observer_logs_root
 from agents_remember.observer.projection_inputs import (
     ALL_PROJECTION_DOMAINS,
@@ -122,19 +126,34 @@ WATCH_REFRESH_SECONDS = 30.0
 _EXCLUDED_NAMES = frozenset({LATEST_STATE, LATEST_METRICS})
 
 #: ``<obs>/workspace`` files that are NOT projection inputs: the raw event river (served
-#: by ``/api/events``, never read by ``project_and_write``) with its cursor + lock, the
-#: operator-inbox flock file (opened ``a+b`` by every inbox access, including each tick's
-#: ``read_agent_pickups`` -- its boot-time creation would emit one spurious change-tick),
-#: and the supervisor's own heartbeat (written every sweep on its own cadence).
+#: by ``/api/events``, never read by ``project_and_write``) with its cursor + lock, and the
+#: supervisor's own heartbeat (written every sweep on its own cadence). The control-plane
+#: lockfiles used to be listed here by name; they are derived instead -- see
+#: :data:`_DURABLE_LOG_LOCK_SUFFIX`.
 _EXCLUDED_WORKSPACE_NAMES = frozenset(
     {
         "events.jsonl",
         WORKSPACE_CURSOR_FILE,
         WORKSPACE_LOCK_FILE,
-        "operator-inbox.lock",
         supervisor_heartbeat_path(Path(".")).name,
     }
 )
+
+#: The suffix ``controlplane.durable_store.lock_path_for`` gives a ``.jsonl`` control-plane log,
+#: DERIVED from that function rather than spelled out, because spelling it out is what broke:
+#: this filter carried the literal ``"operator-inbox.lock"`` while ``lock_path_for`` had moved to
+#: ``operator-inbox.jsonl.lock``, so the exclusion silently stopped matching anything.
+#:
+#: Every append and every rewrite of the six durable logs opens its lockfile ``a+b`` (including
+#: each projection tick's own ``read_agent_pickups``), so these are the highest-frequency writes
+#: in the watched tree and none of them is a projection input. Matched by SUFFIX and in EVERY
+#: watched directory rather than by name under ``workspace/``, which is what the old list could
+#: not express: five of the six logs live only under ``workspace/``, but ``gates.jsonl`` lives
+#: there AND once per lifecycle under ``<obs>/lifecycles/<id>/``, so ``gates.jsonl.lock`` appears
+#: in every lifecycle directory too. A suffix rule needs no list to keep in step with the stores,
+#: and no projection input is named ``*.jsonl.lock``: the inputs are the ``.jsonl`` logs
+#: themselves and ``.json`` sidecars.
+_DURABLE_LOG_LOCK_SUFFIX = lock_path_for(Path("log.jsonl")).name.removeprefix("log")
 
 
 def projection_input_roots(config: McpRuntimeConfig) -> list[Path]:
@@ -168,11 +187,14 @@ def projection_input_roots(config: McpRuntimeConfig) -> list[Path]:
 def is_projection_input_event(path: str) -> bool:
     """Filter one raw watch event down to genuine projection inputs.
 
-    Drops atomic-write temp files, dot-prefixed sidecar temps, the projection's own
-    outputs, and the ``workspace/`` non-input churn (see :data:`_EXCLUDED_WORKSPACE_NAMES`).
+    Drops atomic-write temp files, dot-prefixed sidecar temps, the projection's own outputs,
+    every control-plane lockfile (:data:`_DURABLE_LOG_LOCK_SUFFIX`, in any watched directory),
+    and the ``workspace/`` non-input churn (see :data:`_EXCLUDED_WORKSPACE_NAMES`).
     """
     name = os.path.basename(path.rstrip("/\\"))
     if name.endswith(".tmp") or name.startswith("."):
+        return False
+    if name.endswith(_DURABLE_LOG_LOCK_SUFFIX):
         return False
     if name in _EXCLUDED_NAMES:
         return False

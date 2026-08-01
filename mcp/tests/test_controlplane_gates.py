@@ -990,7 +990,7 @@ class CloseoutEnforcementHelperTests(unittest.TestCase):
 
     def test_gateless_lifecycle_returns_none(self) -> None:
         self.assertIsNone(
-            closeout_mod._enforce_closeout_gate(
+            closeout_mod._claim_closeout_gate(
                 self._contract(lifecycle_id=""),
                 self._args(),
             )
@@ -999,20 +999,27 @@ class CloseoutEnforcementHelperTests(unittest.TestCase):
     def test_open_gate_blocks_closeout(self) -> None:
         self._seed("open")
         with self.assertRaises(RuntimeError):
-            closeout_mod._enforce_closeout_gate(self._contract(), self._args())
+            closeout_mod._claim_closeout_gate(self._contract(), self._args())
+        # Both rungs refuse it, and the early read must refuse it too or an open gate would
+        # be discovered only after a full strict code-quality run over a staged worktree.
+        with self.assertRaises(RuntimeError):
+            closeout_mod._refuse_unsatisfied_closeout_gate(self._contract(), self._args())
 
     def test_model_approved_blocks_closeout(self) -> None:
         self._seed("approved", by="model")
         with self.assertRaises(RuntimeError):
-            closeout_mod._enforce_closeout_gate(self._contract(), self._args())
+            closeout_mod._claim_closeout_gate(self._contract(), self._args())
+        with self.assertRaises(RuntimeError):
+            closeout_mod._refuse_unsatisfied_closeout_gate(self._contract(), self._args())
 
     def test_developer_approved_permits_and_marks_applied(self) -> None:
         gate_id = self._seed("approved", by="developer")
-        guard = closeout_mod._enforce_closeout_gate(self._contract(), self._args())
+        # The claim is the consume: permitting and marking applied are one step, so there is
+        # no arrangement of these two lines that leaves the approval spendable in between.
+        guard = closeout_mod._claim_closeout_gate(self._contract(), self._args())
         self.assertIsNotNone(guard)
         assert guard is not None
         self.assertTrue(guard.permitted)
-        closeout_mod._mark_closeout_gate_applied(self._contract(), gate_id)
         self.assertEqual(self.store.current("L1")[gate_id].state, "applied")
 
     def test_payload_shapes(self) -> None:

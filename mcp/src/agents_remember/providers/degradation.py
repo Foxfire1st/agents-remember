@@ -5,12 +5,31 @@ The detector consumes the central provider metrics log produced by
 healthy/degraded/critical state transitions, durable events, inbox alerts, and
 the critical provider-stop failsafe. It deliberately stays outside the serving
 app so the dashboard loop only has to call one focused service after sampling.
+
+DURABILITY: THE EVENT LOG IS ON ``ar-durable-store/1.0`` (260731-EFA-L5)
+
+``degradation-events.jsonl`` had the same shape as the six ``controlplane/`` logs: an unlocked
+``open("a")`` append beside a ``compact_events`` whole-file read-filter-rewrite, and a
+``.compact.tmp`` name with no pid in it. It has ONE writer today, and that is exactly the
+argument this leaf refused for attention-dismissals and supervisor-signals — and refused for a
+measured reason, since the draft that left those two unlocked on the strength of single-writer
+measured 31.45% loss. Measured here before this change, appenders against one compactor lost
+events this store had reported written.
+
+NO LOSS RATE IS QUOTED FOR THIS LOG, for the reason ``providers/metrics.py`` gives about its own:
+the percentages move with a pacing nothing records, and
+``mcp/tests/test_provider_store_durability.py`` disclaims the figures this leaf took while
+measuring different ones for the same named shape. The direction is what reproduces — events were
+lost and now none are — and ``ProviderHarnessSensitivityTests`` re-establishes it on every run
+against a ``git archive`` of the base commit. "Only one process writes this file" is a deployment
+fact; the lock is about the file.
+
+:data:`PROVIDER_DEGRADATION_OWNERSHIP` states who writes and who compacts.
 """
 
 from __future__ import annotations
 
 import json
-import os
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -18,6 +37,14 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, cast
 
 from agents_remember.controllers.provider_tools import provider_watchers_tool
+from agents_remember.controlplane.durable_store import (
+    SCHEMA_VERSION,
+    StoreOwnership,
+    append_line,
+    exclusive_access,
+    read_log_text,
+    rewrite_lines,
+)
 from agents_remember.controlplane.operator_inbox_records import (
     AgentRole,
     InboxAddress,
@@ -54,6 +81,34 @@ DEGRADATION_EVENT_SCHEMA = "ar-provider-degradation-event/v1"
 # 260707-HFX2-L12 F5: cap for the append-only degradation-events audit log. Events fire only on a
 # state change (rare), so this bound is generous; it exists to stop unbounded growth over years.
 DEGRADATION_EVENT_RETAIN_ROWS = 1_000
+
+PROVIDER_DEGRADATION_OWNERSHIP = StoreOwnership(
+    store="provider-degradation",
+    writers=("dashboard",),
+    compaction_owner="dashboard",
+    rationale=(
+        "Single writer TODAY: evaluate_provider_degradation has exactly one production caller, "
+        "the dashboard's _metrics_loop (serving/app.py), and it is the only thing that appends "
+        "an event, compacts the log or writes the state document. Compaction therefore belongs "
+        "to the dashboard, and it is enforced structurally -- compact_events is called from one "
+        "place, immediately after the append it bounds. NOT the operator-inbox exception: that "
+        "store earned compaction_owner=None because both processes must physically remove rows; "
+        "nothing in the MCP process removes a degradation event, or writes one. The single "
+        "writer is why check_declared_writer earns its place here rather than being a formality "
+        "-- with writers=('dashboard',) it is the one store in this pair where the check can "
+        "actually fire, and it fires the moment the MCP process starts evaluating degradation. "
+        "It is NOT why the log is safe: the lock is unconditional for the same reason it is on "
+        "attention-dismissals and supervisor-signals, which are also single-writer and whose "
+        "unlocked draft measured 31.45% loss."
+    ),
+)
+"""Who writes and who compacts ``degradation-events.jsonl``.
+
+Declared beside the store rather than in ``controlplane/durable_store.py``'s register, for the
+reason given on ``providers/metrics.PROVIDER_METRICS_OWNERSHIP``: that register is the contract
+for the six control-plane logs, and this leaf had a second worker inside that folder. The
+contract is imported, never re-implemented.
+"""
 
 ORCHESTRATOR_DEGRADATION_INSTRUCTION = (
     "Dispatch AR_SPAWN_ROLE=system-specialist to investigate this provider degradation "
@@ -134,33 +189,69 @@ class ProviderDegradationStore:
         )
 
     def write_state(self, state: ProviderDegradationState) -> None:
-        self._root.mkdir(parents=True, exist_ok=True)
-        tmp = self.state_path.with_name(f"{self.state_path.name}.tmp")
-        tmp.write_text(json.dumps(state.to_payload(), indent=2) + "\n", encoding="utf-8")
-        os.replace(tmp, self.state_path)
+        """Republish the state-machine position: one document, replaced whole.
+
+        Written through the contract's :func:`rewrite_lines` — a pid-scoped temp, fsynced file
+        and directory — because ``degradation-state.json.tmp`` was the second unscoped temp name
+        in this pair and two writers sharing it hand one of them ``FileNotFoundError``.
+
+        BE PRECISE ABOUT WHAT THE LOCK DOES HERE. This document is not a record log: it is
+        recomputed in full every evaluation and replaced, so there is no read-modify-write of
+        stored rows for a lock to make atomic, and the lock is NOT claimed to make
+        ``read_state`` -> ``write_state`` one transaction (it is not; that span belongs to
+        :func:`evaluate_provider_degradation` and to its single caller). What it does is
+        serialize two republications and satisfy ``rewrite_lines``' refusal to rewrite a path
+        whose lock the caller is not holding. It is also why this document carries no
+        ``schemaVersion``: the stamp is a per-RECORD fact, and this file holds no records.
+        """
+        PROVIDER_DEGRADATION_OWNERSHIP.check_declared_writer()
+        path = self.state_path
+        with exclusive_access(path, PROVIDER_DEGRADATION_OWNERSHIP):
+            # One element because it is one document; ``rewrite_lines`` appends the newline the
+            # previous ``write_text`` did, so the bytes on disk are unchanged.
+            rewrite_lines(
+                path,
+                [json.dumps(state.to_payload(), indent=2)],
+                PROVIDER_DEGRADATION_OWNERSHIP,
+            )
 
     def append_event(self, event: dict[str, Any]) -> None:
-        self._root.mkdir(parents=True, exist_ok=True)
-        with self.events_path.open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(event, sort_keys=True) + "\n")
+        """Append one state-change event, under the log's lock and stamped with its schema version.
+
+        The stamp is added HERE, at the only write, because that is the only moment the
+        information exists: this log is an audit trail kept for a thousand events and nothing
+        reads it back today, so a row written without its version can never be told apart from a
+        future one. A reader added later must apply
+        ``durable_store.schema_version_supported`` — unknown major refused, unknown minor
+        accepted, absent means 1.0, which is what lets an existing file load unchanged.
+        """
+        PROVIDER_DEGRADATION_OWNERSHIP.check_declared_writer()
+        path = self.events_path
+        line = json.dumps({**event, "schemaVersion": SCHEMA_VERSION}, sort_keys=True)
+        with exclusive_access(path, PROVIDER_DEGRADATION_OWNERSHIP):
+            append_line(path, line)
 
     def compact_events(self, *, retain_rows: int = DEGRADATION_EVENT_RETAIN_ROWS) -> int:
         """Reclaim degradation-events.jsonl to its newest `retain_rows` events; return rows dropped.
 
         260707-HFX2-L12 F5/CS-6 D3: degradation events are only written on a state change (rare), so a
-        full read-fold on that rare path is cheap; this gives the append-only audit log a bounded cap."""
+        full read-fold on that rare path is cheap; this gives the append-only audit log a bounded cap.
+
+        260731-EFA-L5: the read, the filter and the rewrite happen under ONE hold of the log's
+        lock. Rarity is not serialization — the append that races this rewrite is the one that
+        just caused the state change this compaction is bounding, so the window is not merely
+        open, it is the window the store spends its whole life in.
+
+        The reclaim drops rows BY AGE and never by content: the lines are kept raw, so a row no
+        reader could parse survives here instead of being silently deleted by the rewrite."""
         path = self.events_path
-        if not path.exists():
-            return 0
-        lines = [line for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
-        if len(lines) <= retain_rows:
-            return 0
-        kept = lines[-retain_rows:]
-        self._root.mkdir(parents=True, exist_ok=True)
-        tmp = path.with_name(path.name + ".compact.tmp")
-        tmp.write_text("\n".join(kept) + "\n", encoding="utf-8")
-        os.replace(tmp, path)
-        return len(lines) - len(kept)
+        with exclusive_access(path, PROVIDER_DEGRADATION_OWNERSHIP):
+            lines = [line for line in read_log_text(path).splitlines() if line.strip()]
+            if len(lines) <= retain_rows:
+                return 0
+            kept = lines[-retain_rows:]
+            rewrite_lines(path, kept, PROVIDER_DEGRADATION_OWNERSHIP)
+            return len(lines) - len(kept)
 
 
 ProviderStopper = Callable[["McpRuntimeConfig"], dict[str, Any]]

@@ -13,13 +13,21 @@ durable-timer lesson (R2): a row survives a daemon/MCP restart; a timer does not
 
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import Field, ValidationError
+
+from agents_remember.controlplane.durable_store import (
+    EXPECTATION_ROW_OWNERSHIP,
+    DurableRecord,
+    append_line,
+    exclusive_access,
+    read_log_text,
+    rewrite_lines,
+)
 
 EXPECTATION_ROW_SCHEMA = "ar-expectation-row/v1"
 
@@ -32,10 +40,8 @@ ExpectationKind = Literal["briefed-by", "turn-report-by", "verdict-by", "ack-by"
 ExpectationState = Literal["pending", "met", "missed"]
 
 
-class ExpectationRow(BaseModel):
+class ExpectationRow(DurableRecord):
     """One append-only ``ar-expectation-row/v1`` snapshot: what must happen, by when."""
-
-    model_config = ConfigDict(extra="forbid")
 
     schema_version: str = Field(default=EXPECTATION_ROW_SCHEMA, alias="schema")
     id: str
@@ -128,6 +134,16 @@ def mark_missed(row: ExpectationRow, *, now: str) -> ExpectationRow:
     return row.model_copy(update={"ts": now, "state": "missed", "missedAt": now})
 
 
+def _pending_rows(rows: list[ExpectationRow]) -> list[ExpectationRow]:
+    """Fold by id (last-wins), keep the pending ones, order by deadline. One fold, two readers."""
+    latest: dict[str, ExpectationRow] = {}
+    for row in rows:
+        latest[row.id] = row
+    return sorted(
+        (row for row in latest.values() if row.state == "pending"), key=lambda row: row.dueAt
+    )
+
+
 def _terminal_time(row: ExpectationRow) -> datetime | None:
     """Best terminal timestamp for a met/missed row (metAt/missedAt, else ts), tz-safe or None."""
     stamp = row.metAt or row.missedAt or row.ts
@@ -147,20 +163,44 @@ class ExpectationRowStore:
         return self._root / "workspace" / "expectation-rows.jsonl"
 
     def append(self, row: ExpectationRow) -> None:
+        EXPECTATION_ROW_OWNERSHIP.check_declared_writer()
         path = self.log_path()
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with path.open("a", encoding="utf-8") as handle:
-            handle.write(row.model_dump_json(by_alias=True, exclude_none=True) + "\n")
+        with exclusive_access(path, EXPECTATION_ROW_OWNERSHIP):
+            append_line(path, row.model_dump_json(by_alias=True, exclude_none=True))
 
     def read(self) -> list[ExpectationRow]:
-        path = self.log_path()
-        if not path.exists():
-            return []
+        """Read the log back as validated rows (empty when absent).
+
+        STRICT, unchanged: a deadline row that cannot be parsed is a deadline nobody is
+        watching, and the L2 sweep is the only thing standing between a missed expectation and
+        silence. The tolerant policy belongs to reads that only render (see
+        ``GateStore.read_for_projection``); this one decides.
+        """
         return [
             ExpectationRow.model_validate_json(line)
-            for line in path.read_text(encoding="utf-8").splitlines()
+            for line in read_log_text(self.log_path()).splitlines()
             if line.strip()
         ]
+
+    def read_for_projection(self) -> list[ExpectationRow]:
+        """Read the log skipping any torn or unknown-major row.
+
+        TOLERANT on purpose, and never used to decide anything or to drive a rewrite. The strict
+        :meth:`read` above is right for the sweep, but ``observer/snapshots.read_expectation_rows``
+        wrapped it in ``suppress(OSError, ValueError)`` -- and ``ValidationError`` subclasses
+        ``ValueError``, so ONE torn line silently cost the dashboard EVERY expectation row in the
+        file. Degrading to "one row missing" is a dashboard degrading; degrading to "no deadlines
+        at all" is the projection quietly telling the operator nothing is due.
+        """
+        rows: list[ExpectationRow] = []
+        for line in read_log_text(self.log_path()).splitlines():
+            if not line.strip():
+                continue
+            try:
+                rows.append(ExpectationRow.model_validate_json(line))
+            except ValidationError:
+                continue
+        return rows
 
     def current(self) -> dict[str, ExpectationRow]:
         """Fold the log by row id, last-wins."""
@@ -170,10 +210,11 @@ class ExpectationRowStore:
         return latest
 
     def pending(self) -> list[ExpectationRow]:
-        return sorted(
-            (row for row in self.current().values() if row.state == "pending"),
-            key=lambda row: row.dueAt,
-        )
+        return _pending_rows(self.read())
+
+    def pending_for_projection(self) -> list[ExpectationRow]:
+        """:meth:`pending` over the tolerant read -- the dashboard's deadline list."""
+        return _pending_rows(self.read_for_projection())
 
     def find_by_source(
         self,
@@ -252,6 +293,13 @@ class ExpectationRowStore:
         terminal timestamp is older than `retain_seconds`; pending and unparseable-ts rows are always
         kept. The returned folded dict is the sweep's one-read expectation snapshot, so the supervisor
         reads + reclaims the log in a single pass (mirrors the signal-cooldown compactor)."""
+        with exclusive_access(self.log_path(), EXPECTATION_ROW_OWNERSHIP):
+            return self._compact_locked(now=now, retain_seconds=retain_seconds)
+
+    def _compact_locked(
+        self, *, now: datetime, retain_seconds: float
+    ) -> tuple[int, dict[str, ExpectationRow]]:
+        """The read-filter-rewrite half of :meth:`compact`, with the log's lock held."""
         records = self.read()
         if not records:
             return 0, {}
@@ -277,17 +325,15 @@ class ExpectationRowStore:
         return removed, kept
 
     def _replace(self, rows: list[ExpectationRow]) -> None:
-        path = self.log_path()
-        if not rows:
-            path.unlink(missing_ok=True)
-            return
-        path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
-        tmp.write_text(
-            "\n".join(row.model_dump_json(by_alias=True, exclude_none=True) for row in rows) + "\n",
-            encoding="utf-8",
+        """Rewrite the log. Its lock -- held by the caller across the read too -- is what makes
+        this safe, and it is the ONLY thing checked: ``rewrite_lines`` verifies the lock is held
+        and nothing else. No owner check happens here or anywhere below here;
+        ``EXPECTATION_ROW_OWNERSHIP`` is passed so a refusal can name the store."""
+        rewrite_lines(
+            self.log_path(),
+            [row.model_dump_json(by_alias=True, exclude_none=True) for row in rows],
+            EXPECTATION_ROW_OWNERSHIP,
         )
-        os.replace(tmp, path)
 
 
 def write_expectation_row(

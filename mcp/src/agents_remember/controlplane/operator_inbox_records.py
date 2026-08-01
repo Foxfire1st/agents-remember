@@ -6,7 +6,9 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import ConfigDict, Field, model_validator
+
+from agents_remember.controlplane.durable_store import DurableRecord
 
 OPERATOR_INBOX_RECORD_SCHEMA = "ar-operator-inbox-entry/v1"
 
@@ -131,8 +133,14 @@ def require_inbox_address(
         raise ValueError("operator inbox requires lifecycle_id, agent_id, or recipient_role")
 
 
-class OperatorInboxCompatibleRecord(BaseModel):
-    """Preserve only the named additive fields older inbox readers may not model yet."""
+class OperatorInboxCompatibleRecord(DurableRecord):
+    """Preserve only the named additive fields older inbox readers may not model yet.
+
+    The one store whose ``extra`` policy differs from the contract default, and deliberately:
+    it carries a named forward-compatibility allowlist that pre-dates this contract, so it
+    keeps ``extra="allow"`` plus the explicit refusal below rather than the contract's blanket
+    ``extra="forbid"``. The ``schemaVersion`` major/minor rule it inherits is unaffected.
+    """
 
     model_config = ConfigDict(extra="allow")
 

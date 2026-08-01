@@ -416,7 +416,21 @@ class GateStoreCompactTests(unittest.TestCase):
         self.assertEqual([record.id for record in self.store.read("L1")], ["G-live"])
         self.assertTrue(self.store.log_path("L1").is_file())
 
-    def test_pruning_the_last_gate_deletes_the_workspace_log(self) -> None:
+    def test_pruning_the_last_gate_empties_the_workspace_log_without_unlinking_it(self) -> None:
+        """An empty gate set is an empty FILE, not a missing one (260731-EFA-L5 R5).
+
+        This asserted the log was deleted, and that unlink is precisely what the leaf removed:
+        an appender that had already opened the log in ``"a"`` mode kept writing into an inode
+        with no remaining links, so its snapshot disappeared along with the file -- no torn
+        line, no exception, nothing for the caller to notice. The empty case was the most
+        dangerous branch in the store rather than the dullest.
+
+        The claim being proven is unchanged and not weakened: two snapshots went in, ``compact``
+        reports removing both, and nothing survives. Only the evidence for "nothing survives"
+        moves, from absence to emptiness -- and it is now checked twice over, through the
+        STRICT reader (which raises rather than skipping, so an empty result cannot be a
+        swallowed parse failure) and against the raw bytes.
+        """
         consumed = self._open_gate("G-workspace", None, timedelta(minutes=5))
         self.store.append(consumed)
         self.store.append(apply_gate(consumed, now=_stamp(-timedelta(minutes=1))))
@@ -425,7 +439,8 @@ class GateStoreCompactTests(unittest.TestCase):
         removed = self.store.compact(None, now=NOW)
 
         self.assertEqual(removed, 2)
-        self.assertFalse(self.store.log_path(None).exists())
+        self.assertTrue(self.store.log_path(None).is_file())
+        self.assertEqual(self.store.log_path(None).read_bytes(), b"")
         self.assertEqual(self.store.read(None), [])
 
 
