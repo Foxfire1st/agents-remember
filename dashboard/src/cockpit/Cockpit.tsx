@@ -553,6 +553,12 @@ export function CockpitShell({ initialView = "operations" }: { initialView?: Coc
           aria-hidden={fullBleed}
           {...railEnter}
         >
+          {/* These two panels are the reason grammar/Dot.tsx cannot lean on colour alone. They are
+              SIBLINGS in one always-visible rail — severities above, lifecycle states below — so a
+              developer reads both grammars in one glance, and an amber dot up here says nothing
+              about an amber dot down there (the reducer builds no attention row for an
+              `awaiting-developer` lifecycle). Cockpit.test.tsx renders this rail and pins the two
+              dots apart. */}
           <AttentionQueue onSelect={open} active={!fullBleed && !takeover} />
           <LifecycleList
             selectedId={selectedId}
@@ -770,10 +776,21 @@ const TopBar = memo(function TopBar() {
           // rail's chat-seat states. Labeling the scope keeps one fact in one home (no backend change).
           <span
             className={dim}
+            data-testid="task-metrics"
             title="Lifecycle task counts (not Chats seats) — chat-seat working/waiting/failed states live in the Chats rail's attention strip."
           >
-            tasks {metrics.runningCount} running · {metrics.blockedCount} blocked · {metrics.totalTokens}{" "}
-            tok
+            tasks {metrics.runningCount} running · {metrics.blockedCount} blocked
+            {/* The NOTIFY-AND-CONTINUE handoff, appended only while something is actually handed
+                back. Without it a lifecycle that has stopped and given the developer the turn is
+                in `lifecycleCount` and `totalTokens` and in none of the numbers on this bar —
+                the rollup bucket exists on the wire but nothing reads it. It follows the chip
+                above rather than the running/blocked pair: those two are the workspace's standing
+                rhythm and read fine at zero, while a permanent `0 awaiting you` is the same
+                reassurance-zero lie the caution chip refuses to tell. */}
+            {metrics.awaitingDeveloperCount > 0
+              ? ` · ${metrics.awaitingDeveloperCount} awaiting you`
+              : ""}{" "}
+            · {metrics.totalTokens} tok
           </span>
         ) : null}
         {generatedAt ? <span className={dim}>@ {generatedAt.slice(11, 19)}</span> : null}

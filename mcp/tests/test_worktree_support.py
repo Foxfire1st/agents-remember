@@ -276,7 +276,7 @@ def open_external_contract_fixture(root: Path):
             name="Commit Approval Thing",
             repo_name="repo-a",
             coordination_root=root / "ar-coordination",
-            workflow_kind="chat",
+            workflow_kind="chat-task",
             memory_mode="external",
         ),
         leaf=LeafIdentity(worktree_name="commit-approval-thing"),
@@ -350,7 +350,7 @@ def committed_range_external_contract_fixture(root: Path):
             name="Committed Range Thing",
             repo_name="repo-a",
             coordination_root=root / "ar-coordination",
-            workflow_kind="chat",
+            workflow_kind="chat-task",
             memory_mode="external",
         ),
         leaf=LeafIdentity(worktree_name="committed-range-thing"),
@@ -422,7 +422,7 @@ def closed_external_contract_fixture(
             name="Integrate Thing",
             repo_name="repo-a",
             coordination_root=root / "ar-coordination",
-            workflow_kind="chat",
+            workflow_kind="chat-task",
             memory_mode="external",
         ),
         leaf=LeafIdentity(worktree_name="integrate-thing"),
@@ -1958,7 +1958,7 @@ class WorktreeSupportTests(unittest.TestCase):
             payload = worktree_manager.status_payload(contract)
             self.assertEqual(payload["phase"], "integration-pending")
             self.assertEqual(payload["nextOperation"], "request_integration_decision")
-            self.assertEqual(payload["nextTool"], "worktree_integrate")
+            self.assertEqual(payload.get("nextTool"), "worktree_integrate")
             self.assertNotIn("next_command", payload)
 
     def test_integrate_ff_only_fast_forwards_code_and_memory_main(self) -> None:
@@ -2927,7 +2927,7 @@ class WorktreeSupportTests(unittest.TestCase):
                     name="Atomic Integrate",
                     repo_name="repo-a",
                     coordination_root=root / "ar-coordination",
-                    workflow_kind="chat",
+                    workflow_kind="chat-task",
                     memory_mode="disabled",
                 ),
                 leaf=LeafIdentity(worktree_name="atomic-integrate"),

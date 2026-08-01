@@ -33,6 +33,7 @@ from agents_remember.worktrees.modules import cleanup as cleanup_module
 from agents_remember.worktrees.modules import integrate as integrate_module
 from agents_remember.worktrees.modules import onboarding as onboarding_module
 from agents_remember.worktrees.modules import start as start_module
+from agents_remember.worktrees.modules import start_contract as start_contract_module
 from agents_remember.worktrees.modules import sync as sync_module
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.models import WorktreeCommandResult
@@ -138,6 +139,29 @@ class ContractMemoryModeTests(unittest.TestCase):
 
         self.assertEqual(leaf.memory_mode, "disabled")
         self.assertEqual(series.kind, "series")
+
+    def test_a_refused_request_leaves_the_start_as_a_result_not_an_exception(self) -> None:
+        """The refusal above must reach the caller as a payload.
+
+        ``worktree_start``'s handler has no ``except ContractError`` anywhere on its path --
+        not in ``mcp/registration/worktrees.py``, not in ``controllers/worktree_tools.py``,
+        not in ``mcp/tools/worktree.py`` -- so a construction refusal raised out of
+        ``build_start_contract`` would leave the tool as a traceback rather than a blocked
+        result the agent can read and correct. ``_build_start_contract`` is patched because
+        the refusal it raises is the subject; reaching it for real would mean standing up a
+        git repository to test an argument check.
+        """
+        with mock.patch.object(
+            start_contract_module,
+            "_build_start_contract",
+            side_effect=ContractError("workflow_kind must be one of ['chat-task', 'light-task']"),
+        ):
+            result = start_contract_module.build_start_contract(Namespace(), WorktreeArgs())
+
+        assert isinstance(result, WorktreeCommandResult)
+        self.assertEqual(result.returncode, 2)
+        self.assertEqual(result.payload["state"], "invalid-request")
+        self.assertIn("workflow_kind must be one of", str(result.payload["summary"]))
 
 
 class DeclaredLeafCandidateTests(unittest.TestCase):
@@ -256,6 +280,77 @@ class StartPipelineTests(unittest.TestCase):
 
         self.assertIs(result, created)
         self.assertIs(create.call_args.args[1], contract)
+
+
+class MemoryDisabledStartTests(unittest.TestCase):
+    """The memory-disabled recovery: a start that asked for external memory and could not get it.
+
+    ``memory_choice='disable'`` answers the blocked-memory refusal, and the contract it
+    produces has to stop describing a memory topology that will not exist -- the mode, the
+    repo path, both branches, the base commit, the worktree and the ledger, together. Half of
+    that would leave closeout looking for a memory repository the start declined to make.
+    """
+
+    def _external(self, root: Path):
+        return default_contract(
+            ContractTask(
+                name="Edge Task",
+                repo_name="repo-a",
+                coordination_root=root,
+                workflow_kind="light-task",
+                memory_mode="external",
+            ),
+            leaf=LeafIdentity(worktree_name="edge-task"),
+            code=RepoBranchPlan(
+                repo_path=root / "repo-a",
+                source_branch="main",
+                work_branch="ar/edge-task",
+                base_commit="abc123",
+            ),
+            memory=RepoBranchPlan(
+                repo_path=root / "memory-repos" / "ar-repo-a",
+                source_branch="main",
+                work_branch="ar/edge-task",
+                base_commit="def456",
+            ),
+        )
+
+    def test_a_disabled_memory_start_drops_the_whole_memory_topology(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            contract = self._external(Path(tmp))
+        self.assertEqual(contract.memory_mode, "external")
+
+        disabled = start_module._contract_after_memory_start(contract, {"state": "disabled"})
+
+        self.assertEqual(disabled.memory_mode, "disabled")
+        self.assertEqual(disabled.memory_state, "disabled")
+        self.assertIsNone(disabled.memory_repo_path)
+        self.assertIsNone(disabled.memory_worktree)
+        self.assertIsNone(disabled.ledger_path)
+        self.assertEqual(disabled.memory_source_branch, "")
+        self.assertEqual(disabled.memory_work_branch, "")
+        self.assertEqual(disabled.memory_base_commit, "")
+        # ...and nothing on the code side moved with it.
+        self.assertEqual(disabled.code_work_branch, contract.code_work_branch)
+
+    def test_a_reconciled_memory_base_advances_only_that_commit(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            contract = self._external(Path(tmp))
+
+        advanced = start_module._contract_after_memory_start(
+            contract, {"state": "ready", "reconciledMemoryBaseCommit": "999999"}
+        )
+
+        self.assertEqual(advanced.memory_base_commit, "999999")
+        self.assertEqual(advanced.memory_mode, "external")
+
+    def test_an_unremarkable_memory_start_returns_the_contract_untouched(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            contract = self._external(Path(tmp))
+
+        self.assertIs(
+            start_module._contract_after_memory_start(contract, {"state": "ready"}), contract
+        )
 
 
 class ExistingContractStartTests(unittest.TestCase):

@@ -36,6 +36,7 @@ from agents_remember.serving.conversation.control import (
 from agents_remember.serving.conversation.control.capabilities import (
     control_capabilities_for,
 )
+from agents_remember.serving.conversation.control.policy import ConversationPolicyProjection
 from agents_remember.serving.conversation.control.refs import ControlRefError
 from agents_remember.serving.conversation.control.service import (
     ControlOperationError,
@@ -48,12 +49,28 @@ from agents_remember.serving.conversation.dependencies import (
     resolve_conversation_authorization,
 )
 from agents_remember.serving.conversation.models import (
+    AttachmentOperationProjection,
     ConversationSubmitRequest,
+    ConversationTelemetry,
+    InterruptOperation,
     NonEmptyText,
+    OperationQueueProjection,
+    PendingWithdrawalRecoveryList,
     WireModel,
+    WithdrawalOperationProjection,
+    WithdrawalRecovery,
     WithdrawQueueRequest,
 )
+from agents_remember.serving.conversation.response_contract import (
+    CONTROL_RESPONSES,
+    INTERRUPT_OUTCOME_RESPONSES,
+    WITHDRAW_OUTCOME_RESPONSES,
+    ConversationSubmitted,
+    StagedAttachments,
+    WithdrawQueueAnswer,
+)
 from agents_remember.serving.harness_control_models import MAX_SUBMIT_ASSET_BYTES
+from agents_remember.serving.response_contract import StatusRefusal
 
 router = APIRouter(
     prefix="/api/terminal/{ar_session_id}",
@@ -128,7 +145,14 @@ def _dump(model: WireModel) -> dict[str, object]:
     return model.model_dump(mode="json", by_alias=True, exclude_none=True)
 
 
-@router.post("/conversation/interrupt")
+# Every route below chooses its status from the operation it built, and routes every typed
+# refusal through ``_map_typed_error`` -- which is why one shared ``responses`` table covers
+# all 17 of them, and why the success model alone would be a half-declaration.
+@router.post(
+    "/conversation/interrupt",
+    response_model=InterruptOperation,
+    responses={**CONTROL_RESPONSES, **INTERRUPT_OUTCOME_RESPONSES},
+)
 async def conversation_interrupt(
     ar_session_id: str,
     expected_bridge_epoch: EpochQuery,
@@ -157,7 +181,11 @@ async def conversation_interrupt(
     )
 
 
-@router.post("/conversation/interrupt-status")
+@router.post(
+    "/conversation/interrupt-status",
+    response_model=InterruptOperation,
+    responses={**CONTROL_RESPONSES, **INTERRUPT_OUTCOME_RESPONSES},
+)
 async def conversation_interrupt_status(
     ar_session_id: str,
     expected_bridge_epoch: EpochQuery,
@@ -187,7 +215,11 @@ async def conversation_interrupt_status(
     )
 
 
-@router.post("/conversation/interrupt-reconcile")
+@router.post(
+    "/conversation/interrupt-reconcile",
+    response_model=InterruptOperation,
+    responses={**CONTROL_RESPONSES, **INTERRUPT_OUTCOME_RESPONSES},
+)
 async def conversation_interrupt_reconcile(
     ar_session_id: str,
     expected_bridge_epoch: EpochQuery,
@@ -217,7 +249,11 @@ async def conversation_interrupt_reconcile(
     )
 
 
-@router.get("/operation-queue")
+@router.get(
+    "/operation-queue",
+    response_model=OperationQueueProjection,
+    responses=CONTROL_RESPONSES,
+)
 async def conversation_operation_queue(
     ar_session_id: str,
     expected_bridge_epoch: EpochQuery,
@@ -239,7 +275,13 @@ async def conversation_operation_queue(
     return JSONResponse(content=_dump(projection))
 
 
-@router.post("/operation-queue/withdraw")
+# Two success shapes: ``withdraw_http_status`` reads which one was built to pick 200 vs the
+# refusal status, so a failed withdrawal is still this route's own answer, not an error body.
+@router.post(
+    "/operation-queue/withdraw",
+    response_model=WithdrawQueueAnswer,
+    responses={**CONTROL_RESPONSES, **WITHDRAW_OUTCOME_RESPONSES},
+)
 async def conversation_withdraw(
     ar_session_id: str,
     expected_bridge_epoch: EpochQuery,
@@ -269,7 +311,11 @@ async def conversation_withdraw(
     )
 
 
-@router.post("/operation-queue/withdraw-status")
+@router.post(
+    "/operation-queue/withdraw-status",
+    response_model=WithdrawalOperationProjection,
+    responses=CONTROL_RESPONSES,
+)
 async def conversation_withdraw_status(
     ar_session_id: str,
     expected_bridge_epoch: EpochQuery,
@@ -297,7 +343,11 @@ async def conversation_withdraw_status(
     return JSONResponse(content=_dump(projection))
 
 
-@router.post("/operation-queue/withdraw-reconcile")
+@router.post(
+    "/operation-queue/withdraw-reconcile",
+    response_model=WithdrawalOperationProjection,
+    responses=CONTROL_RESPONSES,
+)
 async def conversation_withdraw_reconcile(
     ar_session_id: str,
     expected_bridge_epoch: EpochQuery,
@@ -325,7 +375,11 @@ async def conversation_withdraw_reconcile(
     return JSONResponse(content=_dump(projection))
 
 
-@router.get("/operation-queue/pending-withdrawal-recoveries")
+@router.get(
+    "/operation-queue/pending-withdrawal-recoveries",
+    response_model=PendingWithdrawalRecoveryList,
+    responses=CONTROL_RESPONSES,
+)
 async def conversation_pending_recoveries(
     ar_session_id: str,
     expected_bridge_epoch: EpochQuery,
@@ -349,7 +403,11 @@ async def conversation_pending_recoveries(
     return JSONResponse(content=_dump(projection))
 
 
-@router.post("/operation-queue/withdraw-recovery")
+@router.post(
+    "/operation-queue/withdraw-recovery",
+    response_model=WithdrawalRecovery,
+    responses=CONTROL_RESPONSES,
+)
 async def conversation_fetch_recovery(
     ar_session_id: str,
     expected_bridge_epoch: EpochQuery,
@@ -375,7 +433,11 @@ async def conversation_fetch_recovery(
     return JSONResponse(content=_dump(recovery))
 
 
-@router.post("/operation-queue/withdraw-recovery-ack")
+@router.post(
+    "/operation-queue/withdraw-recovery-ack",
+    response_model=WithdrawalOperationProjection,
+    responses=CONTROL_RESPONSES,
+)
 async def conversation_ack_recovery(
     ar_session_id: str,
     expected_bridge_epoch: EpochQuery,
@@ -417,7 +479,11 @@ class StageAttachmentsForm(BaseModel):
     assets: list[UploadFile] | None = None
 
 
-@router.post("/conversation/attachments")
+@router.post(
+    "/conversation/attachments",
+    response_model=StagedAttachments,
+    responses=CONTROL_RESPONSES,
+)
 async def conversation_stage_attachments(
     ar_session_id: str,
     expected_bridge_epoch: EpochQuery,
@@ -462,7 +528,11 @@ async def conversation_stage_attachments(
     )
 
 
-@router.post("/conversation/attachments/rebind")
+@router.post(
+    "/conversation/attachments/rebind",
+    response_model=StagedAttachments,
+    responses=CONTROL_RESPONSES,
+)
 async def conversation_rebind_attachment(
     ar_session_id: str,
     expected_bridge_epoch: EpochQuery,
@@ -494,7 +564,11 @@ async def conversation_rebind_attachment(
     )
 
 
-@router.get("/conversation/attachments/{request_id}/status")
+@router.get(
+    "/conversation/attachments/{request_id}/status",
+    response_model=AttachmentOperationProjection,
+    responses=CONTROL_RESPONSES,
+)
 async def conversation_attachment_status(
     ar_session_id: str,
     request_id: str,
@@ -521,7 +595,11 @@ async def conversation_attachment_status(
     return JSONResponse(content=_dump(projection))
 
 
-@router.post("/conversation/attachments/{request_id}/reconcile")
+@router.post(
+    "/conversation/attachments/{request_id}/reconcile",
+    response_model=AttachmentOperationProjection,
+    responses=CONTROL_RESPONSES,
+)
 async def conversation_attachment_reconcile(
     ar_session_id: str,
     request_id: str,
@@ -548,7 +626,24 @@ async def conversation_attachment_reconcile(
     return JSONResponse(content=_dump(projection))
 
 
-@router.post("/conversation/submit")
+# One body shape across three statuses: ``acceptance`` picks 200 / 202 (unknown) / 422
+# (rejected or unsupported), so all three are the SAME success model. The 422 entry must still
+# UNION in ``CONTROL_RESPONSES[422]``: this is a ``{**a, **b}`` dict merge, so a bare
+# ``{422: ConversationSubmitted}`` would delete the shared refusal rather than join it, and
+# ``_map_typed_error`` reaches this route's 422 too (``CapabilityRefusedError`` and
+# ``OperationRejectedError`` both carry ``http_status = 422``).
+@router.post(
+    "/conversation/submit",
+    response_model=ConversationSubmitted,
+    responses={
+        **CONTROL_RESPONSES,
+        202: {"model": ConversationSubmitted, "description": "Accepted, acceptance unknown"},
+        422: {
+            "model": ConversationSubmitted | StatusRefusal,
+            "description": "Rejected or unsupported, or a typed refusal of the request as posed",
+        },
+    },
+)
 async def conversation_submit(
     ar_session_id: str,
     body: ConversationSubmitRequest,
@@ -587,7 +682,11 @@ async def conversation_submit(
     return JSONResponse(content=content, status_code=status_code)
 
 
-@router.get("/conversation/policy")
+@router.get(
+    "/conversation/policy",
+    response_model=ConversationPolicyProjection,
+    responses=CONTROL_RESPONSES,
+)
 async def conversation_policy(
     ar_session_id: str,
     expected_bridge_epoch: EpochQuery,
@@ -609,7 +708,11 @@ async def conversation_policy(
     return JSONResponse(content=_dump(projection))
 
 
-@router.get("/conversation/telemetry")
+@router.get(
+    "/conversation/telemetry",
+    response_model=ConversationTelemetry,
+    responses=CONTROL_RESPONSES,
+)
 async def conversation_telemetry(
     ar_session_id: str,
     expected_bridge_epoch: EpochQuery,

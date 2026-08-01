@@ -26,6 +26,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
@@ -68,6 +69,7 @@ from agents_remember.observer import (
     reset_ambient,
 )
 from agents_remember.observer.ambient import AmbientTiming
+from agents_remember.serving.supervisor_heartbeat import SupervisorHeartbeatStore
 from agents_remember.tasks import TaskDocument, write_task_doc
 from test_config import settings_payload
 from test_worktree_support import (
@@ -339,6 +341,18 @@ def _carryover_selection(source: str, old_base: str) -> CarryoverSelection:
     )
 
 
+def _stale_supervisor(observer_root: Path) -> None:
+    """Tick the supervisor heartbeat into the past so every capture carries the banner.
+
+    Without this, these fixtures were a workspace whose supervisor had NEVER ticked --
+    deliberately silent (see ``supervisor_staleness_banner``) -- so ``supervisorBanner``
+    never fired and this suite validated the one shape the choke point cannot break.
+    A ticked-then-quiet row is the mutation point: it is the state in which the choke
+    point adds a key, so it is the state the contract has to be checked in.
+    """
+    SupervisorHeartbeatStore(observer_root).tick(now=datetime.now(UTC) - timedelta(hours=6))
+
+
 def _lifecycle_payloads(root: Path) -> dict[str, dict]:
     """Drive the ambient lifecycle through each signal, capturing every payload.
 
@@ -347,10 +361,10 @@ def _lifecycle_payloads(root: Path) -> dict[str, dict]:
     ``lifecycle_block`` stays here as lower-level compatibility coverage; it is
     not an advertised public MCP tool.
     """
+    observer_root = root / "logs" / "observer"
+    _stale_supervisor(observer_root)
     install_ambient(
-        AmbientLifecycle(
-            EventStore(root / "logs" / "observer"), timing=AmbientTiming(heartbeat_seconds=3600)
-        )
+        AmbientLifecycle(EventStore(observer_root), timing=AmbientTiming(heartbeat_seconds=3600))
     )
     try:
         return {
@@ -400,9 +414,11 @@ def _task_doc_payloads(root: Path) -> dict[str, dict]:
 
 def _gate_payloads(config) -> dict[str, dict]:
     """Control-plane gate substrate, including lower-level compatibility builders."""
+    observer_root = config.coordination_root / "logs" / "observer"
+    _stale_supervisor(observer_root)
     install_ambient(
         AmbientLifecycle(
-            EventStore(config.coordination_root / "logs" / "observer"),
+            EventStore(observer_root),
             timing=AmbientTiming(heartbeat_seconds=3600),
         )
     )
@@ -548,6 +564,19 @@ class ToolResponseConformanceTests(unittest.TestCase):
 
     def test_every_modeled_tool_has_a_representative_payload(self) -> None:
         self.assertEqual(set(self.payloads), set(TOOL_RESPONSE_MODELS))
+
+    def test_the_choke_point_injections_are_actually_exercised(self) -> None:
+        # This suite sits exactly at the mutation point -- ``_tool_payload`` is where the
+        # two envelope-wide keys get set -- but it can only catch drift in them if the
+        # captures were taken in a state where they FIRE. They are captured in an active
+        # lifecycle (``nextStep``) whose supervisor ticked and then went quiet
+        # (``supervisorBanner``); assert both, so a fixture that quietly stops producing
+        # them is a failure here rather than a silent hole in every assertion below.
+        with_next_step = {name for name, body in self.payloads.items() if "nextStep" in body}
+        with_banner = {name for name, body in self.payloads.items() if "supervisorBanner" in body}
+        self.assertIn("lifecycle_start", with_next_step)
+        self.assertIn("lifecycle_start", with_banner)
+        self.assertIn("lifecycle_gate", with_banner)
 
     def test_representative_payloads_conform_to_registered_models(self) -> None:
         for tool_name, model in TOOL_RESPONSE_MODELS.items():

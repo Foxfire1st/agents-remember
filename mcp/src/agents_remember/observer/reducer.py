@@ -19,21 +19,24 @@ derived state as a written fact.
 
 from __future__ import annotations
 
+from collections import Counter
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import Any, get_args
+from typing import Any
 
 from agents_remember.controlplane.attention_dismissals import AttentionDismissalRecord
 from agents_remember.controlplane.records import DECISION_STATES, GateRecord
 from agents_remember.observer.events import Event
 from agents_remember.observer.lifecycle_state import (
     INITIAL_PHASE,
+    STATES,
     TERMINAL_STATES,
-    State,
+    coerce_end_outcome,
     coerce_phase,
 )
 from agents_remember.observer.projection import (
+    STATE_COUNT_FIELDS,
     ActionAvailability,
     AgentPickupNode,
     Analytics,
@@ -65,7 +68,11 @@ from agents_remember.observer.projection import (
 from agents_remember.observer.series_tokens import attach_series_token_totals
 from agents_remember.observer.timeutil import STALE_AFTER_SECONDS, TTL_SECONDS, age_seconds
 
-_STATES: frozenset[str] = frozenset(get_args(State))
+# The whole vocabulary, as strings. Taken from :data:`STATES` rather than from
+# ``get_args(State)``: on the union form (``Literal[...] | Other``) ``get_args`` returns
+# ``Literal`` OBJECTS, and a set of those matches no event payload -- every correction below
+# would be dropped as malformed, silently and forever.
+_STATES: frozenset[str] = frozenset(STATES)
 
 
 def project_lifecycle(events: list[Event], *, now: datetime) -> LifecycleProjection:
@@ -396,7 +403,8 @@ def _promoted_updates(_proj: LifecycleProjection, event: Event) -> dict[str, Any
 
 
 def _ended_updates(_proj: LifecycleProjection, event: Event) -> dict[str, Any]:
-    return {"state": "completed" if event.data.get("outcome") == "completed" else "abandoned"}
+    """The ONE way into a terminal state: the outcome names it (see ``TerminalState``)."""
+    return {"state": coerce_end_outcome(event.data.get("outcome"))}
 
 
 def _tool_completed_updates(proj: LifecycleProjection, event: Event) -> dict[str, Any]:
@@ -517,13 +525,25 @@ def _metrics(
     lifecycles: list[LifecycleProjection],
     sidecars: list[SidecarStaleNode] | None = None,
 ) -> Metrics:
+    """The workspace rollup: the all-states totals plus one bucket per live state.
+
+    The buckets come from :data:`STATE_COUNT_FIELDS`, not from a line per state. Three
+    hand-written ``sum(1 for lc in lifecycles if lc.state == ...)`` lines are what made a
+    lifecycle that had handed the turn back count towards ``lifecycleCount`` and
+    ``totalTokens`` and towards nothing else. Counting by vocabulary also makes the next gap
+    impossible to ship quietly: ``Metrics`` is ``extra="forbid"``, so a state whose bucket
+    field was never declared raises here instead of vanishing into a zero.
+
+    The keyword expansion below is keyed by BUCKET, so it would silently drop a count if two
+    states shared one -- which is why :func:`state_count_fields` refuses to build a map that
+    is not one-to-one rather than leaving the loss to be noticed in a served number.
+    """
+    counts = Counter(lc.state for lc in lifecycles)
     return Metrics(
         lifecycleCount=len(lifecycles),
-        runningCount=sum(1 for lc in lifecycles if lc.state == "running"),
-        blockedCount=sum(1 for lc in lifecycles if lc.state == "blocked"),
-        pausedCount=sum(1 for lc in lifecycles if lc.state == "paused"),
         totalTokens=sum(lc.tokens for lc in lifecycles),
         stalenessHistogram=staleness_histogram(sidecars) if sidecars else {},
+        **{bucket: counts[state] for state, bucket in STATE_COUNT_FIELDS.items()},
     )
 
 

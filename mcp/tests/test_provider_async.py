@@ -21,6 +21,7 @@ from agents_remember.worktrees.modules import cleanup as worktree_cleanup
 from agents_remember.worktrees.modules import provider_async
 from agents_remember.worktrees.modules import start as worktree_start
 from agents_remember.worktrees.modules.args import WorktreeArgs
+from agents_remember.worktrees.modules.guidance import projected_status_payload
 from agents_remember.worktrees.modules.models import WorktreeProviderSetupConfig
 from agents_remember.worktrees.worktree_contract import (
     ContractTask,
@@ -165,6 +166,21 @@ class ProviderSetupStatusTests(unittest.TestCase):
             state_file.parent.mkdir(parents=True, exist_ok=True)
             state_file.write_text("{}", encoding="utf-8")
             self.assertEqual(provider_async.provider_setup_status(contract), {"state": "prepared"})
+
+    def test_a_prepared_stack_reaches_the_status_payload(self) -> None:
+        """`providers` is only attached when there is something to report, and it was never
+        proven to reach the payload -- only that `provider_setup_status` computes it."""
+        with tempfile.TemporaryDirectory() as tmp:
+            contract = make_contract(Path(tmp))
+            without = projected_status_payload(contract, landing=None)
+            self.assertNotIn("providers", without)
+
+            state_file = contract.worktree_group / "provider-runtime" / "provider-state.json"
+            state_file.parent.mkdir(parents=True, exist_ok=True)
+            state_file.write_text("{}", encoding="utf-8")
+
+            payload = projected_status_payload(contract, landing=None)
+            self.assertEqual(payload.get("providers"), {"state": "prepared"})
 
     def test_failed_progress_carries_retry_args(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

@@ -27,3 +27,11 @@ mcp/tests/fixtures/sim-rich/
 # wheel locally) drops these in-tree; an untracked build product must not dirty the gate.
 /mcp/build/
 /mcp/dist/
+
+# Type-checker daemon and cache artifacts. `dmypy` writes a `.dmypy.json` holding a pid and
+# a socket path next to whatever it was pointed at -- it landed in `mcp/src/` twice during
+# this task's tooling evaluation. That matters more than it used to: closeout now stages the
+# whole worktree before gating (so the gate can see created files), so anything untracked and
+# unignored is staged and committed rather than merely ignored by ruff.
+.dmypy.json
+.mypy_cache/

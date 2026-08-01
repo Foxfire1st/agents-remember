@@ -15,6 +15,7 @@ import time
 import unittest
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Any
 
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
@@ -22,6 +23,7 @@ sys.path.insert(0, str(MCP_SRC))
 from agents_remember.observer.ambient import AmbientLifecycle, AmbientTiming, build_ask
 from agents_remember.observer.events import Event
 from agents_remember.observer.lifecycle_state import (
+    TERMINAL_STATES,
     GuardedStartError,
     LifecycleError,
     coerce_phase,
@@ -133,6 +135,54 @@ class StateMachineTests(_AmbientCase):
     def test_signal_without_active_lifecycle_raises(self) -> None:
         with self.assertRaises(LifecycleError):
             self.amb.phase("build")
+
+
+def _string_constants(function: Any) -> set[str]:
+    """Every string literal compiled into a function's body, tuples and sets flattened.
+
+    Reads the code object rather than the source text, so comments and the docstring cannot
+    trip it: a name only counts here if the function actually *uses* it as a value.
+    """
+    found: set[str] = set()
+    pending: list[Any] = list(function.__code__.co_consts)
+    while pending:
+        const = pending.pop()
+        if isinstance(const, str):
+            found.add(const)
+        elif isinstance(const, tuple | frozenset | set | list):
+            pending.extend(const)
+    return found
+
+
+class EndSignalVocabularyTests(unittest.TestCase):
+    """``end`` READS the terminal vocabulary; it no longer keeps a second copy of it.
+
+    Both halves of the classification used to live in this method: a literal
+    ``("completed", "abandoned")`` accept-tuple and a hand-written outcome -> state
+    conditional. That is a copy, and the failure a copy has is silent -- a third terminal
+    state would be one the reducer projects and no session can write, and a renamed one
+    would be accepted by the guard and then mapped to the wrong state by the conditional.
+
+    ``test_the_ambient_end_signal_accepts_exactly_the_terminal_states`` (in
+    ``test_observer_projection.py``) pins the BEHAVIOUR against today's vocabulary; a copy
+    that happens to agree passes it, which is precisely what the removed copy did for as
+    long as it existed. These pin the structure instead.
+    """
+
+    def test_the_end_signal_names_no_terminal_state_of_its_own(self) -> None:
+        named = sorted(_string_constants(AmbientLifecycle.end) & TERMINAL_STATES)
+        self.assertEqual(
+            named,
+            [],
+            f"AmbientLifecycle.end hard-codes terminal state(s) {named}; the accept-set is "
+            "TERMINAL_STATES and the outcome -> state conversion is coerce_end_outcome, so "
+            "the write side has no state name to spell for itself",
+        )
+
+    def test_the_end_signal_converts_through_the_vocabulary(self) -> None:
+        """The guard alone is not enough: a bare cast would also name no state."""
+        self.assertIn("coerce_end_outcome", AmbientLifecycle.end.__code__.co_names)
+        self.assertIn("TERMINAL_STATES", AmbientLifecycle.end.__code__.co_names)
 
 
 class SwitchTests(_AmbientCase):

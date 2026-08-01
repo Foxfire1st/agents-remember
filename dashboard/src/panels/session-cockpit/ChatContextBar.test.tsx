@@ -3,19 +3,20 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { fromTerminalSessionInfo, sessionStore } from "../../data/sessions";
 import { catalogRow } from "../../test/fixtures/catalogRows";
+import { taskDoc } from "../../test/fixtures/wire";
 import type { TaskDocNode } from "../../types/projection";
 import { ChatContextBar, ChatSessionActions } from "./ChatContextBar";
 
 const LEAF_KEY = "agents-remember/260628_operations-integration/260628-L5";
 
 function leafDoc(): TaskDocNode {
-  return {
+  return taskDoc({
     id: "260628-L5",
     repository: "agents-remember",
     kind: "subTask",
     docPath: "/tasks/agents-remember/260628_operations-integration/05_sidebar-chat-attachment.json",
     title: "Sidebar chat attachment",
-  } as unknown as TaskDocNode;
+  });
 }
 
 function seedTerminal(overrides: Partial<ReturnType<typeof catalogRow>> = {}) {

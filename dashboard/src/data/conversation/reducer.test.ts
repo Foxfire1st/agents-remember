@@ -8,83 +8,24 @@ import {
   emptyProjection,
   orderedItems,
 } from "./reducer";
+import {
+  conversationIdentity,
+  conversationItem as item,
+  conversationPage,
+  eventCursor,
+} from "../../test/fixtures/conversationWire";
 import type {
   ActiveConversationRef,
-  ActiveEventCursor,
   ConversationEventEnvelope,
   ConversationItem,
   ConversationMutation,
   ConversationPage,
 } from "./types";
 
-const IDENTITY: ActiveConversationRef = {
-  harnessId: "codex",
-  vendorConversationId: "vc-1",
-  projectScope: "/repo",
-  identityDigest: "digest-1",
-  arSessionId: "ar-1",
-  bridgeEpoch: "epoch-1",
-};
-
-function item(overrides: Partial<ConversationItem> & { itemId: string; globalOrdinal: number }): ConversationItem {
-  return {
-    revision: 1,
-    turnId: "t1",
-    lane: "harness",
-    source: "harness-live",
-    provenance: { strength: "exact", origin: "codex" },
-    role: "assistant",
-    kind: "message",
-    phase: "completed",
-    blocks: [{ blockId: `${overrides.itemId}-b1`, type: "markdown", markdown: "hello" }],
-    ...overrides,
-  };
-}
+const IDENTITY: ActiveConversationRef = conversationIdentity();
 
 function page(items: ConversationItem[], overrides: Partial<ConversationPage> = {}): ConversationPage {
-  return {
-    identity: IDENTITY,
-    items,
-    page: { olderCursor: null, hasOlder: false, totalItems: items.length },
-    eventCursor: "evt-0" as ActiveEventCursor,
-    hydrationId: "hy-1",
-    status: {
-      identity: IDENTITY,
-      revision: 1,
-      observedAt: "2026-07-20T00:00:00Z",
-      freshness: { state: "fresh", lastEvidenceAt: null, ageMs: null, staleAfterMs: 10000, observationBound: "poll" },
-      process: { state: "connected", generation: "g1" },
-      turn: { state: "ready", turnId: null, stateSince: null },
-      evidence: { strength: "exact", origin: "codex" },
-    },
-    capabilities: {
-      live: {
-        text: cap(),
-        thinking: cap(),
-        tools: cap(),
-        diffs: cap(),
-        interactions: cap(),
-        completeness: cap(),
-      },
-      history: { list: cap(), read: cap(), resume: cap(), completeness: cap(), toolCompleteness: cap() },
-      controls: {
-        interrupt: cap(),
-        steer: cap(),
-        followUp: cap(),
-        attachments: { image: attachCap(), file: attachCap(), resource: attachCap() },
-        policyRead: cap(),
-      },
-      telemetry: { context: cap(), usage: cap(), cost: cap(), rateLimit: cap(), compaction: cap() },
-    },
-    ...overrides,
-  };
-}
-
-function cap() {
-  return { state: "supported" as const, reason: "ok", evidenceTier: "runtime-fixture" as const };
-}
-function attachCap() {
-  return { ...cap(), allowedMimeTypes: [], maxBytes: 0, maxCount: 0, description: "required" as const };
+  return conversationPage({ identity: IDENTITY, items, ...overrides });
 }
 
 function envelope(
@@ -95,8 +36,8 @@ function envelope(
 ): ConversationEventEnvelope {
   return {
     identity: IDENTITY,
-    cursor: cursor as ActiveEventCursor,
-    previousCursor: previousCursor as ActiveEventCursor | null,
+    cursor: eventCursor(cursor),
+    previousCursor: previousCursor === null ? null : eventCursor(previousCursor),
     sequence: 1,
     eventId: `e-${cursor}`,
     emittedAt: "2026-07-20T00:00:01Z",
@@ -191,7 +132,7 @@ describe("active conversation reducer", () => {
 
   it("emits a repage recovery and gap stream on an established-stream gap mutation", () => {
     let proj = applyInitialPage(emptyProjection(IDENTITY), page([]));
-    proj = applyEvent(proj, envelope("evt-1", "evt-0", { op: "gap", requestedAfter: "evt-0" as ActiveEventCursor, reason: "retention-overflow", requiresRepage: true, closeAfterEvent: true }));
+    proj = applyEvent(proj, envelope("evt-1", "evt-0", { op: "gap", requestedAfter: eventCursor("evt-0"), reason: "retention-overflow", requiresRepage: true, closeAfterEvent: true }));
     expect(proj.stream).toBe("gap");
     expect(proj.recovery?.mode).toBe("repage");
   });
@@ -216,11 +157,11 @@ describe("active conversation reducer", () => {
   it("prepends an older page while preserving existing items and the resume cursor", () => {
     let proj = applyInitialPage(
       emptyProjection(IDENTITY),
-      page([item({ itemId: "b", globalOrdinal: 2 })], { eventCursor: "evt-5" as ActiveEventCursor }),
+      page([item({ itemId: "b", globalOrdinal: 2 })], { eventCursor: eventCursor("evt-5") }),
     );
     proj = applyOlderPage(
       proj,
-      page([item({ itemId: "a", globalOrdinal: 1 })], { page: { olderCursor: null, hasOlder: false }, eventCursor: "evt-OLD" as ActiveEventCursor }),
+      page([item({ itemId: "a", globalOrdinal: 1 })], { page: { olderCursor: null, hasOlder: false }, eventCursor: eventCursor("evt-OLD") }),
     );
     expect(orderedItems(proj).map((i) => i.itemId)).toEqual(["a", "b"]);
     expect(proj.eventCursor).toBe("evt-5"); // older paging never moves the live resume point
@@ -228,9 +169,9 @@ describe("active conversation reducer", () => {
 
   it("re-hydrates and clears applied keys + recovery on a replace-page mutation", () => {
     let proj = applyInitialPage(emptyProjection(IDENTITY), page([item({ itemId: "a", globalOrdinal: 1 })]));
-    proj = applyEvent(proj, envelope("evt-1", "evt-0", { op: "gap", requestedAfter: "evt-0" as ActiveEventCursor, reason: "projector-restart", requiresRepage: true, closeAfterEvent: true }));
+    proj = applyEvent(proj, envelope("evt-1", "evt-0", { op: "gap", requestedAfter: eventCursor("evt-0"), reason: "projector-restart", requiresRepage: true, closeAfterEvent: true }));
     expect(proj.recovery?.mode).toBe("repage");
-    proj = applyEvent(proj, envelope("evt-9", "evt-8", { op: "replace-page", items: [item({ itemId: "x", globalOrdinal: 1 })], eventCursor: "evt-9" as ActiveEventCursor, reason: "native-rehydrate" }));
+    proj = applyEvent(proj, envelope("evt-9", "evt-8", { op: "replace-page", items: [item({ itemId: "x", globalOrdinal: 1 })], eventCursor: eventCursor("evt-9"), reason: "native-rehydrate" }));
     expect(orderedItems(proj).map((i) => i.itemId)).toEqual(["x"]);
     expect(proj.eventCursor).toBe("evt-9");
     expect(proj.recovery).toBeUndefined();

@@ -84,6 +84,7 @@ from agents_remember.kernel.agentic_settings import load_agentic_settings
 from agents_remember.mcp.tools.dispatch_brief import HostedDelivery
 from agents_remember.mcp.tools.gates import gate_decide_for_lifecycle, gate_decide_payload
 from agents_remember.mcp.tools.operator_inbox import operator_inbox_post_payload
+from agents_remember.models.operator_inbox import OperatorInboxPostResponse
 from agents_remember.observer import observer_root
 from agents_remember.observer.event_retention import (
     WORKSPACE_EVENT_COMPACT_INTERVAL_SECONDS,
@@ -91,6 +92,7 @@ from agents_remember.observer.event_retention import (
 )
 from agents_remember.observer.events import now_iso
 from agents_remember.observer.landing_state import LandingStateRefresher
+from agents_remember.observer.projection import TaskDocNode
 from agents_remember.observer.projection_store import ProviderStateRefresher
 from agents_remember.observer.snapshots import read_task_document_body
 from agents_remember.observer.store import EventStore
@@ -150,6 +152,35 @@ from agents_remember.serving.projector import (
     ProjectionReplay,
     Projector,
 )
+from agents_remember.serving.response_contract import (
+    ACTION_RESPONSES,
+    ActionAccepted,
+    DetectedHarnessesResponse,
+    HttpDetailRefusal,
+    LeafRefRefusal,
+    LeafTakenConflict,
+    OperatorInboxDismissed,
+    StatusRefusal,
+    StreamReadyMarker,
+    TerminalAlreadyRetired,
+    TerminalCleanupResult,
+    TerminalHarnessDelivery,
+    TerminalHarnessRefusal,
+    TerminalImageRefusal,
+    TerminalImageStored,
+    TerminalLaunchConflict,
+    TerminalLeafAttached,
+    TerminalLeafRefused,
+    TerminalOpened,
+    TerminalPaneDelivery,
+    TerminalRenamed,
+    TerminalRetired,
+    TerminalRetireRefused,
+    TerminalSessionsResponse,
+    TerminalTerminated,
+    UnknownActorRefusal,
+    UnknownSessionRefusal,
+)
 from agents_remember.serving.retire import SeatClosure, retire_entry
 from agents_remember.serving.retire_policy import (
     RetirePolicyError,
@@ -161,9 +192,14 @@ from agents_remember.serving.seat_events import (
     log_retire_event,
     log_turn_state_change_event,
 )
+from agents_remember.serving.served_state import (
+    ServedWorkspaceProjection,
+    served_state_tail,
+)
 from agents_remember.serving.static import mount_static
 from agents_remember.serving.supervisor import SupervisorContext, run_supervisor_sweep
 from agents_remember.serving.supervisor_heartbeat import (
+    SupervisorHeartbeatPayload,
     SupervisorHeartbeatStore,
     heartbeat_age_seconds,
 )
@@ -265,7 +301,7 @@ async def stream_events(
     projector: Projector,
     *,
     build: ServingBuild | None = None,
-    supervisor_heartbeat: dict[str, Any] | None = None,
+    supervisor_heartbeat: SupervisorHeartbeatPayload | None = None,
 ) -> AsyncGenerator[ServerSentEvent]:
     """The SSE event sequence for one atomic projector subscription.
 
@@ -274,6 +310,11 @@ async def stream_events(
     ``servingBuild`` so the cockpit can render which process/commit is answering.
     ``supervisor_heartbeat`` rides as ``supervisorHeartbeat`` -- the tick age
     at connect time, so a stale supervisor is visible in the dashboard header at a glance.
+
+    The tail rides the ``snapshot`` ONLY: a ``delta`` is one projection node, not a state
+    body, so there is nothing there for a whole-workspace stamp to be a field of. That
+    asymmetry is why the snapshot is a :class:`ServedWorkspaceProjection` and a delta is
+    just an encoded node.
     """
     async with contextlib.aclosing(projector.subscribe()) as subscription:
         async for seq, delta in subscription:
@@ -285,10 +326,7 @@ async def stream_events(
             else:
                 payload = _encode(delta.data)
             if delta.event == "snapshot":
-                if build is not None:
-                    payload["servingBuild"] = build.payload()
-                if supervisor_heartbeat is not None:
-                    payload["supervisorHeartbeat"] = supervisor_heartbeat
+                payload.update(served_state_tail(build=build, heartbeat=supervisor_heartbeat))
             yield ServerSentEvent(data=payload, event=delta.event, id=str(seq), retry=2000)
 
 
@@ -895,7 +933,7 @@ def _serving_lifespan(
 # --- projection routes --------------------------------------------------------------------------
 
 
-def _supervisor_heartbeat_payload(runtime: _ServingRuntime) -> dict[str, Any]:
+def _supervisor_heartbeat_payload(runtime: _ServingRuntime) -> SupervisorHeartbeatPayload:
     # The tick age at RESPONSE time (not the ETag-gated content revision --
     # a heartbeat is deliberately volatile, the same "ages excluded" posture delta.py already
     # applies to other live ages, so it never busts the projection's change-gate revision).
@@ -904,19 +942,17 @@ def _supervisor_heartbeat_payload(runtime: _ServingRuntime) -> dict[str, Any]:
     heartbeat = runtime.heartbeat_store.read()
     age = heartbeat_age_seconds(heartbeat, now=moment)
     stale_cutoff = settings.supervisor.stale_cutoff_seconds
-    return {
-        "lastTickAt": heartbeat.lastTickAt if heartbeat is not None else None,
-        "ageSeconds": age,
-        "staleCutoffSeconds": stale_cutoff,
-        "stale": age is None or age >= stale_cutoff,
-        "pendingInboxCount": heartbeat.pendingInboxCount if heartbeat is not None else 0,
-        "redeliverableInboxCount": (
-            heartbeat.redeliverableInboxCount if heartbeat is not None else 0
-        ),
-        "lastSweepDurationSeconds": (
+    return SupervisorHeartbeatPayload(
+        lastTickAt=heartbeat.lastTickAt if heartbeat is not None else None,
+        ageSeconds=age,
+        staleCutoffSeconds=stale_cutoff,
+        stale=age is None or age >= stale_cutoff,
+        pendingInboxCount=heartbeat.pendingInboxCount if heartbeat is not None else 0,
+        redeliverableInboxCount=(heartbeat.redeliverableInboxCount if heartbeat is not None else 0),
+        lastSweepDurationSeconds=(
             heartbeat.lastSweepDurationSeconds if heartbeat is not None else None
         ),
-    }
+    )
 
 
 def _state_response(runtime: _ServingRuntime, if_none_match: str | None) -> Response:
@@ -934,9 +970,16 @@ def _state_response(runtime: _ServingRuntime, if_none_match: str | None) -> Resp
         return Response(status_code=304, headers=headers)
     # The dump rides the per-instance memo; only the volatile tail
     # (build stamp + at-response-time heartbeat) is computed per request, on a copy.
+    # This body is therefore ASSEMBLED rather than dumped from one model -- the memo and the
+    # ETag both depend on the tick-time half being reusable and the serve-time half not
+    # being. What it assembles to is nonetheless declared: it is a
+    # ``served_state.ServedWorkspaceProjection``, and the conformance suite validates the
+    # real route's output against that model. Validating here instead would re-parse ~1.3 MB
+    # per request and hand back exactly what the memo exists to save.
     body = dict(_projection_body_cache.body(snapshot))
-    body["servingBuild"] = runtime.build.payload()
-    body["supervisorHeartbeat"] = _supervisor_heartbeat_payload(runtime)
+    body.update(
+        served_state_tail(build=runtime.build, heartbeat=_supervisor_heartbeat_payload(runtime))
+    )
     return JSONResponse(content=body, headers=headers)
 
 
@@ -958,17 +1001,47 @@ def _task_document_response(runtime: _ServingRuntime, path: str) -> JSONResponse
 def _register_projection_routes(app: FastAPI, runtime: _ServingRuntime) -> None:
     """The read side of the cockpit: the projection once, tailed, and the raw event river."""
 
-    @app.get("/api/state")
+    # The 304 branch is why this cannot become a model-returning handler: it answers with an
+    # ETag and NO body at all, which no ``response_model`` can express. The declaration names
+    # the 200 shape; ``mcp/tests/test_served_state_conformance.py`` holds both branches shut.
+    @app.get(
+        "/api/state",
+        response_model=ServedWorkspaceProjection,
+        responses={
+            304: {"description": "Content revision unchanged; ETag only, no body"},
+            503: {"model": HttpDetailRefusal, "description": "Projection not ready"},
+        },
+    )
     def api_state(
         if_none_match: Annotated[str | None, Header()] = None,
     ) -> Response:
         return _state_response(runtime, if_none_match)
 
-    @app.get("/api/task-document")
+    @app.get(
+        "/api/task-document",
+        response_model=TaskDocNode,
+        responses={
+            404: {"model": HttpDetailRefusal, "description": "No such task document"},
+            503: {"model": HttpDetailRefusal, "description": "Projection not ready"},
+        },
+    )
     def api_task_document(path: Annotated[str, Query()]) -> JSONResponse:
         return _task_document_response(runtime, path)
 
-    @app.get("/api/stream", response_class=EventSourceResponse)
+    # An SSE route: the declared model is what a ``snapshot`` frame's ``data`` carries. A
+    # ``delta`` frame is one bare projection node -- that asymmetry is the contract, and the
+    # served-state conformance suite pins it on the real generator.
+    @app.get(
+        "/api/stream",
+        response_class=EventSourceResponse,
+        response_model=ServedWorkspaceProjection,
+        responses={
+            200: {
+                "content": {"text/event-stream": {}},
+                "description": "One `snapshot` frame, then per-entity `delta` frames",
+            }
+        },
+    )
     async def api_stream() -> AsyncIterator[ServerSentEvent]:
         async for event in stream_events(
             runtime.projector,
@@ -977,7 +1050,20 @@ def _register_projection_routes(app: FastAPI, runtime: _ServingRuntime) -> None:
         ):
             yield event
 
-    @app.get("/api/events", response_class=EventSourceResponse)
+    # The raw river: every ``event`` frame is a verbatim observer JSONL record replayed from
+    # disk, so its schema belongs to the observer. What THIS route mints is the ready marker,
+    # which is therefore what it declares.
+    @app.get(
+        "/api/events",
+        response_class=EventSourceResponse,
+        response_model=StreamReadyMarker,
+        responses={
+            200: {
+                "content": {"text/event-stream": {}},
+                "description": "Verbatim `event` frames, then one `ready` marker",
+            }
+        },
+    )
     async def api_events(
         last_event_id: Annotated[str | None, Header()] = None,
     ) -> AsyncIterator[ServerSentEvent]:
@@ -1165,15 +1251,33 @@ def _inbox_dismiss_response(runtime: _ServingRuntime, entry_id: str) -> Response
 def _register_action_routes(app: FastAPI, runtime: _ServingRuntime) -> None:
     """The write side the developer drives: the gate return channel and the operator inbox."""
 
-    @app.post("/api/actions/{action}")
+    # ``status_code=202`` because that is the status this route actually answers with: an
+    # accepted intent is recorded, not applied. Left implicit it declared its success shape at
+    # 200 -- a pair no request can ever produce, and therefore one no conformance check could
+    # ever drive. The handler returns a ``Response`` it built itself, so this is a declaration
+    # only and moves no bytes.
+    @app.post(
+        "/api/actions/{action}",
+        response_model=ActionAccepted,
+        status_code=202,
+        responses=ACTION_RESPONSES,
+    )
     def api_action(action: str, request: ActionRequest) -> Response:
         return _action_response(runtime, action, request)
 
-    @app.post("/api/operator-inbox")
+    @app.post(
+        "/api/operator-inbox",
+        response_model=OperatorInboxPostResponse,
+        responses={400: {"model": StatusRefusal, "description": "Unaddressable inbox message"}},
+    )
     def api_operator_inbox(request: OperatorInboxPostRequest) -> Response:
         return _operator_inbox_response(runtime, request)
 
-    @app.post("/api/operator-inbox/{entry_id}/dismiss")
+    @app.post(
+        "/api/operator-inbox/{entry_id}/dismiss",
+        response_model=OperatorInboxDismissed,
+        responses={404: {"model": OperatorInboxDismissed, "description": "No such inbox entry"}},
+    )
     def api_operator_inbox_dismiss(entry_id: str) -> Response:
         return _inbox_dismiss_response(runtime, entry_id)
 
@@ -1228,17 +1332,31 @@ def _detected_harnesses_payload(runtime: _ServingRuntime) -> dict[str, Any]:
 def _register_terminal_session_routes(app: FastAPI, runtime: _ServingRuntime) -> None:
     """Attaching to a live pane, and what there is to attach to."""
 
+    # THE ONE ROUTE WITHOUT A DECLARED RESPONSE MODEL, and the only one there can be: a
+    # websocket is registered as an ``APIWebSocketRoute``, which takes no ``response_model``
+    # because it has no response body -- it upgrades the connection and then frames bytes both
+    # ways. ``test_serving_response_conformance.py`` recognises this exemption by route CLASS, so
+    # a future undeclared *HTTP* route cannot hide behind it.
     @app.websocket("/api/terminal/{session}")
     async def api_terminal(websocket: WebSocket, session: str) -> None:
         await _serve_terminal_websocket(runtime, websocket, session)
 
-    @app.get("/api/terminal/sessions")
+    # One of only two routes that return a bare ``dict``, so FastAPI itself validates this
+    # body against the model -- the declaration is live enforcement here, not just schema.
+    # ``exclude_unset`` reproduces ``TerminalCatalogEntry.to_json``'s conditional key set
+    # exactly, instead of back-filling nulls the dashboard has never seen.
+    @app.get(
+        "/api/terminal/sessions",
+        response_model=TerminalSessionsResponse,
+        response_model_exclude_unset=True,
+    )
     def api_terminal_sessions() -> dict[str, Any]:
         return {
             "sessions": [_catalog_payload(entry) for entry in runtime.liveness_sweeper.refresh()]
         }
 
-    @app.get("/api/harnesses")
+    # The second FastAPI-validated route. Every key is required, so nothing is excluded.
+    @app.get("/api/harnesses", response_model=DetectedHarnessesResponse)
     def api_harnesses() -> dict[str, Any]:
         return _detected_harnesses_payload(runtime)
 
@@ -1722,35 +1840,99 @@ async def _terminal_image_response(
 def _register_terminal_control_routes(app: FastAPI, runtime: _ServingRuntime) -> None:
     """Everything that changes a seat: open it, bind it, feed it, rename it, retire it."""
 
-    @app.post("/api/terminal/landed-cleanup")
+    @app.post("/api/terminal/landed-cleanup", response_model=TerminalCleanupResult)
     def api_terminal_landed_cleanup(request: TerminalLandedCleanupRequest) -> Response:
         return _landed_cleanup_response(runtime, request.session_ids)
 
-    @app.post("/api/terminal/{session}")
+    @app.post(
+        "/api/terminal/{session}",
+        response_model=TerminalOpened,
+        responses={
+            400: {
+                "model": LeafRefRefusal | StatusRefusal,
+                "description": "Unresolvable leaf ref, bad kind, or an invalid launch selection",
+            },
+            409: {
+                "model": LeafTakenConflict | TerminalLaunchConflict,
+                "description": "The leaf role is taken, or the seat was launched differently",
+            },
+        },
+    )
     def api_terminal_open(session: str, request: TerminalOpenRequest) -> Response:
         return _open_terminal_response(runtime, session, request)
 
-    @app.post("/api/terminal/{session}/attach-leaf")
+    @app.post(
+        "/api/terminal/{session}/attach-leaf",
+        response_model=TerminalLeafAttached,
+        responses={
+            400: {
+                "model": LeafRefRefusal | TerminalLeafRefused,
+                "description": "Unresolvable leaf ref, or a hand-opened seat with no role",
+            },
+            404: {"model": UnknownSessionRefusal, "description": "No such session"},
+            409: {"model": TerminalLeafRefused, "description": "The leaf role is already held"},
+        },
+    )
     def api_terminal_attach_leaf(session: str, request: TerminalAttachLeafRequest) -> Response:
         return _attach_leaf_response(runtime, session, request)
 
-    @app.post("/api/terminal/{session}/paste")
+    # Two success shapes, because a protocol harness and a plain pane can prove different
+    # things: the harness path returns submission evidence, the pane path only transport.
+    @app.post(
+        "/api/terminal/{session}/paste",
+        response_model=TerminalHarnessDelivery | TerminalPaneDelivery,
+        responses={
+            404: {"model": UnknownSessionRefusal, "description": "No live session"},
+            409: {
+                "model": TerminalHarnessRefusal,
+                "description": "A legacy harness seat, or an unsubmitted draft",
+            },
+        },
+    )
     def api_terminal_paste(session: str, request: TerminalPasteRequest) -> Response:
         return _paste_response(runtime, session, request)
 
-    @app.post("/api/terminal/{session}/terminate")
+    @app.post(
+        "/api/terminal/{session}/terminate",
+        response_model=TerminalTerminated,
+        responses={404: {"model": UnknownSessionRefusal, "description": "No such session"}},
+    )
     def api_terminal_terminate(session: str) -> Response:
         return _terminate_response(runtime, session)
 
-    @app.post("/api/terminal/{session}/retire")
+    # Retiring an already-terminal seat is idempotent, not an error, so the 200 carries two
+    # shapes; authority refusal is the only 403 on the whole app surface.
+    @app.post(
+        "/api/terminal/{session}/retire",
+        response_model=TerminalRetired | TerminalAlreadyRetired,
+        responses={
+            403: {"model": TerminalRetireRefused, "description": "Retire authority refused"},
+            404: {
+                "model": UnknownSessionRefusal | UnknownActorRefusal,
+                "description": "The target or the actor session is unknown",
+            },
+        },
+    )
     def api_terminal_retire(session: str, request: TerminalRetireRequest) -> Response:
         return _retire_response(runtime, session, request)
 
-    @app.post("/api/terminal/{session}/rename")
+    @app.post(
+        "/api/terminal/{session}/rename",
+        response_model=TerminalRenamed,
+        responses={404: {"model": UnknownSessionRefusal, "description": "No such live session"}},
+    )
     def api_terminal_rename(session: str, request: TerminalRenameRequest) -> Response:
         return _rename_response(runtime, session, request.label)
 
-    @app.post("/api/terminal/{session}/image")
+    @app.post(
+        "/api/terminal/{session}/image",
+        response_model=TerminalImageStored,
+        responses={
+            400: {"model": TerminalImageRefusal, "description": "Not an accepted image type"},
+            404: {"model": UnknownSessionRefusal, "description": "No such session"},
+            413: {"model": TerminalImageRefusal, "description": "Over the per-image cap"},
+        },
+    )
     async def api_terminal_image(
         session: str, request: Request, file: Annotated[UploadFile, File()]
     ) -> Response:

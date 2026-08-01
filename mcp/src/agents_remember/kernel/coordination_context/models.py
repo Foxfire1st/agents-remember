@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Literal, TypedDict
 
 from agents_remember.errors import AgentsRememberError
+from agents_remember.worktrees.worktree_contract import MemoryMode
 
 
 class MissingMemoryError(AgentsRememberError):
@@ -145,7 +146,11 @@ class CoordinationContext:
     storage: StorageSettings
     path_rules: list[StorageRule]
     cross_repo: CrossRepoSettings
-    memory_mode: Literal["internal", "external", "disabled"]
+    # From the worktree contract whenever one is in scope: `resolver.build_coordination_context`
+    # (resolver.py line 284) reads `contract.memory_mode` straight into this field, falling back
+    # to `_memory_mode(roots.topology)` only when there is no contract. So the vocabulary is the
+    # contract's, and this alias is the one declaration rather than a second copy of the pair.
+    memory_mode: MemoryMode
     contract_path: Path | None = None
     worktree_group: Path | None = None
     code_worktree: Path | None = None

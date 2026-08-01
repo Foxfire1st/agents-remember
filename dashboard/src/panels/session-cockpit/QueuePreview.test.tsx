@@ -7,112 +7,62 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { activeConversationStore } from "../../data/conversation/store";
 import type {
   ActiveConversationRef,
-  ActiveEventCursor,
   CapabilityState,
   ConversationCapabilities,
   ConversationPage,
   ConversationStatus,
 } from "../../data/conversation/types";
 import type { QueuedSubmit } from "../../data/sessionCockpitStore";
+import {
+  conversationCapabilities,
+  conversationIdentity,
+  conversationPage,
+  conversationStatus,
+  featureCapability,
+} from "../../test/fixtures/conversationWire";
 import { QueuePreview } from "./QueuePreview";
 
 const SESSION = "seat-steer";
 
 function identity(sessionId: string): ActiveConversationRef {
-  return {
-    harnessId: "codex",
+  return conversationIdentity({
     vendorConversationId: "v",
     projectScope: "/r",
     identityDigest: "d",
     arSessionId: sessionId,
     bridgeEpoch: "ep-1",
-  };
+  });
 }
 
-function cap(state: CapabilityState) {
-  return {
-    state,
-    reason: state === "supported" ? "fixture-probed" : "not yet probed",
-    evidenceTier: "runtime-fixture" as const,
-  };
-}
-
-function attachCap() {
-  return {
-    ...cap("supported"),
-    allowedMimeTypes: [],
-    maxBytes: 0,
-    maxCount: 0,
-    description: "required" as const,
-  };
-}
-
+/** The codex-shaped control tree: interrupt is the probed leaf, steer/follow-up are not offered. */
 function capabilities(interruptState: CapabilityState): ConversationCapabilities {
-  return {
-    live: {
-      text: cap("supported"),
-      thinking: cap("supported"),
-      tools: cap("supported"),
-      diffs: cap("supported"),
-      interactions: cap("supported"),
-      completeness: cap("supported"),
-    },
-    history: {
-      list: cap("supported"),
-      read: cap("supported"),
-      resume: cap("supported"),
-      completeness: cap("supported"),
-      toolCompleteness: cap("supported"),
-    },
+  return conversationCapabilities({
     controls: {
-      interrupt: cap(interruptState),
-      steer: cap("unavailable"),
-      followUp: cap("unavailable"),
-      attachments: { image: attachCap(), file: attachCap(), resource: attachCap() },
-      policyRead: cap("supported"),
+      interrupt: featureCapability({ state: interruptState }),
+      steer: featureCapability({ state: "unavailable" }),
+      followUp: featureCapability({ state: "unavailable" }),
     },
-    telemetry: {
-      context: cap("supported"),
-      usage: cap("supported"),
-      cost: cap("supported"),
-      rateLimit: cap("supported"),
-      compaction: cap("supported"),
-    },
-  };
+  });
 }
 
 function page(
   sessionId: string,
   options: { turnState: "working" | "ready"; interruptState: CapabilityState },
 ): ConversationPage {
-  const status: ConversationStatus = {
+  const status: ConversationStatus = conversationStatus({
     identity: identity(sessionId),
-    revision: 1,
     observedAt: "2026-07-22T00:00:00Z",
-    freshness: {
-      state: "fresh",
-      lastEvidenceAt: null,
-      ageMs: null,
-      staleAfterMs: 10000,
-      observationBound: "poll",
-    },
-    process: { state: "connected", generation: "g1" },
     turn: {
       state: options.turnState,
       turnId: options.turnState === "working" ? "turn-1" : null,
       stateSince: null,
     },
-    evidence: { strength: "exact", origin: "codex" },
-  };
-  return {
+  });
+  return conversationPage({
     identity: identity(sessionId),
-    items: [],
-    page: { olderCursor: null, hasOlder: false },
-    eventCursor: "evt-0" as ActiveEventCursor,
-    hydrationId: "h",
     status,
     capabilities: capabilities(options.interruptState),
-  };
+  });
 }
 
 function queued(requestId: string, text: string): QueuedSubmit {

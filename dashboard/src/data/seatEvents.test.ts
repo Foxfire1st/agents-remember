@@ -3,21 +3,22 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { catalogRow } from "../test/fixtures/catalogRows";
 import { applySeatEvent, applySeatEventLine, createGatedSeatEventApplier } from "./seatEvents";
 import { fromTerminalSessionInfo, sessionStore } from "./sessions";
+import { observerEvent } from "../test/fixtures/wire";
 import type { ObserverEvent } from "../types/event";
 
 // Seat-event dedup against the authoritative poll (260715-FEUI-L2 R2): push may pre-apply what
 // the next catalog beat confirms, but can never regress a row the poll already advanced.
 
+// The seat-event default this file reads: a `seat.retired` envelope stamped at the same instant
+// the seeded row's `turnStateChangedAt` carries, so the turn-state ordering tests below measure
+// their own explicit `ts` against a known one.
 const event = (overrides: Partial<ObserverEvent>): ObserverEvent =>
-  ({
-    schema: "ar-observer-event/v1",
+  observerEvent({
     id: "evt-1",
     ts: "2026-07-16T10:00:00Z",
     kind: "seat.retired",
-    trust: "observed",
-    actor: "system",
     ...overrides,
-  }) as ObserverEvent;
+  });
 
 const seed = (overrides: Parameters<typeof catalogRow>[0] = {}) => {
   sessionStore

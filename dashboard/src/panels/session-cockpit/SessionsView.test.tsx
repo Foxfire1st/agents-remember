@@ -21,8 +21,6 @@ import {
 } from "../../data/conversation/store";
 import type {
   ActiveConversationRef,
-  ActiveEventCursor,
-  ConversationCapabilities,
   ConversationItem,
   ConversationPage,
   ConversationStatus,
@@ -35,7 +33,13 @@ import {
   FLEET,
   L6_INTERACTION_FREETEXT,
 } from "../../test/fixtures/catalogRows";
-import type { LifecycleProjection } from "../../types/projection";
+import {
+  conversationIdentity,
+  conversationItem,
+  conversationPage,
+  conversationStatus,
+} from "../../test/fixtures/conversationWire";
+import { gate, lifecycle } from "../../test/fixtures/wire";
 import { SessionsView } from "./SessionsView";
 
 function seedReadyComposerSession() {
@@ -67,20 +71,17 @@ function seedLegacyRawSession() {
 // A projected conversation status seeded straight into the active-conversation
 // store. The stage's own connect is neutralized by a never-resolving fetch stub in each such test,
 // so the seeded stream phase stays exactly where the test puts it.
-const L5Q_IDENTITY: ActiveConversationRef = {
-  harnessId: "codex",
+const L5Q_IDENTITY: ActiveConversationRef = conversationIdentity({
   vendorConversationId: "v",
   projectScope: "/r",
   identityDigest: "d",
   arSessionId: "worker-l4",
   bridgeEpoch: "e1",
-};
+});
 
 function l5qStatus(turnState: ConversationStatus["turn"]["state"]): ConversationStatus {
-  return {
+  return conversationStatus({
     identity: L5Q_IDENTITY,
-    revision: 1,
-    observedAt: "2026-07-20T00:00:00Z",
     freshness: {
       state: "fresh",
       lastEvidenceAt: null,
@@ -90,8 +91,7 @@ function l5qStatus(turnState: ConversationStatus["turn"]["state"]): Conversation
     },
     process: { state: "connected", generation: "g" },
     turn: { state: turnState, turnId: "turn-live-1", stateSince: null },
-    evidence: { strength: "exact", origin: "codex" },
-  };
+  });
 }
 
 function seedLiveProjection(sessionId: string, turnState: ConversationStatus["turn"]["state"]): void {
@@ -1258,33 +1258,24 @@ describe("L6: stage surface, WorkingLine, InteractionBar, stop residuals", () =>
   // A warm projection WITH items (the earlier seeds carry status only), so the timeline has
   // scrollable content for the scroll-restore test.
   function seedWorkerL4Items(count: number): void {
-    const items: ConversationItem[] = Array.from({ length: count }, (_, index) => ({
-      itemId: `worker-l4-item-${index + 1}`,
-      globalOrdinal: index + 1,
-      revision: 1,
-      lane: "harness",
-      source: "harness-live",
-      provenance: { strength: "exact", origin: "codex" },
-      role: "assistant",
-      kind: "message",
-      phase: "completed",
-      blocks: [
-        {
-          blockId: `worker-l4-item-${index + 1}-b`,
-          type: "markdown",
-          markdown: `message ${index + 1}`,
-        },
-      ],
-    })) as unknown as ConversationItem[];
-    const page: ConversationPage = {
+    const items: ConversationItem[] = Array.from({ length: count }, (_, index) =>
+      conversationItem({
+        itemId: `worker-l4-item-${index + 1}`,
+        globalOrdinal: index + 1,
+        blocks: [
+          {
+            blockId: `worker-l4-item-${index + 1}-b`,
+            type: "markdown",
+            markdown: `message ${index + 1}`,
+          },
+        ],
+      }),
+    );
+    const page: ConversationPage = conversationPage({
       identity: L5Q_IDENTITY,
       items,
-      page: { olderCursor: null, hasOlder: false },
-      eventCursor: "evt-0" as ActiveEventCursor,
-      hydrationId: "h",
       status: l5qStatus("ready"),
-      capabilities: undefined as unknown as ConversationCapabilities,
-    };
+    });
     activeConversationStore.getState().applyPage("worker-l4", page, "initial");
     activeConversationStore.getState().setStreamPhase("worker-l4", "live");
   }
@@ -1365,9 +1356,9 @@ describe("L6: stage surface, WorkingLine, InteractionBar, stop residuals", () =>
     sessionCockpitStore.setState({ focusedSessionId: null, perSession: {} });
     dashboardStore.setState({
       lifecycles: {
-        "lc-sessions-answer": {
+        "lc-sessions-answer": lifecycle({
           id: "lc-sessions-answer",
-          gate: {
+          gate: gate({
             id: "gate-sessions-answer",
             kind: "agent-question",
             state: "open",
@@ -1379,8 +1370,8 @@ describe("L6: stage surface, WorkingLine, InteractionBar, stop residuals", () =>
                 interactionId: "ix-sessions-answer",
               },
             },
-          },
-        } as unknown as LifecycleProjection,
+          }),
+        }),
       },
     });
     const urls: string[] = [];

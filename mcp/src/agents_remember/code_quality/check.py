@@ -203,6 +203,19 @@ def derive_scope(project_root: Path) -> GateScope:
     ``git add``-ed -- which is exactly the content the pre-commit tier certifies -- and a
     file that has never been added is not part of the tree yet. Nothing else can narrow
     this: the wrapper takes no path arguments.
+
+    Reading the index puts one obligation on every caller: whatever the caller means this
+    gate to certify has to be in the index before it invokes the wrapper. The pre-commit
+    tier gets that for free, because there the staged content *is* the commit. The closeout
+    tier does not -- it commits with ``git add -A`` -- so it stages its whole worktree
+    first (``worktrees/modules/closeout.py:_gate_staged_code``). Until it did, every file a
+    task created rather than edited was committed without ruff, pyright or the changed-lines
+    floor reading a line of it, and a file the task deleted was still handed to ruff as an
+    ``E902``. Widening the enumeration here instead -- to
+    ``--cached --others --exclude-standard`` -- would have been the wrong fix twice over: it
+    would redefine the pre-commit tier, making ruff and pyright certify files deliberately
+    left out of the commit, and it cannot reach ``diff_coverage`` at all, since an untracked
+    file has no diff against any base.
     """
     tracked = git_ls_files(project_root, "*.py")
     if not tracked:

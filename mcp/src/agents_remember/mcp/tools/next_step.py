@@ -257,8 +257,13 @@ def _opt_str(value: Any) -> str | None:
     return value if isinstance(value, str) and value else None
 
 
-def next_step_for(amb: AmbientLifecycle, tool_name: str) -> dict[str, Any] | None:
+def next_step_for(amb: AmbientLifecycle, tool_name: str) -> NextStep | None:
     """Edge: resolve the active state + contract + guidance, then compute the hint.
+
+    Returns the MODEL, not a dump of it. The hint is a declared field of the response
+    envelope (``models.base.ResponseModel.nextStep``), so serializing it is the choke
+    point's single ``model_dump`` -- this edge used to dump it here, which is what made
+    the hint a key written into an already-dumped, already-token-counted dict.
 
     Exception-contained: the ``_tool_payload`` emission path must never raise into
     a tool call, so any failure yields no hint rather than breaking the response.
@@ -271,8 +276,7 @@ def next_step_for(amb: AmbientLifecycle, tool_name: str) -> dict[str, Any] | Non
         state = amb.current
         contract = _load_contract(state) if state is not None else None
         guidance = _guidance_for(contract)
-        step = compute_next_step(state, contract, tool_name, guidance=guidance)
-        return step.model_dump(mode="json", exclude_none=True) if step is not None else None
+        return compute_next_step(state, contract, tool_name, guidance=guidance)
     except Exception:
         return None
 
@@ -283,7 +287,9 @@ def _guidance_for(contract: WorktreeContract | None) -> dict[str, Any] | None:
     if contract is None:
         return None
     try:
-        return lifecycle_guidance(contract)
+        # Widened deliberately: this hint layer reads the guidance defensively by key and
+        # never re-emits its vocabulary, so it takes the payload rather than the contract.
+        return dict(lifecycle_guidance(contract))
     except Exception:
         return None
 

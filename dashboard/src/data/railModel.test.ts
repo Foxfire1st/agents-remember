@@ -22,7 +22,8 @@ import {
   waitingSeats,
 } from "./railModel";
 import { fromTerminalSessionInfo, type OpenSession } from "./sessions";
-import type { AgentPickupNode, GateNode, LifecycleProjection, TaskDocNode } from "../types/projection";
+import { agentPickup, gate, lifecycle, taskDoc } from "../test/fixtures/wire";
+import type { AgentPickupNode, LifecycleProjection, TaskDocNode } from "../types/projection";
 
 const fleet = FLEET.map(fromTerminalSessionInfo);
 const byId = (id: string) => {
@@ -253,31 +254,21 @@ describe("smart-default focus (R9)", () => {
 });
 
 describe("projection joins", () => {
+  // Only the join keys are stated: `repository` + the docPath folder + `id` are what
+  // `qualifiedLeafKey` composes, and `lifecycleId` is the gate join. The rest is served default.
   const doc = (id: string, lifecycleId: string): TaskDocNode =>
-    ({
+    taskDoc({
       id,
       lifecycleId,
       repository: "agents-remember",
       title: id,
-      status: "inProgress",
       kind: "subTask",
-      stepsDone: 0,
-      stepsTotal: 0,
       docPath: `tasks/agents-remember/260714_own-adapter-capability/${id}.md`,
-      steps: [],
-      objective: "",
-      requirements: [],
-      codeExamples: [],
-      decisions: [],
-      openQuestions: [],
-      references: [],
-      subTasks: [],
-      sections: [],
-    }) as TaskDocNode;
-  const gate: GateNode = { id: "g1", kind: "plan-approval", state: "open", decisions: [], packet: {}, ts: "t" };
+    });
+  const openGate = gate({ id: "g1", kind: "plan-approval", state: "open" });
   const lifecycles: Record<string, LifecycleProjection> = {
-    LC1: { id: "LC1", gate } as unknown as LifecycleProjection,
-    LC2: { id: "LC2", gate: { ...gate, state: "approved" } } as unknown as LifecycleProjection,
+    LC1: lifecycle({ id: "LC1", gate: openGate }),
+    LC2: lifecycle({ id: "LC2", gate: { ...openGate, state: "approved" } }),
   };
 
   it("joins HELD gates by leafKey only while undecided (R13)", () => {
@@ -286,8 +277,10 @@ describe("projection joins", () => {
     expect(held.has("agents-remember/260714_own-adapter-capability/05_capabilities")).toBe(false);
   });
 
+  // Every field the two joins below read is stated here rather than inherited: `messageKind`
+  // gates the brief column, `state`/`ttlSeconds` decide the critical-bus threshold (720 = 900·0.8).
   const pickup = (overrides: Partial<AgentPickupNode>): AgentPickupNode =>
-    ({
+    agentPickup({
       id: "p1",
       entryId: "e1",
       messageKind: "dispatch-brief",
@@ -295,7 +288,7 @@ describe("projection joins", () => {
       state: "waiting-for-agent",
       ttlSeconds: 900,
       ...overrides,
-    }) as AgentPickupNode;
+    });
 
   it("brief column is TWO-state: pending while unacknowledged, gone otherwise — never a tri-state", () => {
     const sessions: OpenSession[] = [{ id: "worker-l4", label: "w", lifecycleId: "LC9" }];

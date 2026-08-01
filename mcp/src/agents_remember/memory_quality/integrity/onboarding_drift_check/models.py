@@ -3,6 +3,27 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any, Literal, NotRequired, TypedDict
+
+# The drift summary vocabulary, declared once, here -- `summary.py` produces every member
+# and both wire models (`models.drift.DriftSummary` for the context packet,
+# `models.memory.DriftCheckResponse` for the tool) read it from this declaration. `error` is
+# the one the packet model was missing: `run_drift_summary` returns it whenever the
+# onboarding root does not exist, which is precisely when the diagnostic is wanted, so the
+# packet used to crash on the very call that was meant to explain the problem.
+DriftStatus = Literal["notChecked", "checked", "error"]
+
+
+class DriftSummaryPacket(TypedDict):
+    """What `summary.py` hands to a wire model: a status, plus whatever that status carries."""
+
+    status: DriftStatus
+    count: NotRequired[int]
+    actionableCount: NotRequired[int]
+    reportPath: NotRequired[str]
+    actionableSample: NotRequired[list[dict[str, Any]]]
+    error: NotRequired[str]
+
 
 CLASSIFICATIONS = (
     "up to date",

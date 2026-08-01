@@ -19,7 +19,8 @@ import { fromTerminalSessionInfo, sessionStore } from "../../data/sessions";
 import { seatVisualState } from "../../data/stateGrammar";
 import { dashboardStore } from "../../data/store";
 import { catalogRow, FLEET } from "../../test/fixtures/catalogRows";
-import type { Analytics, SupervisorHeartbeat } from "../../types/projection";
+import { agentPickup, analytics, lifecycleWithGate, taskDoc } from "../../test/fixtures/wire";
+import type { SupervisorHeartbeat } from "../../types/projection";
 import { HeaderStrip } from "./HeaderStrip";
 import { LandedCleanupNotice } from "./LandedCleanupNotice";
 import { RAIL_VIRTUALIZE_THRESHOLD, SessionRail } from "./SessionRail";
@@ -289,9 +290,9 @@ describe("gate + brief joins (R13, R8)", () => {
   it("shows a gate badge on rows whose leaf holds an undecided gate", () => {
     dashboardStore.setState({
       lifecycles: {
-        LC1: {
-          id: "LC1",
-          gate: {
+        LC1: lifecycleWithGate(
+          { id: "LC1" },
+          {
             id: "g1",
             kind: "plan-approval",
             state: "open",
@@ -299,11 +300,11 @@ describe("gate + brief joins (R13, R8)", () => {
             packet: {},
             ts: "t",
           },
-        } as never,
+        ),
       },
-      analytics: {
+      analytics: analytics({
         taskDocuments: [
-          {
+          taskDoc({
             id: "04_serving",
             lifecycleId: "LC1",
             repository: "agents-remember",
@@ -311,10 +312,10 @@ describe("gate + brief joins (R13, R8)", () => {
             kind: "subTask",
             docPath:
               "tasks/agents-remember/260714_own-adapter-capability/04_serving.md",
-          },
+          }),
         ],
         agentPickups: [],
-      } as unknown as Analytics,
+      }),
     });
     const { getByTestId, queryByTestId } = renderRail();
     const badge = getByTestId("rail-gate-worker-l4");
@@ -329,10 +330,10 @@ describe("gate + brief joins (R13, R8)", () => {
 
   it("brief column is two-state: marker while pending, nothing otherwise", () => {
     dashboardStore.setState({
-      analytics: {
+      analytics: analytics({
         taskDocuments: [],
         agentPickups: [
-          {
+          agentPickup({
             id: "p1",
             entryId: "e1",
             messageKind: "dispatch-brief",
@@ -340,9 +341,9 @@ describe("gate + brief joins (R13, R8)", () => {
             state: "waiting-for-agent",
             ttlSeconds: 900,
             deliveredToSession: "worker-l4",
-          },
+          }),
         ],
-      } as unknown as Analytics,
+      }),
     });
     const { getByTestId, queryByTestId } = renderRail();
     const marker = getByTestId("rail-brief-worker-l4");

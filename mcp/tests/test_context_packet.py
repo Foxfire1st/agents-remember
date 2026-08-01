@@ -148,7 +148,7 @@ class ContextPacketTests(unittest.TestCase):
                     name="Context Packet",
                     repo_name="agents-remember",
                     coordination_root=coordination_root,
-                    workflow_kind="light",
+                    workflow_kind="light-task",
                     memory_mode="external",
                 ),
                 leaf=LeafIdentity(worktree_name="context-packet"),

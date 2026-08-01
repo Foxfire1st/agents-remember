@@ -38,6 +38,15 @@ const item = cva({
     },
   },
 });
+// The Dot is decorative (`aria-hidden`), so the severity has to be spoken by its wrapper. The
+// wrapper needs a ROLE that can carry a name: `aria-label` on a bare span names a `generic`, which
+// ARIA prohibits and which no screen reader announces (axe-core reports `aria-prohibited-attr` at
+// `serious`), so the label reached nobody. `img` is the role for a mark that means something — it
+// puts "Severity: warn" in the accessibility tree with the glyph hidden underneath it.
+// (LifecycleList's equivalent span escapes the same bug only because it sits inside React Aria's
+// `role="option"`, whose name-from-content absorbs the label.)
+// `flexShrink` because the wrapper, not the Dot, is the flex item.
+const severityMark = css({ flexShrink: "0", lineHeight: "1.35" });
 const bodyCol = css({ flex: "1", minWidth: "0" });
 const head = css({ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "0.5rem" });
 const heading = css({ margin: "0" });
@@ -210,7 +219,15 @@ function AttentionQueueImpl({
                   className={item({ severity: q.severity })}
                   data-testid="attn-item"
                 >
-                  <Dot variant={q.severity} />
+                  <span
+                    className={severityMark}
+                    role="img"
+                    aria-label={`Severity: ${q.severity}`}
+                    title={`Severity: ${q.severity}`}
+                    data-testid="attn-severity"
+                  >
+                    <Dot variant={q.severity} />
+                  </span>
                   <div className={bodyCol}>
                     <div className={itemTitle}>{displayTitle}</div>
                     {displayDetail ? <div className={detail}>{displayDetail}</div> : null}

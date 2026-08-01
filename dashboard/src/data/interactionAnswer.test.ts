@@ -22,7 +22,11 @@ import {
   L5I_INTERACTION_PERMISSION,
   L5I_INTERACTION_QUESTIONS,
 } from "../test/fixtures/catalogRows";
+import { lifecycleWithGate as servedLifecycleWithGate } from "../test/fixtures/wire";
 
+/** The one shape these tests care about: a lifecycle holding an open agent-question gate whose
+ *  packet carries the adapter interaction identity. Everything else is served default, so the
+ *  fixture is checked against the mirror instead of asserted past it. */
 function lifecycleWithGate(overrides: {
   lifecycleId: string;
   gateId: string;
@@ -31,13 +35,12 @@ function lifecycleWithGate(overrides: {
   sessionId?: string;
   interactionId?: string;
 }): LifecycleProjection {
-  return {
-    id: overrides.lifecycleId,
-    gate: {
+  return servedLifecycleWithGate(
+    { id: overrides.lifecycleId },
+    {
       id: overrides.gateId,
       kind: overrides.kind ?? "agent-question",
       state: overrides.state ?? "open",
-      decisions: [],
       ts: "2026-07-17T09:00:00Z",
       packet: {
         adapterInteraction: {
@@ -49,7 +52,7 @@ function lifecycleWithGate(overrides: {
         },
       },
     },
-  } as unknown as LifecycleProjection;
+  );
 }
 
 afterEach(() => {

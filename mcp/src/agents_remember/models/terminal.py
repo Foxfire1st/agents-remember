@@ -2,17 +2,28 @@
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Literal, get_args
 
 from agents_remember.models.base import ToolResponse
+from agents_remember.worktrees.leaf_refs import LeafRefStatus
+
+# These three vocabularies are declared here rather than beside the payload builders that write
+# them, and the direction is deliberate: `mcp.tools.terminal` imports them, not the reverse.
+# `mcp.tools.base` -> `models.tool_registry` -> `models.terminal` is an existing import edge, so
+# a `models.terminal` -> `mcp.tools.terminal` import would close a cycle. The invariant the fix
+# is actually for is ONE declaration, not a particular module owning it: `mcp.tools.terminal`
+# annotates its status seams with these aliases, so a refusal status the tool invents is a
+# pyright error at the tool rather than a ValidationError escaping the MCP handler. The pair of
+# leaf-ref members is folded in from `worktrees.leaf_refs`, which produces them -- `Literal`
+# flattens nested aliases, so the published enum is unchanged.
+
 
 LeafAssignmentStatus = Literal[
     "attached",
     "leaf-taken",
     "unknown-session",
     "role-required",
-    "leaf-ref-not-found",
-    "leaf-ref-ambiguous",
+    LeafRefStatus,
 ]
 
 
@@ -54,10 +65,16 @@ SpawnAgentSessionStatus = Literal[
     "spend-override-unsupported",
     # 260703-L16 (ruling 2026-07-07T08:15): the dispatch level is outside leaf|master|portfolio.
     "level-invalid",
-    "leaf-ref-not-found",
-    "leaf-ref-ambiguous",
+    # Raised by `LeafRefResolutionError` and copied onto the refusal by `leaf_ref_refusal_payload`.
+    LeafRefStatus,
     "bad-kind",
 ]
+
+# The runtime half of each alias, derived from it rather than retyped beside it, so a member can
+# only ever be added in one place.
+VALID_SPAWN_AGENT_SESSION_STATUSES: frozenset[SpawnAgentSessionStatus] = frozenset(
+    get_args(SpawnAgentSessionStatus)
+)
 
 
 class SpawnAgentSessionResponse(ToolResponse):
@@ -137,6 +154,10 @@ SessionRetireStatus = Literal[
     "retire-refused",
 ]
 
+VALID_SESSION_RETIRE_STATUSES: frozenset[SessionRetireStatus] = frozenset(
+    get_args(SessionRetireStatus)
+)
+
 
 class SessionRetireResponse(ToolResponse):
     """``session_retire`` (260707-HFX-L8, issue #12): terminate/park a tracked chat session.
@@ -158,6 +179,10 @@ class SessionRetireResponse(ToolResponse):
 
 
 SessionRenameStatus = Literal["renamed", "unknown-session"]
+
+VALID_SESSION_RENAME_STATUSES: frozenset[SessionRenameStatus] = frozenset(
+    get_args(SessionRenameStatus)
+)
 
 
 class SessionRenameResponse(ToolResponse):

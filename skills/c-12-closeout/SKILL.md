@@ -67,9 +67,34 @@ must not treat a vague "looks good" or their own preference as authority.
 
 Approval remains outside and before apply: preview, relay, and the applicable explicit or delegated
 authority must be complete before `worktree_closeout_apply`. Once apply begins, it reruns its
-read-only validations and, when code would commit, runs the strict project-owned quality wrapper as
-the first apply-time gate before any code, memory, ledger, contract, or applied-gate mutation. The
-wrapper's CRAP threshold is mandatory: every score at or above the configured threshold fails.
+read-only validations and — when code would commit **and this checkout carries the project-owned
+quality wrapper** — resets the index, stages the whole task worktree, and runs that wrapper over
+exactly that staged content as the first apply-time gate, before any code, memory, ledger,
+contract, or applied-gate **commit**. That index write is the one mutation that precedes the gate,
+and it is why the gate can see files the task created rather than only the ones it edited: every rail
+of the wrapper reads the index, and closeout commits with `git add -A`, so anything not in the
+index was committed unread.
+
+Staging is **not** undone if the gate refuses. The worktree stays fully staged, nothing is
+committed, and that is the intended end state rather than a gap: the checkout being staged is the
+task's own worktree, created by `worktree_start` and destroyed by `lifecycle_finalize_task`, so no
+one is holding a partial staging in it — and a retry does not inherit that index, because each gate
+run begins with `git reset` and restages from the working tree. The reset is what makes the retry
+equivalent to a first run rather than an assertion that it is. `git add -A` on its own is not
+enough: git applies ignore rules only to paths it does not already track or hold staged, so a file
+staged by a refused attempt stays staged even after the retry adds it to `.gitignore`, and the
+commit carries it. Resetting first recomputes what gets staged on every run under the ignore rules
+in force at that moment, and `--mixed` is index-only, so no file content is touched.
+
+Two refusals guard that staging step, and because they guard it they run exactly where the gate
+runs. With the wrapper present, closeout refuses outright, before staging anything, when the code
+checkout is **not** a task worktree (git reports the same `--git-dir` and `--git-common-dir`, which
+is what the repository's own checkout looks like; a series/master contract records that path), and
+when the code worktree has unresolved merge conflicts. A consuming repository carrying **no** wrapper runs
+no gate, so neither refusal applies to it: its closeout stages nothing early and reaches the
+ordinary commit step's own `git add -A` exactly as it always has. The preview reports that state as
+`wrapper-unavailable` rather than passing it off as checked. The wrapper's CRAP threshold is
+mandatory: every score at or above the configured threshold fails.
 
 For a developer-gated closeout, the relay follows the `l-01-agent-lifecycles` orchestrator hand-off protocol: run the
 preview/dry-run first, then call
@@ -208,8 +233,12 @@ External-memory closeout order is:
    separate curator seat create it directly)
 3. after preview and the applicable commit authority are complete, call
    `worktree_closeout_apply`; its initial checks are read-only
-4. when code would commit, run the default strict project-owned quality wrapper before any
-   mutation; mandatory CRAP enforcement fails every score at or above the configured threshold
+4. when code would commit and the checkout carries the wrapper, reset the index, stage the whole
+   task worktree, and run the default strict project-owned quality wrapper over exactly that staged
+   content, before any commit; a refusal leaves the worktree staged and commits nothing, and the
+   next run's reset means it starts from the working tree either way; mandatory CRAP enforcement
+   fails every score at or above the configured threshold. A checkout with no wrapper runs no gate
+   and commits as it always has.
 5. commit code changes and capture `C2` plus its commit date
 6. run the `c-02-memory-quality-control` skill's drift check against `C2` to produce the full memory update worklist
 7. verify each changed source file's sidecar content was updated in this task (by the curator's pass
@@ -230,8 +259,12 @@ Internal-memory closeout order is:
 1. run the same missing-onboarding and changed-sidecar preconditions before preview
 2. complete preview and the applicable explicit or delegated commit authority
 3. call `worktree_closeout_apply`; its initial validations are read-only
-4. when code would commit, run the default strict project-owned quality wrapper before any
-   mutation, including mandatory failure for every CRAP score at or above the configured threshold
+4. when code would commit and the checkout carries the wrapper, reset the index, stage the whole
+   task worktree, and run the default strict project-owned quality wrapper over exactly that staged
+   content, before any commit — a refusal leaves the worktree staged and commits nothing, and the
+   next run's reset restages from the working tree regardless — including mandatory failure for
+   every CRAP score at or above the configured threshold. A checkout with no wrapper runs no gate
+   and commits as it always has.
 5. commit the code and internal-memory changes together
 6. update the task contract closeout state
 
@@ -265,12 +298,46 @@ verification metadata is missing, external memory is not resolved, the code and
 memory checkouts are on different selected branches, or no code or memory
 changes exist.
 
-For an Agents Remember code commit, closeout also fails without mutation when
+For an Agents Remember code commit, closeout also fails without any commit when
 the strict project-owned quality wrapper cannot run or exits non-zero. This
-includes any CRAP score at or above the configured threshold. Fix the reported
-source, test, coverage, or environment issue, rerun the strict wrapper and
-closeout preview, and only then retry apply; never bypass the failure with a
+includes any CRAP score at or above the configured threshold. It is "without any
+commit" rather than "without mutation": closeout resets the index and stages the
+whole task worktree before the gate so the gate can see created files, and
+**leaves it staged** when the gate refuses. Nothing needs undoing — the next run
+resets and restages from the working tree, so it reaches the index a first run
+would have reached, and `commit_if_dirty` stages everything regardless. Fix the
+reported source, test, coverage, or environment issue, rerun the strict wrapper
+and closeout preview, and only then retry apply; never bypass the failure with a
 direct commit.
+
+The next two refusals are preconditions of that staging step, so they run where
+the gate runs — that is, when code would commit and this checkout carries the
+wrapper at `mcp/src/agents_remember/code_quality/check.py`. They are not
+closeout-wide preconditions: a consuming repository that carries no wrapper runs
+no gate, is not staged early, and reaches the ordinary commit step's own
+`git add -A` exactly as it did before the gate existed. The preview reports that
+as `wrapper-unavailable`.
+
+Where the gate runs, closeout refuses before staging anything when the code
+checkout is not a task worktree. The test is git's own: in a linked worktree
+`--git-dir` and `--git-common-dir` differ, and in a repository's own checkout
+they are the same path. `default_series_contract` records `code_worktree` as the
+repository path itself, so a series/master contract reaching
+`worktree_closeout_apply` would otherwise stage in a checkout a person works in —
+overwriting a partial `git add -p` selection, staging files deliberately held
+back, and resolving any merge in progress to whatever is on disk. Close out the
+leaf contract whose `code_worktree` is the task worktree instead.
+
+Where the gate runs, closeout also refuses before staging anything when the code
+worktree has unresolved merge conflicts (an in-progress merge, rebase,
+cherry-pick, or revert with unmerged index entries). The refusal names the
+conflicted paths. This is a deliberate refusal, not an incidental one:
+`git add -A` over an unmerged index resolves every conflict to whatever the
+working tree holds, so without this check closeout committed the `<<<<<<<`
+markers. Both refusals run before the reset as well as before the add — a
+`git reset` drops the unmerged entries and `MERGE_HEAD`, so running it first
+would erase the very state the conflict check reads. Resolve the conflicts, stage
+the resolutions, then rerun closeout.
 
 Closeout also fails without mutation when a changed source file's existing
 sidecar body was not updated in the current task, so verification metadata is

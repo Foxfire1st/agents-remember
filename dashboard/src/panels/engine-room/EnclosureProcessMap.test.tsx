@@ -535,12 +535,14 @@ describe("EnclosureCanvas — T9B/T9C refused-conduit flash (shared red/amber pr
     expect(queryByTestId("refused-conduit")).toBeNull();
   });
 
-  it("flashes the cgc-seed conduit AMBER (refused) and reindexes CGC in place — a soft reroute, no gate/STOP", () => {
+  it("flashes the cgc-seed conduit AMBER (stale reroute) and reindexes CGC in place — a soft reroute, no gate/STOP", () => {
     document.documentElement.removeAttribute("data-effects"); // effects ON so the transient flash renders
     const { container, queryByTestId } = render(<EnclosureProcessMap node={nodeFrom("engine-cgc-seed-refused")} />);
     const seed = container.querySelector('[data-testid="conduit"][data-kind="cgc-seed"]');
-    expect(seed?.getAttribute("data-state")).toBe("refused");
-    expect(seed?.getAttribute("data-refused-polarity")).toBe("amber");
+    // `stale` is the reducer's reroute state; the amber polarity below is DERIVED from it by the
+    // renderer, so the conduit itself carries no polarity attribute to assert on.
+    expect(seed?.getAttribute("data-state")).toBe("stale");
+    expect(seed?.getAttribute("data-refused-polarity")).toBeNull();
     const flash = container.querySelector('[data-fx="refuse"]');
     expect(flash).not.toBeNull();
     expect(flash?.getAttribute("data-polarity")).toBe("amber");

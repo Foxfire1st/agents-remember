@@ -128,32 +128,33 @@ describe("scenario player model (5i)", () => {
     expect(groups.size).toBe(1);
   });
 
-  it("authors the T9C reindex-reroute arc (refused → reindex → nominal), one enclosure, soft (never blocked)", () => {
+  it("authors the T9C reindex-reroute arc (stale seed → reindex → nominal), one enclosure, soft (never blocked)", () => {
     const reroute = SCENARIOS.find((scenario) => scenario.name === "reindex-reroute");
     expect(reroute).toBeTruthy();
     const captions = reroute!.frames.map((frame) => frame.caption).join(" | ");
-    expect(captions).toMatch(/refused/i);
+    expect(captions).toMatch(/reroute/i);
     expect(captions).toMatch(/reindex/i);
-    // the refuse beat drives a `refused` cgc-seed edge with AMBER polarity + a seedFallback (reindexing) engine
+    // The reroute beat drives a `stale` cgc-seed edge — the reducer's OWN reroute state
+    // (_seed_edge_state) — plus a seedFallback (reindexing) engine. The amber flash polarity is
+    // derived from that state by the renderer; the edge carries no polarity field of its own.
     const refusedFrame = reroute!.frames.find((frame) =>
       frame.projection.analytics.engineProcesses.some((node) =>
-        node.edges.some((e) => e.kind === "cgc-seed" && e.state === "refused"),
+        node.edges.some((e) => e.kind === "cgc-seed" && e.state === "stale"),
       ),
     );
     expect(refusedFrame).toBeTruthy();
     const refusedNode = refusedFrame!.projection.analytics.engineProcesses.find((node) =>
-      node.edges.some((e) => e.kind === "cgc-seed" && e.state === "refused"),
+      node.edges.some((e) => e.kind === "cgc-seed" && e.state === "stale"),
     )!;
-    expect(refusedNode.edges.find((e) => e.kind === "cgc-seed")!.refusedPolarity).toBe("amber");
     expect(refusedNode.seedFallback).toBe(true);
     // soft reroute: never a hard block on any frame
     const healths = reroute!.frames.flatMap((frame) =>
       frame.projection.analytics.engineProcesses.map((node) => node.health),
     );
     expect(healths).not.toContain("blocked");
-    // the refuse → reindex-settle recover is a PROP DIFF (same enclosure), not a remount. NB: T9C reuses the
+    // the reroute → reindex-settle recover is a PROP DIFF (same enclosure), not a remount. NB: T9C reuses the
     // shared device-mgmt gallery fixtures (cgc-seed-refused → cgc-fallback) for the failure beats, with the
-    // boot-demo boot frames as the lead-in, so the prop-diff invariant is asserted on the refuse→settle pair.
+    // boot-demo boot frames as the lead-in, so the prop-diff invariant is asserted on the reroute→settle pair.
     const rIdx = reroute!.frames.indexOf(refusedFrame!);
     const refusedGroup = refusedFrame!.projection.analytics.engineProcesses[0].worktreeGroup;
     expect(reroute!.frames[rIdx + 1].projection.analytics.engineProcesses[0].worktreeGroup).toBe(refusedGroup);
@@ -273,5 +274,41 @@ describe("scenario player model (5i)", () => {
   it("folds the old gallery states in as single-frame resting scenarios (no coverage lost)", () => {
     const resting = SCENARIOS.find((scenario) => scenario.name === "engine-cleanup-pending");
     expect(resting?.frames).toHaveLength(1);
+  });
+
+  // These fixtures are the only thing that ever "produced" an engine-process edge on this side of
+  // the wire, so an author can invent a state here that the reducer cannot emit — and then a
+  // renderer branch gets written to match it and ships permanently dead. That is exactly how the
+  // `refused` state and its `refusedPolarity` companion field got in. Pin the fixtures to the
+  // vocabulary `observer/projection.py::EngineProcessEdge.state` documents.
+  const SERVED_EDGE_STATES = new Set([
+    "nominal",
+    "running",
+    "blocked",
+    "failed",
+    "stale",
+    "skipped",
+    "complete",
+    "planned",
+    "unknown",
+  ]);
+
+  it("never authors an engine edge state the reducer cannot emit", () => {
+    const seen = new Set(
+      SCENARIOS.flatMap((scenario) =>
+        scenario.frames.flatMap((frame) =>
+          frame.projection.analytics.engineProcesses.flatMap((node) =>
+            node.edges.map((edge) => edge.state),
+          ),
+        ),
+      ),
+    );
+    expect(seen.size).toBeGreaterThan(0);
+    for (const state of seen) {
+      expect(
+        SERVED_EDGE_STATES.has(state),
+        `fixture edge state '${state}' is not in the served EngineProcessEdge vocabulary`,
+      ).toBe(true);
+    }
   });
 });

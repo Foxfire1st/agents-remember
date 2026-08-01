@@ -65,10 +65,10 @@ function fxSignature(node: EngineProcessNode): string {
     .map((provider) => `${provider.role}:${provider.runtimeState}`)
     .sort()
     .join(",");
-  // A refused/failed/stale seed-or-integration lane drives the one-shot refused-conduit flash. It is
-  // NOT a `running` lane (so `draws` misses it); fold it in so the flash re-arms when the refuse beat lands.
+  // A failed/stale seed-or-integration lane drives the one-shot refused-conduit flash. It is
+  // NOT a `running` lane (so `draws` misses it); fold it in so the flash re-arms when the beat lands.
   const refused = node.edges
-    .filter((edge) => edge.state === "refused" || edge.state === "failed" || edge.state === "stale")
+    .filter((edge) => edge.state === "failed" || edge.state === "stale")
     .map((edge) => `${edge.kind}:${edge.state}`)
     .sort()
     .join(",");

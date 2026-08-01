@@ -14,6 +14,11 @@ from agents_remember.kernel.agentic_settings import (
     RoleKnobs,
     load_agentic_settings,
 )
+from agents_remember.models.terminal import (
+    SessionRenameStatus,
+    SessionRetireStatus,
+    SpawnAgentSessionStatus,
+)
 from agents_remember.observer.ambient import ambient
 from agents_remember.observer.events import now_iso
 from agents_remember.serving.harness_control_adapter import BUILTIN_PROTOCOL_HARNESSES
@@ -397,7 +402,7 @@ def _knob_refusal(
 ) -> dict[str, Any] | None:
     """Preserve explicit static validation for settings-defined non-native harnesses."""
 
-    checks = (
+    checks: tuple[tuple[SpawnAgentSessionStatus, str | None], ...] = (
         (
             "model-invalid",
             invalid_model_detail(found, effective_model) if effective_model else None,
@@ -796,13 +801,19 @@ def _spawned_payload(entry: TerminalCatalogEntry, delivery: _SpawnDelivery) -> d
 
 
 def _spawn_refusal(
-    status: str,
+    status: SpawnAgentSessionStatus,
     harness: str | None,
     kind: str,
     *,
     detail: str | None = None,
 ) -> dict[str, Any]:
-    """A pre-spawn refusal payload (unknown/undetected harness or bad kind) -- nothing was spawned."""
+    """A pre-spawn refusal payload (unknown/undetected harness or bad kind) -- nothing was spawned.
+
+    ``status`` is the wire alias `SpawnAgentSessionResponse` validates against, so every refusal
+    in this module is checked here rather than at ``model_validate``: this payload is an untyped
+    dict all the way to the MCP handler, and a status the response model does not know becomes a
+    pydantic ValidationError on a path with no ``except`` for one.
+    """
     return _tool_payload(
         "spawn_agent_session",
         {
@@ -815,6 +826,42 @@ def _spawn_refusal(
             "detail": detail,
         },
     )
+
+
+# ``SessionRetireResponse.ok`` by its own documented rule, in one place: the two idempotent
+# success statuses are true and every refusal is false. A refusal status added later cannot
+# arrive as ``ok=True`` by being written at a fifth call site that forgot the rule.
+_RETIRE_OK_STATUSES: frozenset[SessionRetireStatus] = frozenset({"retired", "already-retired"})
+
+
+def _retire_payload(
+    status: SessionRetireStatus,
+    session_id: str,
+    *,
+    detail: str | None = None,
+    closure: TerminalCatalogEntry | None = None,
+) -> dict[str, Any]:
+    """One ``session_retire`` result: the status, plus whichever half of the shape it carries.
+
+    A success reports the row's retirement provenance; a refusal reports the policy clause that
+    fired. Nothing carries both, which is why the two are separate keyword arguments rather than
+    one bundle. ``status`` is the wire alias, so a status invented here is a type error at the
+    producer instead of a ValidationError inside the MCP handler.
+    """
+    payload: dict[str, Any] = {
+        "ok": status in _RETIRE_OK_STATUSES,
+        "operation": "session_retire",
+        "status": status,
+        "session": session_id,
+    }
+    if closure is not None:
+        payload["retiredAt"] = closure.retired_at
+        payload["retiredBySession"] = closure.retired_by_session
+        payload["retiredReason"] = closure.retired_reason
+        payload["retiredEdge"] = closure.retired_edge
+    if detail is not None:
+        payload["detail"] = detail
+    return _tool_payload("session_retire", payload)
 
 
 def session_retire_payload(
@@ -836,42 +883,20 @@ def session_retire_payload(
     catalog = TerminalCatalog(terminal_catalog_path(config.coordination_root))
     target_entry = catalog.get(session_id)
     if target_entry is None:
-        return _tool_payload(
-            "session_retire",
-            {
-                "ok": False,
-                "operation": "session_retire",
-                "status": "unknown-session",
-                "session": session_id,
-                "detail": f"no catalog entry for session {session_id!r}",
-            },
+        return _retire_payload(
+            "unknown-session",
+            session_id,
+            detail=f"no catalog entry for session {session_id!r}",
         )
     actor_entry = catalog.get(actor_session_id)
     if actor_entry is None:
-        return _tool_payload(
-            "session_retire",
-            {
-                "ok": False,
-                "operation": "session_retire",
-                "status": "unknown-actor",
-                "session": session_id,
-                "detail": f"no catalog entry for actor session {actor_session_id!r}",
-            },
+        return _retire_payload(
+            "unknown-actor",
+            session_id,
+            detail=f"no catalog entry for actor session {actor_session_id!r}",
         )
     if target_entry.status == "terminated":
-        return _tool_payload(
-            "session_retire",
-            {
-                "ok": True,
-                "operation": "session_retire",
-                "status": "already-retired",
-                "session": session_id,
-                "retiredAt": target_entry.retired_at,
-                "retiredBySession": target_entry.retired_by_session,
-                "retiredReason": target_entry.retired_reason,
-                "retiredEdge": target_entry.retired_edge,
-            },
-        )
+        return _retire_payload("already-retired", session_id, closure=target_entry)
     try:
         check_retire_authority(
             SeatRef(
@@ -886,16 +911,7 @@ def session_retire_payload(
             ),
         )
     except RetirePolicyError as exc:
-        return _tool_payload(
-            "session_retire",
-            {
-                "ok": False,
-                "operation": "session_retire",
-                "status": "retire-refused",
-                "session": session_id,
-                "detail": str(exc),
-            },
-        )
+        return _retire_payload("retire-refused", session_id, detail=str(exc))
     retire_host = host if host is not None else TerminalHost()
     updated = retire_entry(
         catalog,
@@ -905,19 +921,31 @@ def session_retire_payload(
     )
     assert updated is not None  # the entry existed above; nothing between here removes rows
     log_retire_event(config, updated)
-    return _tool_payload(
-        "session_retire",
-        {
-            "ok": True,
-            "operation": "session_retire",
-            "status": "retired",
-            "session": session_id,
-            "retiredAt": updated.retired_at,
-            "retiredBySession": updated.retired_by_session,
-            "retiredReason": updated.retired_reason,
-            "retiredEdge": updated.retired_edge,
-        },
-    )
+    return _retire_payload("retired", session_id, closure=updated)
+
+
+def _rename_payload(
+    status: SessionRenameStatus,
+    session_id: str,
+    *,
+    label: str,
+    renamed: TerminalCatalogEntry | None = None,
+) -> dict[str, Any]:
+    """One ``session_rename`` result: the REQUESTED label on a refusal, the stored pair on success.
+
+    ``spawnedLabel`` exists only once a row was actually renamed -- it is the frozen spawn-time
+    label, and there is no row to have frozen one when the session is unknown.
+    """
+    payload: dict[str, Any] = {
+        "ok": status == "renamed",
+        "operation": "session_rename",
+        "status": status,
+        "session": session_id,
+        "label": renamed.label if renamed is not None else label,
+    }
+    if renamed is not None:
+        payload["spawnedLabel"] = renamed.spawned_label
+    return _tool_payload("session_rename", payload)
 
 
 def session_rename_payload(
@@ -930,27 +958,8 @@ def session_rename_payload(
     catalog = TerminalCatalog(terminal_catalog_path(config.coordination_root))
     entry = catalog.get(session_id)
     if entry is None or entry.status == "terminated":
-        return _tool_payload(
-            "session_rename",
-            {
-                "ok": False,
-                "operation": "session_rename",
-                "status": "unknown-session",
-                "session": session_id,
-                "label": label,
-            },
-        )
+        return _rename_payload("unknown-session", session_id, label=label)
     updated = catalog.set_label(session_id, label)
     assert updated is not None
     log_rename_event(config, updated)
-    return _tool_payload(
-        "session_rename",
-        {
-            "ok": True,
-            "operation": "session_rename",
-            "status": "renamed",
-            "session": session_id,
-            "label": updated.label,
-            "spawnedLabel": updated.spawned_label,
-        },
-    )
+    return _rename_payload("renamed", session_id, label=label, renamed=updated)

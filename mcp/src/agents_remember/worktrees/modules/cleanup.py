@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import subprocess
 from collections.abc import Mapping
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from pathlib import Path
 
 from agents_remember.kernel.git_command import GIT_REMOTE_TIMEOUT_SECONDS, run_git
@@ -14,7 +14,12 @@ from agents_remember.worktrees.modules.guidance import carryover_done, status_pa
 from agents_remember.worktrees.modules.integrate import integration_branch
 from agents_remember.worktrees.modules.models import WorktreeCommandResult
 from agents_remember.worktrees.modules.provider_teardown import teardown_worktree_providers
-from agents_remember.worktrees.worktree_contract import load_contract, write_contract
+from agents_remember.worktrees.worktree_contract import (
+    ContractCells,
+    amend_contract,
+    load_contract,
+    write_contract,
+)
 
 
 def remove_registered_worktree(
@@ -386,7 +391,9 @@ def cleanup_result(args: WorktreeArgs) -> WorktreeCommandResult:
         _scheduled_removal_paths(providers, removed_worktrees) if args.dry_run else None
     )
     directories = _removed_directories(contract, args.dry_run, planned_removed)
-    updated = contract if args.dry_run else replace(contract, cleanup="completed")
+    updated = (
+        contract if args.dry_run else amend_contract(contract, ContractCells(cleanup="completed"))
+    )
     if not args.dry_run:
         write_contract(contract.contract_path, updated)
     state = _cleanup_state(

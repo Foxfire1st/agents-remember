@@ -5,13 +5,25 @@ from __future__ import annotations
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal, get_args
 
 from agents_remember.kernel.git_command import (
     GIT_LOCAL_TIMEOUT_SECONDS,
     GIT_METADATA_TIMEOUT_SECONDS,
     run_git,
 )
+
+# The repo-availability vocabulary, declared once, here. This module is its only writer, and
+# `models.context_packet.RepoSummary` imports this alias instead of retyping it, so there is no
+# second copy for the two to drift apart in. A hand-written copy at the wire boundary is the
+# defect this replaces: the set difference is invisible until a real repo produces the new
+# member, and by then it is a pydantic ValidationError raised inside a tool handler with no
+# `except` for one -- the failure 165 of the 213 contracts on disk were reproducing.
+RepoState = Literal["available", "detached", "unavailable"]
+
+# The runtime half of the alias, derived from it rather than retyped beside it, so a member can
+# only ever be added in one place.
+VALID_REPO_STATES: frozenset[RepoState] = frozenset(get_args(RepoState))
 
 
 @dataclass(frozen=True)
@@ -21,7 +33,7 @@ class GitFacts:
     branch: str
     head: str
     dirty: bool
-    state: str
+    state: RepoState
     error: str = ""
 
 
@@ -85,7 +97,7 @@ def _read_git_facts(repo_id: str, root: Path) -> GitFacts:
     # `status --porcelain` is the one probe here that is not constant time -- it stats the
     # whole work tree -- so it keeps the local bound and is named rather than defaulted.
     dirty = bool(_git_stdout(root, ["status", "--porcelain"], timeout=GIT_LOCAL_TIMEOUT_SECONDS))
-    state = "available" if branch else "detached"
+    state: RepoState = "available" if branch else "detached"
     return GitFacts(repo_id, root, branch, head, dirty, state)
 
 

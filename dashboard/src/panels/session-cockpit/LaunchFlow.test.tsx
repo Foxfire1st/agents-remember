@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { capabilityCatalogStore, capabilityCostNote } from "../../data/capabilityCatalog";
 import { resetCatalogPollForDev } from "../../data/catalogPoll";
+import type { HarnessInfo } from "../../data/harnessCatalog";
 import { sessionCockpitStore } from "../../data/sessionCockpitStore";
 import { fromTerminalSessionInfo, sessionStore, type OpenSession } from "../../data/sessions";
 import { dashboardStore } from "../../data/store";
@@ -19,11 +20,15 @@ import {
 } from "../../test/fixtures/openResponses";
 import { LaunchFlow } from "./LaunchFlow";
 
-const HARNESSES = {
+// Annotated rather than bare: `HarnessInfo` is declared in `data/harnessCatalog.ts`, which carries
+// no mirror marker and so is invisible to `wireFixtureGuard.ts`. These three rows each carried a
+// `control` the server's `DetectedHarness` (`extra="forbid"`) does not declare and no dashboard
+// code reads; the annotation is what makes a second such field fail `tsc -b` here.
+const HARNESSES: { harnesses: HarnessInfo[] } = {
   harnesses: [
-    { id: "claude", name: "Claude Code", detected: true, control: "starting" },
-    { id: "codex", name: "Codex", detected: true, control: "starting" },
-    { id: "pi", name: "Pi.dev", detected: false, control: "starting" },
+    { id: "claude", name: "Claude Code", detected: true },
+    { id: "codex", name: "Codex", detected: true },
+    { id: "pi", name: "Pi.dev", detected: false },
   ],
 };
 
@@ -111,6 +116,18 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+});
+
+describe("the catalog body this file serves is one the daemon could send", () => {
+  it("advertises exactly the three fields `DetectedHarness` declares", () => {
+    // The annotation above catches a field added to a FRESH row. This catches the rest: a row
+    // spread in from somewhere else, or a key written onto the array after the fact. Both are
+    // invisible to `tsc` and to `wireFixtureGuard.ts`, because `harnessCatalog.ts` is not a
+    // marker-carrying mirror module and `HarnessInfo` is therefore not wire vocabulary.
+    for (const row of HARNESSES.harnesses) {
+      expect(Object.keys(row).sort()).toEqual(["detected", "id", "name"]);
+    }
+  });
 });
 
 describe("LaunchFlow — dynamic-only pickers (R1/R4)", () => {

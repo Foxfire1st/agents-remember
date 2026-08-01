@@ -518,7 +518,15 @@ def write_master_series(out: Path) -> None:
         contract_md(
             site,
             lifecycle_id=series_lc,
-            kind="master",
+            # The task *format*, not the series role -- `contract_kind="series"` above already
+            # carries that. It has to be a real `WorkflowKind`, and this fixture is the only
+            # thing that can make it one: `load_contract` does *not* reject an off-vocabulary
+            # value, it degrades to the declared fallback and records the raw token on
+            # `unknown_cells`. The refusal lives at `validate_contract`, the write boundary --
+            # which writing the document as markdown text bypasses entirely. So a wrong value
+            # here would not fail anything; it would quietly produce a whole simulated
+            # workspace of contracts each carrying a quarantined cell.
+            kind="light-task",
             status=ContractStatus(closeout="completed", cleanup="pending"),
         ),
     )

@@ -2,9 +2,11 @@ import { describe, expect, it } from "vitest";
 
 import { findParentTaskMatch, taskDocParentKey } from "./taskHierarchy";
 import { seriesSelectionKey, taskDocSelectionKey } from "./taskIdentity";
-import type { SeriesNode, TaskSubTaskRefNode } from "../types/projection";
+import type { SeriesNode, SeriesSubTaskNode } from "../types/projection";
 
-function ref(overrides: Partial<TaskSubTaskRefNode> & Pick<TaskSubTaskRefNode, "number" | "file">): TaskSubTaskRefNode {
+// These feed `series.subTasks`, so they are SERIES rows: they carry `createdAt` and never a
+// cross-series `linkedLifecycleId`.
+function ref(overrides: Partial<SeriesSubTaskNode> & Pick<SeriesSubTaskNode, "number" | "file">): SeriesSubTaskNode {
   return { name: overrides.number, status: "open", scope: "", ...overrides };
 }
 

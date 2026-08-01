@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { dashboardStore } from "../data/store";
 import { GALLERY } from "../dev/fixtures";
+import { metricsFor } from "../types/projection";
 import type {
   EnclosureNode,
   LifecycleProjection,
@@ -121,7 +122,6 @@ function seedSeries(
         status: "inProgress",
         scope: "",
         createdAt: "2026-06-21T09:00:00+00:00",
-        linkedLifecycleId: "LC-OTHER",
       },
     ],
     sections: [
@@ -160,14 +160,7 @@ function seedSeries(
       : [],
     providers: [],
     activeWorktreeGroups: [],
-    metrics: {
-      lifecycleCount: 1,
-      runningCount: 1,
-      blockedCount: 0,
-      pausedCount: 0,
-      totalTokens: 0,
-      stalenessHistogram: {},
-    },
+    metrics: metricsFor([lc]),
     analytics: {
       driftSnapshots: [],
       stalestSidecars: [],
@@ -228,14 +221,7 @@ function seedSeriesOrdering() {
     enclosures: [],
     providers: [],
     activeWorktreeGroups: [],
-    metrics: {
-      lifecycleCount: 0,
-      runningCount: 0,
-      blockedCount: 0,
-      pausedCount: 0,
-      totalTokens: 0,
-      stalenessHistogram: {},
-    },
+    metrics: metricsFor([]),
     analytics: {
       driftSnapshots: [],
       stalestSidecars: [],
@@ -284,14 +270,7 @@ function seedProjection(over: Partial<WorkspaceProjection>) {
     enclosures: [],
     providers: [],
     activeWorktreeGroups: [],
-    metrics: {
-      lifecycleCount: lifecycles.length,
-      runningCount: lifecycles.filter((entry) => entry.state === "running").length,
-      blockedCount: lifecycles.filter((entry) => entry.state === "blocked").length,
-      pausedCount: lifecycles.filter((entry) => entry.state === "paused").length,
-      totalTokens: lifecycles.reduce((sum, entry) => sum + entry.tokens, 0),
-      stalenessHistogram: {},
-    },
+    metrics: metricsFor(lifecycles),
     analytics: {
       driftSnapshots: [],
       stalestSidecars: [],
@@ -370,14 +349,7 @@ function seedPromotedLeaf() {
     ],
     providers: [],
     activeWorktreeGroups: [],
-    metrics: {
-      lifecycleCount: 1,
-      runningCount: 0,
-      blockedCount: 0,
-      pausedCount: 1,
-      totalTokens: 0,
-      stalenessHistogram: {},
-    },
+    metrics: metricsFor([lc]),
     analytics: {
       driftSnapshots: [],
       stalestSidecars: [],
@@ -503,7 +475,6 @@ describe("DetailPanel master series navigation (6g)", () => {
           file: "01_leaf.md",
           status: "planning",
           scope: "",
-          createdAt: "2026-06-20T09:00:00+00:00",
         },
       ],
     });
@@ -552,7 +523,6 @@ describe("DetailPanel master series navigation (6g)", () => {
           file: "01_leaf.md",
           status: "planning",
           scope: "",
-          createdAt: "2026-06-20T09:00:00+00:00",
         },
       ],
     });
@@ -605,7 +575,6 @@ describe("DetailPanel master series navigation (6g)", () => {
           file: "01_missing.md",
           status: "planning",
           scope: "",
-          createdAt: "2026-06-20T09:00:00+00:00",
         },
       ],
     });
@@ -695,11 +664,36 @@ describe("DetailPanel master series navigation (6g)", () => {
     expect(queryByText("Slice objective text")).toBeNull();
   });
 
-  it("jumps lifecycles from a cross-master row", () => {
-    seedSeries();
+  it("jumps lifecycles from a cross-master row on a master TASK DOC", () => {
+    // The cross-series jump is reachable only from a master task document: `linkedLifecycleId`
+    // lives on `TaskSubTaskRefNode`. A SeriesNode's rows are `SeriesSubTaskNode`, which the
+    // server never stamps with one — this fixture used to be a series, so it was exercising a
+    // projection the server cannot produce.
+    const master = taskDoc({
+      lifecycleId: undefined,
+      kind: "master",
+      title: "Cross-linking Master",
+      docPath: "/tasks/repo-a/planning/task.json",
+      objective: "Master plan objective.",
+      subTasks: [
+        { number: "1", name: "Own slice", file: "01_leaf.md", status: "planning", scope: "" },
+        {
+          number: "2",
+          name: "Parallel series",
+          file: "../other/task.md",
+          status: "inProgress",
+          scope: "",
+          linkedLifecycleId: "LC-OTHER",
+        },
+      ],
+    });
+    seedTaskDocuments([master]);
     const onOpenLifecycle = vi.fn();
     const { getByTestId } = render(
-      <DetailPanel selectedId="series" onOpenLifecycle={onOpenLifecycle} />,
+      <DetailPanel
+        selectedId="taskdoc:/tasks/repo-a/planning/task.json"
+        onOpenLifecycle={onOpenLifecycle}
+      />,
     );
     fireEvent.click(getByTestId("subtask-open-link-2")); // the "→" cross-series row
     expect(onOpenLifecycle).toHaveBeenCalledWith("LC-OTHER");

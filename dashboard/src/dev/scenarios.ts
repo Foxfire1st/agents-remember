@@ -95,7 +95,7 @@ const reindexReroute: Scenario = {
     erFrame("engine-boot-1-code-worktree", "R1 · code worktree copies in from main (branch-copy)"),
     erFrame("engine-boot-2-memory-contract", "R2 · memory worktree copies in; the contract coupler binds"),
     erFrame("engine-boot-3-providers-dim", "R3 · provider runtime — engines materialise dim; clone conduits seed from main"),
-    erFrame("engine-cgc-seed-refused", "R4 · CGC seed REFUSED → reindex — the seed arrow flashes AMBER and CGC reindexes in place (a fallback, not a failure); GrepAI seeds normally", 2000),
+    erFrame("engine-cgc-seed-refused", "R4 · CGC seed STALE → reindex reroute — the seed arrow flashes AMBER and CGC reindexes in place (a fallback, not a failure); GrepAI seeds normally", 2000),
     erFrame("engine-cgc-fallback", "R5 · indexing completes — the amber reindex finishes (not terminal); engine ready to lock"),
     erFrame("engine-boot-5-nominal", "R6 · running — recovered via reindex; both engines green → nominal"),
   ],

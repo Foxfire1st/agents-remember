@@ -28,7 +28,7 @@ def _contract(tmp: Path, **over: object) -> WorktreeContract:
         "task_id": "T",
         "task_name": "demo",
         "repo_name": "repo-a",
-        "workflow_kind": "chat",
+        "workflow_kind": "chat-task",
         "memory_mode": "external",
         "coordination_root": tmp,
         "task_root": tmp,

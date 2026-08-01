@@ -60,13 +60,18 @@ function authorityTransport(onRead: () => void): SubmissionLifecycleTransport {
       bridgeEpoch: "scenario-reset-epoch",
       submissions: [],
     }),
-    withdraw: async (_sessionId, _epoch, requestId) => ({
+    // The return type is written out on purpose. An object literal in an ASYNC arrow's concise
+    // body loses excess-property checking — the literal is compared to the inferred `Promise<…>`
+    // rather than checked fresh against the contextual one — so this result carried a
+    // `bridgeEpoch` that `WithdrawalResultWire` does not declare (nor does the server's
+    // `extra="forbid"` model; it was copied from the `/submit` receipt, which does carry one).
+    // With the annotation, a re-added field fails `tsc -b` right here.
+    withdraw: async (_sessionId, _epoch, requestId): Promise<WithdrawalResultWire> => ({
       requestId,
       outcome: "not-found",
       state: null,
       withdrawnAt: null,
       detail: null,
-      bridgeEpoch: "scenario-reset-epoch",
     }),
   };
 }
@@ -100,6 +105,40 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+});
+
+describe("the scenario server answers only what the daemon could answer", () => {
+  // Two routes whose response types live in UNMARKED modules — `data/harnessCatalog.ts` and
+  // `data/submissionLifecycleClient.ts` — and are therefore not in `wireFixtureGuard.ts`'s
+  // vocabulary. Both had a field the server cannot send: a `control` on every catalog row, and a
+  // `bridgeEpoch` on the withdrawal result. The `satisfies`/return-type pins beside each fixture
+  // catch a field added to a fresh literal; these two assertions catch the rest.
+
+  it("serves harness catalog rows with exactly `DetectedHarness`'s three fields", async () => {
+    const restore = installCockpitScenarioFetch(fleet);
+    try {
+      const body = (await (await window.fetch("/api/harnesses")).json()) as {
+        harnesses: Array<Record<string, unknown>>;
+      };
+      expect(body.harnesses.length).toBeGreaterThan(0);
+      for (const row of body.harnesses) {
+        expect(Object.keys(row).sort()).toEqual(["detected", "id", "name"]);
+      }
+    } finally {
+      restore();
+    }
+  });
+
+  it("withdraws with exactly the fields `WithdrawalResultWire` declares", async () => {
+    const result = await authorityTransport(() => {}).withdraw("s", "e", "req-1");
+    expect(Object.keys(result).sort()).toEqual([
+      "detail",
+      "outcome",
+      "requestId",
+      "state",
+      "withdrawnAt",
+    ]);
+  });
 });
 
 describe("cockpit scenario authority boundary", () => {

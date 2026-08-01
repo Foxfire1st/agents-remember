@@ -12,6 +12,32 @@ export interface ConstelHandle {
   destroy(): void;
 }
 
+/** Reads one CSS custom property, falling back to a literal when the sheet has not defined it. */
+export type CssVarReader = (name: string, fallback: string) => string;
+
+// The status → colour grammar, declared ONCE and totally — the same move `model.ts` made for
+// state → status, applied to the step this leaf originally left un-migrated. It was
+// `Record<string, string>` read through `COLORS[status] ?? COLORS.ok`, which is the pattern that
+// module's own comment condemns: "a default that says healthy is not a default, it is a claim."
+// It made the same claim, one map further down the pipeline, and it is where the `undefined` from
+// an unclassified state landed and came out cyan.
+//
+// `Record<ConstelStatus, string>` is the load-bearing part: a sixth status in `CONSTEL_STATUSES`
+// stops this object literal compiling until someone picks its hue. There is no `??` here on
+// purpose — unlike `model.ts`'s state lookup the key is NOT wire data, it is a `ConstelStatus`
+// this package's own `buildTopology` produced, so the lookup really is total and a fallback would
+// be re-introducing the guess. Extracted from `mountConstel` so it is reachable without a canvas:
+// a totality claim nothing can execute is a totality claim nothing can check.
+export function constelColors(cssVar: CssVarReader): Record<ConstelStatus, string> {
+  return {
+    core: cssVar("--ink", "#e8e8e8"),
+    ok: cssVar("--cyan", "#7fd6ff"),
+    warn: cssVar("--amber", "#e8a020"),
+    crit: cssVar("--alarm", "#ff3322"),
+    idle: cssVar("--dormant", "#7a3030"),
+  };
+}
+
 interface Comet {
   a: number;
   b: number;
@@ -42,17 +68,11 @@ export function mountConstel(
   const frozen = document.documentElement.dataset.effects === "off";
 
   const css = getComputedStyle(document.documentElement);
-  const v = (name: string, fallback: string) => css.getPropertyValue(name).trim() || fallback;
-  const COLORS: Record<string, string> = {
-    core: v("--ink", "#e8e8e8"),
-    ok: v("--cyan", "#7fd6ff"),
-    warn: v("--amber", "#e8a020"),
-    crit: v("--alarm", "#ff3322"),
-    idle: v("--dormant", "#7a3030"),
-  };
+  const v: CssVarReader = (name, fallback) => css.getPropertyValue(name).trim() || fallback;
+  const COLORS = constelColors(v);
   const EDGE = v("--ink", "#cccccc");
   const MUTED = "oklch(0.7 0.02 250)";
-  const col = (status: string): string => COLORS[status] ?? COLORS.ok;
+  const col = (status: ConstelStatus): string => COLORS[status];
 
   let cw = 0;
   let ch = 0;

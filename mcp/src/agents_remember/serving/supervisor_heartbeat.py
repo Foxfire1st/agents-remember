@@ -15,11 +15,37 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
+from pydantic import BaseModel, ConfigDict
+
 
 @dataclass(frozen=True)
 class SupervisorHeartbeat:
     lastTickAt: str
     sweepCount: int
+    pendingInboxCount: int = 0
+    redeliverableInboxCount: int = 0
+    lastSweepDurationSeconds: float | None = None
+
+
+class SupervisorHeartbeatPayload(BaseModel):
+    """The declared wire form of the tick age, as it rides ``supervisorHeartbeat``.
+
+    Distinct from :class:`SupervisorHeartbeat`, which is the durable ROW. This is what a
+    reader computes ABOUT that row at response time: the row's own counters plus the age
+    and the staleness verdict against the configured cutoff. Serving-layer arithmetic on a
+    tick-time artifact, which is exactly why it is not a projection field.
+
+    Serialized WITHOUT ``exclude_none``: a supervisor that has never ticked reports
+    ``lastTickAt``/``ageSeconds`` as explicit nulls, because the cockpit distinguishes
+    "never ticked" from "this server does not report a heartbeat at all".
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    lastTickAt: str | None = None
+    ageSeconds: float | None = None
+    staleCutoffSeconds: float
+    stale: bool
     pendingInboxCount: int = 0
     redeliverableInboxCount: int = 0
     lastSweepDurationSeconds: float | None = None

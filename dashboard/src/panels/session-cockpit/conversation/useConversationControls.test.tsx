@@ -5,53 +5,42 @@ import { emptyProjection, type ActiveConversationProjection } from "../../../dat
 import { activeConversationStore } from "../../../data/conversation/store";
 import type {
   ActiveConversationRef,
-  ConversationCapabilities,
   ConversationItem,
   ConversationStatus,
 } from "../../../data/conversation/types";
+import {
+  capabilitiesWithInterrupt as capabilities,
+  conversationIdentity,
+  conversationItem,
+  conversationStatus,
+} from "../../../test/fixtures/conversationWire";
 import { resolveWorkingTurnId, useConversationInterrupt } from "./useConversationControls";
 
-const IDENTITY: ActiveConversationRef = {
-  harnessId: "codex",
+const IDENTITY: ActiveConversationRef = conversationIdentity({
   vendorConversationId: "v",
   projectScope: "/r",
   identityDigest: "d",
   arSessionId: "s1",
   bridgeEpoch: "e1",
-};
+});
 
 function streamingItem(turnId: string | undefined): ConversationItem {
-  return {
+  return conversationItem({
     itemId: "i1",
-    revision: 1,
     globalOrdinal: 1,
     turnId,
-    lane: "harness",
-    source: "harness-live",
-    provenance: { strength: "exact", origin: "codex" },
-    role: "assistant",
-    kind: "message",
     phase: "streaming",
     blocks: [],
-  };
+  });
 }
 
 function status(turnState: ConversationStatus["turn"]["state"], turnId: string | null): ConversationStatus {
-  return {
+  return conversationStatus({
     identity: IDENTITY,
-    revision: 1,
-    observedAt: "2026-07-20T00:00:00Z",
     freshness: { state: "fresh", lastEvidenceAt: null, ageMs: null, staleAfterMs: 1, observationBound: "poll" },
     process: { state: "connected", generation: "g" },
     turn: { state: turnState, turnId, stateSince: null },
-    evidence: { strength: "exact", origin: "codex" },
-  };
-}
-
-function capabilities(interruptState: "supported" | "unverified" | "unavailable"): ConversationCapabilities {
-  return {
-    controls: { interrupt: { state: interruptState, reason: `interrupt ${interruptState}`, evidenceTier: "adapter" } },
-  } as unknown as ConversationCapabilities;
+  });
 }
 
 function seed(overrides: Partial<ActiveConversationProjection>): void {

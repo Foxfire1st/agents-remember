@@ -1,4 +1,10 @@
-"""Tests for the crash-safe copy-then-swap behavior of the sync scripts."""
+"""Tests for the sync scripts: their copy semantics, and the copies in this checkout.
+
+Two different jobs live here. ``ReplaceTreeTests`` exercises ``replace_tree``'s
+crash-safe copy-then-swap contract over throwaway trees, which is the right shape for
+testing an algorithm. ``RealTreeDriftTests`` reads the actual mirrored trees in this
+checkout, which is the only shape that can enforce anything -- see its docstring.
+"""
 
 from __future__ import annotations
 
@@ -8,6 +14,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from types import ModuleType
+from typing import Any
 from unittest import mock
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -24,6 +31,27 @@ def load_script(name: str) -> ModuleType:
     sys.modules[module_name] = module
     spec.loader.exec_module(module)
     return module
+
+
+def drifted_files(module: ModuleType, target: Any) -> list[str]:
+    """Repo-relative paths where ``target`` disagrees with its canonical source.
+
+    ``sync-skills`` and ``sync-runtime`` publish the same reading surface -- a
+    ``diff_target`` returning ``missing``/``extra``/``changed`` tuples of tree-relative
+    paths, plus ``repo_relative`` -- so one reader serves both. Each entry is rebased
+    onto the target so the failure names the copy that has to be fixed rather than the
+    path it shares with eight others.
+    """
+    diff = module.diff_target(target)
+    return [
+        f"{module.repo_relative(target.path / rel_path)} ({kind})"
+        for kind, rel_paths in (
+            ("differs from source", diff.changed),
+            ("absent from copy", diff.missing),
+            ("absent from source", diff.extra),
+        )
+        for rel_path in rel_paths
+    ]
 
 
 class ReplaceTreeTests(unittest.TestCase):
@@ -126,6 +154,57 @@ class ReplaceTreeTests(unittest.TestCase):
             self.sync_runtime.replace_tree(source, target)
 
             self.assertFalse((target / "__pycache__").exists())
+
+
+class RealTreeDriftTests(unittest.TestCase):
+    """The enforcing half: every generated copy *in this checkout* matches its source.
+
+    Every test above runs inside a ``tempfile.TemporaryDirectory``. That is correct for
+    ``replace_tree``'s semantics and worth nothing as enforcement -- a hand-edited
+    ``.claude/skills/.../SKILL.md`` passes all of them, because none of them ever looks
+    at the repository. Nor did anything else: ``.github/workflows/`` and
+    ``code_quality/check.py`` never invoke either script, so the only thing that caught
+    drift was ``.githooks/_gate.sh``, which each contributor has to install locally and
+    which no CI run executes. These two tests read the real trees, so a mirror edited
+    without a re-sync fails the suite wherever the suite runs.
+
+    Modelled on ``test_sync_harness.py::test_every_generated_harness_file_matches_its_source``,
+    including naming the exact command that repairs the drift.
+    """
+
+    # A copy that is missing outright lists every file in the source tree; the default
+    # 640-character diff would truncate exactly the names this test exists to print.
+    maxDiff = None
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.sync_skills = load_script("sync-skills.py")
+        cls.sync_runtime = load_script("sync-runtime.py")
+
+    def test_every_skill_copy_matches_the_canonical_tree(self) -> None:
+        drifted = [
+            entry
+            for target in self.sync_skills.TARGETS
+            for entry in drifted_files(self.sync_skills, target)
+        ]
+        self.assertEqual(
+            drifted,
+            [],
+            "skill copies drifted from skills/; run: python3 scripts/sync-skills.py",
+        )
+
+    def test_every_runtime_package_asset_matches_its_source(self) -> None:
+        drifted = [
+            entry
+            for target in self.sync_runtime.TARGETS
+            for entry in drifted_files(self.sync_runtime, target)
+        ]
+        self.assertEqual(
+            drifted,
+            [],
+            "package data drifted from the canonical runtime assets; "
+            "run: python3 scripts/sync-runtime.py",
+        )
 
 
 if __name__ == "__main__":

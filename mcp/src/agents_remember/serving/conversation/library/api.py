@@ -43,10 +43,16 @@ from agents_remember.serving.conversation.library.factories import (
 from agents_remember.serving.conversation.library.open_service import OpenRequest
 from agents_remember.serving.conversation.library.scope import clamp_limit
 from agents_remember.serving.conversation.models import (
+    ConversationLibraryPage,
+    HistoricalConversationPage,
     LibraryListCursor,
     LibraryReadCursor,
     OpenConversationOperation,
     WireModel,
+)
+from agents_remember.serving.conversation.response_contract import (
+    LIBRARY_RESPONSES,
+    OPEN_OUTCOME_RESPONSES,
 )
 
 router = APIRouter(
@@ -59,7 +65,14 @@ _LIST_MAX_LIMIT = 100
 _READ_DEFAULT_LIMIT = 50
 _READ_MAX_LIMIT = 100
 
-_OPEN_STATUS_BY_OUTCOME = {
+# TOTAL over ``OpenConversationOperation.outcome``'s eight-member Literal, and it has to be:
+# ``_open_call`` indexes this directly, so a ninth outcome added without a status here is a
+# loud ``KeyError`` at the one place that can fix it -- the same posture as ``_error_response``
+# below, which re-raises rather than inventing a status. The alternative, a ``.get(..., 500)``
+# default, answered an unmapped outcome with a 500 carrying a full operation body: a shape no
+# ``responses`` table declares, on a status no test could ever drive, silently.
+# ``test_serving_response_conformance`` asserts this set equality against the Literal.
+_OPEN_STATUS_BY_OUTCOME: dict[str, int] = {
     "opened": 201,
     "pending": 202,
     "timeout-unknown": 202,
@@ -91,7 +104,9 @@ class OpenStatusRequest(BaseModel):
     request_id: str = Field(alias="requestId", min_length=1)
 
 
-@router.get("")
+# ``_error_response`` maps the whole typed library error family onto six statuses, so one
+# shared table is the complete refusal surface of all five routes here.
+@router.get("", response_model=ConversationLibraryPage, responses=LIBRARY_RESPONSES)
 async def api_library_list(
     request: Request,
     harness_id: str,
@@ -115,7 +130,11 @@ async def api_library_list(
     return await _library_call(run, success_status=200)
 
 
-@router.get("/{conversation_key}")
+@router.get(
+    "/{conversation_key}",
+    response_model=HistoricalConversationPage,
+    responses=LIBRARY_RESPONSES,
+)
 async def api_library_read(
     request: Request,
     harness_id: str,
@@ -139,7 +158,20 @@ async def api_library_read(
     return await _library_call(run, success_status=200)
 
 
-@router.post("/{conversation_key}/open")
+# The open trio answer with TWO families on the same statuses. ``_OPEN_STATUS_BY_OUTCOME``
+# reads the operation's own ``outcome`` to pick 201/202/409/422/503, and each of those carries
+# an ``OpenConversationOperation`` -- the outcome is the body, not an error. But
+# ``_error_response`` still maps the typed library errors onto 400/403/404/409/422/503 with the
+# refusal bodies ``LIBRARY_RESPONSES`` names, so 409/422/503 carry *either*. ``{**a, **b}`` is
+# a dict merge and not a union, which is why ``OPEN_OUTCOME_RESPONSES`` unions the refusal
+# member into each overlapping status itself: a bare operation-only entry would overwrite the
+# refusal and declare, on nine (route, status) pairs, a model the route cannot produce.
+@router.post(
+    "/{conversation_key}/open",
+    response_model=OpenConversationOperation,
+    status_code=201,
+    responses={**LIBRARY_RESPONSES, **OPEN_OUTCOME_RESPONSES},
+)
 async def api_library_open(
     request: Request,
     harness_id: str,
@@ -167,7 +199,12 @@ async def api_library_open(
     return await _open_call(run)
 
 
-@router.post("/{conversation_key}/open-status")
+@router.post(
+    "/{conversation_key}/open-status",
+    response_model=OpenConversationOperation,
+    status_code=201,
+    responses={**LIBRARY_RESPONSES, **OPEN_OUTCOME_RESPONSES},
+)
 async def api_library_open_status(
     request: Request,
     harness_id: str,
@@ -184,7 +221,12 @@ async def api_library_open_status(
     return await _open_call(run)
 
 
-@router.post("/{conversation_key}/open-reconcile")
+@router.post(
+    "/{conversation_key}/open-reconcile",
+    response_model=OpenConversationOperation,
+    status_code=201,
+    responses={**LIBRARY_RESPONSES, **OPEN_OUTCOME_RESPONSES},
+)
 async def api_library_open_reconcile(
     request: Request,
     harness_id: str,
@@ -221,8 +263,9 @@ async def _open_call(run: Callable[[], Awaitable[OpenConversationOperation]]) ->
         operation = await run()
     except Exception as exc:
         return _error_response(exc)
-    status_code = _OPEN_STATUS_BY_OUTCOME.get(operation.outcome, 500)
-    return JSONResponse(content=_dump(operation), status_code=status_code)
+    return JSONResponse(
+        content=_dump(operation), status_code=_OPEN_STATUS_BY_OUTCOME[operation.outcome]
+    )
 
 
 def _error_response(exc: Exception) -> JSONResponse:

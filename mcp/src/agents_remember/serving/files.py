@@ -43,6 +43,13 @@ from agents_remember.mcp.config import McpRuntimeConfig
 from agents_remember.memory_quality.integrity.onboarding_drift_check.discovery import (
     mirror_onboarding_path,
 )
+from agents_remember.serving.response_contract import (
+    SCOPED_READ_RESPONSES,
+    DirectoryListing,
+    FileContents,
+    OnboardingResolution,
+    RepoCatalog,
+)
 from agents_remember.serving.scope import (
     FileScope,
     _iter_active_contracts,
@@ -291,19 +298,27 @@ def resolve_partner(scope: FileScope, onboarding_rel: str) -> dict[str, Any]:
 def register_files_routes(app: FastAPI, config: McpRuntimeConfig) -> None:
     """Register the read-only files routes. Must be called BEFORE the greedy static mount."""
 
-    @app.get("/api/files/repos")
+    # ``/api/files/repos`` is the one route in this family with no refusal branch at all: the
+    # catalog is assembled from the allow-list itself, so it declares a success shape only.
+    @app.get("/api/files/repos", response_model=RepoCatalog)
     def api_files_repos() -> Response:
         return JSONResponse(list_repos(config), status_code=200)
 
-    @app.get("/api/files/list")
+    @app.get("/api/files/list", response_model=DirectoryListing, responses=SCOPED_READ_RESPONSES)
     def api_files_list(repo: str, scope: str = "mainline", path: str = "") -> Response:
         return run_scoped(lambda fs: list_dir(fs, path), config, repo, scope)
 
-    @app.get("/api/files/read")
+    @app.get("/api/files/read", response_model=FileContents, responses=SCOPED_READ_RESPONSES)
     def api_files_read(repo: str, scope: str = "mainline", path: str = "") -> Response:
         return run_scoped(lambda fs: read_file(fs, path), config, repo, scope)
 
-    @app.get("/api/files/onboarding")
+    # Five success shapes, because ``direction`` picks the pairing direction and each direction
+    # discriminates further -- the union is the honest declaration, not a convenience.
+    @app.get(
+        "/api/files/onboarding",
+        response_model=OnboardingResolution,
+        responses=SCOPED_READ_RESPONSES,
+    )
     def api_files_onboarding(
         repo: str, scope: str = "mainline", path: str = "", direction: str = "forward"
     ) -> Response:

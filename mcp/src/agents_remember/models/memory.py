@@ -6,14 +6,16 @@ from typing import Any, Literal
 
 from pydantic import Field
 
+from agents_remember.memory_quality.integrity.onboarding_drift_check.models import DriftStatus
 from agents_remember.models.base import FlexibleToolResponse, ToolResponse
-
-DriftCheckStatus = Literal["notChecked", "checked", "error"]
 
 
 class DriftCheckResponse(ToolResponse):
     operation: Literal["drift_check"] = "drift_check"
-    status: DriftCheckStatus
+    # The last hand-copy of the drift vocabulary. `run_drift_summary` produces every member and
+    # `models.drift.DriftSummary` already reads `DriftStatus` from its declaration; this model
+    # kept a third, identical copy, which is one more place for the next member to not arrive.
+    status: DriftStatus
     count: int | None = Field(default=None, ge=0)
     actionableCount: int | None = Field(default=None, ge=0)
     reportPath: str | None = None

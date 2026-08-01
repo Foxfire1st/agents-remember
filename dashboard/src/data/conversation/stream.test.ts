@@ -6,7 +6,7 @@ import {
   type ConversationStreamController,
   type EventSourceCtor,
 } from "./stream";
-import type { ActiveEventCursor } from "./types";
+import { eventCursor } from "../../test/fixtures/conversationWire";
 
 // The stream's reconnect backoff is boot-window aware. Before the FIRST
 // successful open (the fresh-chat window where the bridge's events endpoint still 503s) the
@@ -146,7 +146,7 @@ describe("liveness watchdog (260723 sleep/wake + half-open wedge)", () => {
     return openConversationStream({
       sessionId: "s1",
       epoch: "e1",
-      getResumeCursor: () => "evt-7" as ActiveEventCursor,
+      getResumeCursor: () => eventCursor("evt-7"),
       handlers: { onEnvelope: () => {}, ...handlers },
       eventSourceCtor: ControlledSource as unknown as EventSourceCtor,
     });

@@ -12,7 +12,7 @@ from __future__ import annotations
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal, get_args
 
 from agents_remember.kernel.git_command import (
     GIT_LOCAL_TIMEOUT_SECONDS,
@@ -22,6 +22,24 @@ from agents_remember.kernel.git_command import (
 
 DEFAULT_FETCH_TIMEOUT = 30
 
+# The freshness vocabulary, declared once, here. Four members report a comparison that
+# succeeded and four report why one could not be made; `_read_branch_freshness` is the only
+# writer of any of them, and `models.context_packet.BranchFreshness` imports this alias for the
+# wire boundary rather than keeping a second copy the degrade paths could outgrow.
+FreshnessState = Literal[
+    "current",
+    "behind",
+    "ahead",
+    "diverged",
+    "no-upstream",
+    "no-branch",
+    "unknown",
+    "unavailable",
+]
+
+# The runtime half of the alias, derived from it rather than retyped beside it.
+VALID_FRESHNESS_STATES: frozenset[FreshnessState] = frozenset(get_args(FreshnessState))
+
 
 @dataclass(frozen=True)
 class BranchFreshness:
@@ -30,7 +48,7 @@ class BranchFreshness:
     fetched: bool
     ahead: int | None
     behind: int | None
-    state: str
+    state: FreshnessState
     error: str = ""
 
 
@@ -125,7 +143,7 @@ def _read_branch_freshness(
     if fetch_error or counts is None:
         error = fetch_error or f"could not count {branch}...{upstream}"
         return BranchFreshness(branch, upstream, False, ahead, behind, "unknown", error)
-    state = (
+    state: FreshnessState = (
         "current"
         if ahead == 0 and behind == 0
         else "behind"

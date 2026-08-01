@@ -675,7 +675,9 @@ def read_engine_process_facts(
         facts.append(
             EngineProcessFacts(
                 contract=cp,
-                guidance=lifecycle_guidance(contract),
+                # Widened at the boundary: `EngineProcessFacts` is the projection's untyped
+                # input carrier, and the reducer folds it by key name.
+                guidance=dict(lifecycle_guidance(contract)),
                 status=_safe_status_payload(
                     contract,
                     cache_key=status_key,
@@ -785,8 +787,9 @@ def _cached_local_status(
             and 0 <= (now - cached[0]).total_seconds() < STATUS_PAYLOAD_TTL_SECONDS
         ):
             return cached[1]
+    value: dict[str, Any] | None
     try:
-        value = projected_status_payload(contract, landing=None)
+        value = dict(projected_status_payload(contract, landing=None))
     except Exception:  # local status for one broken worktree must not fail the whole projection
         value = None
     if cache_key is not None and now is not None:

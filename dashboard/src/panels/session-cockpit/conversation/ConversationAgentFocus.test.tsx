@@ -21,12 +21,16 @@ import {
 import type { EventSourceCtor } from "../../../data/conversation/stream";
 import type {
   ActiveConversationRef,
-  ActiveEventCursor,
-  ConversationCapabilities,
   ConversationItem,
   ConversationPage,
   ConversationStatus,
 } from "../../../data/conversation/types";
+import {
+  conversationIdentity,
+  conversationItem,
+  conversationPage,
+  conversationStatus,
+} from "../../../test/fixtures/conversationWire";
 import { ConversationSurface } from "./ConversationSurface";
 import { OPERATOR_SCROLL_KEYS } from "./ConversationTimeline";
 
@@ -40,20 +44,18 @@ vi.mock("./AmbientTelemetry", () => ({ AmbientTelemetry: () => null }));
 const SESSION_ID = "agent-focus-session";
 
 function identity(): ActiveConversationRef {
-  return {
-    harnessId: "codex",
+  return conversationIdentity({
     vendorConversationId: "v",
     projectScope: "/r",
     identityDigest: "d",
     arSessionId: SESSION_ID,
     bridgeEpoch: "e1",
-  };
+  });
 }
 
 function status(): ConversationStatus {
-  return {
+  return conversationStatus({
     identity: identity(),
-    revision: 1,
     observedAt: "2026-07-21T00:00:00Z",
     freshness: {
       state: "fresh",
@@ -63,23 +65,15 @@ function status(): ConversationStatus {
       observationBound: "poll",
     },
     process: { state: "connected", generation: "g" },
-    turn: { state: "ready", turnId: null, stateSince: null },
-    evidence: { strength: "exact", origin: "codex" },
-  };
+  });
 }
 
 function item(overrides: Partial<ConversationItem> & { itemId: string; globalOrdinal: number }): ConversationItem {
-  return {
-    revision: 1,
-    lane: "harness",
-    source: "harness-live",
-    provenance: { strength: "exact", origin: "codex" },
-    role: "assistant",
-    kind: "message",
-    phase: "completed",
+  return conversationItem({
+    turnId: undefined,
     blocks: [{ blockId: `${overrides.itemId}-b`, type: "text", text: overrides.itemId }],
     ...overrides,
-  };
+  });
 }
 
 const PARENT_1 = item({ itemId: "parent-1", globalOrdinal: 1, role: "user" });
@@ -118,15 +112,7 @@ const FakeEventSource = class {
 } as unknown as EventSourceCtor;
 
 function initialPage(): ConversationPage {
-  return {
-    identity: identity(),
-    items: [],
-    page: { olderCursor: null, hasOlder: false },
-    eventCursor: "evt-0" as ActiveEventCursor,
-    hydrationId: "h",
-    status: status(),
-    capabilities: {} as ConversationCapabilities,
-  };
+  return conversationPage({ identity: identity(), status: status() });
 }
 
 function connectRuntime(

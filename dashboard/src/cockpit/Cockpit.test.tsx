@@ -1,4 +1,5 @@
 import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react";
+import axe from "axe-core";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { sessionStore } from "../data/sessions";
@@ -14,7 +15,10 @@ import { LifecycleList } from "../panels/LifecycleList";
 import { NotesReaderViewer } from "../panels/notes-reader/NotesReaderViewer";
 import { RailChat } from "../panels/RailChat";
 import { SessionsView } from "../panels/session-cockpit/SessionsView";
+import { taskDoc as wireTaskDoc } from "../test/fixtures/wire";
+import { metricsFor } from "../types/projection";
 import type {
+  Analytics,
   EnclosureNode,
   LifecycleProjection,
   TaskDocNode,
@@ -34,7 +38,7 @@ vi.mock("../panels/Terminal", () => ({
 }));
 
 function taskDoc(over: Partial<TaskDocNode> & Pick<TaskDocNode, "kind" | "docPath" | "id">): TaskDocNode {
-  return {
+  return wireTaskDoc({
     lifecycleId: "ROOT",
     repository: "repo-a",
     title: "doc",
@@ -52,7 +56,7 @@ function taskDoc(over: Partial<TaskDocNode> & Pick<TaskDocNode, "kind" | "docPat
     subTasks: [],
     sections: [],
     ...over,
-  } as TaskDocNode;
+  });
 }
 
 // A lifecycle-bound master with one authored, drillable leaf — the drilled-leaf fixture.
@@ -83,7 +87,6 @@ function seedDrillableMaster() {
         file: "01_leaf.md",
         status: "inProgress",
         scope: "",
-        createdAt: "2026-06-20T09:00:00+00:00",
       },
     ],
   });
@@ -101,14 +104,7 @@ function seedDrillableMaster() {
     enclosures: [],
     providers: [],
     activeWorktreeGroups: [],
-    metrics: {
-      lifecycleCount: 1,
-      runningCount: 1,
-      blockedCount: 0,
-      pausedCount: 0,
-      totalTokens: 0,
-      stalenessHistogram: {},
-    },
+    metrics: metricsFor([lc]),
     analytics: {
       driftSnapshots: [],
       stalestSidecars: [],
@@ -235,14 +231,7 @@ function taskReaderProjection(): WorkspaceProjection {
     ],
     providers: [],
     activeWorktreeGroups: ["direct-leaf", "runtime-only"],
-    metrics: {
-      lifecycleCount: 2,
-      runningCount: 2,
-      blockedCount: 0,
-      pausedCount: 0,
-      totalTokens: 0,
-      stalenessHistogram: {},
-    },
+    metrics: metricsFor([lifecycle("LC-DIRECT", "direct-leaf"), lifecycle("LC-BOUND", "runtime-only")]),
     analytics: {
       driftSnapshots: [],
       stalestSidecars: [],
@@ -441,6 +430,41 @@ describe("Operations click-to-detail body hydration", () => {
     );
     expect(view.queryByText(completeObjective.get(taskAPath) ?? "")).toBeNull();
     expect(requestsFor(taskBPath)).toHaveLength(1);
+  });
+});
+
+describe("workspace rollup — the handoff reaches the header", () => {
+  // The served rollup grew an `awaitingDeveloperCount` bucket, but the header read only
+  // running/blocked/tokens. A lifecycle that had stopped and handed the turn back was inside
+  // `lifecycleCount` and `totalTokens` and inside none of the numbers on the bar — the workflow's
+  // own handoff surface was countable on the wire and invisible in the UI.
+  const withStates = (...states: LifecycleProjection["state"][]): WorkspaceProjection => {
+    const fixture = GALLERY.find((entry) => entry.name === "calm");
+    if (!fixture) throw new Error("fixture not found: calm");
+    const lifecycles = states.map((state, index) => ({
+      ...fixture.projection.lifecycles[0],
+      id: `LC-${index}`,
+      state,
+    }));
+    return { ...fixture.projection, lifecycles, metrics: metricsFor(lifecycles) };
+  };
+
+  it("counts handed-back lifecycles on the bar", () => {
+    dashboardStore
+      .getState()
+      .applySnapshot(withStates("awaiting-developer", "awaiting-developer", "running"));
+    const { getByTestId } = render(<CockpitShell />);
+    expect(getByTestId("task-metrics").textContent).toContain("2 awaiting you");
+  });
+
+  it("says nothing when nothing is handed back (no reassurance zero)", () => {
+    dashboardStore.getState().applySnapshot(withStates("running", "blocked"));
+    const { getByTestId } = render(<CockpitShell />);
+    const text = getByTestId("task-metrics").textContent ?? "";
+    expect(text).not.toContain("awaiting");
+    // the standing rhythm is unchanged — the segment is appended, it does not displace anything
+    expect(text).toContain("1 running");
+    expect(text).toContain("1 blocked");
   });
 });
 
@@ -812,5 +836,117 @@ describe("persistent layers are exported memoized (260721 tab-switch CPU)", () =
     for (const [name, component] of layers) {
       expect((component as { $$typeof: symbol }).$$typeof, name).toBe(Symbol.for("react.memo"));
     }
+  });
+});
+
+describe("the left rail shows lifecycle states and attention severities at the same time", () => {
+  // Dot.tsx used to justify `warn` and `awaiting-developer` sharing amber on the grounds that
+  // "AttentionQueue renders only severities and LifecycleList renders only states, so no list can
+  // show both". True per LIST and false per VIEW: the two panels are siblings inside the same
+  // always-visible left rail, so a developer reads both grammars in one glance — and they are
+  // different facts about different objects (the reducer builds no attention row for an
+  // `awaiting-developer` lifecycle, so an amber dot in one panel says nothing about the other).
+  //
+  // This renders the whole shell rather than the two panels, because the panels being siblings in
+  // one view is exactly the claim under test.
+  function railProjection(attentionQueue: Analytics["attentionQueue"]): WorkspaceProjection {
+    const handoff: LifecycleProjection = {
+      id: "LC-HANDOFF",
+      state: "awaiting-developer",
+      phase: "build",
+      fleeting: false,
+      repoId: "repo-a",
+      tokens: 0,
+      startedAt: "2026-06-20T09:00:00+00:00",
+      lastEventTs: "2026-06-20T09:00:30+00:00",
+      inferred: false,
+      actions: [],
+      tokenSeries: [],
+    };
+    return {
+      version: 2,
+      generatedAt: "2026-06-20T09:01:00+00:00",
+      lifecycles: [handoff],
+      // The rail renders a leaf only while a worktree exists, so the row needs its enclosure.
+      enclosures: [liveEnclosure("01", "LC-HANDOFF")],
+      providers: [],
+      activeWorktreeGroups: [],
+      metrics: metricsFor([handoff]),
+      analytics: {
+        driftSnapshots: [],
+        stalestSidecars: [],
+        setupSummaries: [],
+        setupProgress: [],
+        routeCoverage: [],
+        toolReports: [],
+        ledgers: [],
+        taskDocuments: [
+          taskDoc({
+            id: "01",
+            kind: "subTask",
+            lifecycleId: "LC-HANDOFF",
+            title: "Handoff Leaf",
+            docPath: "/tasks/repo-a/ops/01_handoff.json",
+          }),
+        ],
+        series: [],
+        attentionQueue,
+        engineProcesses: [],
+      },
+    };
+  }
+
+  const WARN_ROW: Analytics["attentionQueue"] = [
+    {
+      id: "actionable-drift:repo-a",
+      kind: "actionable-drift",
+      severity: "warn",
+      lane: "repo",
+      title: "6 actionable drift",
+      waitSeconds: 900,
+      repoId: "repo-a",
+    },
+  ];
+
+  it("keeps a handoff state and a queue warning apart in the one rail that shows both", () => {
+    dashboardStore.getState().applySnapshot(railProjection(WARN_ROW));
+    const { getByTestId } = render(<CockpitShell />);
+
+    const stateDot = getByTestId("task-state").firstElementChild;
+    const severityDot = getByTestId("attn-severity").firstElementChild;
+    expect(stateDot, "no lifecycle state dot in the rail").toBeTruthy();
+    expect(severityDot, "no attention severity dot in the rail").toBeTruthy();
+    // Both are amber — the palette groups rather than identifies — so this is the glyph's job.
+    expect(stateDot?.outerHTML).not.toBe(severityDot?.outerHTML);
+  });
+
+  it("speaks the severity of an attention row into the accessibility tree", () => {
+    // The Dot is `aria-hidden`, so the severity lives entirely on its wrapper — and the wrapper
+    // used to be a bare `<span aria-label>`. ARIA prohibits naming a `generic`, so that label was
+    // in the DOM and in no accessibility tree: `getAttribute("aria-label")` passed while a screen
+    // reader user got nothing. Queried BY ROLE AND NAME here, which is the computed tree, and
+    // backed by axe, which fails the prohibited attribute outright.
+    dashboardStore.getState().applySnapshot(railProjection(WARN_ROW));
+    const { getByRole, container } = render(<CockpitShell />);
+    expect(getByRole("img", { name: "Severity: warn" })).toBe(
+      container.querySelector('[data-testid="attn-severity"]'),
+    );
+    // The state dot's label reaches the tree a different way: React Aria gives the row
+    // `role="option"`, whose name comes from its content, so the span's label is absorbed into it.
+    expect(
+      getByRole("option", { name: /Task progress: awaiting-developer; phase: build/ }),
+    ).toBeTruthy();
+  });
+
+  it("passes axe on the panel the severity label lives in", async () => {
+    // The panel rather than the whole shell: axe walks every node it is given, and this is the
+    // subtree the label is on. `aria-prohibited-attr` is `serious` and would fail here.
+    dashboardStore.getState().applySnapshot(railProjection(WARN_ROW));
+    const { container } = render(<AttentionQueue onSelect={vi.fn()} />);
+    const results = await axe.run(container, {
+      // jsdom has no layout engine, so skip the rules that need rendered geometry.
+      rules: { "color-contrast": { enabled: false }, region: { enabled: false } },
+    });
+    expect(results.violations.map((violation) => violation.id)).toEqual([]);
   });
 });

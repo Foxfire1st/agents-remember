@@ -996,10 +996,10 @@ export const scanRing = css({
 export const ghostedLane = css({ opacity: "0.32", filter: "grayscale(0.45)" });
 
 // 05o refused-conduit flash (SHARED — T9B red fault · T9C amber reroute · T14C red conflict). The seed/
-// return conduit that is REFUSED (podstage `.refused`/`.refred`): cyan → white spark → its polarity colour
-// → fade out. AMBER = a fallback/reroute (CGC seed refused → reindex), RED = a fault/conflict (GrepAI seed
-// fault, integration conflict). Polarity is NEVER a class alone — it is read off the projection (edge.state
-// failed→red / stale→amber, or edge.refusedPolarity on a `refused` edge) and carried as the cva variant.
+// return conduit that did not take (podstage `.refused`/`.refred`): cyan → white spark → its polarity
+// colour → fade out. AMBER = a fallback/reroute (CGC seed stale → reindex), RED = a fault/conflict (GrepAI
+// seed fault, integration conflict). Polarity is NEVER a class alone and never a field on the edge — it is
+// DERIVED from edge.state (failed→red / stale→amber) and carried as the cva variant.
 // The one-shot colour sweep + the fade are owned by GSAP (data-fx='refuse', repeat:0 — CSS stays static,
 // 05f §8); the base recipe rests at opacity 0 (a one-shot flash has no settled state — it ends GONE, like
 // the prototype's `animation:refused .9s ease forwards` ending at opacity 0), so under effects=off the lane

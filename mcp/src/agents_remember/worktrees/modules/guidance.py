@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import asdict
 from pathlib import Path
+from typing import Any, Literal, NotRequired, TypedDict
 
 from agents_remember.kernel.git_command import run_git
 from agents_remember.kernel.git_freshness import ahead_behind
@@ -9,21 +10,173 @@ from agents_remember.kernel.memory_ledger import LedgerError, find_mapping, load
 from agents_remember.worktrees.modules import provider_async
 from agents_remember.worktrees.modules.git import worktree_dirty
 from agents_remember.worktrees.modules.landing import landing_refs
-from agents_remember.worktrees.worktree_contract import WorktreeContract
+from agents_remember.worktrees.worktree_contract import (
+    CleanupStatus,
+    CloseoutStatus,
+    HumanReviewStatus,
+    IntegrationStatus,
+    MemoryMode,
+    WorkflowKind,
+    WorktreeContract,
+)
+
+# The guidance vocabularies, declared once, here -- this module is the state machine that
+# produces every one of them, and `models.worktree` imports these aliases for the response
+# boundary instead of keeping a second hand-written copy that drifted (`carryover-pending`,
+# `abandoned`, `request_carryover_decision` and `memory_carryover_apply` were all emitted
+# below and all rejected by the packet).
+WorktreePhase = Literal[
+    "worktree-started",
+    "closeout-pending",
+    "integration-pending",
+    "integration-blocked",
+    "carryover-pending",
+    "cleanup-pending",
+    "cleanup-completed",
+    "abandoned",
+]
+NextOperation = Literal[
+    "continue_work",
+    "closeout",
+    "request_integration_decision",
+    "developer_decision",
+    "request_carryover_decision",
+    "request_cleanup_decision",
+    "done",
+]
+NextTool = Literal[
+    "worktree_status",
+    "worktree_closeout_apply",
+    "worktree_integrate",
+    "memory_carryover_apply",
+    "worktree_cleanup",
+]
+# The *other* users of the same nextOperation/nextTool shape: the closeout preview's commit
+# gate and the four blocked-start / blocked-sync recovery payloads. Every one of them is a
+# `WorktreeCommandResult` rendered as a `FlexibleToolResponse` -- none reaches
+# `WorktreeSummary`, whose only producer is `lifecycle_guidance` via `worktrees.status`. They
+# get their own builder and their own vocabulary rather than widening the phase machine's,
+# because a wider `NextOperation` would put "requires developer approval" and "blocked on a
+# stale base" back into the set the context packet's `nextOperation` claims to be.
+RecoveryOperation = Literal[
+    "request_commit_approval",
+    "choose_memory_recovery",
+    "choose_provider_setup_recovery",
+    "choose_stale_base_recovery",
+    "choose_memory_sync_recovery",
+]
+RecoveryTool = Literal["worktree_start", "worktree_sync", "worktree_closeout_apply"]
+
+
+class NextGuidance(TypedDict):
+    """The move out of a phase: which operation, and the tool call that performs it.
+
+    ``nextTool`` is deliberately absent -- not blank -- when the operation needs no call
+    (``done``). The wire model declares it optional for exactly that reason, so the packet
+    projection reads it with ``.get`` and lets ``exclude_none`` drop it.
+    """
+
+    nextOperation: NextOperation
+    nextTool: NotRequired[NextTool]
+    nextArgs: NotRequired[dict[str, object]]
+    nextRequiredArgs: NotRequired[list[str]]
+
+
+class LifecycleGuidance(TypedDict):
+    """Everything :func:`lifecycle_guidance` returns: the phase, plus the move out of it."""
+
+    phase: WorktreePhase
+    summary: str
+    nextOperation: NextOperation
+    nextTool: NotRequired[NextTool]
+    nextArgs: NotRequired[dict[str, object]]
+    nextRequiredArgs: NotRequired[list[str]]
+    # Only the cleanup-pending phase carries it (05m; the dashboard renders it).
+    carryoverDoneAt: NotRequired[str]
+
+
+class WorktreeStatusFacts(TypedDict):
+    """The local, contract-derived half of a worktree status payload.
+
+    Snake_case because it is the tool-response shape; the camelCase packet projection in
+    :mod:`agents_remember.worktrees.status` maps it onto ``WorktreeSummary``.
+    """
+
+    task_id: str
+    task_name: str
+    code_repository_name: str
+    workflow_kind: WorkflowKind
+    memory_mode: MemoryMode
+    kind: str
+    leaf_id: str
+    enclosure_path: str
+    contract_path: str
+    parent_contract_path: str
+    worktree_group: str
+    code_worktree: str
+    code_worktree_exists: bool
+    code_worktree_dirty: bool
+    memory_worktree: str
+    memory_worktree_exists: bool
+    memory_worktree_dirty: bool
+    ledger_path: str
+    human_review_status: HumanReviewStatus
+    approved_for_commit: bool
+    closeout_status: CloseoutStatus
+    integration_status: IntegrationStatus
+    cleanup: CleanupStatus
+    lifecycle_id: str
+    # Present only when the contract file carried a cell outside its vocabulary, which the
+    # reader substituted for (`worktree_contract._vocabulary_cell`). Absent is the normal
+    # shape -- 213 of 213 contracts on disk -- so the key is the exception report, not a flag.
+    unknown_contract_cells: NotRequired[list[str]]
+    providers: NotRequired[dict[str, Any]]
+    freshness: NotRequired[dict[str, object]]
+    landing: NotRequired[list[dict[str, object]]]
+
+
+class WorktreeStatusPayload(WorktreeStatusFacts, LifecycleGuidance):
+    """A full ``worktree_status`` payload: the contract facts plus the guidance."""
 
 
 def next_guidance(
-    operation: str,
+    operation: NextOperation,
     *,
-    tool: str | None = None,
+    tool: NextTool | None = None,
     args: dict[str, object] | None = None,
     required_args: list[str] | None = None,
-) -> dict[str, object]:
-    payload: dict[str, object] = {"nextOperation": operation}
+) -> NextGuidance:
+    payload: NextGuidance = {"nextOperation": operation}
     if tool:
         payload["nextTool"] = tool
     if args is not None:
         payload["nextArgs"] = args
+    if required_args:
+        payload["nextRequiredArgs"] = required_args
+    return payload
+
+
+def recovery_guidance(
+    operation: RecoveryOperation,
+    *,
+    tool: RecoveryTool,
+    args: dict[str, object],
+    required_args: list[str] | None = None,
+) -> dict[str, object]:
+    """The same next-move keys for a payload that is a *gate or a block*, not a phase.
+
+    Emits exactly what :func:`next_guidance` does, in the same key order, so nothing on the
+    wire changes; the split is in the type, and that is the point. These callers hand their
+    result to a `FlexibleToolResponse`, so widening `next_guidance` to fit them would have
+    silently widened `WorktreeSummary.nextOperation` too -- and the context packet would go
+    back to claiming values its own state machine can never produce. ``tool`` and ``args``
+    are required here because a block that cannot say how to recover is not worth emitting.
+    """
+    payload: dict[str, object] = {
+        "nextOperation": operation,
+        "nextTool": tool,
+        "nextArgs": args,
+    }
     if required_args:
         payload["nextRequiredArgs"] = required_args
     return payload
@@ -73,7 +226,7 @@ def carryover_done(contract: WorktreeContract) -> tuple[bool, str]:
     return (True, dated.stdout.strip() if dated.returncode == 0 else "")
 
 
-def lifecycle_guidance(contract: WorktreeContract) -> dict[str, object]:
+def lifecycle_guidance(contract: WorktreeContract) -> LifecycleGuidance:
     """Where the task stands in the worktree lifecycle, and the next move out of it.
 
     Read back to front: a reclaimed worktree is done, an integrated one is waiting on
@@ -86,7 +239,7 @@ def lifecycle_guidance(contract: WorktreeContract) -> dict[str, object]:
     )
 
 
-def _reclaimed_phase(contract: WorktreeContract) -> dict[str, object] | None:
+def _reclaimed_phase(contract: WorktreeContract) -> LifecycleGuidance | None:
     """Terminal phases: the worktrees are gone, by cleanup or by abandonment."""
     if contract.cleanup == "completed":
         return {
@@ -103,7 +256,7 @@ def _reclaimed_phase(contract: WorktreeContract) -> dict[str, object] | None:
     return None
 
 
-def _post_integration_phase(contract: WorktreeContract) -> dict[str, object] | None:
+def _post_integration_phase(contract: WorktreeContract) -> LifecycleGuidance | None:
     """Integration has been attempted: it blocked, or it landed and carryover/cleanup follow."""
     if contract.integration_status == "blocked":
         return {
@@ -152,7 +305,7 @@ def _post_integration_phase(contract: WorktreeContract) -> dict[str, object] | N
     return None
 
 
-def _pre_integration_phase(contract: WorktreeContract) -> dict[str, object]:
+def _pre_integration_phase(contract: WorktreeContract) -> LifecycleGuidance:
     """Still working: closeout is pending, approved, or already done and awaiting integration.
 
     slice 09: a dirty worktree is NOT a commit-approval gate. `commit-approval-pending` is owned by the
@@ -247,9 +400,9 @@ def base_freshness(contract: WorktreeContract) -> dict[str, object] | None:
 
 def _status_payload_with_landing(
     contract: WorktreeContract, landing: list[dict[str, object]] | None
-) -> dict[str, object]:
+) -> WorktreeStatusPayload:
     guidance = lifecycle_guidance(contract)
-    payload = {
+    facts: WorktreeStatusFacts = {
         "task_id": contract.task_id,
         "task_name": contract.task_name,
         "code_repository_name": contract.repo_name,
@@ -279,25 +432,31 @@ def _status_payload_with_landing(
         "cleanup": contract.cleanup,
         "lifecycle_id": contract.lifecycle_id,
     }
+    if contract.unknown_cells:
+        # The one place a degraded read becomes visible to whoever called a worktree tool:
+        # the phase below was computed from the substituted values, and this says so.
+        facts["unknown_contract_cells"] = list(contract.unknown_cells)
     providers = provider_async.provider_setup_status(contract)
     if providers is not None:
-        payload["providers"] = providers
+        facts["providers"] = providers
     freshness = base_freshness(contract)
     if freshness is not None:
-        payload["freshness"] = freshness
+        facts["freshness"] = freshness
     if landing is not None:
-        payload["landing"] = landing
-    payload.update(guidance)
-    return payload
+        facts["landing"] = landing
+    # Merged rather than `.update`d so the checker sees the result as one payload: the
+    # guidance keys keep coming last, exactly as they did, and the phase / next-move
+    # Literals are now type-checked against the wire vocabulary at this seam.
+    return {**facts, **guidance}
 
 
 def projected_status_payload(
     contract: WorktreeContract, *, landing: list[dict[str, object]] | None
-) -> dict[str, object]:
+) -> WorktreeStatusPayload:
     """Build status from local facts plus an already-observed landing snapshot."""
     return _status_payload_with_landing(contract, landing)
 
 
-def status_payload(contract: WorktreeContract) -> dict[str, object]:
+def status_payload(contract: WorktreeContract) -> WorktreeStatusPayload:
     """Build an interactive status response, including a fresh remote landing observation."""
     return _status_payload_with_landing(contract, landing_refs(contract))

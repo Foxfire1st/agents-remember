@@ -1,9 +1,10 @@
 import { beforeEach, describe, expect, it } from "vitest";
 
+import { libraryConversationKey } from "../../test/fixtures/conversationWire";
 import { beginOpen, conversationLibraryStore, reconcileOpen } from "./store";
-import type { LibraryConversationKey, OpenConversationOperation } from "./types";
+import type { OpenConversationOperation } from "./types";
 
-const KEY = "ar-lck1.k1" as LibraryConversationKey;
+const KEY = libraryConversationKey("ar-lck1.k1");
 
 function op(overrides: Partial<OpenConversationOperation>): OpenConversationOperation {
   return {

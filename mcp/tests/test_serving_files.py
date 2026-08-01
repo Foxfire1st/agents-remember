@@ -36,7 +36,11 @@ from agents_remember.serving.files import (
     resolve_partner,
 )
 from agents_remember.serving.projector import ProjectionCadence
-from agents_remember.worktrees.worktree_contract import WorktreeContract, write_contract
+from agents_remember.worktrees.worktree_contract import (
+    CleanupStatus,
+    WorktreeContract,
+    write_contract,
+)
 
 _SIDECAR = (
     "# mod\n\n"
@@ -261,7 +265,7 @@ def _write_leaf_contract(
     repo: str,
     leaf: str,
     code_worktree: Path,
-    cleanup: str = "pending",
+    cleanup: CleanupStatus = "pending",
 ) -> None:
     """One leaf-enclosure contract on disk in the shape worktree_start writes it.
 
@@ -319,7 +323,9 @@ class CatalogAssemblyTests(unittest.TestCase):
             repositories=repos,
         )
 
-    def _enclosure(self, tasks: Path, repo: str, leaf: str, *, cleanup: str = "pending") -> None:
+    def _enclosure(
+        self, tasks: Path, repo: str, leaf: str, *, cleanup: CleanupStatus = "pending"
+    ) -> None:
         worktree = self.tmp / "wt" / repo / leaf
         worktree.mkdir(parents=True, exist_ok=True)
         _write_leaf_contract(tasks, repo=repo, leaf=leaf, code_worktree=worktree, cleanup=cleanup)

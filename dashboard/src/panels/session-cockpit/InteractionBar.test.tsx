@@ -9,7 +9,6 @@ import { sessionCockpitStore } from "../../data/sessionCockpitStore";
 import { fromTerminalSessionInfo } from "../../data/sessions";
 import { dashboardStore } from "../../data/store";
 import { clearSubmissionAuthorityCache } from "../../data/submissionLifecycleClient";
-import type { LifecycleProjection } from "../../types/projection";
 import {
   L5I_INTERACTION_LEGACY_RUNNER,
   L5I_INTERACTION_NO_LIFECYCLE,
@@ -20,6 +19,7 @@ import {
   L6_INTERACTION_UNREPRESENTABLE,
   L7_MULTIPLEXED_INTERACTIONS,
 } from "../../test/fixtures/catalogRows";
+import { lifecycleWithGate } from "../../test/fixtures/wire";
 import type { SessionComposerHandle } from "../SessionComposer";
 import { InteractionBar } from "./InteractionBar";
 import { INTERACTION_HONESTY_HINT } from "./lifecycleCopy";
@@ -27,9 +27,9 @@ import { INTERACTION_HONESTY_HINT } from "./lifecycleCopy";
 function projectGate(lifecycleId: string, gateId: string, sessionId: string, interactionId: string) {
   dashboardStore.setState({
     lifecycles: {
-      [lifecycleId]: {
-        id: lifecycleId,
-        gate: {
+      [lifecycleId]: lifecycleWithGate(
+        { id: lifecycleId },
+        {
           id: gateId,
           kind: "agent-question",
           state: "open",
@@ -37,7 +37,7 @@ function projectGate(lifecycleId: string, gateId: string, sessionId: string, int
           ts: "2026-07-17T09:00:00Z",
           packet: { adapterInteraction: { sessionId, interactionId } },
         },
-      } as unknown as LifecycleProjection,
+      ),
     },
   });
 }

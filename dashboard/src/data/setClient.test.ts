@@ -9,6 +9,7 @@ import {
   SET_RESULTS,
   UNKNOWN_THEN_READBACK,
 } from "../test/fixtures/capabilityEnvelopes";
+import { observerEvent } from "../test/fixtures/wire";
 import type { CapabilitySnapshotWire, SetResultWire } from "../types/harnessCapabilities";
 import { announcerStore } from "./announcer";
 import { sessionCockpitStore } from "./sessionCockpitStore";
@@ -666,12 +667,14 @@ describe("startSetPromotionWatcher (R4 + v3 drift delta)", () => {
       }),
     );
     const release = startSetPromotionWatcher();
-    applySeatEvent({
-      kind: "seat.turn-state-changed",
-      sessionId: "s1",
-      ts: "2099-01-01T00:00:00Z", // strictly newer than the stored transition
-      data: { turnState: "turn-ended" },
-    } as never);
+    applySeatEvent(
+      observerEvent({
+        kind: "seat.turn-state-changed",
+        sessionId: "s1",
+        ts: "2099-01-01T00:00:00Z", // strictly newer than the stored transition
+        data: { turnState: "turn-ended" },
+      }),
+    );
     await vi.waitFor(() =>
       expect(mock.mock.calls.filter(([url]) => url === capabilitiesUrl("s1"))).toHaveLength(1),
     );

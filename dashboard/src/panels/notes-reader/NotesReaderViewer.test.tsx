@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { CockpitShell } from "../../cockpit/Cockpit";
 import { dashboardStore } from "../../data/store";
 import type { NoteContent, NoteEntry } from "../../data/notes";
+import { metricsFor } from "../../types/projection";
 import type { TaskDocNode, WorkspaceProjection } from "../../types/projection";
 import { NotesReaderViewer } from "./NotesReaderViewer";
 
@@ -178,6 +179,12 @@ describe("NotesReaderViewer content pane (reuses the File Viewer DualPane)", () 
 });
 
 // A minimal projection carrying one selectable master task document so the cockpit sidebar has a row.
+//
+// Typed, not `as unknown as`. Both literals below carried a double cast, which is worse here than
+// on the shared fixture: this is a HAND-WRITTEN object, so the cast was the only thing standing
+// between it and the mirror, and it made the seed immune to the mirror entirely — adding a
+// required field to `Analytics` failed fifteen files and not this one. A seed that cannot fail
+// when the contract moves is a seed that stops describing the contract the day it does.
 function masterDoc(): TaskDocNode {
   return {
     id: "task",
@@ -199,7 +206,7 @@ function masterDoc(): TaskDocNode {
     references: [],
     subTasks: [],
     sections: [],
-  } as unknown as TaskDocNode;
+  };
 }
 function seedMaster() {
   const projection = {
@@ -209,12 +216,12 @@ function seedMaster() {
     enclosures: [],
     providers: [],
     activeWorktreeGroups: [],
-    metrics: { lifecycleCount: 0, runningCount: 0, blockedCount: 0, pausedCount: 0, totalTokens: 0, stalenessHistogram: {} },
+    metrics: metricsFor([]),
     analytics: {
       driftSnapshots: [], stalestSidecars: [], setupSummaries: [], setupProgress: [], routeCoverage: [],
       toolReports: [], ledgers: [], taskDocuments: [masterDoc()], series: [], attentionQueue: [], engineProcesses: [],
     },
-  } as unknown as WorkspaceProjection;
+  } satisfies WorkspaceProjection;
   dashboardStore.getState().applySnapshot(projection);
 }
 

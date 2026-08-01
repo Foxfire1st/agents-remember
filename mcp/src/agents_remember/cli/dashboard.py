@@ -25,7 +25,11 @@ from agents_remember.serving.projector import ProjectionCadence, ProjectionRepla
 from agents_remember.serving.sim import SimError, SimSetup, build_sim, parse_sim_speed
 
 # Dev hot-reload (``--reload``): uvicorn's reloader re-imports the app per worker restart, so it
-# needs an import-string *factory*, not a pre-built app object (an object silently disables reload).
+# needs an import-string *factory*, not a pre-built app object. Handing it an object does NOT
+# silently disable reload -- uvicorn refuses to start, loudly. uvicorn 0.49.0, ``uvicorn/main.py``
+# lines 604-607: ``if (config.reload or config.workers > 1) and not isinstance(app, str):`` logs the
+# ``uvicorn.error`` warning "You must pass the application as an import string to enable 'reload' or
+# 'workers'." and calls ``sys.exit(1)`` (measured: exit code 1, before the port is bound).
 # The factory reads the resolved config from the environment the parent ``run`` sets.
 _DEV_CONFIG_ENV = "AR_DASHBOARD_DEV_CONFIG"
 _DEV_INTERVAL_ENV = "AR_DASHBOARD_DEV_INTERVAL"

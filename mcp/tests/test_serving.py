@@ -125,6 +125,17 @@ _FRESH_GATE_TS_LATER = "2999-01-01T10:05:00+00:00"
 FIXTURE_DIR = Path(__file__).resolve().parent / "fixtures" / "sim"
 
 
+def _build_wire(build: ServingBuild) -> dict[str, Any]:
+    """The stamp exactly as the state body carries it.
+
+    ``ServingBuild.payload()`` returns the declared ``ServingBuildPayload`` model; the wire
+    form is that model under ``exclude_none=True``, which is where the honest-unknown rule
+    (absent, never null, never a fabricated "clean") is applied -- see
+    ``serving.served_state.served_state_tail``.
+    """
+    return build.payload().model_dump(mode="json", exclude_none=True)
+
+
 def _config(tmp: Path) -> McpRuntimeConfig:
     return McpRuntimeConfig(
         config_path=tmp / "settings.json",
@@ -467,7 +478,7 @@ class StreamEventsTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(first.event, "snapshot")
         self.assertEqual(first.id, "1")
         assert isinstance(first.data, dict)
-        self.assertEqual(first.data["servingBuild"], build.payload())
+        self.assertEqual(first.data["servingBuild"], _build_wire(build))
         self.assertEqual(first.data["lifecycles"][0]["id"], "recovered")
 
         projector._publish_projection(recovered)
@@ -939,7 +950,7 @@ class BuildInfoTests(unittest.TestCase):
         self.assertTrue(build.booted_at)
         # The test tree lives in a checkout, so the short hash resolves and rides the payload.
         self.assertIsNotNone(build.commit)
-        payload = build.payload()
+        payload = _build_wire(build)
         self.assertEqual(payload["commit"], build.commit)
         self.assertEqual(payload["bootedAt"], build.booted_at)
         # Rewritten: this used to index ``dashboardBuild`` unconditionally, which only held
@@ -954,9 +965,9 @@ class BuildInfoTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             build = resolve_serving_build(anchor=Path(tmp))
         self.assertIsNone(build.commit)
-        self.assertNotIn("commit", build.payload())  # never a faked hash
+        self.assertNotIn("commit", _build_wire(build))  # never a faked hash
         self.assertFalse(build.dirty)
-        self.assertNotIn("dirty", build.payload())  # the wheel path stays clean
+        self.assertNotIn("dirty", _build_wire(build))  # the wheel path stays clean
 
     def test_payload_shape_is_camel_case(self) -> None:
         build = ServingBuild(
@@ -966,7 +977,7 @@ class BuildInfoTests(unittest.TestCase):
             dashboard_build="dashboard-123",
         )
         self.assertEqual(
-            build.payload(),
+            _build_wire(build),
             {
                 "version": "9.9.9",
                 "bootedAt": "2026-07-07T05:00:00Z",
@@ -977,11 +988,11 @@ class BuildInfoTests(unittest.TestCase):
 
     def test_dirty_flag_is_additive_on_the_payload(self) -> None:
         clean = ServingBuild(version="9.9.9", commit="abc1234", booted_at="2026-07-07T05:00:00Z")
-        self.assertNotIn("dirty", clean.payload())  # omitted, never a faked "clean" fact
+        self.assertNotIn("dirty", _build_wire(clean))  # omitted, never a faked "clean" fact
         dirty = ServingBuild(
             version="9.9.9", commit="abc1234", booted_at="2026-07-07T05:00:00Z", dirty=True
         )
-        self.assertEqual(dirty.payload()["dirty"], True)
+        self.assertEqual(_build_wire(dirty)["dirty"], True)
 
     def test_dirty_detection_in_a_checkout(self) -> None:
         def git(root: Path, *argv: str) -> None:
@@ -1074,7 +1085,7 @@ class BuildInfoTests(unittest.TestCase):
 
         self.assertEqual(build.commit, "deadbee")  # the hash resolved and rides the wire
         self.assertIsNone(build.dirty)  # dirtiness is UNKNOWN -- not the fail-closed False
-        payload = build.payload()
+        payload = _build_wire(build)
         self.assertEqual(payload["commit"], "deadbee")
         self.assertNotIn("dirty", payload)  # absence is not a pristine claim, just no warning
 

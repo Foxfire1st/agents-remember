@@ -643,7 +643,7 @@ class ParentSeriesContractTests(unittest.TestCase):
         base: dict[str, Any] = {
             "task_name": self.TASK,
             "worktree_name": "demo-leaf",
-            "workflow_kind": "master-task",
+            "workflow_kind": "light-task",
             "dry_run": False,
         }
         return WorktreeArgs(**{**base, **overrides})
@@ -775,7 +775,7 @@ class ParentSeriesContractTests(unittest.TestCase):
                     name=self.TASK,
                     repo_name=self.REPO,
                     coordination_root=root,
-                    workflow_kind="master-task",
+                    workflow_kind="light-task",
                     memory_mode="internal",
                 ),
                 code=RepoBranchPlan(

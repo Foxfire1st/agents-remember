@@ -5,6 +5,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { sessionStore } from "../data/sessions";
 import { dashboardStore } from "../data/store";
 import { GALLERY } from "../dev/fixtures";
+import { taskDoc as wireTaskDoc } from "../test/fixtures/wire";
+import { metricsFor } from "../types/projection";
 import type { LifecycleProjection, TaskDocNode, WorkspaceProjection } from "../types/projection";
 import { CockpitShell } from "./Cockpit";
 
@@ -114,7 +116,7 @@ function seed(stateName: string) {
 function taskDoc(
   over: Partial<TaskDocNode> & Pick<TaskDocNode, "kind" | "docPath" | "id">,
 ): TaskDocNode {
-  return {
+  return wireTaskDoc({
     lifecycleId: "ROOT",
     repository: "repo-a",
     title: "doc",
@@ -132,7 +134,7 @@ function taskDoc(
     subTasks: [],
     sections: [],
     ...over,
-  } as TaskDocNode;
+  });
 }
 
 // A lifecycle-bound master with one authored, drillable leaf (same fixture shape as Cockpit.test.tsx).
@@ -163,7 +165,6 @@ function seedDrillableMaster() {
         file: "01_leaf.md",
         status: "inProgress",
         scope: "",
-        createdAt: "2026-06-20T09:00:00+00:00",
       },
     ],
   });
@@ -181,14 +182,7 @@ function seedDrillableMaster() {
     enclosures: [],
     providers: [],
     activeWorktreeGroups: [],
-    metrics: {
-      lifecycleCount: 1,
-      runningCount: 1,
-      blockedCount: 0,
-      pausedCount: 0,
-      totalTokens: 0,
-      stalenessHistogram: {},
-    },
+    metrics: metricsFor([lc]),
     analytics: {
       driftSnapshots: [],
       stalestSidecars: [],

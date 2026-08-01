@@ -34,6 +34,11 @@ from agents_remember.controllers._guards import require_repo
 from agents_remember.errors import AuthorityError
 from agents_remember.kernel.sidecar_pairing import confine_rel
 from agents_remember.mcp.config import McpRuntimeConfig, path_is_relative_to
+from agents_remember.serving.response_contract import (
+    SCOPED_READ_RESPONSES,
+    NoteContents,
+    NotesListing,
+)
 from agents_remember.serving.scope import decode_capped, language_for
 
 # Mirrors the serving.files read cap: a pathological file never blocks the event loop;
@@ -163,10 +168,10 @@ def _notes_json(
 def register_notes_routes(app: FastAPI, config: McpRuntimeConfig) -> None:
     """Register the read-only notes routes. Must be called BEFORE the greedy static mount."""
 
-    @app.get("/api/notes/list")
+    @app.get("/api/notes/list", response_model=NotesListing, responses=SCOPED_READ_RESPONSES)
     def api_notes_list(repo: str, master: str = "") -> Response:
         return _notes_json(config, repo, master, lambda: list_notes(config, repo, master))
 
-    @app.get("/api/notes/read")
+    @app.get("/api/notes/read", response_model=NoteContents, responses=SCOPED_READ_RESPONSES)
     def api_notes_read(repo: str, master: str = "", path: str = "") -> Response:
         return _notes_json(config, repo, master, lambda: read_note(config, repo, master, path))

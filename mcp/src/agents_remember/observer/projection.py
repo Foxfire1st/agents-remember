@@ -18,12 +18,19 @@ enclosures (North-Star #4) from being keyed to a single repo.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from agents_remember.observer.lifecycle_state import Phase, State
+from agents_remember.observer.lifecycle_state import (
+    LIVE_STATES,
+    LifecycleVocabularyError,
+    LiveState,
+    Phase,
+    State,
+)
 
 
 class ActionAvailability(BaseModel):
@@ -186,8 +193,96 @@ class ProviderNode(BaseModel):
     worktreeGroup: str | None = None
 
 
+# The states :class:`Metrics` buckets: the LIVE half of the vocabulary, verbatim.
+# ``lifecycleCount`` already counts every lifecycle and ``totalTokens`` sums every one, so what
+# the per-state buckets add is the live workload -- a ``completed``/``abandoned`` lifecycle is
+# history, not work in flight. This is the live half itself and not a subtraction: a set
+# difference re-derives the answer from a second list (``TERMINAL_STATES``) that could be wrong,
+# and a hand-written bucket list is exactly what let ``awaiting-developer`` inflate
+# ``lifecycleCount`` and ``totalTokens`` while landing in no bucket at all -- the rollup could
+# not show a lifecycle that had handed the turn back. A seventh state must join
+# ``LiveState`` or ``TerminalState`` to exist at all (``check_state_partition``); joining the
+# live half grows a bucket here, a count in the reducer, and (via ``extra="forbid"``) a loud
+# failure if the field below is missing -- never another silent zero.
+#
+# STATE OF THE MIRROR (``dashboard/src/types/projection.ts``): it holds the same partition, in the
+# same shape. It declares ``LIVE_STATES`` and ``TERMINAL_STATES`` as the two halves, spreads them
+# into ``LIFECYCLE_STATES`` (live half first, so it enumerates in exactly the order ``STATES``
+# does here -- no consumer on either side indexes it, but the two sides now agree for free), derives
+# ``State`` from that tuple and ``ActiveState`` from the live half, and sets
+# ``ACTIVE_STATES = LIVE_STATES`` -- the live half itself, not a subtraction, for the reason given
+# above. Its ``stateCountField`` matches the naming rule below; Python moved to that spelling, not
+# the other way round, because TypeScript's type-level ``Capitalize<>`` cannot lower-case a tail
+# and the runtime helper must agree with the type.
+#
+# What the two sides ENFORCE differs, and only in the direction of this file being stricter.
+# Composition alone makes two of :func:`check_state_partition`'s three refusals unrepresentable on
+# either side: a state cannot be on ``State`` yet filed nowhere, nor filed yet absent from
+# ``State``. The third -- one state filed on BOTH halves -- is representable in both, and this file
+# refuses it at import while the mirror refuses it at compile time (``ActiveState & TerminalState``
+# is constrained to ``never``, so ``tsc -b`` fails naming the offending state). Where the mirror
+# genuinely cannot follow is a duplicate WITHIN one half: ``Literal["a", "a"]`` collapses to one
+# member here, while a TypeScript tuple keeps both -- the dashboard's contract test catches that at
+# runtime instead (one bucket per live state), which is a weaker gate but not an absent one.
+ACTIVE_STATES: tuple[LiveState, ...] = LIVE_STATES
+
+
+def state_count_field(state: str) -> str:
+    """The :class:`Metrics` field that buckets one lifecycle state.
+
+    ``running`` -> ``runningCount``, ``awaiting-developer`` -> ``awaitingDeveloperCount``: the
+    package's camelCase wire convention applied to the hyphenated state name, so the field
+    *name* is derived from the vocabulary too and not merely the count behind it.
+
+    Each segment after the first has its FIRST character upper-cased and the rest left alone.
+    ``str.capitalize`` would lower-case the tail instead (``awaiting-DEVELOPER`` ->
+    ``awaitingDeveloperCount``), which both disagrees with the TypeScript mirror -- whose
+    ``Capitalize<>`` cannot lower-case a tail, so it renders ``awaitingDEVELOPERCount`` -- and
+    quietly merges states that differ only in the case of a tail. Two copies of one rule are
+    only safe while they are the same rule.
+    """
+    head, *rest = state.split("-")
+    return f"{head}{''.join(word[:1].upper() + word[1:] for word in rest)}Count"
+
+
+def state_count_fields(states: Sequence[str]) -> dict[str, str]:
+    """Map each state to its bucket field, refusing a mapping that is not one-to-one.
+
+    :func:`state_count_field` is not injective (``a-b`` and ``aB`` both bucket into
+    ``aBCount``), and a collision does not announce itself: :func:`Metrics` is keyed by
+    field, so two states sharing a bucket means the later count silently OVERWRITES the
+    earlier and the rollup under-reports without a single field being wrong-looking. The
+    collision is a naming problem in the vocabulary, so it is refused where the map is
+    built, naming both states.
+    """
+    fields: dict[str, str] = {}
+    owner: dict[str, str] = {}
+    for state in states:
+        bucket = state_count_field(state)
+        collides_with = owner.get(bucket)
+        if collides_with is not None:
+            raise LifecycleVocabularyError(
+                f"states {collides_with!r} and {state!r} both bucket into {bucket!r}; "
+                "one Metrics field cannot count two states -- rename one state"
+            )
+        owner[bucket] = state
+        fields[state] = bucket
+    return fields
+
+
+STATE_COUNT_FIELDS: dict[str, str] = state_count_fields(ACTIVE_STATES)
+"""Lifecycle state -> its ``Metrics`` bucket field, one-to-one. The reducer's counting loop and
+the vocabulary-coverage tests both read this instead of re-enumerating the buckets."""
+
+
 class Metrics(BaseModel):
     """Workspace rollups: 3a point counts + the 3b derived aggregates.
+
+    The ``*Count`` fields below are not a free-form list: they are exactly
+    :data:`STATE_COUNT_FIELDS` (one per non-terminal lifecycle state) plus ``lifecycleCount``,
+    the all-states total. They stay written out because they are the served contract the
+    dashboard reads by name and pyright checks by name; what makes them non-drifting is that
+    the reducer fills them from the vocabulary and a test asserts this declaration equals it.
 
     ``stalenessHistogram`` buckets every onboarding sidecar by the age of its
     ``lastVerifiedCommitDate`` (slice 3b, surface 11) -- the git-free
@@ -202,6 +297,9 @@ class Metrics(BaseModel):
     runningCount: int = 0
     blockedCount: int = 0
     pausedCount: int = 0
+    # The NOTIFY-AND-CONTINUE turn end: the model stopped and the developer holds the turn.
+    # Non-terminal, so it belongs in the live rollup rather than in history.
+    awaitingDeveloperCount: int = 0
     totalTokens: int = 0
     stalenessHistogram: dict[str, int] = Field(default_factory=dict)
 

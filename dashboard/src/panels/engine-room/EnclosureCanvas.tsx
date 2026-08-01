@@ -212,9 +212,22 @@ function conduitPathD(edge: EngineProcessEdge): string | null {
     : `M${x1} ${y1} L ${x2} ${y2}`;
 }
 
-// Refused-conduit flash polarity (T9B/T9C/T14C), read off the projection — NEVER a class alone. A
-// seed/integration lane that is `refused` carries its polarity explicitly (amber reroute / red fault); a
-// `failed` lane is a fault (red), a `stale` lane a reroute (amber). Any other kind/state → no flash.
+// Refused-conduit flash polarity (T9B/T9C/T14C), DERIVED from the edge state — never a class, and
+// never a field on the edge. A `failed` lane is a fault (red), a `stale` lane a reroute (amber).
+// Any other kind/state → no flash.
+//
+// `integration` / `integration-mem` are dead against TODAY's reducer: its two edge builders --
+// `_process_edges` and `_start_process_node` in `observer/reducer.py` -- emit only worktree-add,
+// cgc-seed, ledger-map, grepai-clone and sync, so no served payload reaches these two
+// arms. They are kept anyway, and the honest reason is NOT forward-compatibility — nothing is
+// scheduled to start emitting them. It is that (a) `EngineProcessEdge`'s own documented kind
+// vocabulary (`observer/projection.py`, the comment above `kind: str`) lists `integration` as a
+// valid kind, unlike the `refused` STATE removed alongside, which that model's state comment never
+// listed; and (b) the whole integration lane — geometry, the T14C conflict scenario, the replay
+// strategy — is authored in the dev fixtures and covered by tests, so the arms are exercised even
+// though the server does not drive them. Delete the lane and its coverage together, or not at all.
+// (`integration-mem` is the memory-side mirror and is not itself in that documented list; it lives
+// or dies with `integration`, which is why it is named here rather than quietly assumed.)
 function refusedPolarityOf(edge: EngineProcessEdge): "amber" | "red" | null {
   const isSeedOrIntegration =
     edge.kind === "cgc-seed" ||
@@ -222,7 +235,6 @@ function refusedPolarityOf(edge: EngineProcessEdge): "amber" | "red" | null {
     edge.kind === "integration" ||
     edge.kind === "integration-mem";
   if (!isSeedOrIntegration) return null;
-  if (edge.state === "refused") return edge.refusedPolarity === "red" ? "red" : "amber";
   if (edge.state === "failed") return "red";
   if (edge.state === "stale") return "amber";
   return null;
@@ -642,8 +654,6 @@ function Conduit({ edge, strategy, retiring = false, ghosted = false }: { edge: 
       data-state={edge.state}
       data-strategy={isReplay ? "replay" : undefined}
       data-ghosted={ghosted || undefined}
-      // A refused seed lane (T9C) carries its flash polarity for the topmost refused-conduit overlay
-      data-refused-polarity={edge.refusedPolarity || undefined}
       // a `planned` lane is hidden during the main-only B0; the transient clone arrows show ONLY while the
       // clone is running (gone at idle); every other lane fades in as it activates. Motion eases the opacity
       // (instant under !animate, where it mounts at the end-state).
@@ -1295,8 +1305,8 @@ export function EnclosureCanvas({ node, gateNode, workspaceEngines = [], officia
       : memGated && isBlocked(node)
         ? { cx: COL_MAIN_CX, top: POS.memorySource.y } // T3B — the unmappable official-line MEMORY base
         : null;
-  // T9B/T9C/T14C — the refused-conduit flash lanes (seed/integration edges that are failed/refused/stale).
-  // Polarity comes off the projection (refusedPolarityOf), never a class. Rendered topmost so the flash is
+  // T9B/T9C/T14C — the refused-conduit flash lanes (seed/integration edges that are failed or stale).
+  // Polarity is derived from the edge state (refusedPolarityOf), never a class. Rendered topmost so the flash is
   // never covered; each path is a one-shot GSAP flash that rests at opacity 0 (absent) under effects=off.
   const refusedEdges = node.edges
     .map((edge) => ({ edge, polarity: refusedPolarityOf(edge) }))

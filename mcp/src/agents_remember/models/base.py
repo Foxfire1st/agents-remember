@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, TypeAlias
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -49,6 +49,12 @@ class ResponseModel(StrictResponseModel):
     # choke point for every response emitted inside an active lifecycle. Optional
     # (``exclude_none``) so lifecycle-less calls stay unchanged.
     nextStep: NextStep | None = None
+    # The stale-supervisor banner (260707-HFX2-L2 R5), set at the same choke point when
+    # the supervisor's heartbeat row has gone quiet past the cutoff. Declared here for
+    # the same reason ``nextStep`` is: a key the choke point writes is a key of THIS
+    # envelope, so the emitted object stays inside its own contract instead of being
+    # stamped onto an already-dumped dict. Optional -- a live supervisor emits nothing.
+    supervisorBanner: str | None = None
 
     def to_payload(self) -> dict[str, Any]:
         return self.model_dump(mode="json", exclude_none=True)
@@ -69,6 +75,10 @@ class FlexibleResponseEnvelope(FlexibleResponseModel):
     tokenCountExact: bool = False
     # Same lifecycle next-step hint as the strict envelope (task 27).
     nextStep: NextStep | None = None
+    # Same stale-supervisor banner as the strict envelope. ``extra="allow"`` would have
+    # accepted it undeclared, which is exactly the hole: a tolerated-drift surface tolerates
+    # the PROVIDER's fields, not ours. What this package writes, this package declares.
+    supervisorBanner: str | None = None
 
     def to_payload(self) -> dict[str, Any]:
         return self.model_dump(mode="json", exclude_none=True)
@@ -78,3 +88,14 @@ class FlexibleToolResponse(FlexibleResponseEnvelope):
     """Flexible operation-bearing response for raw/detail tool surfaces."""
 
     operation: str
+
+
+ResponseEnvelope: TypeAlias = ResponseModel | FlexibleResponseEnvelope
+"""The two envelope families every registered tool response belongs to.
+
+The strict/flexible split is about ``extra``, not about the envelope: both families
+carry the same ``ok``/``tokens``/``nextStep``/``supervisorBanner`` header. Naming the
+union lets ``models.tool_registry`` say what it holds, which is what lets
+``_tool_payload`` set the two choke-point fields on the validated response *before*
+dumping it rather than writing them into the dump afterwards.
+"""

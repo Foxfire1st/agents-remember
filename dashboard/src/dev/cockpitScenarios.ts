@@ -4,6 +4,7 @@ import {
   capabilityCatalogStore,
   resetCapabilityCatalogForDev,
 } from "../data/capabilityCatalog";
+import type { HarnessInfo } from "../data/harnessCatalog";
 import { sessionCockpitStore } from "../data/sessionCockpitStore";
 import { lifecycleNoticeStore } from "../data/sessionLifecycle";
 import { ptyHarvestStore } from "../data/ptyHarvest";
@@ -453,12 +454,16 @@ export function installCockpitScenarioFetch(
       });
     }
     if (path === "/api/harnesses" && method === "GET") {
+      // `satisfies` rather than a bare literal: `HarnessInfo` lives in `data/harnessCatalog.ts`,
+      // which carries no mirror marker and so is NOT in `wireFixtureGuard.ts`'s vocabulary. Nothing
+      // else in the tree would notice an invented field here — a `control` was live on these three
+      // rows, and the server's `DetectedHarness` is `extra="forbid"` over exactly the three below.
       return json({
         harnesses: [
-          { id: "claude", name: "Claude", detected: true, control: "ready" },
-          { id: "codex", name: "Codex", detected: true, control: "ready" },
-          { id: "pi", name: "Pi", detected: true, control: "ready" },
-        ],
+          { id: "claude", name: "Claude", detected: true },
+          { id: "codex", name: "Codex", detected: true },
+          { id: "pi", name: "Pi", detected: true },
+        ] satisfies HarnessInfo[],
       });
     }
     const preSession = path.match(/^\/api\/harnesses\/([^/]+)\/capabilities$/);

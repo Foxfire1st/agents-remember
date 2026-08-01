@@ -33,11 +33,12 @@ from pydantic import ValidationError
 from agents_remember.observer.events import Actor, Event, Trust
 from agents_remember.observer.lifecycle_state import (
     INITIAL_PHASE,
+    TERMINAL_STATES,
     GuardedStartError,
     LifecycleError,
     LifecycleState,
     Phase,
-    State,
+    coerce_end_outcome,
 )
 from agents_remember.observer.save_gate import (
     SaveDecision,
@@ -240,10 +241,24 @@ class AmbientLifecycle:
         current afterward and the end call itself produces no ``tool.completed``
         -- the terminal signal is the record, not a redundant tool event. The
         returned snapshot is the ended lifecycle's terminal state.
+
+        Which outcomes are accepted, and which state each one names, are both read
+        from :mod:`~agents_remember.observer.lifecycle_state` rather than restated
+        here: the terminal half of the vocabulary IS the ``lifecycle.ended`` outcome
+        vocabulary, so the write side has nothing of its own to keep in step. The
+        WRITE side still refuses an unknown outcome rather than defaulting it --
+        :func:`coerce_end_outcome`'s leniency is for the reducer, which reads logs
+        it did not write; a session ending itself must not have a typo silently
+        recorded as an abandonment.
         """
-        if outcome not in ("completed", "abandoned"):
-            raise LifecycleError(f"end outcome must be completed|abandoned, got {outcome!r}")
-        terminal: State = "completed" if outcome == "completed" else "abandoned"
+        if outcome not in TERMINAL_STATES:
+            raise LifecycleError(
+                f"end outcome must be {'|'.join(sorted(TERMINAL_STATES))}, got {outcome!r}"
+            )
+        # Membership is already checked, so this is the identity conversion -- called
+        # anyway, rather than cast, so the outcome -> state rule has exactly one owner
+        # and the write side reads it from the same function the reducer does.
+        terminal = coerce_end_outcome(outcome)
         with self._lock:
             current = self._require_active()
             self._emit_locked("lifecycle.ended", "declared", "model", outcome=outcome)
@@ -485,6 +500,11 @@ class AmbientLifecycle:
             self._promote_to_landing_zone_locked()
             self._pause_locked("switched-away")
         else:
+            # Naming ONE outcome, not classifying: discarding unsaved work is a decision
+            # this branch makes, so the literal is the decision. (It is deliberately not
+            # ``DEFAULT_END_OUTCOME``, which is the separate policy for coercing a free-form
+            # outcome at the tool boundary -- discard would follow that constant anywhere it
+            # moved, and there is no reason it should.)
             self._emit_locked("lifecycle.ended", "declared", "model", outcome="abandoned")
             self._stop_ticker_locked()
             self._served.pop(current.id, None)

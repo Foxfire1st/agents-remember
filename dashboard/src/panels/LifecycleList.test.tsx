@@ -3,6 +3,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { dashboardStore } from "../data/store";
 import { sessionStore } from "../data/sessions";
+import { Dot } from "../grammar/Dot";
+import { metricsFor } from "../types/projection";
 import type {
   Analytics,
   EnclosureNode,
@@ -114,14 +116,7 @@ function projection(over: Partial<WorkspaceProjection>): WorkspaceProjection {
     enclosures: [],
     providers: [],
     activeWorktreeGroups: [],
-    metrics: {
-      lifecycleCount: lifecycles.length,
-      runningCount: lifecycles.filter((entry) => entry.state === "running").length,
-      blockedCount: lifecycles.filter((entry) => entry.state === "blocked").length,
-      pausedCount: lifecycles.filter((entry) => entry.state === "paused").length,
-      totalTokens: lifecycles.reduce((sum, entry) => sum + entry.tokens, 0),
-      stalenessHistogram: {},
-    },
+    metrics: metricsFor(lifecycles),
     analytics: EMPTY_ANALYTICS,
     ...over,
   };
@@ -1127,14 +1122,17 @@ describe("LifecycleList gate hint (L17 — no bare-ask affordance)", () => {
 describe("LifecycleList independent Operations signals", () => {
   const leafKey = "agents-remember/260610_browser-dashboard/01";
 
-  function seedActivityProjection(agentPickups: Analytics["agentPickups"] = []) {
+  function seedActivityProjection(
+    agentPickups: Analytics["agentPickups"] = [],
+    state: LifecycleProjection["state"] = "running",
+  ) {
     seed(
       projection({
         lifecycles: [
           lifecycle({
             id: "LC-ACTIVITY",
             repoId: "agents-remember",
-            state: "running",
+            state,
             phase: "build",
           }),
         ],
@@ -1187,6 +1185,48 @@ describe("LifecycleList independent Operations signals", () => {
     );
     expect(getByTestId("chat-activity").textContent).toBe("idle");
     expect(getByTestId("chat-activity").getAttribute("aria-label")).toContain("worker: idle");
+  });
+
+  // The row builds its dot variant as `lifecycle?.state ?? statusVariant(doc.status)`, so a live
+  // lifecycle hands `Dot` the RAW state string. What Dot then does with it is Dot.test.tsx's
+  // business; what these two assert is that this list hands over the state at all.
+  const rowMarkOf = (state: LifecycleProjection["state"]): string => {
+    cleanup();
+    seedActivityProjection([], state);
+    hydrateTurn("turn-ended");
+    const { getByTestId } = render(<LifecycleList selectedId={null} onSelect={vi.fn()} />);
+    const mark = getByTestId("task-state").firstElementChild;
+    if (!mark) throw new Error(`no dot rendered for '${state}'`);
+    return mark.outerHTML;
+  };
+  const bareDotOf = (variant: string): string => {
+    const mark = render(<Dot variant={variant} />).container.firstElementChild;
+    if (!mark) throw new Error(`Dot rendered nothing for '${variant}'`);
+    return mark.outerHTML;
+  };
+
+  it("gives a live awaiting-developer row the handoff dot, not the one an unknown state gets", () => {
+    // `awaiting-developer` was in neither the statusVariant map nor Dot's variant list, so it fell
+    // through to the base and the developer-facing handoff row looked like any other nominal row.
+    cleanup();
+    seedActivityProjection([], "awaiting-developer");
+    hydrateTurn("turn-ended");
+    const { getByTestId } = render(<LifecycleList selectedId={null} onSelect={vi.fn()} />);
+    const cell = getByTestId("task-state");
+    expect(cell.getAttribute("aria-label")).toBe("Task progress: awaiting-developer; phase: build");
+
+    // Read the row's mark out before rendering anything else: both renders share document.body.
+    const handoffRow = cell.firstElementChild?.outerHTML;
+    expect(handoffRow).toBe(bareDotOf("awaiting-developer"));
+    expect(handoffRow).not.toBe(bareDotOf("__no-such-variant__"));
+  });
+
+  it("keeps a paused row and an abandoned row apart in the same list", () => {
+    // Both states reach `Dot` through `item.variant` and both are rendered by THIS list, so this is
+    // not a cross-panel argument — a developer scanning one rail sees them side by side. They used
+    // to be the same dormant dot, so a lifecycle waiting to be resumed looked exactly like a dead
+    // one.
+    expect(rowMarkOf("paused")).not.toBe(rowMarkOf("abandoned"));
   });
 
   it("shows pending inbox acknowledgment beside an idle chat without conflating them", () => {

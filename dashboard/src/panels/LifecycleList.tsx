@@ -980,12 +980,23 @@ function rowMetaText(progress: string, status: string, staleSeconds: number | un
   return parts.length > 0 ? parts.join(" · ") : "—";
 }
 
+// The DOCUMENT status → dot variant, for rows with no live lifecycle. Its whole input vocabulary
+// is `tasks/document.py::DocStatus` = planning | inProgress | Completed, arriving verbatim through
+// `TaskDocNode.status` / `SeriesNode.status` (`snapshots.py` assigns `status=doc.status`). So this
+// maps exactly two outcomes and nothing else can arrive.
+//
+// It deliberately does NOT carry the lifecycle vocabulary. Both callers read
+// `lifecycle?.state ?? statusVariant(...)`, so blocked/paused/abandoned/awaiting-developer reach
+// `Dot` as the LIVE state on the left of the `??` — never through here. Arms for them were
+// unreachable and untested (the suite is identical with or without them), which is the same class
+// of permanently-dead branch this change removed from the engine-room renderer; adding one for
+// `awaiting-developer` would have been the defect the change was written to delete. `blocked`,
+// `paused` and `abandoned` were pre-existing instances of it and go with it rather than being left
+// as the exception that proves the rule — deleting them is behaviour-identical (the suite is
+// unchanged), because the server cannot reach them either.
 function statusVariant(status: string): string {
   const normalized = status.toLowerCase();
   if (normalized === "completed") return "completed";
-  if (normalized === "abandoned") return "abandoned";
-  if (normalized === "blocked") return "blocked";
-  if (normalized === "paused") return "paused";
   return "running";
 }
 

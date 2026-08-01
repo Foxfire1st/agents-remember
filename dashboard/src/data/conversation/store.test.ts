@@ -10,35 +10,28 @@ import {
   touchConversation,
 } from "./store";
 import type { EventSourceCtor } from "./stream";
-import type {
-  ActiveConversationRef,
-  ActiveEventCursor,
-  ConversationCapabilities,
-  ConversationPage,
-  ConversationStatus,
-} from "./types";
+import {
+  conversationIdentity,
+  conversationPage,
+  conversationStatus,
+} from "../../test/fixtures/conversationWire";
+import type { ActiveConversationRef, ConversationPage } from "./types";
 
 function identity(sessionId: string, epoch = "e1"): ActiveConversationRef {
-  return {
-    harnessId: "codex",
+  return conversationIdentity({
     vendorConversationId: "v",
     projectScope: "/r",
     identityDigest: "d",
     arSessionId: sessionId,
     bridgeEpoch: epoch,
-  };
+  });
 }
 
 function page(sessionId: string): ConversationPage {
-  return {
+  return conversationPage({
     identity: identity(sessionId),
-    items: [],
-    page: { olderCursor: null, hasOlder: false },
-    eventCursor: "evt-0" as ActiveEventCursor,
-    hydrationId: "h",
-    status: { turn: { state: "ready", turnId: null, stateSince: null } } as unknown as ConversationStatus,
-    capabilities: {} as unknown as ConversationCapabilities,
-  };
+    status: conversationStatus({ identity: identity(sessionId) }),
+  });
 }
 
 // A no-op EventSource so connect can open a stream without a network.

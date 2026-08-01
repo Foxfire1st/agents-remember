@@ -51,6 +51,11 @@ from agents_remember.serving.conversation.models import (
     ActiveEventCursor,
     ActivePageCursor,
     ConversationEventEnvelope,
+    ConversationPage,
+)
+from agents_remember.serving.conversation.response_contract import (
+    CONVERSATION_RESPONSES,
+    AgentHistoryHydrated,
 )
 
 router = APIRouter(
@@ -118,7 +123,7 @@ def _resume_cursor(
         raise CursorInvalidError("resume value is not an active event cursor") from exc
 
 
-@router.get("")
+@router.get("", response_model=ConversationPage, responses=CONVERSATION_RESPONSES)
 async def conversation_page(
     ar_session_id: str,
     expected_bridge_epoch: Annotated[str, Query(alias="expectedBridgeEpoch", min_length=1)],
@@ -150,7 +155,13 @@ async def conversation_page(
     return JSONResponse(content=page.model_dump(mode="json", by_alias=True, exclude_none=True))
 
 
-@router.post("/agents/{agent_id}/history")
+# A typed child failure is a SUCCESSFUL local outcome here, so the failure vocabulary lives
+# inside the 200 body's ``status``; only parent-bridge refusals reach ``responses``.
+@router.post(
+    "/agents/{agent_id}/history",
+    response_model=AgentHistoryHydrated,
+    responses=CONVERSATION_RESPONSES,
+)
 async def hydrate_agent_history(
     ar_session_id: str,
     agent_id: Annotated[str, Path(min_length=1)],
@@ -187,7 +198,20 @@ async def hydrate_agent_history(
     )
 
 
-@router.get("/events")
+# The SSE wire: every failure is typed PRE-stream (that is why this returns an explicit
+# ``StreamingResponse`` instead of being a generator route), and each frame's ``data`` is one
+# ``ConversationEventEnvelope`` -- which is what the declaration names.
+@router.get(
+    "/events",
+    response_model=ConversationEventEnvelope,
+    responses={
+        **CONVERSATION_RESPONSES,
+        200: {
+            "content": {"text/event-stream": {}},
+            "description": "Resumable `conversation` frames, one envelope per frame",
+        },
+    },
+)
 async def conversation_events(
     ar_session_id: str,
     expected_bridge_epoch: Annotated[str, Query(alias="expectedBridgeEpoch", min_length=1)],

@@ -1,9 +1,11 @@
-import type { SeriesNode, TaskDocNode, TaskSubTaskRefNode } from "../types/projection";
+import type { SeriesNode, SeriesSubTaskNode, TaskDocNode } from "../types/projection";
 import { seriesSelectionKey, taskDocSelectionKey } from "./taskIdentity";
 
 export interface ParentTaskMatch {
   series: SeriesNode;
-  ref: TaskSubTaskRefNode;
+  // Always a SERIES row (it is read off `series.subTasks`), so it carries `createdAt` and never a
+  // cross-series `linkedLifecycleId` — the collapsed interface used to claim both.
+  ref: SeriesSubTaskNode;
   number: string;
 }
 
@@ -131,7 +133,16 @@ export function stripExt(name: string): string {
   return name.replace(/\.(md|json)$/i, "");
 }
 
-function orderedByCreation<T extends { createdAt?: string }>(items: T[]): T[] {
+/** Creation-order sort, all-or-nothing: rows are only reordered when EVERY row carries a
+ * `createdAt`, so a partially-stamped list keeps its authored order rather than sorting the
+ * stamped ones to the front. Shared with `DetailPanel` (it held a byte-identical second copy).
+ *
+ * Rows whose type carries no `createdAt` at all — a master's `TaskSubTaskRefNode`, which the
+ * server never stamps — therefore pass through untouched by construction. Only
+ * `SeriesSubTaskNode` is actually sortable here, and `snapshots.py::_series_subtask_nodes` has
+ * already applied the same rule server-side, so this is an order-preserving safety net rather
+ * than the thing that establishes the order. */
+export function orderedByCreation<T extends { createdAt?: string }>(items: T[]): T[] {
   if (!items.every((item) => item.createdAt)) return items;
   return [...items].sort((left, right) =>
     (left.createdAt as string).localeCompare(right.createdAt as string),

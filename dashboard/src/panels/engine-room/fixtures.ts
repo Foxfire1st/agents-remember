@@ -132,7 +132,6 @@ function landingRef(
 interface EdgeStates {
   worktreeAdd?: string;
   cgc?: string;
-  cgcRefused?: "amber" | "red"; // 05o/T9C — the cgc-seed lane is REFUSED (state `refused` + this polarity)
   ledger?: string;
   grepai?: string;
   sync?: string;
@@ -154,9 +153,8 @@ function edges(states: EdgeStates, external = true): EngineProcessEdge[] {
       fromNode: "code-worktree",
       toNode: "cgc-engine",
       kind: "cgc-seed",
-      state: states.cgcRefused ? "refused" : (states.cgc ?? "complete"),
+      state: states.cgc ?? "complete",
       label: "CGC seed",
-      ...(states.cgcRefused ? { refusedPolarity: states.cgcRefused } : {}),
     },
   ];
   if (external) {
@@ -843,15 +841,17 @@ export const ENGINE_ROOM_SCENARIOS: EngineRoomScenario[] = [
         phase: "provider-setup",
         health: "running", // SOFT — a reroute, not a failure
         setupState: "running",
-        currentPhase: "codegraphcontext-code reindex (seed refused — reroute)",
+        currentPhase: "codegraphcontext-code reindex (seed stale — reroute)",
         heartbeatAgeSeconds: 1,
         seedFallback: true, // → CGC EngineGauge renders the amber center-out reindex pulse (data-fx='reindex')
         completedPhases: ["grepai-memory clone: ok"],
         // CGC reindexing (engine `indexing`, amber via reindex prop); GrepAI seeds normally (running clone)
         providers: [boot("code", "indexing"), boot("memory", "indexing")],
-        // the cgc-seed conduit is REFUSED with AMBER polarity (the flash); grepai-clone keeps running normally
-        edges: edges({ cgcRefused: "amber", grepai: "running", worktreeAdd: "complete", ledger: "complete" }),
-        summary: "CGC seed refused on commit mismatch — rerouting to a full reindex (a fallback, not a failure).",
+        // The cgc-seed lane is `stale` — the reducer's own reroute state (_seed_edge_state), which the
+        // renderer derives AMBER polarity from; grepai-clone keeps running normally. Nothing here
+        // carries a polarity field: the fixture states are exactly the ones the server can emit.
+        edges: edges({ cgc: "stale", grepai: "running", worktreeAdd: "complete", ledger: "complete" }),
+        summary: "CGC seed went stale on commit mismatch — rerouting to a full reindex (a fallback, not a failure).",
         nextAction: "continue_work",
         missingFacts: [],
       }),

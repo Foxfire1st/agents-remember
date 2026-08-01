@@ -104,7 +104,7 @@ class ResolverCliTests(unittest.TestCase):
                     name="Resolver Parity",
                     repo_name="agents-remember",
                     coordination_root=coordination,
-                    workflow_kind="light",
+                    workflow_kind="light-task",
                     memory_mode="external",
                 ),
                 leaf=LeafIdentity(worktree_name="resolver-parity"),
@@ -172,7 +172,7 @@ class ResolverCliTests(unittest.TestCase):
                             name="child",
                             repo_name="agents-remember",
                             coordination_root=coordination,
-                            workflow_kind="master-series",
+                            workflow_kind="light-task",
                             memory_mode="disabled",
                         ),
                         code=RepoBranchPlan(
@@ -226,7 +226,7 @@ class ResolverCliTests(unittest.TestCase):
                             name=task_name,
                             repo_name="agents-remember",
                             coordination_root=coordination,
-                            workflow_kind="master-series",
+                            workflow_kind="light-task",
                             memory_mode="disabled",
                         ),
                         code=RepoBranchPlan(

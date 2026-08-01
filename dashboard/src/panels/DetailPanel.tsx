@@ -3,7 +3,7 @@ import { memo, useEffect, useState, type ReactNode } from "react";
 import { css, cva, cx } from "../../styled-system/css";
 import { type ChangeCounters, leafChangeset, masterChangeset, taskChangeset } from "../data/changeset";
 import { useDashboard } from "../data/store";
-import { parentTaskLinkForDoc, pathDir, stripExt } from "../data/taskHierarchy";
+import { orderedByCreation, parentTaskLinkForDoc, pathDir, stripExt } from "../data/taskHierarchy";
 import {
   findLifecycleEnclosure,
   groupEnclosuresByLifecycle,
@@ -31,7 +31,7 @@ import type {
   TaskDocNode,
   TaskSectionNode,
   TaskStepNode,
-  TaskSubTaskRefNode,
+  SubTaskRow,
 } from "../types/projection";
 
 import type { ChangeSetTarget } from "./changeset/ChangeSetViewer";
@@ -826,10 +826,7 @@ function DocChangeSetBar({
 const sliceSlug = (doc: TaskDocNode): string => stripExt(doc.docPath.split("/").pop() ?? "");
 const sliceForSlug = (sliceDocs: TaskDocNode[], slug: string): TaskDocNode | undefined =>
   sliceDocs.find((doc) => sliceSlug(doc) === slug);
-const sliceForRef = (
-  sliceDocs: TaskDocNode[],
-  ref: TaskSubTaskRefNode,
-): TaskDocNode | undefined =>
+const sliceForRef = (sliceDocs: TaskDocNode[], ref: SubTaskRow): TaskDocNode | undefined =>
   ref.file ? sliceForSlug(sliceDocs, stripExt(ref.file)) : undefined;
 const seriesSliceDocs = (sliceDocs: TaskDocNode[], seriesDocPath: string): TaskDocNode[] =>
   sliceDocs.filter((doc) => pathDir(doc.docPath) === pathDir(seriesDocPath));
@@ -937,26 +934,33 @@ const topLevelStepProgress = (doc: TaskDocNode): { done: number; total: number }
   total: doc.steps.length,
 });
 
+// A master doc OR a series rendered as one. `subTasks` is widened to the union because the two
+// sources send genuinely different rows: a task-doc master sends `TaskSubTaskRefNode` (may carry a
+// cross-series `linkedLifecycleId`), a series sends `SeriesSubTaskNode` (carries `createdAt`, never
+// a cross-link). Picking `TaskDocNode["subTasks"]` for both is what hid that difference.
 type MasterDocView = Pick<
   TaskDocNode,
   | "kind"
   | "title"
   | "status"
   | "objective"
-  | "subTasks"
   | "sections"
   | "decisions"
   | "masterLifecycleId"
   | "docPath"
   | "repository"
-> & { seriesTokenTotal?: number };
+> & { subTasks: SubTaskRow[]; seriesTokenTotal?: number };
 
 const seriesAsMasterDoc = (seriesNode: SeriesNode): MasterDocView => ({
   kind: "master",
   title: seriesNode.title,
   status: seriesNode.status,
   objective: seriesNode.objective,
-  subTasks: seriesNode.subTasks,
+  // Creation order belongs HERE, on the only source whose rows actually carry `createdAt`.
+  // `SubTaskIndex` used to run this over its union of row types, where it could never do
+  // anything for a task-doc master's rows (they have no such field). Kept as a safety net
+  // even though `snapshots.py::_series_subtask_nodes` already sorts these server-side.
+  subTasks: orderedByCreation(seriesNode.subTasks),
   sections: seriesNode.sections,
   decisions: seriesNode.decisions,
   docPath: seriesNode.docPath,
@@ -1141,7 +1145,7 @@ function SubTaskIndex({
   onJump,
   testidPrefix = "subtask-open",
 }: {
-  refs: TaskSubTaskRefNode[];
+  refs: SubTaskRow[];
   sliceDocs: TaskDocNode[];
   onOpen: (slug: string) => void;
   onJump: (id: string) => void;
@@ -1150,10 +1154,13 @@ function SubTaskIndex({
   if (refs.length === 0) {
     return <p className="muted">No sub-tasks indexed.</p>;
   }
-  const orderedRefs = orderedByCreation(refs);
+  // Rendered in the order received, deliberately. Neither source needs a client-side sort: a
+  // master's `TaskSubTaskRefNode` rows carry no `createdAt` at all (so the old
+  // `orderedByCreation(refs)` here could never do anything), and a series' `SeriesSubTaskNode`
+  // rows arrive already ordered by it from `snapshots.py::_series_subtask_nodes`.
   return (
     <ul className={slices}>
-      {orderedRefs.map((ref, index) => {
+      {refs.map((ref, index) => {
         const position = index + 1;
         const match = sliceForRef(sliceDocs, ref);
         const displayNumber = match?.id || ref.number;
@@ -1167,15 +1174,18 @@ function SubTaskIndex({
           </span>
         );
         // A row whose ref points at another master is a parallel/external series → jump lifecycles.
-        if (ref.linkedLifecycleId) {
+        // Only a task-doc master's rows can cross-link: `SeriesSubTaskNode` has no such field, so
+        // this branch is structurally unreachable for a series rendered via `seriesAsMasterDoc`.
+        const linkedLifecycleId = "linkedLifecycleId" in ref ? ref.linkedLifecycleId : undefined;
+        if (linkedLifecycleId) {
           return (
             <li key={subTaskKey(ref, index)}>
               <button
                 type="button"
                 className={crossButton}
-                onClick={() => onJump(ref.linkedLifecycleId as string)}
+                onClick={() => onJump(linkedLifecycleId)}
                 data-testid={`${testidPrefix}-link-${position}`}
-                title={`open the ${ref.linkedLifecycleId} series`}
+                title={`open the ${linkedLifecycleId} series`}
               >
                 <span>→ {label}</span>
                 {meta}
@@ -1212,15 +1222,8 @@ function SubTaskIndex({
   );
 }
 
-function subTaskKey(ref: TaskSubTaskRefNode, index: number): string {
+function subTaskKey(ref: SubTaskRow, index: number): string {
   return `${ref.file || ref.name}:${index}`;
-}
-
-function orderedByCreation<T extends { createdAt?: string }>(items: T[]): T[] {
-  if (!items.every((item) => item.createdAt)) return items;
-  return [...items].sort((left, right) =>
-    (left.createdAt as string).localeCompare(right.createdAt as string),
-  );
 }
 
 // Fallback for a series with no master yet: the slice list, now clickable into each reader.

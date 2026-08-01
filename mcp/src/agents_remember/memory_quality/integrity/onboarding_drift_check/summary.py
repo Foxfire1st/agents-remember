@@ -11,12 +11,13 @@ from typing import Any
 from agents_remember.memory_quality.integrity.onboarding_drift_check import drift
 from agents_remember.memory_quality.integrity.onboarding_drift_check.models import (
     ACTIONABLE_CLASSIFICATIONS,
+    DriftSummaryPacket,
 )
 from agents_remember.observer.drift_snapshots import drift_snapshot_path
 from agents_remember.observer.paths import DRIFT_SNAPSHOT_SCHEMA
 
 
-def not_checked() -> dict[str, Any]:
+def not_checked() -> DriftSummaryPacket:
     return {"status": "notChecked"}
 
 
@@ -25,7 +26,7 @@ def run_drift_summary(
     code_repository_root: Path,
     context: Any,
     detail_limit: int = 10,
-) -> dict[str, Any]:
+) -> DriftSummaryPacket:
     if not context.onboarding_root.exists():
         return {
             "status": "error",
@@ -76,7 +77,7 @@ def summarize_rows(
     *,
     report_path: str = "",
     detail_limit: int = 10,
-) -> dict[str, Any]:
+) -> DriftSummaryPacket:
     actionable = [
         row for row in rows if str(row.get("classification", "")) in ACTIONABLE_CLASSIFICATIONS
     ]

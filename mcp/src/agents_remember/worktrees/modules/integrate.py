@@ -32,7 +32,9 @@ from agents_remember.worktrees.modules.guidance import (
 )
 from agents_remember.worktrees.modules.models import WorktreeCommandResult
 from agents_remember.worktrees.worktree_contract import (
+    ContractCells,
     WorktreeContract,
+    amend_contract,
     load_contract,
     write_contract,
 )
@@ -115,7 +117,7 @@ def unmatched_handover_gate_warning(
 def blocked_integration_payload(
     contract: WorktreeContract, state: str, reason: str, persist: bool = True, **extra: object
 ) -> dict[str, object]:
-    blocked = replace(contract, integration_status="blocked")
+    blocked = amend_contract(contract, ContractCells(integration_status="blocked"))
     if persist:
         write_contract(blocked.contract_path, blocked)
     return {
@@ -485,14 +487,15 @@ def _integrated_result(
     *,
     handover_warning: dict[str, object] | None,
 ) -> WorktreeCommandResult:
-    updated = replace(
-        contract,
-        integration_status="completed",
-        integration_strategy=args.strategy,
-        integrated_code_commit=commits.code,
-        integrated_memory_content_commit=commits.memory_content,
-        integrated_ledger_commit=commits.ledger,
-        cleanup="pending",
+    updated = amend_contract(
+        replace(
+            contract,
+            integration_strategy=args.strategy,
+            integrated_code_commit=commits.code,
+            integrated_memory_content_commit=commits.memory_content,
+            integrated_ledger_commit=commits.ledger,
+        ),
+        ContractCells(integration_status="completed", cleanup="pending"),
     )
     write_contract(contract.contract_path, updated)
     payload: dict[str, object] = {

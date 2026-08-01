@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Any
 
 from pydantic import Field
 
+from agents_remember.memory_quality.integrity.onboarding_drift_check.models import DriftStatus
 from agents_remember.models.base import StrictResponseModel
-
-DriftStatus = Literal["notChecked", "checked"]
 
 
 class DriftSummary(StrictResponseModel):
@@ -17,3 +16,8 @@ class DriftSummary(StrictResponseModel):
     actionableCount: int | None = Field(default=None, ge=0)
     reportPath: str | None = None
     actionableSample: list[dict[str, Any]] | None = None
+    # `run_drift_summary` returns `{"status": "error", "error": ...}` when the onboarding root
+    # is missing. Both halves were absent here, so `include_drift=true` against a repo without
+    # onboarding raised out of the tool instead of reporting why -- the strict model rejected
+    # the status *and* the key. `DriftCheckResponse` has carried both all along.
+    error: str | None = None

@@ -1,10 +1,23 @@
 import { beforeEach, describe, expect, it } from "vitest";
 
 import type { WorkspaceProjection } from "../types/projection";
+import { asServedProjection } from "../test/servedProjection";
+import { reparsed, supervisorHeartbeat } from "../test/fixtures/wire";
 import { dashboardStore } from "./store";
 import snapshot from "../fixtures/snapshot.json";
 
-const projection = snapshot as unknown as WorkspaceProjection;
+// `asServedProjection`, not `snapshot as unknown as WorkspaceProjection`. The double cast turned
+// off assignability for this file too: the fixture could drop a field the store reads and nothing
+// here would notice, because the cast had already promised the value was a `WorkspaceProjection`.
+// The helper's parameter type is the check — the cast inside it only puts back the literal types
+// `resolveJsonModule` erased (see `test/servedProjection.ts`).
+const projection = asServedProjection(snapshot);
+
+// The fixture's lifecycle count, read from the fixture rather than repeated as a literal in each
+// assertion below. It grew from 2 to 6 when `contract.test.ts` started requiring every member of
+// every closed vocabulary to be exercised — six states need six lifecycles — and a hard-coded 2
+// is exactly the kind of hand-kept second copy this leaf is about.
+const FIXTURE_LIFECYCLES = projection.lifecycles.length;
 
 beforeEach(() => {
   dashboardStore.setState({
@@ -41,7 +54,7 @@ describe("dashboard store", () => {
     expect(state.conn).toBe("live");
     expect(Object.keys(state.lifecycles)).toContain("sim-replay-lifecycle");
     expect(Object.keys(state.enclosures)).toContain("sim-enclosure");
-    expect(state.metrics?.lifecycleCount).toBe(2);
+    expect(state.metrics?.lifecycleCount).toBe(FIXTURE_LIFECYCLES);
   });
 
   it("upserts a lifecycle delta by id", () => {
@@ -73,9 +86,11 @@ describe("dashboard store", () => {
 // A payload whose only movement is its volatile ages (or a byte-fresh but content-equal
 // reconnect snapshot) must cost NOTHING: no store write, no new object graph, no re-render.
 
-/** A byte-fresh copy of the projection (like a real wire parse) with volatile ages bumped. */
+/** A byte-fresh copy of the projection (like a real wire parse) with volatile ages bumped.
+ *  `reparsed` is the typed round-trip: `JSON.parse` answers `any`, which would have let this
+ *  helper hand the store a shape the server could never send. */
 function volatileBump(source: WorkspaceProjection, tick: number): WorkspaceProjection {
-  const copy = JSON.parse(JSON.stringify(source)) as WorkspaceProjection;
+  const copy = reparsed(source);
   copy.generatedAt = `2026-07-07T05:00:${String(tick % 60).padStart(2, "0")}+00:00`;
   for (const lifecycle of copy.lifecycles) lifecycle.staleSeconds = 10 + tick;
   for (const doc of copy.analytics?.taskDocuments ?? []) doc.ageSeconds = 100 + tick;
@@ -119,28 +134,18 @@ describe("dashboard store change gate (260703-L15)", () => {
   });
 
   it("applies an idle re-snapshot with a genuinely changed supervisorHeartbeat", () => {
-    const withHeartbeat = {
-      ...projection,
-      supervisorHeartbeat: {
-        lastTickAt: "2026-07-08T00:00:00+00:00",
-        ageSeconds: 1,
-        staleCutoffSeconds: 30,
-        stale: false,
-        pendingInboxCount: 2,
-        redeliverableInboxCount: 1,
-        lastSweepDurationSeconds: 0.2,
-      },
-    } as WorkspaceProjection;
+    const heartbeat = supervisorHeartbeat({ pendingInboxCount: 2, redeliverableInboxCount: 1 });
+    const withHeartbeat: WorkspaceProjection = { ...projection, supervisorHeartbeat: heartbeat };
     dashboardStore.getState().applySnapshot(withHeartbeat);
     const before = dashboardStore.getState();
     let notifications = 0;
     const unsubscribe = dashboardStore.subscribe(() => {
       notifications += 1;
     });
-    const advanced = {
+    const advanced: WorkspaceProjection = {
       ...withHeartbeat,
-      supervisorHeartbeat: { ...withHeartbeat.supervisorHeartbeat, ageSeconds: 5 },
-    } as WorkspaceProjection;
+      supervisorHeartbeat: { ...heartbeat, ageSeconds: 5 },
+    };
     dashboardStore.getState().applySnapshot(advanced);
     unsubscribe();
     expect(notifications).toBe(1); // the tick advance IS a store write
@@ -230,6 +235,6 @@ describe("long-session guard", () => {
     expect(state.lifecycles).toBe(lifecyclesRef); // no per-tick object churn
     expect(state.analytics).toBe(analyticsRef);
     expect(state.events.length).toBeLessThanOrEqual(2000); // the sliding window bound
-    expect(Object.keys(state.lifecycles).length).toBe(2); // nothing accumulates
+    expect(Object.keys(state.lifecycles).length).toBe(FIXTURE_LIFECYCLES); // nothing accumulates
   });
 });

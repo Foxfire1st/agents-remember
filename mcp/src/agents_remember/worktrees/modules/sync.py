@@ -26,7 +26,7 @@ from agents_remember.worktrees.modules.git import (
 )
 from agents_remember.worktrees.modules.guidance import (
     contract_next_args,
-    next_guidance,
+    recovery_guidance,
 )
 from agents_remember.worktrees.modules.models import WorktreeCommandResult
 from agents_remember.worktrees.modules.start import load_contract_from_args
@@ -161,7 +161,7 @@ def _memory_sync_block(
                 "summary": "The memory work branch has local commits and the official memory "
                 "moved; choose merge-memory (ledger conflicts abort cleanly) or skip-memory "
                 "(defer to end-of-task carryover).",
-                **next_guidance(
+                **recovery_guidance(
                     "choose_memory_sync_recovery",
                     tool="worktree_sync",
                     args=contract_next_args(contract),

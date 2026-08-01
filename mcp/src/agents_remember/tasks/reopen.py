@@ -34,7 +34,9 @@ from agents_remember.tasks.store import read_task_doc, write_task_docs
 from agents_remember.worktrees.modules.guidance import status_payload
 from agents_remember.worktrees.modules.models import WorktreeCommandResult
 from agents_remember.worktrees.worktree_contract import (
+    ContractCells,
     WorktreeContract,
+    amend_contract,
     load_contract,
     write_contract,
 )
@@ -58,23 +60,31 @@ def reopen_task(contract_path: Path, *, dry_run: bool = False) -> WorktreeComman
             },
         )
 
-    updated = replace(
-        contract,
-        human_review_status="pending-review",
-        approved_for_commit=False,
-        commit_approval_note="",
-        closeout_status="not-started",
-        code_commit="",
-        memory_content_commit="",
-        ledger_commit="",
-        integration_status="not-started",
-        integration_strategy="",
-        integrated_code_commit="",
-        integrated_memory_content_commit="",
-        integrated_ledger_commit="",
-        cleanup="reopened",
-        lifecycle_id="",
-        memory_state="",
+    updated = amend_contract(
+        replace(
+            contract,
+            approved_for_commit=False,
+            commit_approval_note="",
+            code_commit="",
+            memory_content_commit="",
+            ledger_commit="",
+            integration_strategy="",
+            integrated_code_commit="",
+            integrated_memory_content_commit="",
+            integrated_ledger_commit="",
+            lifecycle_id="",
+            memory_state="",
+        ),
+        # The vocabulary cells go through the typed record, which is what puts them in front
+        # of pyright: `dataclasses.replace` is `**changes: Any` in typeshed, so the `reopened`
+        # marker below crossed the boundary unchecked for as long as it was spelled as a
+        # `replace` keyword -- and it was one of the six values the packet then rejected.
+        ContractCells(
+            human_review_status="pending-review",
+            closeout_status="not-started",
+            integration_status="not-started",
+            cleanup="reopened",
+        ),
     )
     doc_reset = _reset_leaf_doc(contract, dry_run=dry_run)
     frozen_cleared = _clear_frozen_landing(contract, dry_run=dry_run)

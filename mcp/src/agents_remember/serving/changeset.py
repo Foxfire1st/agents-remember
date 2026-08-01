@@ -34,6 +34,13 @@ from fastapi.responses import JSONResponse, Response
 from agents_remember.errors import AuthorityError
 from agents_remember.kernel.sidecar_pairing import confine_rel, route_sidecar_status
 from agents_remember.mcp.config import McpRuntimeConfig
+from agents_remember.serving.response_contract import (
+    SCOPED_READ_RESPONSES,
+    FileDiff,
+    LeafChangeSet,
+    MasterChangeSet,
+    TaskChangeSet,
+)
 from agents_remember.serving.scope import FileScope, language_for, run_scoped
 from agents_remember.worktrees.modules.git import (
     branch_exists,
@@ -500,7 +507,13 @@ def register_changeset_routes(app: FastAPI, config: McpRuntimeConfig) -> None:
     JSONResponse 400/404 idiom rather than ``run_scoped``.
     """
 
-    @app.get("/api/changeset/task")
+    # Two success shapes: the leaf view adds ``mode`` to the enclosure view's body, and the
+    # ``leaf`` selector is what picks between them.
+    @app.get(
+        "/api/changeset/task",
+        response_model=LeafChangeSet | TaskChangeSet,
+        responses=SCOPED_READ_RESPONSES,
+    )
     def api_changeset_task(
         repo: str, scope: str = "mainline", master: str = "", leaf: str = "", mode: str = ""
     ) -> Response:
@@ -510,7 +523,7 @@ def register_changeset_routes(app: FastAPI, config: McpRuntimeConfig) -> None:
             )
         return run_scoped(task_changeset, config, repo, scope)
 
-    @app.get("/api/changeset/file-diff")
+    @app.get("/api/changeset/file-diff", response_model=FileDiff, responses=SCOPED_READ_RESPONSES)
     def api_changeset_file_diff(ref: Annotated[ChangesetFileRef, Depends()]) -> Response:
         if ref.leaf:
             return _leaf_json(lambda: leaf_file_diff(config, ref), ref.master, ref.mode)
@@ -528,7 +541,9 @@ def register_changeset_routes(app: FastAPI, config: McpRuntimeConfig) -> None:
                 return JSONResponse({"status": "not-found", "path": str(err)}, status_code=404)
         return run_scoped(lambda fs: file_diff(fs, ref.kind, ref.path), config, ref.repo, ref.scope)
 
-    @app.get("/api/changeset/master")
+    # An unresolvable master degrades to empty lists rather than refusing, so this route has no
+    # refusal shape to declare.
+    @app.get("/api/changeset/master", response_model=MasterChangeSet)
     def api_changeset_master(
         repo: str,
         master: str,

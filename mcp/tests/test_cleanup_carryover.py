@@ -146,15 +146,15 @@ class GuidanceCarryoverRoutingTests(unittest.TestCase):
         cd.return_value = (False, "")
         guidance = lifecycle_guidance(_contract(self.tmp))
         self.assertEqual(guidance["phase"], "carryover-pending")
-        self.assertEqual(guidance["nextTool"], "memory_carryover_apply")
+        self.assertEqual(guidance.get("nextTool"), "memory_carryover_apply")
 
     @patch("agents_remember.worktrees.modules.guidance.carryover_done")
     def test_routes_cleanup_pending_with_done_at_when_carried(self, cd: MagicMock) -> None:
         cd.return_value = (True, "2026-06-21T09:00:00+02:00")
         guidance = lifecycle_guidance(_contract(self.tmp))
         self.assertEqual(guidance["phase"], "cleanup-pending")
-        self.assertEqual(guidance["nextTool"], "worktree_cleanup")
-        self.assertEqual(guidance["carryoverDoneAt"], "2026-06-21T09:00:00+02:00")
+        self.assertEqual(guidance.get("nextTool"), "worktree_cleanup")
+        self.assertEqual(guidance.get("carryoverDoneAt"), "2026-06-21T09:00:00+02:00")
 
 
 class CleanupCarryoverGuardTests(unittest.TestCase):

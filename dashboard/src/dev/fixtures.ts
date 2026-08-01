@@ -3,6 +3,14 @@
 // the bench hydrates into the store. The attention queues here mirror what the reducer's
 // build_attention_queue would compute for the same tree — kept in sync by eye (sidecar-free,
 // dashboard/** is out of memory scope).
+//
+// The SCENARIOS are this file's business; the NODES are not. Every builder below now delegates to
+// `test/fixtures/wire.ts`, whose bases are assembled from `fixtures/snapshot.json` (hand-maintained
+// — there is no generator; `wire.ts`'s header carries the chain and where it stops),
+// so there is one definition of "the fields a served lifecycle always carries" rather than one
+// here and one per test seed. The gallery keeps its own DEFAULTS (a running lifecycle reads better
+// in a gallery than the snapshot's blocked one) by passing them explicitly — what it no longer
+// keeps is a second copy of the required-field list, which is the thing that drifts.
 
 import { ENGINE_ROOM_SCENARIOS, OFFICIAL_LEDGER } from "../panels/engine-room/fixtures";
 import type { ObserverEvent } from "../types/event";
@@ -12,25 +20,19 @@ import type {
   ProviderNode,
   WorkspaceProjection,
 } from "../types/projection";
-
-const EMPTY_ANALYTICS: WorkspaceProjection["analytics"] = {
-  driftSnapshots: [],
-  stalestSidecars: [],
-  setupSummaries: [],
-  setupProgress: [],
-  routeCoverage: [],
-  toolReports: [],
-  ledgers: [],
-  taskDocuments: [],
-  series: [],
-  attentionQueue: [],
-  engineProcesses: [],
-};
+import {
+  EMPTY_ANALYTICS,
+  enclosure as servedEnclosure,
+  lifecycle as servedLifecycle,
+  observerEvent as servedObserverEvent,
+  projection as servedProjection,
+  provider as servedProvider,
+} from "../test/fixtures/wire";
 
 function lifecycle(
   over: Partial<LifecycleProjection> & Pick<LifecycleProjection, "id">,
 ): LifecycleProjection {
-  return {
+  return servedLifecycle({
     state: "running",
     phase: "build",
     fleeting: false,
@@ -41,64 +43,60 @@ function lifecycle(
     actions: [],
     tokenSeries: [],
     ...over,
-  };
+  });
 }
 
 function project(over: Partial<WorkspaceProjection> = {}): WorkspaceProjection {
-  const { lifecycles = [], analytics, ...rest } = over;
-  return {
+  // `metrics` is derived from the lifecycles by the shared builder — one bucket per live state,
+  // read off the vocabulary. This used to be three hand-written filters here, a copy of the
+  // reducer's bucket list that missed `awaiting-developer` exactly as the server's own copy did,
+  // so the gallery could not show the state either.
+  return servedProjection({
     version: 2,
     generatedAt: "2026-06-14T09:01:00+00:00",
-    enclosures: [],
-    providers: [],
-    activeWorktreeGroups: [],
-    ...rest,
-    lifecycles,
-    metrics: {
-      lifecycleCount: lifecycles.length,
-      runningCount: lifecycles.filter((entry) => entry.state === "running").length,
-      blockedCount: lifecycles.filter((entry) => entry.state === "blocked").length,
-      pausedCount: lifecycles.filter((entry) => entry.state === "paused").length,
-      totalTokens: lifecycles.reduce((sum, entry) => sum + entry.tokens, 0),
-      stalenessHistogram: {},
-    },
-    analytics: { ...EMPTY_ANALYTICS, ...analytics },
-  };
+    ...over,
+  });
 }
 
-const ok = (id: string): ProviderNode => ({
-  id,
-  state: "ready",
-  ok: true,
-  watcherUp: true,
-  indexingState: "indexed",
-  scope: "workspace",
-  role: id.includes("memory") || id.includes("grepai") ? "memory" : "code",
-});
-const down = (id: string): ProviderNode => ({
-  id,
-  state: "stopped",
-  ok: false,
-  watcherUp: false,
-  indexingState: "unknown",
-  scope: "workspace",
-  role: id.includes("memory") || id.includes("grepai") ? "memory" : "code",
-});
-const indexing = (id: string): ProviderNode => ({
-  id,
-  state: "ready",
-  ok: true,
-  watcherUp: true,
-  indexingState: "indexing",
-  snapshotStaleSeconds: 3,
-  scope: "workspace",
-  role: id.includes("memory") || id.includes("grepai") ? "memory" : "code",
-});
+const providerRole = (id: string): string =>
+  id.includes("memory") || id.includes("grepai") ? "memory" : "code";
+
+const ok = (id: string): ProviderNode =>
+  servedProvider({
+    id,
+    state: "ready",
+    ok: true,
+    watcherUp: true,
+    indexingState: "indexed",
+    scope: "workspace",
+    role: providerRole(id),
+  });
+const down = (id: string): ProviderNode =>
+  servedProvider({
+    id,
+    state: "stopped",
+    ok: false,
+    watcherUp: false,
+    indexingState: "unknown",
+    scope: "workspace",
+    role: providerRole(id),
+  });
+const indexing = (id: string): ProviderNode =>
+  servedProvider({
+    id,
+    state: "ready",
+    ok: true,
+    watcherUp: true,
+    indexingState: "indexing",
+    snapshotStaleSeconds: 3,
+    scope: "workspace",
+    role: providerRole(id),
+  });
 
 function enclosure(
   over: Partial<EnclosureNode> & Pick<EnclosureNode, "enclosure" | "repoName" | "taskName">,
 ): EnclosureNode {
-  return {
+  return servedEnclosure({
     taskId: over.enclosure,
     enclosureId: over.enclosure,
     leafId: over.taskName,
@@ -114,7 +112,7 @@ function enclosure(
     memoryWorktreeExists: true,
     actions: [],
     ...over,
-  };
+  });
 }
 
 const evt = (
@@ -123,15 +121,8 @@ const evt = (
   trust: ObserverEvent["trust"],
   actor: ObserverEvent["actor"],
   over: Partial<ObserverEvent> = {},
-): ObserverEvent => ({
-  schema: "ar-observer-event/v1",
-  id,
-  ts: "2026-06-14T09:00:30+00:00",
-  kind,
-  trust,
-  actor,
-  ...over,
-});
+): ObserverEvent =>
+  servedObserverEvent({ id, kind, trust, actor, ts: "2026-06-14T09:00:30+00:00", ...over });
 
 export interface GalleryEntry {
   name: string;

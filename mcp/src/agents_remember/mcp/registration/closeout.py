@@ -29,8 +29,8 @@ def register_closeout_tools(server: FastMCP, config: McpRuntimeConfig) -> None:
     ) -> dict[str, Any]:
         """Non-mutating preview of a worktree-backed closeout. Reports the proposed
         code/memory/ledger commits and whether strict project-owned code quality, including
-        mandatory CRAP enforcement, will run before the code commit. Pair with
-        worktree_closeout_apply after approval."""
+        mandatory CRAP enforcement, will run over the staged task worktree
+        before the code commit. Pair with worktree_closeout_apply after approval."""
         return worktree_closeout_preview_payload(
             config,
             contract_path,
@@ -50,11 +50,20 @@ def register_closeout_tools(server: FastMCP, config: McpRuntimeConfig) -> None:
         ledger_commit_message: str = "",
         dry_run: bool = False,
     ) -> dict[str, Any]:
-        """Apply an approved worktree closeout. When code would commit, runs strict
-        project-owned quality with mandatory CRAP enforcement before any code, memory,
-        ledger, contract, or applied-gate mutation; then commits code, memory, and ledger
-        in order. MUTATING and commit-gated: preview and approval precede apply.
-        Requires intent_note."""
+        """Apply an approved worktree closeout. When code would commit AND the checkout carries
+        the project-owned quality wrapper, resets the index, stages the whole task worktree, and
+        runs strict quality with mandatory CRAP enforcement over exactly that staged content,
+        before any code, memory, ledger, contract, or applied-gate commit; then commits code,
+        memory, and ledger in order. Staging is what lets the gate see files the task created
+        rather than only the ones it edited; the reset is what makes a retry stage what a first
+        run would, instead of inheriting a refused attempt's index. Staging is not undone if the
+        gate refuses: the checkout staged is the task's own disposable worktree. The two refusals
+        guard that staging step, so they run only where the gate runs -- it refuses before staging
+        when the code checkout is not a task worktree (a series/master contract records the
+        repository path itself) or has unresolved merge conflicts. A checkout carrying no wrapper
+        runs neither the gate nor those refusals, and reaches the ordinary commit step's own
+        'git add -A' exactly as it always has. MUTATING and commit-gated: preview and
+        approval precede apply. Requires intent_note."""
         return worktree_closeout_apply_payload(
             config,
             contract_path,

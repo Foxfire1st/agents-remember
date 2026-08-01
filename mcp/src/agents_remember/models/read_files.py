@@ -15,12 +15,12 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
+# ``FileReadStatus`` is imported from the controller that decides it, never retyped here:
+# ``_resolve_onboarding`` returns it and ``_read_one`` puts it into an untyped payload dict, so
+# a copy on this side would only be measured against the producer when a real read carried the
+# new member -- as a ValidationError, on the tool path, with no handler for one.
+from agents_remember.controllers.read_files import FileReadStatus
 from agents_remember.models.base import StrictResponseModel, ToolResponse
-
-# The onboarding-lookup outcome for one requested source path. This is the
-# ONBOARDING status, never a source-read condition (source presence rides the
-# independent ``source`` field).
-FileReadStatus = Literal["found", "missing", "disabled", "unsupported", "not_requested"]
 
 
 class FileRead(StrictResponseModel):

@@ -149,6 +149,6 @@ def _enclosure_is_provider_relevant(enclosure: EnclosureNode) -> bool:
         return False
     if not enclosure.worktreeGroup:
         return False
-    if enclosure.cleanup in {"completed", "abandoned"}:
+    if enclosure.cleanup in ARCHIVED_CLEANUP_STATES:
         return False
     return enclosure.closeoutStatus != "completed" and enclosure.integrationStatus != "completed"

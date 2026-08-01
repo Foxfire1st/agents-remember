@@ -62,7 +62,7 @@ def _contract(root: Path, index: int) -> WorktreeContract:
             name=f"landing-{index}",
             repo_name=f"repo-{index}",
             coordination_root=root,
-            workflow_kind="light",
+            workflow_kind="light-task",
             memory_mode="disabled",
         ),
         leaf=LeafIdentity(worktree_name=f"landing-{index}"),

@@ -26,7 +26,8 @@ import contextlib
 from dataclasses import dataclass
 from importlib import resources
 from pathlib import Path
-from typing import Any
+
+from pydantic import BaseModel, ConfigDict
 
 import agents_remember
 from agents_remember.kernel.git_command import run_git
@@ -37,6 +38,29 @@ from agents_remember.observer.events import now_iso
 # git that does not answer in two seconds is treated as "unstampable" like any other
 # failure. Kept tight deliberately, against the runner's general-purpose local bound.
 _PROBE_TIMEOUT_SECONDS = 2
+
+
+class ServingBuildPayload(BaseModel):
+    """The declared camelCase wire form of the stamp, as it rides ``servingBuild``.
+
+    A model rather than a hand-built ``dict[str, Any]`` because this object is a field of
+    the served state contract (``serving.served_state.ServedWorkspaceProjection``), and a
+    contract whose members are untyped dicts only pretends to be one.
+
+    The honest-unknown rule of this module is expressed as ``None`` on every best-effort
+    field: callers serialize with ``exclude_none=True``, so an unresolvable commit, an
+    unbuilt dashboard bundle and an unprovable tree are all OMITTED rather than emitted as
+    a null or a fabricated "clean".
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    version: str
+    bootedAt: str
+    commit: str | None = None
+    dashboardBuild: str | None = None
+    # Only ever True or absent -- see ``ServingBuild.payload``.
+    dirty: bool | None = None
 
 
 @dataclass(frozen=True)
@@ -50,18 +74,18 @@ class ServingBuild:
     # Tri-state: True = proven dirty, False = proven clean, None = unprovable (fail-open).
     dirty: bool | None = False
 
-    def payload(self) -> dict[str, Any]:
-        """The camelCase wire form carried on the state payload (``None`` commit omitted)."""
-        body: dict[str, Any] = {"version": self.version, "bootedAt": self.booted_at}
-        if self.commit is not None:
-            body["commit"] = self.commit
-        if self.dashboard_build is not None:
-            body["dashboardBuild"] = self.dashboard_build
-        # Only a PROVEN-dirty tree emits the marker; clean AND unprovable (None) both omit
-        # it, so the wire never fabricates a "clean" fact -- absence is not a pristine claim.
-        if self.dirty:
-            body["dirty"] = True
-        return body
+    def payload(self) -> ServingBuildPayload:
+        """The declared wire form of this stamp (serialize with ``exclude_none=True``)."""
+        return ServingBuildPayload(
+            version=self.version,
+            bootedAt=self.booted_at,
+            commit=self.commit,
+            dashboardBuild=self.dashboard_build,
+            # Only a PROVEN-dirty tree carries the marker; clean (False) AND unprovable
+            # (None) both collapse to None and drop out, so the wire never fabricates a
+            # "clean" fact -- absence is not a pristine claim.
+            dirty=True if self.dirty else None,
+        )
 
 
 def _git_short_head(anchor: Path) -> str | None:

@@ -2,6 +2,31 @@ import { expect, test, type Page } from "@playwright/test";
 import { readFileSync } from "node:fs";
 
 import { capabilityEnvelope } from "../src/test/fixtures/capabilityEnvelopes";
+import type { TerminalCatalogRow } from "../src/types/terminalCatalog";
+import type { TerminalOpenSuccessBody } from "../src/types/terminalOpen";
+
+// R6 in the production suite. This spec fulfils every endpoint itself, so the same question applies
+// as to a unit fixture: is what it serves a payload the SERVER could produce? Three answers, and
+// they are deliberately different:
+//
+//   the projection — read whole from `src/fixtures/snapshot.json` rather than written here. That
+//     is reuse, NOT provenance: `snapshot.json` is hand-maintained and no generator exists —
+//     nothing in this repository derives it from `observer/projection.py`'s pydantic models. It is
+//     type-checked against `types/projection.ts` by `src/test/contract.test.ts`, and that mirror is
+//     itself hand-maintained, so the chain ends at a human. The biggest payload in this file is
+//     therefore exactly as unverified as a hand-written one; it is merely unverified in ONE place
+//     instead of many. The capability envelopes come from the shared typed fixture, which is a
+//     genuinely stronger claim — `capabilityEnvelopes.ts` is annotated with the wire types.
+//
+//   the happy-path terminal payloads — now `satisfies` the wire mirrors. This found real drift: the
+//     open response omitted `controlEndpoint` and `controlProtocol`, which `TerminalOpenSuccessBody`
+//     declares required, and spread `harness`/`controlState` conditionally where the server always
+//     sends the key (null when unset). A client bug behind those keys could not have been caught here.
+//
+//   the FAULT-INJECTION payloads (`missing`/`malformed`/`contradictory`, and the 4xx/5xx bodies) —
+//     left untyped ON PURPOSE, and they must stay that way. Their entire job is to be shapes the
+//     server should never send; a `satisfies` there would delete the test. Being unable to type
+//     these is not a gap in the guard, it is the distinction the guard has to respect.
 
 const repoRoot = new URL("../../", import.meta.url);
 const projection = JSON.parse(
@@ -113,7 +138,7 @@ async function routeProductionApis(page: Page) {
       ...(kind === "harness" ? { controlState: "starting" } : {}),
       ...(typeof body.model === "string" ? { resolvedModel: body.model } : {}),
       ...(typeof body.effort === "string" ? { resolvedEffort: body.effort } : {}),
-    };
+    } satisfies TerminalCatalogRow;
     sessions.push(row);
     return route.fulfill({
       status: 200,
@@ -121,17 +146,21 @@ async function routeProductionApis(page: Page) {
         session: id,
         label,
         kind,
-        ...(kind === "harness" && typeof body.harness === "string" ? { harness: body.harness } : {}),
+        harness: kind === "harness" && typeof body.harness === "string" ? body.harness : null,
         lifecycleId: typeof body.lifecycleId === "string" ? body.lifecycleId : null,
         leafKey: typeof body.leafKey === "string" ? body.leafKey : null,
         seatRole: row.seatRole,
         cwd: row.cwd,
         tmuxName: row.tmuxName,
         status: "running",
-        ...(kind === "harness" ? { controlState: "starting" } : {}),
+        controlState: kind === "harness" ? "starting" : null,
+        // Always on the wire (`serving/app.py::api_terminal_open`), null until the control plane
+        // reports an endpoint. Absent here until `satisfies` asked for them.
+        controlEndpoint: null,
+        controlProtocol: null,
         resolvedModel: typeof body.model === "string" ? body.model : null,
         resolvedEffort: typeof body.effort === "string" ? body.effort : null,
-      },
+      } satisfies TerminalOpenSuccessBody,
     });
   });
   await page.route("**/api/terminal/sessions", (route) =>

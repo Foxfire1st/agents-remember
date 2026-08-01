@@ -13,8 +13,8 @@ import {
   type SubmissionLifecycleTransport,
   type SubmissionStatusBatchWire,
 } from "../data/submissionLifecycleClient";
-import type { LifecycleProjection } from "../types/projection";
 import { catalogRow } from "../test/fixtures/catalogRows";
+import { lifecycleWithGate } from "../test/fixtures/wire";
 import {
   L5_ALREADY_DELIVERED_RACE_FIXTURE,
   L5_MULTI_QUEUE_FIXTURE,
@@ -709,9 +709,9 @@ describe("SessionComposer (FEUI-L5)", () => {
     sessionStore.getState().hydrate([session]);
     dashboardStore.setState({
       lifecycles: {
-        "lc-answer-mode": {
-          id: "lc-answer-mode",
-          gate: {
+        "lc-answer-mode": lifecycleWithGate(
+          { id: "lc-answer-mode" },
+          {
             id: "gate-answer-mode",
             kind: "agent-question",
             state: "open",
@@ -724,7 +724,7 @@ describe("SessionComposer (FEUI-L5)", () => {
               },
             },
           },
-        } as unknown as LifecycleProjection,
+        ),
       },
     });
     let release: (response: Response) => void = () => {};

@@ -7,7 +7,8 @@ import { submitSessionText, waitForSubmissionReady } from "../data/submitClient"
 import { startSubmitRecord } from "../data/submitMachine";
 import { dashboardStore } from "../data/store";
 import { L6_INTERACTION_FREETEXT } from "../test/fixtures/catalogRows";
-import type { EngineProcessNode, LifecycleProjection, TaskDocNode } from "../types/projection";
+import { engineProcess, lifecycleWithGate, taskDoc } from "../test/fixtures/wire";
+import type { EngineProcessNode, TaskDocNode } from "../types/projection";
 import { RailChat } from "./RailChat";
 
 const LEAF_KEY = "agents-remember/260628_operations-integration/260628-L5";
@@ -25,7 +26,7 @@ vi.mock("../data/submitClient", async (importOriginal) => {
 // A minimal task-doc whose qualified leaf id (`repo / dir(docPath) basename / id`) equals LEAF_KEY.
 // `kind: "subTask"` marks it as a leaf so the "Attach to leaf ▾" picker lists it.
 function leafDoc(): TaskDocNode {
-  return {
+  return taskDoc({
     id: "260628-L5",
     lifecycleId: "lc-l5",
     repository: "agents-remember",
@@ -39,11 +40,11 @@ function leafDoc(): TaskDocNode {
       { id: "S1", title: "Wire the leaf registry", status: "done", substeps: [] },
       { id: "S2", title: "Add the rail chat", status: "inProgress", substeps: [] },
     ],
-  } as unknown as TaskDocNode;
+  });
 }
 
 function secondLeafDoc(): TaskDocNode {
-  return {
+  return taskDoc({
     id: "260628-L9",
     lifecycleId: "lc-l9",
     repository: "agents-remember",
@@ -54,11 +55,13 @@ function secondLeafDoc(): TaskDocNode {
     objective: "Move a hosted chat between task leaves.",
     requirements: ["Keep the terminal session alive."],
     steps: [{ id: "S1", title: "Move the catalog leaf binding", status: "pending", substeps: [] }],
-  } as unknown as TaskDocNode;
+  });
 }
 
-function engineProcess(): EngineProcessNode {
-  return {
+// The process the leaf doc joins to (`lifecycleId`) — it is where the leaf-context packet reads the
+// worktree group and the two worktree paths from.
+function leafProcess(): EngineProcessNode {
+  return engineProcess({
     id: "enc",
     enclosure: "enc",
     worktreeGroup: "/worktrees/sidebar-chat-ar",
@@ -67,28 +70,9 @@ function engineProcess(): EngineProcessNode {
     taskName: "260628_operations-integration",
     repoName: "agents-remember",
     lifecycleId: "lc-l5",
-    phase: "worktree-started",
-    health: "nominal",
-    codeSource: { factState: "observed" },
     codeWorktree: { path: "/worktrees/sidebar-chat-ar/sidebar-chat", factState: "observed" },
-    memoryMode: "external",
     memoryWorktree: { path: "/worktrees/sidebar-chat-ar/memory-sidebar-chat", factState: "observed" },
-    ledgerRows: [],
-    ledgerRowCount: 0,
-    humanReviewStatus: "pending-review",
-    closeoutStatus: "not-started",
-    integrationStatus: "not-started",
-    cleanup: "pending",
-    completedPhases: [],
-    failedPhases: [],
-    seedFallback: false,
-    providers: [],
-    edges: [],
-    actions: [],
-    summary: "ready",
-    missingFacts: [],
-    sourceFiles: [],
-  } as unknown as EngineProcessNode;
+  });
 }
 
 // Mock the lazy Terminal so opening a session never pulls xterm (a canvas probe) into jsdom; the stub
@@ -223,7 +207,7 @@ describe("RailChat start affordances (L5 fix 2)", () => {
     );
 
     const { findByTestId } = render(
-      <RailChat leafKey={LEAF_KEY} taskDocuments={[leafDoc()]} engineProcesses={[engineProcess()]} />,
+      <RailChat leafKey={LEAF_KEY} taskDocuments={[leafDoc()]} engineProcesses={[leafProcess()]} />,
     );
     fireEvent.click(await findByTestId("rail-start-chat-claude"));
 
@@ -264,7 +248,7 @@ describe("RailChat start affordances (L5 fix 2)", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     const { findByTestId } = render(
-      <RailChat leafKey={LEAF_KEY} taskDocuments={[leafDoc()]} engineProcesses={[engineProcess()]} />,
+      <RailChat leafKey={LEAF_KEY} taskDocuments={[leafDoc()]} engineProcesses={[leafProcess()]} />,
     );
     fireEvent.click(await findByTestId("rail-start-chat-claude"));
 
@@ -339,7 +323,7 @@ describe("RailChat create from anywhere (L5)", () => {
     ]);
 
     const { findByTestId } = render(
-      <RailChat taskDocuments={[leafDoc()]} engineProcesses={[engineProcess()]} />,
+      <RailChat taskDocuments={[leafDoc()]} engineProcesses={[leafProcess()]} />,
     ); // NO leafKey
     // Drill-down picker: open it, then pick the leaf (a lone leaf with no master doc shows at top level).
     fireEvent.click(await findByTestId("rail-attach-leaf-picker"));
@@ -477,9 +461,9 @@ describe("RailChat chat + terminal split (L5 fix 2)", () => {
     sessionStore.getState().hydrate([session]);
     dashboardStore.setState({
       lifecycles: {
-        "lc-rail-answer": {
-          id: "lc-rail-answer",
-          gate: {
+        "lc-rail-answer": lifecycleWithGate(
+          { id: "lc-rail-answer" },
+          {
             id: "gate-rail-answer",
             kind: "agent-question",
             state: "open",
@@ -492,7 +476,7 @@ describe("RailChat chat + terminal split (L5 fix 2)", () => {
               },
             },
           },
-        } as unknown as LifecycleProjection,
+        ),
       },
     });
     const urls: string[] = [];

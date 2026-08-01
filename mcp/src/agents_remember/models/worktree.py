@@ -6,38 +6,31 @@ from typing import Any, Literal
 
 from agents_remember.models.base import FlexibleToolResponse, StrictResponseModel
 
+# Every vocabulary below is imported from whoever produces it, never retyped here. Retyped
+# is what these were, and the copies had drifted apart in six places at once: `chat-task`
+# (the kind `worktree_start`'s own docstring advertises, on 8 contracts), `reopened`,
+# `carryover-pending`, `abandoned`, `request_carryover_decision` and `memory_carryover_apply`
+# were all writable and none validated, which made this model reject 165 of the 213 series
+# contracts on disk with a ValidationError no handler on the tool path catches.
+from agents_remember.worktrees.modules.guidance import (
+    NextOperation,
+    NextTool,
+    WorktreePhase,
+)
+from agents_remember.worktrees.worktree_contract import (
+    CleanupStatus,
+    HumanReviewStatus,
+    IntegrationStatus,
+    MemoryMode,
+    WorkflowKind,
+)
+from agents_remember.worktrees.worktree_contract import (
+    CloseoutStatus as LifecycleStatus,  # the published wire name for the closeout status
+)
+
+# Produced entirely inside `worktrees.status`, which constructs this model directly, so the
+# projection there is already the single writer the checker can see.
 WorktreeState = Literal["inactive", "active", "missingContract", "invalidContract"]
-WorkflowKind = Literal["chat", "light", "light-task"]
-MemoryMode = Literal["internal", "external", "disabled"]
-HumanReviewStatus = Literal["pending-review", "approved"]
-LifecycleStatus = Literal["not-started", "completed"]
-IntegrationStatus = Literal["not-started", "completed", "blocked"]
-CleanupStatus = Literal["pending", "completed", "abandoned"]
-WorktreePhase = Literal[
-    "cleanup-completed",
-    "integration-blocked",
-    "cleanup-pending",
-    "commit-approval-pending",
-    "integration-pending",
-    "closeout-pending",
-    "worktree-started",
-]
-NextOperation = Literal[
-    "done",
-    "developer_decision",
-    "request_cleanup_decision",
-    "request_commit_approval",
-    "request_integration_decision",
-    "closeout",
-    "continue_work",
-]
-NextTool = Literal[
-    "worktree_integrate",
-    "worktree_cleanup",
-    "worktree_closeout_preview",
-    "worktree_closeout_apply",
-    "worktree_status",
-]
 
 
 class WorktreeSummary(StrictResponseModel):
@@ -67,7 +60,16 @@ class WorktreeSummary(StrictResponseModel):
     nextOperation: NextOperation | None = None
     nextTool: NextTool | None = None
     nextArgs: dict[str, Any] | None = None
+    # Absent means the next call needs nothing beyond `nextArgs` -- the same thing the empty
+    # list used to mean. `next_guidance` writes this key only when there is a required
+    # argument, and the projection reports what the producer said rather than filling in a
+    # value for it (`worktrees.status._summary_from_status_payload` states the measurement).
     nextRequiredArgs: list[str] | None = None
+    # Present only when the contract file carried a cell outside its declared vocabulary, as
+    # "<field>=<raw token> read as <fallback>". The `state` is still `active` and every other
+    # field on this summary was computed from the substituted values -- this is the notice
+    # that they were substituted, and the file heals the next time a lifecycle tool writes it.
+    unknownContractCells: list[str] | None = None
     error: str | None = None
 
 

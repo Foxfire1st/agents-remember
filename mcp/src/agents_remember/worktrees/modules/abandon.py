@@ -15,7 +15,6 @@ worktree. With `force` it discards them (`git worktree remove --force`,
 
 from __future__ import annotations
 
-from dataclasses import replace
 from pathlib import Path
 
 from agents_remember.kernel.git_command import run_git
@@ -36,7 +35,9 @@ from agents_remember.worktrees.modules.provider_teardown import (
     teardown_worktree_providers,
 )
 from agents_remember.worktrees.worktree_contract import (
+    ContractCells,
     WorktreeContract,
+    amend_contract,
     load_contract,
     write_contract,
 )
@@ -69,7 +70,9 @@ def abandon_result(args: WorktreeArgs) -> WorktreeCommandResult:
 
     blockers = _abandon_blockers(removed_worktrees, branches)
     reclaimed = not blockers
-    updated = replace(contract, cleanup="abandoned") if reclaimed else contract
+    updated = (
+        amend_contract(contract, ContractCells(cleanup="abandoned")) if reclaimed else contract
+    )
     if reclaimed and not args.dry_run:
         write_contract(contract.contract_path, updated)
     return WorktreeCommandResult(

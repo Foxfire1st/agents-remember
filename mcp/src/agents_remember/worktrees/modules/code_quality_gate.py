@@ -74,7 +74,11 @@ def code_quality_gate_preview(
         "status": GATE_ENFORCED,
         "command": _gate_command(diff_base),
         "diffBase": diff_base,
-        "reason": "strict project-owned quality wrapper runs before the code commit",
+        "reason": (
+            "closeout stages the whole task worktree so the gate's scope is the commit's "
+            "content, then runs the strict project-owned quality wrapper over exactly that "
+            "before the code commit"
+        ),
     }
 
 
@@ -108,6 +112,13 @@ def run_strict_code_quality_gate(
     would be as useless as one that cannot fail. CI keeps the ``main`` default
     because a pull request genuinely is measured against ``main``; a leaf closeout
     is measured against the leaf.
+
+    The wrapper derives its scope from the index, so what is staged when this runs is what
+    gets certified. This function certifies the index it is handed and says nothing about
+    how it came to look that way: ``runner`` is a public parameter and closeout is not the
+    only caller this signature admits, so the failure message below states only what is
+    true of every caller -- that nothing was committed. It deliberately does not say the
+    staging was undone, because closeout does not undo it.
     """
     wrapper = quality_wrapper_path(code_worktree)
     if not wrapper.is_file():

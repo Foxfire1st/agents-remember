@@ -17,6 +17,9 @@ from agents_remember.kernel.git_facts import GitFacts, git_facts_to_packet, read
 from agents_remember.kernel.git_freshness import freshness_to_packet, read_branch_freshness
 from agents_remember.kernel.memory_ledger import LedgerError, find_mapping, load_ledger
 from agents_remember.mcp.config import McpRuntimeConfig, RepositoryScope
+from agents_remember.memory_quality.integrity.onboarding_drift_check.models import (
+    DriftSummaryPacket,
+)
 from agents_remember.memory_quality.integrity.onboarding_drift_check.summary import (
     not_checked,
     run_drift_summary,
@@ -32,7 +35,6 @@ from agents_remember.models.context_packet import (
 )
 from agents_remember.models.drift import DriftSummary
 from agents_remember.models.providers import ProviderSummary
-from agents_remember.models.worktree import WorktreeSummary
 from agents_remember.providers.status import provider_summary_packet
 from agents_remember.worktrees.status import worktree_status_packet
 
@@ -79,7 +81,11 @@ def build_context_packet(
         repo=RepoSummary.model_validate(git_facts_to_packet(git_facts)),
         paths=_context_paths(context_dict),
         memory=_memory_summary(context_dict),
-        worktree=WorktreeSummary.model_validate(worktree_status_packet(context.contract_path)),
+        # Not `model_validate(...)`: the projection returns the model, so a value the
+        # worktree state machine can emit and this block cannot accept is now a type error
+        # in `worktrees.status` rather than a ValidationError raised from inside the
+        # `context_packet` tool handler, where nothing catches it.
+        worktree=worktree_status_packet(context.contract_path),
         providers=ProviderSummary.model_validate(
             provider_summary_packet(
                 config,
@@ -164,7 +170,7 @@ def _drift_packet(
     request: ContextPacketRequest,
     context: Any,
     repo_scope: RepositoryScope,
-) -> dict[str, Any]:
+) -> DriftSummaryPacket:
     if not request.include_drift:
         return not_checked()
     return run_drift_summary(

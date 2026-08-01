@@ -465,8 +465,13 @@ CANONICAL_TURN_STATE_BY_EVIDENCE: Mapping[CanonicalStatusEvidence, ConversationT
 
 class StatusFreshness(WireModel):
     state: Literal["fresh", "stale", "unknown"]
-    last_evidence_at: str | None
-    age_ms: int | None = Field(ge=0)
+    # Nullable AND defaulted, because the active/control serializers dump with
+    # ``exclude_none=True``: a null is DROPPED from the wire, so a required-but-nullable
+    # field made this model unable to validate its own emitted body -- which the response
+    # conformance suite found the moment the routes started declaring these models. The
+    # wire is unchanged; the absent key already meant exactly this ``None``.
+    last_evidence_at: str | None = None
+    age_ms: int | None = Field(default=None, ge=0)
     stale_after_ms: int = Field(gt=0)
     observation_bound: NonEmptyText
 
@@ -492,8 +497,13 @@ class ConversationTurnOutcome(WireModel):
 
 class ConversationTurnStatus(WireModel):
     state: ConversationTurnState
-    turn_id: str | None
-    state_since: str | None
+    # Nullable AND defaulted, because the active/control serializers dump with
+    # ``exclude_none=True``: a null is DROPPED from the wire, so a required-but-nullable
+    # field made this model unable to validate its own emitted body -- which the response
+    # conformance suite found the moment the routes started declaring these models. The
+    # wire is unchanged; the absent key already meant exactly this ``None``.
+    turn_id: str | None = None
+    state_since: str | None = None
     waiting: ConversationTurnWaiting | None = None
     terminal_outcome: ConversationTurnOutcome | None = None
 
@@ -623,7 +633,12 @@ ConversationMutation: TypeAlias = Annotated[
 class ConversationEventEnvelope(WireModel):
     identity: ActiveConversationRef
     cursor: ActiveEventCursor
-    previous_cursor: ActiveEventCursor | None
+    # Nullable AND defaulted, because the active/control serializers dump with
+    # ``exclude_none=True``: a null is DROPPED from the wire, so a required-but-nullable
+    # field made this model unable to validate its own emitted body -- which the response
+    # conformance suite found the moment the routes started declaring these models. The
+    # wire is unchanged; the absent key already meant exactly this ``None``.
+    previous_cursor: ActiveEventCursor | None = None
     sequence: PositiveOrdinal
     event_id: NonEmptyText
     emitted_at: NonEmptyText
@@ -737,7 +752,12 @@ class ConversationCapabilities(WireModel):
 
 
 class ConversationPageWindow(WireModel):
-    older_cursor: ActivePageCursor | None
+    # Nullable AND defaulted, because the active/control serializers dump with
+    # ``exclude_none=True``: a null is DROPPED from the wire, so a required-but-nullable
+    # field made this model unable to validate its own emitted body -- which the response
+    # conformance suite found the moment the routes started declaring these models. The
+    # wire is unchanged; the absent key already meant exactly this ``None``.
+    older_cursor: ActivePageCursor | None = None
     has_older: bool
     total_items: int | None = Field(default=None, ge=0)
 

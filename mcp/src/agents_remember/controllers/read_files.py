@@ -17,7 +17,7 @@ import contextlib
 import hashlib
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal, get_args
 
 from agents_remember.controllers._guards import require_repo
 from agents_remember.errors import AuthorityError
@@ -45,6 +45,16 @@ from agents_remember.observer.events import now_iso
 from agents_remember.observer.paths import observer_root
 
 MAX_FILES = 5
+
+# The onboarding-lookup outcome for one requested source path, declared once, here --
+# ``_resolve_onboarding`` below is the only function that decides it, and
+# ``models.read_files.FileRead`` imports this alias rather than keeping a second copy. This is
+# the ONBOARDING status, never a source-read condition: source presence rides the independent
+# ``source`` field, which is why ``found`` and a missing ``source`` are not a contradiction.
+FileReadStatus = Literal["found", "missing", "disabled", "unsupported", "not_requested"]
+
+# The runtime half of the alias, derived from it rather than retyped beside it.
+VALID_FILE_READ_STATUSES: frozenset[FileReadStatus] = frozenset(get_args(FileReadStatus))
 # Storage modes whose onboarding body lives in a sidecar markdown file. This
 # repo's own memory is ``external``, which also writes sidecars, so it is treated
 # as sidecar here even though ``is_sidecar_storage`` (used for missing-onboarding
@@ -205,7 +215,7 @@ def _read_source(source_path: Path, request: _FileRequest) -> tuple[str | None, 
 
 def _resolve_onboarding(
     context: CoordinationContext, rel: str, request: _FileRequest
-) -> tuple[str, str | None, bool]:
+) -> tuple[FileReadStatus, str | None, bool]:
     """Return ``(status, onboarding_body, attach_front_door)`` for one file.
 
     ``attach_front_door`` is True when this file participates in onboarding

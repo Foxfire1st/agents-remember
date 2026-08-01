@@ -2,6 +2,7 @@ import { cleanup, render } from "@testing-library/react";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import { dashboardStore } from "../data/store";
+import { observerEvent } from "../test/fixtures/wire";
 import type { ObserverEvent } from "../types/event";
 import type {
   Analytics,
@@ -44,15 +45,13 @@ beforeEach(() =>
   }),
 );
 
-function ev(partial: Partial<ObserverEvent> & { kind: string }): ObserverEvent {
-  return {
-    schema: "ar-observer-event/v1",
-    id: partial.id ?? `e-${partial.kind}-${Math.random().toString(36).slice(2)}`,
+function ev(partial: Partial<ObserverEvent> & Pick<ObserverEvent, "kind">): ObserverEvent {
+  return observerEvent({
+    id: `e-${partial.kind}-${Math.random().toString(36).slice(2)}`,
     ts: "2026-06-23T10:11:12+00:00",
-    trust: "observed",
     actor: "model",
     ...partial,
-  } as ObserverEvent;
+  });
 }
 
 function lifecycle(partial: Partial<LifecycleProjection> & { id: string }): LifecycleProjection {

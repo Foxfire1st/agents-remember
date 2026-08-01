@@ -21,8 +21,7 @@ payload genuinely embeds provider-native detail.
 
 from __future__ import annotations
 
-from pydantic import BaseModel
-
+from agents_remember.models.base import ResponseEnvelope
 from agents_remember.models.benchmarks import (
     CodexBenchmarkPrepareResponse,
     CodexBenchmarkRunResponse,
@@ -109,7 +108,12 @@ INTERNAL_COMPAT_TOOL_NAMES = frozenset(
 )
 """Lower-level compatibility payload builders, not advertised MCP tools."""
 
-TOOL_RESPONSE_MODELS: dict[str, type[BaseModel]] = {
+# ``type[ResponseEnvelope]``, not ``type[BaseModel]``: every registered model is a
+# ``ResponseModel`` or a ``FlexibleResponseEnvelope``, and saying so is what lets the choke
+# point set ``nextStep``/``supervisorBanner`` on the validated response before the dump.
+# ``BaseModel`` here made those two fields unreachable by type, which is how they ended up
+# being written into the already-dumped dict instead.
+TOOL_RESPONSE_MODELS: dict[str, type[ResponseEnvelope]] = {
     "ping": PingResponse,
     "server_info": ServerInfoResponse,
     "context_packet": ContextPacketV2,
@@ -174,7 +178,7 @@ TOOL_RESPONSE_MODELS: dict[str, type[BaseModel]] = {
     "orchestration_nudge_manager": OrchestrationNudgeManagerResponse,
 }
 
-PUBLIC_TOOL_RESPONSE_MODELS: dict[str, type[BaseModel]] = {
+PUBLIC_TOOL_RESPONSE_MODELS: dict[str, type[ResponseEnvelope]] = {
     name: model
     for name, model in TOOL_RESPONSE_MODELS.items()
     if name not in INTERNAL_COMPAT_TOOL_NAMES

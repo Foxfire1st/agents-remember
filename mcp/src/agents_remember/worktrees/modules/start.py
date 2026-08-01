@@ -35,6 +35,7 @@ from agents_remember.worktrees.modules.guidance import (
     contract_next_args,
     contract_payload,
     next_guidance,
+    recovery_guidance,
     status_payload,
 )
 from agents_remember.worktrees.modules.models import WorktreeCommandResult
@@ -50,7 +51,9 @@ from agents_remember.worktrees.start_progress import (
 )
 from agents_remember.worktrees.task_resolver import resolve_leaf_enclosure_contract
 from agents_remember.worktrees.worktree_contract import (
+    ContractCells,
     WorktreeContract,
+    amend_contract,
     load_contract,
     write_contract,
 )
@@ -96,7 +99,7 @@ def load_contract_from_args(args: WorktreeArgs) -> WorktreeContract:
 
 def status_result(args: WorktreeArgs) -> WorktreeCommandResult:
     contract = load_contract_from_args(args)
-    return WorktreeCommandResult(0, status_payload(contract))
+    return WorktreeCommandResult(0, dict(status_payload(contract)))
 
 
 def attach_result(args: WorktreeArgs) -> WorktreeCommandResult:
@@ -114,7 +117,7 @@ def _blocked_memory_start_result(
         {
             "state": "blocked",
             "summary": "Code worktree is prepared, but external memory cannot be used until the developer selects a recovery path.",
-            **next_guidance(
+            **recovery_guidance(
                 "choose_memory_recovery",
                 tool="worktree_start",
                 args={
@@ -135,16 +138,20 @@ def _contract_after_memory_start(
     contract: WorktreeContract, memory_state: dict[str, object]
 ) -> WorktreeContract:
     if contract.memory_mode == "external" and memory_state["state"] == "disabled":
-        return replace(
-            contract,
-            memory_mode="disabled",
-            memory_repo_path=None,
-            memory_source_branch="",
-            memory_work_branch="",
-            memory_base_commit="",
-            memory_worktree=None,
-            ledger_path=None,
-            memory_state="disabled",
+        return amend_contract(
+            replace(
+                contract,
+                memory_repo_path=None,
+                memory_source_branch="",
+                memory_work_branch="",
+                memory_base_commit="",
+                memory_worktree=None,
+                ledger_path=None,
+                memory_state="disabled",
+            ),
+            # Through the typed record, like every other vocabulary cell: `memory_state` above
+            # is free text and `memory_mode` is not.
+            ContractCells(memory_mode="disabled"),
         )
     reconciled_base = memory_state.get("reconciledMemoryBaseCommit")
     if isinstance(reconciled_base, str) and reconciled_base:
@@ -166,7 +173,7 @@ def _blocked_provider_start_result(
         {
             "state": "blocked",
             "summary": "Worktree provider setup could not be prepared safely.",
-            **next_guidance(
+            **recovery_guidance(
                 "choose_provider_setup_recovery",
                 tool="worktree_start",
                 args={
@@ -345,7 +352,7 @@ def _stale_base_preflight(
         "summary": "Source branches are behind their upstream; a worktree started now "
         "would base on stale code/memory and silently defeat the provider seed "
         "fast-path. Choose fast-forward or proceed-stale.",
-        **next_guidance(
+        **recovery_guidance(
             "choose_stale_base_recovery",
             tool="worktree_start",
             args={

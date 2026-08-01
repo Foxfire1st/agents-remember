@@ -52,6 +52,22 @@ from agents_remember.serving.harness_control_models import (
 )
 from agents_remember.serving.harness_launch import ResolvedLaunch, resolve_settings_launch
 from agents_remember.serving.harnesses import Harness
+from agents_remember.serving.response_contract import (
+    SESSION_CONTROL_RESPONSES,
+    BridgeEpochMismatchRefusal,
+    CapabilitySnapshotWire,
+    HarnessCapabilityEnvelope,
+    InteractionAnswered,
+    PreDispatchFailureRefusal,
+    PublicReceiptWire,
+    PublicReconciliationWire,
+    SetResultWire,
+    StatusRefusal,
+    SubmissionAuthorityWire,
+    SubmissionStatusBatchWire,
+    UnsupportedSeatRefusal,
+    WithdrawalResultWire,
+)
 from agents_remember.serving.terminal_catalog import TerminalCatalogEntry
 from agents_remember.serving.terminal_liveness import (
     LivenessProbe,
@@ -210,7 +226,16 @@ def _register_capability_routes(
 ) -> None:
     """What a harness can do and how it is currently set: advertise, read, and live set."""
 
-    @app.get("/api/harnesses/{harness}/capabilities")
+    # The one capability route with no seat: a lookup failure carries its own status code
+    # (404 for an unknown/uninstalled harness, 503 when discovery itself failed).
+    @app.get(
+        "/api/harnesses/{harness}/capabilities",
+        response_model=HarnessCapabilityEnvelope,
+        responses={
+            404: {"model": StatusRefusal, "description": "No such installed native harness"},
+            503: {"model": StatusRefusal, "description": "Capability discovery is unavailable"},
+        },
+    )
     async def api_harness_capabilities(harness: str, refresh: bool = False) -> JSONResponse:
         try:
             result = await pre_session.get(
@@ -227,7 +252,11 @@ def _register_capability_routes(
             return _control_unavailable(exc)
         return _ok(result.to_json())
 
-    @app.get("/api/terminal/{session}/capabilities")
+    @app.get(
+        "/api/terminal/{session}/capabilities",
+        response_model=CapabilitySnapshotWire,
+        responses=SESSION_CONTROL_RESPONSES,
+    )
     def api_terminal_capabilities(session: str) -> JSONResponse:
         return _control_route(
             session,
@@ -235,7 +264,11 @@ def _register_capability_routes(
             lambda entry: _ok(capability_snapshot_json(read_control_capabilities(entry))),
         )
 
-    @app.post("/api/terminal/{session}/set-model")
+    @app.post(
+        "/api/terminal/{session}/set-model",
+        response_model=SetResultWire,
+        responses=SESSION_CONTROL_RESPONSES,
+    )
     def api_terminal_set_model(session: str, request: HarnessSetModelRequest) -> JSONResponse:
         return _control_route(
             session,
@@ -243,7 +276,11 @@ def _register_capability_routes(
             lambda entry: _ok(set_result_json(set_control_model(entry, request.model))),
         )
 
-    @app.post("/api/terminal/{session}/set-effort")
+    @app.post(
+        "/api/terminal/{session}/set-effort",
+        response_model=SetResultWire,
+        responses=SESSION_CONTROL_RESPONSES,
+    )
     def api_terminal_set_effort(session: str, request: HarnessSetEffortRequest) -> JSONResponse:
         return _control_route(
             session,
@@ -255,7 +292,11 @@ def _register_capability_routes(
 def _register_submission_routes(app: FastAPI, *, control_entry: ControlEntryResolver) -> None:
     """The submission authority's public surface: its epoch, its ledger, and writes against it."""
 
-    @app.get("/api/terminal/{session}/submission-authority")
+    @app.get(
+        "/api/terminal/{session}/submission-authority",
+        response_model=SubmissionAuthorityWire,
+        responses=SESSION_CONTROL_RESPONSES,
+    )
     def api_submission_authority(session: str) -> JSONResponse:
         return _control_route(
             session,
@@ -263,7 +304,11 @@ def _register_submission_routes(app: FastAPI, *, control_entry: ControlEntryReso
             lambda entry: _ok(submission_authority_json(read_submission_authority(entry))),
         )
 
-    @app.post("/api/terminal/{session}/submission-status")
+    @app.post(
+        "/api/terminal/{session}/submission-status",
+        response_model=SubmissionStatusBatchWire,
+        responses=SESSION_CONTROL_RESPONSES,
+    )
     def api_submission_status(
         session: str,
         request: HarnessSubmissionStatusRequest,
@@ -282,7 +327,11 @@ def _register_submission_routes(app: FastAPI, *, control_entry: ControlEntryReso
             ),
         )
 
-    @app.post("/api/terminal/{session}/withdraw")
+    @app.post(
+        "/api/terminal/{session}/withdraw",
+        response_model=WithdrawalResultWire,
+        responses=SESSION_CONTROL_RESPONSES,
+    )
     def api_withdraw_submission(
         session: str,
         request: HarnessWithdrawRequest,
@@ -301,7 +350,23 @@ def _register_submission_routes(app: FastAPI, *, control_entry: ControlEntryReso
             ),
         )
 
-    @app.post("/api/terminal/{session}/submit")
+    # Submit adds two refusals no other control route can produce: a reused request id is
+    # the caller's own contradiction, and a certified pre-dispatch failure is retry-safe.
+    @app.post(
+        "/api/terminal/{session}/submit",
+        response_model=PublicReceiptWire,
+        responses={
+            **SESSION_CONTROL_RESPONSES,
+            409: {
+                "model": UnsupportedSeatRefusal | BridgeEpochMismatchRefusal | StatusRefusal,
+                "description": "No control endpoint, a stale epoch, or a reused request id",
+            },
+            503: {
+                "model": PreDispatchFailureRefusal | StatusRefusal,
+                "description": "Control unavailable; retry-safe only when nothing was written",
+            },
+        },
+    )
     def api_terminal_submit(session: str, request: HarnessSubmitRequest) -> JSONResponse:
         return _control_route(
             session,
@@ -322,7 +387,11 @@ def _register_submission_routes(app: FastAPI, *, control_entry: ControlEntryReso
             on_failure=_submit_failure_response,
         )
 
-    @app.post("/api/terminal/{session}/reconcile")
+    @app.post(
+        "/api/terminal/{session}/reconcile",
+        response_model=PublicReconciliationWire,
+        responses=SESSION_CONTROL_RESPONSES,
+    )
     def api_terminal_reconcile(session: str, request: HarnessReconcileRequest) -> JSONResponse:
         return _control_route(
             session,
@@ -342,7 +411,17 @@ def _register_submission_routes(app: FastAPI, *, control_entry: ControlEntryReso
 def _register_interaction_routes(app: FastAPI, *, control_entry: ControlEntryResolver) -> None:
     """Answering a vendor's own question, with no lifecycle required anywhere."""
 
-    @app.post("/api/terminal/{session}/interaction-response")
+    @app.post(
+        "/api/terminal/{session}/interaction-response",
+        response_model=InteractionAnswered,
+        responses={
+            **SESSION_CONTROL_RESPONSES,
+            409: {
+                "model": UnsupportedSeatRefusal | BridgeEpochMismatchRefusal | StatusRefusal,
+                "description": "No control endpoint, a stale epoch, or nothing pending",
+            },
+        },
+    )
     def api_terminal_interaction_response(
         session: str, request: HarnessInteractionResponseRequest
     ) -> JSONResponse:

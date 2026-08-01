@@ -7,6 +7,7 @@ from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
 from difflib import get_close_matches
 from pathlib import Path
+from typing import Literal, get_args
 
 from agents_remember.tasks import TASK_DOCUMENT_SCHEMA, TaskDocument, read_task_doc
 from agents_remember.worktrees.task_resolver import (
@@ -20,6 +21,15 @@ from agents_remember.worktrees.task_resolver import (
 )
 
 LEAF_REF_EXPECTED_FORM = "<repo>/<master-folder>/<doc-id>"
+
+# How a failed leaf-ref resolution is reported on the wire, declared once, here.
+# ``LeafRefResolutionError`` is the only producer, and `leaf_ref_refusal_payload` copies it
+# verbatim into whichever tool refused, so both `models.terminal.LeafAssignmentStatus` and
+# `models.terminal.SpawnAgentSessionStatus` fold this alias in rather than each keeping a pair
+# of hand-written members that nothing would compare against this class again.
+LeafRefStatus = Literal["leaf-ref-not-found", "leaf-ref-ambiguous"]
+
+VALID_LEAF_REF_STATUSES: frozenset[LeafRefStatus] = frozenset(get_args(LeafRefStatus))
 
 
 @dataclass(frozen=True)
@@ -48,7 +58,9 @@ class LeafRefResolutionError(TaskResolutionError):
         self.repo_name = repo_name
         self.reason = reason
         self.candidates = tuple(dict.fromkeys(candidates))
-        self.status = "leaf-ref-ambiguous" if reason == "ambiguous" else "leaf-ref-not-found"
+        self.status: LeafRefStatus = (
+            "leaf-ref-ambiguous" if reason == "ambiguous" else "leaf-ref-not-found"
+        )
         scope = f" for repo {repo_name!r}" if repo_name else ""
         nearest = ", ".join(self.candidates) if self.candidates else "none"
         message = (

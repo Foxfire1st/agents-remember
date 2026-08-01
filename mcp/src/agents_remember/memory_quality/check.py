@@ -90,13 +90,15 @@ def run_drift_quality_check(drift_context: DriftCheckContext) -> dict[str, Any]:
             ],
         }
     findings = [drift_row_to_finding(row) for row in packet.get("actionableSample", [])]
+    # `.get` throughout: `count`/`reportPath`/`actionableCount` only accompany a `checked`
+    # status, which the guard above has established but the type cannot carry across it.
     return {
         "ok": packet.get("actionableCount", 0) == 0,
         "check": DRIFT_CHECK_NAME,
         "status": packet["status"],
-        "checkedCount": packet["count"],
-        "reportPath": packet["reportPath"],
-        "findingCount": packet["actionableCount"],
+        "checkedCount": packet.get("count"),
+        "reportPath": packet.get("reportPath"),
+        "findingCount": packet.get("actionableCount"),
         "sampleCount": len(findings),
         "findings": findings,
     }

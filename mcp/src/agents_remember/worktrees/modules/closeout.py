@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from pathlib import Path
 from typing import Any
 
 from agents_remember.controlplane.enforcement import CloseoutGuard, evaluate_closeout_gate
@@ -34,7 +35,7 @@ from agents_remember.worktrees.modules.git import (
 )
 from agents_remember.worktrees.modules.guidance import (
     contract_next_args,
-    next_guidance,
+    recovery_guidance,
     status_payload,
 )
 from agents_remember.worktrees.modules.models import (
@@ -62,7 +63,12 @@ from agents_remember.worktrees.modules.onboarding import (
     validate_onboarding_refresh_plan,
     validate_route_overview_refresh_plan,
 )
-from agents_remember.worktrees.worktree_contract import load_contract, write_contract
+from agents_remember.worktrees.worktree_contract import (
+    ContractCells,
+    amend_contract,
+    load_contract,
+    write_contract,
+)
 
 
 def closeout_changed_paths(contract) -> dict[str, list[str]]:
@@ -289,8 +295,8 @@ def closeout_preview_payload(contract, args: WorktreeArgs) -> dict[str, object]:
         "state": "would-closeout",
         **status_payload(contract),
         "phase": "commit-approval-pending",
-        "summary": "Closeout preview only; no commits were created. When code would commit, strict project-owned code quality runs first. External-memory closeout then refreshes onboarding verification metadata, affected entity fingerprints, route overview metadata, and route indexes to that code commit, runs memory_quality_check, and commits memory and ledger.",
-        **next_guidance(
+        "summary": "Closeout preview only; no commits were created. The staging step and its two refusals belong to the strict code-quality gate, so they apply exactly when this preview reports the gate as enforced: when code would commit and this checkout carries the quality wrapper, closeout refuses outright if the code checkout is not the task's own worktree or has unresolved merge conflicts; otherwise it resets the index and stages the whole task worktree so the gate's scope is the commit's content -- files the task created included, not only the ones it edited -- and runs strict project-owned code quality over exactly that. A refused gate leaves the worktree staged and commits nothing; nothing is unstaged, because a retry resets and restages from the working tree and so reaches the same content a first run would. A checkout carrying no wrapper runs no gate, stages nothing early, and commits as it always has. External-memory closeout then refreshes onboarding verification metadata, affected entity fingerprints, route overview metadata, and route indexes to that code commit, runs memory_quality_check, and commits memory and ledger.",
+        **recovery_guidance(
             "request_commit_approval",
             tool="worktree_closeout_apply",
             args=contract_next_args(
@@ -304,7 +310,10 @@ def closeout_preview_payload(contract, args: WorktreeArgs) -> dict[str, object]:
         "commit_approval_required": True,
         "approval_question": "Approve creating the code, memory, and ledger commits with these messages?",
         "closeout_order": [
-            "run-strict-code-quality-if-code-commit",
+            "refuse-if-gate-would-run-and-code-checkout-is-not-the-tasks-own-worktree",
+            "refuse-if-gate-would-run-and-code-worktree-has-unresolved-merge-conflicts",
+            "reset-and-stage-whole-task-worktree-if-gate-would-run",
+            "run-strict-code-quality-over-that-staged-content",
             "commit-code",
             "refresh-onboarding-metadata-and-entity-fingerprints",
             "refresh-route-overview-metadata-and-indexes",
@@ -545,6 +554,133 @@ def _external_closeout_commits(
     )
 
 
+def _refuse_outside_a_linked_worktree(code_worktree: Path) -> None:
+    """Refuse to stage anywhere except a task's own throwaway worktree.
+
+    Staging is safe here because of what this checkout *is*, not because of what closeout
+    is careful to do with it. A leaf's ``code_worktree`` is created by ``worktree_start``
+    and destroyed by ``lifecycle_finalize_task``; it is agent scratch space with no human
+    in it, so leaving it fully staged costs nobody anything -- ``commit_if_dirty`` was
+    going to run ``git add -A`` over it a moment later regardless. In a checkout somebody
+    works in, the same ``add -A`` overwrites a ``git add -p`` selection, stages files
+    deliberately left out, and resolves an in-progress merge to whatever is on disk.
+
+    That is not hypothetical: :func:`default_series_contract` sets
+    ``code_worktree=code.repo_path`` for a ``kind: "series"`` contract, which is the
+    primary checkout itself. Nothing else stops such a contract reaching
+    ``worktree_closeout_apply``, so this is the guard that does.
+
+    The test is git's own definition of a linked worktree -- ``--git-dir`` differs from
+    ``--git-common-dir`` -- rather than the contract's ``kind``, and the difference matters.
+    ``kind`` is a label sitting next to the path; this constrains the path that is about to
+    be written. A leaf contract whose ``code_worktree`` had been pointed at the primary
+    checkout would pass a ``kind`` check and still stage in somebody's working repository,
+    and a series contract that genuinely pointed at a disposable worktree would be refused
+    by one for no reason. Checking the property that makes staging safe is both necessary
+    and sufficient; checking the label is neither.
+    """
+    git_dir, common_dir = require_git(
+        code_worktree, ["rev-parse", "--path-format=absolute", "--git-dir", "--git-common-dir"]
+    ).splitlines()
+    if git_dir == common_dir:
+        raise RuntimeError(
+            "closeout refuses to run the strict code-quality gate here: it stages the whole code"
+            f" checkout before the gate, and {code_worktree} is not a task worktree -- git"
+            f" reports its git dir as {git_dir}, which is the repository's own, so this is a"
+            " checkout a person works in. Staging it would overwrite a partial 'git add -p'"
+            " selection, stage files deliberately held back, and resolve any merge in progress"
+            " to whatever is on disk. Nothing was staged and nothing was committed. Closeout"
+            " stages only the disposable worktree a task was started with; run it against the"
+            " leaf contract whose code_worktree is that worktree. A series or master contract"
+            " records the repository path itself and is not closed out this way."
+        )
+
+
+def _refuse_conflicted_worktree(code_worktree: Path) -> None:
+    """Refuse, before staging anything, when the checkout has unresolved conflicts.
+
+    ``git add -A`` over an unmerged index does not fail: it *resolves* every conflict by
+    taking whatever the working tree holds, which is the file with the ``<<<<<<<`` markers
+    still in it, and closeout then commits that. Closeout did exactly that before this
+    check existed, so this refusal is a behaviour change worth naming rather than a guard
+    against something that could not happen.
+
+    It replaces the plumbing message the reader would otherwise be shown -- a ruff syntax
+    error inside a conflict marker, or nothing at all when the conflicted file is not
+    Python -- with the state git is actually in and what to do about it.
+    """
+    conflicted = require_git(code_worktree, ["diff", "--name-only", "--diff-filter=U"]).splitlines()
+    if conflicted:
+        raise RuntimeError(
+            "closeout cannot stage the code worktree for the strict code-quality gate: the"
+            f" index has {len(conflicted)} unmerged path(s), so a merge, rebase, cherry-pick or"
+            " revert is still in progress with its conflicts unresolved"
+            f" ({', '.join(conflicted[:PATH_SAMPLE_LIMIT])})."
+            " Nothing was staged and nothing was committed. Resolve the conflicts, stage the"
+            " resolutions, then rerun closeout -- staging a conflicted worktree would commit the"
+            " conflict markers themselves."
+        )
+
+
+def _gate_staged_code(code_worktree: Path, *, diff_base: str) -> dict[str, object]:
+    """Reset and stage the task worktree, then run the strict gate over exactly what it commits.
+
+    Every rail of the gate reads the index. ``derive_scope`` lists what ruff and pyright
+    are given with ``git ls-files``; ``diff_coverage`` diffs the base against the tracked
+    tree, which is likewise blind to a file git has never been told about. Closeout commits
+    with ``git add -A``, so until it staged first, any file the task *created* -- as opposed
+    to edited -- went into the commit without a single rail of the gate reading a line of
+    it, and the gate reported green having never seen it. Leaf 3's ``abc7cbcc`` shipped four
+    files that way. The index cut both ways, too: a path the task deleted stayed in
+    ``ls-files`` until the deletion was staged, so ruff was handed a file that no longer
+    existed and took an ``E902`` for it.
+
+    Staging first is what makes the gate's scope and the commit's content one set, by
+    construction rather than by a second enumeration that has to be kept in step. The
+    alternative -- widening ``derive_scope`` to ``--cached --others --exclude-standard`` --
+    would redefine the pre-commit tier, where staged content is precisely the point, and
+    could not reach the coverage floor at all, since an untracked file has no diff against
+    any base.
+
+    The mixed reset is what makes a retry mean the same thing as a first run. ``add -A``
+    on its own does not: git applies ignore rules only to files it does not already track
+    or have staged, so a path staged by a refused attempt stays staged even after the retry
+    adds it to ``.gitignore``, and the commit carries it. That is this leaf's own history --
+    a ``.dmypy.json`` a type checker had dropped in the worktree was staged by a refused
+    attempt, ignored on the retry, and committed anyway. Resetting first means each run
+    recomputes the index from the working tree under the ignore rules in force *now*,
+    instead of inheriting whatever the last attempt happened to leave behind. It costs
+    nothing to do: ``--mixed`` is index-only, so the tree the gate is about to certify is
+    byte-for-byte what the task left on disk.
+
+    The reset goes after both refusals, not before either of them. Ahead of the first it
+    would inflict the exact damage that refusal exists to prevent -- a mixed reset in a
+    checkout somebody works in discards their ``git add -p`` selection, and that refusal
+    promises nothing in the checkout was touched. Ahead of the second it would disarm it
+    silently: ``git reset`` drops the unmerged index entries and removes ``MERGE_HEAD``,
+    so ``diff --diff-filter=U`` would report nothing, the conflict refusal would never fire
+    again, and ``add -A`` would go on to stage the ``<<<<<<<`` markers it was added to keep
+    out of a commit. Reset-then-add is one step and belongs wholly downstream of both
+    checks; nothing in it may run until they have both passed.
+
+    There is no rollback here and none is wanted. The staging is not undone if the gate
+    refuses, because this worktree is the task's own disposable checkout
+    (:func:`_refuse_outside_a_linked_worktree` is what makes that true rather than assumed),
+    nobody is holding a partial staging in it, and the reset means the next attempt does not
+    inherit it in any case. A previous attempt saved the index file aside and copied it
+    back, and that machinery is gone rather than fixed: it could not survive
+    ``core.splitIndex`` (the saved pointer outlives the ``sharedindex.<sha>`` that
+    ``add -A`` expires, leaving ``status`` exiting 128), it could not survive ``SIGTERM``,
+    which is how an MCP server actually dies, and every guarantee it tried to offer was
+    about a person who is never in this checkout.
+    """
+    _refuse_outside_a_linked_worktree(code_worktree)
+    _refuse_conflicted_worktree(code_worktree)
+    require_git(code_worktree, ["reset", "--mixed", "--quiet", "HEAD"])
+    require_git(code_worktree, ["add", "-A"])
+    return run_strict_code_quality_gate(code_worktree, diff_base=diff_base)
+
+
 def closeout_result(args: WorktreeArgs) -> WorktreeCommandResult:
     assert args.contract_path is not None
     contract = load_contract(args.contract_path)
@@ -588,7 +724,7 @@ def closeout_result(args: WorktreeArgs) -> WorktreeCommandResult:
         diff_base=contract.code_base_commit,
     )
     if requires_strict_code_quality(contract.code_worktree, code_would_commit=code_would_commit):
-        code_quality_gate = run_strict_code_quality_gate(
+        code_quality_gate = _gate_staged_code(
             contract.code_worktree, diff_base=contract.code_base_commit
         )
     code_commit = commit_if_dirty(contract.code_worktree, args.code_commit_message)
@@ -626,23 +762,29 @@ def closeout_result(args: WorktreeArgs) -> WorktreeCommandResult:
         ledger_commit=ledger_commit,
     )
     reopened = bool(integration_reopen["reopened"])
-    updated = replace(
-        contract,
-        human_review_status="approved",
-        approved_for_commit=True,
-        commit_approval_note=approval_note,
-        closeout_status="completed",
-        code_commit=code_commit,
-        memory_content_commit=memory_commit,
-        ledger_commit=ledger_commit,
-        integration_status="not-started" if reopened else contract.integration_status,
-        integration_strategy="" if reopened else contract.integration_strategy,
-        integrated_code_commit="" if reopened else contract.integrated_code_commit,
-        integrated_memory_content_commit=""
-        if reopened
-        else contract.integrated_memory_content_commit,
-        integrated_ledger_commit="" if reopened else contract.integrated_ledger_commit,
-        cleanup="pending" if reopened else contract.cleanup,
+    updated = amend_contract(
+        replace(
+            contract,
+            approved_for_commit=True,
+            commit_approval_note=approval_note,
+            code_commit=code_commit,
+            memory_content_commit=memory_commit,
+            ledger_commit=ledger_commit,
+            integration_strategy="" if reopened else contract.integration_strategy,
+            integrated_code_commit="" if reopened else contract.integrated_code_commit,
+            integrated_memory_content_commit=""
+            if reopened
+            else contract.integrated_memory_content_commit,
+            integrated_ledger_commit="" if reopened else contract.integrated_ledger_commit,
+        ),
+        # The vocabulary cells go through the typed record; `replace` above carries only the
+        # free-text commits and notes, which have no vocabulary to check them against.
+        ContractCells(
+            human_review_status="approved",
+            closeout_status="completed",
+            integration_status="not-started" if reopened else contract.integration_status,
+            cleanup="pending" if reopened else contract.cleanup,
+        ),
     )
     write_contract(contract.contract_path, updated)
     if gate_guard is not None and gate_guard.gate_id is not None:

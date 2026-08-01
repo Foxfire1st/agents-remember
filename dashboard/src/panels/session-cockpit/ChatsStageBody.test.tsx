@@ -17,12 +17,15 @@ import {
 } from "../../data/submissionLifecycleClient";
 import type {
   ActiveConversationRef,
-  ActiveEventCursor,
-  ConversationCapabilities,
   ConversationItem,
   ConversationPage,
-  ConversationStatus,
 } from "../../data/conversation/types";
+import {
+  conversationIdentity,
+  conversationItem,
+  conversationPage,
+  conversationStatus,
+} from "../../test/fixtures/conversationWire";
 import { ChatsStageBody } from "./ChatsStageBody";
 
 // The authority resolve and the conversation orchestration are the two network edges; both are
@@ -237,27 +240,19 @@ describe("ChatsStageBody fresh-chat boot (260721 D1/D2)", () => {
 // contract: mounted-but-hidden, identity/scroll preserved, bounded, never resurrecting the dead.
 
 function identity(sessionId: string): ActiveConversationRef {
-  return {
-    harnessId: "codex",
+  return conversationIdentity({
     vendorConversationId: "v",
     projectScope: "/r",
     identityDigest: "d",
     arSessionId: sessionId,
     bridgeEpoch: "e1",
-  };
+  });
 }
 
 function feedItem(sessionId: string, ordinal: number): ConversationItem {
-  return {
+  return conversationItem({
     itemId: `${sessionId}-item-${ordinal}`,
     globalOrdinal: ordinal,
-    revision: 1,
-    lane: "harness",
-    source: "harness-live",
-    provenance: { strength: "exact", origin: "codex" },
-    role: "assistant",
-    kind: "message",
-    phase: "completed",
     blocks: [
       {
         blockId: `${sessionId}-item-${ordinal}-b`,
@@ -265,23 +260,15 @@ function feedItem(sessionId: string, ordinal: number): ConversationItem {
         markdown: `${sessionId} message ${ordinal}`,
       },
     ],
-  } as ConversationItem;
+  });
 }
 
 function page(sessionId: string, itemCount = 3): ConversationPage {
-  return {
+  return conversationPage({
     identity: identity(sessionId),
     items: Array.from({ length: itemCount }, (_, index) => feedItem(sessionId, index + 1)),
-    page: { olderCursor: null, hasOlder: false },
-    eventCursor: "evt-0" as ActiveEventCursor,
-    hydrationId: "h",
-    status: {
-      revision: 1,
-      process: { state: "connected" },
-      turn: { state: "ready", turnId: null, stateSince: null },
-    } as unknown as ConversationStatus,
-    capabilities: undefined as unknown as ConversationCapabilities,
-  };
+    status: conversationStatus({ identity: identity(sessionId) }),
+  });
 }
 
 function seedWarm(sessionId: string): void {

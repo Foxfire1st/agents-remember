@@ -14,6 +14,7 @@ from agents_remember.worktrees.modules.git import (
     require_git,
 )
 from agents_remember.worktrees.modules.leaf_ref_start import (
+    invalid_contract_request_result,
     invalid_leaf_ref_result,
     resolve_start_leaf_doc_id,
 )
@@ -184,10 +185,25 @@ def _parent_series_contract(
 
 
 def build_start_contract(context, args: WorktreeArgs) -> WorktreeContract | WorktreeCommandResult:
+    """The contract a start would create, or the refusal that says why it cannot.
+
+    Both are returned rather than raised, because `worktree_start`'s handler has no `except`
+    for either. `LeafRefResolutionError` is always a bad *argument*: an unresolvable leaf ref.
+    `ContractError` is NOT always an argument fault, and the docstring must not claim it is --
+    the `except` wraps the whole call, so besides the intended case (a `workflow_kind` or
+    `memory_mode` the contract vocabulary does not hold) it also catches a `ContractError`
+    raised by the `write_contract` inside `_parent_series_contract`, which is a write-validation
+    failure of the PARENT series contract rather than anything this caller passed. That path is
+    still reported honestly -- `validate_contract` names the offending cell and the file -- so
+    it is returned rather than re-raised on purpose; what would be wrong is describing it as a
+    caller mistake when the caller may have supplied nothing at fault.
+    """
     try:
         return _build_start_contract(context, args)
     except LeafRefResolutionError as exc:
         return invalid_leaf_ref_result(exc)
+    except ContractError as exc:
+        return invalid_contract_request_result(exc)
 
 
 def _build_start_contract(context, args: WorktreeArgs) -> WorktreeContract:

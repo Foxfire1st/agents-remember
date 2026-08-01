@@ -7,9 +7,15 @@
 // stable across snapshots and unit-testable without a canvas.
 
 import { engineState } from "../data/selectors";
-import type { EnclosureNode, LifecycleProjection, ProviderNode } from "../types/projection";
+import type { EnclosureNode, LifecycleProjection, ProviderNode, State } from "../types/projection";
 
-export type ConstelStatus = "core" | "ok" | "warn" | "crit" | "idle";
+// The constellation's own colour-bearing vocabulary, declared as a tuple with the type derived —
+// so every table keyed by it (`constel.ts`'s palette) and every test that iterates it reads ONE
+// list. A hand-written union here is a list that only the type system can see, and a table that
+// only the type system can see is a table no runtime assertion can prove total.
+export const CONSTEL_STATUSES = ["core", "ok", "warn", "crit", "idle"] as const;
+
+export type ConstelStatus = (typeof CONSTEL_STATUSES)[number];
 
 export interface ConstelNode {
   kind: "ws" | "repo" | "wt" | "prov";
@@ -30,11 +36,60 @@ export const RF = { repo: 0.3, wt: 0.62 };
 
 const TAU = Math.PI * 2;
 
-function lifecycleStatus(lifecycle: LifecycleProjection): ConstelStatus {
-  if (lifecycle.state === "blocked") return "crit";
-  if (lifecycle.state === "abandoned") return "idle";
-  if (lifecycle.state === "paused" || lifecycle.inferred) return "warn";
-  return "ok"; // running / completed
+// The state → constellation-status grammar, declared ONCE and totally. `Record<State, …>` is
+// the load-bearing part: a seventh state in `LIFECYCLE_STATES` makes this object literal stop
+// compiling until someone decides what it looks like. What it replaces was an if-chain ending
+// in `return "ok"`, which covered five of the six states and answered "healthy" for the sixth —
+// and a default that says "healthy" is not a default, it is a claim. That is how a lifecycle
+// which had handed the turn back drew as a green node on the one surface a developer scans for
+// work waiting on them, and why `model.test.ts` passed a seventh-state mutation that
+// `Dot.test.tsx` caught: `Dot` derives its known-set from the cva recipe (one declaration) and
+// its test iterates the vocabulary. This is the same move in this module's vocabulary.
+export const CONSTEL_STATUS_BY_STATE: Record<State, ConstelStatus> = {
+  blocked: "crit", // a fault — the lifecycle cannot proceed without intervention
+  // The turn is back with the developer (NOTIFY-AND-CONTINUE turn end): actionable but NOT a
+  // fault, so the same `warn` treatment as paused — never `crit` (nothing is broken), never
+  // `ok` (something is waiting on you). The colour grammar rules the same way (`Dot.tsx` gives
+  // it amber, the palette's one "wants you, is not broken" hue).
+  "awaiting-developer": "warn",
+  paused: "warn", // parked, and the reducer INFERS this from a stale heartbeat
+  abandoned: "idle", // over, and over without finishing
+  running: "ok",
+  completed: "ok",
+};
+
+// A state this build has never heard of — a newer server, or a persisted projection from one.
+// It must not be `ok`: `ok` is the exact wrong answer, the one that made the handed-back
+// lifecycle read as healthy, and an unrecognised state is the case where this build knows
+// LEAST. `warn` is the honest register in the vocabulary this model has ("look at this"), and
+// it is `Dot.tsx`'s ruling for the same situation — an unrecognised variant renders the
+// `muted` "we could not classify this" tone rather than borrowing a live state's colour.
+// `crit` is not it either: that would claim a fault the server never reported.
+export const UNCLASSIFIED_STATUS: ConstelStatus = "warn";
+
+// The table READ through a view that admits what the wire actually allows. `lifecycle.state` is
+// typed `State`, but that type is a CLAIM about the server, not a guarantee — the value arrives as
+// JSON from a process this build does not control. Indexing `Record<State, …>` types the miss
+// away: TypeScript hands back `ConstelStatus`, never `undefined`, so `?? UNCLASSIFIED_STATUS`
+// below reads as dead code that anyone may delete for zero new `tsc` errors — and the `undefined`
+// it was catching flows on to `constel.ts`, whose palette used to answer `?? COLORS.ok` and paint
+// the cyan healthy fill. That is the original defect, restorable end-to-end with both gates green.
+// This alias is what makes the fallback load-bearing to the compiler: the miss is typed, so
+// removing the `??` fails `tsc -b` here rather than failing a developer at a glance.
+//
+// `noUncheckedIndexedAccess` would say the same thing for every index in the project. It is not on
+// (measured: 601 errors across 81 files, 33 of them non-test), so this says it at the one seam
+// that matters — where the index key is wire data rather than a value this module produced.
+const STATUS_BY_DECLARED_STATE: Partial<Record<string, ConstelStatus>> = CONSTEL_STATUS_BY_STATE;
+
+export function lifecycleStatus(
+  lifecycle: Pick<LifecycleProjection, "state" | "inferred">,
+): ConstelStatus {
+  const declared = STATUS_BY_DECLARED_STATE[lifecycle.state] ?? UNCLASSIFIED_STATUS;
+  // `inferred` degrades a HEALTHY reading only: the reducer derived this state (stale heartbeat
+  // → paused, dormant fleeting → abandoned) instead of reading a written transition, so it may
+  // not be drawn with the confidence of an observed one. It never upgrades warn/crit/idle.
+  return declared === "ok" && lifecycle.inferred ? "warn" : declared;
 }
 
 // Worktree groups join across the projection by BASENAME: the worktree-scoped
