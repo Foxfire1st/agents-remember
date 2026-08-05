@@ -4,12 +4,12 @@ from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
-from agents_remember.benchmarks.runner import CODEX_BENCHMARK_SANDBOX
-from agents_remember.controllers.benchmark_tools import (
+from agents_remember.application.benchmark_tools import (
     BenchmarkPreparation,
     BenchmarkSelection,
     CodexBenchmarkRun,
 )
+from agents_remember.models.benchmarks import CODEX_BENCHMARK_SANDBOX
 
 from ..config import McpRuntimeConfig
 from ..tools import codex_benchmark_prepare_payload, codex_benchmark_run_payload

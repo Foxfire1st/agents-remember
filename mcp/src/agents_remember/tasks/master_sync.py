@@ -9,6 +9,7 @@ from typing import Literal
 from pydantic import ValidationError
 
 from .document import DocStatus, SubTaskRef, TaskDocument
+from .readiness import completion_blockers
 from .store import markdown_path_for, read_task_doc
 
 MasterSyncStatus = Literal["none", "created", "updated", "unchanged"]
@@ -46,7 +47,13 @@ def plan_master_sync(task_root: Path, leaf: TaskDocument) -> MasterSyncPlan:
     if master.kind != "master":
         raise MasterSyncError(f"parent task document is not a master: {master_json_path}")
 
-    existing = next((ref for ref in master.subTasks if ref.number == leaf.id), None)
+    matches = [ref for ref in master.subTasks if ref.number == leaf.id]
+    if len(matches) > 1:
+        raise MasterSyncError(
+            f"parent master must contain at most one row {leaf.id!r}; found {len(matches)}"
+        )
+    existing = matches[0] if matches else None
+    _validate_existing_row_path(master_json_path, task_root, leaf, existing)
     ref = subtask_ref_from_leaf(task_root, leaf, existing=existing)
     if existing == ref:
         return MasterSyncPlan(
@@ -63,12 +70,14 @@ def plan_master_sync(task_root: Path, leaf: TaskDocument) -> MasterSyncPlan:
         refs.append(ref_payload)
         status: MasterSyncStatus = "created"
     else:
-        refs = [ref_payload if item.get("number") == leaf.id else item for item in refs]
+        index = next(index for index, item in enumerate(refs) if item.get("number") == leaf.id)
+        refs[index] = ref_payload
         status = "updated"
     data["subTasks"] = refs
+    updated = demote_completed_master_if_unresolved(TaskDocument.model_validate(data))
     return MasterSyncPlan(
         status=status,
-        master=TaskDocument.model_validate(data),
+        master=updated,
         master_json_path=master_json_path,
         subtask_number=leaf.id,
     )
@@ -89,22 +98,46 @@ def subtask_ref_from_leaf(
 
 def derived_master_status(leaf: TaskDocument) -> DocStatus:
     """Collapse leaf step state to the master's strict status vocabulary."""
-    statuses = [
-        sub.status if step.substeps else step.status
-        for step in leaf.steps
-        for sub in (step.substeps or [step])
-    ]
-    if statuses and all(status == "done" for status in statuses):
+    statuses = [step.status for step in leaf.steps]
+    statuses.extend(sub.status for step in leaf.steps for sub in step.substeps)
+    if statuses and not completion_blockers(leaf):
         return "Completed"
     if any(status in {"done", "inProgress", "blocked"} for status in statuses):
+        return "inProgress"
+    if statuses and leaf.status == "Completed":
+        # An old inconsistent leaf remains readable, but cannot project a terminal parent row.
         return "inProgress"
     return leaf.status
 
 
+def demote_completed_master_if_unresolved(master: TaskDocument) -> TaskDocument:
+    """Keep a master terminal only while every declared row remains terminal."""
+    if master.kind != "master" or master.status != "Completed" or not completion_blockers(master):
+        return master
+    data = master.model_dump(by_alias=True)
+    data["status"] = "inProgress"
+    return TaskDocument.model_validate(data)
+
+
+def _validate_existing_row_path(
+    master_json_path: Path,
+    task_root: Path,
+    leaf: TaskDocument,
+    existing: SubTaskRef | None,
+) -> None:
+    if existing is None or not existing.file:
+        return
+    existing_path = (master_json_path.parent / existing.file).resolve(strict=False)
+    leaf_path = markdown_path_for(task_root, leaf).resolve(strict=False)
+    if existing_path != leaf_path:
+        raise MasterSyncError(
+            f"parent row {leaf.id!r} points at {existing_path}, not leaf {leaf_path}"
+        )
+
+
 def _master_json_path(task_root: Path, leaf: TaskDocument) -> Path | None:
-    candidate = _json_path_from_master_ref(task_root, leaf.master) if leaf.master else None
-    if candidate is not None:
-        return candidate
+    if leaf.master:
+        return _json_path_from_master_ref(task_root, leaf.master)
     default = task_root / "task.json"
     return default if default.exists() else None
 

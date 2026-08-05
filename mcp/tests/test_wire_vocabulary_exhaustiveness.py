@@ -75,9 +75,9 @@ and so differed from the seven that broke `context_packet` only in not having fa
     RepoSummary.state           <- kernel.git_facts.RepoState
     BranchFreshness.state       <- kernel.git_freshness.FreshnessState
     DriftCheckResponse.status   <- onboarding_drift_check.models.DriftStatus (the last copy)
-    FileRead.status             <- controllers.read_files.FileReadStatus
+    FileRead.status             <- models.read_files.FileReadStatus
     SpawnAgentSessionResponse   \\
-    SessionRetireResponse        > models.terminal, imported BY mcp.tools.terminal
+    SessionRetireResponse        > models.terminal, produced by application.terminal_tools
     SessionRenameResponse       /
 
 Each is measured the same way: derive the producible set from the producers' source, assert
@@ -109,7 +109,7 @@ sys.path.insert(0, str(MCP_SRC))
 sys.path.insert(0, str(MCP_TESTS))
 
 import agents_remember
-from agents_remember.controllers.read_files import VALID_FILE_READ_STATUSES
+from agents_remember.application.worktree_status import worktree_status_packet
 from agents_remember.kernel.git_facts import VALID_REPO_STATES, git_facts_to_packet, read_git_facts
 from agents_remember.kernel.git_freshness import (
     VALID_FRESHNESS_STATES,
@@ -120,7 +120,7 @@ from agents_remember.models.context_packet import BranchFreshness as WireBranchF
 from agents_remember.models.context_packet import MemorySummary, RepoSummary
 from agents_remember.models.drift import DriftSummary
 from agents_remember.models.memory import DriftCheckResponse
-from agents_remember.models.read_files import FileRead
+from agents_remember.models.read_files import VALID_FILE_READ_STATUSES, FileRead
 from agents_remember.models.terminal import (
     VALID_SESSION_RENAME_STATUSES,
     VALID_SESSION_RETIRE_STATUSES,
@@ -138,7 +138,6 @@ from agents_remember.worktrees.modules.guidance import (
     recovery_guidance,
 )
 from agents_remember.worktrees.modules.leaf_ref_start import invalid_contract_request_result
-from agents_remember.worktrees.status import worktree_status_packet
 from agents_remember.worktrees.worktree_contract import (
     VALID_MEMORY_MODES,
     CleanupStatus,
@@ -412,7 +411,8 @@ def guidance_next_moves() -> tuple[set[str], set[str]]:
     """Every `(operation, tool)` literal handed to `next_guidance`, anywhere in the package.
 
     `next_guidance` is the phase machine's builder and its output reaches `WorktreeSummary`
-    through `worktrees.status`, so every literal at every call site has to validate there.
+    through `application.worktree_status`, so every literal at every call site has to
+    validate there.
     The gate/block payloads use `recovery_guidance` instead -- a separate builder with its own
     vocabulary, because those results are `FlexibleToolResponse`s that never reach this model.
     """
@@ -462,7 +462,7 @@ def _module_tree(relative: str) -> ast.Module:
 
 # --- the other seven: producers read out of their own source ---------------------------------
 
-TERMINAL_TOOL = "mcp/tools/terminal.py"
+TERMINAL_TOOL = "application/terminal_tools.py"
 # Enough of each strict model to leave only the field under test undecided.
 REPO_BASE = {"id": "r", "root": "/r", "branch": "main", "head": "0" * 40, "dirty": False}
 SESSION_BASE = {"ok": False, "session": "s"}
@@ -775,8 +775,8 @@ class ProducedLiteralTests(unittest.TestCase):
                 self.assertTrue(_accepts(DriftSummary, {}, "status", status))
                 self.assertTrue(_accepts(DriftCheckResponse, {"ok": True}, "status", status))
 
-    def test_every_onboarding_status_the_read_controller_returns_validates(self) -> None:
-        produced = _returned_tuple_literals("controllers/read_files.py", "_resolve_onboarding", 0)
+    def test_every_onboarding_status_the_read_entry_point_returns_validates(self) -> None:
+        produced = _returned_tuple_literals("application/read_files.py", "_resolve_onboarding", 0)
         self.assertIn("not_requested", produced)
         self.assertIn("unsupported", produced)
         self.assertEqual(produced, set(VALID_FILE_READ_STATUSES))

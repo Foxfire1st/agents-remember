@@ -62,9 +62,12 @@ export type PageResult =
 // conversation request carries a hard timeout so a hung transport becomes an ordinary rejection
 // the existing recovery paths (quiet retry, re-page, fail-loud) already know how to handle.
 const CONVERSATION_REQUEST_TIMEOUT_MS = 15_000;
-const withTimeout = (init: RequestInit): RequestInit => ({
+const withTimeout = (init: RequestInit, signal?: AbortSignal): RequestInit => ({
   ...init,
-  signal: AbortSignal.timeout(CONVERSATION_REQUEST_TIMEOUT_MS),
+  signal:
+    signal === undefined
+      ? AbortSignal.timeout(CONVERSATION_REQUEST_TIMEOUT_MS)
+      : AbortSignal.any([signal, AbortSignal.timeout(CONVERSATION_REQUEST_TIMEOUT_MS)]),
 });
 
 /** GET the native-hydrated active page, preserving the server's typed refusal reason on failure. */
@@ -74,13 +77,17 @@ export async function fetchConversationPage(
   query: PageQuery = {},
   base = "",
   fetchImpl: FetchLike = fetch,
+  signal?: AbortSignal,
 ): Promise<PageResult> {
   const params = [epochQuery(epoch)];
   if (query.before) params.push(`before=${encodeURIComponent(query.before)}`);
   if (query.limit !== undefined) params.push(`limit=${query.limit}`);
   const url = `${activeBase(base, sessionId)}?${params.join("&")}`;
   try {
-    const response = await fetchImpl(url, withTimeout({ headers: { Accept: "application/json" } }));
+    const response = await fetchImpl(
+      url,
+      withTimeout({ headers: { Accept: "application/json" } }, signal),
+    );
     if (!response.ok) {
       return { ok: false, error: asRouteError(await readJson(response), response.status) };
     }
@@ -96,10 +103,14 @@ export async function fetchConversationTelemetry(
   epoch: string,
   base = "",
   fetchImpl: FetchLike = fetch,
+  signal?: AbortSignal,
 ): Promise<ConversationTelemetry | null> {
   const url = `${activeBase(base, sessionId)}/telemetry?${epochQuery(epoch)}`;
   try {
-    const response = await fetchImpl(url, withTimeout({ headers: { Accept: "application/json" } }));
+    const response = await fetchImpl(
+      url,
+      withTimeout({ headers: { Accept: "application/json" } }, signal),
+    );
     if (!response.ok) return null;
     return (await response.json()) as ConversationTelemetry;
   } catch {

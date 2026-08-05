@@ -112,8 +112,8 @@ class BenchmarkPrepareRequest:
     force_clone: bool = False
     provider_timeout: int = 1800
     # Containment R1 (260707-HFX-L1): the live MCP authority's provider ids. The
-    # MCP controllers always pass this; manifest-requested providers outside the
-    # set are skipped (and reported), never armed or launched. None = no
+    # application layer always passes this; manifest-requested providers outside
+    # the set are skipped (and reported), never armed or launched. None = no
     # authority context (direct script use) and is FAIL-CLOSED by the consumer
     # (workspace.filter_benchmark_provider_ids) unless
     # AR_BENCHMARK_ALLOW_UNFILTERED_PROVIDERS=1 — the explicit developer act.

@@ -21,6 +21,10 @@ class DriftCheckResponse(ToolResponse):
     reportPath: str | None = None
     actionableSample: list[dict[str, Any]] | None = None
     error: str | None = None
+    # WHICH tree was measured. `repo_id` alone means the official memory repo and a
+    # `contract_path` means a leaf's memory worktree, and nothing else in this response
+    # distinguishes them -- a caller that got the wrong one could not tell.
+    onboardingRoot: str | None = None
 
 
 class MemoryQualityCheckResponse(FlexibleToolResponse):
@@ -33,6 +37,9 @@ class MemoryQualityCheckResponse(FlexibleToolResponse):
 class RouteIndexRefreshResponse(FlexibleToolResponse):
     operation: Literal["route_index_refresh"] = "route_index_refresh"
     repoId: str | None = None
+    # The tree the indexes were WRITTEN into, declared because this tool mutates: a
+    # caller has to be able to see whether it just wrote its leaf or the official repo.
+    onboardingRoot: str | None = None
     dryRun: bool | None = None
 
 

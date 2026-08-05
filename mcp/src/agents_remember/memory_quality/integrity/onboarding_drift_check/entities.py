@@ -132,129 +132,151 @@ def parse_entity_inventory_names(path: Path) -> list[str]:
     return names
 
 
+@dataclass(frozen=True)
+class _EntityVerdict:
+    """The four fields that differ between one entity classification and the next.
+
+    Every ``DriftRow`` this module builds carries the same six identifying fields, derived
+    from the catalog and the row; only these four say what was found. Naming them is what
+    turned six twelve-line constructions into six statements of the finding.
+    """
+
+    classification: str
+    trust: str
+    affected_sections: str
+    note: str
+
+
+def _entity_drift_row(
+    catalog: EntityCatalog, row: EntityFingerprint, verdict: _EntityVerdict
+) -> DriftRow:
+    """One classified entity row, with the identifying fields filled in once."""
+    return DriftRow(
+        onboarding_file=rel(catalog.onboarding_file, catalog.onboarding_root),
+        source_file=f"entity:{row.entity}",
+        repository=catalog.repository,
+        storage_mode=catalog.settings.mode,
+        last_verified_hash=row.fingerprint,
+        last_verified_date=catalog.last_updated,
+        classification=verdict.classification,
+        trust=verdict.trust,
+        affected_sections=verdict.affected_sections,
+        note=verdict.note,
+    )
+
+
+def _structurally_invalid_entity(
+    catalog: EntityCatalog,
+    repo_root: Path,
+    row: EntityFingerprint,
+) -> DriftRow | None:
+    """Classify rows the HEAD comparison cannot be run against, or ``None`` if it can.
+
+    Three shapes: an algorithm this checker does not implement, a row with nothing to
+    compare, and evidence that has since been deleted or moved. None of them is a
+    fingerprint mismatch, and calling them one would send the reader looking for a code
+    change that never happened.
+    """
+    if row.algorithm != GIT_BLOB_SET_ALGORITHM:
+        return _entity_drift_row(
+            catalog,
+            row,
+            _EntityVerdict(
+                classification="unsupported",
+                trust="low",
+                affected_sections=f"entity catalog; {row.entity}",
+                note=f"Unsupported entity fingerprint algorithm '{row.algorithm}'.",
+            ),
+        )
+    if not row.fingerprint or not row.evidence_paths:
+        return _entity_drift_row(
+            catalog,
+            row,
+            _EntityVerdict(
+                classification="missing verification",
+                trust="medium",
+                affected_sections=f"entity catalog; {row.entity}",
+                note="Entity fingerprint row is missing a fingerprint value or evidence paths.",
+            ),
+        )
+    missing_paths = [
+        source_path for source_path in row.evidence_paths if not (repo_root / source_path).exists()
+    ]
+    if not missing_paths:
+        return None
+    return _entity_drift_row(
+        catalog,
+        row,
+        _EntityVerdict(
+            classification="drifted",
+            trust="low",
+            affected_sections=f"entity catalog; {row.entity}; source evidence",
+            note=(
+                f"Entity evidence path missing: {', '.join(missing_paths)}. "
+                "Check whether the entity was removed, renamed, or moved before deleting or replacing the fingerprint evidence."
+            ),
+        ),
+    )
+
+
 def classify_entity_fingerprint(
     catalog: EntityCatalog,
     repo_root: Path,
     row: EntityFingerprint,
 ) -> DriftRow:
-    onboarding_file = catalog.onboarding_file
-    settings = catalog.settings
-    repository = catalog.repository
-    last_updated = catalog.last_updated
-    onboarding_ref = rel(onboarding_file, catalog.onboarding_root)
-    source_ref = f"entity:{row.entity}"
-
-    def _early_classification() -> DriftRow | None:
-        """Classify structurally-invalid rows before the HEAD comparison."""
-        if row.algorithm != GIT_BLOB_SET_ALGORITHM:
-            return DriftRow(
-                onboarding_file=onboarding_ref,
-                source_file=source_ref,
-                repository=repository,
-                storage_mode=settings.mode,
-                last_verified_hash=row.fingerprint,
-                last_verified_date=last_updated,
-                classification="unsupported",
-                trust="low",
-                affected_sections=f"entity catalog; {row.entity}",
-                note=f"Unsupported entity fingerprint algorithm '{row.algorithm}'.",
-            )
-        if not row.fingerprint or not row.evidence_paths:
-            return DriftRow(
-                onboarding_file=onboarding_ref,
-                source_file=source_ref,
-                repository=repository,
-                storage_mode=settings.mode,
-                last_verified_hash=row.fingerprint,
-                last_verified_date=last_updated,
-                classification="missing verification",
-                trust="medium",
-                affected_sections=f"entity catalog; {row.entity}",
-                note="Entity fingerprint row is missing a fingerprint value or evidence paths.",
-            )
-        missing_paths = [
-            source_path
-            for source_path in row.evidence_paths
-            if not (repo_root / source_path).exists()
-        ]
-        if missing_paths:
-            return DriftRow(
-                onboarding_file=onboarding_ref,
-                source_file=source_ref,
-                repository=repository,
-                storage_mode=settings.mode,
-                last_verified_hash=row.fingerprint,
-                last_verified_date=last_updated,
-                classification="drifted",
-                trust="low",
-                affected_sections=f"entity catalog; {row.entity}; source evidence",
-                note=(
-                    f"Entity evidence path missing: {', '.join(missing_paths)}. "
-                    "Check whether the entity was removed, renamed, or moved before deleting or replacing the fingerprint evidence."
-                ),
-            )
-        return None
-
-    early = _early_classification()
+    """Classify one entity fingerprint against the evidence it was computed from."""
+    early = _structurally_invalid_entity(catalog, repo_root, row)
     if early is not None:
         return early
     try:
         current = compute_git_blob_set_fingerprint(repo_root, row.evidence_paths)
     except RuntimeError as error:
-        return DriftRow(
-            onboarding_file=onboarding_ref,
-            source_file=source_ref,
-            repository=repository,
-            storage_mode=settings.mode,
-            last_verified_hash=row.fingerprint,
-            last_verified_date=last_updated,
-            classification="drifted",
-            trust="low",
-            affected_sections=f"entity catalog; {row.entity}; source evidence",
-            note=f"Unable to compute entity fingerprint: {error}",
+        return _entity_drift_row(
+            catalog,
+            row,
+            _EntityVerdict(
+                classification="drifted",
+                trust="low",
+                affected_sections=f"entity catalog; {row.entity}; source evidence",
+                note=f"Unable to compute entity fingerprint: {error}",
+            ),
         )
 
     local_notes = entity_local_change_notes(repo_root, row.evidence_paths)
     if current == row.fingerprint and not local_notes:
-        return DriftRow(
-            onboarding_file=onboarding_ref,
-            source_file=source_ref,
-            repository=repository,
-            storage_mode=settings.mode,
-            last_verified_hash=row.fingerprint,
-            last_verified_date=last_updated,
-            classification="up to date",
-            trust="high",
-            affected_sections="none",
-            note="Entity evidence fingerprint matches current HEAD.",
+        return _entity_drift_row(
+            catalog,
+            row,
+            _EntityVerdict(
+                classification="up to date",
+                trust="high",
+                affected_sections="none",
+                note="Entity evidence fingerprint matches current HEAD.",
+            ),
         )
     if current == row.fingerprint:
-        return DriftRow(
-            onboarding_file=onboarding_ref,
-            source_file=source_ref,
-            repository=repository,
-            storage_mode=settings.mode,
-            last_verified_hash=row.fingerprint,
-            last_verified_date=last_updated,
-            classification="drifted",
-            trust="medium",
-            affected_sections=f"entity catalog; {row.entity}; source evidence",
-            note="; ".join(local_notes),
+        return _entity_drift_row(
+            catalog,
+            row,
+            _EntityVerdict(
+                classification="drifted",
+                trust="medium",
+                affected_sections=f"entity catalog; {row.entity}; source evidence",
+                note="; ".join(local_notes),
+            ),
         )
     note = "Entity evidence fingerprint changed since the catalog was refreshed."
     if local_notes:
         note = f"{note} Local changes also exist: {'; '.join(local_notes)}"
-    return DriftRow(
-        onboarding_file=onboarding_ref,
-        source_file=source_ref,
-        repository=repository,
-        storage_mode=settings.mode,
-        last_verified_hash=row.fingerprint,
-        last_verified_date=last_updated,
-        classification="drifted",
-        trust="medium",
-        affected_sections=f"entity catalog; {row.entity}; source evidence",
-        note=note,
+    return _entity_drift_row(
+        catalog,
+        row,
+        _EntityVerdict(
+            classification="drifted",
+            trust="medium",
+            affected_sections=f"entity catalog; {row.entity}; source evidence",
+            note=note,
+        ),
     )
 
 

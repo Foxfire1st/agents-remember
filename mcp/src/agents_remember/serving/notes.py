@@ -30,8 +30,8 @@ from typing import Any
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse, Response
 
-from agents_remember.controllers._guards import require_repo
 from agents_remember.errors import AuthorityError
+from agents_remember.kernel.authority import require_repo
 from agents_remember.kernel.sidecar_pairing import confine_rel
 from agents_remember.mcp.config import McpRuntimeConfig, path_is_relative_to
 from agents_remember.serving.response_contract import (

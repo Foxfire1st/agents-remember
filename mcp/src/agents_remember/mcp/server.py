@@ -5,9 +5,10 @@ from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
-from agents_remember.controlplane.durable_store import declare_process_role
-from agents_remember.observer import AmbientLifecycle, EventStore, install_ambient, observer_root
-from agents_remember.serving.daemon import maybe_autostart_dashboard
+from agents_remember.application.server_startup import (
+    initialize_mcp_application,
+    prepare_mcp_process,
+)
 
 from .compact_content import install_compact_content
 from .config import ConfigError, McpRuntimeConfig, load_config
@@ -18,7 +19,7 @@ def create_server(config: McpRuntimeConfig) -> Any:
     install_compact_content()
     # One ambient lifecycle per server process; the _tool_payload choke point
     # tags tool calls onto it once a lifecycle is started.
-    install_ambient(AmbientLifecycle(EventStore(observer_root(config))))
+    initialize_mcp_application(config)
     server = FastMCP("Agents Remember")
     # The tool surface itself lives in `.registration`, one module per family; this loop is
     # the only place that decides which families a server advertises.
@@ -49,9 +50,8 @@ def main(argv: list[str] | None = None) -> int:
     # (controlplane/durable_store.py). Declared here, at the process entry point, and
     # deliberately not in create_server: the role is a fact about the process, and a factory
     # that tests call in-process would stamp this one onto whatever ran next.
-    declare_process_role("mcp")
-    # Boot-time dashboard supervision (dashboard.autoStart): total and threaded —
-    # it must never delay or break the stdio handshake this process exists for.
-    maybe_autostart_dashboard(config)
+    # Boot-time dashboard supervision (dashboard.autoStart) is part of the same application
+    # operation and remains total/threaded: it must never delay or break the stdio handshake.
+    prepare_mcp_process(config)
     run_server(config)
     return 0

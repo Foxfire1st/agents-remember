@@ -6,17 +6,43 @@ from collections.abc import Mapping
 
 from agents_remember.errors import HarnessControlError
 from agents_remember.serving.codex_app_server_adapter import CodexAppServerAdapter
-from agents_remember.serving.codex_app_server_session import CodexAppServerSettings
+from agents_remember.serving.codex_app_server_session import (
+    CodexAppServerSettings,
+    codex_launch_knobs,
+)
 from agents_remember.serving.harness_capabilities import LaunchKnobs
 from agents_remember.serving.harness_control_adapter import (
     LaunchableHarnessProtocolAdapter,
     UnsupportedHarnessProtocolAdapter,
 )
-from agents_remember.serving.harness_control_claude import ClaudeStreamJsonAdapter
+from agents_remember.serving.harness_control_claude import (
+    ClaudeStreamJsonAdapter,
+    claude_launch_knobs,
+)
 from agents_remember.serving.harness_launch import ResolvedLaunch
 from agents_remember.serving.pi_rpc_adapter import PiRpcAdapter
+from agents_remember.serving.pi_rpc_protocol import pi_launch_knobs
 
 BUILTIN_PROTOCOL_HARNESSES = frozenset({"claude", "codex", "pi"})
+
+_LAUNCH_KNOBS = {
+    "claude": claude_launch_knobs,
+    "codex": codex_launch_knobs,
+    "pi": pi_launch_knobs,
+}
+
+
+def harness_launch_knobs(harness_id: str, *, model_key: str, effort: str | None) -> LaunchKnobs:
+    """How one harness spells a model/effort selection at launch, before any adapter exists.
+
+    Answered from the harness id alone because none of the three implementations reads adapter
+    state; a custom id has no native launch vocabulary and is refused rather than defaulted.
+    """
+
+    knobs = _LAUNCH_KNOBS.get(harness_id)
+    if knobs is None:
+        raise HarnessControlError(f"no protocol adapter is registered for {harness_id!r}")
+    return knobs(model_key=model_key, effort=effort)
 
 
 def create_harness_protocol_adapter(

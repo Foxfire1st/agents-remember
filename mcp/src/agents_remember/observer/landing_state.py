@@ -5,13 +5,13 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import os
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
+from agents_remember.kernel.atomic_write import atomic_write_text
 from agents_remember.worktrees.modules.landing import landing_refs, unobserved_landing_refs
 from agents_remember.worktrees.task_resolver import iter_leaf_enclosure_contracts
 from agents_remember.worktrees.worktree_contract import (
@@ -319,9 +319,7 @@ class LandingStateRefresher:
         ]
         payload = {"frozenAt": attempted_at.isoformat(), "facts": frozen_rows}
         try:
-            tmp = path.with_suffix(".json.tmp")
-            tmp.write_text(json.dumps(payload, indent=1), encoding="utf-8")
-            os.replace(tmp, path)
+            atomic_write_text(path, json.dumps(payload, indent=1))
         except OSError:
             logger.warning("could not persist landing freeze for %s", path, exc_info=True)
 

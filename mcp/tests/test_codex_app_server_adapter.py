@@ -258,8 +258,7 @@ def drain_events(adapter: CodexAppServerAdapter) -> int:
     A duplicate notification is proved inert by the sequence not moving, which only reads
     as evidence from a known-empty queue.
     """
-    while not adapter._events.empty():
-        adapter._events.get_nowait()
+    adapter._events.drain()
     return adapter._event_sequence
 
 

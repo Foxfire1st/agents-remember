@@ -14,6 +14,7 @@ from agents_remember.serving.claude_stream_limits import ClaudeAdapterLimits
 from agents_remember.serving.claude_stream_protocol import (
     CLAUDE_STREAM_PROTOCOL,
     FORWARD_SUBAGENT_TEXT_FLOOR,
+    ClaudeSystemInitialization,
     build_claude_discovery_argv,
     build_claude_stream_argv,
     forward_subagent_text_supported,
@@ -45,6 +46,7 @@ from agents_remember.serving.harness_control_models import (
     InteractionResponse,
     InterruptResult,
     LaunchSpec,
+    PendingInteraction,
     PromptRequest,
     ReconciliationResult,
     ShutdownMode,
@@ -81,6 +83,65 @@ class ExpectedEcho:
     allowed_results: frozenset[str] = frozenset()
 
 
+@dataclass(frozen=True)
+class _ClaudeStartup:
+    """What one stream handshake established, before any of it is rendered or stored.
+
+    Negotiation and rendering used to sit in one 123-line ``start``. They are separated
+    because they fail differently: everything gathered here is inside the
+    ``HarnessControlError`` boundary that degrades to an unsupported handshake, and
+    everything rendered from it is past that boundary and cannot.
+    """
+
+    system_init: ClaudeSystemInitialization
+    capabilities: CapabilitySnapshot
+    supported_commands: frozenset[str]
+    pending: PendingInteraction | None
+    pending_frame: dict[str, object] | None
+    subagent_text_forwarded: bool
+
+    @property
+    def version(self) -> str | None:
+        return self.system_init.version
+
+
+def _subagent_text_note(version: str | None, *, forwarded: bool) -> str:
+    """The launch-flag verdict, in the exact words the snapshot publishes.
+
+    Never a silent omission: when the flag was withheld the note says which version was
+    captured, which floor it missed, and what the caller loses by it.
+    """
+    floor_text = ".".join(str(part) for part in FORWARD_SUBAGENT_TEXT_FLOOR)
+    if forwarded:
+        return (
+            "enabled: --forward-subagent-text emitted after system/init proved "
+            f"claude {version} meets the probed floor {floor_text}"
+        )
+    return (
+        "unverified: system/init captured claude "
+        f"{version or 'unknown'} below the probed --forward-subagent-text floor "
+        f"{floor_text}; the flag was omitted (fail-closed) and sub-agent text "
+        "blocks do not cross the live stream"
+    )
+
+
+def claude_launch_knobs(*, model_key: str, effort: str | None) -> LaunchKnobs:
+    """Claude's native launch-time model and effort flags.
+
+    Reads nothing but its arguments: the selection is spelled on the launch line before any
+    adapter or transport exists, which is why it is a launch fact rather than an adapter method.
+    """
+
+    if not model_key or model_key != model_key.strip():
+        raise HarnessControlError("Claude launch model must be non-empty with no outer whitespace")
+    if effort is None or not effort or effort != effort.strip():
+        raise HarnessControlError("Claude launch effort must be non-empty with no outer whitespace")
+    return LaunchKnobs(
+        argv=("--model", model_key, "--effort", effort),
+        owned_argv_options=("--model", "--effort"),
+    )
+
+
 class ClaudeStreamJsonAdapter:
     """Validate startup, then delegate Claude frames to the bounded normalized state machine."""
 
@@ -112,91 +173,77 @@ class ClaudeStreamJsonAdapter:
     def retained_submission_count(self) -> int:
         return self._state.retained_submission_count if self._state is not None else 0
 
-    async def start(self, launch: LaunchSpec) -> AdapterHandshake:
-        self._validate_launch(launch)
-        self._identity = launch.identity
-        version: str | None = None
+    async def _negotiate(self, launch: LaunchSpec) -> _ClaudeStartup:
+        """Bring the stream up and read back everything the handshake established.
+
+        Fail-closed default: the first launch OMITS --forward-subagent-text because no
+        version seam exists at argv-build time; only the system/init capture proves the
+        floor. A proven install re-launches WITH the flag (an old CLI would have failed the
+        flag at launch -- loud, never silently degraded); an unproven or old install runs
+        on without it and the snapshot marks the capability unverified.
+        """
         subagent_text_forwarded = False
-        try:
-            # Fail-closed default: the first
-            # launch OMITS --forward-subagent-text because no version seam exists at
-            # argv-build time; only the system/init capture proves the floor. A proven
-            # install re-launches WITH the flag (an old CLI would have failed the flag at
-            # launch — loud, never silently degraded); an unproven/old install runs on
-            # without it and the snapshot marks the capability unverified.
-            argv = build_claude_stream_argv(launch.argv)
+        argv = build_claude_stream_argv(launch.argv)
+        await self._transport.start(argv, cwd=launch.cwd, env=launch.env)
+        self._transport_started = True
+        control_init, system_init = await negotiate_claude_startup(
+            self._transport,
+            cwd=launch.cwd,
+            timeout_seconds=self._limits.startup_timeout_seconds,
+        )
+        if forward_subagent_text_supported(system_init.version):
+            await self._transport.stop("forced")
+            argv = build_claude_stream_argv(launch.argv, forward_subagent_text=True)
             await self._transport.start(argv, cwd=launch.cwd, env=launch.env)
-            self._transport_started = True
             control_init, system_init = await negotiate_claude_startup(
                 self._transport,
                 cwd=launch.cwd,
                 timeout_seconds=self._limits.startup_timeout_seconds,
             )
-            if forward_subagent_text_supported(system_init.version):
-                await self._transport.stop("forced")
-                argv = build_claude_stream_argv(launch.argv, forward_subagent_text=True)
-                await self._transport.start(argv, cwd=launch.cwd, env=launch.env)
-                control_init, system_init = await negotiate_claude_startup(
-                    self._transport,
-                    cwd=launch.cwd,
-                    timeout_seconds=self._limits.startup_timeout_seconds,
-                )
-                subagent_text_forwarded = True
-            self._capabilities = await negotiate_claude_catalog(
-                self._transport,
-                current_model=system_init.model,
-                timeout_seconds=self._limits.startup_timeout_seconds,
-                requested_key=(
-                    self._expected_launch.model_key if self._expected_launch is not None else None
-                ),
-            )
-            version = system_init.version
-            supported_commands = control_init.commands | system_init.commands
-            pending, pending_frame = restore_pending_interaction(
-                control_init.pending_requests, created_at=self._clock()
-            )
-        except HarnessControlError as exc:
-            return await self._unsupported_handshake(launch, str(exc), version=version)
-        if self._expected_launch is not None:
-            try:
-                verify_effective_launch(
-                    self._expected_launch,
-                    self._capabilities,
-                    require_effort_echo=False,
-                )
-            except HarnessControlError:
-                # Negotiation succeeded, so an expected-launch echo mismatch is a rejected launch,
-                # not an unsupported protocol. Close here and let the runner expose bridgeError.
-                await self._transport.stop("forced")
-                self._transport_started = False
-                raise
-        floor_text = ".".join(str(part) for part in FORWARD_SUBAGENT_TEXT_FLOOR)
-        subagent_text_note = (
-            "enabled: --forward-subagent-text emitted after system/init proved "
-            f"claude {version} meets the probed floor {floor_text}"
-            if subagent_text_forwarded
-            else "unverified: system/init captured claude "
-            f"{version or 'unknown'} below the probed --forward-subagent-text floor "
-            f"{floor_text}; the flag was omitted (fail-closed) and sub-agent text "
-            "blocks do not cross the live stream"
+            subagent_text_forwarded = True
+        capabilities = await negotiate_claude_catalog(
+            self._transport,
+            current_model=system_init.model,
+            timeout_seconds=self._limits.startup_timeout_seconds,
+            requested_key=(
+                self._expected_launch.model_key if self._expected_launch is not None else None
+            ),
         )
-        snapshot = AdapterSnapshot(
+        self._capabilities = capabilities
+        pending, pending_frame = restore_pending_interaction(
+            control_init.pending_requests, created_at=self._clock()
+        )
+        return _ClaudeStartup(
+            system_init=system_init,
+            capabilities=capabilities,
+            supported_commands=control_init.commands | system_init.commands,
+            pending=pending,
+            pending_frame=pending_frame,
+            subagent_text_forwarded=subagent_text_forwarded,
+        )
+
+    def _startup_snapshot(self, launch: LaunchSpec, startup: _ClaudeStartup) -> AdapterSnapshot:
+        """The snapshot the handshake publishes, rendered from what negotiation proved."""
+        system_init = startup.system_init
+        return AdapterSnapshot(
             identity=launch.identity,
             control="ready",
-            activity="blocked" if pending is not None else "idle",
+            activity="blocked" if startup.pending is not None else "idle",
             acceptance="immediate",
             vendor_session_id=system_init.session_id,
-            pending_interaction=pending,
+            pending_interaction=startup.pending,
             raw={
-                "claudeCodeVersion": version,
+                "claudeCodeVersion": startup.version,
                 "effectiveModel": system_init.model,
                 "permissionMode": system_init.permission_mode,
-                "supportedSessionCommands": sorted(supported_commands),
+                "supportedSessionCommands": sorted(startup.supported_commands),
                 "transport": "stream-json",
                 # The launch-flag verdict:
                 # enabled only after system/init proved the floor; otherwise the exact
                 # fail-closed reason, never a silent omission.
-                "subagentTextForwarding": subagent_text_note,
+                "subagentTextForwarding": _subagent_text_note(
+                    startup.version, forwarded=startup.subagent_text_forwarded
+                ),
                 "requestedLaunchModel": (
                     self._expected_launch.model_key if self._expected_launch is not None else None
                 ),
@@ -210,17 +257,51 @@ class ClaudeStreamJsonAdapter:
                 ),
             },
         )
+
+    async def _verify_expected_launch(self, startup: _ClaudeStartup) -> None:
+        """Hold the running stream to the launch that was asked for, or close it.
+
+        Reads the catalog off ``startup`` rather than ``self._capabilities``: the value
+        being verified must be the one this negotiation returned, not whatever the
+        attribute happens to hold by the time the check runs.
+        """
+        if self._expected_launch is None:
+            return
+        try:
+            verify_effective_launch(
+                self._expected_launch,
+                startup.capabilities,
+                require_effort_echo=False,
+            )
+        except HarnessControlError:
+            # Negotiation succeeded, so an expected-launch echo mismatch is a rejected launch,
+            # not an unsupported protocol. Close here and let the runner expose bridgeError.
+            await self._transport.stop("forced")
+            self._transport_started = False
+            raise
+
+    async def start(self, launch: LaunchSpec) -> AdapterHandshake:
+        self._validate_launch(launch)
+        self._identity = launch.identity
+        version: str | None = None
+        try:
+            startup = await self._negotiate(launch)
+            version = startup.version
+        except HarnessControlError as exc:
+            return await self._unsupported_handshake(launch, str(exc), version=version)
+        await self._verify_expected_launch(startup)
+        snapshot = self._startup_snapshot(launch, startup)
         self._state = ClaudeStreamState(
             ClaudeStreamSession(
                 identity=launch.identity,
                 snapshot=snapshot,
                 transport=self._transport,
-                supported_commands=supported_commands,
+                supported_commands=startup.supported_commands,
             ),
             clock=self._clock,
             correlation_factory=self._correlation_factory,
             limits=self._limits,
-            pending_interaction_frame=pending_frame,
+            pending_interaction_frame=startup.pending_frame,
         )
         self._state.start_reader()
         self._started = True
@@ -267,22 +348,6 @@ class ClaudeStreamJsonAdapter:
         ):
             raise HarnessControlError(self._unsupported_detail or "Claude adapter is unsupported")
         return self._capabilities
-
-    def launch_knobs(self, *, model_key: str, effort: str | None) -> LaunchKnobs:
-        """Return Claude's native launch-time model and effort flags."""
-
-        if not model_key or model_key != model_key.strip():
-            raise HarnessControlError(
-                "Claude launch model must be non-empty with no outer whitespace"
-            )
-        if effort is None or not effort or effort != effort.strip():
-            raise HarnessControlError(
-                "Claude launch effort must be non-empty with no outer whitespace"
-            )
-        return LaunchKnobs(
-            argv=("--model", model_key, "--effort", effort),
-            owned_argv_options=("--model", "--effort"),
-        )
 
     async def set_model(
         self, model_key: str, *, operation: ControlOperationRef | None = None

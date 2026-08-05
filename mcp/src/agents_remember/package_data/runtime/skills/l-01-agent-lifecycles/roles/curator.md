@@ -71,19 +71,44 @@ nearest overview because it is easiest) is rejected as a default:
 - Entity catalog: update only for real load-bearing entity changes.
 - A notes/ item with no file, route, or entity home routes to the L3 Operational-Notes target —
   LAST RESORT ONLY, never the default drop point for a finding that is merely inconvenient to place.
-- Generated route indexes: regenerate locally with `build_route_indexes(...)` from the memory
-  worktree.
+- Generated route indexes: regenerate with `route_index_refresh` scoped to this leaf (see below).
 
 Do not modify code. Do not edit task docs, gates, lifecycle state, worktree contracts, or closeout
 state. Do not run c-12/c-05 rewiring experiments from this role.
 
 ### 4 — Checks And Report
 
-Run the memory/onboarding checks named in the brief, plus `git diff --check` in the memory worktree
-when the brief requires it. Write a curator memory-pass report under the series `notes/reports/`
-that lists changed onboarding files, route index results, reference checks, blockers, and the exact
-commands run. The report is the memory input the manager uses beside builder code and reviewer
-verdict.
+**Your output is checked at closeout, and you can run that check yourself now.** The manager runs
+`memory_quality_check` before the memory commit and a failure there is a closeout failure that comes
+straight back to a respawned curator. Green your own change-set first — the same shift-left the
+builder does with targeted tests. This does NOT replace the closeout gate; the commit gate stays the
+hard gate.
+
+Three tools, all scoped to THIS leaf by passing your enclosure contract path — the same
+`contract_path` the `worktree_*` verbs take. Your brief names it; it is the leaf's
+`series-contract.md` under the master's `enclosures/<leaf-id>/`:
+
+| Tool | What it tells you | Call |
+| --- | --- | --- |
+| `route_index_refresh` | regenerates `overview.index.json` for your onboarding tree | `route_index_refresh(repo_id="<repo-id>", contract_path="<enclosure-contract-path>")` |
+| `memory_quality_check` | the closeout gate itself: drift integrity + style findings | `memory_quality_check(repo_id="<repo-id>", contract_path="<enclosure-contract-path>")` |
+| `drift_check` | whether onboarding still matches the code you were fed | `drift_check(repo_id="<repo-id>", contract_path="<enclosure-contract-path>")` |
+
+`contract_path` is what points them at your memory worktree. **Without it they resolve the OFFICIAL
+memory repo** — read-only for the first two, but `route_index_refresh` writes, so an unscoped call
+generates indexes into a repository you do not own and leaves it dirty, which blocks the next
+`worktree_start` until a human reverts it. Check `onboardingRoot` in the response: it must be your
+memory worktree. Preview a write first with `dry_run=true` if you want to see the file list.
+
+Read the counts, not just `ok`. A number that is implausible for your change-set is a measurement
+problem to report, not a backlog to fix: a relative onboarding root once turned 52 findings into
+393. Say so in your report rather than editing onboarding to chase it.
+
+Then `git diff --check` in the memory worktree, plus any other check the brief names. Write a
+curator memory-pass report under the series `notes/reports/` that lists changed onboarding files,
+route index results, the memory-quality result (findingCount and `onboardingRoot`), reference
+checks, blockers, and the exact commands run. The report is the memory input the manager uses beside
+builder code and reviewer verdict.
 
 ## Comms
 

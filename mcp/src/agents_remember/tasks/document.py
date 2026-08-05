@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from typing import Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 TASK_DOCUMENT_SCHEMA = "ar-task-document/v1"
 
@@ -39,11 +39,36 @@ class _Doc(BaseModel):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
 
+class StepDisposition(_Doc):
+    """Durable evidence that one exact work unit was intentionally skipped."""
+
+    kind: Literal["intentionalSkip"] = "intentionalSkip"
+    reason: str
+    recordedAt: str
+    recordedVia: Literal["task_doc.skip_step"] = "task_doc.skip_step"
+    lifecycleId: str | None = None
+
+    @field_validator("reason")
+    @classmethod
+    def _trim_nonblank_reason(cls, value: str) -> str:
+        trimmed = value.strip()
+        if not trimmed:
+            raise ValueError("intentional skip reason must not be blank")
+        return trimmed
+
+
 class SubStep(_Doc):
     id: str
     title: str
     status: StepStatus = "pending"
     note: str | None = None
+    disposition: StepDisposition | None = None
+
+    @model_validator(mode="after")
+    def _check_disposition_is_terminal(self) -> Self:
+        if self.disposition is not None and self.status != "done":
+            raise ValueError("a substep with intentional-skip disposition must have status done")
+        return self
 
 
 class Step(_Doc):
@@ -54,6 +79,13 @@ class Step(_Doc):
     outcome: str | None = None
     status: StepStatus = "pending"
     substeps: list[SubStep] = Field(default_factory=list)
+    disposition: StepDisposition | None = None
+
+    @model_validator(mode="after")
+    def _check_disposition_is_terminal(self) -> Self:
+        if self.disposition is not None and self.status != "done":
+            raise ValueError("a step with intentional-skip disposition must have status done")
+        return self
 
 
 class Decision(_Doc):
@@ -173,23 +205,21 @@ class TaskDocument(_Doc):
         return self
 
 
-def _leaf_statuses(doc: TaskDocument) -> list[StepStatus]:
-    """The progress-bearing units: a step's substeps if it has any, else the step."""
+def _declared_statuses(doc: TaskDocument) -> list[StepStatus]:
+    """Every declared step and substep, matching terminal-readiness semantics."""
     statuses: list[StepStatus] = []
     for step in doc.steps:
-        if step.substeps:
-            statuses.extend(sub.status for sub in step.substeps)
-        else:
-            statuses.append(step.status)
+        statuses.append(step.status)
+        statuses.extend(sub.status for sub in step.substeps)
     return statuses
 
 
 def step_total(doc: TaskDocument) -> int:
-    return len(_leaf_statuses(doc))
+    return len(_declared_statuses(doc))
 
 
 def step_done(doc: TaskDocument) -> int:
-    return sum(1 for status in _leaf_statuses(doc) if status == "done")
+    return sum(1 for status in _declared_statuses(doc) if status == "done")
 
 
 def current_step(doc: TaskDocument) -> str | None:
@@ -197,9 +227,15 @@ def current_step(doc: TaskDocument) -> str | None:
     for step in doc.steps:
         if step.status in ("inProgress", "blocked"):
             return f"{step.id} — {step.title}"
+        for sub in step.substeps:
+            if sub.status in ("inProgress", "blocked"):
+                return f"{step.id}/{sub.id} — {sub.title}"
     for step in doc.steps:
         if step.status != "done":
             return f"{step.id} — {step.title}"
+        for sub in step.substeps:
+            if sub.status != "done":
+                return f"{step.id}/{sub.id} — {sub.title}"
     return None
 
 

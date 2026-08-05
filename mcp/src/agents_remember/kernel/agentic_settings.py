@@ -55,7 +55,7 @@ from agents_remember.controlplane.inbox_backoff import (
 )
 from agents_remember.controlplane.records import GateKind, coerce_gate_kind
 from agents_remember.errors import AgentsRememberError
-from agents_remember.serving.harnesses import HARNESSES, Harness
+from agents_remember.kernel.harnesses import HARNESSES, Harness
 
 
 class AgenticSettingsError(AgentsRememberError):
@@ -322,7 +322,8 @@ class EscalationSettings:
 
     ``sla_seconds`` gates rung 1 (how long a pending row sits unacked, past ``escalatedAt``,
     before the first renudge); ``rung_seconds`` gates every rung's OWN dwell time thereafter
-    (keyed 1/2/3, re-anchored at every transition -- see ``OperatorInboxStore.advance_rung``).
+    (keyed 1/2/3, re-anchored at every transition -- see the control plane's
+    ``operator_inbox_transitions.advance_rung``).
     """
 
     sla_seconds: dict[str, float] = field(

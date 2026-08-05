@@ -158,7 +158,7 @@ When the approved plan has been fully implemented:
 2. for worktree-backed tasks, run `c-09-git-worktree-manager` closeout in dry-run mode to prepare the commit preview; this does not require commit approval and must not mutate Git
 3. present a concise completion summary in chat covering what changed, what onboarding was updated, which listed checks were run, and the proposed code, memory, and ledger commit messages
 4. ask explicitly for commit/closeout approval; do not treat implementation approval as commit approval
-5. leave worktree-backed task status below `Completed` after closeout; `lifecycle_finalize_task` sets completion after the landed commit is proven on the parent branch and cleanup/finalization is approved
+5. leave worktree-backed task status below `Completed` after closeout; every declared parent/nested step must be explicitly `done` (or intentionally skipped through exact `task_doc.skip_step`) before `lifecycle_finalize_task` can set completion. If a final step includes cleanup, run standalone `worktree_cleanup`, mark that exact step done afterwards, then finalize the already-clean contract
 
 ## Phase 3 — Close
 

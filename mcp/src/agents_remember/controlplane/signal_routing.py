@@ -3,9 +3,9 @@
 A worker's signal routes to its manager; a manager's signal routes to its orchestrator -- one
 hop up the spawn edge, never further (a developer ruling: no layer is addressed its
 grandchildren's noise). The address is read straight off the SENDER's own catalog row
-(``spawned_by_session`` / ``spawned_by_lifecycle`` -- terminal_catalog.py:48-59), which is exactly
-who spawned it; no second catalog lookup is needed to resolve "the manager's session id" because
-that IS the sender's ``spawned_by_session``.
+(``spawned_by_session`` / ``spawned_by_lifecycle``, declared on ``controlplane/seats.py``'s
+``SeatRow``), which is exactly who spawned it; no second catalog lookup is needed to resolve "the
+manager's session id" because that IS the sender's ``spawned_by_session``.
 
 ``message_kind == "decision-item"`` is routed to the reserved ``architect`` role regardless of
 spawn provenance (the queue itself is AQR Q3's job, not this leaf's -- only the routing target is
@@ -18,7 +18,7 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from agents_remember.controlplane.operator_inbox_records import AgentRole, InboxMessageKind
-from agents_remember.serving.terminal_catalog import TerminalCatalog, TerminalCatalogEntry
+from agents_remember.controlplane.seats import SeatDirectory, SeatRow
 
 # One hop up the spawn edge: the role a signal's SENDER was spawned as -> the role its routed
 # owner carries. A sender spawned as anything else (orchestrator, strategist, reviewer, ...) has
@@ -41,7 +41,7 @@ class RoutedOwner:
     lifecycle_id: str | None = None
 
 
-def _manager_owner(entry: TerminalCatalogEntry) -> RoutedOwner:
+def _manager_owner(entry: SeatRow) -> RoutedOwner:
     return RoutedOwner(
         role="manager",
         agent_id=entry.id,
@@ -59,7 +59,7 @@ def _master_key(leaf_key: str | None) -> str | None:
 
 
 def signal_leaf_key(
-    catalog: TerminalCatalog,
+    catalog: SeatDirectory,
     *,
     sender_agent_id: str | None,
     leaf_key: str | None = None,
@@ -83,9 +83,7 @@ def signal_leaf_key(
     return prior_manager.binding_leaf_key if prior_manager is not None else None
 
 
-def _direct_live_manager(
-    catalog: TerminalCatalog, sender_agent_id: str | None
-) -> TerminalCatalogEntry | None:
+def _direct_live_manager(catalog: SeatDirectory, sender_agent_id: str | None) -> SeatRow | None:
     sender = catalog.get(sender_agent_id) if sender_agent_id is not None else None
     if sender is None or sender.spawned_by_session is None:
         return None
@@ -100,7 +98,7 @@ def _direct_live_manager(
     return manager
 
 
-def _live_managers(catalog: TerminalCatalog) -> list[TerminalCatalogEntry]:
+def _live_managers(catalog: SeatDirectory) -> list[SeatRow]:
     return [
         entry
         for entry in catalog.list()
@@ -109,11 +107,11 @@ def _live_managers(catalog: TerminalCatalog) -> list[TerminalCatalogEntry]:
 
 
 def _scoped_managers(
-    catalog: TerminalCatalog,
-    managers: list[TerminalCatalogEntry],
+    catalog: SeatDirectory,
+    managers: list[SeatRow],
     *,
     route_leaf: str,
-) -> list[TerminalCatalogEntry]:
+) -> list[SeatRow]:
     route_master = _master_key(route_leaf)
     linked_manager_ids = {
         entry.spawned_by_session
@@ -130,7 +128,7 @@ def _scoped_managers(
 
 
 def derive_leaf_manager_owner(
-    catalog: TerminalCatalog,
+    catalog: SeatDirectory,
     *,
     sender_agent_id: str | None,
     leaf_key: str | None = None,
@@ -167,7 +165,7 @@ def _parsed_at(value: str | None) -> datetime | None:
         return None
 
 
-def _entry_progressed_after(entry: TerminalCatalogEntry, since: datetime) -> bool:
+def _entry_progressed_after(entry: SeatRow, since: datetime) -> bool:
     if entry.status == "running" and entry.turn_state == "working":
         return True
     timestamps = (
@@ -180,7 +178,7 @@ def _entry_progressed_after(entry: TerminalCatalogEntry, since: datetime) -> boo
 
 
 def _entry_carries_leaf_chain(
-    entry: TerminalCatalogEntry,
+    entry: SeatRow,
     *,
     leaf_key: str,
     manager_agent_id: str | None,
@@ -202,7 +200,7 @@ def _entry_carries_leaf_chain(
 
 
 def _is_chain_progress(
-    entry: TerminalCatalogEntry,
+    entry: SeatRow,
     *,
     leaf_key: str,
     manager_agent_id: str | None,
@@ -219,7 +217,7 @@ def _is_chain_progress(
 
 
 def leaf_chain_has_progress(
-    catalog: TerminalCatalog,
+    catalog: SeatDirectory,
     *,
     leaf_key: str,
     subject_agent_id: str | None,
@@ -249,7 +247,7 @@ def leaf_chain_has_progress(
 
 
 def derive_signal_owner(
-    catalog: TerminalCatalog,
+    catalog: SeatDirectory,
     *,
     sender_agent_id: str | None,
     message_kind: InboxMessageKind,
@@ -278,7 +276,7 @@ def derive_signal_owner(
 
 
 def _derive_spawn_owner(
-    catalog: TerminalCatalog,
+    catalog: SeatDirectory,
     *,
     sender_agent_id: str | None,
     message_kind: InboxMessageKind,
@@ -306,7 +304,7 @@ def _derive_spawn_owner(
     )
 
 
-def is_seat_dead(catalog: TerminalCatalog, agent_id: str | None) -> bool:
+def is_seat_dead(catalog: SeatDirectory, agent_id: str | None) -> bool:
     """Whether ``agent_id`` cannot receive a delivery: unknown to the catalog, or not ``running``
     (260707-HFX2-L4). A row with no catalog trace at all (never spawned through the harness path,
     a role-only mailbox) counts as dead here -- there is nothing live to skip TO it, so the ladder
@@ -317,7 +315,7 @@ def is_seat_dead(catalog: TerminalCatalog, agent_id: str | None) -> bool:
     return entry is None or entry.status != "running"
 
 
-def derive_architect_owner(catalog: TerminalCatalog) -> RoutedOwner:
+def derive_architect_owner(catalog: SeatDirectory) -> RoutedOwner:
     """The ladder's terminal addressee (ruled 2026-07-09): the LIVE architect seat when one is
     attached, else the role-only architect mailbox. The developer is an authority label, never an
     address -- a human-shaped mailbox cannot mechanically ack, which is how the 2026-07-09 storm's
@@ -335,7 +333,7 @@ def derive_architect_owner(catalog: TerminalCatalog) -> RoutedOwner:
 
 
 def derive_skip_level_owner(
-    catalog: TerminalCatalog,
+    catalog: SeatDirectory,
     *,
     sender_agent_id: str | None,
     message_kind: InboxMessageKind,

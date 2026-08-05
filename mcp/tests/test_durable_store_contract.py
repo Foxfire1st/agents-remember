@@ -37,6 +37,9 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 
+import pytest
+from _global_state import preserve_owned_mutable_state
+from agents_remember.application import server_startup
 from agents_remember.controlplane import attention_dismissals as attention_module
 from agents_remember.controlplane import durable_store
 from agents_remember.controlplane.attention_dismissals import (
@@ -66,6 +69,7 @@ from agents_remember.controlplane.expectation_rows import (
     ExpectationRowStore,
     create_expectation_row,
 )
+from agents_remember.controlplane.gate_decisions import _reclaim_gate_log
 from agents_remember.controlplane.orchestration_nudges import (
     OrchestrationNudgeRecord,
     OrchestrationNudgeStore,
@@ -73,8 +77,8 @@ from agents_remember.controlplane.orchestration_nudges import (
 )
 from agents_remember.controlplane.records import GateAnchor, GateRecord, create_gate
 from agents_remember.controlplane.store import GateStore
+from agents_remember.kernel import atomic_write
 from agents_remember.mcp import server as server_module
-from agents_remember.mcp.tools.gates import _reclaim_gate_log
 from pydantic import ValidationError
 from test_config import settings_payload
 
@@ -90,6 +94,12 @@ class _TempRoot(unittest.TestCase):
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         self.root = Path(tmp.name)
+
+
+def _contain_process_role(test: unittest.TestCase) -> None:
+    state = preserve_owned_mutable_state()
+    state.__enter__()
+    test.addCleanup(state.__exit__, None, None, None)
 
 
 def _drift(item_id: str) -> AttentionDismissalRecord:
@@ -132,11 +142,13 @@ class _IgnoredFlock:
 
 
 class _FailingOs:
-    """``os`` as ``durable_store`` sees it, with exactly one call swapped for a failure.
+    """``os`` as the atomic publish sees it, with exactly one call swapped for a failure.
 
-    Scoped to ``durable_store``'s module reference alone; ``getpid``, ``open``, ``fsync``,
-    ``close`` and ``O_RDONLY`` all forward to the real ``os``, so the rewrite under test is the
-    shipped one everywhere except at the single instruction the scenario needs to fail.
+    Scoped to ``kernel.atomic_write``'s module reference alone -- which is where
+    ``rewrite_lines``' temp-write, rename and fsyncs have lived since L6 consolidated the
+    package's thirteen copies of them. ``getpid``, ``open``, ``fsync``, ``close`` and
+    ``O_RDONLY`` all forward to the real ``os``, so the rewrite under test is the shipped one
+    everywhere except at the single instruction the scenario needs to fail.
     """
 
     def __init__(self, failing: str, error: BaseException) -> None:
@@ -152,6 +164,7 @@ class _FailingOs:
         return getattr(os, name)
 
 
+@pytest.mark.fitness
 class InProcessExclusivityTests(_TempRoot):
     """The exclusion holds between THREADS, and is stated rather than inherited from ``flock``."""
 
@@ -352,6 +365,7 @@ class InProcessExclusivityTests(_TempRoot):
         )
 
 
+@pytest.mark.fitness
 class UnsafeLockFilesystemTests(_TempRoot):
     """A lock that does not exclude is refused loudly, never downgraded to a silent no-op.
 
@@ -552,6 +566,7 @@ class BlankLineToleranceTests(_TempRoot):
         self.assertEqual([row.id for row in store.read()], ["E1", "E2"])
 
 
+@pytest.mark.fitness
 class OrchestrationNudgeRewriteTests(_TempRoot):
     """The nudge log's two rewrite entry points: the safe one and the primitive it wraps."""
 
@@ -632,14 +647,16 @@ class OrchestrationNudgeRewriteTests(_TempRoot):
         self.assertEqual([record.id for record in self.store.read()], ["N1"])
 
 
+@pytest.mark.fitness
 class FailedRewriteTests(_TempRoot):
     """A rewrite that dies mid-flight leaves no temp file behind and no damage to the log.
 
     ``rewrite_lines`` is the only destructive rewrite in the control plane, and its temp file is
-    the one artifact of it that outlives a failure. A stranded ``.gates.jsonl.<pid>.tmp`` is not
-    cosmetic: it is a partially written copy of an authority log sitting next to it, it is what
-    the next rewrite from this pid would collide with, and colliding temp names are the defect
-    that turned the dashboard's dismiss route into a 500 before this contract existed.
+    the one artifact of it that outlives a failure. A stranded ``.gates.jsonl.<pid>.<uuid>.tmp``
+    is not cosmetic: it is a partially written copy of an authority log sitting next to it, and
+    colliding temp names are the defect that turned the dashboard's dismiss route into a 500
+    before this contract existed. (The temp carries a uuid as well as the pid since L6: the pid
+    alone still let two threads in one process share one temp path.)
 
     The failure is injected at the ``os`` boundary (see :class:`_FailingOs`) because these two
     instructions cannot be made to fail from the outside: a full disk or a crashing rename is not
@@ -669,7 +686,7 @@ class FailedRewriteTests(_TempRoot):
             # The lock is taken OUTSIDE the substitution and released after it: the failure under
             # test is the rewrite's, not the lock's, and ``exclusive_access`` never touches ``os``.
             exclusive_access(self.log, GATE_OWNERSHIP),
-            patch.object(durable_store, "os", failure),
+            patch.object(atomic_write, "os", failure),
             self.assertRaises(BaseException) as raised,
         ):
             rewrite_lines(self.log, [], GATE_OWNERSHIP)
@@ -684,17 +701,17 @@ class FailedRewriteTests(_TempRoot):
     def test_a_failed_rename_removes_the_temp_file_it_had_already_written(self) -> None:
         """The worst moment to fail: the temp file exists, is fsynced, and the rename did not run.
 
-        The named path is asserted directly as well as the directory sweep, so this test says
-        which file it means -- the pid-scoped name the contract promises -- rather than only that
-        no ``.tmp`` is left.
+        The pid-scoped prefix is asserted as well as the directory sweep, so this test says which
+        file it means -- the name the contract promises -- rather than only that no ``.tmp`` is
+        left. The trailing uuid is not spelled out because it is per call by design.
         """
-        tmp = self.log.with_name(f".{self.log.name}.{os.getpid()}.tmp")
+        prefix = f".{self.log.name}.{os.getpid()}."
 
         error = self._rewrite_under(_FailingOs("replace", OSError(errno.EIO, "rename failed")))
 
         self.assertIsInstance(error, OSError)
         self.assertEqual(getattr(error, "errno", None), errno.EIO)
-        self.assertFalse(tmp.exists())
+        self.assertEqual(list(self.log.parent.glob(f"{prefix}*.tmp")), [])
 
     def test_an_interrupted_rewrite_cleans_up_too(self) -> None:
         """Why the handler catches ``BaseException`` and not ``Exception``.
@@ -761,6 +778,10 @@ class ProcessRoleDeclarationTests(_TempRoot):
     the proof that the fixture actually restores.
     """
 
+    def setUp(self) -> None:
+        super().setUp()
+        _contain_process_role(self)
+
     def test_main_declares_the_mcp_role_before_the_server_starts_serving(self) -> None:
         """Declared at the entry point, before anything can write, and load-bearing once made.
 
@@ -775,7 +796,7 @@ class ProcessRoleDeclarationTests(_TempRoot):
         role_when_serving: list[str | None] = []
 
         with (
-            patch.object(server_module, "maybe_autostart_dashboard"),
+            patch.object(server_startup, "maybe_autostart_dashboard"),
             patch.object(
                 server_module,
                 "run_server",
@@ -811,6 +832,9 @@ class ProcessRoleIsolationTests(unittest.TestCase):
     accessor the two ownership predicates use, so this asserts what they would see.
     """
 
+    def setUp(self) -> None:
+        _contain_process_role(self)
+
     def _declare_after_asserting_a_clean_process(self, role: ProcessRole) -> None:
         self.assertIsNone(
             declared_process_role(),
@@ -835,10 +859,10 @@ class ProcessRoleIsolationTests(unittest.TestCase):
 class GateReclaimOwnershipTests(_TempRoot):
     """The one call site that ASKS ``is_compaction_owner`` must act on a No.
 
-    ``mcp/tools/gates.py::_reclaim_gate_log`` is where this leaf put gate compaction after taking
-    it off the dashboard's projection tick, and the dashboard still reaches that same function --
-    it decides gates by calling ``gate_decide_payload`` directly. So the ownership guard there is
-    the whole of what keeps the moved reclaim from simply running in the old process again.
+    ``controlplane/gate_decisions.py::_reclaim_gate_log`` owns gate compaction after this leaf took
+    it off the dashboard's projection tick. Both the MCP application composition and dashboard
+    serving composition reach that same lower service, so its ownership guard is the whole of
+    what keeps the moved reclaim from simply running in the old process again.
 
     It had no test. The guard's skip branch was reached only as a side effect of a role LEAKING
     out of ``test_serving.py::CliRunTests`` into ``test_tool_response_conformance.py``, which
@@ -850,6 +874,7 @@ class GateReclaimOwnershipTests(_TempRoot):
 
     def setUp(self) -> None:
         super().setUp()
+        _contain_process_role(self)
         self.store = GateStore(self.root)
         # Fresh stamps, not the module's fixed NOW: ``_reclaim_gate_log`` compacts against the
         # real clock, and a gate older than INTERACTION_RECORD_TTL_SECONDS would be dropped by
@@ -880,7 +905,7 @@ class GateReclaimOwnershipTests(_TempRoot):
 
     def test_the_dashboard_skips_the_gate_reclaim_and_the_mcp_process_performs_it(self) -> None:
         declare_process_role("dashboard")
-        _reclaim_gate_log(self.store, "L1")
+        _reclaim_gate_log(self.store, "L1", now=datetime.now(UTC))
         self.assertEqual(
             self._ids(),
             ["G-expired", "G-open"],
@@ -889,7 +914,7 @@ class GateReclaimOwnershipTests(_TempRoot):
         )
 
         declare_process_role("mcp")
-        _reclaim_gate_log(self.store, "L1")
+        _reclaim_gate_log(self.store, "L1", now=datetime.now(UTC))
         self.assertEqual(
             self._ids(),
             ["G-open"],

@@ -4,7 +4,7 @@ from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
-from agents_remember.controllers.task_ref import TaskRef
+from agents_remember.application.task_ref import TaskRef
 
 from ..config import McpRuntimeConfig
 from ..tools import (
@@ -19,6 +19,15 @@ from ..tools import (
 
 
 def register_core_tools(server: FastMCP, config: McpRuntimeConfig) -> None:
+    """Register the core tools, split by what the caller is trying to find out."""
+    _register_identity_tools(server, config)
+    _register_orientation_tools(server, config)
+    _register_installation_tools(server, config)
+
+
+def _register_identity_tools(server: FastMCP, config: McpRuntimeConfig) -> None:
+    """What this server is and how it was configured."""
+
     @server.tool()
     def ping() -> dict[str, Any]:
         """Liveness check. Returns server name, version, and transport. Read-only; no side effects."""
@@ -30,6 +39,10 @@ def register_core_tools(server: FastMCP, config: McpRuntimeConfig) -> None:
         repo ids, allowed provider ids, and the full tool list. Read-only; reflects the settings
         loaded at startup (settings-file edits need a harness restart to take effect)."""
         return server_info_payload(config)
+
+
+def _register_orientation_tools(server: FastMCP, config: McpRuntimeConfig) -> None:
+    """Read-only reads that orient a session in a repository before it changes anything."""
 
     @server.tool()
     def context_packet(
@@ -98,6 +111,10 @@ def register_core_tools(server: FastMCP, config: McpRuntimeConfig) -> None:
             worktree_name=worktree_name,
             topology=topology,
         )
+
+
+def _register_installation_tools(server: FastMCP, config: McpRuntimeConfig) -> None:
+    """Install or refresh what the coordinator runtime needs on disk."""
 
     @server.tool()
     def runtime_install(

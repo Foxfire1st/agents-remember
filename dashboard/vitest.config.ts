@@ -26,6 +26,9 @@ export default defineConfig({
   test: {
     environment: "jsdom",
     globals: true,
+    // Unbounded forks saturated this shared host and drove it into swap; keep every
+    // config-backed run at the measured safe ceiling.
+    maxWorkers: 2,
     setupFiles: ["./src/test/setup.ts"],
     // Vitest owns logic tests under src/; the e2e/ Playwright specs (which import
     // @playwright/test) are run by `npm run e2e`, never collected here.

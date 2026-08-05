@@ -181,6 +181,10 @@ def quality_environment(code_worktree: Path) -> dict[str, str]:
     if existing:
         entries.append(existing)
     env["PYTHONPATH"] = os.pathsep.join(entries)
+    # Closeout has already reset and staged the whole task worktree before this process
+    # starts. Naming that state lets the shared wrapper distinguish it from a manual dirty
+    # tree or a pre-push ref range without inventing a second closeout-only gate.
+    env["AR_QUALITY_INVOCATION"] = "closeout-staged"
     return env
 
 

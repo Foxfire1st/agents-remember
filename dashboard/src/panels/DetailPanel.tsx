@@ -265,6 +265,13 @@ const substeps = css({
   color: "muted",
 });
 const SUBSTEP: Record<string, string> = { inProgress: css({ color: "amber" }) };
+const skippedDisposition = css({
+  display: "inline",
+  marginInlineStart: "0.4rem",
+  color: "amber",
+  fontSize: "0.72rem",
+});
+const skippedWord = css({ fontWeight: "700", letterSpacing: "0.06em" });
 
 const taskdoc = css({ display: "grid", gap: "0.75rem" });
 const taskdocHead = css({ display: "flex", alignItems: "center", gap: "0.5rem", flexWrap: "wrap" });
@@ -929,9 +936,9 @@ function displayedLeafDoc({
   const nonMaster = docs.filter((doc) => doc.kind !== "master");
   return nonMaster.length === 1 ? nonMaster[0] : undefined;
 }
-const topLevelStepProgress = (doc: TaskDocNode): { done: number; total: number } => ({
-  done: doc.steps.filter((step) => step.status === "done").length,
-  total: doc.steps.length,
+const taskStepProgress = (doc: TaskDocNode): { done: number; total: number } => ({
+  done: doc.stepsDone,
+  total: doc.stepsTotal,
 });
 
 // A master doc OR a series rendered as one. `subTasks` is widened to the union because the two
@@ -1166,7 +1173,7 @@ function SubTaskIndex({
         const displayNumber = match?.id || ref.number;
         const displayName = match?.title || ref.name;
         const label = `${displayNumber}. ${displayName}`;
-        const progress = match ? topLevelStepProgress(match) : undefined;
+        const progress = match ? taskStepProgress(match) : undefined;
         const meta = (
           <span className={sliceMeta}>
             {progress && progress.total > 0 ? `${progress.done}/${progress.total} · ` : ""}
@@ -1242,7 +1249,7 @@ function SliceList({
       <ul className={slices}>
         {orderedByCreation(sliceDocs)
           .map((doc) => {
-            const progress = topLevelStepProgress(doc);
+            const progress = taskStepProgress(doc);
             return (
               <li key={doc.docPath}>
                 <button
@@ -1304,7 +1311,7 @@ function TaskReader({
   onOpenChangeSet?: (target: ChangeSetTarget) => void;
   onOpenNotes?: (target: NotesReaderTarget) => void;
 }) {
-  const progress = topLevelStepProgress(doc);
+  const progress = taskStepProgress(doc);
   const leafKey = qualifiedLeafKey(doc);
   return (
     <div className={taskdoc} data-task-leaf-key={leafKey}>
@@ -1423,12 +1430,16 @@ function StepList({ steps }: { steps: TaskStepNode[] }) {
       {steps.map((s) => (
         <li key={s.id} className={stepRow}>
           <span className={cx(stepMarkBase, STEP_MARK[s.status] ?? "")} aria-hidden="true" />
-          <span className={STEP_TITLE[s.status] ?? ""}>{labelWithId(s.id, s.title)}</span>
+          <span className={STEP_TITLE[s.status] ?? ""}>
+            {labelWithId(s.id, s.title)}
+            {s.disposition ? <SkippedDisposition reason={s.disposition.reason} /> : null}
+          </span>
           {s.substeps.length > 0 ? (
             <ul className={substeps}>
               {s.substeps.map((sub) => (
                 <li key={sub.id} className={SUBSTEP[sub.status] ?? ""}>
                   {labelWithId(sub.id, sub.title)}
+                  {sub.disposition ? <SkippedDisposition reason={sub.disposition.reason} /> : null}
                 </li>
               ))}
             </ul>
@@ -1436,6 +1447,14 @@ function StepList({ steps }: { steps: TaskStepNode[] }) {
         </li>
       ))}
     </ol>
+  );
+}
+
+function SkippedDisposition({ reason }: { reason: string }) {
+  return (
+    <span className={skippedDisposition}>
+      <span className={skippedWord}>SKIPPED</span> — {reason}
+    </span>
   );
 }
 

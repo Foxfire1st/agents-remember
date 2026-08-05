@@ -13,6 +13,7 @@ from pathlib import Path
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
+from agents_remember.application import gate_tools
 from agents_remember.controlplane.expectation_rows import ExpectationRowStore
 from agents_remember.controlplane.operator_inbox_records import (
     InboxAddress,
@@ -22,10 +23,9 @@ from agents_remember.controlplane.operator_inbox_records import (
 from agents_remember.controlplane.records import GateAnchor, GateVerdict
 from agents_remember.kernel.agentic_settings import agentic_settings_path
 from agents_remember.mcp.config import McpRuntimeConfig
-from agents_remember.mcp.tools import gates as gate_tools
 from agents_remember.mcp.tools import operator_inbox as inbox_tools
-from agents_remember.mcp.tools.dispatch_brief import HostedDelivery
 from agents_remember.observer import observer_root, reset_ambient
+from agents_remember.serving.dispatch_brief import HostedDelivery
 from agents_remember.tasks import TaskDocument, write_task_doc
 from test_spawn_agent_session import _FakeHost, _FakePaster, call_spawn
 
@@ -141,7 +141,7 @@ class GateExpectationRowTests(unittest.TestCase):
         self.config = _config(self.tmp)
 
     def test_gate_create_writes_a_verdict_by_row(self) -> None:
-        created = gate_tools.gate_create_payload(
+        created = gate_tools.gate_create_tool(
             self.config,
             kind="plan-approval",
             anchor=GateAnchor(lifecycle_id="L1"),
@@ -152,12 +152,12 @@ class GateExpectationRowTests(unittest.TestCase):
         self.assertEqual(rows[0].sourceId, created["gateId"])
 
     def test_gate_decide_meets_the_verdict_by_row(self) -> None:
-        created = gate_tools.gate_create_payload(
+        created = gate_tools.gate_create_tool(
             self.config,
             kind="plan-approval",
             anchor=GateAnchor(lifecycle_id="L1"),
         )
-        gate_tools.gate_decide_payload(
+        gate_tools.gate_decide_tool(
             self.config,
             gate_id=created["gateId"],
             lifecycle_id="L1",

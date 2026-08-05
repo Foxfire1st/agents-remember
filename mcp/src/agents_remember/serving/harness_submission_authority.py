@@ -4,13 +4,18 @@ The authority is the only prompt FIFO.  It linearizes withdrawal against dispatc
 in the same monotonic order, and pins an accepted ordinary operation until an exact correlated
 completion releases it.  Adapters are dispatch-now vendor boundaries; they never own a second
 prompt queue.
+
+It owns the ORDER -- the dispatch timeline, the pinned active operation, the adapter conversation.
+It does not own the rows: the retained records and every read that answers for a request id live on
+``self.ledger`` (``harness_submission_ledger``), which shares this class's lock so a status read and
+the dispatcher never see different rows.
 """
 
 from __future__ import annotations
 
 import asyncio
 import json
-from collections import OrderedDict, deque
+from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 from hashlib import sha256
@@ -31,32 +36,26 @@ from agents_remember.serving.harness_control_adapter import (
     HarnessProtocolAdapter,
 )
 from agents_remember.serving.harness_control_models import (
-    EVIDENCE_PAGE_BYTE_BUDGET,
-    MAX_OPERATION_TIMELINE_PAGE,
-    AcceptanceState,
     AdapterEvent,
     AdapterSnapshot,
     AssetReference,
     ControlOperationKind,
     ControlOperationRef,
     InteractionResponse,
-    OperationTimeline,
-    OperationTimelineItem,
     PromptRequest,
     ReconciliationResult,
     ReconciliationState,
-    SubmissionAuthorityDescriptor,
     SubmissionLifecycleState,
-    SubmissionLookup,
-    SubmissionProvenance,
-    SubmissionProvenanceBatch,
     SubmissionReceipt,
     SubmissionSource,
-    SubmissionStatus,
-    SubmissionStatusBatch,
     WithdrawalRecovery,
     WithdrawalResult,
-    operation_timeline_item_wire_bytes,
+)
+from agents_remember.serving.harness_submission_ledger import (
+    OperationKey,
+    OperationRecord,
+    SubmissionLedger,
+    ref_key,
 )
 
 Clock = Callable[[], str]
@@ -64,7 +63,6 @@ SnapshotGetter = Callable[[], AdapterSnapshot]
 SnapshotSetter = Callable[[AdapterSnapshot], None]
 Publisher = Callable[[], None]
 OperationResolution = Literal["applied", "not-applied"]
-_OperationKey = tuple[ControlOperationKind, str]
 
 DISPATCH_ACCEPTANCE_GRACE_SECONDS = 0.5
 """Bound the synchronous wait for vendor acceptance evidence on a dispatchable submit head.
@@ -84,32 +82,6 @@ def _consume_future_exception(future: asyncio.Future[object]) -> None:
 
     if not future.cancelled():
         future.exception()
-
-
-@dataclass
-class _OperationRecord:
-    ref: ControlOperationRef
-    state: SubmissionLifecycleState
-    submitted_at: str
-    updated_at: str
-    source: str | None = None
-    payload_digest: str | None = None
-    text: str | None = None
-    requested_value: str | None = None
-    accepted_at: str | None = None
-    vendor_correlation_id: str | None = None
-    detail: str | None = None
-    buffered_completion_sequence: int | None = None
-    result_future: asyncio.Future[object] | None = None
-    assets: tuple[AssetReference, ...] = ()
-
-    @property
-    def key(self) -> _OperationKey:
-        return (self.ref.kind, self.ref.operation_id)
-
-    @property
-    def live(self) -> bool:
-        return self.state in {"queued", "dispatching", "unknown"}
 
 
 @dataclass(frozen=True)
@@ -162,19 +134,18 @@ class HarnessSubmissionAuthority:
             raise HarnessControlError("submission authority dispatch grace must be positive")
         self._adapter = adapter
         self._timeline_limit = timeline_limit
-        self._ledger_limit = ledger_limit
         self._dispatch_grace_seconds = dispatch_grace_seconds
         self._clock = port.clock
         self._snapshot = port.snapshot
         self._set_snapshot = port.set_snapshot
         self._publish = port.publish
         self._bridge_epoch = bridge_epoch or uuid4().hex
-        self._sequence = 0
-        self._records: OrderedDict[_OperationKey, _OperationRecord] = OrderedDict()
-        self._prompt_ids: dict[str, _OperationKey] = {}
-        self._timeline: deque[_OperationKey] = deque()
-        self._active: _OperationKey | None = None
         self._lock = asyncio.Lock()
+        self.ledger = SubmissionLedger(
+            bridge_epoch=self._bridge_epoch, limit=ledger_limit, lock=self._lock
+        )
+        self._timeline: deque[OperationKey] = deque()
+        self._active: OperationKey | None = None
         # The ordinary lane is held through one adapter method.  Status/withdraw use only
         # ``_lock`` and therefore remain responsive while vendor evidence is slow.
         self._ordinary_lane = asyncio.Lock()
@@ -186,7 +157,6 @@ class HarnessSubmissionAuthority:
         self._dispatcher: asyncio.Task[None] | None = None
         self._accepting = False
         self._last_adapter_sequence = 0
-        self._evicted_before_sequence = 0
         self._consumed_completions: deque[ControlOperationRef] = deque(maxlen=ledger_limit)
 
     @property
@@ -194,16 +164,9 @@ class HarnessSubmissionAuthority:
         return self._bridge_epoch
 
     @property
-    def retained_record_count(self) -> int:
-        return len(self._records)
-
-    @property
     def active_operation(self) -> ControlOperationRef | None:
-        record = self._records.get(self._active) if self._active is not None else None
+        record = self.ledger.by_key(self._active) if self._active is not None else None
         return record.ref if record is not None else None
-
-    def descriptor(self) -> SubmissionAuthorityDescriptor:
-        return SubmissionAuthorityDescriptor(bridge_epoch=self._bridge_epoch)
 
     def start(self) -> None:
         if self._dispatcher is not None:
@@ -227,7 +190,7 @@ class HarnessSubmissionAuthority:
             self._timeline.append(record.key)
             if not self._head_is_dispatchable(record.key):
                 self._wake.set()
-                return self._receipt(record, "queued")
+                return record.receipt("queued", bridge_epoch=self._bridge_epoch)
             future = asyncio.get_running_loop().create_future()
             record.result_future = future
             self._wake.set()
@@ -249,7 +212,7 @@ class HarnessSubmissionAuthority:
             # during dispatch) instead of leaking an unretrieved-future warning.
             future.add_done_callback(_consume_future_exception)
             async with self._lock:
-                return self._pending_dispatch_receipt(record)
+                return record.pending_dispatch_receipt(self._bridge_epoch)
 
     def _pre_admission_receipt_locked(
         self, request: PromptRequest, digest: str
@@ -261,16 +224,15 @@ class HarnessSubmissionAuthority:
         ledger with no room for a live operation rejects rather than dropping something live.
         """
 
-        prior_key = self._prompt_ids.get(request.request_id)
-        if prior_key is not None:
-            prior = self._records[prior_key]
+        prior = self.ledger.by_request_id(request.request_id)
+        if prior is not None:
             if prior.source != request.source or prior.payload_digest != digest:
                 raise HarnessRequestConflictError(
                     f"request id {request.request_id!r} already belongs to its first source/payload"
                 )
-            self._records.move_to_end(prior_key)
-            return self._duplicate_receipt(prior)
-        if self._live_count() >= self._timeline_limit or not self._make_ledger_room():
+            self.ledger.touch(prior)
+            return prior.duplicate_receipt(self._bridge_epoch)
+        if not self._has_admission_room():
             return SubmissionReceipt(
                 request_id=request.request_id,
                 acceptance="rejected",
@@ -280,11 +242,11 @@ class HarnessSubmissionAuthority:
             )
         return None
 
-    def _enrol_prompt_locked(self, request: PromptRequest, digest: str) -> _OperationRecord:
+    def _enrol_prompt_locked(self, request: PromptRequest, digest: str) -> OperationRecord:
         """Register one admitted prompt as a queued record, before it reaches the timeline."""
 
-        record = _OperationRecord(
-            ref=self._next_ref("prompt", request.request_id),
+        record = OperationRecord(
+            ref=self.ledger.next_ref("prompt", request.request_id),
             state="queued",
             submitted_at=request.submitted_at,
             updated_at=request.submitted_at,
@@ -294,12 +256,11 @@ class HarnessSubmissionAuthority:
             detail="queued inside the authoritative control bridge",
             assets=request.assets,
         )
-        self._records[record.key] = record
-        self._prompt_ids[request.request_id] = record.key
+        self.ledger.enrol(record)
         return record
 
     def _unsupported_prompt_locked(
-        self, record: _OperationRecord, request: PromptRequest
+        self, record: OperationRecord, request: PromptRequest
     ) -> SubmissionReceipt | None:
         """Retire a prompt this hosted harness cannot carry at all, before it is ever queued.
 
@@ -315,21 +276,19 @@ class HarnessSubmissionAuthority:
         """
 
         if self._snapshot().control == "unsupported":
-            self._mark_terminal(
-                record,
+            record.mark_terminal(
                 "unsupported",
                 "hosted harness does not support native prompt control",
                 request.submitted_at,
             )
-            return self._receipt(record, "unsupported")
+            return record.receipt("unsupported", bridge_epoch=self._bridge_epoch)
         if request.assets and not isinstance(self._adapter, AssetSubmitCapable):
-            self._mark_terminal(
-                record,
+            record.mark_terminal(
                 "unsupported",
                 "hosted harness does not support asset submissions",
                 request.submitted_at,
             )
-            return self._receipt(record, "unsupported")
+            return record.receipt("unsupported", bridge_epoch=self._bridge_epoch)
         return None
 
     async def set_model(self, model_key: str) -> SetResult:
@@ -343,7 +302,7 @@ class HarnessSubmissionAuthority:
         async with self._lock:
             snapshot_now = self._snapshot()
             pending = snapshot_now.pending_interaction
-            active = self._records.get(self._active) if self._active is not None else None
+            active = self.ledger.by_key(self._active) if self._active is not None else None
             # Parent-ness is decided by the entry's own thread, not by which slot
             # carries it: concurrent parent pendings beyond the singular slot's
             # oldest ride the plural tuple (the adapter keeps a per-thread pending
@@ -401,15 +360,14 @@ class HarnessSubmissionAuthority:
     ) -> ReconciliationResult:
         self._require_epoch(expected_bridge_epoch)
         async with self._lock:
-            key = self._prompt_ids.get(request_id)
-            record = self._records.get(key) if key is not None else None
+            record = self.ledger.by_request_id(request_id)
             if record is None:
                 raise HarnessControlError(
                     f"submission {request_id!r} is no longer retained for reconciliation"
                 )
-            known = self._known_reconciliation(record)
+            known = record.reconciliation(self._bridge_epoch)
             if known is not None:
-                self._records.move_to_end(record.key)
+                self.ledger.touch(record)
                 return known
             ref = record.ref
         # Reconciliation queries only the already-active ambiguous operation.  It never admits or
@@ -418,7 +376,7 @@ class HarnessSubmissionAuthority:
         if result.request_id != request_id:
             raise HarnessControlError("adapter reconciliation request id does not match")
         async with self._lock:
-            current = self._records.get(ref_key(ref))
+            current = self.ledger.by_key(ref_key(ref))
             if current is None:
                 raise HarnessControlError("submission disappeared during reconciliation")
             if result.state == "accepted":
@@ -429,10 +387,10 @@ class HarnessSubmissionAuthority:
                 current.updated_at = result.reconciled_at
                 # Accepted proves delivery, not turn completion; the active gate stays pinned.
             elif result.state == "rejected":
-                self._mark_terminal(current, "rejected", result.detail, result.reconciled_at)
+                current.mark_terminal("rejected", result.detail, result.reconciled_at)
                 self._release_head(current, consume_completion=False)
             elif result.state == "unsupported":
-                self._mark_terminal(current, "unsupported", result.detail, result.reconciled_at)
+                current.mark_terminal("unsupported", result.detail, result.reconciled_at)
                 self._release_head(current, consume_completion=False)
             else:
                 current.detail = result.detail
@@ -456,15 +414,13 @@ class HarnessSubmissionAuthority:
         if resolution not in {"applied", "not-applied"}:
             raise HarnessControlError("operation resolution must be applied or not-applied")
         async with self._lock:
-            record = self._records.get((operation_kind, operation_id))
+            record = self.ledger.by_key((operation_kind, operation_id))
             if record is None or record.state != "unknown":
                 raise HarnessControlError("only an unknown operation can be operator-resolved")
-            at = self._clock()
-            self._mark_terminal(
-                record,
+            record.mark_terminal(
                 "delivered" if resolution == "applied" else "rejected",
                 detail,
-                at,
+                self._clock(),
             )
             self._release_head(record, consume_completion=False)
             self._wake.set()
@@ -493,124 +449,6 @@ class HarnessSubmissionAuthority:
             submission_state="delivered" if state == "accepted" else "rejected",
         )
 
-    async def status(
-        self,
-        expected_bridge_epoch: str,
-        request_ids: tuple[str, ...],
-        *,
-        cockpit_only: bool,
-    ) -> SubmissionStatusBatch:
-        self._require_epoch(expected_bridge_epoch)
-        if not 1 <= len(request_ids) <= 64:
-            raise HarnessControlError("submission status requires 1..64 request ids")
-        if len(set(request_ids)) != len(request_ids):
-            raise HarnessControlError("submission status request ids must be unique")
-        async with self._lock:
-            lookups: list[SubmissionLookup] = []
-            for request_id in request_ids:
-                key = self._prompt_ids.get(request_id)
-                record = self._records.get(key) if key is not None else None
-                if record is None or (cockpit_only and record.source != "cockpit"):
-                    lookups.append(SubmissionLookup(request_id=request_id, outcome="not-found"))
-                    continue
-                lookups.append(
-                    SubmissionLookup(
-                        request_id=request_id,
-                        outcome="found",
-                        submission=self._status(record),
-                    )
-                )
-            return SubmissionStatusBatch(
-                bridge_epoch=self._bridge_epoch,
-                submissions=tuple(lookups),
-            )
-
-    async def provenance(
-        self,
-        expected_bridge_epoch: str,
-        request_ids: tuple[str, ...],
-    ) -> SubmissionProvenanceBatch:
-        """Read-only provenance batch across every source; never origin-filtered."""
-
-        self._require_epoch(expected_bridge_epoch)
-        if not 1 <= len(request_ids) <= 64:
-            raise HarnessControlError("submission provenance requires 1..64 request ids")
-        if len(set(request_ids)) != len(request_ids):
-            raise HarnessControlError("submission provenance request ids must be unique")
-        async with self._lock:
-            provenance: list[SubmissionProvenance] = []
-            for request_id in request_ids:
-                key = self._prompt_ids.get(request_id)
-                record = self._records.get(key) if key is not None else None
-                if record is None:
-                    provenance.append(
-                        SubmissionProvenance(request_id=request_id, outcome="not-found")
-                    )
-                    continue
-                provenance.append(
-                    SubmissionProvenance(
-                        request_id=request_id,
-                        outcome="found",
-                        source=cast(SubmissionSource | None, record.source),
-                        state=record.state,
-                        submitted_at=record.submitted_at,
-                        updated_at=record.updated_at,
-                        accepted_at=record.accepted_at,
-                        vendor_correlation_id=record.vendor_correlation_id,
-                    )
-                )
-            return SubmissionProvenanceBatch(
-                bridge_epoch=self._bridge_epoch,
-                provenance=tuple(provenance),
-            )
-
-    async def operation_timeline(
-        self,
-        expected_bridge_epoch: str,
-        *,
-        after_sequence: int = 0,
-        limit: int = MAX_OPERATION_TIMELINE_PAGE,
-        byte_budget: int = EVIDENCE_PAGE_BYTE_BUDGET,
-    ) -> OperationTimeline:
-        """Page the retained ledger, never bodies; completeness is the union of pages."""
-
-        self._require_epoch(expected_bridge_epoch)
-        if limit < 1 or byte_budget < 1:
-            raise HarnessControlError("operation timeline requires positive limit and byte budget")
-        bounded = min(MAX_OPERATION_TIMELINE_PAGE, limit)
-        async with self._lock:
-            items: list[OperationTimelineItem] = []
-            used = 0
-            truncated = False
-            for record in sorted(self._records.values(), key=lambda item: item.ref.sequence):
-                if record.ref.sequence <= after_sequence:
-                    continue
-                item = OperationTimelineItem(
-                    operation_id=record.ref.operation_id,
-                    kind=record.ref.kind,
-                    source=cast(SubmissionSource | None, record.source),
-                    state=record.state,
-                    sequence=record.ref.sequence,
-                    submitted_at=record.submitted_at,
-                    updated_at=record.updated_at,
-                    accepted_at=record.accepted_at,
-                    payload_digest_present=record.payload_digest is not None,
-                    vendor_correlation_id=record.vendor_correlation_id,
-                )
-                size = operation_timeline_item_wire_bytes(item)
-                if len(items) >= bounded or (items and used + size > byte_budget):
-                    truncated = True
-                    break
-                items.append(item)
-                used += size
-            return OperationTimeline(
-                bridge_epoch=self._bridge_epoch,
-                latest_sequence=self._sequence,
-                evicted_before_sequence=self._evicted_before_sequence,
-                truncated=truncated,
-                items=tuple(items),
-            )
-
     async def withdraw(
         self,
         expected_bridge_epoch: str,
@@ -620,8 +458,7 @@ class HarnessSubmissionAuthority:
     ) -> WithdrawalResult:
         self._require_epoch(expected_bridge_epoch)
         async with self._lock:
-            key = self._prompt_ids.get(request_id)
-            record = self._records.get(key) if key is not None else None
+            record = self.ledger.by_request_id(request_id)
             if record is None or (cockpit_only and record.source != "cockpit"):
                 return WithdrawalResult(
                     request_id=request_id,
@@ -648,9 +485,8 @@ class HarnessSubmissionAuthority:
             self._timeline.remove(record.key)
             # The exact body crosses once, inside this response, before the tombstone fires.
             recovery = WithdrawalRecovery(text=record.text, assets=record.assets)
-            self._mark_terminal(record, "withdrawn", "queued submission was withdrawn", at)
-            if record.result_future is not None and not record.result_future.done():
-                record.result_future.set_result(self._receipt(record, "rejected"))
+            record.mark_terminal("withdrawn", "queued submission was withdrawn", at)
+            record.resolve(record.receipt("rejected", bridge_epoch=self._bridge_epoch))
             self._wake.set()
             return WithdrawalResult(
                 request_id=request_id,
@@ -678,7 +514,7 @@ class HarnessSubmissionAuthority:
                 raise HarnessControlError("completed adapter event bridge epoch mismatch")
             if ref in self._consumed_completions:
                 raise HarnessControlError("duplicate adapter completion cannot release a successor")
-            active = self._records.get(self._active) if self._active is not None else None
+            active = self.ledger.by_key(self._active) if self._active is not None else None
             if active is None or active.ref != ref:
                 raise HarnessControlError("adapter completion does not match the active operation")
             if active.state == "dispatching":
@@ -688,7 +524,7 @@ class HarnessSubmissionAuthority:
                 return
             if active.state not in {"delivered", "unknown"}:
                 raise HarnessControlError("active operation is not completion-eligible")
-            self._mark_terminal(active, "delivered", active.detail, event.created_at)
+            active.mark_terminal("delivered", active.detail, event.created_at)
             self._release_head(active, consume_completion=True)
             self._wake.set()
 
@@ -701,7 +537,7 @@ class HarnessSubmissionAuthority:
         self._accepting = False
         if not forced:
             async with self._lock:
-                active = self._records.get(self._active) if self._active is not None else None
+                active = self.ledger.by_key(self._active) if self._active is not None else None
                 pending_dispatch = (
                     active.result_future
                     if active is not None
@@ -717,7 +553,7 @@ class HarnessSubmissionAuthority:
             await asyncio.gather(self._dispatcher, return_exceptions=True)
         error = HarnessControlError("submission authority stopped")
         async with self._lock:
-            for record in self._records.values():
+            for record in self.ledger.records():
                 if record.result_future is not None and not record.result_future.done():
                     record.result_future.set_exception(HarnessControlError(str(error)))
         await self._adapter.stop("forced" if forced else "graceful")
@@ -734,19 +570,17 @@ class HarnessSubmissionAuthority:
                 detail="hosted harness does not support native capability control",
             )
         async with self._lock:
-            if self._live_count() >= self._timeline_limit or not self._make_ledger_room():
+            if not self._has_admission_room():
                 return SetResult(
                     ok=False,
                     acceptance="unknown",
                     requested_value=requested_value,
                     detail="operation ledger is full of live or unresolved operations",
                 )
-            next_sequence = self._sequence + 1
-            ref = self._next_ref(kind, f"{self._bridge_epoch}:{next_sequence}:{kind}")
             future: asyncio.Future[object] = asyncio.get_running_loop().create_future()
             at = self._clock()
-            record = _OperationRecord(
-                ref=ref,
+            record = OperationRecord(
+                ref=self.ledger.next_ref(kind),
                 state="queued",
                 submitted_at=at,
                 updated_at=at,
@@ -754,7 +588,7 @@ class HarnessSubmissionAuthority:
                 detail="queued in the authoritative ordinary-operation timeline",
                 result_future=future,
             )
-            self._records[record.key] = record
+            self.ledger.enrol(record)
             self._timeline.append(record.key)
             self._wake.set()
         return cast(SetResult, await asyncio.shield(future))
@@ -789,17 +623,18 @@ class HarnessSubmissionAuthority:
                     return True
             return await self._send_and_settle(record)
 
-    def _dispatchable_head_locked(self) -> _OperationRecord | None:
+    def _dispatchable_head_locked(self) -> OperationRecord | None:
         """The queued head this step may dispatch, or ``None`` when there is nothing to do."""
 
         if not self._timeline or self._active is not None:
             return None
-        record = self._records[self._timeline[0]]
+        record = self.ledger.by_key(self._timeline[0])
+        assert record is not None
         if record.state != "queued" or not self._snapshot_allows_dispatch():
             return None
         return record
 
-    async def _preflight_declined(self, record: _OperationRecord) -> bool:
+    async def _preflight_declined(self, record: OperationRecord) -> bool:
         """Ask the adapter whether it can take the operation; ``True`` means stand down.
 
         A preflight sends no operation bytes, so a busy or not-yet-connected adapter simply leaves
@@ -817,18 +652,18 @@ class HarnessSubmissionAuthority:
                 record.detail = str(exc)
                 record.updated_at = self._clock()
                 if record.ref.kind == "prompt":
-                    self._resolve_record_future(record, self._receipt(record, "queued"))
+                    record.resolve(record.receipt("queued", bridge_epoch=self._bridge_epoch))
             return True
         return False
 
     async def _unknown_after_preflight_claim(
-        self, record: _OperationRecord, exc: HarnessAdapterDisconnectedError
+        self, record: OperationRecord, exc: HarnessAdapterDisconnectedError
     ) -> None:
         """Install the ambiguity barrier for a preflight that claims it may have sent bytes."""
 
         async with self._lock:
             self._active = record.key
-            self._set_unknown_locked(record, str(exc), exc.vendor_correlation_id)
+            self._mark_unknown_locked(record, str(exc), exc.vendor_correlation_id)
             snapshot = self._snapshot()
             self._set_snapshot(
                 replace(
@@ -841,7 +676,7 @@ class HarnessSubmissionAuthority:
             )
             self._publish()
 
-    def _claim_head_locked(self, record: _OperationRecord) -> bool:
+    def _claim_head_locked(self, record: OperationRecord) -> bool:
         """Re-verify the head under the lock and mark it dispatching; ``False`` = the world moved.
 
         The preflight ran outside the lock, so the timeline, the bridge epoch and the snapshot may
@@ -862,7 +697,7 @@ class HarnessSubmissionAuthority:
         self._active = record.key
         return True
 
-    async def _send_and_settle(self, record: _OperationRecord) -> bool:
+    async def _send_and_settle(self, record: OperationRecord) -> bool:
         """Issue the claimed operation and apply whatever came back.
 
         Every failure mode here turns on what the adapter can certify. A busy adapter, or a
@@ -891,7 +726,7 @@ class HarnessSubmissionAuthority:
             await self._incoherent_method_result(record, exc)
             return False
 
-    async def _invoke_adapter(self, record: _OperationRecord) -> object:
+    async def _invoke_adapter(self, record: OperationRecord) -> object:
         """Call the adapter method this operation names, taking the asset path when it carries any.
 
         Whether this hosted harness can carry assets at all is decided ONCE, at admission, by
@@ -921,19 +756,19 @@ class HarnessSubmissionAuthority:
         assert isinstance(capable, AssetSubmitCapable)
         return await capable.submit_with_assets(request)
 
-    async def _adapter_preflight(self, record: _OperationRecord) -> None:
+    async def _adapter_preflight(self, record: OperationRecord) -> None:
         await self._adapter.preflight_operation(record.ref)
 
     async def _adapter_setter(
-        self, kind: ControlOperationKind, record: _OperationRecord
+        self, kind: ControlOperationKind, record: OperationRecord
     ) -> SetResult:
         assert record.requested_value is not None
         method = self._adapter.set_model if kind == "set-model" else self._adapter.set_effort
         return await method(record.requested_value, operation=record.ref)
 
-    async def _apply_method_result(self, record: _OperationRecord, result: object) -> bool:
+    async def _apply_method_result(self, record: OperationRecord, result: object) -> bool:
         async with self._lock:
-            current = self._records.get(record.key)
+            current = self.ledger.by_key(record.key)
             if current is not record or self._active != record.key:
                 raise HarnessControlError("ordinary operation changed while adapter method ran")
             at = self._clock()
@@ -942,7 +777,7 @@ class HarnessSubmissionAuthority:
             return self._apply_set_result_locked(record, result, at=at)
 
     def _verified_prompt_receipt(
-        self, record: _OperationRecord, result: object
+        self, record: OperationRecord, result: object
     ) -> SubmissionReceipt:
         """The adapter's result read as a receipt for exactly this operation, or a control error."""
 
@@ -953,23 +788,23 @@ class HarnessSubmissionAuthority:
         return result
 
     def _accept_prompt_locked(
-        self, record: _OperationRecord, receipt: SubmissionReceipt, *, at: str
+        self, record: OperationRecord, receipt: SubmissionReceipt, *, at: str
     ) -> None:
         """Record the acceptance the submitter is owed, without deciding the turn is over."""
 
         record.state = "delivered"
         record.accepted_at = receipt.accepted_at or at
-        self._resolve_record_future(record, self._receipt(record, "immediate"))
+        record.resolve(record.receipt("immediate", bridge_epoch=self._bridge_epoch))
 
-    def _complete_delivered_locked(self, record: _OperationRecord, *, at: str) -> None:
+    def _complete_delivered_locked(self, record: OperationRecord, *, at: str) -> None:
         """Retire a delivered prompt whose turn is also over and release the head."""
 
-        self._mark_terminal(record, "delivered", record.detail, at)
+        record.mark_terminal("delivered", record.detail, at)
         self._release_head(record, consume_completion=True)
         self._wake.set()
 
     def _apply_prompt_receipt_locked(
-        self, record: _OperationRecord, result: object, *, at: str
+        self, record: OperationRecord, result: object, *, at: str
     ) -> bool:
         """Apply one adapter submission receipt to the head. Returns whether the head was released.
 
@@ -983,7 +818,7 @@ class HarnessSubmissionAuthority:
         receipt = self._verified_prompt_receipt(record, result)
         if receipt.acceptance == "queued":
             # A vendor/adaptor queue escaped the common authority after dispatch crossed.
-            self._set_unknown_locked(
+            self._mark_unknown_locked(
                 record,
                 "adapter returned forbidden queued acceptance after dispatch",
                 receipt.vendor_correlation_id,
@@ -1005,22 +840,20 @@ class HarnessSubmissionAuthority:
             self._complete_delivered_locked(record, at=at)
             return True
         if receipt.acceptance in {"rejected", "unsupported"}:
-            self._mark_terminal(record, receipt.acceptance, receipt.detail, at)
+            record.mark_terminal(receipt.acceptance, receipt.detail, at)
             projected = "rejected" if receipt.acceptance == "rejected" else "unsupported"
-            self._resolve_record_future(record, self._receipt(record, projected))
+            record.resolve(record.receipt(projected, bridge_epoch=self._bridge_epoch))
             self._release_head(record, consume_completion=False)
             self._wake.set()
             return True
-        self._set_unknown_locked(
+        self._mark_unknown_locked(
             record,
             receipt.detail or "adapter could not prove prompt acceptance",
             receipt.vendor_correlation_id,
         )
         return False
 
-    def _apply_set_result_locked(
-        self, record: _OperationRecord, result: object, *, at: str
-    ) -> bool:
+    def _apply_set_result_locked(self, record: OperationRecord, result: object, *, at: str) -> bool:
         """Apply one adapter setter result to the head. Returns whether the head was released.
 
         A setter has no later acceptance echo to wait for, so it is terminal the moment it returns
@@ -1033,22 +866,22 @@ class HarnessSubmissionAuthority:
         record.detail = result.detail
         record.updated_at = at
         if result.acceptance == "unknown" and record.buffered_completion_sequence is not None:
-            self._resolve_record_future(record, replace(result, ok=True, acceptance="immediate"))
+            record.resolve(replace(result, ok=True, acceptance="immediate"))
             self._complete_delivered_locked(record, at=at)
             return True
-        self._resolve_record_future(record, result)
+        record.resolve(result)
         if result.acceptance == "unknown":
             record.state = "unknown"
             return False
         terminal_state: SubmissionLifecycleState = (
             "unsupported" if result.acceptance == "unsupported" else "delivered"
         )
-        self._mark_terminal(record, terminal_state, result.detail, at)
+        record.mark_terminal(terminal_state, result.detail, at)
         self._release_head(record, consume_completion=False)
         self._wake.set()
         return True
 
-    async def _certified_pre_send_busy(self, record: _OperationRecord, detail: str) -> None:
+    async def _certified_pre_send_busy(self, record: OperationRecord, detail: str) -> None:
         async with self._lock:
             if self._active != record.key or record.state != "dispatching":
                 raise HarnessControlError("pre-send busy result does not match active dispatch")
@@ -1057,10 +890,10 @@ class HarnessSubmissionAuthority:
             record.updated_at = self._clock()
             self._active = None
             if record.ref.kind == "prompt":
-                self._resolve_record_future(record, self._receipt(record, "queued"))
+                record.resolve(record.receipt("queued", bridge_epoch=self._bridge_epoch))
             # Do not hot-loop. A direct adapter readiness event wakes the dispatcher.
 
-    async def _incoherent_method_result(self, record: _OperationRecord, error: Exception) -> None:
+    async def _incoherent_method_result(self, record: OperationRecord, error: Exception) -> None:
         """Install an ambiguity barrier when post-call adapter evidence is incoherent.
 
         The adapter method has already returned, so the authority cannot certify that the
@@ -1073,17 +906,17 @@ class HarnessSubmissionAuthority:
                 raise HarnessControlError(
                     "incoherent adapter result does not match active dispatch"
                 ) from error
-            self._set_unknown_locked(
+            self._mark_unknown_locked(
                 record,
                 f"incoherent adapter {type(error).__name__}: {error}",
                 None,
             )
 
     async def _possible_send_failure(
-        self, record: _OperationRecord, detail: str, vendor_correlation_id: str | None
+        self, record: OperationRecord, detail: str, vendor_correlation_id: str | None
     ) -> None:
         async with self._lock:
-            self._set_unknown_locked(record, detail, vendor_correlation_id)
+            self._mark_unknown_locked(record, detail, vendor_correlation_id)
             snapshot = self._snapshot()
             self._set_snapshot(
                 replace(
@@ -1096,135 +929,17 @@ class HarnessSubmissionAuthority:
             )
             self._publish()
 
-    def _set_unknown_locked(
-        self, record: _OperationRecord, detail: str, vendor_correlation_id: str | None
+    def _mark_unknown_locked(
+        self, record: OperationRecord, detail: str, vendor_correlation_id: str | None
     ) -> None:
-        record.state = "unknown"
-        record.detail = detail
-        record.vendor_correlation_id = vendor_correlation_id
-        record.updated_at = self._clock()
-        if record.ref.kind == "prompt":
-            self._resolve_record_future(record, self._receipt(record, "unknown"))
-        elif record.requested_value is not None:
-            self._resolve_record_future(
-                record,
-                SetResult(
-                    ok=False,
-                    acceptance="unknown",
-                    requested_value=record.requested_value,
-                    detail=detail,
-                ),
-            )
-
-    def _known_reconciliation(self, record: _OperationRecord) -> ReconciliationResult | None:
-        if record.state == "unknown":
-            return None
-        state: ReconciliationState
-        if record.state in {"queued", "dispatching", "delivered"}:
-            state = "accepted"
-        elif record.state in {"withdrawn", "rejected"}:
-            state = "rejected"
-        else:
-            state = "unsupported"
-        return ReconciliationResult(
-            request_id=record.ref.operation_id,
-            state=state,
-            reconciled_at=record.accepted_at or record.updated_at,
-            vendor_correlation_id=record.vendor_correlation_id,
-            detail=record.detail,
-            bridge_epoch=self._bridge_epoch,
-            submission_state=record.state,
-        )
-
-    def _duplicate_receipt(self, record: _OperationRecord) -> SubmissionReceipt:
-        acceptance = {
-            "queued": "queued",
-            "dispatching": "unknown",
-            "delivered": "immediate",
-            "withdrawn": "rejected",
-            "unknown": "unknown",
-            "rejected": "rejected",
-            "unsupported": "unsupported",
-        }[record.state]
-        detail = record.detail
-        if record.state == "dispatching":
-            detail = "dispatch is in flight; query status/reconcile with the same request id"
-        elif record.state == "withdrawn":
-            detail = "the queued submission was withdrawn and will not be dispatched"
-        return self._receipt(record, acceptance, detail=detail)
-
-    def _pending_dispatch_receipt(self, record: _OperationRecord) -> SubmissionReceipt:
-        """Receipt for a live record whose acceptance evidence outlasted the dispatch grace.
-
-        "queued" is the honest synchronous word for a not-yet-vendor-verified submission: the
-        record stays live on the timeline, and status/reconcile project acceptance when the echo
-        lands.  A record that raced into a terminal or ambiguous state during the grace reports
-        its exact state through the duplicate mapping instead.
-        """
-
-        if record.state == "dispatching":
-            return self._receipt(
-                record,
-                "queued",
-                detail=(
-                    "dispatch is in flight; acceptance evidence is pending — "
-                    "query status/reconcile with the same request id"
-                ),
-            )
-        if record.state == "queued":
-            return self._receipt(record, "queued")
-        return self._duplicate_receipt(record)
-
-    def _receipt(
-        self,
-        record: _OperationRecord,
-        acceptance: str,
-        *,
-        detail: str | None = None,
-    ) -> SubmissionReceipt:
-        raw: dict[str, object] = {}
-        if record.assets:
-            # Additive native-acceptance evidence; asset-free receipts keep raw={} byte-identical.
-            raw["assetIds"] = [asset.asset_id for asset in record.assets]
-        return SubmissionReceipt(
-            request_id=record.ref.operation_id,
-            acceptance=cast(AcceptanceState, acceptance),
-            submitted_at=record.submitted_at,
-            vendor_correlation_id=record.vendor_correlation_id,
-            accepted_at=record.accepted_at,
-            detail=record.detail if detail is None else detail,
-            raw=raw,
+        record.mark_unknown(
+            detail,
+            vendor_correlation_id,
+            at=self._clock(),
             bridge_epoch=self._bridge_epoch,
         )
 
-    def _status(self, record: _OperationRecord) -> SubmissionStatus:
-        return SubmissionStatus(
-            request_id=record.ref.operation_id,
-            state=record.state,
-            submitted_at=record.submitted_at,
-            updated_at=record.updated_at,
-            accepted_at=record.accepted_at,
-            withdrawable=record.state == "queued",
-            detail=record.detail,
-        )
-
-    def _mark_terminal(
-        self,
-        record: _OperationRecord,
-        state: SubmissionLifecycleState,
-        detail: str | None,
-        at: str,
-    ) -> None:
-        record.state = state
-        record.detail = detail
-        record.updated_at = at
-        if state == "delivered" and record.accepted_at is None:
-            record.accepted_at = at
-        # Terminal tombstones retain the digest and lifecycle metadata, never full prompt text.
-        record.text = None
-        record.assets = ()
-
-    def _release_head(self, record: _OperationRecord, *, consume_completion: bool) -> None:
+    def _release_head(self, record: OperationRecord, *, consume_completion: bool) -> None:
         if self._active == record.key:
             self._active = None
         if self._timeline and self._timeline[0] == record.key:
@@ -1235,9 +950,9 @@ class HarnessSubmissionAuthority:
             self._consumed_completions.append(record.ref)
         record.buffered_completion_sequence = None
         self._responded_interactions.clear()
-        self._records.move_to_end(record.key)
+        self.ledger.touch(record)
 
-    def _head_is_dispatchable(self, key: _OperationKey) -> bool:
+    def _head_is_dispatchable(self, key: OperationKey) -> bool:
         return (
             len(self._timeline) == 1
             and self._timeline[0] == key
@@ -1249,39 +964,17 @@ class HarnessSubmissionAuthority:
         snapshot = self._snapshot()
         return snapshot.control == "ready" and snapshot.activity == "idle"
 
-    def _next_ref(self, kind: ControlOperationKind, operation_id: str) -> ControlOperationRef:
-        self._sequence += 1
-        return ControlOperationRef(
-            bridge_epoch=self._bridge_epoch,
-            sequence=self._sequence,
-            operation_id=operation_id,
-            kind=kind,
-        )
+    def _has_admission_room(self) -> bool:
+        """Whether one more operation fits: a free timeline slot AND a ledger row to spend."""
 
-    def _live_count(self) -> int:
-        return sum(
-            1 for record in self._records.values() if record.live or record.key == self._active
-        )
+        return self.ledger.live_count(
+            self._active
+        ) < self._timeline_limit and self.ledger.make_room(self._pinned)
 
-    def _make_ledger_room(self) -> bool:
-        while len(self._records) >= self._ledger_limit:
-            evictable = next(
-                (
-                    key
-                    for key, record in self._records.items()
-                    if key != self._active
-                    and key not in self._timeline
-                    and record.state in {"delivered", "withdrawn", "rejected", "unsupported"}
-                ),
-                None,
-            )
-            if evictable is None:
-                return False
-            record = self._records.pop(evictable)
-            self._evicted_before_sequence = max(self._evicted_before_sequence, record.ref.sequence)
-            if record.ref.kind == "prompt":
-                self._prompt_ids.pop(record.ref.operation_id, None)
-        return True
+    def _pinned(self, key: OperationKey) -> bool:
+        """Whether dispatch still needs this row, which is what eviction must never take."""
+
+        return key == self._active or key in self._timeline
 
     def _require_epoch(self, expected: str | None) -> None:
         if expected is not None and expected != self._bridge_epoch:
@@ -1315,12 +1008,6 @@ class HarnessSubmissionAuthority:
         return sha256(canonical.encode("utf-8")).hexdigest()
 
     @staticmethod
-    def _resolve_record_future(record: _OperationRecord, value: object) -> None:
-        future = record.result_future
-        if future is not None and not future.done():
-            future.set_result(value)
-
-    @staticmethod
     def _validate_set_result(result: SetResult, requested_value: str) -> None:
         if result.requested_value != requested_value:
             raise HarnessControlError("adapter set result does not match requested value")
@@ -1334,7 +1021,3 @@ class HarnessSubmissionAuthority:
                 raise HarnessControlError("accepted setter result has incoherent evidence")
         elif result.ok or result.effective_value is not None:
             raise HarnessControlError("failed setter result cannot claim effect")
-
-
-def ref_key(ref: ControlOperationRef) -> _OperationKey:
-    return (ref.kind, ref.operation_id)

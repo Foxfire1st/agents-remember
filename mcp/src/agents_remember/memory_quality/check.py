@@ -1,4 +1,13 @@
-"""Run memory-layer quality checks."""
+"""Run the registered memory-layer quality checks.
+
+Every ``STYLE_CHECKS`` entry receives ``StyleCheckInputs`` so tree-only, code-aware, and
+history-aware checks share one gate path. A required input that is unavailable must appear
+in that check's result rather than produce an empty success.
+
+``reportOnlyFindings`` are surfaced and counted but do not affect ``ok``. Use them only
+for ranked review output, never to soften an enforcing invariant. Detail samples may be
+bounded; total counts remain exact.
+"""
 
 from __future__ import annotations
 
@@ -10,18 +19,61 @@ from typing import Any
 from agents_remember.memory_quality.integrity.onboarding_drift_check.summary import (
     run_drift_summary,
 )
+from agents_remember.memory_quality.style.citations import claim_reopen, range_resolution
+from agents_remember.memory_quality.style.document_shape import diff_markers, tables
 from agents_remember.memory_quality.style.update_history import history_order
 
-CheckRunner = Callable[[Path], dict[str, Any]]
 DRIFT_CHECK_NAME = "integrity.onboarding_drift_check.summary"
+FINDING_KEYS = ("findings", "reportOnlyFindings")
+# Matches the drift check's own `detail_limit` default, for the same reason.
+REPORT_ONLY_SAMPLE_LIMIT = 50
+
+
+@dataclass(frozen=True)
+class StyleCheckInputs:
+    """What a style check may read: the memory tree, and the code tree when there is one.
+
+    ``code_repository_root`` is ``None`` only for a caller that has no code checkout to
+    resolve against -- the two callers in the product (``memory_quality_check`` and the
+    closeout gate) both take it from the repository they are closing out. A check that needs
+    it and does not get it says so in its own result rather than passing quietly.
+    """
+
+    onboarding_root: Path
+    code_repository_root: Path | None = None
+
+
+CheckRunner = Callable[[StyleCheckInputs], dict[str, Any]]
+
+
+def onboarding_only(runner: Callable[[Path], dict[str, Any]]) -> CheckRunner:
+    """Adapt a check that reads only the onboarding tree to the one runner signature."""
+    return lambda inputs: runner(inputs.onboarding_root)
+
 
 STYLE_CHECKS: dict[str, CheckRunner] = {
-    history_order.CHECK_NAME: history_order.check_onboarding_root,
+    claim_reopen.CHECK_NAME: lambda inputs: claim_reopen.check_onboarding_root(
+        inputs.onboarding_root, inputs.code_repository_root
+    ),
+    diff_markers.CHECK_NAME: onboarding_only(diff_markers.check_onboarding_root),
+    history_order.CHECK_NAME: onboarding_only(history_order.check_onboarding_root),
+    range_resolution.CHECK_NAME: lambda inputs: range_resolution.check_onboarding_root(
+        inputs.onboarding_root, inputs.code_repository_root
+    ),
+    tables.CHECK_NAME: onboarding_only(tables.check_onboarding_root),
 }
 INTEGRITY_CHECKS = (DRIFT_CHECK_NAME,)
 AVAILABLE_CHECKS = (*INTEGRITY_CHECKS, *STYLE_CHECKS)
 DEFAULT_STYLE_CHECKS = tuple(STYLE_CHECKS)
 DEFAULT_CONTEXT_CHECKS = (*INTEGRITY_CHECKS, *DEFAULT_STYLE_CHECKS)
+# Closeout is one quality gate with two temporal phases. Historical claim evidence must be
+# compared while the persisted verification stamp is still old; drift and the other style
+# rules must see the single ordinary metadata refresh. Splitting this declared check list is
+# what preserves both truths without copying or double-stamping provenance.
+BEFORE_METADATA_REFRESH_CHECKS = (claim_reopen.CHECK_NAME,)
+AFTER_METADATA_REFRESH_CHECKS = tuple(
+    check for check in DEFAULT_CONTEXT_CHECKS if check not in BEFORE_METADATA_REFRESH_CHECKS
+)
 
 
 @dataclass(frozen=True)
@@ -40,17 +92,24 @@ def run_memory_quality_check(
     selected = normalize_checks(checks, include_integrity=drift_context is not None)
     check_results: dict[str, Any] = {}
     findings: list[dict[str, Any]] = []
+    report_only: list[dict[str, Any]] = []
     finding_count = 0
     for check in selected:
         result = run_check(check, onboarding_root, drift_context)
-        check_results[check] = {key: value for key, value in result.items() if key != "findings"}
+        check_results[check] = {
+            key: value for key, value in result.items() if key not in FINDING_KEYS
+        }
         finding_count += int(result.get("findingCount", 0))
         findings.extend(result["findings"])
+        report_only.extend(result.get("reportOnlyFindings", []))
     return {
         "ok": all(result.get("ok", False) for result in check_results.values()),
         "checks": check_results,
         "findingCount": finding_count,
         "findings": findings,
+        "reportOnlyFindingCount": len(report_only),
+        "reportOnlySample": report_only[:REPORT_ONLY_SAMPLE_LIMIT],
+        "reportOnlySampleCount": min(len(report_only), REPORT_ONLY_SAMPLE_LIMIT),
     }
 
 
@@ -60,7 +119,14 @@ def run_check(
     drift_context: DriftCheckContext | None,
 ) -> dict[str, Any]:
     if check in STYLE_CHECKS:
-        return STYLE_CHECKS[check](onboarding_root)
+        return STYLE_CHECKS[check](
+            StyleCheckInputs(
+                onboarding_root=onboarding_root,
+                code_repository_root=(
+                    None if drift_context is None else drift_context.code_repository_root
+                ),
+            )
+        )
     if check == DRIFT_CHECK_NAME:
         if drift_context is None:
             raise ValueError(f"{DRIFT_CHECK_NAME} requires drift context")

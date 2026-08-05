@@ -4,8 +4,8 @@ from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
-from agents_remember.controllers.task_ref import TaskRef
-from agents_remember.controllers.worktree_tools import StartExecution, TaskBases, TaskIdentity
+from agents_remember.application.task_ref import TaskRef
+from agents_remember.application.worktree_tools import StartExecution, TaskBases, TaskIdentity
 
 from ..config import McpRuntimeConfig
 from ..tools import (
@@ -17,6 +17,14 @@ from ..tools import (
 
 
 def register_worktree_tools(server: FastMCP, config: McpRuntimeConfig) -> None:
+    """Register the worktree tools, split by whether the contract exists yet."""
+    _register_worktree_start_tools(server, config)
+    _register_worktree_working_tools(server, config)
+
+
+def _register_worktree_start_tools(server: FastMCP, config: McpRuntimeConfig) -> None:
+    """Create or load the task contract and its git worktrees."""
+
     @server.tool()
     def worktree_start(
         repo_id: str,
@@ -76,6 +84,10 @@ def register_worktree_tools(server: FastMCP, config: McpRuntimeConfig) -> None:
                 retry_provider_setup=retry_provider_setup,
             ),
         )
+
+
+def _register_worktree_working_tools(server: FastMCP, config: McpRuntimeConfig) -> None:
+    """Work with a contract that already exists: re-attach, observe, pull the base forward."""
 
     @server.tool()
     def worktree_attach(

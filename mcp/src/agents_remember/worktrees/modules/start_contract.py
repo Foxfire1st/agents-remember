@@ -5,6 +5,10 @@ from __future__ import annotations
 from pathlib import Path
 
 from agents_remember.tasks import read_task_doc
+from agents_remember.tasks.leaf_doc import (
+    LeafLifecycleRestampPlan,
+    plan_leaf_doc_lifecycle_restamp,
+)
 from agents_remember.worktrees.leaf_refs import LeafRefResolutionError
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.git import (
@@ -20,6 +24,7 @@ from agents_remember.worktrees.modules.leaf_ref_start import (
 )
 from agents_remember.worktrees.modules.models import WorktreeCommandResult
 from agents_remember.worktrees.task_resolver import (
+    leaf_enclosure_path,
     resolve_active_task_root,
     series_contract_path,
     slugify,
@@ -206,10 +211,57 @@ def build_start_contract(context, args: WorktreeArgs) -> WorktreeContract | Work
         return invalid_contract_request_result(exc)
 
 
-def _build_start_contract(context, args: WorktreeArgs) -> WorktreeContract:
+def _start_restamp_block(plan: LeafLifecycleRestampPlan, *, dry_run: bool) -> WorktreeCommandResult:
+    assert plan.doc_path is not None
+    return WorktreeCommandResult(
+        2,
+        {
+            "state": "task-steps-blocked",
+            "dryRun": dry_run,
+            "taskDocument": plan.doc_path.as_posix(),
+            "lifecycleId": plan.lifecycle_id,
+            "blockers": [blocker.model_dump() for blocker in plan.blockers],
+            "summary": (
+                "Worktree start refused before creating its enclosure because changing the "
+                "leaf lifecycle would republish terminal status with unresolved work units."
+            ),
+        },
+    )
+
+
+def _start_will_restamp(task_root: Path, leaf_id: str) -> bool:
+    contract_path = leaf_enclosure_path(task_root, leaf_id)
+    if not contract_path.exists():
+        return True
+    existing = load_contract(contract_path)
+    return existing.cleanup in ("abandoned", "reopened")
+
+
+def _start_restamp_preflight(
+    args: WorktreeArgs, leaf_id: str, task_root: Path
+) -> WorktreeCommandResult | None:
+    """Refuse a false-terminal restamp before contract construction can mutate state."""
+    if not args.lifecycle_id or not _start_will_restamp(task_root, leaf_id):
+        return None
+    restamp = plan_leaf_doc_lifecycle_restamp(task_root, leaf_id, args.lifecycle_id)
+    if not restamp.blockers:
+        return None
+    return _start_restamp_block(restamp, dry_run=args.dry_run)
+
+
+def _build_start_contract(context, args: WorktreeArgs) -> WorktreeContract | WorktreeCommandResult:
     assert args.task_name is not None
     assert args.worktree_name is not None
     leaf_id = resolve_start_leaf_doc_id(context, args)
+    task_root = resolve_active_task_root(
+        context.coordination_root,
+        context.code_repository_name,
+        args.task_name,
+        parent_task=args.parent_task,
+    )
+    restamp_block = _start_restamp_preflight(args, leaf_id, task_root)
+    if restamp_block is not None:
+        return restamp_block
     repo = context.code_repository_root
     memory_mode = args.memory_mode or context.memory_mode
     parent_series = _parent_series_contract(context, args, memory_mode)

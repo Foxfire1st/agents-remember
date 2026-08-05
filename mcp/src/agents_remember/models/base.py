@@ -23,7 +23,7 @@ class NextStep(StrictResponseModel):
     """The single computed next move for the active lifecycle (task 27).
 
     Attached to every in-lifecycle tool response at the ``_tool_payload`` choke
-    point by the next-step engine (``mcp.tools.next_step``). It mirrors the
+    point by the next-step engine (``application.next_step``). It mirrors the
     worktree ``guidance.lifecycle_guidance`` shape so operational hints and
     gate-raise hints share one vocabulary: a gate junction is simply
     ``nextTool="lifecycle_gate"`` with ``nextArgs={"kind": ...}``. Strict, so it

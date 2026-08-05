@@ -292,8 +292,8 @@
         "title": "sim replay",
         "status": "in-progress",
         "kind": "subTask",
-        "stepsDone": 1,
-        "stepsTotal": 2,
+        "stepsDone": 2,
+        "stepsTotal": 3,
         "currentStep": "step-2",
         "docPath": "/tasks/sim/01.md",
         "bodyRevision": "rev-3",
@@ -304,7 +304,27 @@
             "id": "step-1",
             "title": "read the contract",
             "status": "done",
-            "substeps": [{ "id": "step-1a", "title": "read projection.py", "status": "done" }]
+            "disposition": {
+              "kind": "intentionalSkip",
+              "reason": "the contract was already reviewed",
+              "recordedAt": "2026-06-14T08:52:00+00:00",
+              "recordedVia": "task_doc.skip_step",
+              "lifecycleId": "sim-replay-lifecycle"
+            },
+            "substeps": [
+              {
+                "id": "step-1a",
+                "title": "read projection.py",
+                "status": "done",
+                "disposition": {
+                  "kind": "intentionalSkip",
+                  "reason": "the projection review already covered it",
+                  "recordedAt": "2026-06-14T08:53:00+00:00",
+                  "recordedVia": "task_doc.skip_step",
+                  "lifecycleId": "sim-replay-lifecycle"
+                }
+              }
+            ]
           },
           { "id": "step-2", "title": "make the guard bite", "status": "in-progress", "substeps": [] }
         ],
@@ -325,7 +345,7 @@
           {
             "at": "2026-06-14T08:55:00+00:00",
             "decision": "keep the fixture as the server stand-in",
-            "rationale": "codegen replaces it, the assertions do not change"
+            "rationale": "schema codegen owns the TypeScript contract; this sampled fixture remains hand-maintained"
           }
         ],
         "openQuestions": ["which vocabularies still have no runtime tuple?"],
@@ -520,6 +540,7 @@
         "seedFallback": true,
         "providers": [{ "id": "grepai-memory", "role": "memory", "runtimeState": "missing", "factState": "planned" }],
         "edges": [],
+        "landing": [],
         "actions": [],
         "summary": "memory lane disabled by contract",
         "missingFacts": ["memory-worktree"],
@@ -549,6 +570,7 @@
         "seedFallback": false,
         "providers": [],
         "edges": [],
+        "landing": [],
         "actions": [],
         "summary": "waiting on commit approval",
         "missingFacts": [],
@@ -578,6 +600,7 @@
         "seedFallback": false,
         "providers": [],
         "edges": [],
+        "landing": [],
         "actions": [],
         "summary": "cgc seed failed",
         "missingFacts": [],
@@ -607,6 +630,7 @@
         "seedFallback": false,
         "providers": [],
         "edges": [],
+        "landing": [],
         "actions": [],
         "summary": "setup heartbeat has not advanced",
         "missingFacts": [],
@@ -636,6 +660,7 @@
         "seedFallback": false,
         "providers": [],
         "edges": [],
+        "landing": [],
         "actions": [],
         "summary": "provider setup skipped by contract",
         "missingFacts": [],
@@ -665,6 +690,7 @@
         "seedFallback": false,
         "providers": [],
         "edges": [],
+        "landing": [],
         "actions": [],
         "summary": "no probe could run",
         "missingFacts": ["code-source", "code-worktree"],
@@ -694,6 +720,7 @@
         "seedFallback": false,
         "providers": [],
         "edges": [],
+        "landing": [],
         "actions": [],
         "summary": "landed on origin/main",
         "missingFacts": [],

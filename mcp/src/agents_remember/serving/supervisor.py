@@ -26,6 +26,7 @@ from datetime import datetime
 from pathlib import Path
 from time import perf_counter
 
+from agents_remember.controlplane import operator_inbox_transitions as inbox_transitions
 from agents_remember.controlplane.escalation_ladder import (
     MAX_RUNG,
     next_step,
@@ -46,7 +47,11 @@ from agents_remember.controlplane.operator_inbox_records import (
     OperatorInboxEntry,
     create_operator_inbox_entry,
 )
-from agents_remember.controlplane.operator_inbox_store import InboxRenewal, OperatorInboxStore
+from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
+from agents_remember.controlplane.operator_inbox_transitions import (
+    InboxRenewal,
+    RungAdvance,
+)
 from agents_remember.controlplane.orchestration_artifacts import turn_report_artifact
 from agents_remember.controlplane.orchestration_nudges import (
     NudgeReason,
@@ -107,9 +112,10 @@ from agents_remember.serving.terminal_paste import capture_pane as default_captu
 DEFAULT_ESCALATION_SLA_SECONDS = 300.0
 DEFAULT_ESCALATION_RUNG_SECONDS = 900.0
 PERSISTENT_FAILURE_ATTEMPTS = 5
-"""Attempt count past which an unacked inbox row is handed to the escalation ladder (R4d): this
-leaf only reserves the transition (``OperatorInboxStore.mark_escalated``) -- HFX2-L4 owns the
-actual ladder that reads it."""
+"""Attempt count past which an unacked inbox row is handed to the escalation ladder (R4d),
+through ``operator_inbox_transitions.mark_escalated``. What walks it from there is
+``controlplane.escalation_ladder``, which anchors every rung's dwell on the ``escalatedAt``
+that transition stamps."""
 
 _INACTIVE_EXPECTATION_KINDS = frozenset({"briefed-by", "verdict-by", "ack-by"})
 # --- R2: predicates ----------------------------------------------------------------------------
@@ -581,7 +587,8 @@ def _resolve_ladder_terminal(
     if finding.source_id is None:
         return SupervisorActionResult("ladder-resolve", finding, "skipped", "no source entry id")
     try:
-        resolved, resolved_now = ctx.inbox_store.mark_ladder_resolved(
+        resolved, resolved_now = inbox_transitions.mark_ladder_resolved(
+            ctx.inbox_store,
             finding.source_id,
             now=now.isoformat(),
             reason="terminal ladder rung reached for non-live target seat",
@@ -610,11 +617,11 @@ def _resolve_ladder_terminal(
 def _escalate_inbox_entry(
     ctx: SupervisorContext, entry_id: str, *, now: datetime, sweep: _SweepState
 ) -> None:
-    """R4d: hand a persistently-failing row to the escalation ladder -- this leaf only stamps the
-    reserved ``escalatedAt`` hook HFX2-L4's ladder will read; it builds no ladder itself."""
+    """R4d: hand a persistently-failing row to the escalation ladder by stamping ``escalatedAt``,
+    the anchor ``escalation_ladder.rung_due`` measures each rung's dwell from."""
     try:
-        escalated = ctx.inbox_store.mark_escalated(
-            entry_id, now=now.isoformat(), current=sweep.inbox_current
+        escalated = inbox_transitions.mark_escalated(
+            ctx.inbox_store, entry_id, now=now.isoformat(), current=sweep.inbox_current
         )
     except KeyError:
         return
@@ -792,7 +799,8 @@ def _post_owner_signal(
         seat_role=signal.seat_role,
     )
     if existing is not None:
-        entry = ctx.inbox_store.renew(
+        entry = inbox_transitions.renew(
+            ctx.inbox_store,
             existing.id,
             InboxRenewal(
                 response=signal.response,
@@ -964,19 +972,22 @@ def _escalate_rung(
     step = next_step(ctx.catalog, entry)
     if step.owner.agent_id is None and step.owner.role is None:
         return SupervisorActionResult("escalate-rung", finding, "skipped", "no routable owner")
-    advanced = ctx.inbox_store.advance_rung(
+    advanced = inbox_transitions.advance_rung(
+        ctx.inbox_store,
         entry.id,
-        rung=step.rung,
-        now=now.isoformat(),
-        readdress_to=(
-            InboxOwner(
-                role=step.owner.role,
-                agent_id=step.owner.agent_id,
-                lifecycle_id=step.owner.lifecycle_id,
-            )
-            if step.rung > 1
-            else None
+        RungAdvance(
+            rung=step.rung,
+            readdress_to=(
+                InboxOwner(
+                    role=step.owner.role,
+                    agent_id=step.owner.agent_id,
+                    lifecycle_id=step.owner.lifecycle_id,
+                )
+                if step.rung > 1
+                else None
+            ),
         ),
+        now=now.isoformat(),
         current=sweep.inbox_current,
     )
     sweep.remember(advanced)

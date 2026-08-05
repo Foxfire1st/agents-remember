@@ -59,7 +59,7 @@ from agents_remember.serving.terminal_catalog import (
     TerminalCatalogEntry,
     TerminalSessionStatus,
 )
-from agents_remember.tasks import TaskDocument, write_task_doc
+from agents_remember.tasks import TaskDocument, read_task_doc, write_task_doc
 
 FRESH_GATE_TS = "2999-01-01T10:00:00+00:00"
 
@@ -268,6 +268,43 @@ class TaskDocumentEndpointTests(_AppFixture):
         )
         self.assertEqual(
             body["requirements"], ["the body rides the on-demand endpoint, not the projection"]
+        )
+
+    def test_serves_parent_and_nested_intentional_skip_dispositions(self) -> None:
+        doc = read_task_doc(self.doc_path)
+        data = doc.model_dump(by_alias=True)
+        disposition = {
+            "kind": "intentionalSkip",
+            "reason": "Superseded.",
+            "recordedAt": "2026-08-03T12:00:00+00:00",
+            "recordedVia": "task_doc.skip_step",
+        }
+        data["steps"] = [
+            {
+                "id": "S1",
+                "title": "Parent",
+                "status": "done",
+                "disposition": disposition,
+                "substeps": [
+                    {
+                        "id": "C1",
+                        "title": "Child",
+                        "status": "done",
+                        "disposition": disposition,
+                    }
+                ],
+            }
+        ]
+        write_task_doc(self.doc_path.parent, TaskDocument.model_validate(data))
+
+        with TestClient(self.app) as client:
+            response = client.get("/api/task-document", params={"path": "repo/master/leaf-1.json"})
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["steps"][0]["disposition"]["reason"], "Superseded.")
+        self.assertEqual(
+            body["steps"][0]["substeps"][0]["disposition"]["recordedVia"],
+            "task_doc.skip_step",
         )
 
     def test_serves_the_same_document_for_a_coordination_root_relative_path(self) -> None:

@@ -28,9 +28,7 @@ cross-process, and threads would let the GIL serialise the very window under tes
 Two properties of a *measurement* are enforced here rather than left to the callers, because a
 caller that gets either wrong reports a number that looks like the real one:
 :func:`harness_work_dir` keys this run's scratch space off ``root`` so two cases can never share a
-stop flag, and :func:`_refuse_a_vacuous_run` raises rather than report a stress result whose
-reclaimer never ran. Both were written after the second failed silently: see their docstrings for
-what was measured with them missing.
+stop flag, and :func:`require_stress_measurement` refuses incomplete worker or reclaimer work.
 """
 
 from __future__ import annotations
@@ -47,6 +45,11 @@ from pathlib import Path
 from typing import Any
 
 import agents_remember
+from _durability_measurement import (
+    MIN_SUCCESSFUL_RECLAIMS,
+    VacuousRunError,
+    require_stress_measurement,
+)
 from agents_remember.controlplane.attention_dismissals import (
     AttentionDismissalRecord,
     AttentionDismissalStore,
@@ -78,6 +81,8 @@ from agents_remember.providers.metrics import (
     MetricsSnapshot,
     ProviderMetricsStore,
 )
+
+__all__ = ["MIN_SUCCESSFUL_RECLAIMS", "VacuousRunError", "run_case"]
 
 # Survivors are what the harness accounts for. The anchor is a record that is never prunable and
 # never counted: it keeps the reclaimed set non-empty so a reclaim pass exercises the tmp +
@@ -584,18 +589,25 @@ def surviving_ids(path: Path, id_field: str) -> tuple[set[str], int]:
 
 
 def _appender_main(spec: dict[str, Any]) -> None:
-    """Append survivor records, journalling each id only AFTER the store call returned.
+    """Append survivors, journalling attempts before calls and receipts after returns.
 
-    The receipt is the appender's own claim "this record is written". Anything on that list and
-    not on disk afterwards is a record the store accepted and then lost.
+    Each line is flushed at its respective point so the two journals preserve the attempted and
+    completed sequence. Both journal file descriptors are fsynced once after the bounded loop.
+    A receipt is the appender's own claim "this record is written"; anything on that list and not
+    on disk afterwards is a record the store accepted and then lost.
     """
     adapter = ADAPTERS[spec["case"]]()
     store = adapter.open(Path(spec["root"]))
     errors: list[str] = []
     pace = spec.get("append_sleep", 0.0)
-    with Path(spec["receipt"]).open("w", encoding="utf-8") as receipts:
+    with (
+        Path(spec["attempts"]).open("w", encoding="utf-8") as attempts,
+        Path(spec["receipt"]).open("w", encoding="utf-8") as receipts,
+    ):
         for index in range(spec["count"]):
             record_id = f"{SURVIVOR_PREFIX}{spec['worker']}-{index}"
+            attempts.write(record_id + "\n")
+            attempts.flush()
             try:
                 adapter.write(store, record_id)
             except Exception as exc:
@@ -607,32 +619,38 @@ def _appender_main(spec: dict[str, Any]) -> None:
             receipts.flush()
             if pace:
                 time.sleep(pace)
+        os.fsync(attempts.fileno())
         os.fsync(receipts.fileno())
     Path(spec["errors"]).write_text("\n".join(errors), encoding="utf-8")
 
 
 def _reclaimer_main(spec: dict[str, Any]) -> None:
-    """Run reclaim ticks until the appenders finish or the tick budget runs out.
+    """Attempt compactions until the appenders finish or the attempt budget runs out.
 
-    A reclaim that raises (a log unlinked mid-read, a torn line under a strict reader) is counted
-    and the loop continues: stopping would silently narrow the window and understate the loss.
+    A reclaim that raises (a log unlinked mid-read, a torn line under a strict reader) is recorded
+    but never counted as successful semantic work. The loop continues so the instrument can report
+    every failure and then refuse the entire result rather than silently narrowing the window.
     """
     adapter = ADAPTERS[spec["case"]]()
     store = adapter.open(Path(spec["root"]))
     stop = Path(spec["stop"])
     errors: list[str] = []
-    ticks = 0
+    attempts = 0
+    successes = 0
     for tick in range(spec["max_ticks"]):
         try:
             adapter.reclaim(store, tick)
         except Exception as exc:
             errors.append(f"{type(exc).__name__}: {exc}")
-        ticks += 1
+        else:
+            successes += 1
+        attempts += 1
         if stop.exists():
             break
         time.sleep(spec["sleep"])
     Path(spec["errors"]).write_text("\n".join(errors), encoding="utf-8")
-    Path(spec["ticks"]).write_text(str(ticks), encoding="utf-8")
+    Path(spec["attempts"]).write_text(str(attempts), encoding="utf-8")
+    Path(spec["successes"]).write_text(str(successes), encoding="utf-8")
 
 
 @contextlib.contextmanager
@@ -823,43 +841,6 @@ def _prepared_work_dir(root: Path) -> Path:
     return work
 
 
-# A stress run is evidence exactly in proportion to how many times the reclaimer got to rewrite
-# the log WHILE the appenders were writing into it. A run whose reclaimer managed one tick raced
-# nothing, and until :func:`harness_work_dir` stopped keying the stop flag off ``root.parent`` that
-# was the rule rather than the exception: measured on this tree, seven of eight stores reported
-# 0.00% loss over exactly ONE tick each. Nothing noticed, because nothing was looking. This is what
-# looks -- and it lives in the instrument rather than in either suite for the same reason the work
-# directory does. A check each caller has to remember holds only until the next caller, and the
-# script entry point (:func:`main`) carries no assertions at all.
-#
-# THE FLOOR, and why it is this number rather than a rounder one. Measured over all eight stores on
-# ``STRESS_PROFILE``, four runs each: 22-39 ticks on an idle 20-core box, and 34-49 with 24 spinning
-# CPU hogs against it. Load RAISES the count -- the appenders' 2ms pacing stretches out in wall
-# clock while the reclaimer keeps polling -- so the idle figure is the one a floor has to clear, and
-# the direction a loaded CI box moves this number is away from the floor rather than into it. 10 is
-# an order of magnitude above the vacuous run this refuses and under half the lowest count measured.
-MIN_RECLAIM_TICKS = 10
-
-
-class VacuousRunError(RuntimeError):
-    """A stress run whose reclaimer barely ran: not evidence, and so not returned as a result."""
-
-
-def _refuse_a_vacuous_run(result: dict[str, Any], work: Path) -> dict[str, Any]:
-    """Return a stress result, or raise if its reclaimer never really ran."""
-    ticks = result["reclaim_ticks"]
-    if ticks >= MIN_RECLAIM_TICKS:
-        return result
-    raise VacuousRunError(
-        f"{result['case']} / stress: the reclaimer ran {ticks} tick(s), below the "
-        f"{MIN_RECLAIM_TICKS} this instrument requires before it will report a number. "
-        f"'{result['lost']} of {result['attempted']} lost' measured against a compactor that "
-        f"did not run is not a measurement of durability. First thing to check: whether this "
-        f"run's work directory ({work}) is its own -- a stop flag left by an earlier run ends "
-        f"the tick loop after a single tick."
-    )
-
-
 def run_stress(config: dict[str, Any]) -> dict[str, Any]:
     """N appender processes racing one reclaiming process: the natural-operation loss rate."""
     case = config["case"]
@@ -877,7 +858,8 @@ def run_stress(config: dict[str, Any]) -> dict[str, Any]:
         "max_ticks": config["max_ticks"],
         "sleep": config["reclaim_sleep"],
         "errors": str(work / "reclaimer.err"),
-        "ticks": str(work / "reclaimer.ticks"),
+        "attempts": str(work / "reclaimer.attempts"),
+        "successes": str(work / "reclaimer.successes"),
     }
     reclaimer = ctx.Process(target=_reclaimer_main, args=(reclaimer_spec,), name="reclaimer")
     reclaimer.start()
@@ -890,6 +872,7 @@ def run_stress(config: dict[str, Any]) -> dict[str, Any]:
             "worker": worker,
             "count": config["per_appender"],
             "append_sleep": config.get("append_sleep", 0.0),
+            "attempts": str(work / f"appender-{worker}.attempts"),
             "receipt": str(work / f"appender-{worker}.ids"),
             "errors": str(work / f"appender-{worker}.err"),
         }
@@ -901,25 +884,29 @@ def run_stress(config: dict[str, Any]) -> dict[str, Any]:
     stop.write_text("stop", encoding="utf-8")
     stragglers += _join([reclaimer], config["timeout"])
 
+    attempted_ids: set[str] = set()
     claimed: set[str] = set()
     append_errors: list[str] = []
     for worker in range(config["appenders"]):
+        attempted_ids.update(_read_lines(work / f"appender-{worker}.attempts"))
         claimed.update(_read_lines(work / f"appender-{worker}.ids"))
         append_errors += _read_lines(work / f"appender-{worker}.err")
     present, torn = surviving_ids(adapter.log_path(root), adapter.id_field)
     lost = sorted(claimed - present)
     reclaim_errors = _read_lines(work / "reclaimer.err")
-    return _refuse_a_vacuous_run(
+    return require_stress_measurement(
         {
             "case": case,
             "scenario": "stress",
             "requested": config["appenders"] * config["per_appender"],
-            "attempted": len(claimed),
+            "attempted": len(attempted_ids),
+            "completed": len(claimed),
             "surviving": len(claimed & present),
             "lost": len(lost),
             "lost_sample": lost[:5],
             "torn_lines": torn,
-            "reclaim_ticks": int((_read_lines(work / "reclaimer.ticks") or ["0"])[0]),
+            "reclaim_attempts": int((_read_lines(work / "reclaimer.attempts") or ["0"])[0]),
+            "successful_reclaims": int((_read_lines(work / "reclaimer.successes") or ["0"])[0]),
             "reclaim_error_count": len(reclaim_errors),
             "reclaim_errors": sorted({error.split(":")[0] for error in reclaim_errors}),
             "append_error_count": len(append_errors),

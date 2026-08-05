@@ -8,9 +8,10 @@ ran any of the eight: the markers were registered but never *applied*, so
 of the variables.
 
 This module closes that third gap. It asserts, in both directions, that every registered
-marker is applied to at least one test and has an entry in
+environment-gated marker is applied to at least one test and has an entry in
 ``scripts/run-gated-integration.py`` -- so a path cannot be registered, documented and
-still unreachable, and the runner cannot claim a path the suite no longer has.
+still unreachable, and the runner cannot claim a path the suite no longer has. Ordinary
+markers such as ``fitness`` remain outside that opt-in runner.
 """
 
 from __future__ import annotations
@@ -30,6 +31,7 @@ MCP_SRC = REPO_ROOT / "mcp" / "src"
 sys.path.insert(0, str(MCP_SRC))
 
 MARKER_NAME = re.compile(r"^([a-z_][a-z0-9_]*):")
+ENVIRONMENT_NAME = re.compile(r"\b(?:AR|AGENTS_REMEMBER)_[A-Z0-9_]+\b")
 
 
 def load_runner() -> ModuleType:
@@ -42,11 +44,15 @@ def load_runner() -> ModuleType:
     return module
 
 
-def registered_markers() -> list[str]:
+def marker_entries() -> list[str]:
     with (REPO_ROOT / "pyproject.toml").open("rb") as handle:
         data = tomllib.load(handle)
-    markers = data["tool"]["pytest"]["ini_options"]["markers"]
-    names = [MARKER_NAME.match(entry) for entry in markers]
+    return data["tool"]["pytest"]["ini_options"]["markers"]
+
+
+def registered_gated_markers() -> list[str]:
+    entries = [entry for entry in marker_entries() if ENVIRONMENT_NAME.search(entry)]
+    names = [MARKER_NAME.match(entry) for entry in entries]
     return [match.group(1) for match in names if match is not None]
 
 
@@ -82,20 +88,29 @@ class GatedPathInventoryTests(unittest.TestCase):
     def setUpClass(cls) -> None:
         cls.runner = load_runner()
 
-    def test_every_registered_marker_is_applied_to_at_least_one_test(self) -> None:
+    def test_every_registered_gated_marker_is_applied_to_at_least_one_test(self) -> None:
         # The failure this catches is silent by construction: `--strict-markers` rejects
         # an *unknown* marker, but a registered marker that decorates nothing selects
         # zero tests and pytest reports that as a successful run of an empty selection.
         # All eight were in that state until 260731-EFA-L2.
-        empty = [marker for marker in registered_markers() if selected_test_count(marker) == 0]
+        empty = [
+            marker for marker in registered_gated_markers() if selected_test_count(marker) == 0
+        ]
 
         self.assertEqual(empty, [], f"registered markers that select no test: {empty}")
 
-    def test_the_runner_covers_every_registered_marker_and_invents_none(self) -> None:
+    def test_the_runner_covers_every_registered_gated_marker_and_invents_none(self) -> None:
         self.assertEqual(
             {path.marker for path in self.runner.PATHS},
-            set(registered_markers()),
+            set(registered_gated_markers()),
         )
+
+    def test_fitness_is_registered_as_an_ordinary_non_gated_marker(self) -> None:
+        [fitness] = [entry for entry in marker_entries() if entry.startswith("fitness:")]
+
+        self.assertIsNone(ENVIRONMENT_NAME.search(fitness))
+        self.assertNotIn("fitness", registered_gated_markers())
+        self.assertNotIn("fitness", {path.marker for path in self.runner.PATHS})
 
     def test_every_path_states_what_it_requires(self) -> None:
         for path in self.runner.PATHS:

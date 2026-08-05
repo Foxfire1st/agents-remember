@@ -10,13 +10,13 @@ import type { TerminalOpenSuccessBody } from "../src/types/terminalOpen";
 // they are deliberately different:
 //
 //   the projection — read whole from `src/fixtures/snapshot.json` rather than written here. That
-//     is reuse, NOT provenance: `snapshot.json` is hand-maintained and no generator exists —
-//     nothing in this repository derives it from `observer/projection.py`'s pydantic models. It is
-//     type-checked against `types/projection.ts` by `src/test/contract.test.ts`, and that mirror is
-//     itself hand-maintained, so the chain ends at a human. The biggest payload in this file is
-//     therefore exactly as unverified as a hand-written one; it is merely unverified in ONE place
-//     instead of many. The capability envelopes come from the shared typed fixture, which is a
-//     genuinely stronger claim — `capabilityEnvelopes.ts` is annotated with the wire types.
+//     is reuse, NOT provenance: `snapshot.json` remains a hand-maintained sample. It is type-checked
+//     against the generated `types/projection.ts` contract by `src/test/contract.test.ts`, while
+//     the projection generator and stale gate hold that contract to `observer/projection.py`'s
+//     Pydantic schema. The human-maintained link is therefore only sample coverage, not the
+//     producer-to-TypeScript contract. The capability envelopes come from the shared typed fixture,
+//     which is a stronger per-payload claim — `capabilityEnvelopes.ts` is annotated with the wire
+//     types.
 //
 //   the happy-path terminal payloads — now `satisfies` the wire mirrors. This found real drift: the
 //     open response omitted `controlEndpoint` and `controlProtocol`, which `TerminalOpenSuccessBody`

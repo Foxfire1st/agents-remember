@@ -5,8 +5,8 @@
 // dashboard/** is out of memory scope).
 //
 // The SCENARIOS are this file's business; the NODES are not. Every builder below now delegates to
-// `test/fixtures/wire.ts`, whose bases are assembled from `fixtures/snapshot.json` (hand-maintained
-// — there is no generator; `wire.ts`'s header carries the chain and where it stops),
+// `test/fixtures/wire.ts`, whose bases are assembled from the hand-maintained sampled payload in
+// `fixtures/snapshot.json`; `wire.ts`'s header records how that sample uses the generated contract,
 // so there is one definition of "the fields a served lifecycle always carries" rather than one
 // here and one per test seed. The gallery keeps its own DEFAULTS (a running lifecycle reads better
 // in a gallery than the snapshot's blocked one) by passing them explicitly — what it no longer
@@ -454,6 +454,7 @@ export const GALLERY: GalleryEntry[] = [
             id: "01HGATE",
             kind: "closeout-approval",
             state: "open",
+            evidenceRefs: [],
             decisions: ["approve", "cancel", "reject", "request-revision"],
             packet: { changedPaths: 6 },
             ts: "2026-06-14T09:00:30+00:00",

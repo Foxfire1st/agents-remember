@@ -24,11 +24,34 @@ from agents_remember.serving.codex_app_server_state import (
 )
 from agents_remember.serving.harness_capabilities import (
     CapabilitySnapshot,
+    LaunchKnobs,
     ModelCapability,
 )
 from agents_remember.serving.harness_control_models import AdapterSnapshot, LaunchSpec
 
 TransportFactory = Callable[[], CodexAppServerTransport]
+
+
+def codex_launch_knobs(*, model_key: str, effort: str | None) -> LaunchKnobs:
+    """Carry native Codex launch state through thread/start settings, never CODEX_CONFIG.
+
+    Reads nothing but its arguments: the selection is spelled into the session settings before
+    any adapter or transport exists, which is why it is a launch fact rather than an adapter
+    method. The result feeds ``CodexAppServerSettings.config``.
+    """
+
+    if not model_key or model_key != model_key.strip():
+        raise CodexAppServerError("Codex launch model must be non-empty with no outer whitespace")
+    if effort is None or not effort or effort != effort.strip():
+        raise CodexAppServerError("Codex launch effort must be non-empty with no outer whitespace")
+    return LaunchKnobs(
+        session_config={
+            "model": model_key,
+            "model_reasoning_effort": effort,
+        },
+        owned_argv_options=("--model", "-m"),
+        owned_config_keys=("model", "model_reasoning_effort"),
+    )
 
 
 @dataclass(frozen=True)

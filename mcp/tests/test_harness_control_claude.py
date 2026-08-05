@@ -619,7 +619,9 @@ class ClaudeStreamJsonAdapterTests(unittest.IsolatedAsyncioTestCase):
         bridge = HarnessControlBridge(_identity(), adapter, clock=lambda: NOW)
         await bridge.start(_launch())
         submission = asyncio.create_task(
-            bridge.submit(bridge.prompt("first prompt", source="durable", request_id="request-1"))
+            bridge.submissions().submit(
+                bridge.prompt("first prompt", source="durable", request_id="request-1")
+            )
         )
         try:
             await transport.wait_for_writes(4)
@@ -663,13 +665,15 @@ class ClaudeStreamJsonAdapterTests(unittest.IsolatedAsyncioTestCase):
         await bridge.start(_launch())
         try:
             first_task = asyncio.create_task(
-                bridge.submit(bridge.prompt("first", source="terminal", request_id="first"))
+                bridge.submissions().submit(
+                    bridge.prompt("first", source="terminal", request_id="first")
+                )
             )
             await transport.wait_for_writes(4)
             transport.feed(_replay(transport.writes[3]))
             first = await asyncio.wait_for(first_task, timeout=1.0)
 
-            second = await bridge.submit(
+            second = await bridge.submissions().submit(
                 bridge.prompt("second", source="durable", request_id="second")
             )
             self.assertEqual((first.acceptance, second.acceptance), ("immediate", "queued"))
@@ -695,7 +699,7 @@ class ClaudeStreamJsonAdapterTests(unittest.IsolatedAsyncioTestCase):
         permission, question = _load_fixture("interactions.jsonl")
         try:
             active = asyncio.create_task(
-                bridge.submit(
+                bridge.submissions().submit(
                     bridge.prompt("interaction turn", source="terminal", request_id="interaction")
                 )
             )
@@ -707,7 +711,7 @@ class ClaudeStreamJsonAdapterTests(unittest.IsolatedAsyncioTestCase):
             pending = bridge.snapshot().pending_interaction
             assert pending is not None
             self.assertEqual((pending.kind, pending.choices), ("permission", ("allow", "deny")))
-            await bridge.respond(InteractionResponse("permission-1", "allow", NOW))
+            await bridge.submissions().respond(InteractionResponse("permission-1", "allow", NOW))
             permission_response = transport.writes[-1]["response"]
             assert isinstance(permission_response, dict)
             result = permission_response["response"]
@@ -721,7 +725,7 @@ class ClaudeStreamJsonAdapterTests(unittest.IsolatedAsyncioTestCase):
             assert pending is not None
             self.assertEqual(pending.kind, "user-input")
             self.assertIn("Which mode", pending.prompt)
-            await bridge.respond(
+            await bridge.submissions().respond(
                 InteractionResponse(
                     "question-1",
                     json.dumps({"Which mode should be used?": "Safe"}),
@@ -748,7 +752,7 @@ class ClaudeStreamJsonAdapterTests(unittest.IsolatedAsyncioTestCase):
         (question,) = _load_fixture("interactions-multi.jsonl")
         try:
             active = asyncio.create_task(
-                bridge.submit(
+                bridge.submissions().submit(
                     bridge.prompt("interaction turn", source="terminal", request_id="interaction")
                 )
             )
@@ -790,7 +794,7 @@ class ClaudeStreamJsonAdapterTests(unittest.IsolatedAsyncioTestCase):
             assert wire is not None
             self.assertEqual(_interaction_questions(wire["questions"]), pending.questions)
 
-            await bridge.respond(
+            await bridge.submissions().respond(
                 InteractionResponse(
                     "question-multi",
                     json.dumps(
@@ -826,7 +830,7 @@ class ClaudeStreamJsonAdapterTests(unittest.IsolatedAsyncioTestCase):
         (question,) = _load_fixture("interactions-multi.jsonl")
         try:
             active = asyncio.create_task(
-                bridge.submit(
+                bridge.submissions().submit(
                     bridge.prompt("interaction turn", source="terminal", request_id="interaction")
                 )
             )
@@ -837,7 +841,7 @@ class ClaudeStreamJsonAdapterTests(unittest.IsolatedAsyncioTestCase):
             await _settle()
 
             with self.assertRaisesRegex(HarnessControlError, "answer every question"):
-                await bridge.respond(
+                await bridge.submissions().respond(
                     InteractionResponse(
                         "question-multi",
                         json.dumps({"Which mode should be used?": "Safe"}),
@@ -845,7 +849,9 @@ class ClaudeStreamJsonAdapterTests(unittest.IsolatedAsyncioTestCase):
                     )
                 )
             with self.assertRaisesRegex(HarnessControlError, "JSON object"):
-                await bridge.respond(InteractionResponse("question-multi", "Safe", NOW))
+                await bridge.submissions().respond(
+                    InteractionResponse("question-multi", "Safe", NOW)
+                )
             # The failed responds never reached the transport; the interaction stays pending.
             self.assertIsNotNone(bridge.snapshot().pending_interaction)
             self.assertEqual(len(transport.writes), 4)
@@ -861,10 +867,10 @@ class ClaudeStreamJsonAdapterTests(unittest.IsolatedAsyncioTestCase):
         bridge = HarnessControlBridge(_identity(), adapter, clock=lambda: NOW)
         await bridge.start(_launch())
         try:
-            unknown = await bridge.submit(
+            unknown = await bridge.submissions().submit(
                 bridge.prompt("/not-real", source="terminal", request_id="unknown")
             )
-            identity_change = await bridge.submit(
+            identity_change = await bridge.submissions().submit(
                 bridge.prompt("/clear", source="terminal", request_id="clear")
             )
             self.assertEqual(
@@ -875,7 +881,9 @@ class ClaudeStreamJsonAdapterTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(len(transport.writes), 3)
 
             compact_task = asyncio.create_task(
-                bridge.submit(bridge.prompt("/compact", source="terminal", request_id="compact"))
+                bridge.submissions().submit(
+                    bridge.prompt("/compact", source="terminal", request_id="compact")
+                )
             )
             await transport.wait_for_writes(4)
             self.assertEqual(_wire_text(transport.writes[3]), "/compact")
@@ -894,7 +902,7 @@ class ClaudeStreamJsonAdapterTests(unittest.IsolatedAsyncioTestCase):
         bridge = HarnessControlBridge(_identity(), adapter, clock=lambda: NOW)
         await bridge.start(_launch())
         try:
-            model_task = asyncio.create_task(bridge.set_model("haiku"))
+            model_task = asyncio.create_task(bridge.submissions().set_model("haiku"))
             await transport.wait_for_writes(4)
             self.assertEqual(_wire_text(transport.writes[3]), "/model haiku")
             transport.feed(_replay(transport.writes[3]))
@@ -907,14 +915,14 @@ class ClaudeStreamJsonAdapterTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(adapter.advertise().selected_model_key, "haiku")
 
             write_count = len(transport.writes)
-            refused_effort = await bridge.set_effort("low")
+            refused_effort = await bridge.submissions().set_effort("low")
             self.assertEqual(
                 (refused_effort.ok, refused_effort.acceptance),
                 (False, "unsupported"),
             )
             self.assertEqual(len(transport.writes), write_count)
 
-            sonnet_task = asyncio.create_task(bridge.set_model("sonnet"))
+            sonnet_task = asyncio.create_task(bridge.submissions().set_model("sonnet"))
             await transport.wait_for_writes(5)
             transport.feed(_replay(transport.writes[4]))
             transport.feed(_result("Set model to Sonnet for this session only"))
@@ -923,7 +931,7 @@ class ClaudeStreamJsonAdapterTests(unittest.IsolatedAsyncioTestCase):
                 "echo-verified",
             )
 
-            effort_task = asyncio.create_task(bridge.set_effort("low"))
+            effort_task = asyncio.create_task(bridge.submissions().set_effort("low"))
             await transport.wait_for_writes(6)
             self.assertEqual(_wire_text(transport.writes[5]), "/effort low")
             transport.feed(_replay(transport.writes[5]))
@@ -1273,7 +1281,9 @@ class ClaudeStreamJsonAdapterTests(unittest.IsolatedAsyncioTestCase):
         bridge = HarnessControlBridge(_identity(), adapter, clock=lambda: NOW)
         await bridge.start(_launch())
         submission = asyncio.create_task(
-            bridge.submit(bridge.prompt("ambiguous", source="durable", request_id="ambiguous"))
+            bridge.submissions().submit(
+                bridge.prompt("ambiguous", source="durable", request_id="ambiguous")
+            )
         )
         try:
             await transport.wait_for_writes(4)
@@ -1283,11 +1293,11 @@ class ClaudeStreamJsonAdapterTests(unittest.IsolatedAsyncioTestCase):
             await _settle()
             self.assertEqual(bridge.snapshot().control, "disconnected")
             write_count = len(transport.writes)
-            reconciliation = await bridge.reconcile("ambiguous")
+            reconciliation = await bridge.submissions().reconcile("ambiguous")
             self.assertEqual(reconciliation.state, "unresolved")
             self.assertIn("was not resent", reconciliation.detail or "")
             self.assertEqual(len(transport.writes), write_count)
-            blocked = await bridge.submit(
+            blocked = await bridge.submissions().submit(
                 bridge.prompt("must not resend", source="durable", request_id="after-exit")
             )
             self.assertEqual(blocked.acceptance, "queued")
@@ -1306,7 +1316,7 @@ class ClaudeStreamJsonAdapterTests(unittest.IsolatedAsyncioTestCase):
         bridge = HarnessControlBridge(_identity(), adapter, clock=lambda: NOW)
         await bridge.start(_launch())
         try:
-            receipt = await bridge.submit(
+            receipt = await bridge.submissions().submit(
                 bridge.prompt("late replay", source="durable", request_id="late")
             )
             self.assertEqual(receipt.acceptance, "unknown")
@@ -1314,7 +1324,7 @@ class ClaudeStreamJsonAdapterTests(unittest.IsolatedAsyncioTestCase):
 
             transport.feed(_replay(transport.writes[-1]))
             await _settle()
-            reconciliation = await bridge.reconcile("late")
+            reconciliation = await bridge.submissions().reconcile("late")
             self.assertEqual(reconciliation.state, "accepted")
             self.assertIn("replay-user-message", reconciliation.detail or "")
             self.assertEqual(len(transport.writes), write_count)
@@ -1341,7 +1351,9 @@ class ClaudeStreamJsonAdapterTests(unittest.IsolatedAsyncioTestCase):
         await bridge.start(_launch())
         try:
             submission = asyncio.create_task(
-                bridge.submit(bridge.prompt("limited", source="terminal", request_id="limited"))
+                bridge.submissions().submit(
+                    bridge.prompt("limited", source="terminal", request_id="limited")
+                )
             )
             await transport.wait_for_writes(4)
             transport.feed(_replay(transport.writes[3]))
@@ -1438,7 +1450,7 @@ class ClaudeInterruptTests(unittest.IsolatedAsyncioTestCase):
         bridge = HarnessControlBridge(_identity(), adapter, clock=lambda: NOW)
         await bridge.start(_launch())
         submission = asyncio.create_task(
-            bridge.submit(
+            bridge.submissions().submit(
                 bridge.prompt("write an essay", source="terminal", request_id="req-int-1")
             )
         )
@@ -1466,7 +1478,7 @@ class ClaudeInterruptTests(unittest.IsolatedAsyncioTestCase):
         transport = _FakeClaudeTransport(_load_fixture("initialization.jsonl"))
         bridge = await self._active_turn(transport)
         try:
-            epoch = bridge.submission_authority().bridge_epoch
+            epoch = bridge.submissions().bridge_epoch
             interrupt_task = asyncio.create_task(bridge.interrupt(epoch))
             await transport.wait_for_writes(5)
             self.assertEqual(
@@ -1509,7 +1521,7 @@ class ClaudeInterruptTests(unittest.IsolatedAsyncioTestCase):
         transport = _FakeClaudeTransport(_load_fixture("initialization.jsonl"))
         bridge = await self._active_turn(transport)
         try:
-            epoch = bridge.submission_authority().bridge_epoch
+            epoch = bridge.submissions().bridge_epoch
             interrupt_task = asyncio.create_task(bridge.interrupt(epoch))
             await transport.wait_for_writes(5)
             control_response, _, _, _ = self._interrupt_frames()
@@ -1525,7 +1537,7 @@ class ClaudeInterruptTests(unittest.IsolatedAsyncioTestCase):
         transport = _FakeClaudeTransport(_load_fixture("initialization.jsonl"))
         bridge = await self._active_turn(transport)
         try:
-            epoch = bridge.submission_authority().bridge_epoch
+            epoch = bridge.submissions().bridge_epoch
             with self.assertRaisesRegex(HarnessControlError, "does not accept turn identity"):
                 await bridge.interrupt(epoch, turn_id="turn-1")
             with self.assertRaisesRegex(
@@ -1542,7 +1554,7 @@ class ClaudeInterruptTests(unittest.IsolatedAsyncioTestCase):
         bridge = HarnessControlBridge(_identity(), adapter, clock=lambda: NOW)
         await bridge.start(_launch())
         try:
-            epoch = bridge.submission_authority().bridge_epoch
+            epoch = bridge.submissions().bridge_epoch
             with self.assertRaisesRegex(HarnessControlError, "no active Claude turn to interrupt"):
                 await bridge.interrupt(epoch)
             self.assertEqual(len(transport.writes), 3)
@@ -1562,7 +1574,7 @@ class ClaudeInterruptTests(unittest.IsolatedAsyncioTestCase):
         bridge = HarnessControlBridge(_identity(), adapter, clock=lambda: NOW)
         await bridge.start(_launch())
         first = asyncio.create_task(
-            bridge.submit(
+            bridge.submissions().submit(
                 bridge.prompt("write an essay", source="terminal", request_id="req-int-1")
             )
         )
@@ -1586,7 +1598,7 @@ class ClaudeInterruptTests(unittest.IsolatedAsyncioTestCase):
 
             # The next turn projects its own fresh identity, never the settled one.
             second = asyncio.create_task(
-                bridge.submit(
+                bridge.submissions().submit(
                     bridge.prompt("write a poem", source="terminal", request_id="req-int-2")
                 )
             )
@@ -1598,7 +1610,7 @@ class ClaudeInterruptTests(unittest.IsolatedAsyncioTestCase):
 
             # The settled turn's identity is refused before any native write; the projected
             # identity resolves to the exact active turn and is natively accepted.
-            epoch = bridge.submission_authority().bridge_epoch
+            epoch = bridge.submissions().bridge_epoch
             with self.assertRaisesRegex(
                 HarnessControlError, "does not match the active Claude operation"
             ):
@@ -1641,7 +1653,7 @@ class ClaudeInterruptTests(unittest.IsolatedAsyncioTestCase):
     ) -> None:
         """Drive one native interrupt to an ``accepted`` acknowledgement, no result fed yet."""
 
-        epoch = bridge.submission_authority().bridge_epoch
+        epoch = bridge.submissions().bridge_epoch
         interrupt_task = asyncio.create_task(bridge.interrupt(epoch))
         await transport.wait_for_writes(5)
         control_response, _, _, _ = self._interrupt_frames()
@@ -1712,7 +1724,7 @@ class ClaudeInterruptTests(unittest.IsolatedAsyncioTestCase):
         transport = _FakeClaudeTransport(_load_fixture("initialization.jsonl"))
         bridge = await self._active_turn(transport)
         try:
-            epoch = bridge.submission_authority().bridge_epoch
+            epoch = bridge.submissions().bridge_epoch
             interrupt_task = asyncio.create_task(bridge.interrupt(epoch))
             await transport.wait_for_writes(5)
             transport.feed(
@@ -1743,7 +1755,7 @@ class ClaudeInterruptTests(unittest.IsolatedAsyncioTestCase):
         transport = _FakeClaudeTransport(_load_fixture("initialization.jsonl"))
         bridge = await self._active_turn(transport)
         try:
-            epoch = bridge.submission_authority().bridge_epoch
+            epoch = bridge.submissions().bridge_epoch
             interrupt_task = asyncio.create_task(bridge.interrupt(epoch))
             await transport.wait_for_writes(5)
             control_response, _, _, _ = self._interrupt_frames()
@@ -1767,7 +1779,7 @@ class ClaudeInterruptTests(unittest.IsolatedAsyncioTestCase):
         bridge = HarnessControlBridge(_identity(), adapter, clock=lambda: NOW)
         await bridge.start(_launch())
         submission = asyncio.create_task(
-            bridge.submit(
+            bridge.submissions().submit(
                 bridge.prompt("write an essay", source="terminal", request_id="req-int-1")
             )
         )
@@ -1776,7 +1788,7 @@ class ClaudeInterruptTests(unittest.IsolatedAsyncioTestCase):
             transport.feed(_replay(transport.writes[3]))
             receipt = await asyncio.wait_for(submission, timeout=1.0)
             assert receipt.acceptance == "immediate"
-            epoch = bridge.submission_authority().bridge_epoch
+            epoch = bridge.submissions().bridge_epoch
             # No control_response arrives inside the acknowledgement bound: the bytes were
             # sent, so the honest answer is unknown — never rejected, never accepted.
             acknowledgement = await bridge.interrupt(epoch)

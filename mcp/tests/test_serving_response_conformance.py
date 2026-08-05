@@ -95,12 +95,12 @@ from agents_remember.serving.harness_control_models import (
 from agents_remember.serving.projector import ProjectionCadence, Projector
 from agents_remember.serving.response_contract import TerminalCatalogEntryWire
 from agents_remember.serving.served_state import SERVED_TAIL_FIELDS
-from agents_remember.serving.terminal import TerminalSession
 from agents_remember.serving.terminal_catalog import (
     TerminalCatalog,
     TerminalCatalogEntry,
     terminal_catalog_path,
 )
+from agents_remember.serving.terminal_pty import TerminalSession
 from agents_remember.tasks import TaskDocument, write_task_doc
 from agents_remember.worktrees.worktree_contract import WorktreeContract, write_contract
 from pydantic import TypeAdapter, ValidationError
@@ -344,9 +344,6 @@ class _LivePaneHost:
 
     def terminate(self, session_id: str, *, tmux_name: str | None = None) -> None:  # noqa: ARG002
         self.terminated.append(session_id)
-
-    def close_session(self, session: TerminalSession) -> None:  # noqa: ARG002
-        return None
 
     def shutdown(self) -> None:
         return None

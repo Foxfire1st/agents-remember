@@ -18,16 +18,16 @@ from unittest import mock
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
-from agents_remember.mcp.tools.core import ping_payload
-from agents_remember.mcp.tools.lifecycle import (
-    lifecycle_start_payload,
-    lifecycle_turn_end_notification_payload,
-)
-from agents_remember.mcp.tools.next_step import (
+from agents_remember.application.next_step import (
     FRONT_HALF_RUNDOWN,
     _from_guidance,
     compute_next_step,
     next_step_for,
+)
+from agents_remember.mcp.tools.core import ping_payload
+from agents_remember.mcp.tools.lifecycle import (
+    lifecycle_start_payload,
+    lifecycle_turn_end_notification_payload,
 )
 from agents_remember.models.core import PingResponse
 from agents_remember.models.tokens import count_response_tokens
@@ -336,7 +336,7 @@ class EdgeAndChokePointTests(unittest.TestCase):
         # one, not a half-built envelope.
         self.amb.start()
         with mock.patch(
-            "agents_remember.mcp.tools.base.supervisor_staleness_banner",
+            "agents_remember.application.tool_response.supervisor_staleness_banner",
             side_effect=OSError("heartbeat unreadable"),
         ):
             payload = ping_payload()

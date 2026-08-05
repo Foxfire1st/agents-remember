@@ -20,8 +20,8 @@ MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
 from agents_remember.benchmarks import runner as benchmark_runner
+from agents_remember.kernel import atomic_write, filesystem
 from agents_remember.kernel import coordination_context_resolver as resolver
-from agents_remember.kernel import filesystem
 from agents_remember.kernel.coordination_context_resolver import (
     CoordinationHints,
     EnclosureSelector,
@@ -74,6 +74,17 @@ from agents_remember.worktrees.worktree_contract import (
 )
 
 drift = adopt_baseline.drift
+
+
+def _benchmark_git_subcommands(recorder: mock.Mock) -> list[str]:
+    """The git subcommands ``prepare_repo`` asked for, in order.
+
+    ``run_git_command(repo_root, args, dry_run, ...)`` carries the args without the program
+    word, so the subcommand is ``args[0]`` -- an exact match rather than the substring
+    search over a joined argv these tests used when the benchmark runner built its own
+    ``["git", "-c", ...]`` line.
+    """
+    return [call.args[1][0] for call in recorder.call_args_list]
 
 
 def git(repo: Path, *args: str) -> str:
@@ -131,6 +142,37 @@ def write_file_onboarding(
         ),
         encoding="utf-8",
     )
+
+
+def write_claim_onboarding(
+    onboarding_root: Path, repo_name: str, source_path: str, commit_hash: str
+) -> Path:
+    path = onboarding_root / f"{source_path}.md"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        "\n".join(
+            [
+                f"# {source_path}",
+                "",
+                "| Field | Value |",
+                "| --- | --- |",
+                f"| repository | {repo_name} |",
+                f"| path | `{source_path}` |",
+                "| doc_type | `file-level-onboarding` |",
+                f"| lastVerifiedCommitHash | `{commit_hash}` |",
+                "| lastVerifiedCommitDate | 2026-05-09T00:00:00+00:00 |",
+                "",
+                "## Repo-Internal References",
+                "",
+                "| Finding | Anchor | Source |",
+                "| --- | --- | --- |",
+                f"| Stable behavior. | `stable` | {source_path}:1-2 |",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    return path
 
 
 def write_route_overview(
@@ -329,6 +371,24 @@ def dirty_open_external_contract_fixture(root: Path):
     return contract
 
 
+def claimed_external_contract_fixture(root: Path):
+    contract = open_external_contract_fixture(root)
+    baseline = commit_file(
+        contract.code_worktree,
+        "feature.py",
+        "def stable(value: int) -> int:\n    return value + 1\n",
+        "Add claimed baseline",
+    )
+    assert contract.memory_worktree is not None
+    sidecar = write_claim_onboarding(
+        contract.memory_worktree / "onboarding",
+        contract.repo_name,
+        "feature.py",
+        baseline,
+    )
+    return contract, baseline, sidecar
+
+
 def committed_range_external_contract_fixture(root: Path):
     """Open external contract whose changes are already committed on the work branch.
 
@@ -425,7 +485,7 @@ def closed_external_contract_fixture(
             workflow_kind="chat-task",
             memory_mode="external",
         ),
-        leaf=LeafIdentity(worktree_name="integrate-thing"),
+        leaf=LeafIdentity(worktree_name="integrate-thing", lifecycle_id="LC-INTEGRATE-THING"),
         code=RepoBranchPlan(
             repo_path=code_repo,
             source_branch="main",
@@ -1349,6 +1409,48 @@ class WorktreeSupportTests(unittest.TestCase):
                 json.loads(output.getvalue())["contract_path"], contract.contract_path.as_posix()
             )
 
+    def test_worktree_contract_failed_atomic_replace_preserves_exact_old_bytes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            contract = default_contract(
+                ContractTask(
+                    name="Atomic Contract",
+                    repo_name="device-management",
+                    coordination_root=root / "ar-coordination",
+                    workflow_kind="light-task",
+                    memory_mode="external",
+                ),
+                leaf=LeafIdentity(worktree_name="atomic-contract"),
+                code=RepoBranchPlan(
+                    repo_path=root / "device-management",
+                    source_branch="dev",
+                    work_branch="feature/atomic-contract",
+                    base_commit="abc123",
+                ),
+                memory=RepoBranchPlan(
+                    repo_path=root / "ar-coordination" / "memory-repos" / "ar-device-management",
+                    source_branch="dev",
+                    work_branch="feature/atomic-contract",
+                    base_commit="def456",
+                ),
+            )
+            write_contract(contract.contract_path, contract)
+            before = contract.contract_path.read_bytes()
+            updated = replace(contract, task_name="Atomic Contract Updated")
+
+            with (
+                mock.patch.object(
+                    atomic_write.os,
+                    "replace",
+                    side_effect=OSError("deterministic atomic replace failure"),
+                ),
+                self.assertRaisesRegex(OSError, "atomic replace failure"),
+            ):
+                write_contract(updated.contract_path, updated)
+
+            self.assertEqual(contract.contract_path.read_bytes(), before)
+            self.assertEqual(load_contract(contract.contract_path).task_name, "Atomic Contract")
+
     def test_closeout_dry_run_without_approval_reports_commit_plan(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -1636,7 +1738,7 @@ class WorktreeSupportTests(unittest.TestCase):
             sidecar.write_text(
                 sidecar.read_text(encoding="utf-8")
                 + "\nDocumented the transported change.\n\n## Update History\n\n"
-                + "- 2026-06-12T18:00 — Reviewed the merged feature change.\n",
+                + "- 2026-06-12T18:00+02:00 — Reviewed the merged feature change.\n",
                 encoding="utf-8",
             )
             code_head = git(contract.code_worktree, "rev-parse", "HEAD")
@@ -1892,6 +1994,49 @@ class WorktreeSupportTests(unittest.TestCase):
                 worktree_manager.command_closeout(args)
             self.assertEqual(git(contract.memory_worktree, "rev-parse", "HEAD"), memory_head)
             self.assertEqual(load_contract(contract.contract_path).closeout_status, "not-started")
+
+    def test_closeout_reopens_a_changed_claim_before_advancing_its_old_stamp(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            contract, baseline, sidecar = claimed_external_contract_fixture(Path(tmp))
+            (contract.code_worktree / "feature.py").write_text(
+                "def stable(value: int) -> int:\n    return value + 2\n",
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(RuntimeError, "citation_claim_reopened"):
+                worktree_manager.command_closeout(closeout_args(contract))
+
+            self.assertEqual(read_onboarding_field(sidecar, "lastVerifiedCommitHash"), baseline)
+            self.assertEqual(git(contract.code_worktree, "rev-parse", "HEAD"), baseline)
+            self.assertTrue(worktree_manager.worktree_dirty(contract.code_worktree))
+            self.assertEqual(load_contract(contract.contract_path).closeout_status, "not-started")
+
+    def test_closeout_advances_the_stamp_after_a_clean_claim_passes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            contract, baseline, sidecar = claimed_external_contract_fixture(Path(tmp))
+            (contract.code_worktree / "feature.py").write_text(
+                "def stable(value: int) -> int:\n"
+                "    return value + 1\n\n"
+                "def unrelated() -> int:\n"
+                "    return 2\n",
+                encoding="utf-8",
+            )
+            output = io.StringIO()
+
+            with redirect_stdout(output):
+                self.assertEqual(worktree_manager.command_closeout(closeout_args(contract)), 0)
+
+            payload = json.loads(output.getvalue())
+            self.assertNotEqual(payload["code_commit"], baseline)
+            self.assertEqual(
+                read_onboarding_field(sidecar, "lastVerifiedCommitHash"),
+                payload["code_commit"],
+            )
+            self.assertEqual(
+                payload["memory_quality"]["closeoutPhases"]["beforeMetadataRefresh"],
+                ["style.citations.claim_reopen"],
+            )
+            self.assertEqual(load_contract(contract.contract_path).closeout_status, "completed")
 
     def test_closeout_refreshes_entity_fingerprint_after_code_commit(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -3474,17 +3619,16 @@ class BenchmarkRunnerPortabilityTests(unittest.TestCase):
             benchmark_runner.prepare_repo(repository, repo_root, dry_run=False)
 
             with mock.patch.object(
-                benchmark_runner, "run_command", wraps=benchmark_runner.run_command
-            ) as run_command:
+                benchmark_runner, "run_git_command", wraps=benchmark_runner.run_git_command
+            ) as run_git_command:
                 benchmark_runner.prepare_repo(repository, repo_root, dry_run=False)
 
-            commands = [call.args[0] for call in run_command.call_args_list]
-            command_text = [" ".join(command) for command in commands]
-            self.assertFalse(any(" clone " in f" {text} " for text in command_text))
-            self.assertFalse(any(" fetch " in f" {text} " for text in command_text))
-            self.assertTrue(any(" checkout " in f" {text} " for text in command_text))
-            self.assertTrue(any(" reset " in f" {text} " for text in command_text))
-            self.assertTrue(any(" clean " in f" {text} " for text in command_text))
+            subcommands = _benchmark_git_subcommands(run_git_command)
+            self.assertNotIn("clone", subcommands)
+            self.assertNotIn("fetch", subcommands)
+            self.assertIn("checkout", subcommands)
+            self.assertIn("reset", subcommands)
+            self.assertIn("clean", subcommands)
 
     def test_prepare_repo_fetches_when_cached_checkout_lacks_commit(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -3498,16 +3642,15 @@ class BenchmarkRunnerPortabilityTests(unittest.TestCase):
             second_commit = commit_file(upstream, "feature.txt", "feature\n", "Add feature")
 
             with mock.patch.object(
-                benchmark_runner, "run_command", wraps=benchmark_runner.run_command
-            ) as run_command:
+                benchmark_runner, "run_git_command", wraps=benchmark_runner.run_git_command
+            ) as run_git_command:
                 benchmark_runner.prepare_repo(
                     {"url": str(upstream), "commit": second_commit}, repo_root, dry_run=False
                 )
 
-            commands = [call.args[0] for call in run_command.call_args_list]
-            command_text = [" ".join(command) for command in commands]
-            self.assertFalse(any(" clone " in f" {text} " for text in command_text))
-            self.assertTrue(any(" fetch " in f" {text} " for text in command_text))
+            subcommands = _benchmark_git_subcommands(run_git_command)
+            self.assertNotIn("clone", subcommands)
+            self.assertIn("fetch", subcommands)
             self.assertEqual(git(repo_root, "rev-parse", "HEAD"), second_commit)
 
     def test_prepare_repo_force_clone_discards_cached_checkout(self) -> None:
@@ -3524,17 +3667,15 @@ class BenchmarkRunnerPortabilityTests(unittest.TestCase):
                     benchmark_runner, "remove_path", wraps=benchmark_runner.remove_path
                 ) as remove_path,
                 mock.patch.object(
-                    benchmark_runner, "run_command", wraps=benchmark_runner.run_command
-                ) as run_command,
+                    benchmark_runner, "run_git_command", wraps=benchmark_runner.run_git_command
+                ) as run_git_command,
             ):
                 benchmark_runner.prepare_repo(
                     repository, repo_root, dry_run=False, force_clone=True
                 )
 
-            commands = [call.args[0] for call in run_command.call_args_list]
-            command_text = [" ".join(command) for command in commands]
             self.assertTrue(remove_path.called)
-            self.assertTrue(any(" clone " in f" {text} " for text in command_text))
+            self.assertIn("clone", _benchmark_git_subcommands(run_git_command))
             self.assertTrue((repo_root / ".git").exists())
 
     def test_skill_exposure_copy_mode_copies_skill_tree_without_bash(self) -> None:
@@ -3624,7 +3765,7 @@ class RequireUpdatedSidecarContentTests(unittest.TestCase):
     def test_blocks_history_only_edit_without_marker(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             memory_repo, sidecar, plan = self._setup(Path(tmp_dir))
-            self._append(sidecar, "\n## Update History\n\n- 2026-06-10T04:00 — Stamped.\n")
+            self._append(sidecar, "\n## Update History\n\n- 2026-06-10T04:00+02:00 — Stamped.\n")
             with self.assertRaises(RuntimeError) as caught:
                 require_updated_sidecar_content(None, plan, memory_tree=memory_repo)
             self.assertIn("metadata/history-only", str(caught.exception))
@@ -3636,7 +3777,7 @@ class RequireUpdatedSidecarContentTests(unittest.TestCase):
             self._append(
                 sidecar,
                 "\n## Update History\n\n"
-                "- 2026-06-10T04:00 — No content impact: version bump only; body verified.\n",
+                "- 2026-06-10T04:00+02:00 — No content impact: version bump only; body verified.\n",
             )
             attested = require_updated_sidecar_content(None, plan, memory_tree=memory_repo)
             self.assertEqual(attested, ["src/app.py"])
@@ -3655,7 +3796,7 @@ class RequireUpdatedSidecarContentTests(unittest.TestCase):
             self._append(
                 sidecar,
                 "\nUpdated body.\n\n## Update History\n\n"
-                "- 2026-06-10T04:00 — Documented the new retry contract.\n",
+                "- 2026-06-10T04:00+02:00 — Documented the new retry contract.\n",
             )
             attested = require_updated_sidecar_content(None, plan, memory_tree=memory_repo)
             self.assertEqual(attested, [])
@@ -3684,7 +3825,7 @@ class RequireUpdatedSidecarContentTests(unittest.TestCase):
             self._append(
                 sidecar,
                 "\nUpdated body.\n\n## Update History\n\n"
-                "- 2026-06-12T18:00 — Documented the merged change.\n",
+                "- 2026-06-12T18:00+02:00 — Documented the merged change.\n",
             )
             git(memory_repo, "add", "-A")
             git(memory_repo, "commit", "-m", "Update sidecar before closeout")
@@ -3785,7 +3926,7 @@ class RequireUpdatedRouteOverviewContentTests(unittest.TestCase):
             self._append(
                 overviews["src/app"],
                 "\nRoute behavior notes.\n\n## Update History\n\n"
-                "- 2026-06-10T04:00 — Documented the route change.\n",
+                "- 2026-06-10T04:00+02:00 — Documented the route change.\n",
             )
             attested = require_updated_route_overview_content(
                 None, self._plan(overviews), list(self.CHANGED), memory_tree=memory_repo
@@ -3803,7 +3944,7 @@ class RequireUpdatedRouteOverviewContentTests(unittest.TestCase):
             self._append(
                 overviews["src/app"],
                 "\n## Update History\n\n"
-                "- 2026-06-10T04:00 — No route impact: reviewed, file-local fix.\n",
+                "- 2026-06-10T04:00+02:00 — No route impact: reviewed, file-local fix.\n",
             )
             attested = require_updated_route_overview_content(
                 None, self._plan(overviews), list(self.CHANGED), memory_tree=memory_repo

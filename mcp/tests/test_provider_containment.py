@@ -16,6 +16,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+from agents_remember.application import provider_tools, worktree_tools
 from agents_remember.benchmarks.runner_modules.constants import (
     BENCHMARK_MCP_SETTINGS_NAME,
     CODEX_HARNESS_DIR,
@@ -27,7 +28,6 @@ from agents_remember.benchmarks.runner_modules.workspace import (
     UNFILTERED_PROVIDERS_ENV,
     filter_benchmark_provider_ids,
 )
-from agents_remember.controllers import provider_tools, worktree_tools
 from agents_remember.mcp.config import (
     ConfigError,
     McpRuntimeConfig,
@@ -156,7 +156,7 @@ class WorktreeStartVetoTests(unittest.TestCase):
                 setup_config = args.provider_setup_config
                 captured["provider_setup_config"] = setup_config
                 if setup_config is not None:
-                    # Read while the temp file exists — the controller's finally
+                    # Read while the temp file exists — the application layer's finally
                     # unlinks it once no background setup owns it.
                     captured["settings"] = json.loads(
                         Path(setup_config.settings_path).read_text(encoding="utf-8")

@@ -260,7 +260,7 @@ async def test_sub_agent_activity_binds_only_the_facets_it_carries() -> None:
         }
 
         # No thread id: the activity names nobody, so nothing is registered for it.
-        known_threads = set(adapter._threads)
+        known_threads = set(adapter._threads.thread_ids())
         transport.emit(
             parent_item(
                 {
@@ -273,7 +273,7 @@ async def test_sub_agent_activity_binds_only_the_facets_it_carries() -> None:
         )
         raw = await settled_evidence(events)
         assert raw[AR_EVIDENCE_METHOD_KEY] == "item/completed"
-        assert set(adapter._threads) == known_threads
+        assert set(adapter._threads.thread_ids()) == known_threads
         assert agent_registry(adapter) == {
             AGENT: {"status": "started", "agentPath": "/root/reviewer"}
         }
@@ -343,7 +343,7 @@ async def test_collab_tool_call_registers_only_well_formed_receivers_and_states(
         )
         await settled_evidence(events)
         assert agent_registry(adapter) == {"agent-a": {"status": "unresolved"}}
-        assert "agent-ghost" not in adapter._threads
+        assert adapter._threads.state("agent-ghost") is None
 
         # A well-formed body whose status is not text is the same non-event.
         transport.emit(

@@ -17,6 +17,7 @@ from the runner and these fail.
 from __future__ import annotations
 
 import ast
+import io
 import os
 import subprocess
 import sys
@@ -24,22 +25,25 @@ import tempfile
 import time
 import unittest
 from collections.abc import Callable
+from contextlib import redirect_stdout
 from pathlib import Path, PurePosixPath
 from unittest.mock import patch
 
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
+from agents_remember.benchmarks.runner_modules import commands, workspace
 from agents_remember.benchmarks.runner_modules.commands import (
-    git_command,
     repo_has_commit,
-    run_command,
+    run_git_command,
 )
 from agents_remember.code_quality import check as quality_check
 from agents_remember.code_quality import diff_coverage
+from agents_remember.kernel import git_command as git_command_module
 from agents_remember.kernel import git_facts, git_freshness
 from agents_remember.kernel.coordination_context import cross_repo
 from agents_remember.kernel.git_command import (
+    GIT_BULK_REMOTE_TIMEOUT_SECONDS,
     GIT_LOCAL_TIMEOUT_SECONDS,
     GIT_METADATA_TIMEOUT_SECONDS,
     GIT_REMOTE_TIMEOUT_SECONDS,
@@ -402,13 +406,15 @@ class SingleRunnerTests(unittest.TestCase):
     contents it cannot see. :class:`SingleRunnerGuardReachTests` plants each of those forms
     and fails if the sweep stops catching it.
 
-    The one blind spot that remains, stated because it is not closed: an argv that is not a
-    list literal at the call site. ``subprocess.run(argv)`` where ``argv`` was built above,
-    or composed by a helper, is invisible to a reader of the syntax tree --
-    ``benchmarks/runner_modules/commands.py`` composes one through ``git_command()``. That
-    module therefore passes ``env=git_environment()`` at both of its spawns and has its
-    property asserted directly by :class:`BenchmarkRunnerEnvironmentTests` below, which is
-    what any future module in that shape owes as well.
+    This sweep reads argv **list literals** at the call site, so an argv composed elsewhere is
+    invisible to it. That was a live hole rather than a theoretical one: it existed precisely
+    because ``benchmarks/runner_modules/commands.py`` composed its argv through a second
+    builder, ``git_command()``, which L3 sanctioned as an exception. L6 deleted the builder
+    and routed those commands onto ``run_git``, and
+    ``mcp/tests/test_single_owner_primitives.py`` now closes the hole itself: it reports the
+    *construction* of a git argv wherever it happens, so a helper-composed argv no longer
+    escapes by being assembled one line above the spawn. This class is kept as the
+    environment-shaped guard it always was; the ownership question is that module's.
     """
 
     def _package_modules(self) -> list[Path]:
@@ -530,12 +536,13 @@ class SingleRunnerGuardReachTests(unittest.TestCase):
         source = "def run(argv):\n    return argv\n\n\nrun(['git', 'status'])\n"
         self.assertEqual(self._offenders(source), [])
 
-    def test_a_computed_argv_remains_the_documented_blind_spot(self) -> None:
-        # Stated, not closed: the sweep reads argv list literals at the call site, so an argv
-        # assembled beforehand is invisible to it. `benchmarks/runner_modules/commands.py` is
-        # the one module in that shape, which is why BenchmarkRunnerEnvironmentTests asserts
-        # its property directly. This test exists so that the limitation documented on
-        # SingleRunnerTests cannot quietly stop being the true one.
+    def test_a_computed_argv_is_this_sweeps_documented_blind_spot(self) -> None:
+        # Stated, and closed elsewhere: this sweep reads argv list literals at the call site,
+        # so an argv assembled beforehand is invisible to it. That is why the ownership rule
+        # lives in `code_quality/single_owner.py`, which reports the list literal itself --
+        # `argv = ['git', 'status']` on line 2 here -- rather than only the spawn. This test
+        # exists so the limitation documented on SingleRunnerTests cannot quietly stop being
+        # the true one.
         source = "import subprocess\nargv = ['git', 'status']\nsubprocess.run(argv)\n"
         self.assertEqual(self._offenders(source), [])
 
@@ -654,11 +661,12 @@ class TimeoutClassTests(unittest.TestCase):
 
 
 class BenchmarkRunnerEnvironmentTests(unittest.TestCase):
-    """The benchmark runner composes its argv, so the AST guard cannot see its spawns.
+    """The most destructive argv in the package, proven safe through the one runner.
 
-    It is also where the most destructive argv in the package lives -- ``clone``,
-    ``checkout --detach``, ``reset --hard``, ``clean -fdx`` -- so the property it cannot
-    be swept for is asserted directly instead.
+    ``clone``, ``checkout --detach``, ``reset --hard`` and ``clean -fdx`` used to be built
+    and spawned by this module's own builder; they now go through ``run_git``. The property
+    is asserted end to end rather than inferred from the routing, because "it calls the safe
+    runner now" is exactly the kind of claim that stops being true one refactor later.
     """
 
     def test_a_hard_reset_reverts_the_named_repository_not_an_inherited_one(self) -> None:
@@ -673,7 +681,7 @@ class BenchmarkRunnerEnvironmentTests(unittest.TestCase):
             (decoy / "file.txt").write_text("decoy-two\n", encoding="utf-8")
 
             with patch.dict(os.environ, _selectors(decoy)):
-                run_command(git_command("-C", str(real), "reset", "--hard"), dry_run=False)
+                run_git_command(real, ["reset", "--hard"], dry_run=False)
 
             self.assertEqual((real / "file.txt").read_text(encoding="utf-8"), "one\n")
             # The decoy's uncommitted work is exactly what a redirected reset destroys.
@@ -691,6 +699,128 @@ class BenchmarkRunnerEnvironmentTests(unittest.TestCase):
             with patch.dict(os.environ, _selectors(decoy)):
                 self.assertTrue(repo_has_commit(real, real_head))
                 self.assertFalse(repo_has_commit(real, decoy_head))
+
+    def test_a_clone_into_a_fresh_destination_is_redirection_safe_too(self) -> None:
+        # The command that could not go through `run_git` before L6, and the reason the
+        # runner grew `work_dir`: its destination does not exist when it starts.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            upstream, decoy = root / "upstream", root / "decoy"
+            _init(upstream)
+            _init(decoy)
+            head = _commit(upstream, "file.txt", "one\n")
+            destination = root / "clones" / "repo-a"
+            destination.parent.mkdir(parents=True)
+
+            with patch.dict(os.environ, _selectors(decoy)):
+                run_git_command(
+                    destination,
+                    ["clone", str(upstream), str(destination)],
+                    dry_run=False,
+                    work_dir=destination.parent,
+                )
+
+            self.assertTrue((destination / ".git").exists())
+            self.assertEqual(run_git(destination, ["rev-parse", "HEAD"]).stdout.strip(), head)
+
+    def test_the_work_dir_is_what_makes_that_clone_possible(self) -> None:
+        # Without it the child's cwd is the repository being created, which does not exist
+        # yet -- so this is the failure the parameter exists to avoid, not a style choice.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            upstream = root / "upstream"
+            _init(upstream)
+            _commit(upstream, "file.txt", "one\n")
+            destination = root / "clones" / "repo-a"
+            destination.parent.mkdir(parents=True)
+
+            with self.assertRaises(FileNotFoundError):
+                run_git(destination, ["clone", str(upstream), str(destination)])
+
+    def test_a_failed_command_raises_with_gits_own_output(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp) / "repo"
+            _init(repo)
+            _commit(repo, "file.txt", "one\n")
+            with self.assertRaises(RuntimeError) as raised:
+                run_git_command(repo, ["checkout", "--detach", "deadbeefdeadbeef"], dry_run=False)
+            self.assertIn("git checkout --detach deadbeefdeadbeef", str(raised.exception))
+
+    def test_a_dry_run_prints_the_command_and_spawns_nothing(self) -> None:
+        printed = io.StringIO()
+        with (
+            patch.object(commands, "run_git", side_effect=AssertionError("spawned")),
+            redirect_stdout(printed),
+        ):
+            run_git_command(Path("/repo"), ["clean", "-fdx"], dry_run=True)
+        self.assertIn("git clean -fdx", printed.getvalue())
+
+    def test_benchmark_preparation_bounds_each_command_by_what_it_does(self) -> None:
+        # Routing these onto the runner imposed a timeout where there had been none, so which
+        # bound each command gets is asserted rather than left to the runner's default.
+        calls: list[tuple[str, float]] = []
+
+        def record(
+            _root: Path, args: list[str], *, work_dir: Path | None = None, timeout: float
+        ) -> subprocess.CompletedProcess[str]:
+            calls.append((args[0], float(timeout)))
+            return subprocess.CompletedProcess(
+                args=["git", *args], returncode=0, stdout="", stderr=""
+            )
+
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            patch.object(commands, "run_git", side_effect=record),
+        ):
+            workspace.prepare_repo(
+                {"url": "https://example.invalid/repo.git", "commit": "c0ffee"},
+                Path(tmp) / "repo-a",
+                dry_run=False,
+            )
+
+        self.assertEqual(
+            dict(calls),
+            {
+                # network work outside a tool call: bounded, but not by the in-tool-call band
+                "clone": GIT_BULK_REMOTE_TIMEOUT_SECONDS,
+                "checkout": GIT_LOCAL_TIMEOUT_SECONDS,
+                "reset": GIT_LOCAL_TIMEOUT_SECONDS,
+                "clean": GIT_LOCAL_TIMEOUT_SECONDS,
+            },
+        )
+        self.assertGreater(GIT_BULK_REMOTE_TIMEOUT_SECONDS, GIT_REMOTE_TIMEOUT_SECONDS)
+
+
+class RunnerArgvTests(unittest.TestCase):
+    """What the one runner puts on every git command line, and why each word is there."""
+
+    def _argv(self, repo_root: Path, args: list[str], **kwargs: object) -> list[str]:
+        with patch.object(git_command_module.subprocess, "run") as spawn:
+            spawn.return_value = subprocess.CompletedProcess(args=[], returncode=0)
+            run_git(repo_root, args, **kwargs)  # type: ignore[arg-type]
+        return list(spawn.call_args.args[0])
+
+    def test_the_repository_is_named_to_git_itself_not_only_through_cwd(self) -> None:
+        argv = self._argv(Path("/repo"), ["status", "--porcelain"])
+        self.assertEqual(argv[:3], ["git", "-C", "/repo"])
+        self.assertIn("safe.directory=/repo", argv)
+        self.assertEqual(argv[-2:], ["status", "--porcelain"])
+
+    def test_a_work_dir_aims_the_process_while_the_repository_stays_the_subject(self) -> None:
+        argv = self._argv(Path("/repo"), ["clone", "url", "/repo"], work_dir=Path("/parent"))
+        self.assertEqual(argv[:3], ["git", "-C", "/parent"])
+        self.assertIn("safe.directory=/repo", argv)
+
+    def test_long_paths_are_enabled_and_git_really_receives_the_setting(self) -> None:
+        # Asserted through git rather than through the argv: `core.longpaths` is what lets a
+        # checkout land a path past Windows' MAX_PATH, and the benchmark runner carried it
+        # before L6 routed those commands here.
+        self.assertIn("core.longpaths=true", self._argv(Path("/repo"), ["status"]))
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp) / "repo"
+            _init(repo)
+            listed = run_git(repo, ["config", "--list"]).stdout
+        self.assertIn("core.longpaths=true", listed)
 
 
 if __name__ == "__main__":

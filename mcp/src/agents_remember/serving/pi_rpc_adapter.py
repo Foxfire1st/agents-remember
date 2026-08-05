@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import base64
-from collections import OrderedDict
 from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
@@ -17,7 +16,6 @@ from agents_remember.errors import (
 )
 from agents_remember.serving.harness_capabilities import (
     CapabilitySnapshot,
-    LaunchKnobs,
     ModelCapability,
     SetResult,
 )
@@ -66,17 +64,14 @@ from agents_remember.serving.pi_rpc_protocol import (
     pi_rpc_resume_launch,
     require_pi_success,
 )
+from agents_remember.serving.pi_rpc_submissions import (
+    PiSubmissionEvidence,
+    PiSubmissionLedger,
+    SubmissionKnowledge,
+)
 
 Clock = Callable[[], str]
 TransportFactory = Callable[[], PiRpcTransport]
-SubmissionKnowledge = Literal["pending", "accepted", "rejected", "unknown"]
-
-
-@dataclass(frozen=True)
-class _SubmissionEvidence:
-    request: PromptRequest
-    cursor_before: str | None
-    state: SubmissionKnowledge
 
 
 @dataclass(frozen=True)
@@ -112,7 +107,6 @@ class PiRpcAdapter:
         if submission_limit < 1 or interaction_limit < 1:
             raise HarnessControlError("Pi RPC adapter limits must be positive")
         self._transport_factory = transport_factory
-        self._submission_limit = submission_limit
         self._interaction_limit = interaction_limit
         self._clock = clock
         self._expected_launch = expected_launch
@@ -122,7 +116,7 @@ class PiRpcAdapter:
         self._capabilities: CapabilitySnapshot | None = None
         self._events: PiRpcEventMapper | None = None
         self._cursor: str | None = None
-        self._submissions: OrderedDict[str, _SubmissionEvidence] = OrderedDict()
+        self._submissions = PiSubmissionLedger(submission_limit)
         self._request_sequence = 0
         self._transport_generation = 0
         self._activity_token = 0
@@ -230,18 +224,6 @@ class PiRpcAdapter:
             raise HarnessControlError("Pi RPC model catalog is not available")
         return self._current_capabilities(capabilities.models, state)
 
-    def launch_knobs(self, *, model_key: str, effort: str | None) -> LaunchKnobs:
-        """Use Pi 0.80.7's exact native model/thinking flags; RPC mode stays protocol-owned."""
-
-        if not model_key or model_key != model_key.strip():
-            raise HarnessControlError("Pi launch model must be non-empty with no outer whitespace")
-        if effort is None or not effort or effort != effort.strip():
-            raise HarnessControlError("Pi launch effort must be non-empty with no outer whitespace")
-        return LaunchKnobs(
-            argv=("--model", model_key, "--thinking", effort),
-            owned_argv_options=("--model", "--thinking"),
-        )
-
     async def set_model(
         self, model_key: str, *, operation: ControlOperationRef | None = None
     ) -> SetResult:
@@ -330,7 +312,7 @@ class PiRpcAdapter:
         operation = self._require_operation(request.operation, "prompt")
         if operation.operation_id != request.request_id:
             raise HarnessControlError("Pi prompt operation id does not match request id")
-        if request.request_id in self._submissions:
+        if self._submissions.knows(request.request_id):
             raise HarnessControlError(f"duplicate Pi RPC request id: {request.request_id}")
         try:
             entries = await self._read_entries()
@@ -341,9 +323,9 @@ class PiRpcAdapter:
                 vendor_correlation_id=request.request_id,
             ) from exc
         self._cursor = entries.leaf_id
-        self._remember_submission(
+        self._submissions.remember(
             request.request_id,
-            _SubmissionEvidence(request=request, cursor_before=self._cursor, state="pending"),
+            PiSubmissionEvidence(request=request, cursor_before=self._cursor, state="pending"),
         )
         command: dict[str, object] = {
             "id": request.request_id,
@@ -356,16 +338,14 @@ class PiRpcAdapter:
         try:
             frame = await self._require_transport().request(command, before_write=guard)
         except HarnessAdapterBusyError:
-            self._submissions.pop(request.request_id, None)
+            self._submissions.discard(request.request_id)
             self._clear_operation(operation)
             raise
         except HarnessAdapterDisconnectedError as exc:
             knowledge: SubmissionKnowledge = "unknown" if exc.may_have_sent else "rejected"
-            self._submissions[request.request_id] = replace(
-                self._submissions[request.request_id], state=knowledge
-            )
+            self._submissions.mark(request.request_id, knowledge)
             if not exc.may_have_sent:
-                self._submissions.pop(request.request_id, None)
+                self._submissions.discard(request.request_id)
                 self._clear_operation(operation)
             raise HarnessAdapterDisconnectedError(
                 str(exc),
@@ -374,9 +354,7 @@ class PiRpcAdapter:
             ) from exc
         response = parse_pi_response(frame, request_id=request.request_id, command="prompt")
         if response["success"] is False:
-            self._submissions[request.request_id] = replace(
-                self._submissions[request.request_id], state="rejected"
-            )
+            self._submissions.mark(request.request_id, "rejected")
             self._clear_operation(operation)
             return SubmissionReceipt(
                 request_id=request.request_id,
@@ -386,9 +364,7 @@ class PiRpcAdapter:
                 detail=pi_response_error(response),
                 raw=dict(response),
             )
-        self._submissions[request.request_id] = replace(
-            self._submissions[request.request_id], state="accepted"
-        )
+        self._submissions.mark(request.request_id, "accepted")
         self._require_event_mapper().mark_prompt_accepted()
         raw: dict[str, object] = dict(response)
         if request.assets:
@@ -530,7 +506,7 @@ class PiRpcAdapter:
                 "no exact post-cursor user entry proves whether Pi accepted the prompt",
                 entries=entries,
             )
-        self._submissions[request_id] = replace(evidence, state="accepted")
+        self._submissions.mark(request_id, "accepted")
         return ReconciliationResult(
             request_id=request_id,
             state="accepted",
@@ -552,14 +528,14 @@ class PiRpcAdapter:
             self._events.clear()
 
     @property
-    def retained_interaction_count(self) -> int:
-        """Bounded pending-dialog count exposed for D2/D3 scaling proof."""
+    def _retained_interaction_count(self) -> int:
+        """Bounded pending-dialog count, for the white-box D2/D3 scaling proof.
+
+        Not adapter surface: no caller outside the tests reads it, and the mapper it forwards to
+        is where the bound is enforced.
+        """
 
         return self._require_event_mapper().retained_interaction_count
-
-    @property
-    def active_operation(self) -> ControlOperationRef | None:
-        return self._active_operation
 
     async def _read_state(self) -> PiSessionState:
         state = await self._request_state(self._require_transport())
@@ -705,21 +681,6 @@ class PiRpcAdapter:
         finally:
             self._transport_changed.set()
         return True
-
-    def _remember_submission(self, request_id: str, evidence: _SubmissionEvidence) -> None:
-        if len(self._submissions) >= self._submission_limit:
-            evictable = next(
-                (
-                    key
-                    for key, value in self._submissions.items()
-                    if value.state in {"accepted", "rejected"}
-                ),
-                None,
-            )
-            if evictable is None:
-                raise HarnessControlError("Pi reconciliation ledger is full of ambiguous sends")
-            self._submissions.pop(evictable)
-        self._submissions[request_id] = evidence
 
     def _unresolved(
         self, request_id: str, detail: str, *, entries: PiEntries | None = None

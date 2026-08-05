@@ -2,9 +2,9 @@
 
 ``read_lifecycle_logs`` enumerates the per-lifecycle truth; ``project_and_write``
 ties reading, the pure reduction, and the write together (the entry the serving
-layer drives on a tick). Projections are written tmp-write +
-``os.replace`` so a polling dashboard reader never sees a half-written
-``latest-state.json`` -- stronger than the plain ``write_text`` of the
+layer drives on a tick). Projections are published through
+:mod:`agents_remember.kernel.atomic_write` so a polling dashboard reader never sees a
+half-written ``latest-state.json`` -- stronger than the plain ``write_text`` of the
 ``setup_progress`` precedent, which a concurrent reader can tear.
 
 The store root is resolved through :func:`agents_remember.observer.paths.observer_root`,
@@ -15,13 +15,13 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol
 
 from agents_remember.controlplane.attention_dismissals import AttentionDismissalStore
+from agents_remember.kernel.atomic_write import atomic_write_text
 from agents_remember.observer.contract_snapshot import ContractSnapshotCache
 from agents_remember.observer.events import Event
 from agents_remember.observer.lifecycle_state import TERMINAL_STATES
@@ -51,7 +51,6 @@ from agents_remember.observer.snapshots import (
     read_sidecar_staleness,
 )
 from agents_remember.observer.store import EventStore
-from agents_remember.observer.ulid import new_ulid
 from agents_remember.providers.status import refresh_current_provider_state
 
 if TYPE_CHECKING:
@@ -157,10 +156,9 @@ def read_lifecycle_logs(root: Path) -> list[list[Event]]:
 def write_projection(root: Path, projection: WorkspaceProjection) -> None:
     """Atomically write ``latest-state.json`` + ``latest-metrics.json``."""
     root.mkdir(parents=True, exist_ok=True)
-    _atomic_write_json(root / LATEST_STATE, projection.model_dump(by_alias=True, exclude_none=True))
-    _atomic_write_json(
-        root / LATEST_METRICS,
-        projection.metrics.model_dump(by_alias=True, exclude_none=True),
+    _write_json(root / LATEST_STATE, projection.model_dump(by_alias=True, exclude_none=True))
+    _write_json(
+        root / LATEST_METRICS, projection.metrics.model_dump(by_alias=True, exclude_none=True)
     )
 
 
@@ -358,8 +356,11 @@ def _repo_surface_cache_key(config: McpRuntimeConfig) -> tuple[tuple[str, str, s
     return tuple(rows)
 
 
-def _atomic_write_json(path: Path, payload: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(f"{path.name}.{new_ulid()}.tmp")
-    tmp.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
-    os.replace(tmp, path)
+def _write_json(path: Path, payload: dict[str, Any]) -> None:
+    """Serialise, then hand the bytes to the package's one atomic publish.
+
+    This used to be ``_atomic_write_json`` and owned its own temp-and-replace -- one of the
+    two named copies of that primitive. What is left is the JSON rendering, which is all
+    that was ever local to the projection store.
+    """
+    atomic_write_text(path, json.dumps(payload, indent=2) + "\n")

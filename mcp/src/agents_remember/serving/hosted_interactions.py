@@ -8,8 +8,10 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
+from agents_remember.controlplane import operator_inbox_transitions as inbox_transitions
 from agents_remember.controlplane.operator_inbox_records import OperatorInboxEntry
 from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
+from agents_remember.controlplane.operator_inbox_transitions import AdapterCompletion
 from agents_remember.controlplane.records import (
     GateAnchor,
     GateRecord,
@@ -250,11 +252,14 @@ class HostedInteractionSynchronizer:
             outcome = terminal_result.get("outcome")
             completed_at = terminal_result.get("completedAt")
             correlation = item.get("vendorCorrelationId")
-            self._inbox.record_adapter_completion(
+            inbox_transitions.record_adapter_completion(
+                self._inbox,
                 request_id,
+                AdapterCompletion(
+                    vendor_correlation_id=correlation if isinstance(correlation, str) else None,
+                    detail=f"adapter terminal result: {outcome}",
+                ),
                 now=completed_at if isinstance(completed_at, str) else now_iso(),
-                vendor_correlation_id=correlation if isinstance(correlation, str) else None,
-                detail=f"adapter terminal result: {outcome}",
                 current=current,
             )
 

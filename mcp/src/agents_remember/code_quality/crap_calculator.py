@@ -30,56 +30,10 @@ IGNORED_PATH_PARTS = {
     "node_modules",
     "venv",
 }
-# The enforced threshold. There is no baseline, allowlist or exemption file beside it:
-# a function at or above this score fails the gate, and is cleared by covering its
-# branches or by being split.
-#
-# Chosen against the branch-coverage distribution of `mcp/src/agents_remember`, measured
-# on 2026-07-31 under the full suite with `[tool.coverage.run] branch = true`: 4,469
-# scored functions before this leaf's fixes, 4,672 after; aggregate 86.84% reported,
-# 89.85% statements alone, 76.51% branches alone.
-#
-# The number that decides this is not the failure count, it is *reach*: how much of the
-# tree a threshold is capable of failing at all. `crap = cc**2 * (1 - c)**3 + cc`, so a
-# function's ceiling is `cc**2 + cc` at zero coverage -- but no function reaches zero,
-# because its own `def` line is a statement that runs when the module is imported. The
-# floor observed across all 4,672 functions is 3.03%, and reach therefore moves in steps:
-#
-#   threshold 28..30   only cc >= 6 can ever fail    3,821 of 4,672 unreachable  81.8%
-#   threshold 19..27   cc >= 5 can fail              3,436 of 4,672 unreachable  73.5%
-#   threshold <= 18    cc >= 4 can fail              2,832 of 4,672 unreachable  60.6%
-#
-# That is the case against the historical 30 and against nudging it. Every value from 28
-# to 30 has identical reach, so moving inside that range changes which functions are named
-# and nothing about what the gate can see. 30 failed 0 functions while CRAP consumed
-# statement coverage and 3 once it consumed branch coverage: the same weak gate either way.
-#
-# 20 is the anchor at the bottom of the middle band, and it is a statement about code
-# rather than about this tree: `crap(4, 0) = 20` is the lowest score an entirely
-# unexercised four-path function can have, so a threshold of 20 is exactly the rule "four
-# independent paths that no test ever enters is a finding". Nothing between 21 and 27 buys
-# any reach over it, so within that band the strictest value is the honest one. Concretely
-# it demands branch coverage above 53.6% at C901's declared ceiling of cc = 10, above
-# 71.9% at cc = 15, and cannot be met at all at cc >= 20 -- which is not a second
-# complexity gate, because C901 already rejects anything past 10.
-#
-# One measured caveat, because it decides which failures are honest. The two terms are
-# measured by tools that disagree about what a branch is: Radon counts `and`/`or`
-# short-circuits as decisions, Coverage.py emits no arc for them. 69 of the 102 functions
-# at cc >= 11 still have fewer branch arcs than their Radon complexity. The extreme case
-# was `observer/reducer.py::project_workspace` -- Radon cc 25, *zero* branch arcs, 100%
-# covered, CRAP exactly 25.00, its complexity entirely ~20 `x or []` keyword defaults. No
-# test could move it; normalising those defaults once took it to cc 5. So a threshold in
-# this band is a claim about complexity as well as about testing, which is the reason it
-# belongs at a number defensible without reference to which functions sit above it today.
-#
-# Cost when it was armed, all of it paid rather than recorded: 46 of 4,469 functions.
-# 41 were undertested and got real behavioural tests; 5 could not be cleared by any test
-# (`crap(cc, 1.0) = cc`) and were split -- project_workspace 25 -> 5, _engine_process
-# 22 -> 6, _map_task_lifecycle 22 -> 3, _map_collab_tool_call 25 -> 4, parse_runner_config
-# 20 -> 5. The tree now tops out at 19.83
-# (`serving/claude_stream_state.py::ClaudeStreamState._complete_pending_on_disconnect`,
-# cc 10 at 53.8%), so the margin is 0.17 and the next regression is a failure.
+# A score at or above 20 fails without a baseline or exemption. Cover missing branch
+# arcs or split the function. Known measurement boundary: Radon counts boolean
+# short-circuits in complexity while Coverage.py may emit no corresponding arc, so a
+# score can sometimes be reduced only by simplifying the function.
 DEFAULT_CRAP_THRESHOLD = 20.0
 DEFAULT_TOP = 25
 
@@ -179,16 +133,7 @@ def load_coverage_by_path(coverage_json: Path, project_root: Path) -> dict[str, 
 
 
 def require_branch_measurement(data: dict[str, Any], coverage_json: Path) -> None:
-    """Refuse a report that was not produced with branch measurement on.
-
-    Without this the failure is invisible rather than loud. ``executed_branches`` and
-    ``missing_branches`` are simply absent from a statement-only report, so every
-    function would read as having no branches, every coverage ratio would silently
-    collapse back to the statement ratio, and CRAP would go on being computed over a
-    metric it is not defined against -- which is the exact defect this reader was
-    changed to remove. Turning ``[tool.coverage.run] branch`` off therefore has to break
-    the gate loudly, not soften it.
-    """
+    """Refuse coverage reports that do not carry branch measurement."""
     meta = data.get("meta")
     branch = meta.get("branch_coverage") if isinstance(meta, dict) else None
     if branch is not True:
@@ -334,21 +279,10 @@ def arcs_from(arcs: frozenset[tuple[int, int]], span: set[int]) -> int:
 
 
 def coverage_ratio_for_function(covered_units: int, total_units: int, has_data: bool) -> float:
-    """Branch coverage over one function span, as Coverage.py itself computes it.
+    """Coverage.py statement-plus-branch ratio over one function span.
 
-    The units are the file's statements plus its branch arcs, which is the ratio
-    Coverage.py reports as ``percent_covered`` when ``branch = true`` -- 85.40% for this
-    tree on 2026-07-31, against 88.59% for statements alone. One formula covers every
-    function, including a function that contains no branch at all: its arc terms are both
-    zero and the same division still applies. That degeneration is arithmetic, not a
-    fallback -- there is no branch in this code that switches metric, so two functions'
-    scores are always the same measurement and a threshold means one thing everywhere.
-
-    A zero denominator is not reachable for a function Coverage.py measured, because its
-    ``def`` line is itself a statement. It is reachable for a span that is entirely
-    excluded (``# pragma: no cover``), which is a deliberate opt-out and scores as covered;
-    a file the report never mentions is the different case ``has_data`` carries, and counts
-    as wholly uncovered.
+    An absent file is wholly uncovered. A measured span with no executable units is
+    treated as covered, matching an explicit coverage exclusion.
     """
     if not has_data:
         return 0.0

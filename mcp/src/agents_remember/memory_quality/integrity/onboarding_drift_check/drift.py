@@ -19,6 +19,7 @@ from agents_remember.kernel.coordination_context_resolver import (
     StorageSettings,
     clean_scalar,
     is_sidecar_storage,
+    mirror_onboarding_path,
     normalize_rel_path,
     resolve_coordination_context,
     resolve_storage_for_source,
@@ -27,7 +28,6 @@ from agents_remember.kernel.git_command import run_git
 from agents_remember.memory_quality.integrity.onboarding_drift_check.discovery import (
     discover_onboarding_files,
     is_supported_sidecar_onboarding,
-    mirror_onboarding_path,
     normalize_overview_route,
     parse_table_metadata,
     rel,

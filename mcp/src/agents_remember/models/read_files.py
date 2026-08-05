@@ -13,14 +13,23 @@ choke point -- this module never sets them.
 
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Any, Literal, get_args
 
-# ``FileReadStatus`` is imported from the controller that decides it, never retyped here:
-# ``_resolve_onboarding`` returns it and ``_read_one`` puts it into an untyped payload dict, so
-# a copy on this side would only be measured against the producer when a real read carried the
-# new member -- as a ValidationError, on the tool path, with no handler for one.
-from agents_remember.controllers.read_files import FileReadStatus
 from agents_remember.models.base import StrictResponseModel, ToolResponse
+
+# The onboarding-lookup outcome for one requested source path, declared once, HERE.
+# It is a served status: it is a field of the response below, so it is wire vocabulary and
+# this package owns it. Declaring it in the application entry point that decides it made the
+# response model import the application layer: the one edge that made ``models`` and
+# ``application`` mutually dependent (``layers.toml``), for a five-member literal.
+#
+# This is the ONBOARDING status, never a source-read condition: source presence rides the
+# independent ``source`` field, which is why ``found`` and a missing ``source`` are not a
+# contradiction.
+FileReadStatus = Literal["found", "missing", "disabled", "unsupported", "not_requested"]
+
+# The runtime half of the alias, derived from it rather than retyped beside it.
+VALID_FILE_READ_STATUSES: frozenset[FileReadStatus] = frozenset(get_args(FileReadStatus))
 
 
 class FileRead(StrictResponseModel):

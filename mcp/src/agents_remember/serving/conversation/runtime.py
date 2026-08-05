@@ -37,7 +37,7 @@ from agents_remember.serving.terminal_liveness import (
 )
 
 if TYPE_CHECKING:
-    from agents_remember.serving.harnesses import Harness
+    from agents_remember.kernel.harnesses import Harness
 
 HarnessRegistry = Callable[[], Sequence["Harness"]]
 

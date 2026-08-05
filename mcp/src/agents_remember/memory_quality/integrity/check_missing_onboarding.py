@@ -14,6 +14,7 @@ from agents_remember.kernel.coordination_context_resolver import (
     CoordinationHints,
     StorageSettings,
     is_sidecar_storage,
+    mirror_onboarding_path,
     normalize_rel_path,
     resolve_coordination_context,
     resolve_storage_for_source,
@@ -21,7 +22,6 @@ from agents_remember.kernel.coordination_context_resolver import (
 from agents_remember.kernel.git_command import run_git
 from agents_remember.memory_quality.integrity.onboarding_drift_check.drift import (
     extract_inline_onboarding_block,
-    mirror_onboarding_path,
 )
 
 

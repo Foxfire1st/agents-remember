@@ -4,15 +4,14 @@ from __future__ import annotations
 
 import contextlib
 import json
-import os
 import threading
 from collections.abc import Iterator
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
-from uuid import uuid4
 
+from agents_remember.kernel.atomic_write import atomic_write_text
 from agents_remember.serving.harness_control_models import (
     AcceptanceState,
     ActivityState,
@@ -847,23 +846,15 @@ class TerminalCatalog:
         return [TerminalCatalogEntry.from_json(item) for item in rows]
 
     def _write_disk(self, entries: list[TerminalCatalogEntry]) -> None:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        # A UNIQUE temp per write (pid + uuid): a shared fixed-name temp let concurrent writers — even two
-        # request threads in one process — interleave their bytes into a torn file. With a private temp +
-        # atomic os.replace, every reader sees a complete file; the worst case is a lost update, never
-        # corruption. The temp is removed if the write fails so a crash never leaves a partial sibling.
-        tmp = self.path.with_name(f".{self.path.name}.{os.getpid()}.{uuid4().hex}.tmp")
+        # The unique-temp rule this method used to spell out itself — a shared fixed-name temp let
+        # concurrent writers, even two request threads in one process, interleave their bytes into a
+        # torn file — is now the package-wide rule in kernel.atomic_write, which is where the rest of
+        # the tree learns it too. The worst case here is still a lost update, never corruption.
         payload = {
             "schema": "ar-dashboard-terminal-sessions/v1",
             "sessions": [entry.to_json() for entry in sorted(entries, key=lambda e: e.created_at)],
         }
-        try:
-            tmp.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-            os.replace(tmp, self.path)
-        except BaseException:
-            with contextlib.suppress(OSError):
-                tmp.unlink()
-            raise
+        atomic_write_text(self.path, json.dumps(payload, indent=2, sort_keys=True) + "\n")
 
 
 def _string_tuple(raw: object) -> tuple[str, ...] | None:

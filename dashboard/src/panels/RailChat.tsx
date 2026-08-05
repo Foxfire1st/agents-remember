@@ -184,8 +184,17 @@ function isRunning(session: OpenSession): boolean {
   return (session.status ?? "running") === "running";
 }
 
-function stepLine(step: TaskStepNode): string {
-  return `- [${step.status}] ${step.id ? `${step.id} -- ` : ""}${step.title}`;
+function stepLines(step: TaskStepNode): string[] {
+  const disposition = step.disposition ? ` -- SKIPPED: ${step.disposition.reason}` : "";
+  return [
+    `- [${step.status}] ${step.id ? `${step.id} -- ` : ""}${step.title}${disposition}`,
+    ...step.substeps.map((substep) => {
+      const childDisposition = substep.disposition
+        ? ` -- SKIPPED: ${substep.disposition.reason}`
+        : "";
+      return `  - [${substep.status}] ${substep.id ? `${substep.id} -- ` : ""}${substep.title}${childDisposition}`;
+    }),
+  ];
 }
 
 function findLeafProcess(
@@ -234,7 +243,7 @@ function buildLeafContextPackage({
       : ["- (none projected)"]),
     "",
     "Top-level steps",
-    ...(doc.steps.length > 0 ? doc.steps.map(stepLine) : ["- (none projected)"]),
+    ...(doc.steps.length > 0 ? doc.steps.flatMap(stepLines) : ["- (none projected)"]),
     "",
     "Instruction",
     "Attach yourself to this lifecycle/leaf before working. Use this task document as the scope anchor.",

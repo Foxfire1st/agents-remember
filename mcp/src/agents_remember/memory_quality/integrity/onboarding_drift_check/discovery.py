@@ -14,10 +14,6 @@ from agents_remember.memory_quality.integrity.onboarding_drift_check.models impo
 )
 
 
-def mirror_onboarding_path(onboarding_root: Path, source_file: str) -> Path:
-    return onboarding_root / f"{normalize_rel_path(source_file)}.md"
-
-
 def parse_table_metadata(path: Path) -> dict[str, str]:
     metadata: dict[str, str] = {}
     for raw_line in path.read_text(encoding="utf-8").splitlines():

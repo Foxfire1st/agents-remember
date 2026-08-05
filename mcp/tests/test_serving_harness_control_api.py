@@ -25,6 +25,7 @@ from agents_remember.errors import (
     HarnessInteractionNotPendingError,
     HarnessRequestConflictError,
 )
+from agents_remember.kernel.harnesses import HARNESSES
 from agents_remember.serving import harness_control_api
 from agents_remember.serving.conversation.authorization import (
     LocalOperatorAuthorizationResolver,
@@ -47,7 +48,6 @@ from agents_remember.serving.harness_control_models import (
     SubmissionStatusBatch,
     WithdrawalResult,
 )
-from agents_remember.serving.harnesses import HARNESSES
 from agents_remember.serving.terminal_catalog import TerminalCatalog, TerminalCatalogEntry
 from agents_remember.serving.terminal_liveness import (
     TerminalCatalogLivenessConfig,

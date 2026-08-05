@@ -38,7 +38,30 @@ function leafDoc(): TaskDocNode {
     requirements: ["Start from the selected leaf.", "Do not inject on rejected attach."],
     steps: [
       { id: "S1", title: "Wire the leaf registry", status: "done", substeps: [] },
-      { id: "S2", title: "Add the rail chat", status: "inProgress", substeps: [] },
+      {
+        id: "S2",
+        title: "Add the rail chat",
+        status: "done",
+        disposition: {
+          kind: "intentionalSkip",
+          reason: "The existing rail already covers it.",
+          recordedAt: "2026-08-03T12:00:00+00:00",
+          recordedVia: "task_doc.skip_step",
+        },
+        substeps: [
+          {
+            id: "S2.1",
+            title: "Add a duplicate control",
+            status: "done",
+            disposition: {
+              kind: "intentionalSkip",
+              reason: "Duplicate control is unnecessary.",
+              recordedAt: "2026-08-03T12:00:00+00:00",
+              recordedVia: "task_doc.skip_step",
+            },
+          },
+        ],
+      },
     ],
   });
 }
@@ -223,6 +246,13 @@ describe("RailChat start affordances (L5 fix 2)", () => {
     expect(packet).toContain("Lifecycle: lc-l5");
     expect(packet).toContain("Code worktree: /worktrees/sidebar-chat-ar/sidebar-chat");
     expect(packet).toContain("- [done] S1 -- Wire the leaf registry");
+    expect(packet).not.toContain("S1 -- Wire the leaf registry -- SKIPPED");
+    expect(packet).toContain(
+      "- [done] S2 -- Add the rail chat -- SKIPPED: The existing rail already covers it.",
+    );
+    expect(packet).toContain(
+      "  - [done] S2.1 -- Add a duplicate control -- SKIPPED: Duplicate control is unnecessary.",
+    );
   });
 
   it("surfaces a rejected harness open without a ghost row or context delivery", async () => {

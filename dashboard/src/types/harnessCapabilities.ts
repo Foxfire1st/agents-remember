@@ -3,7 +3,7 @@
 // (the daemon envelope) nesting harness_capabilities.py `capability_snapshot_json()` (the
 // normalized L1 snapshot), served by `GET /api/harnesses/{h}/capabilities`
 // (serving/harness_control_api.py). camelCase matches the wire form; the Python serializers are
-// the source of truth — keep in lockstep by hand (same posture as types/terminalCatalog.ts).
+// the source of truth — keep this dataclass-backed surface in lockstep by hand.
 //
 // DYNAMIC-ONLY invariant: these are SHAPES. No model key, effort key, or menu from any install
 // may ever be copied here as a value — catalogs are live data fetched per install/auth.

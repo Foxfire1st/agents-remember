@@ -8,6 +8,10 @@ from pydantic import Field
 
 from agents_remember.models.base import FlexibleToolResponse
 
+# This is the public MCP default, so models owns it; benchmark execution imports the value rather
+# than forcing the transport to import the high-rank benchmark implementation.
+CODEX_BENCHMARK_SANDBOX = "default"
+
 
 class CodexBenchmarkPrepareResponse(FlexibleToolResponse):
     operation: Literal["codex_benchmark_prepare"] = "codex_benchmark_prepare"

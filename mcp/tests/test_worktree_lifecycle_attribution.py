@@ -1,6 +1,6 @@
 """worktree_start promotes / worktree_attach resumes the lifecycle (slice 2c).
 
-These unit-test the controller attribution helpers against a real ambient
+These unit-test the application-layer attribution helpers against a real ambient
 lifecycle without standing up git worktrees: the helpers read the (snake_case)
 result payload and drive promote/adopt/save-gate on the process singleton.
 """
@@ -16,7 +16,7 @@ from typing import Any
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
-from agents_remember.controllers.worktree_tools import _attribute_attach, _attribute_start
+from agents_remember.application.worktree_tools import _attribute_attach, _attribute_start
 from agents_remember.observer.ambient import AmbientLifecycle, AmbientTiming
 from agents_remember.observer.save_gate import SaveGateRequired
 from agents_remember.observer.store import EventStore

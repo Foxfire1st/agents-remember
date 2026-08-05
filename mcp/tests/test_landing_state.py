@@ -20,7 +20,7 @@ from agents_remember.observer.landing_state import (
     _load_final,
 )
 from agents_remember.observer.projection import LandingRefNode
-from agents_remember.tasks.reopen import _clear_frozen_landing, reopen_task
+from agents_remember.worktrees.reopen import _clear_frozen_landing, reopen_task
 from agents_remember.worktrees.worktree_contract import (
     ContractTask,
     LeafIdentity,

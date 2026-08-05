@@ -506,8 +506,8 @@ export function SessionRail({
     (state) => state.analytics?.taskDocuments ?? EMPTY_DOCS,
   );
   const lifecycles = useDashboard((state) => state.lifecycles);
-  const pickups = useDashboard(
-    (state) => state.analytics?.agentPickups ?? EMPTY_PICKUPS,
+  const pickups = useDashboard((state) =>
+    state.analytics ? state.analytics.agentPickups : EMPTY_PICKUPS,
   );
 
   const [openDoneFolders, setOpenDoneFolders] = useState<

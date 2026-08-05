@@ -7,6 +7,9 @@ server it is handed, and ``TOOL_REGISTRARS`` lists them in the order the server 
 them. Adding a tool means editing one family module; the advertised set stays pinned by
 ``agents_remember.mcp.tools.PUBLIC_TOOLS``, which the tool-list test checks against a live
 server.
+
+FastMCP publishes tools in registration order -- never reorder ``TOOL_REGISTRARS``, nor the
+``_register_*`` calls inside a family module.
 """
 
 from collections.abc import Callable

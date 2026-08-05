@@ -44,7 +44,7 @@ function AbandonRecord({ node }: { node: EngineProcessNode }) {
 // into the official line (the same `.dissolve`), but the record reads success — and names the `origin-main`
 // tip it rejoined (the "back into main" seam), never faked (dropped when the probe couldn't resolve it).
 function CleanupRecord({ node }: { node: EngineProcessNode }) {
-  const mainTip = node.landing?.find((ref) => ref.kind === "origin-main" && ref.factState !== "missing");
+  const mainTip = node.landing.find((ref) => ref.kind === "origin-main" && ref.factState !== "missing");
   return (
     <div className={cleanupRecord} data-testid="cleanup-record">
       <span>

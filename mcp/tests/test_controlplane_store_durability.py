@@ -43,7 +43,7 @@ from _store_durability import (
     ADAPTERS,
     APPEND_CASES,
     CASES,
-    MIN_RECLAIM_TICKS,
+    MIN_SUCCESSFUL_RECLAIMS,
     STRESS_PROFILE,
     VacuousRunError,
     extract_base_commit_tree,
@@ -77,13 +77,17 @@ TOLERANT_READ_CASES = ("attention", "nudge", "supervisor_signal")
 
 def _describe(result: dict[str, object]) -> str:
     attempted = int(result["attempted"])  # type: ignore[arg-type]
+    completed = int(result.get("completed", attempted))  # type: ignore[arg-type]
     lost = int(result["lost"])  # type: ignore[arg-type]
-    percent = (100.0 * lost / attempted) if attempted else 0.0
+    percent = (100.0 * lost / completed) if completed else 0.0
     return (
-        f"{result['case']} / {result['scenario']}: {lost} of {attempted} records reported "
+        f"{result['case']} / {result['scenario']}: attempted={attempted} completed={completed}; "
+        f"{lost} completed records "
         f"written were missing afterwards ({percent:.2f}% loss); "
         f"sample={result['lost_sample']} torn_lines={result['torn_lines']} "
-        f"reclaim_ticks={result.get('reclaim_ticks')} stragglers={result['stragglers']}"
+        f"reclaim_attempts={result.get('reclaim_attempts')} "
+        f"successful_reclaims={result.get('successful_reclaims')} "
+        f"stragglers={result['stragglers']}"
     )
 
 
@@ -344,7 +348,8 @@ class HarnessVacuityGuardTests(_TempRootTest):
     layout across all eight stores this instrument covers, on this tree: 25 reclaim ticks for the
     first and exactly 1 for each of the seven after it, 0.00% loss reported by every one.
 
-    The guard is in the instrument (``_store_durability.MIN_RECLAIM_TICKS``) rather than here, so
+    The guard is in the instrument (``_store_durability.MIN_SUCCESSFUL_RECLAIMS``) rather than
+    here, so
     that the provider suite and the base-commit script entry point are covered by the same floor
     and not by a copy of it. This is the test that proves the refusal is real and reachable, using
     the shipped code path rather than a hand-built result dict.
@@ -356,8 +361,8 @@ class HarnessVacuityGuardTests(_TempRootTest):
             run_case("stress", "gate", self.tmp / "vacuous", max_ticks=1)
 
         message = str(refusal.exception)
-        self.assertIn("ran 1 tick", message)
-        self.assertIn(str(MIN_RECLAIM_TICKS), message)
+        self.assertIn("completed 1 successful compaction", message)
+        self.assertIn(str(MIN_SUCCESSFUL_RECLAIMS), message)
 
     def test_the_floor_is_far_enough_below_what_a_real_run_produces(self) -> None:
         """The floor separates a vacuous run from a real one, with room on both sides.
@@ -369,9 +374,13 @@ class HarnessVacuityGuardTests(_TempRootTest):
         on a 20-core box -- contention RAISES the count, because the appenders' 2ms pacing
         stretches in wall clock while the reclaimer keeps polling.
         """
-        self.assertGreater(MIN_RECLAIM_TICKS, 2, "one or two ticks is the vacuous run itself")
+        self.assertGreater(
+            MIN_SUCCESSFUL_RECLAIMS,
+            2,
+            "one or two successful compactions is the vacuous run itself",
+        )
         self.assertLess(
-            MIN_RECLAIM_TICKS,
+            MIN_SUCCESSFUL_RECLAIMS,
             22,
             "the floor must sit below the lowest tick count ever measured on this profile",
         )

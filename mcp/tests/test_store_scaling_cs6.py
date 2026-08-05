@@ -54,12 +54,11 @@ from agents_remember.observer.event_retention import (
     prune_expired_lifecycle_event_logs,
 )
 from agents_remember.observer.events import Event
-from agents_remember.observer.served_store import ServedRecord, ServedStore
+from agents_remember.observer.served_store import ServedLedger, ServedRecord, ServedStore
 from agents_remember.observer.store import EventStore, workspace_base_offset
 from agents_remember.providers.degradation import ProviderDegradationStore
 from agents_remember.providers.metrics import PROVIDER_METRICS_SCHEMA, ProviderMetricsStore
 from agents_remember.serving.events import decode_cursor, read_new_events
-from agents_remember.serving.terminal import TmuxProbeResult
 from agents_remember.serving.terminal_catalog import (
     TerminalCatalog,
     TerminalCatalogEntry,
@@ -69,6 +68,7 @@ from agents_remember.serving.terminal_liveness import (
     TerminalCatalogLivenessConfig,
     TerminalCatalogLivenessSweeper,
 )
+from agents_remember.serving.terminal_tmux import TmuxProbeResult
 
 NOW = datetime(2026, 7, 9, 12, 0, 0, tzinfo=UTC)
 
@@ -521,6 +521,52 @@ class ToleranceBatchTests(unittest.TestCase):
                 "life-1", ServedRecord(kind="overview", path="b", hash="h2", ts=NOW.isoformat())
             )
             self.assertEqual({r.path for r in store.read("life-1")}, {"a", "b"})
+
+    def test_served_ledger_reads_through_once_and_resets_both_halves(self) -> None:
+        # The ledger is the hot path over the store: the first question about a lifecycle
+        # hydrates from disk, and a reset must drop the in-memory set AND the log, or a
+        # `refresh=true` read would re-serve nothing.
+        with tempfile.TemporaryDirectory() as tmp:
+            store = ServedStore(Path(tmp))
+            store.append(
+                "life-1", ServedRecord(kind="overview", path="a", hash="h1", ts=NOW.isoformat())
+            )
+            ledger = ServedLedger(store)
+
+            self.assertTrue(ledger.is_served("life-1", "overview", "a", "h1"))
+            self.assertFalse(ledger.is_served("life-1", "overview", "a", "h2"))
+
+            ledger.record("life-1", "overview", "b", "h3", ts=NOW.isoformat())
+            self.assertTrue(ledger.is_served("life-1", "overview", "b", "h3"))
+            self.assertEqual({r.path for r in store.read("life-1")}, {"a", "b"})
+
+            ledger.reset("life-1")
+            self.assertFalse(ledger.is_served("life-1", "overview", "a", "h1"))
+            self.assertEqual(store.read("life-1"), [])
+
+    def test_resetting_a_lifecycle_that_never_served_anything_is_a_no_op(self) -> None:
+        # There is no log to unlink for a lifecycle that read nothing, and `refresh=true`
+        # on a fresh session takes exactly that path.
+        with tempfile.TemporaryDirectory() as tmp:
+            ledger = ServedLedger(ServedStore(Path(tmp)))
+
+            ledger.reset("never-served")
+
+            self.assertFalse(ledger.is_served("never-served", "overview", "a", "h1"))
+
+    def test_forgetting_a_lifecycle_drops_the_set_and_keeps_the_log(self) -> None:
+        # The counterpart of reset, and the one duty AmbientLifecycle keeps over the
+        # ledger: a lifecycle that ended or was left behind releases memory, but its
+        # durable record survives -- deleting it would destroy a merely-paused lifecycle.
+        with tempfile.TemporaryDirectory() as tmp:
+            store = ServedStore(Path(tmp))
+            ledger = ServedLedger(store)
+            ledger.record("life-1", "overview", "a", "h1", ts=NOW.isoformat())
+
+            ledger.forget("life-1")
+
+            self.assertEqual({r.path for r in store.read("life-1")}, {"a"})
+            self.assertTrue(ledger.is_served("life-1", "overview", "a", "h1"))
 
 
 class _DiskCountingCatalog(TerminalCatalog):

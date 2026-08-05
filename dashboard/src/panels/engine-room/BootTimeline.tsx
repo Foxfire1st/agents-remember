@@ -94,10 +94,10 @@ const DISPOSE_PHASES = new Set([
 
 // The single ACTIVE dispose step (the frontier), read from the SAME landing[] ref progression the canvas
 // flows use (origin-feat pushed → pr merged → origin-mem-main pushed) — so the panel's "running" row and the
-// canvas's cyan flow always agree. Index into the step list below. carryoverDoneAt isn't on the TS projection
-// yet (a deferred 5k-render item), so the carryover step reads the origin-mem-main ref.
+// canvas's cyan flow always agree. Index into the step list below. `carryoverDoneAt` is optional until
+// that milestone is recorded, so the carryover step reads the origin-mem-main ref.
 function disposeFrontier(node: EngineProcessNode): number {
-  const ref = (k: string) => node.landing?.find((r) => r.kind === k);
+  const ref = (k: string) => node.landing.find((r) => r.kind === k);
   const resolved = (k: string) => {
     const r = ref(k);
     return r ? r.factState !== "planned" && r.state !== "planned" : false;

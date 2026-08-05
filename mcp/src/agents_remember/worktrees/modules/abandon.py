@@ -16,23 +16,34 @@ worktree. With `force` it discards them (`git worktree remove --force`,
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TypeAlias
 
+from agents_remember.errors import CitationCacheError
 from agents_remember.kernel.git_command import run_git
+from agents_remember.memory_quality.style.citations.source_index_cache import (
+    TerminalNamespaceGuard,
+    terminal_namespace_guard,
+)
 from agents_remember.worktrees.modules import provider_async
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.cleanup import (
     delete_branch_force,
     delete_branch_if_merged,
+    local_branch_presence,
     remove_empty_dir,
     remove_registered_worktree,
 )
-from agents_remember.worktrees.modules.git import branch_exists
 from agents_remember.worktrees.modules.guidance import status_payload
 from agents_remember.worktrees.modules.integrate import integration_branch
 from agents_remember.worktrees.modules.models import WorktreeCommandResult
 from agents_remember.worktrees.modules.provider_teardown import (
     remove_tree,
     teardown_worktree_providers,
+)
+from agents_remember.worktrees.modules.terminal_validation import (
+    TerminalPreflight,
+    terminal_preflight,
+    terminal_result_blockers,
 )
 from agents_remember.worktrees.worktree_contract import (
     ContractCells,
@@ -41,6 +52,14 @@ from agents_remember.worktrees.worktree_contract import (
     load_contract,
     write_contract,
 )
+
+TerminalItems: TypeAlias = dict[str, dict[str, object]]
+AbandonOutputs: TypeAlias = tuple[
+    dict[str, object],
+    TerminalItems,
+    TerminalItems,
+    TerminalItems,
+]
 
 
 def abandon_result(args: WorktreeArgs) -> WorktreeCommandResult:
@@ -63,31 +82,204 @@ def abandon_result(args: WorktreeArgs) -> WorktreeCommandResult:
             },
         )
 
-    providers = teardown_worktree_providers(contract, dry_run=args.dry_run)
-    removed_worktrees = _abandon_worktrees(contract, dry_run=args.dry_run, force=args.force)
-    branches = _abandon_branches(contract, dry_run=args.dry_run, force=args.force)
-    directories = _abandon_directories(contract, dry_run=args.dry_run, force=args.force)
+    preflight = terminal_preflight(contract, mode="abandon", force=args.force)
+    if preflight.blockers and not args.dry_run:
+        return WorktreeCommandResult(
+            2,
+            {
+                **status_payload(contract),
+                "state": "abandon-blocked",
+                "summary": "Abandon terminal preflight refused before any mutation.",
+                "blockers": list(preflight.blockers),
+            },
+        )
 
-    blockers = _abandon_blockers(removed_worktrees, branches)
-    reclaimed = not blockers
-    updated = (
-        amend_contract(contract, ContractCells(cleanup="abandoned")) if reclaimed else contract
+    return _abandon_reserved(args, contract, preflight)
+
+
+def _abandon_reserved(
+    args: WorktreeArgs,
+    contract: WorktreeContract,
+    preflight: TerminalPreflight,
+) -> WorktreeCommandResult:
+    assert args.contract_path is not None
+
+    try:
+        guard_context = terminal_namespace_guard(
+            contract,
+            requested_contract_path=args.contract_path,
+        )
+        guard = guard_context.__enter__()
+    except CitationCacheError as error:
+        reason = "live-lease-timeout" if "live lease" in str(error) else str(error)
+        return WorktreeCommandResult(
+            2,
+            {
+                **status_payload(contract),
+                "state": "abandon-blocked",
+                "summary": "Abandon could not reserve exact terminal citation cache authority.",
+                "citation_source_index": {
+                    "removed": False,
+                    "reason": reason,
+                    "detail": str(error),
+                },
+                "blockers": [],
+            },
+        )
+    try:
+        return _abandon_with_guard(args, contract, preflight, guard)
+    finally:
+        guard_context.__exit__(None, None, None)
+
+
+def _abandon_with_guard(
+    args: WorktreeArgs,
+    contract: WorktreeContract,
+    preflight: TerminalPreflight,
+    guard: TerminalNamespaceGuard,
+) -> WorktreeCommandResult:
+    try:
+        outputs = _abandon_terminal_outputs(args, contract, preflight)
+    except Exception as error:
+        return WorktreeCommandResult(
+            2,
+            {
+                "state": "abandon-blocked",
+                **status_payload(contract),
+                "summary": "Abandon terminal helper failed; cache and contract stayed live.",
+                "citation_source_index": _preserved_cache(
+                    guard.preview(), "terminal-helper-failed"
+                ),
+                "blockers": [{"terminal": "helper", "reason": str(error)}],
+            },
+        )
+    providers, removed_worktrees, branches, directories = outputs
+    blockers = terminal_result_blockers(
+        providers=providers,
+        worktrees=removed_worktrees,
+        branches=branches,
+        directories=directories,
     )
-    if reclaimed and not args.dry_run:
-        write_contract(contract.contract_path, updated)
+    if blockers and not args.dry_run:
+        return WorktreeCommandResult(
+            2,
+            {
+                "state": "abandon-blocked",
+                **status_payload(contract),
+                "summary": "Abandon terminal mutation failed; cache and contract stayed live.",
+                "providers": providers,
+                "citation_source_index": _preserved_cache(
+                    guard.preview(), "terminal-operation-failed"
+                ),
+                "removed_worktrees": removed_worktrees,
+                "branches": branches,
+                "directories": directories,
+                "blockers": blockers,
+            },
+        )
+    if args.dry_run:
+        return WorktreeCommandResult(
+            0,
+            {
+                "state": "would-abandon",
+                **status_payload(contract),
+                "summary": _abandon_summary(True, not preflight.blockers),
+                "providers": providers,
+                "citation_source_index": guard.preview(),
+                "removed_worktrees": removed_worktrees,
+                "branches": branches,
+                "directories": directories,
+                "blockers": list(preflight.blockers),
+            },
+        )
+    return _publish_abandon(contract, guard, outputs)
+
+
+def _publish_abandon(
+    contract: WorktreeContract,
+    guard: TerminalNamespaceGuard,
+    outputs: AbandonOutputs,
+) -> WorktreeCommandResult:
+    providers, removed_worktrees, branches, directories = outputs
+    updated = amend_contract(contract, ContractCells(cleanup="abandoned"))
+    try:
+        citation_cache = guard.complete(
+            outcome="abandoned",
+            publish=lambda: write_contract(contract.contract_path, updated),
+            rollback_publish=lambda: write_contract(contract.contract_path, contract),
+        )
+    except Exception as error:
+        return WorktreeCommandResult(
+            2,
+            {
+                "state": "abandon-blocked",
+                **status_payload(contract),
+                "summary": "Abandon contract/cache publication failed and was rolled back.",
+                "citation_source_index": _preserved_cache(
+                    guard.preview(), "terminal-publication-failed"
+                ),
+                "blockers": [{"publication": "contract/cache", "reason": str(error)}],
+            },
+        )
     return WorktreeCommandResult(
         0,
         {
-            "state": _abandon_state(args.dry_run, reclaimed),
+            "state": "abandoned",
             **status_payload(updated),
-            "summary": _abandon_summary(args.dry_run, reclaimed),
+            "summary": _abandon_summary(False, True),
             "providers": providers,
+            "citation_source_index": citation_cache,
             "removed_worktrees": removed_worktrees,
             "branches": branches,
             "directories": directories,
-            "blockers": blockers,
+            "blockers": [],
         },
     )
+
+
+def _abandon_terminal_outputs(
+    args: WorktreeArgs,
+    contract: WorktreeContract,
+    preflight: TerminalPreflight,
+) -> AbandonOutputs:
+    providers: dict[str, object] = teardown_worktree_providers(contract, dry_run=args.dry_run)
+    if not args.dry_run and terminal_result_blockers(
+        providers=providers,
+        worktrees={},
+        branches={},
+        directories={},
+    ):
+        return providers, {}, {}, {}
+    removed_worktrees = (
+        _abandon_worktrees(contract, dry_run=True, force=args.force)
+        if args.dry_run
+        else _abandon_worktrees(contract, dry_run=False, force=args.force)
+    )
+    if not args.dry_run and terminal_result_blockers(
+        providers=providers,
+        worktrees=removed_worktrees,
+        branches={},
+        directories={},
+    ):
+        return providers, removed_worktrees, {}, {}
+    branches = (
+        preflight.branches
+        if args.dry_run
+        else _abandon_branches(contract, dry_run=False, force=args.force)
+    )
+    if not args.dry_run and terminal_result_blockers(
+        providers=providers,
+        worktrees=removed_worktrees,
+        branches=branches,
+        directories={},
+    ):
+        return providers, removed_worktrees, branches, {}
+    directories = _abandon_directories(
+        contract,
+        dry_run=args.dry_run,
+        force=args.force,
+    )
+    return providers, removed_worktrees, branches, directories
 
 
 def _abandon_worktrees(
@@ -134,25 +326,41 @@ def _abandon_branches(
             force=force,
         )
         integration_work_branch = integration_branch(contract)
-        if branch_exists(contract.memory_repo_path, integration_work_branch):
-            branches["memory_integration"] = _abandon_branch(
-                contract.memory_repo_path,
-                integration_work_branch,
-                contract.memory_source_branch,
-                dry_run=dry_run,
-                force=force,
-            )
+        branches["memory_integration"] = _abandon_branch(
+            contract.memory_repo_path,
+            integration_work_branch,
+            contract.memory_source_branch,
+            dry_run=dry_run,
+            force=force,
+        )
     return branches
 
 
 def _abandon_branch(
     repo: Path, branch: str, base_branch: str, *, dry_run: bool, force: bool
 ) -> dict[str, object]:
-    if not branch_exists(repo, branch):
-        return {"branch": branch, "deleted": False, "reason": "already-absent"}
+    source_refusal = _branch_presence_refusal(
+        repo,
+        base_branch,
+        reported_branch=branch,
+        absent_reason=f"base branch is missing: {base_branch}",
+    )
+    if source_refusal is not None:
+        return source_refusal
+    branch_refusal = _branch_presence_refusal(
+        repo,
+        branch,
+        reported_branch=branch,
+        absent_reason="already-absent",
+    )
+    if branch_refusal is not None:
+        return branch_refusal
     if force:
         return delete_branch_force(repo, branch, dry_run)
-    unmerged = _unmerged_commits(repo, base_branch, branch)
+    try:
+        unmerged = _unmerged_commits(repo, base_branch, branch)
+    except RuntimeError as error:
+        return {"branch": branch, "deleted": False, "reason": str(error)}
     if unmerged:
         return {
             "branch": branch,
@@ -164,13 +372,46 @@ def _abandon_branch(
     return delete_branch_if_merged(repo, branch, dry_run)
 
 
+def _branch_presence_refusal(
+    repo: Path,
+    queried_branch: str,
+    *,
+    reported_branch: str,
+    absent_reason: str,
+) -> dict[str, object] | None:
+    presence = local_branch_presence(repo, queried_branch)
+    if presence.state == "present":
+        return None
+    return {
+        "branch": reported_branch,
+        "deleted": False,
+        "reason": presence.reason if presence.state == "error" else absent_reason,
+    }
+
+
 def _unmerged_commits(repo: Path, base_branch: str, branch: str) -> list[str]:
-    if not base_branch or not branch_exists(repo, base_branch):
-        return []
-    result = run_git(repo, ["log", "--oneline", f"{base_branch}..{branch}"])
+    if not base_branch:
+        raise RuntimeError("base branch is empty")
+    base = run_git(repo, ["rev-parse", "--verify", "--quiet", f"refs/heads/{base_branch}"])
+    if base.returncode != 0:
+        reason = base.stderr.strip() or f"base branch is missing: {base_branch}"
+        raise RuntimeError(reason)
+    result = run_git(
+        repo,
+        ["log", "--oneline", f"refs/heads/{base_branch}..refs/heads/{branch}"],
+    )
     if result.returncode != 0:
-        return []
+        raise RuntimeError(result.stderr.strip() or "git log query failed")
     return [line for line in result.stdout.splitlines() if line.strip()]
+
+
+def _preserved_cache(cache: dict[str, object], reason: str) -> dict[str, object]:
+    return {
+        **cache,
+        "removed": False,
+        "preserved": True,
+        "reason": reason,
+    }
 
 
 def _abandon_directories(

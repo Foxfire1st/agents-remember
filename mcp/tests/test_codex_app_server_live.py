@@ -19,6 +19,7 @@ from agents_remember.serving.codex_app_server_protocol import (
     JsonObject,
     WriteGuard,
 )
+from agents_remember.serving.codex_app_server_session import codex_launch_knobs
 from agents_remember.serving.harness_capabilities import (
     CapabilitySnapshot,
     ModelCapability,
@@ -325,9 +326,7 @@ def _configured_adapter(
     base_launch: LaunchSpec, selection: ResolvedLaunch
 ) -> tuple[CodexAppServerAdapter, RecordingCodexTransport, LaunchSpec]:
     """The adapter and launch the resolved selection produces, with no secret in the env."""
-    knobs = CodexAppServerAdapter(CodexAppServerSettings()).launch_knobs(
-        model_key=selection.model_key, effort=selection.effort
-    )
+    knobs = codex_launch_knobs(model_key=selection.model_key, effort=selection.effort)
     assert "CODEX_CONFIG" not in knobs.env
     transport = RecordingCodexTransport()
     adapter = CodexAppServerAdapter(

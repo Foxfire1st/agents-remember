@@ -17,6 +17,7 @@ function series(
     repository: "repo",
     title: overrides.seriesId,
     status: "open",
+    createdAt: "2026-06-24T06:00:00+00:00",
     objective: "",
     doneCount: 0,
     totalCount: overrides.subTasks.length,

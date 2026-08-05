@@ -4,15 +4,17 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from agents_remember.controlplane import operator_inbox_transitions as inbox_transitions
 from agents_remember.controlplane.operator_inbox_records import (
     AdapterDeliveryState,
     InboxDeliveryState,
     OperatorInboxEntry,
 )
-from agents_remember.controlplane.operator_inbox_store import (
+from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
+from agents_remember.controlplane.operator_inbox_transitions import (
     AdapterReceipt,
     DeliveryAttempt,
-    OperatorInboxStore,
+    RedeliveryFloor,
 )
 from agents_remember.errors import HarnessControlError
 from agents_remember.observer.events import now_iso
@@ -62,18 +64,6 @@ class _AdapterCorrelation:
     request_id: str | None = None
     vendor_correlation_id: str | None = None
     accepted_at: str | None = None
-
-
-@dataclass(frozen=True)
-class RedeliveryFloor:
-    """The rate limit on re-recording a delivery, and the row snapshot it is measured against.
-
-    The floor is meaningless without ``current``: the store needs the rows it is comparing this
-    attempt's timing against. They arrive together from the sweep that owns both.
-    """
-
-    current: dict[str, OperatorInboxEntry] | None = None
-    seconds: float | None = None
 
 
 @dataclass(frozen=True)
@@ -295,7 +285,8 @@ def _record(
     outcome: _DeliveryOutcome,
     correlation: _AdapterCorrelation = _NO_ADAPTER_CORRELATION,
 ) -> OperatorInboxEntry:
-    return log.store.record_delivery(
+    return inbox_transitions.record_delivery(
+        log.store,
         log.entry.id,
         DeliveryAttempt(
             delivery_state=outcome.delivery_state,
@@ -310,8 +301,7 @@ def _record(
             ),
         ),
         now=log.at,
-        current=log.floor.current,
-        redelivery_floor_seconds=log.floor.seconds,
+        floor=log.floor,
     )
 
 

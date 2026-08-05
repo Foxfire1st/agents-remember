@@ -23,7 +23,6 @@ from agents_remember.serving.harness_control_models import (
     ControlIdentity,
     ControlState,
 )
-from agents_remember.serving.terminal import TmuxProbeResult, _tmux_probe_session
 from agents_remember.serving.terminal_catalog import (
     TerminalCatalog,
     TerminalCatalogEntry,
@@ -37,6 +36,7 @@ from agents_remember.serving.terminal_liveness import (
     TerminalCatalogLivenessConfig,
     TerminalCatalogLivenessSweeper,
 )
+from agents_remember.serving.terminal_tmux import TmuxProbeResult, tmux_probe_session
 
 
 def _entry(session_id: str, *, status: TerminalSessionStatus = "running") -> TerminalCatalogEntry:
@@ -170,7 +170,7 @@ class _TmuxSubprocessProbeHost:
 
     def probe_session(self, tmux_name: str) -> TmuxProbeResult:
         self.calls += 1
-        return _tmux_probe_session(tmux_name)
+        return tmux_probe_session(tmux_name)
 
 
 class TerminalCatalogLivenessTests(unittest.TestCase):
@@ -292,7 +292,7 @@ class TerminalCatalogLivenessTests(unittest.TestCase):
         )
 
         with mock.patch(
-            "agents_remember.serving.terminal.subprocess.run",
+            "agents_remember.serving.terminal_tmux.subprocess.run",
             return_value=SimpleNamespace(returncode=1, stderr="error connecting to tmux server"),
         ):
             sweeper.refresh()
@@ -321,7 +321,7 @@ class TerminalCatalogLivenessTests(unittest.TestCase):
         )
 
         with mock.patch(
-            "agents_remember.serving.terminal.subprocess.run",
+            "agents_remember.serving.terminal_tmux.subprocess.run",
             return_value=SimpleNamespace(returncode=1, stderr="can't find session: ar-gone"),
         ):
             sweeper.refresh()

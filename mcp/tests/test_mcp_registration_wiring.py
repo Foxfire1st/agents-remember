@@ -2,7 +2,7 @@
 
 ``agents_remember.mcp.registration`` is the tool surface: one module per family, each
 declaring ``@server.tool()`` bodies that translate a flat MCP argument list into the
-parameter objects the controllers take. The tool-list test in ``test_tools.py`` proves
+parameter objects the application layer takes. The tool-list test in ``test_tools.py``
 the surface *advertises* the right names; nothing proved what a call to one of those
 names actually does.
 
@@ -384,7 +384,7 @@ class RegistrationWiringTests(unittest.TestCase):
         )
 
         self.assertEqual(recorder.args, (self.config, "agents-remember"))
-        self.assertEqual(recorder.kwargs, {"detail_limit": 50})
+        self.assertEqual(recorder.kwargs, {"detail_limit": 50, "contract_path": None})
 
     def test_memory_quality_check_runs_every_check_when_none_are_named(self) -> None:
         recorder = self.invoke(
@@ -393,7 +393,9 @@ class RegistrationWiringTests(unittest.TestCase):
             {"repo_id": "agents-remember"},
         )
 
-        self.assertEqual(recorder.kwargs, {"checks": None, "detail_limit": 50})
+        self.assertEqual(
+            recorder.kwargs, {"checks": None, "detail_limit": 50, "contract_path": None}
+        )
 
     def test_memory_quality_check_forwards_a_named_subset(self) -> None:
         recorder = self.invoke(
@@ -402,7 +404,9 @@ class RegistrationWiringTests(unittest.TestCase):
             {"repo_id": "agents-remember", "checks": ["drift"], "detail_limit": 5},
         )
 
-        self.assertEqual(recorder.kwargs, {"checks": ["drift"], "detail_limit": 5})
+        self.assertEqual(
+            recorder.kwargs, {"checks": ["drift"], "detail_limit": 5, "contract_path": None}
+        )
 
     def test_route_index_refresh_writes_unless_previewed(self) -> None:
         recorder = self.invoke(
@@ -412,7 +416,33 @@ class RegistrationWiringTests(unittest.TestCase):
         )
 
         self.assertEqual(recorder.args, (self.config, "agents-remember"))
-        self.assertEqual(recorder.kwargs, {"dry_run": False})
+        self.assertEqual(recorder.kwargs, {"dry_run": False, "contract_path": None})
+
+    def test_the_three_memory_health_tools_forward_a_named_enclosure(self) -> None:
+        """L6-R29: `contract_path` is what points these at a leaf instead of official memory.
+
+        Through the live FastMCP schema, so the parameter is really published and really
+        coerced -- an argument the registered signature does not declare is dropped before
+        the body ever sees it, and the tool would then resolve the official repo while the
+        caller believed it had named its leaf.
+        """
+        for tool, builder, extra in (
+            ("drift_check", "drift_check_payload", {"detail_limit": 50}),
+            (
+                "memory_quality_check",
+                "memory_quality_check_payload",
+                {"checks": None, "detail_limit": 50},
+            ),
+            ("route_index_refresh", "route_index_refresh_payload", {"dry_run": False}),
+        ):
+            with self.subTest(tool=tool):
+                recorder = self.invoke(
+                    tool,
+                    f"agents_remember.mcp.registration.memory.{builder}",
+                    {"repo_id": "agents-remember", "contract_path": "/coord/leaf.md"},
+                )
+
+                self.assertEqual(recorder.kwargs, {**extra, "contract_path": "/coord/leaf.md"})
 
     def test_memory_init_initializes_git_by_default(self) -> None:
         recorder = self.invoke(
@@ -667,7 +697,7 @@ class RegistrationWiringTests(unittest.TestCase):
 
     def test_worktree_start_splits_identity_bases_and_execution(self) -> None:
         """Who the task is, what it is cut from, and how the start runs -- the three
-        parameter objects the controller takes, each carrying its own arguments."""
+        parameter objects the application entry point takes, each carrying its own arguments."""
         recorder = self.invoke(
             "worktree_start",
             "agents_remember.mcp.registration.worktrees.worktree_start_payload",
@@ -1041,12 +1071,12 @@ class RegistrationWiringTests(unittest.TestCase):
 
     # ---- gates -----------------------------------------------------------------
 
-    def test_lifecycle_gate_packs_the_anchor_and_the_request_and_blocks_by_default(
+    def test_lifecycle_gate_forwards_flat_fields_for_application_composition(
         self,
     ) -> None:
         recorder = self.invoke(
             "lifecycle_gate",
-            "agents_remember.mcp.registration.gates.lifecycle_gate_payload",
+            "agents_remember.mcp.registration.gates.registered_lifecycle_gate_payload",
             {
                 "kind": "plan-approval",
                 "ask": {"kind": "decision", "question": "ship?"},
@@ -1059,46 +1089,44 @@ class RegistrationWiringTests(unittest.TestCase):
             },
         )
 
-        config, raise_request = recorder.args
+        config, request = recorder.args
         self.assertIs(config, self.config)
-        self.assertEqual(raise_request.kind, "plan-approval")
-        self.assertEqual(raise_request.ask, {"kind": "decision", "question": "ship?"})
-        self.assertEqual(raise_request.anchor.lifecycle_id, "life-1")
-        self.assertEqual(raise_request.anchor.enclosure, "260731-EFA-MASTER")
-        self.assertEqual(raise_request.anchor.repo_id, "agents-remember")
-        self.assertEqual(raise_request.request.packet, {"summary": "the plan"})
-        self.assertEqual(raise_request.request.required_decision, ["approve", "reject"])
-        self.assertEqual(raise_request.request.evidence_refs, [{"path": "plan.md"}])
-        self.assertIs(recorder.kwargs["wait"].block, True)
+        self.assertEqual(request.kind, "plan-approval")
+        self.assertEqual(request.ask, {"kind": "decision", "question": "ship?"})
+        self.assertEqual(request.lifecycle_id, "life-1")
+        self.assertEqual(request.enclosure, "260731-EFA-MASTER")
+        self.assertEqual(request.repo_id, "agents-remember")
+        self.assertEqual(request.packet, {"summary": "the plan"})
+        self.assertEqual(request.required_decision, ["approve", "reject"])
+        self.assertEqual(request.evidence_refs, [{"path": "plan.md"}])
+        self.assertIs(request.wait, True)
 
     def test_lifecycle_gate_wait_false_raises_without_a_timeout(self) -> None:
         """A non-blocking raise has nothing to time out; the wait it passes must say so
         rather than inheriting ``GateWait``'s blocking default of 300 seconds."""
         recorder = self.invoke(
             "lifecycle_gate",
-            "agents_remember.mcp.registration.gates.lifecycle_gate_payload",
+            "agents_remember.mcp.registration.gates.registered_lifecycle_gate_payload",
             {"kind": "master-handover-approval", "wait": False},
         )
 
-        wait = recorder.kwargs["wait"]
-        self.assertIs(wait.block, False)
-        self.assertEqual(wait.timeout_seconds, None)
+        self.assertIs(recorder.args[1].wait, False)
 
     def test_gate_decide_attributes_a_plain_decision_to_the_model_via_cli(self) -> None:
         recorder = self.invoke(
             "gate_decide",
-            "agents_remember.mcp.registration.gates.gate_decide_payload",
+            "agents_remember.mcp.registration.gates.registered_gate_decide_payload",
             {"gate_id": "gate-1", "decision": "approve", "note": "looks right"},
         )
 
-        self.assertEqual(recorder.args, (self.config,))
-        self.assertEqual(recorder.kwargs["gate_id"], "gate-1")
-        verdict = recorder.kwargs["verdict"]
-        self.assertEqual(verdict.decision, "approve")
-        self.assertEqual(verdict.by, "model")
-        self.assertEqual(verdict.via, "cli")
-        self.assertEqual(verdict.note, "looks right")
-        self.assertEqual(verdict.deciding_role, None)
+        config, request = recorder.args
+        self.assertIs(config, self.config)
+        self.assertEqual(request.gate_id, "gate-1")
+        self.assertEqual(request.decision, "approve")
+        self.assertEqual(request.note, "looks right")
+        self.assertEqual(request.decided_by, "model")
+        self.assertEqual(request.decided_via, "cli")
+        self.assertIsNone(request.deciding_role)
 
     def test_gate_decide_with_a_deciding_role_attributes_via_orchestration(self) -> None:
         """A role-attributed decision is checked against the gate policy, so it must not
@@ -1106,7 +1134,7 @@ class RegistrationWiringTests(unittest.TestCase):
         to fill from the role and ``via`` becomes orchestration."""
         recorder = self.invoke(
             "gate_decide",
-            "agents_remember.mcp.registration.gates.gate_decide_payload",
+            "agents_remember.mcp.registration.gates.registered_gate_decide_payload",
             {
                 "gate_id": "gate-1",
                 "decision": "approve",
@@ -1115,11 +1143,12 @@ class RegistrationWiringTests(unittest.TestCase):
             },
         )
 
-        verdict = recorder.kwargs["verdict"]
-        self.assertEqual(verdict.deciding_role, "manager")
-        self.assertEqual(verdict.via, "orchestration")
-        self.assertEqual(verdict.by, "")
-        self.assertEqual(recorder.kwargs["evidence_refs"], [{"path": "review.md"}])
+        request = recorder.args[1]
+        self.assertEqual(request.deciding_role, "manager")
+        self.assertEqual(request.decision, "approve")
+        self.assertEqual(request.decided_via, "orchestration")
+        self.assertEqual(request.decided_by, "")
+        self.assertEqual(request.evidence_refs, [{"path": "review.md"}])
 
     def test_gate_list_defaults_to_the_ambient_lifecycle(self) -> None:
         recorder = self.invoke(
@@ -1129,12 +1158,19 @@ class RegistrationWiringTests(unittest.TestCase):
         self.assertEqual(recorder.args, (self.config,))
         self.assertEqual(recorder.kwargs, {"lifecycle_id": None})
 
+    def test_registered_gate_list_executes_the_real_application_operation(self) -> None:
+        result = self.call("gate_list")
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["operation"], "gate_list")
+        self.assertEqual(result["gates"], [])
+
     # ---- orchestration ---------------------------------------------------------
 
-    def test_operator_inbox_post_splits_address_message_poster_and_delivery(self) -> None:
+    def test_operator_inbox_post_forwards_flat_fields_for_application_composition(self) -> None:
         recorder = self.invoke(
             "operator_inbox_post",
-            "agents_remember.mcp.registration.orchestration.operator_inbox_post_payload",
+            "agents_remember.mcp.registration.orchestration.registered_operator_inbox_post_payload",
             {
                 "ask": "status?",
                 "response": "green",
@@ -1149,41 +1185,37 @@ class RegistrationWiringTests(unittest.TestCase):
             },
         )
 
-        self.assertEqual(recorder.args, (self.config,))
-        address = recorder.kwargs["address"]
-        self.assertEqual(address.lifecycle_id, "life-1")
-        self.assertEqual(address.agent_id, "agent-1")
-        self.assertEqual(address.recipient_role, "worker")
-
-        message = recorder.kwargs["message"]
-        self.assertEqual(message.ask, "status?")
-        self.assertEqual(message.response, "green")
-        self.assertEqual(message.message_kind, "dispatch-brief")
-        self.assertEqual(message.gate_id, "gate-1")
-        self.assertEqual(message.artifact_path, "/tmp/brief.md")
-
-        poster = recorder.kwargs["poster"]
-        self.assertEqual(poster.sender_agent_id, "agent-0")
-        self.assertEqual(poster.sender_role, "manager")
-        self.assertIs(recorder.kwargs["delivery"].enabled, True)
+        config, request = recorder.args
+        self.assertIs(config, self.config)
+        self.assertEqual(request.lifecycle_id, "life-1")
+        self.assertEqual(request.agent_id, "agent-1")
+        self.assertEqual(request.recipient_role, "worker")
+        self.assertEqual(request.ask, "status?")
+        self.assertEqual(request.response, "green")
+        self.assertEqual(request.message_kind, "dispatch-brief")
+        self.assertEqual(request.gate_id, "gate-1")
+        self.assertEqual(request.artifact_path, "/tmp/brief.md")
+        self.assertEqual(request.sender_agent_id, "agent-0")
+        self.assertEqual(request.sender_role, "manager")
+        self.assertIs(request.deliver_to_hosted, True)
 
     def test_operator_inbox_post_over_mcp_is_always_attributed_to_the_model(self) -> None:
         """The docstring is explicit that this route is the model's: attribution is fixed
         here, not taken from the caller, so an agent cannot post as the developer."""
         recorder = self.invoke(
             "operator_inbox_post",
-            "agents_remember.mcp.registration.orchestration.operator_inbox_post_payload",
+            "agents_remember.mcp.registration.orchestration.registered_operator_inbox_post_payload",
             {"ask": "status?", "response": "green", "agent_id": "agent-1"},
         )
 
-        poster = recorder.kwargs["poster"]
-        self.assertEqual(poster.created_by, "model")
-        self.assertEqual(poster.created_via, "cli")
+        request = recorder.args[1]
+        self.assertEqual(request.created_by, "model")
+        self.assertEqual(request.created_via, "cli")
 
     def test_operator_inbox_post_can_opt_out_of_hosted_push_delivery(self) -> None:
         recorder = self.invoke(
             "operator_inbox_post",
-            "agents_remember.mcp.registration.orchestration.operator_inbox_post_payload",
+            "agents_remember.mcp.registration.orchestration.registered_operator_inbox_post_payload",
             {
                 "ask": "status?",
                 "response": "green",
@@ -1192,7 +1224,24 @@ class RegistrationWiringTests(unittest.TestCase):
             },
         )
 
-        self.assertIs(recorder.kwargs["delivery"].enabled, False)
+        self.assertIs(recorder.args[1].deliver_to_hosted, False)
+
+    def test_registered_operator_post_executes_real_application_composition(self) -> None:
+        result = self.call(
+            "operator_inbox_post",
+            {
+                "ask": "status?",
+                "response": "green",
+                "agent_id": "agent-1",
+                "deliver_to_hosted": False,
+            },
+        )
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["operation"], "operator_inbox_post")
+        self.assertEqual(result["agentId"], "agent-1")
+        self.assertEqual(result["state"], "pending")
+        self.assertEqual(result["messageKind"], "message")
 
     def test_operator_inbox_poll_forwards_every_mailbox_key(self) -> None:
         recorder = self.invoke(
@@ -1224,7 +1273,7 @@ class RegistrationWiringTests(unittest.TestCase):
         collapsing them would nudge the wrong mailbox."""
         recorder = self.invoke(
             "orchestration_nudge_manager",
-            "agents_remember.mcp.registration.orchestration.orchestration_nudge_manager_payload",
+            "agents_remember.mcp.registration.orchestration.registered_orchestration_nudge_payload",
             {
                 "reason": "inactive",
                 "subject": "worker stalled",
@@ -1236,27 +1285,26 @@ class RegistrationWiringTests(unittest.TestCase):
             },
         )
 
-        self.assertEqual(recorder.args, (self.config,))
-        self.assertEqual(recorder.kwargs["reason"], "inactive")
-        target = recorder.kwargs["target"]
-        self.assertEqual(target.agent_id, "agent-manager")
-        self.assertEqual(target.lifecycle_id, "life-manager")
-        subject = recorder.kwargs["subject"]
-        self.assertEqual(subject.subject, "worker stalled")
-        self.assertEqual(subject.agent_id, "agent-worker")
-        self.assertEqual(subject.lifecycle_id, "life-worker")
-        self.assertEqual(subject.artifact_path, "/tmp/report.md")
+        config, request = recorder.args
+        self.assertIs(config, self.config)
+        self.assertEqual(request.reason, "inactive")
+        self.assertEqual(request.manager_agent_id, "agent-manager")
+        self.assertEqual(request.manager_lifecycle_id, "life-manager")
+        self.assertEqual(request.subject, "worker stalled")
+        self.assertEqual(request.subject_agent_id, "agent-worker")
+        self.assertEqual(request.subject_lifecycle_id, "life-worker")
+        self.assertEqual(request.artifact_path, "/tmp/report.md")
 
     def test_orchestration_nudge_manager_rate_limits_to_fifteen_minutes_by_default(
         self,
     ) -> None:
         recorder = self.invoke(
             "orchestration_nudge_manager",
-            "agents_remember.mcp.registration.orchestration.orchestration_nudge_manager_payload",
+            "agents_remember.mcp.registration.orchestration.registered_orchestration_nudge_payload",
             {"reason": "missing-turn-report", "subject": "no report"},
         )
 
-        self.assertEqual(recorder.kwargs["rate_limit_seconds"], 900)
+        self.assertEqual(recorder.args[1].rate_limit_seconds, 900)
 
 
 if __name__ == "__main__":

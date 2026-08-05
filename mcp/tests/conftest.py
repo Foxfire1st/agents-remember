@@ -18,9 +18,9 @@ A fallback commit identity is also provided so the committing fixtures never fai
 with "Author identity unknown" when no git user is configured (CI runners, fresh
 clones, automated evaluation runs).
 
-The one autouse fixture here restores the durable store's process-role declaration
-around every test; see :func:`restore_declared_process_role` for why that is a
-session-wide concern and not one file's business.
+The autouse fixture rejects changes to the deliberately-enumerated module-level mutable state
+owned by ``_global_state.py``. It restores before reporting the leak, so the offending test is
+named and later tests are not poisoned.
 """
 
 from __future__ import annotations
@@ -38,7 +38,8 @@ import pytest
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
-from agents_remember.controlplane import durable_store
+from _global_state import restore_owned_mutable_state, snapshot_owned_mutable_state
+from _random_order import shuffle_items
 from agents_remember.kernel.git_command import GIT_REPOSITORY_SELECTOR_ENV
 
 # git's repo-pointer / object-store environment. Any of these, if inherited,
@@ -54,34 +55,35 @@ os.environ.setdefault("GIT_COMMITTER_NAME", "Agents Remember Tests")
 os.environ.setdefault("GIT_COMMITTER_EMAIL", "agents-remember-tests@example.invalid")
 
 
+def pytest_addoption(parser: pytest.Parser) -> None:
+    parser.addoption(
+        "--random-order-seed",
+        type=int,
+        default=None,
+        help="shuffle collected tests with this deterministic seed and report it in the header",
+    )
+
+
+def pytest_report_header(config: pytest.Config) -> str | None:
+    seed = config.getoption("random_order_seed")
+    return f"random-order seed: {seed}" if seed is not None else None
+
+
+def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
+    seed = config.getoption("random_order_seed")
+    if seed is not None:
+        shuffle_items(items, seed)
+
+
 @pytest.fixture(autouse=True)
-def restore_declared_process_role() -> Iterator[None]:
-    """Undo any ``declare_process_role`` a test performs, for every test in this tree.
-
-    ``durable_store._declared`` is process-global and has no reset -- it is written once at a
-    real process's entry point and never again. The test suite is the one interpreter that hosts
-    both roles, and it reaches those entry points directly: ``cli/dashboard.py::run`` declares
-    ``"dashboard"`` as its first statement, and ``test_serving.py`` calls it seven times -- FOUR
-    in ``CliRunTests`` and three in ``CliSimTests``. Both classes are named because the leak is
-    not one class's to fix, which is half the argument for this being a fixture rather than a
-    ``tearDown``. From any of those calls on, every later test in the same interpreter claims to
-    be the dashboard. Measured on this tree before this fixture existed: ``declared_process_role()``
-    is ``'dashboard'`` at the end of a run of ``CliRunTests`` alone.
-
-    The value is not cosmetic. It is what ``StoreOwnership.is_compaction_owner`` and
-    ``check_declared_writer`` answer from, so a leak silently flips whether a process is treated
-    as a log's compaction owner and whether a write to a dashboard-only store is refused. The
-    suite is green today only because of the order the files happen to run in -- a new test, a
-    renamed file or a ``-k`` subset is enough to move it, and the failure would land on whichever
-    test ran next rather than on the one that leaked.
-
-    RESTORE, not clear. A test that legitimately declares a role must still observe its own
-    declaration for the rest of its body, and an enclosing fixture that declared one must get it
-    back; only the escape into the NEXT test is closed. Autouse fixtures apply to
-    ``unittest.TestCase`` tests too, which is what the great majority of this suite is written as
-    and why this cannot be a per-file helper.
-    """
-    previous = dict(durable_store._declared)
+def reject_owned_global_state_leaks() -> Iterator[None]:
+    """Fail the test that leaks an owned global, after restoring all owned state."""
+    previous = snapshot_owned_mutable_state()
     yield
-    durable_store._declared.clear()
-    durable_store._declared.update(previous)
+    changed = restore_owned_mutable_state(previous)
+    if changed:
+        pytest.fail(
+            "test leaked owned module-level mutable state; restore it inside the test:\n"
+            + "\n".join(changed),
+            pytrace=False,
+        )

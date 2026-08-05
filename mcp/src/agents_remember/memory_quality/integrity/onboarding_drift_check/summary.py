@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import json
-import os
+from contextlib import suppress
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from agents_remember.kernel.atomic_write import atomic_write_text
 from agents_remember.memory_quality.integrity.onboarding_drift_check import drift
 from agents_remember.memory_quality.integrity.onboarding_drift_check.models import (
     ACTIONABLE_CLASSIFICATIONS,
@@ -141,10 +142,7 @@ def _write_drift_snapshot(
         repository=code_repository_root.name,
         branch=branch,
     )
-    try:
-        snapshot_path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = snapshot_path.with_name(f"{snapshot_path.name}.tmp")
-        tmp.write_text(json.dumps(payload, indent=2, default=str) + "\n", encoding="utf-8")
-        os.replace(tmp, snapshot_path)
-    except OSError:
-        pass  # the snapshot is a dashboard convenience; never fail the drift run for it
+    # The snapshot is a dashboard convenience: a write error must never fail the drift run
+    # that produced it.
+    with suppress(OSError):
+        atomic_write_text(snapshot_path, json.dumps(payload, indent=2, default=str) + "\n")

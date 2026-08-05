@@ -14,6 +14,7 @@ import agents_remember.serving.conversation.router as conversation_router_module
 import agents_remember.serving.conversation.runtime as runtime_module
 import pytest
 from agents_remember.errors import ConversationCompositionError
+from agents_remember.kernel.harnesses import Harness
 from agents_remember.mcp.config import McpRuntimeConfig
 from agents_remember.serving.app import create_app
 from agents_remember.serving.conversation import ConversationRuntime, get_conversation_runtime
@@ -28,7 +29,6 @@ from agents_remember.serving.conversation.runtime import (
 )
 from agents_remember.serving.harness_capability_catalog import HarnessCapabilityCatalog
 from agents_remember.serving.harness_control_api import register_harness_control_routes
-from agents_remember.serving.harnesses import Harness
 from agents_remember.serving.projector import ProjectionCadence
 from agents_remember.serving.terminal_catalog import TerminalCatalog
 from agents_remember.serving.terminal_liveness import (

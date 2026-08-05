@@ -75,6 +75,13 @@ rewriting shell loops:
 drift_check(repo_id="<repo-id>", detail_limit=50)
 ```
 
+Inside a worktree-backed leaf, add the leaf's enclosure contract path so the check reads that
+leaf's memory worktree rather than the official memory repo:
+
+```text
+drift_check(repo_id="<repo-id>", detail_limit=50, contract_path="<enclosure-contract-path>")
+```
+
 By default the MCP drift tool writes the Markdown report to
 `<coordination_root>/temp/drift-reports/<repo-name>/<repo-name>_<branch-name>_drift-report.md`.
 That keeps temporary drift artifacts out of task contract folders while still
@@ -180,8 +187,18 @@ the memory content commit:
 memory_quality_check(repo_id="<repo-id>")
 ```
 
+Inside a leaf, scope it to that leaf's memory worktree:
+
+```text
+memory_quality_check(repo_id="<repo-id>", contract_path="<enclosure-contract-path>")
+```
+
 This is the full closeout gate. It combines integrity checks such as drift
-summary status with style checks such as update-history ordering.
+summary status with style checks such as update-history ordering. The seat that
+WROTE the onboarding can run this form on its own change-set before handing it
+back, instead of the closing seat meeting the findings at the commit gate; the
+commit gate stays the hard gate either way. Confirm `onboardingRoot` in the
+response names the tree you meant to check.
 
 If the report is clean, the memory content can be committed through the selected
 workflow's closeout procedure. If the report has findings, fix the reported

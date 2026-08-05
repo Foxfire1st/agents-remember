@@ -28,8 +28,8 @@ from agents_remember.worktrees.worktree_contract import (
     CloseoutStatus as LifecycleStatus,  # the published wire name for the closeout status
 )
 
-# Produced entirely inside `worktrees.status`, which constructs this model directly, so the
-# projection there is already the single writer the checker can see.
+# Produced entirely inside `application.worktree_status`, which constructs this model
+# directly, so the projection there is already the single writer the checker can see.
 WorktreeState = Literal["inactive", "active", "missingContract", "invalidContract"]
 
 
@@ -63,7 +63,8 @@ class WorktreeSummary(StrictResponseModel):
     # Absent means the next call needs nothing beyond `nextArgs` -- the same thing the empty
     # list used to mean. `next_guidance` writes this key only when there is a required
     # argument, and the projection reports what the producer said rather than filling in a
-    # value for it (`worktrees.status._summary_from_status_payload` states the measurement).
+    # value for it (`application.worktree_status._summary_from_status_payload` states the
+    # measurement).
     nextRequiredArgs: list[str] | None = None
     # Present only when the contract file carried a cell outside its declared vocabulary, as
     # "<field>=<raw token> read as <fallback>". The `state` is still `active` and every other

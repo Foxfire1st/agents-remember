@@ -2,17 +2,23 @@
 
 from __future__ import annotations
 
-from typing import Any
-
-from agents_remember.worktrees.leaf_refs import LeafRefResolutionError
+from typing import Any, Protocol
 
 from .base import _tool_payload
+
+
+class LeafRefRefusal(Protocol):
+    """The two report fields used from a leaf-reference refusal."""
+
+    status: str
+
+    def __str__(self) -> str: ...
 
 
 def leaf_ref_refusal_payload(
     operation: str,
     leaf_key: str,
-    error: LeafRefResolutionError,
+    error: LeafRefRefusal,
     *,
     kind: str | None = None,
 ) -> dict[str, Any]:

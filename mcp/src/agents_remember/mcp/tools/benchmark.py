@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from agents_remember.controllers.benchmark_tools import (
+from agents_remember.application.benchmark_tools import (
     ALL_CASES,
     DEFAULT_PREPARATION,
     DEFAULT_RUN,

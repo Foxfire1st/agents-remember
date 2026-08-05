@@ -1,35 +1,14 @@
-"""Source quality wrapper for Agents Remember development.
+"""Run the repository-owned Python quality rails with explicit provenance.
 
-Scope is not written down in this module. ``derive_scope`` reads it off the tree --
-``git ls-files '*.py'`` for what gets linted and type-checked, the tracked top-level
-packages for what gets covered and CRAP-scored, and pytest's own ``testpaths`` for
-where the suite lives -- so a newly tracked Python file is gated the moment it is
-added rather than whenever somebody remembers to extend a constant.
-``mcp/tests/test_gate_scope.py`` proves the derivation reaches every tracked path.
+Ruff, Ruff format, Pyright, pytest, CRAP, and changed-lines coverage enforce. Radon CC
+and MI are labelled reports because Radon findings do not change its exit status. Scope
+comes from ``code_quality.scope``: lint/type paths are index-known, while Radon and
+Coverage.py recursively consume the configured on-disk production roots. The wrapper
+reports relevant untracked files separately because the index and diff omit them.
 
-Every step here is either enforcing or explicitly labelled a report. Radon is the
-report: ``radon cc`` and ``radon mi`` exit 0 whatever they find, so no finding of
-theirs has ever been able to fail this gate, and the wrapper now says so instead of
-listing them alongside the checks that can. Radon stays load-bearing all the same --
-``crap_calculator`` imports ``radon.complexity`` for the complexity half of CRAP.
-
-Four steps enforce. ``ruff`` lints -- including the four complexity rules
-``C901``/``PLR0911``/``PLR0912``/``PLR0915``, which it reports like every other finding --
-``ruff-format`` fails on any file the formatter would rewrite, ``pyright`` types, and
-``pytest`` runs the suite under coverage. Two more score that one coverage report
-afterwards rather than measuring anything again: CRAP, and the changed-lines coverage
-floor in ``diff_coverage``. The coverage gate is on the diff and not on the aggregate
-because an aggregate over 88k lines of tests is substantially satisfied by import-time
-execution and cannot move far enough to see a single change; ``diff_coverage``'s module
-docstring carries the measurements.
-
-Nothing in this gate is exempt. There is no baseline, ratchet, allowlist or grandfather
-file for complexity, and none for CRAP either. A fifth ``complexity-baseline`` step used
-to sit beside ``ruff`` holding the four complexity rules against
-``quality/complexity-baseline.txt``, and ``ruff`` was handed ``--extend-ignore`` for
-exactly those codes so the two steps could not double-report the same function. Both are
-gone: the 67 recorded offenders were refactored rather than scheduled, so ``ruff``
-enforces the rules directly and the only way past a finding is to fix the function.
+Each rail prints its actual input, config, nonzero population or result denominator, and
+explicit result. Missing/vacuous inputs and tool failures refuse. Findings are remediated
+in source or tests; baselines, allowlists, and exemptions are not supported.
 """
 
 from __future__ import annotations
@@ -39,38 +18,46 @@ import os
 import subprocess
 import sys
 import tempfile
-import tomllib
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
-from agents_remember.code_quality import crap_calculator, diff_coverage
-from agents_remember.kernel import git_command
+from agents_remember.code_quality import (
+    crap_calculator,
+    diff_coverage,
+    scope_reporting,
+)
+from agents_remember.code_quality import (
+    scope as quality_scope,
+)
+
+GateScope = quality_scope.GateScope
+ScopeError = quality_scope.ScopeError
+
+
+def git_ls_files(project_root: Path, *patterns: str) -> list[Path]:
+    return quality_scope.git_ls_files(project_root, *patterns)
+
+
+def top_level_packages(tracked: list[Path]) -> list[Path]:
+    return quality_scope.top_level_packages(tracked)
+
+
+def toml_section(data: Mapping[str, object], keys: tuple[str, ...]) -> Mapping[str, object]:
+    return quality_scope.toml_section(data, keys)
+
+
+def pytest_testpaths(project_root: Path) -> list[Path]:
+    return quality_scope.pytest_testpaths(project_root)
+
+
+def derive_scope(project_root: Path) -> GateScope:
+    return quality_scope.derive_scope(project_root)
+
 
 RADON_REPORT_NOTE = (
     "report only: radon exits 0 whatever it finds, so nothing below can fail the gate"
 )
-
-
-class ScopeError(RuntimeError):
-    """The gate could not work out what it is supposed to certify."""
-
-
-@dataclass(frozen=True)
-class GateScope:
-    """What each rail of the gate certifies, derived from the tree.
-
-    ``lint_paths`` and ``type_paths`` are every tracked Python file, so neither rail
-    can fall behind the repository. ``coverage_paths`` are the tracked top-level
-    importable packages -- what ``--cov`` measures and what CRAP scores. ``test_paths``
-    come from ``[tool.pytest.ini_options] testpaths``, the one place that declares
-    where the suite lives.
-    """
-
-    lint_paths: list[Path]
-    type_paths: list[Path]
-    coverage_paths: list[Path]
-    test_paths: list[Path]
 
 
 @dataclass(frozen=True)
@@ -124,114 +111,6 @@ def run_subprocess(name: str, command: list[str], cwd: Path, env: Mapping[str, s
         command, cwd=cwd, env=dict(env), stdin=subprocess.DEVNULL, check=False
     )
     return StepResult(name=name, return_code=completed.returncode, command=command)
-
-
-# --- scope -------------------------------------------------------------------
-
-
-def git_ls_files(project_root: Path, *patterns: str) -> list[Path]:
-    """Tracked paths matching ``patterns``, relative to ``project_root``.
-
-    A failure here is fatal rather than an empty list: an empty scope would make every
-    step of the gate pass by certifying nothing.
-    """
-    arguments = ["ls-files", "-z", "--", *patterns]
-    # On the package's one git runner, which strips GIT_DIR and friends. This gate runs
-    # from the pre-push hook and git exports GIT_DIR to its hooks, so an unstripped
-    # `ls-files` here would derive the whole gate's scope from another repository.
-    failed = f"could not list tracked files (git {' '.join(arguments)})"
-    try:
-        completed = git_command.run_git(project_root, arguments)
-    except (OSError, subprocess.SubprocessError) as error:
-        raise ScopeError(f"{failed}: {error}") from error
-    if completed.returncode != 0:
-        raise ScopeError(f"{failed}: exit {completed.returncode}: {completed.stderr.strip()}")
-    return [Path(entry) for entry in completed.stdout.split("\0") if entry]
-
-
-def top_level_packages(tracked: list[Path]) -> list[Path]:
-    """Tracked top-level importable packages.
-
-    A directory holding ``__init__.py`` is a package; it is top-level when its parent
-    is not itself a package. Their parents are the import roots the subprocesses need
-    on PYTHONPATH, and the packages themselves are what coverage measures.
-    """
-    packages = {path.parent for path in tracked if path.name == "__init__.py"}
-    return sorted(
-        package
-        for package in packages
-        if package.parent == package or package.parent not in packages
-    )
-
-
-def toml_section(data: Mapping[str, object], keys: tuple[str, ...]) -> Mapping[str, object]:
-    current: object = data
-    for key in keys:
-        if not isinstance(current, Mapping):
-            return {}
-        current = current.get(key, {})
-    return current if isinstance(current, Mapping) else {}
-
-
-def pytest_testpaths(project_root: Path) -> list[Path]:
-    """Where the suite lives, read from pytest's own declaration.
-
-    ``[tool.pytest.ini_options] testpaths`` is the single place that says which
-    directories hold tests. Reading it keeps the wrapper from carrying a second copy
-    that can drift out of step with it. A missing or empty declaration raises rather
-    than defaulting: a gate that quietly runs no tests is exactly the failure this
-    module exists to make impossible.
-    """
-    pyproject = project_root / "pyproject.toml"
-    if not pyproject.is_file():
-        raise ScopeError(f"no pyproject.toml at {pyproject}; the gate cannot derive its scope")
-    with pyproject.open("rb") as handle:
-        data = tomllib.load(handle)
-    testpaths = toml_section(data, ("tool", "pytest", "ini_options")).get("testpaths")
-    if not isinstance(testpaths, list) or not testpaths:
-        raise ScopeError(
-            "[tool.pytest.ini_options] testpaths is missing or empty in "
-            f"{pyproject}; the gate refuses to guess where the suite lives"
-        )
-    return [Path(str(entry)) for entry in testpaths]
-
-
-def derive_scope(project_root: Path) -> GateScope:
-    """The gate's scope, read off the tree rather than written down here.
-
-    ``git ls-files`` reads the *index*, so a file is in scope the moment it is
-    ``git add``-ed -- which is exactly the content the pre-commit tier certifies -- and a
-    file that has never been added is not part of the tree yet. Nothing else can narrow
-    this: the wrapper takes no path arguments.
-
-    Reading the index puts one obligation on every caller: whatever the caller means this
-    gate to certify has to be in the index before it invokes the wrapper. The pre-commit
-    tier gets that for free, because there the staged content *is* the commit. The closeout
-    tier does not -- it commits with ``git add -A`` -- so it stages its whole worktree
-    first (``worktrees/modules/closeout.py:_gate_staged_code``). Until it did, every file a
-    task created rather than edited was committed without ruff, pyright or the changed-lines
-    floor reading a line of it, and a file the task deleted was still handed to ruff as an
-    ``E902``. Widening the enumeration here instead -- to
-    ``--cached --others --exclude-standard`` -- would have been the wrong fix twice over: it
-    would redefine the pre-commit tier, making ruff and pyright certify files deliberately
-    left out of the commit, and it cannot reach ``diff_coverage`` at all, since an untracked
-    file has no diff against any base.
-    """
-    tracked = git_ls_files(project_root, "*.py")
-    if not tracked:
-        raise ScopeError(f"git tracks no Python files under {project_root}")
-    coverage_paths = top_level_packages(tracked)
-    if not coverage_paths:
-        raise ScopeError(
-            "no tracked top-level Python package (a directory holding __init__.py) under "
-            f"{project_root}; coverage and CRAP would have nothing to measure"
-        )
-    return GateScope(
-        lint_paths=tracked,
-        type_paths=tracked,
-        coverage_paths=coverage_paths,
-        test_paths=pytest_testpaths(project_root),
-    )
 
 
 # --- steps -------------------------------------------------------------------
@@ -345,6 +224,9 @@ def run_quality_check(
     printer: Printer = print_line,
 ) -> int:
     project_root = config.project_root.resolve()
+    printer(scope_reporting.wrapper_scope_line(project_root, config.scope))
+    for line in scope_reporting.untracked_scope_lines(config.scope):
+        printer(line)
     with coverage_path_context(config.coverage_json, project_root) as coverage_json:
         failed_steps = run_fixed_checks(config, coverage_json, runner=runner, printer=printer)
         failed_steps += run_crap_calculator(
@@ -359,7 +241,11 @@ def run_quality_check(
             project_root,
             printer=printer,
         )
-    return 1 if failed_steps else 0
+    if failed_steps:
+        printer(f"result: quality-wrapper FAIL ({failed_steps} failed rails)")
+        return 1
+    printer("result: quality-wrapper PASS")
+    return 0
 
 
 def run_fixed_checks(
@@ -373,8 +259,24 @@ def run_fixed_checks(
     failed_steps = 0
     for step in quality_steps(config, coverage_json):
         printer(step_header(step))
+        printer(
+            scope_reporting.fixed_step_scope_line(
+                step.name,
+                config.project_root,
+                config.scope,
+            )
+        )
         result = runner(step.name, step.command, config.project_root, env)
+        if step.name == "pytest" and coverage_json.is_file():
+            try:
+                printer(scope_reporting.coverage_result_scope_line(coverage_json))
+            except ScopeError as error:
+                failed_steps += 1
+                printer(f"coverage result reporting failed: {error}")
+                printer("result: pytest FAIL (Coverage.py result scope unavailable)")
+                continue
         if result.return_code == 0:
+            printer(step_success(step))
             continue
         failed_steps += 1
         printer(step_failure(step, result.return_code))
@@ -389,11 +291,18 @@ def step_header(step: Step) -> str:
 
 def step_failure(step: Step, return_code: int) -> str:
     if step.report_note is None:
-        return f"{step.name} failed with exit code {return_code}"
+        return f"result: {step.name} FAIL (exit code {return_code})"
     return (
-        f"{step.name} could not run (exit code {return_code}). This is a report step, "
+        f"result: {step.name} FAIL; {step.name} could not run (exit code {return_code}). "
+        "This is a report step, "
         "so this is the tool breaking rather than a finding -- fix the tool."
     )
+
+
+def step_success(step: Step) -> str:
+    if step.report_note is None:
+        return f"result: {step.name} PASS"
+    return f"result: {step.name} REPORT COMPLETE (non-enforcing)"
 
 
 def run_crap_calculator(
@@ -405,7 +314,16 @@ def run_crap_calculator(
 ) -> int:
     printer("\n## CRAP-Calculator")
     if not coverage_json.exists():
+        printer(
+            scope_reporting.crap_scope_line(
+                project_root / "pyproject.toml",
+                coverage_json,
+                0,
+                config.threshold,
+            )
+        )
         printer(f"coverage JSON was not created: {coverage_json}")
+        printer("result: CRAP-Calculator FAIL")
         return 1
     try:
         scores = crap_calculator.calculate_scores(
@@ -415,10 +333,28 @@ def run_crap_calculator(
         )
     except RuntimeError as error:
         printer(str(error))
+        printer("result: CRAP-Calculator FAIL")
+        return 1
+    printer(
+        scope_reporting.crap_scope_line(
+            project_root / "pyproject.toml",
+            coverage_json,
+            len(scores),
+            config.threshold,
+        )
+    )
+    if not scores:
+        printer(
+            "CRAP scored zero functions; production coverage scope is vacuous. Correct the "
+            "production roots or add the measurable production functions the declared package "
+            "is required to contain."
+        )
+        printer("result: CRAP-Calculator FAIL")
         return 1
     printer(crap_calculator.render_table(scores, project_root, config.threshold, config.top))
     over_threshold = [score for score in scores if score.crap >= config.threshold]
     if not over_threshold:
+        printer("result: CRAP-Calculator PASS")
         return 0
     # Every offender, not the first `--top` of them. The table above is a fixed-length
     # report; the failure list is the work, and a gate that truncates its own findings
@@ -430,6 +366,7 @@ def run_crap_calculator(
     )
     for score in over_threshold:
         printer(crap_failure_line(score, project_root, config.threshold))
+    printer("result: CRAP-Calculator FAIL")
     return 1
 
 
@@ -471,18 +408,34 @@ def run_diff_coverage(
     """
     printer("\n## diff-coverage")
     if not coverage_json.exists():
+        printer(
+            scope_reporting.scope_line(
+                "diff-coverage",
+                "changed Python diff intersected with missing Coverage.py JSON",
+                f"coverage input={coverage_json.as_posix()}; floor={config.diff_floor:.1f}%",
+                "0 measurable statements+branches",
+            )
+        )
         printer(f"coverage JSON was not created: {coverage_json}")
+        printer("result: diff-coverage FAIL")
         return 1
     try:
         base = diff_coverage.resolve_base(project_root, explicit_base=config.diff_base)
         result = diff_coverage.measure(project_root, coverage_json, base)
     except (RuntimeError, OSError) as error:
         printer(str(error))
+        printer("result: diff-coverage FAIL")
         return 1
+    printer(scope_reporting.diff_scope_line(result, coverage_json, config.diff_floor))
     for line in diff_coverage.render(result, config.diff_floor):
         printer(line)
     if result.state == "measured" and result.percent < config.diff_floor:
+        printer("result: diff-coverage FAIL")
         return 1
+    if result.state == "measured":
+        printer("result: diff-coverage PASS")
+    else:
+        printer(f"result: diff-coverage PASS (not applicable: {result.state})")
     return 0
 
 
@@ -520,9 +473,10 @@ def build_parser() -> argparse.ArgumentParser:
             "changed-lines coverage floor. Radon "
             "cyclomatic complexity and maintainability index are printed as a report "
             "only -- radon exits 0 whatever it finds, so it cannot fail this gate. Scope "
-            "is derived from the tree, not from a flag: there is no way to narrow what "
-            "the gate certifies, and no baseline, allowlist or exemption file anywhere "
-            "in it can excuse a finding."
+            "is derived from the index and configured roots, not from a flag: there is "
+            "no way to narrow what the gate measures. Non-ignored untracked siblings are "
+            "reported as outside that measurement. No baseline, allowlist or exemption "
+            "file anywhere in it can excuse a finding."
         )
     )
     parser.add_argument("--project-root", type=Path, default=Path.cwd())
@@ -560,6 +514,11 @@ def build_parser() -> argparse.ArgumentParser:
 
 def config_from_args(args: argparse.Namespace) -> CheckConfig:
     project_root = args.project_root.resolve()
+    quality_scope.validate_quality_config(project_root)
+    try:
+        scope_reporting.validate_invocation_environment()
+    except scope_reporting.ScopeReportingError as error:
+        raise ScopeError(str(error)) from error
     return CheckConfig(
         project_root=project_root,
         scope=derive_scope(project_root),
@@ -578,6 +537,7 @@ def main(argv: list[str] | None = None) -> int:
         config = config_from_args(args)
     except ScopeError as error:
         print_line(f"gate scope could not be derived: {error}")
+        print_line("result: quality-wrapper FAIL")
         return 1
     return run_quality_check(config)
 

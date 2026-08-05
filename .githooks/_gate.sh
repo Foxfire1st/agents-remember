@@ -1,20 +1,15 @@
 #!/usr/bin/env sh
 # Shared body for this repository's git hooks, in two tiers.
 #
-#     _gate.sh fast    pre-commit: certify exactly the staged content, cheaply.
-#     _gate.sh full    pre-push:   certify the working tree with the full wrapper.
+#     _gate.sh fast    pre-commit: check staged/index content, cheaply.
+#     _gate.sh full    pre-push:   report the pushed refs, then run the full wrapper.
 #
 # Enable once per clone:  ./setup-hooks.sh
 # Prerequisite:           pip install -e "mcp[dev]"
 #
-# The fast tier is cheap on purpose. A gate nobody can afford to run is a gate
-# nobody runs, and `--no-verify` disables every check, not just the slow one.
-#
-# Works from any branch and any git worktree. When the current checkout has no
-# local .venv (the common worktree case), fall back to the primary worktree's
-# .venv so the dev tools are available without a per-worktree install. Both
-# tiers put the current checkout's source first on PYTHONPATH, so the gate
-# always measures *this* checkout's code regardless of which python runs it.
+# The fast tier runs staged/index checks before commit; the full tier runs the complete
+# wrapper before push. In linked worktrees, use the primary worktree's virtual environment
+# when necessary and put the current checkout's source first on PYTHONPATH.
 
 set -u
 
@@ -63,11 +58,8 @@ STASH_MESSAGE="agents-remember $label gate: staged-content isolation"
 
 # --- checks -----------------------------------------------------------------
 
-# Scope is read off the index, exactly as `code_quality/check.py::derive_scope` does.
-# This tier used to name "mcp/src/agents_remember" and "mcp/tests" by hand, which was
-# narrower than the gate it fronts: a broken scripts/sync-skills.py passed pre-commit and
-# was then rejected on push. An empty list is fatal rather than a silent pass -- certifying
-# nothing is how a gate stops being one.
+# Scope is the complete index-known Python population used by the quality wrapper. Refuse
+# an empty population.
 over_tracked_python() {
   if [ -z "$(git ls-files -- '*.py')" ]; then
     echo "[$label] git tracks no Python files; refusing to certify an empty scope." >&2
@@ -77,31 +69,88 @@ over_tracked_python() {
 }
 
 generated_copy_checks() {
-  echo "[$label] checking generated skill copies..."
-  "$py" scripts/sync-skills.py --check || return 1
-  echo "[$label] checking generated runtime asset copies..."
-  "$py" scripts/sync-runtime.py --check || return 1
-  echo "[$label] checking generated harness configuration trees..."
-  "$py" scripts/sync-harness.py --check || return 1
+  generated_projection_check || return 1
+  generated_check skills scripts/sync-skills.py || return 1
+  generated_check runtime scripts/sync-runtime.py || return 1
+  generated_check harness scripts/sync-harness.py || return 1
   return 0
 }
 
+generated_projection_check() {
+  "$py" -m agents_remember.code_quality.scope_reporting \
+    --project-root "$root" generated --name projection --script scripts/sync-projection-types.py || return 1
+  echo "[$label] checking generated projection copies..."
+  if "$py" scripts/sync-projection-types.py --check; then
+    echo "[$label] result: generated-projection PASS"
+    return 0
+  fi
+  echo "[$label] result: generated-projection FAIL" >&2
+  return 1
+}
+
+generated_check() {
+  generated_name=$1
+  generated_script=$2
+  "$py" -m agents_remember.code_quality.scope_reporting \
+    --project-root "$root" generated --name "$generated_name" --script "$generated_script" || return 1
+  echo "[$label] checking generated $generated_name copies..."
+  if "$py" "$generated_script" --check; then
+    echo "[$label] result: generated-$generated_name PASS"
+    return 0
+  fi
+  echo "[$label] result: generated-$generated_name FAIL" >&2
+  return 1
+}
+
+report_wrapper_tier() {
+  "$py" -m agents_remember.code_quality.scope_reporting \
+    --project-root "$root" hook-tier --tier "$tier"
+}
+
+report_fixed_step() {
+  "$py" -m agents_remember.code_quality.scope_reporting \
+    --project-root "$root" fixed-step --name "$1"
+}
+
+report_untracked_scope() {
+  "$py" -m agents_remember.code_quality.scope_reporting \
+    --project-root "$root" untracked
+}
+
 run_fast_checks() {
+  report_wrapper_tier || return 1
+  if [ "${AR_QUALITY_INVOCATION:-}" = "pre-commit-sequencer" ]; then
+    report_untracked_scope || return 1
+  fi
   generated_copy_checks || return 1
-  # No `--extend-ignore` and no `--select`: ruff lints exactly what pyproject selects,
-  # C901/PLR0911/PLR0912/PLR0915 included. This step used to route those four codes away
-  # for a `complexity-baseline` step to hold against a shrink-only list; that list is gone
-  # along with the debt it recorded, and re-adding a flag here would silently un-enforce
-  # four rules in the tier developers actually feel.
+  # Ruff uses the project selection unchanged, including C901/PLR0911/PLR0912/PLR0915.
+  # Do not add command-line ignores or a baseline.
+  report_fixed_step ruff || return 1
   echo "[$label] ruff (lint)..."
-  over_tracked_python "$py" -m ruff check || return 1
-  # Unformatted content is exactly what a staged-content check should catch before it
-  # lands, and the whole-tree check runs in well under a second.
+  if over_tracked_python "$py" -m ruff check; then
+    echo "[$label] result: ruff PASS"
+  else
+    echo "[$label] result: ruff FAIL" >&2
+    return 1
+  fi
+  # Reject unformatted index-known Python content.
+  report_fixed_step ruff-format || return 1
   echo "[$label] ruff format (--check)..."
-  over_tracked_python "$py" -m ruff format --check || return 1
+  if over_tracked_python "$py" -m ruff format --check; then
+    echo "[$label] result: ruff-format PASS"
+  else
+    echo "[$label] result: ruff-format FAIL" >&2
+    return 1
+  fi
+  report_fixed_step pyright || return 1
   echo "[$label] Pyright (types)..."
-  over_tracked_python "$py" -m pyright --project . --pythonpath "$py" || return 1
-  echo "[$label] fast tier passed; the full suite (pytest + CRAP) runs on push."
+  if over_tracked_python "$py" -m pyright --project . --pythonpath "$py"; then
+    echo "[$label] result: pyright PASS"
+  else
+    echo "[$label] result: pyright FAIL" >&2
+    return 1
+  fi
+  echo "[$label] result: fast-tier PASS; the full suite (pytest + CRAP) runs on push."
   return 0
 }
 
@@ -112,19 +161,21 @@ run_fast_checks() {
 # from a series branch: git cannot infer that fork point, and without it the floor
 # compares against the default branch and asks you to cover the series' lines too.
 run_full_checks() {
+  report_wrapper_tier || return 1
   generated_copy_checks || return 1
   echo "[$label] running quality wrapper (ruff + format + Pyright + pytest + CRAP + diff coverage)..."
-  "$py" -m agents_remember.code_quality.check || return 1
-  return 0
+  if "$py" -m agents_remember.code_quality.check; then
+    echo "[$label] result: full quality wrapper PASS"
+    return 0
+  fi
+  echo "[$label] result: full quality wrapper FAIL" >&2
+  return 1
 }
 
 # --- staged-content isolation ------------------------------------------------
 #
-# The fast tier must certify what is about to be committed, which is the index,
-# not the working tree. `git stash push --keep-index` parks unstaged and
-# untracked content so the working tree becomes byte-identical to the index for
-# the duration of the checks. Everything below exists to guarantee that content
-# comes back: a hook that loses uncommitted work is far worse than a slow hook.
+# The fast tier certifies the index. Park unstaged and untracked content with
+# `git stash push --keep-index`, then restore the exact pre-gate state on every exit.
 
 stash_commit=""
 
@@ -205,25 +256,44 @@ on_signal() {
 # --- run ---------------------------------------------------------------------
 
 if [ "$tier" = "full" ]; then
-  run_full_checks
-  exit $?
+  if run_full_checks; then
+    echo "[$label] result: full-tier PASS"
+    exit 0
+  fi
+  echo "[$label] result: full-tier FAIL" >&2
+  exit 1
 fi
 
 if sequencer_in_progress; then
+  AR_QUALITY_INVOCATION="pre-commit-sequencer"
+  export AR_QUALITY_INVOCATION
   echo "[$label] merge/rebase in progress; gating the working tree (stash is unsafe here)."
-  run_fast_checks
-  exit $?
+  if run_fast_checks; then
+    exit 0
+  fi
+  echo "[$label] result: fast-tier FAIL" >&2
+  exit 1
 fi
 
 if ! isolation_needed; then
-  run_fast_checks
-  exit $?
+  AR_QUALITY_INVOCATION="pre-commit-staged"
+  export AR_QUALITY_INVOCATION
+  if run_fast_checks; then
+    exit 0
+  fi
+  echo "[$label] result: fast-tier FAIL" >&2
+  exit 1
 fi
 
 isolate_staged_content || exit 1
+AR_QUALITY_INVOCATION="pre-commit-staged"
+export AR_QUALITY_INVOCATION
 trap 'on_exit' EXIT
 trap 'on_signal 130' INT
 trap 'on_signal 143' TERM
 trap 'on_signal 129' HUP
 
-run_fast_checks
+if ! run_fast_checks; then
+  echo "[$label] result: fast-tier FAIL" >&2
+  false
+fi

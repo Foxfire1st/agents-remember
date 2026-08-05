@@ -109,15 +109,6 @@ describe("EnclosureCanvas — landing arc (5h H2)", () => {
     expect(queryByTestId("remote-strip")).toBeNull();
   });
 
-  it("renders without crashing when the projection node omits the landing arc (pre-5h/persisted data)", () => {
-    // A projection produced before the `landing` field was added omits it entirely (not []); the
-    // canvas must degrade to no landing dock, never throw on `node.landing.find`.
-    const node = { ...nodeFrom("engine-landing-ffonly") };
-    delete (node as { landing?: unknown }).landing;
-    const { getByTestId, queryByTestId } = render(<EnclosureProcessMap node={node} />);
-    expect(getByTestId("enclosure-canvas")).not.toBeNull();
-    expect(queryByTestId("remote-strip")).toBeNull();
-  });
 });
 
 describe("EnclosureCanvas — remote/PR strip (5h H3)", () => {
@@ -152,7 +143,7 @@ describe("EnclosureCanvas — remote/PR strip (5h H3)", () => {
     const base = nodeFrom("engine-landing-ffonly");
     const node: EngineProcessNode = {
       ...base,
-      landing: (base.landing ?? []).map((ref) => ({
+      landing: base.landing.map((ref) => ({
         ...ref,
         factState: "stale",
         observedAt: "2026-07-12T14:00:00+00:00",
@@ -170,15 +161,9 @@ describe("EnclosureCanvas — remote/PR strip (5h H3)", () => {
     expect(queryByTestId("landing-packet")).toBeNull();
   });
 
-  it("omits the remote strip for a plain enclosure and never throws when landing is absent", () => {
+  it("omits the remote strip when a plain enclosure carries an empty landing arc", () => {
     const { queryByTestId } = render(<EnclosureProcessMap node={nodeFrom("engine-bootstrap")} />);
     expect(queryByTestId("remote-strip")).toBeNull();
-    cleanup();
-    const node = { ...nodeFrom("engine-landing-ffonly") };
-    delete (node as { landing?: unknown }).landing;
-    const second = render(<EnclosureProcessMap node={node} />);
-    expect(second.getByTestId("enclosure-canvas")).not.toBeNull();
-    expect(second.queryByTestId("remote-strip")).toBeNull();
   });
 });
 

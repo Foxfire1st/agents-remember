@@ -192,7 +192,7 @@ class MemoryQualityTests(unittest.TestCase):
     def test_memory_quality_check_wrapper_defaults_to_update_history(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)
-            write_onboarding(root / "onboarding" / "example.md", "- 2026-05-24T00:37: Clean.")
+            write_onboarding(root / "onboarding" / "example.md", "- 2026-05-24T00:37+02:00: Clean.")
 
             result = run_memory_quality_check(root / "onboarding")
 

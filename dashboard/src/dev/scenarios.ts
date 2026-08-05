@@ -226,6 +226,7 @@ const cockpitScenarios: Scenario[] = COCKPIT_SCENARIOS.map((cockpit) => {
               tokens: 0,
               startedAt: "2026-07-18T00:00:00Z",
               lastEventTs: "2026-07-18T00:00:00Z",
+              stateEnteredAt: "2026-07-18T00:00:00Z",
               inferred: false,
               actions: [],
               tokenSeries: [],
@@ -233,6 +234,7 @@ const cockpitScenarios: Scenario[] = COCKPIT_SCENARIOS.map((cockpit) => {
                 id: INTERACTION_SCENARIO_GATE.gateId,
                 kind: "agent-question",
                 state: "open",
+                evidenceRefs: [],
                 decisions: [],
                 packet: {
                   adapterInteraction: {

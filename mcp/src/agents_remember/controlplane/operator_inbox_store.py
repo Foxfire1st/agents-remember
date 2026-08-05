@@ -4,19 +4,27 @@ THE DECLARED LOCK EXCEPTION of leaf 260731-EFA-L5. Every other control-plane log
 single compaction owner so that no two processes read-modify-write it. This one cannot be:
 both long-lived processes must physically REMOVE rows, not merely append them. The MCP deletes
 the inbox rows tied to a cancelled gate at the moment it cancels the gate
-(``mcp/tools/gates.py`` -> :meth:`delete_by_gate`), and the dashboard's supervisor sweep must
+(``application/gate_tools.py`` -> :meth:`delete_by_gate`), and the dashboard's supervisor sweep must
 resolve and compact under one continuously held lock (:meth:`reconcile_and_compact`) so that a
 consume which won the lock stays terminal. Moving either to the other process means moving the
 decision it implements. So the advisory lock this store already had is kept, and it is the only
 place in the control plane where locking -- rather than ownership -- is the mechanism. Its
 filesystem is verified rather than assumed; see ``controlplane/durable_store.py``.
+
+The six stamp/refresh transitions -- what one row's next snapshot SAYS -- live next door in
+``controlplane/operator_inbox_transitions.py`` and call back through :meth:`current` and
+:meth:`append`, so this module remains the only one that knows the inbox log has a lock.
+Nothing else moved. All five operations that read this log and then write it --
+:meth:`consume`, :meth:`delete`, :meth:`delete_by_gate`, :meth:`compact`,
+:meth:`reconcile_and_compact` -- hold the lock across both halves, which is the property
+the exception above exists for. ``durable_store.py`` enumerates the four that replace the
+file; :meth:`consume` appends its result instead.
 """
 
 from __future__ import annotations
 
 from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
-from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
@@ -29,71 +37,17 @@ from agents_remember.controlplane.durable_store import (
 )
 from agents_remember.controlplane.inbox_backoff import (
     DEFAULT_RATE_LIMIT_SECONDS,
-    is_ladder_resolved,
-    next_attempt_at,
     redeliverable,
 )
 from agents_remember.controlplane.interaction_retention import inbox_keep_ids
 from agents_remember.controlplane.operator_inbox_records import (
-    AdapterDeliveryState,
     AgentRole,
-    InboxDeliveryState,
-    InboxOwner,
-    InboxSubject,
     OperatorInboxEntry,
     OperatorInboxVia,
     consume_operator_inbox_entry,
     fold_operator_inbox_entries,
     require_inbox_address,
 )
-
-
-@dataclass(frozen=True)
-class AdapterReceipt:
-    """What the vendor adapter reported about one delivery attempt: the state it returned, the
-    request it acknowledged, the vendor's own correlation id, when it accepted the payload, and
-    any detail. One receipt per attempt -- the fields are never sourced independently."""
-
-    delivery_state: AdapterDeliveryState | None = None
-    request_id: str | None = None
-    vendor_correlation_id: str | None = None
-    accepted_at: str | None = None
-    detail: str | None = None
-
-
-@dataclass(frozen=True)
-class DeliveryAttempt:
-    """One attempt to put a pending row in front of its addressee: the outcome, the session it
-    was pasted into, the human-readable detail, and the adapter's receipt for the same attempt.
-    ``delivered`` is not terminal (pasted != perceived); only a consume ends the schedule."""
-
-    delivery_state: InboxDeliveryState
-    delivered_to_session: str | None = None
-    detail: str | None = None
-    adapter: AdapterReceipt = AdapterReceipt()
-
-
-@dataclass(frozen=True)
-class InboxRenewal:
-    """What a re-firing condition refreshes on the one row it already has: the response text,
-    the subject the row now concerns, and -- when the routed owner has moved on -- the owner to
-    readdress it to. Passing ``readdress_to`` IS the readdress; there is no owner without one."""
-
-    response: str | None = None
-    subject: InboxSubject = field(default_factory=InboxSubject)
-    readdress_to: InboxOwner | None = None
-
-
-def _readdress_fields(owner: InboxOwner) -> dict[str, object]:
-    """Move a row's delivery address onto ``owner`` and record it as the routed owner."""
-    return {
-        "recipientRole": owner.role,
-        "agentId": owner.agent_id,
-        "lifecycleId": owner.lifecycle_id,
-        "ownerRole": owner.role,
-        "ownerAgentId": owner.agent_id,
-        "ownerLifecycleId": owner.lifecycle_id,
-    }
 
 
 class OperatorInboxStore:
@@ -148,89 +102,6 @@ class OperatorInboxStore:
         ]
         return sorted(entries, key=lambda record: record.createdAt)
 
-    def record_delivery(
-        self,
-        entry_id: str,
-        attempt: DeliveryAttempt,
-        *,
-        now: str,
-        current: dict[str, OperatorInboxEntry] | None = None,
-        redelivery_floor_seconds: float | None = None,
-    ) -> OperatorInboxEntry:
-        """Append a delivery-status snapshot for one pending entry.
-
-        R1/R3: every attempt -- including a confirmed ``delivered`` paste -- bumps
-        ``attemptCount``, stamps ``lastAttemptAt``, and schedules ``nextAttemptAt`` from the
-        backoff ladder. 'delivered' is never terminal (pasted != perceived), so only ``consume``
-        clears the redelivery schedule; a still-pending entry always carries a durable next-attempt
-        row L2 can sweep, restart-proof.
-        """
-        entry = self._entry_from_current(entry_id, current)
-        if entry is None:
-            raise KeyError(f"no operator inbox entry {entry_id!r}")
-        delivery_state = attempt.delivery_state
-        adapter = attempt.adapter
-        attempt_count = entry.attemptCount + 1
-        delivered = entry.model_copy(
-            update={
-                "ts": now,
-                "deliveryState": delivery_state,
-                "deliveredAt": now if delivery_state == "delivered" else entry.deliveredAt,
-                "deliveredToSession": attempt.delivered_to_session,
-                "deliveryDetail": attempt.detail,
-                "adapterDeliveryState": adapter.delivery_state or entry.adapterDeliveryState,
-                "adapterRequestId": adapter.request_id or entry.adapterRequestId,
-                "adapterVendorCorrelationId": (
-                    adapter.vendor_correlation_id or entry.adapterVendorCorrelationId
-                ),
-                "adapterAcceptedAt": adapter.accepted_at or entry.adapterAcceptedAt,
-                "adapterDeliveryDetail": (
-                    adapter.detail if adapter.detail is not None else entry.adapterDeliveryDetail
-                ),
-                "attemptCount": attempt_count,
-                "lastAttemptAt": now,
-                "nextAttemptAt": (
-                    next_attempt_at(
-                        now=datetime.fromisoformat(now),
-                        attempt_count=attempt_count,
-                        redelivery_floor_seconds=redelivery_floor_seconds,
-                    )
-                    if entry.state == "pending"
-                    else entry.nextAttemptAt
-                ),
-            }
-        )
-        self.append(delivered)
-        return delivered
-
-    def record_adapter_completion(
-        self,
-        entry_id: str,
-        *,
-        now: str,
-        vendor_correlation_id: str | None = None,
-        detail: str | None = None,
-        current: dict[str, OperatorInboxEntry] | None = None,
-    ) -> OperatorInboxEntry:
-        """Persist terminal adapter evidence without consuming the durable inbox row."""
-
-        entry = self._entry_from_current(entry_id, current)
-        if entry is None:
-            raise KeyError(f"no operator inbox entry {entry_id!r}")
-        completed = entry.model_copy(
-            update={
-                "ts": now,
-                "adapterDeliveryState": "completed",
-                "adapterVendorCorrelationId": (
-                    vendor_correlation_id or entry.adapterVendorCorrelationId
-                ),
-                "adapterCompletedAt": now,
-                "adapterDeliveryDetail": detail,
-            }
-        )
-        self.append(completed)
-        return completed
-
     def list_redeliverable(
         self,
         *,
@@ -252,118 +123,6 @@ class OperatorInboxStore:
                 rate_limit_seconds if rate_limit_seconds is not None else DEFAULT_RATE_LIMIT_SECONDS
             ),
         )
-
-    def mark_escalated(
-        self,
-        entry_id: str,
-        *,
-        now: str,
-        current: dict[str, OperatorInboxEntry] | None = None,
-    ) -> OperatorInboxEntry:
-        """Stamp ``escalatedAt`` once the ladder (HFX2-L4) escalates an unacked row.
-
-        This leaf only reserves the field -- it never calls this itself; redelivery keeps running
-        until either ack or this mark, per R3.
-        """
-        entry = self._entry_from_current(entry_id, current)
-        if entry is None:
-            raise KeyError(f"no operator inbox entry {entry_id!r}")
-        escalated = entry.model_copy(update={"ts": now, "escalatedAt": now})
-        self.append(escalated)
-        return escalated
-
-    def advance_rung(
-        self,
-        entry_id: str,
-        *,
-        rung: int,
-        now: str,
-        readdress_to: InboxOwner | None = None,
-        current: dict[str, OperatorInboxEntry] | None = None,
-    ) -> OperatorInboxEntry:
-        """Stamp the ladder's next rung (260707-HFX2-L4, R1/R2): re-anchors ``escalatedAt`` to
-        ``now`` so the NEXT rung's SLA is measured from this transition, not the row's original
-        creation. Distinct from :meth:`mark_escalated` (HFX2-L2's reserved "this row is now
-        escalatable" stamp, rung-agnostic) -- the ladder is the only caller of this method.
-
-        Ruled invariant (developer, 2026-07-09): the ladder climbs by MUTATING this one row --
-        with ``readdress=True`` the row itself moves to the next addressee (skip-level owner,
-        then the developer attention queue). It never mints a sibling row; one root cause is one
-        row for its whole ladder life. (The escalation storm that took the host down was every
-        rung transition posting a new pending row whose own rungs posted more rows.)
-        """
-        entry = self._entry_from_current(entry_id, current)
-        if entry is None:
-            raise KeyError(f"no operator inbox entry {entry_id!r}")
-        update: dict[str, object] = {
-            "ts": now,
-            "rung": rung,
-            "escalatedAt": now,
-            "rungTransitionAt": now,
-        }
-        if readdress_to is not None:
-            update.update(_readdress_fields(readdress_to))
-        advanced = entry.model_copy(update=update)
-        self.append(advanced)
-        return advanced
-
-    def renew(
-        self,
-        entry_id: str,
-        renewal: InboxRenewal,
-        *,
-        now: str,
-        current: dict[str, OperatorInboxEntry] | None = None,
-    ) -> OperatorInboxEntry:
-        """Refresh one still-pending row in place: same id, bumped ``ts``, optionally refreshed
-        ``response``. The ruled coalescing primitive (developer, 2026-07-09): a condition that
-        re-fires updates its ONE existing row's date/detail instead of appending a duplicate --
-        there is zero reason to repeat the same message until the system catches fire."""
-        entry = self._entry_from_current(entry_id, current)
-        if entry is None:
-            raise KeyError(f"no operator inbox entry {entry_id!r}")
-        if entry.state != "pending":
-            return entry
-        update: dict[str, object] = {"ts": now}
-        if renewal.response is not None:
-            update["response"] = renewal.response
-        if renewal.subject.leaf_key is not None:
-            update["leafKey"] = renewal.subject.leaf_key
-        if renewal.subject.seat_role is not None:
-            update["seatRole"] = renewal.subject.seat_role
-        if renewal.subject.agent_id is not None:
-            update["subjectAgentId"] = renewal.subject.agent_id
-        if renewal.readdress_to is not None:
-            update.update(_readdress_fields(renewal.readdress_to))
-        renewed = entry.model_copy(update=update)
-        self.append(renewed)
-        return renewed
-
-    def mark_ladder_resolved(
-        self,
-        entry_id: str,
-        *,
-        now: str,
-        reason: str,
-        current: dict[str, OperatorInboxEntry] | None = None,
-    ) -> tuple[OperatorInboxEntry, bool]:
-        """Terminally resolve a ladder-complete row without treating it as an ack."""
-        entry = self._entry_from_current(entry_id, current)
-        if entry is None:
-            raise KeyError(f"no operator inbox entry {entry_id!r}")
-        if is_ladder_resolved(entry):
-            return entry, False
-        resolved = entry.model_copy(
-            update={
-                "ts": now,
-                "state": "ladder-resolved",
-                "ladderResolvedAt": now,
-                "ladderResolvedReason": reason,
-                "nextAttemptAt": None,
-            }
-        )
-        self.append(resolved)
-        return resolved, True
 
     def consume(
         self,
@@ -490,11 +249,3 @@ class OperatorInboxStore:
         """Serialize append and physical compaction across dashboard and MCP processes."""
         with exclusive_access(self.log_path(), OPERATOR_INBOX_OWNERSHIP):
             yield
-
-    def _entry_from_current(
-        self,
-        entry_id: str,
-        current: dict[str, OperatorInboxEntry] | None,
-    ) -> OperatorInboxEntry | None:
-        entries = self.current() if current is None else current
-        return entries.get(entry_id)

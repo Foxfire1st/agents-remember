@@ -98,6 +98,87 @@ class RouteIndexBuildResult:
         }
 
 
+@dataclass(frozen=True)
+class _RouteIndexSurvey:
+    """Everything discovered about the onboarding tree before a single index is rendered.
+
+    One survey feeds every route's document, which is why it is taken once and passed on:
+    each field is a whole-tree read (the overview walk, the Git-tracked source snapshot),
+    and doing them per route would turn a linear build into a quadratic one.
+    """
+
+    onboarding_root: Path
+    repository: str
+    route_overviews: dict[str, str]
+    covered_by_route: dict[str, list[str]]
+    child_routes: dict[str, list[str]]
+    source_counts: dict[str, int]
+
+
+def _survey_routes(
+    code_root: Path, onboarding_root: Path, repository: str, storage: StorageSettings
+) -> _RouteIndexSurvey:
+    """Read the onboarding tree and the Git-tracked source once."""
+    route_overviews = _discover_route_overviews(onboarding_root)
+    source_snapshot = route_index_source_snapshot(
+        code_root=code_root,
+        storage=storage,
+        scoped_repo_path=repository,
+    )
+    return _RouteIndexSurvey(
+        onboarding_root=onboarding_root,
+        repository=repository,
+        route_overviews=route_overviews,
+        covered_by_route=_discover_covered_files(
+            onboarding_root,
+            route_overviews.keys(),
+            repository_files=frozenset(source_snapshot.repository_paths),
+        ),
+        child_routes=_discover_child_routes(route_overviews.keys()),
+        source_counts=_count_source_files_by_route(
+            route_overviews.keys(),
+            source_files=source_snapshot.eligible_paths,
+        ),
+    )
+
+
+def _route_index_document(survey: _RouteIndexSurvey, route: str) -> dict[str, Any]:
+    """The index document for one route, exactly as it is written to disk."""
+    overview_rel = survey.route_overviews[route]
+    covered = survey.covered_by_route.get(route, [])
+    children = survey.child_routes.get(route, [])
+    overview_path = survey.onboarding_root / overview_rel
+    return {
+        "schemaVersion": SCHEMA_VERSION,
+        "kind": "agents-remember-route-index",
+        "repository": survey.repository,
+        "route": route,
+        "overview": overview_rel,
+        "index": _route_index_path(route),
+        "sourceScope": [_source_scope(route)],
+        "childRoutes": [
+            {
+                "route": child,
+                "overview": survey.route_overviews[child],
+                "index": _route_index_path(child),
+            }
+            for child in children
+        ],
+        "coveredFiles": covered,
+        "coverageCounts": {
+            "sourceFilesInScope": survey.source_counts.get(route, 0),
+            "fileSidecars": len(covered),
+            "childRoutes": len(children),
+        },
+        "routingTerms": _routing_terms(overview_path, route, covered, children),
+        "hotPath": _hot_path(overview_path, route, covered, children),
+        "fallback": {
+            "governingOverview": overview_rel,
+            "sidecarAbsence": "inferFromCoveredFiles",
+        },
+    }
+
+
 def build_route_indexes(
     *,
     code_root: Path,
@@ -120,71 +201,17 @@ def build_route_indexes(
     if not onboarding_root.is_dir():
         raise FileNotFoundError(f"onboarding root does not exist: {onboarding_root}")
 
-    route_overviews = _discover_route_overviews(onboarding_root)
-    source_snapshot = route_index_source_snapshot(
-        code_root=code_root,
-        storage=storage,
-        scoped_repo_path=repository,
-    )
-    covered_by_route = _discover_covered_files(
-        onboarding_root,
-        route_overviews.keys(),
-        repository_files=frozenset(source_snapshot.repository_paths),
-    )
-    child_routes = _discover_child_routes(route_overviews.keys())
-    source_counts = _count_source_files_by_route(
-        route_overviews.keys(),
-        source_files=source_snapshot.eligible_paths,
-    )
+    survey = _survey_routes(code_root, onboarding_root, repository, storage)
 
     written = 0
     unchanged = 0
     indexes: list[str] = []
 
-    for route in sorted(route_overviews.keys(), key=_route_sort_key):
-        overview_rel = route_overviews[route]
+    for route in sorted(survey.route_overviews.keys(), key=_route_sort_key):
         index_rel = _route_index_path(route)
-        index = {
-            "schemaVersion": SCHEMA_VERSION,
-            "kind": "agents-remember-route-index",
-            "repository": repository,
-            "route": route,
-            "overview": overview_rel,
-            "index": index_rel,
-            "sourceScope": [_source_scope(route)],
-            "childRoutes": [
-                {
-                    "route": child,
-                    "overview": route_overviews[child],
-                    "index": _route_index_path(child),
-                }
-                for child in child_routes.get(route, [])
-            ],
-            "coveredFiles": covered_by_route.get(route, []),
-            "coverageCounts": {
-                "sourceFilesInScope": source_counts.get(route, 0),
-                "fileSidecars": len(covered_by_route.get(route, [])),
-                "childRoutes": len(child_routes.get(route, [])),
-            },
-            "routingTerms": _routing_terms(
-                onboarding_root / overview_rel,
-                route,
-                covered_by_route.get(route, []),
-                child_routes.get(route, []),
-            ),
-            "hotPath": _hot_path(
-                onboarding_root / overview_rel,
-                route,
-                covered_by_route.get(route, []),
-                child_routes.get(route, []),
-            ),
-            "fallback": {
-                "governingOverview": overview_rel,
-                "sidecarAbsence": "inferFromCoveredFiles",
-            },
-        }
-
-        rendered = json.dumps(index, indent=2, sort_keys=False) + "\n"
+        rendered = (
+            json.dumps(_route_index_document(survey, route), indent=2, sort_keys=False) + "\n"
+        )
         index_path = onboarding_root / index_rel
         indexes.append(index_rel)
         if index_path.exists() and index_path.read_text(encoding="utf-8") == rendered:
@@ -196,7 +223,7 @@ def build_route_indexes(
         written += 1
 
     return RouteIndexBuildResult(
-        routes=len(route_overviews),
+        routes=len(survey.route_overviews),
         written=written,
         unchanged=unchanged,
         indexes=indexes,

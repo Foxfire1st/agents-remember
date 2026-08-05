@@ -8,7 +8,11 @@ from dataclasses import dataclass, replace
 from typing import Literal, cast
 
 from agents_remember.errors import HarnessControlError
-from agents_remember.serving.harness_capabilities import EffortOption, ModelCapability
+from agents_remember.serving.harness_capabilities import (
+    EffortOption,
+    LaunchKnobs,
+    ModelCapability,
+)
 from agents_remember.serving.harness_control_models import LaunchSpec
 
 PI_RPC_PACKAGE = "@earendil-works/pi-coding-agent"
@@ -109,6 +113,23 @@ def encode_pi_rpc_frame(value: Mapping[str, object]) -> bytes:
     except (TypeError, ValueError) as exc:
         raise HarnessControlError(f"Pi RPC command is not JSON-serializable: {exc}") from exc
     return payload + b"\n"
+
+
+def pi_launch_knobs(*, model_key: str, effort: str | None) -> LaunchKnobs:
+    """Pi 0.80.7's exact native model/thinking flags; RPC mode stays protocol-owned.
+
+    Reads nothing but its arguments: the selection is spelled on the launch line before any
+    adapter or transport exists, which is why it is a launch fact rather than an adapter method.
+    """
+
+    if not model_key or model_key != model_key.strip():
+        raise HarnessControlError("Pi launch model must be non-empty with no outer whitespace")
+    if effort is None or not effort or effort != effort.strip():
+        raise HarnessControlError("Pi launch effort must be non-empty with no outer whitespace")
+    return LaunchKnobs(
+        argv=("--model", model_key, "--thinking", effort),
+        owned_argv_options=("--model", "--thinking"),
+    )
 
 
 def pi_rpc_launch(launch: LaunchSpec) -> LaunchSpec:

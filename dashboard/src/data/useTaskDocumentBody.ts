@@ -8,7 +8,7 @@ export type TaskDocumentBodyState = "loading" | "available" | "unavailable";
 
 const taskDocumentBodyKey = (
   doc: Pick<TaskDocNode, "docPath" | "bodyRevision"> | undefined,
-): string => (doc ? `${doc.docPath}\n${doc.bodyRevision ?? ""}` : "");
+): string => (doc ? `${doc.docPath}\n${doc.bodyRevision}` : "");
 
 const mergeTaskDocumentBody = (
   summary: TaskDocNode,

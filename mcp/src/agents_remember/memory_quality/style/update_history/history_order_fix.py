@@ -1,4 +1,12 @@
-"""Fix Update History sections with timestamped bullets into newest-first order."""
+"""Fix Update History sections with timestamped bullets into newest-first order.
+
+This tool SORTS, so every ambiguity the checker can merely report is one this tool would
+act on. It already refuses a section holding a bullet with no timestamp; since L6 it also
+refuses one that MIXES offset-bearing and offset-less timestamps, because sorting those
+together means ordering two frames against each other and writing the result to disk. The
+checker's ``update_history_timestamp_naive`` finding names the same sections; the remedy
+for both is to state the offsets, after which this tool sorts them.
+"""
 
 from __future__ import annotations
 
@@ -11,6 +19,7 @@ from agents_remember.memory_quality.integrity.onboarding_drift_check.discovery i
 from agents_remember.memory_quality.style.update_history.history_order import (
     BULLET_PATTERN,
     datetime_value,
+    has_offset,
     parse_timestamp,
     update_history_sections,
 )
@@ -72,6 +81,8 @@ def sort_section(section: list[str]) -> tuple[list[str], bool]:
         return section, False
     if any(block_timestamp(block) is None for block in blocks):
         return section, True
+    if mixes_timestamp_frames(blocks):
+        return section, True
     sorted_blocks = sorted(
         enumerate(blocks),
         key=lambda item: (block_timestamp(item[1]) or dt.datetime.min, -item[0]),
@@ -102,13 +113,23 @@ def parse_bullet_blocks(section: list[str]) -> tuple[list[str], list[list[str]]]
     return prefix, blocks
 
 
-def block_timestamp(block: list[str]) -> dt.datetime | None:
+def mixes_timestamp_frames(blocks: list[list[str]]) -> bool:
+    """Whether this section states an offset on some bullets and not on others."""
+    frames = {has_offset(text) for text in filter(None, map(block_timestamp_text, blocks))}
+    return len(frames) > 1
+
+
+def block_timestamp_text(block: list[str]) -> str | None:
     if not block:
         return None
     match = BULLET_PATTERN.match(block[0])
     if match is None:
         return None
-    timestamp = parse_timestamp(match.group("body"))
+    return parse_timestamp(match.group("body"))
+
+
+def block_timestamp(block: list[str]) -> dt.datetime | None:
+    timestamp = block_timestamp_text(block)
     if timestamp is None:
         return None
     try:

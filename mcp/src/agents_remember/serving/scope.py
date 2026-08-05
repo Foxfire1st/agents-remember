@@ -21,8 +21,8 @@ from typing import Any, Literal
 
 from fastapi.responses import JSONResponse, Response
 
-from agents_remember.controllers._guards import require_repo
 from agents_remember.errors import AuthorityError
+from agents_remember.kernel.authority import require_repo
 from agents_remember.kernel.coordination_context.models import MissingMemoryError
 from agents_remember.kernel.coordination_context_resolver import (
     CoordinationHints,

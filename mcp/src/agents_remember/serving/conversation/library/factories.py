@@ -19,6 +19,7 @@ import threading
 import weakref
 from dataclasses import dataclass
 
+from agents_remember.kernel.harnesses import Harness
 from agents_remember.serving.conversation.library.claude import ClaudeConversationLibrary
 from agents_remember.serving.conversation.library.codex import CodexConversationLibrary
 from agents_remember.serving.conversation.library.cursor import (
@@ -45,7 +46,6 @@ from agents_remember.serving.conversation.models import (
     HarnessId,
 )
 from agents_remember.serving.conversation.runtime import ConversationRuntime
-from agents_remember.serving.harnesses import Harness
 
 NORMALIZED_HARNESS_IDS: tuple[HarnessId, ...] = ("codex", "claude", "pi")
 

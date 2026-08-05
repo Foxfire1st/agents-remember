@@ -272,11 +272,24 @@ relationship as a direct edge. The tool does not infer squash equivalence by
 default; squash merges are emergency/manual recovery because they erase commit
 lineage and can invalidate memory lookup history.
 
-When `task_doc_path` is supplied, the finalizer sets that task document to
-`Completed`. When `master_doc_path` and `subtask_number` are supplied, it sets the
-immediate parent row for that sub-task to `Completed`. It does not mark the parent
-task itself complete and does not recursively complete ancestors; each parent-child
-edge is finalized separately.
+The finalizer resolves the leaf from the contract's task root and leaf id. An omitted
+`task_doc_path` adopts that exact document; a supplied path is an assertion and must
+match it. Before any cleanup (including a dry-run cleanup preview), every declared
+top-level step and nested substep must be `done`. Use `task_doc.skip_step` with an
+exact id and nonblank reason for an intentional skip; cleanup/finalization never
+auto-checks work. When the bound leaf declares an existing immediate parent, the
+finalizer always derives that parent and reconciles its exact row to `Completed`, even
+when both optional parent assertions are omitted. `master_doc_path` and
+`subtask_number` are independent identity assertions; when supplied, each must match
+that derived edge. Standalone/no-parent leaves remain supported. The finalizer does
+not mark the parent task itself complete or recursively complete ancestors; each
+parent-child edge is finalized separately.
+
+Standalone `worktree_cleanup` is deliberately non-terminal for task documents. If a
+declared final step includes cleanup, run standalone cleanup first, then mark that
+exact step `done`, and finally run `lifecycle_finalize_task` against the already-clean
+contract. Do not mark a self-referential "make this task Completed" step prematurely;
+split or reword it as the concrete cleanup/preparation work.
 
 Cleanup is idempotent. If the worktrees or merged branches are already gone, it reports the already-clean state instead of failing. If Git refuses to delete an unmerged branch, cleanup leaves that branch in place and reports it for developer review.
 

@@ -1,0 +1,61 @@
+"""Complete one tool result at the application boundary.
+
+The MCP adapter supplies the tool name and raw use-case result.  This service
+selects the wire model, attaches lifecycle-wide state, finalizes the token
+count, and records the completed call.  Domain observation therefore remains
+below the application boundary; the adapter receives a protocol-ready mapping.
+"""
+
+from __future__ import annotations
+
+from datetime import UTC, datetime
+from typing import Any
+
+from agents_remember.application.next_step import next_step_for
+from agents_remember.kernel.agentic_settings import DEFAULT_SUPERVISOR_STALE_CUTOFF_SECONDS
+from agents_remember.models.base import ResponseEnvelope
+from agents_remember.models.tool_response import finalize_tool_response
+from agents_remember.observer.ambient import AmbientLifecycle, ambient
+from agents_remember.serving.supervisor_heartbeat import supervisor_staleness_banner
+
+
+def _supervisor_banner(amb: AmbientLifecycle) -> str | None:
+    """Return the stale-supervisor banner without blocking a tool response."""
+    try:
+        return supervisor_staleness_banner(
+            amb.root,
+            now=datetime.now(UTC),
+            stale_cutoff_seconds=DEFAULT_SUPERVISOR_STALE_CUTOFF_SECONDS,
+        )
+    except Exception:
+        return None
+
+
+def _attach_lifecycle_tail(
+    response: ResponseEnvelope, amb: AmbientLifecycle, tool_name: str
+) -> None:
+    if (
+        amb.current is not None
+        and amb.current.state == "awaiting-developer"
+        and tool_name != "lifecycle_turn_end_notification"
+    ):
+        amb.resume_from_await()
+    response.nextStep = next_step_for(amb, tool_name)
+    response.supervisorBanner = _supervisor_banner(amb)
+
+
+def complete_tool_response(tool_name: str, payload: dict[str, Any]) -> dict[str, Any]:
+    """Validate, enrich, count, and observe one application result."""
+    amb = ambient()
+    finalized = finalize_tool_response(
+        tool_name,
+        payload,
+        enrich=(
+            (lambda response: _attach_lifecycle_tail(response, amb, tool_name))
+            if amb is not None
+            else None
+        ),
+    )
+    if amb is not None:
+        amb.emit_tool(tool_name, finalized)
+    return finalized

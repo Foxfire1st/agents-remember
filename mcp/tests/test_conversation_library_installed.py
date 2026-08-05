@@ -18,6 +18,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from agents_remember.kernel.harnesses import HARNESSES
 from agents_remember.observer.events import now_iso
 from agents_remember.serving.conversation.library.codex import CodexConversationLibrary
 from agents_remember.serving.conversation.library.cursor import (
@@ -50,7 +51,6 @@ from agents_remember.serving.conversation.models import (
 )
 from agents_remember.serving.conversation.runtime import ConversationRuntime, ConversationScope
 from agents_remember.serving.harness_capability_catalog import HarnessCapabilityCatalog
-from agents_remember.serving.harnesses import HARNESSES
 from agents_remember.serving.hosted_readiness import ReadinessWait, hosted_session_readiness
 from agents_remember.serving.retire import SeatClosure, retire_entry
 from agents_remember.serving.terminal import TerminalHost

@@ -1,12 +1,7 @@
 name: Quality checks
 
 on:
-  # Every branch, not only `main`. The gate has to reach work while it is still
-  # small; scoping it to `main` meant the first automated verdict on a long-lived
-  # branch arrived once, in one enormous pull request.
-  #
-  # Naming `branches` also excludes tag pushes, so a release tag runs this workflow
-  # exactly once -- through the `workflow_call` below, from publish-mcp-to-pypi.yml.
+  # Run on every branch push. Tag releases call this workflow from publish-mcp-to-pypi.yml.
   push:
     branches: ["**"]
   # Every pull request, whatever its base branch.
@@ -14,6 +9,9 @@ on:
   # Callable so the release path can require this gate on the tagged tree.
   # Consumer: .github/workflows/publish-mcp-to-pypi.yml (job `quality`).
   workflow_call:
+  # Run the randomized collection-order rail on its weekly schedule.
+  schedule:
+    - cron: "17 3 * * 1"
 
 concurrency:
   group: quality-${{ github.ref }}
@@ -29,10 +27,7 @@ jobs:
         python-version: ["3.11", "3.12", "3.13"]
 
     steps:
-      # Full history, not the default single commit. The wrapper's changed-lines
-      # coverage floor diffs against the merge base with the branch's source; a
-      # shallow clone has no merge base to find, which would silently turn the
-      # strictest step of the gate into "compare against the empty tree".
+      # Full history is required for the changed-lines coverage merge base.
       - uses: actions/checkout@v6
         with:
           persist-credentials: false
@@ -54,21 +49,12 @@ jobs:
           git config --global user.email "ci@agents-remember.invalid"
           git config --global user.name "Agents Remember CI"
 
-      # Enforces ALL of: ruff (lint, complexity rules C901/PLR0911/PLR0912/PLR0915
-      # included), `ruff format --check`, Pyright (types), the full pytest suite,
-      # CRAP (complexity x branch coverage) and the changed-lines coverage floor.
-      # The wrapper exits non-zero if ANY of them fail; CRAP threshold enforcement
-      # is mandatory in the default command. Nothing here is baselined or
-      # allowlisted -- the complexity baseline this job used to run was deleted
-      # with the debt it recorded. Its two Radon steps are labelled reports and
-      # cannot fail it -- radon exits 0 whatever it finds -- so they are not named
-      # here.
-      #
-      # The coverage floor needs the base branch to diff against. `fetch-depth: 0`
-      # above gives it the history; on a pull request it reads `GITHUB_BASE_REF`
-      # itself, and on a branch push it falls back to the merge base with the
-      # remote's default branch. The base it used is printed in the step output.
+      # Enforce Ruff (including C901/PLR0911/PLR0912/PLR0915), Ruff format, Pyright,
+      # full pytest, CRAP, and changed-lines coverage without baselines or allowlists.
+      # Radon CC/MI remain labelled reports. The wrapper prints its selected diff base.
       - name: Run quality wrapper (ruff + format + Pyright + pytest + CRAP + diff coverage)
+        env:
+          AR_QUALITY_INVOCATION: ci
         run: python -m agents_remember.code_quality.check
 
   dashboard:
@@ -92,19 +78,55 @@ jobs:
 
       - name: Lint
         working-directory: dashboard
-        run: npm run lint
+        run: |
+          PYTHONPATH=../mcp/src python3 -m agents_remember.code_quality.scope_reporting --project-root .. dashboard --step lint
+          if npm run lint; then echo "result: dashboard-lint PASS"; else echo "result: dashboard-lint FAIL"; exit 1; fi
 
       - name: Typecheck
         working-directory: dashboard
-        run: npm run typecheck
+        run: |
+          PYTHONPATH=../mcp/src python3 -m agents_remember.code_quality.scope_reporting --project-root .. dashboard --step typecheck
+          if npm run typecheck; then echo "result: dashboard-typecheck PASS"; else echo "result: dashboard-typecheck FAIL"; exit 1; fi
 
       - name: Unit tests
         working-directory: dashboard
-        run: npm run test
+        run: |
+          PYTHONPATH=../mcp/src python3 -m agents_remember.code_quality.scope_reporting --project-root .. dashboard --step test
+          if npm run test; then echo "result: dashboard-test PASS"; else echo "result: dashboard-test FAIL"; exit 1; fi
 
-      # The bundle is a generated artifact and is no longer committed, so there is
-      # nothing to compare a fresh build against. Proving the frontend still builds
-      # is the whole check here; the release job builds it again and ships it.
+      # Require the generated frontend bundle to build successfully.
       - name: Build
         working-directory: dashboard
-        run: npm run build
+        run: |
+          PYTHONPATH=../mcp/src python3 -m agents_remember.code_quality.scope_reporting --project-root .. dashboard --step build
+          if npm run build; then echo "result: dashboard-build PASS"; else echo "result: dashboard-build FAIL"; exit 1; fi
+
+  randomized-order:
+    name: Scheduled randomized Python test order
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install package with dev extras
+        run: python -m pip install -e "mcp[dev]"
+
+      - name: Configure git identity for hermetic test fixtures
+        run: |
+          git config --global user.email "ci@agents-remember.invalid"
+          git config --global user.name "Agents Remember CI"
+
+      - name: Run full suite in deterministic randomized order
+        env:
+          RANDOM_ORDER_SEED: ${{ github.run_id }}
+        run: |
+          PYTHONPATH=mcp/src python -m agents_remember.code_quality.scope_reporting randomized-pytest --seed "${RANDOM_ORDER_SEED}"
+          if python -m pytest mcp/tests --random-order-seed="${RANDOM_ORDER_SEED}"; then echo "result: randomized-pytest PASS"; else echo "result: randomized-pytest FAIL"; exit 1; fi

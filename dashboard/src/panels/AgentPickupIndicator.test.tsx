@@ -22,6 +22,7 @@ describe("AgentPickupIndicator", () => {
           messageKind: "dispatch-brief",
           deliveryState: "delivered",
           state: "waiting-for-agent",
+          attemptCount: 1,
           ttlSeconds: 300,
         }}
       />,
@@ -46,6 +47,7 @@ describe("AgentPickupIndicator", () => {
           messageKind: "message",
           deliveryState: "queued",
           state: "check-chat",
+          attemptCount: 0,
           ttlSeconds: 300,
         }}
       />,

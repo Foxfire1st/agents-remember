@@ -13,12 +13,12 @@ MCP_TESTS = Path(__file__).resolve().parent
 sys.path.insert(0, str(MCP_SRC))
 sys.path.insert(0, str(MCP_TESTS))
 
-from agents_remember.cli.context_packet import main as cli_main
-from agents_remember.controllers.context_packet import (
+from agents_remember.application.context_packet import (
     ContextPacketError,
     ContextPacketRequest,
     build_context_packet,
 )
+from agents_remember.cli.context_packet import main as cli_main
 from agents_remember.kernel.memory_ledger import create_initial_ledger, write_ledger
 from agents_remember.mcp.config import load_config
 from agents_remember.mcp.tools.core import context_packet_payload

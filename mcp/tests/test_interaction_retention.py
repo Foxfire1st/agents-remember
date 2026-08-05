@@ -16,6 +16,7 @@ from agents_remember.controlplane.operator_inbox_records import (
 )
 from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
 from agents_remember.controlplane.records import GateAnchor, create_gate
+from agents_remember.controlplane.stamps import age_seconds
 from agents_remember.controlplane.store import GateStore
 from agents_remember.observer.paths import observer_logs_root
 from agents_remember.observer.snapshots import read_agent_pickups, read_gates
@@ -104,6 +105,31 @@ class InteractionRetentionTests(unittest.TestCase):
         self.assertEqual(by_entry["fresh"].state, "waiting-for-agent")
         self.assertEqual(by_entry["stale"].state, "check-chat")
         self.assertEqual(by_entry["fresh"].gateId, "G1")
+
+
+class StampAgingTests(unittest.TestCase):
+    """The primitive every rule above measures with, proven at each of its three outcomes.
+
+    ``age_seconds`` moved into ``controlplane`` from ``observer.timeutil`` (260731-EFA-L6):
+    the control plane's retention rules and the observer's staleness projection age the same
+    stamps, so the LOWER of the two packages defines it (``layers.toml``). Its three outcomes
+    are each one line of retention policy elsewhere, so each is proven here rather than
+    inferred from a caller: an offset-aware stamp, a naive stamp (which must be READ as UTC
+    rather than crash a retention pass on a hand-edited record), and an unparseable one (which
+    must degrade to ``None``, because every caller reads ``None`` as "keep it").
+    """
+
+    def test_an_offset_aware_stamp_ages_against_the_clock(self) -> None:
+        now = datetime(2026, 6, 1, 12, 0, 0, tzinfo=UTC)
+        self.assertEqual(age_seconds("2026-06-01T11:30:00+00:00", now), 1800.0)
+
+    def test_a_naive_stamp_is_read_as_utc_rather_than_refused(self) -> None:
+        now = datetime(2026, 6, 1, 12, 0, 0, tzinfo=UTC)
+        self.assertEqual(age_seconds("2026-06-01T11:30:00", now), 1800.0)
+
+    def test_an_unparseable_stamp_is_none_so_the_caller_keeps_the_record(self) -> None:
+        now = datetime(2026, 6, 1, 12, 0, 0, tzinfo=UTC)
+        self.assertIsNone(age_seconds("not-a-timestamp", now))
 
 
 if __name__ == "__main__":

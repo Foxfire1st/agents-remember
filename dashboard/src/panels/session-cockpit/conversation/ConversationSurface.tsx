@@ -108,14 +108,12 @@ export function ConversationSurface({
   onRetry: () => void;
   onShowDiagnostics: () => void;
   /** False while the surface is kept mounted-but-hidden behind another chat (ChatsStageBody
-      keep-alive pool). The projection keeps updating (data layer stays warm), the refs below keep
-      TRACKING state — so a re-show never voices a stale transition — but nothing is announced to
-      the global live regions from a chat the operator is not looking at. */
+      keep-alive pool). Its projection/cursor stay warm but its physical stream is paused; the refs
+      below still track any final in-flight transition so a re-show never voices stale state. */
   visible?: boolean;
-  /** False only when an ancestor removes the timeline's layout box (`display:none`: a cockpit
-      view switch or the in-stage library). A keep-alive surface hidden with `visibility:hidden`
-      keeps honest geometry and stays true here, so focus switches never arm scroll restoration.
-      Deliberately separate from operator `visible`, which owns announcer semantics above. */
+  /** False whenever this retained timeline is not the active visible feed. Its DOM, scrollTop, and
+      TanStack measurement cache remain mounted, while observers/listeners/timers detach. Kept
+      separate from `visible` because the latter also owns announcer semantics above. */
   scrollGeometryActive?: boolean;
 }) {
   const projection = useActiveConversation((state) => state.bySession[sessionId]);
@@ -180,9 +178,9 @@ export function ConversationSurface({
   // acquisition from the validated effective focus, not only from click handlers; the runtime
   // singleflight makes event selection + remount converge on exactly one POST.
   useEffect(() => {
-    if (agentFocus === null) return;
+    if (!visible || agentFocus === null) return;
     void hydrateAgentConversation(sessionId, agentFocus);
-  }, [agentFocus, projection?.identity.bridgeEpoch, sessionId]);
+  }, [agentFocus, projection?.identity.bridgeEpoch, sessionId, visible]);
 
   const onSurfaceKeyDown = useCallback(
     (event: React.KeyboardEvent<HTMLDivElement>) => {
@@ -315,6 +313,7 @@ export function ConversationSurface({
           sessionId={sessionId}
           epoch={projection.identity.bridgeEpoch}
           statusRevision={projection.status?.revision}
+          active={visible}
         />
         {projection.capabilities?.live.completeness.state !== undefined &&
         projection.capabilities.live.completeness.state !== "supported" ? (

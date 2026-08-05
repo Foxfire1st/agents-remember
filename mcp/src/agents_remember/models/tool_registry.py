@@ -14,7 +14,7 @@ Response-model convention (one place, deliberately two tiers):
   rejected when the provider adds a field. This is a tolerated-drift surface,
   not an un-validated one -- the envelope (ok/operation/tokens) is still typed.
 
-Controllers return plain dicts; ``_tool_payload`` validates them against the
+Application entry points return plain dicts; ``_tool_payload`` validates them against the
 model registered here and finalizes token counts. Pick STRICT unless the
 payload genuinely embeds provider-native detail.
 """

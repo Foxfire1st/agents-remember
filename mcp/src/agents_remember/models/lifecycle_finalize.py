@@ -7,6 +7,7 @@ from typing import Any, Literal
 from pydantic import Field
 
 from agents_remember.models.base import ToolResponse
+from agents_remember.tasks import CompletionBlocker
 
 
 class LifecycleFinalizeTaskResponse(ToolResponse):
@@ -22,7 +23,7 @@ class LifecycleFinalizeTaskResponse(ToolResponse):
     enclosurePath: str | None = None
     landedCommit: str | None = None
     targetBranch: str | None = None
-    blockers: list[str] = Field(default_factory=list)
+    blockers: list[str | CompletionBlocker] = Field(default_factory=list)
     cleanup: dict[str, Any] = Field(default_factory=dict)
     taskUpdates: dict[str, Any] = Field(default_factory=dict)
     taskArchive: dict[str, Any] = Field(default_factory=dict)

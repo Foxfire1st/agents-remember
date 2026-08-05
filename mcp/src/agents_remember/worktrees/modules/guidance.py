@@ -54,10 +54,11 @@ NextTool = Literal[
 # The *other* users of the same nextOperation/nextTool shape: the closeout preview's commit
 # gate and the four blocked-start / blocked-sync recovery payloads. Every one of them is a
 # `WorktreeCommandResult` rendered as a `FlexibleToolResponse` -- none reaches
-# `WorktreeSummary`, whose only producer is `lifecycle_guidance` via `worktrees.status`. They
-# get their own builder and their own vocabulary rather than widening the phase machine's,
-# because a wider `NextOperation` would put "requires developer approval" and "blocked on a
-# stale base" back into the set the context packet's `nextOperation` claims to be.
+# `WorktreeSummary`, whose only producer is `lifecycle_guidance` via
+# `application.worktree_status`. They get their own builder and their own vocabulary rather
+# than widening the phase machine's, because a wider `NextOperation` would put "requires
+# developer approval" and "blocked on a stale base" back into the set the context packet's
+# `nextOperation` claims to be.
 RecoveryOperation = Literal[
     "request_commit_approval",
     "choose_memory_recovery",
@@ -99,7 +100,7 @@ class WorktreeStatusFacts(TypedDict):
     """The local, contract-derived half of a worktree status payload.
 
     Snake_case because it is the tool-response shape; the camelCase packet projection in
-    :mod:`agents_remember.worktrees.status` maps it onto ``WorktreeSummary``.
+    :mod:`agents_remember.application.worktree_status` maps it onto ``WorktreeSummary``.
     """
 
     task_id: str

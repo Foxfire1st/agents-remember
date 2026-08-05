@@ -30,6 +30,7 @@ from typing import Any
 
 from pydantic import ValidationError
 
+from agents_remember.controlplane.stamps import age_seconds
 from agents_remember.observer.events import Actor, Event, Trust
 from agents_remember.observer.lifecycle_state import (
     INITIAL_PHASE,
@@ -45,13 +46,12 @@ from agents_remember.observer.save_gate import (
     SaveGateRequired,
     compute_scope,
 )
-from agents_remember.observer.served_store import ServedRecord, ServedStore, served_key
+from agents_remember.observer.served_store import ServedLedger, ServedStore
 from agents_remember.observer.store import EventStore
 from agents_remember.observer.timeutil import (
     HEARTBEAT_SECONDS,
     TTL_SECONDS,
     Clock,
-    age_seconds,
 )
 from agents_remember.observer.ulid import new_ulid
 
@@ -118,11 +118,17 @@ class AmbientLifecycle:
         self._ticker: threading.Thread | None = None
         self.current: LifecycleState | None = None
         # The served-onboarding dedup ledger lives beside the event logs (one
-        # served.jsonl per lifecycle dir). The in-memory set is the hot path; it
-        # is hydrated from served.jsonl on first use so it survives a context
-        # compaction (the same lifecycle process keeps running).
-        self._served_store = served_store or ServedStore(store.root)
-        self._served: dict[str, set[str]] = {}
+        # served.jsonl per lifecycle dir). It is a COLLABORATOR rather than four more
+        # methods here: the dedup state is a second substrate with its own file and its
+        # own lock, and it was never part of this state machine -- only co-located with
+        # it. This class keeps exactly one duty over it, forgetting a lifecycle's set
+        # when that lifecycle ends or is left.
+        self._served = ServedLedger(served_store or ServedStore(store.root))
+
+    @property
+    def served(self) -> ServedLedger:
+        """The served-onboarding dedup ledger for the lifecycles in this process."""
+        return self._served
 
     @property
     def root(self) -> Path:
@@ -263,7 +269,7 @@ class AmbientLifecycle:
             current = self._require_active()
             self._emit_locked("lifecycle.ended", "declared", "model", outcome=outcome)
             self._stop_ticker_locked()
-            self._served.pop(current.id, None)
+            self._served.forget(current.id)
             self.current = None
             return replace(current, state=terminal)
 
@@ -415,58 +421,6 @@ class AmbientLifecycle:
                     "read.packet", "observed", "model", repoId=repo_id, files=projected
                 )
 
-    # --- served-onboarding dedup ledger -----------------------------------
-
-    def _served_for_locked(self, lifecycle_id: str) -> set[str]:
-        """The served-key set for a lifecycle, hydrated from disk on first use."""
-        cached = self._served.get(lifecycle_id)
-        if cached is None:
-            cached = self._served_store.served_set(lifecycle_id)
-            self._served[lifecycle_id] = cached
-        return cached
-
-    def served_keys(self, lifecycle_id: str) -> set[str]:
-        """A copy of the served-key set for a lifecycle (hydrated on first use)."""
-        with self._lock:
-            return set(self._served_for_locked(lifecycle_id))
-
-    def is_served(self, lifecycle_id: str, kind: str, path: str, content_hash: str) -> bool:
-        """True when this exact ``(kind, path, hash)`` was already served."""
-        with self._lock:
-            return served_key(kind, path, content_hash) in self._served_for_locked(lifecycle_id)
-
-    def record_served(
-        self, lifecycle_id: str, kind: str, path: str, content_hash: str, *, ts: str
-    ) -> None:
-        """Record a served onboarding piece in memory and on disk (append-only).
-
-        Emission/durability must never break the read, so a disk error is
-        contained -- the in-memory set still advances so the same call does not
-        re-serve within one process.
-        """
-        with self._lock:
-            served = self._served_for_locked(lifecycle_id)
-            served.add(served_key(kind, path, content_hash))
-            with contextlib.suppress(OSError):
-                self._served_store.append(
-                    lifecycle_id,
-                    ServedRecord(kind=kind, path=path, hash=content_hash, ts=ts),
-                )
-
-    def reset_served(self, lifecycle_id: str) -> None:
-        """Clear the served-set for a lifecycle (the compaction/refresh reset).
-
-        Drops the in-memory set and deletes the on-disk ``served.jsonl`` so the
-        next read re-serves every onboarding piece from scratch. The single live
-        owner deleting its own ledger keeps the single-writer invariant intact.
-        """
-        with self._lock:
-            self._served.pop(lifecycle_id, None)
-            with contextlib.suppress(OSError):
-                path = self._served_store.log_path(lifecycle_id)
-                if path.exists():
-                    path.unlink()
-
     def shutdown(self) -> None:
         """Stop the heartbeat ticker (process teardown / test isolation)."""
         with self._lock:
@@ -507,7 +461,7 @@ class AmbientLifecycle:
             # moved, and there is no reason it should.)
             self._emit_locked("lifecycle.ended", "declared", "model", outcome="abandoned")
             self._stop_ticker_locked()
-            self._served.pop(current.id, None)
+            self._served.forget(current.id)
             self.current = None
 
     def _promote_to_landing_zone_locked(self) -> None:
@@ -529,7 +483,7 @@ class AmbientLifecycle:
         self._emit_locked("lifecycle.paused", "observed", "system", cause=cause)
         self._stop_ticker_locked()
         if self.current is not None:
-            self._served.pop(self.current.id, None)
+            self._served.forget(self.current.id)
         self.current = None
 
     def _emit_locked(self, kind: str, trust: Trust, actor: Actor, **data: Any) -> None:

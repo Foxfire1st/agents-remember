@@ -19,6 +19,7 @@ from agents_remember.errors import (
     HarnessInteractionNotPendingError,
     HarnessRequestConflictError,
 )
+from agents_remember.kernel.harnesses import Harness
 from agents_remember.serving.conversation import register_conversation_routes
 from agents_remember.serving.conversation.runtime import ConversationRuntime
 from agents_remember.serving.harness_capabilities import (
@@ -51,7 +52,6 @@ from agents_remember.serving.harness_control_models import (
     withdrawal_result_json,
 )
 from agents_remember.serving.harness_launch import ResolvedLaunch, resolve_settings_launch
-from agents_remember.serving.harnesses import Harness
 from agents_remember.serving.response_contract import (
     SESSION_CONTROL_RESPONSES,
     BridgeEpochMismatchRefusal,
@@ -290,7 +290,18 @@ def _register_capability_routes(
 
 
 def _register_submission_routes(app: FastAPI, *, control_entry: ControlEntryResolver) -> None:
-    """The submission authority's public surface: its epoch, its ledger, and writes against it."""
+    """The submission authority's public surface: its epoch, its ledger, and writes against it.
+
+    Split by whether the route can change the ledger.
+    """
+    _register_submission_ledger_routes(app, control_entry=control_entry)
+    _register_submission_write_routes(app, control_entry=control_entry)
+
+
+def _register_submission_ledger_routes(
+    app: FastAPI, *, control_entry: ControlEntryResolver
+) -> None:
+    """Read the authority's epoch and the status of submissions already in its ledger."""
 
     @app.get(
         "/api/terminal/{session}/submission-authority",
@@ -326,6 +337,10 @@ def _register_submission_routes(app: FastAPI, *, control_entry: ControlEntryReso
                 )
             ),
         )
+
+
+def _register_submission_write_routes(app: FastAPI, *, control_entry: ControlEntryResolver) -> None:
+    """Write against the authority: withdraw, submit, reconcile."""
 
     @app.post(
         "/api/terminal/{session}/withdraw",

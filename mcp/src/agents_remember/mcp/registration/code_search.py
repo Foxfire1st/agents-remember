@@ -4,7 +4,7 @@ from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
-from agents_remember.controllers.provider_tools import (
+from agents_remember.application.provider_tools import (
     GrepaiRepoScope,
     GrepaiSearchQuery,
     GrepaiTraceQuery,
@@ -25,6 +25,15 @@ from ..tools import (
 
 
 def register_code_search_tools(server: FastMCP, config: McpRuntimeConfig) -> None:
+    """Register both search backends, grouped by backend and by what the reader wants."""
+    _register_grepai_tools(server, config)
+    _register_cgc_lookup_tools(server, config)
+    _register_cgc_analysis_tools(server, config)
+
+
+def _register_grepai_tools(server: FastMCP, config: McpRuntimeConfig) -> None:
+    """Semantic search and relationship tracing over the GrepAI memory index."""
+
     @server.tool()
     def grepai_search(
         query: str,
@@ -75,6 +84,10 @@ def register_code_search_tools(server: FastMCP, config: McpRuntimeConfig) -> Non
             repos=GrepaiRepoScope(repo_ids=repo_ids, all_repos=all_repos),
             scope=ProviderQueryScope(worktree=worktree, dry_run=dry_run, timeout=timeout),
         )
+
+
+def _register_cgc_lookup_tools(server: FastMCP, config: McpRuntimeConfig) -> None:
+    """CodeGraphContext lookups that answer "where is it" and "who calls it"."""
 
     @server.tool()
     def cgc_symbol_search(
@@ -132,6 +145,10 @@ def register_code_search_tools(server: FastMCP, config: McpRuntimeConfig) -> Non
             function,
             scope=ProviderQueryScope(worktree=worktree, dry_run=dry_run, timeout=timeout),
         )
+
+
+def _register_cgc_analysis_tools(server: FastMCP, config: McpRuntimeConfig) -> None:
+    """CodeGraphContext reports over a whole module or repository."""
 
     @server.tool()
     def cgc_dependencies(

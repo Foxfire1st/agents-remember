@@ -15,10 +15,9 @@ from pathlib import Path
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
+from agents_remember.kernel.harnesses import HARNESSES, Harness
 from agents_remember.serving.harnesses import (
-    HARNESSES,
     DetectedHarness,
-    Harness,
     detect_harnesses,
     effort_session_commands,
     effort_vocabulary,

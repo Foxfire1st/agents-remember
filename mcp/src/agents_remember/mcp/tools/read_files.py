@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from agents_remember.controllers.read_files import read_ar_files_tool
+from agents_remember.application.read_files import read_ar_files_tool
 
 from ..config import McpRuntimeConfig
 from .base import _tool_payload

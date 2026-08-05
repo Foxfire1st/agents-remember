@@ -21,15 +21,15 @@ MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
 import agents_remember
-from agents_remember.kernel.agentic_settings import agentic_settings_path
-from agents_remember.mcp.config import McpRuntimeConfig, RepositoryScope
-from agents_remember.mcp.tools.terminal import (
+from agents_remember.application.terminal_tools import (
     RetiredSpawnInputs,
     SpawnedBy,
     SpawnOverrides,
     SpawnSeat,
-    spawn_agent_session_payload,
 )
+from agents_remember.kernel.agentic_settings import agentic_settings_path
+from agents_remember.mcp.config import McpRuntimeConfig, RepositoryScope
+from agents_remember.mcp.tools.terminal import spawn_agent_session_payload
 from agents_remember.observer import (
     AmbientLifecycle,
     EventStore,

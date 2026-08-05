@@ -17,14 +17,14 @@ from __future__ import annotations
 
 import fcntl
 import json
-import os
 from collections.abc import Iterator
-from contextlib import contextmanager, suppress
+from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 
 from pydantic import ValidationError
 
+from agents_remember.kernel.atomic_write import atomic_write_text
 from agents_remember.observer.events import Event
 
 WORKSPACE_SOURCE = "workspace"
@@ -70,12 +70,7 @@ def set_workspace_base_offset(root: Path, base_offset: int) -> None:
     Callers hold :func:`workspace_river_lock`; this helper only performs the atomic sidecar write.
     """
     path = root / WORKSPACE_SOURCE / WORKSPACE_CURSOR_FILE
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
-    tmp.write_text(
-        json.dumps({"baseOffset": base_offset}, separators=(",", ":")) + "\n", encoding="utf-8"
-    )
-    os.replace(tmp, path)
+    atomic_write_text(path, json.dumps({"baseOffset": base_offset}, separators=(",", ":")) + "\n")
 
 
 def workspace_logical_size(root: Path) -> int:
@@ -173,18 +168,7 @@ class EventStore:
 
     def _write_heartbeat_sidecar(self, event: Event) -> None:
         path = heartbeat_sidecar_path(self._root, event.lifecycleId or "")
-        path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
-        try:
-            tmp.write_text(
-                event.model_dump_json(by_alias=True, exclude_none=True) + "\n",
-                encoding="utf-8",
-            )
-            os.replace(tmp, path)
-        except BaseException:
-            with suppress(OSError):
-                tmp.unlink()
-            raise
+        atomic_write_text(path, event.model_dump_json(by_alias=True, exclude_none=True) + "\n")
 
 
 def _event_before(left: Event, right: Event) -> bool:

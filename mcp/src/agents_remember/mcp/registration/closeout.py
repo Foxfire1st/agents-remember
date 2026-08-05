@@ -4,7 +4,7 @@ from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
-from agents_remember.controllers.worktree_tools import (
+from agents_remember.application.worktree_tools import (
     CloseoutApproval,
     CloseoutCommitMessages,
 )

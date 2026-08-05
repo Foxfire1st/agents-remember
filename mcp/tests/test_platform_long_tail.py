@@ -29,17 +29,29 @@ MCP_TESTS = Path(__file__).resolve().parent
 sys.path.insert(0, str(MCP_SRC))
 sys.path.insert(0, str(MCP_TESTS))
 
+from agents_remember.application import memory_tools, read_files
+from agents_remember.application.memory_tools import CarryoverSelection
+from agents_remember.application.orchestration_tools import (
+    NudgeSubject,
+    NudgeTarget,
+    orchestration_nudge_manager_tool,
+)
+from agents_remember.application.terminal_tools import (
+    OpenTerminalResult,
+    _open_terminal_refusal,
+    _requested_harness,
+)
 from agents_remember.benchmarks.runner_modules import execution as benchmark_execution
 from agents_remember.benchmarks.runner_modules import mcp_registration as benchmark_mcp
 from agents_remember.cli import dashboard as dashboard_cli
-from agents_remember.controllers import memory_tools, read_files
-from agents_remember.controllers.memory_tools import CarryoverSelection
+from agents_remember.controlplane import operator_inbox_transitions as inbox_transitions
 from agents_remember.controlplane.gate_policy import coerce_decision_role
 from agents_remember.controlplane.operator_inbox_records import (
     InboxSubject,
     OperatorInboxEntry,
 )
-from agents_remember.controlplane.operator_inbox_store import InboxRenewal, OperatorInboxStore
+from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
+from agents_remember.controlplane.operator_inbox_transitions import InboxRenewal
 from agents_remember.install import runtime as runtime_install
 from agents_remember.install import skills as skills_install
 from agents_remember.install.runtime import (
@@ -48,21 +60,11 @@ from agents_remember.install.runtime import (
     install_provider_dependencies,
 )
 from agents_remember.kernel.agentic_settings import AgenticSettingsError, load_agentic_settings
-from agents_remember.mcp.tools.orchestration import (
-    NudgeSubject,
-    NudgeTarget,
-    orchestration_nudge_manager_payload,
-)
-from agents_remember.mcp.tools.terminal import (
-    OpenTerminalResult,
-    _open_terminal_refusal,
-    _requested_harness,
-)
+from agents_remember.kernel.harnesses import Harness
 from agents_remember.memory import baseline as memory_baseline
 from agents_remember.memory.carryover import _validate_entity_fingerprints
 from agents_remember.observer.projection_store import ProviderStateRefresher
 from agents_remember.observer.reducer import _paused_updates
-from agents_remember.serving.harnesses import Harness
 
 
 class DecisionRoleTests(unittest.TestCase):
@@ -132,7 +134,7 @@ class NudgeTargetTests(unittest.TestCase):
         config = cast(Any, SimpleNamespace(coordination_root=Path("/tmp/coord")))
 
         with self.assertRaises(ValueError) as raised:
-            orchestration_nudge_manager_payload(
+            orchestration_nudge_manager_tool(
                 config,
                 reason="inactive",
                 target=NudgeTarget(),
@@ -311,7 +313,9 @@ class InboxRenewalTests(unittest.TestCase):
         renewal that restates nothing must not blank the subject the row already names."""
         seeded = self.seed()
 
-        renewed = self.store.renew("entry-1", InboxRenewal(), now="2026-07-31T11:00:00Z")
+        renewed = inbox_transitions.renew(
+            self.store, "entry-1", InboxRenewal(), now="2026-07-31T11:00:00Z"
+        )
 
         self.assertEqual(renewed.id, seeded.id)
         self.assertEqual(renewed.ts, "2026-07-31T11:00:00Z")
@@ -324,7 +328,8 @@ class InboxRenewalTests(unittest.TestCase):
     def test_a_renewal_that_restates_fields_overwrites_only_those(self) -> None:
         self.seed()
 
-        renewed = self.store.renew(
+        renewed = inbox_transitions.renew(
+            self.store,
             "entry-1",
             InboxRenewal(
                 response="amber",
@@ -340,7 +345,30 @@ class InboxRenewalTests(unittest.TestCase):
 
     def test_renewing_an_unknown_entry_raises(self) -> None:
         with self.assertRaises(KeyError):
-            self.store.renew("missing", InboxRenewal(), now="2026-07-31T11:00:00Z")
+            inbox_transitions.renew(
+                self.store, "missing", InboxRenewal(), now="2026-07-31T11:00:00Z"
+            )
+
+    def test_a_row_that_is_no_longer_pending_is_returned_untouched(self) -> None:
+        """Coalescing is for a row still waiting on someone. Once a row is consumed the
+        condition it carried is answered, so a re-firing condition must not reanimate it by
+        bumping its date -- it appends nothing, and the caller sees the terminal row back."""
+        self.seed()
+        self.store.consume(
+            "entry-1", now="2026-07-31T10:30:00Z", consumed_by="model", consumed_via="cli"
+        )
+        before = len(self.store.read())
+
+        renewed = inbox_transitions.renew(
+            self.store,
+            "entry-1",
+            InboxRenewal(response="amber"),
+            now="2026-07-31T11:00:00Z",
+        )
+
+        self.assertEqual(renewed.state, "consumed")
+        self.assertEqual(renewed.response, "green")
+        self.assertEqual(len(self.store.read()), before)
 
 
 class RequestedHarnessTests(unittest.TestCase):

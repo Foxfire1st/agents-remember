@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from agents_remember.controllers.provider_tools import (
+from agents_remember.application.provider_tools import (
     ALL_INDEXED_REPOS,
     WORKSPACE_QUERY_SCOPE,
     GrepaiRepoScope,
@@ -22,9 +22,9 @@ from agents_remember.controllers.provider_tools import (
     provider_diagnostics_tool,
     provider_status_tool,
     provider_watchers_tool,
+    summarize_provider_watchers_result,
 )
 from agents_remember.mcp.tool_reports import write_tool_report
-from agents_remember.providers.lifecycle.log_capture import summarize_command_logs
 
 from ..config import McpRuntimeConfig
 from .base import _tool_payload
@@ -80,7 +80,7 @@ def provider_watchers_payload(
     report_path = write_tool_report(
         config.coordination_root, "provider_watchers", full, label=action
     )
-    summarized = summarize_command_logs(full)
+    summarized = summarize_provider_watchers_result(full)
     return _tool_payload(
         "provider_watchers",
         compact_watchers_payload(summarized, report_path.as_posix()),

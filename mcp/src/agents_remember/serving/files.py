@@ -31,6 +31,7 @@ from typing import Any
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse, Response
 
+from agents_remember.kernel.coordination_context_resolver import mirror_onboarding_path
 from agents_remember.kernel.onboarding_doc import table_metadata
 from agents_remember.kernel.sidecar_pairing import (
     confine_rel,
@@ -40,9 +41,6 @@ from agents_remember.kernel.sidecar_pairing import (
     source_path_from_sidecar,
 )
 from agents_remember.mcp.config import McpRuntimeConfig
-from agents_remember.memory_quality.integrity.onboarding_drift_check.discovery import (
-    mirror_onboarding_path,
-)
 from agents_remember.serving.response_contract import (
     SCOPED_READ_RESPONSES,
     DirectoryListing,

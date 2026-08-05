@@ -35,6 +35,17 @@ from agents_remember.serving.terminal_catalog import (
 T1 = "2026-07-07T12:00:00+00:00"
 
 
+def unreachable_stopper(_: McpRuntimeConfig) -> dict[str, Any]:
+    """The failsafe action for evaluations that must never reach the critical branch.
+
+    ``evaluate_provider_degradation`` requires the stop action rather than defaulting to one,
+    so a test that is about some other transition still has to say what would happen if the
+    failsafe fired. Saying "this must not fire" is the honest answer, and it fails loudly if
+    the evaluation the test is about ever starts firing it.
+    """
+    raise AssertionError("the critical failsafe must not fire in this evaluation")
+
+
 def write_json(path: Path, data: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(data, indent=2), encoding="utf-8")
@@ -354,13 +365,17 @@ class ProviderDegradationEvaluatorTests(unittest.TestCase):
     def test_recovery_transition_survives_restart_and_posts_role_addressed_all_clear(self) -> None:
         record_memory_sample(self.config, name="grepai-1", ratio=0.80)
         record_memory_sample(self.config, name="grepai-2", ratio=0.82)
-        degraded = evaluate_provider_degradation(self.config)
+        degraded = evaluate_provider_degradation(
+            self.config, stop_provider_stacks=unreachable_stopper
+        )
         self.assertEqual(degraded["state"], "degraded")
 
         record_memory_sample(self.config, name="grepai-3", ratio=0.20)
         record_memory_sample(self.config, name="grepai-4", ratio=0.20)
 
-        recovered = evaluate_provider_degradation(self.config)
+        recovered = evaluate_provider_degradation(
+            self.config, stop_provider_stacks=unreachable_stopper
+        )
 
         self.assertEqual(recovered["state"], "healthy")
         event = recovered["event"]

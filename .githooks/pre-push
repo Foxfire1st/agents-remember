@@ -1,9 +1,15 @@
 #!/usr/bin/env sh
-# Full pre-push tier: run the project-owned suite over the working tree and
-# block the push on any finding (ruff, Pyright, the full pytest suite, and
-# mandatory CRAP).
+# Full pre-push tier: preserve Git's ref-update input as provenance, then run the
+# project-owned suite without staging, stashing, or mutating the index.
 #
 # Bypass intentionally with `git push --no-verify`.
 
 hook_dir="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)" || exit 1
+push_updates="$(cat)" || {
+  echo "[pre-push] could not read Git's ref-update stream" >&2
+  exit 1
+}
+AR_QUALITY_INVOCATION="pre-push"
+AR_QUALITY_PUSH_UPDATES="$push_updates"
+export AR_QUALITY_INVOCATION AR_QUALITY_PUSH_UPDATES
 exec "$hook_dir/_gate.sh" full

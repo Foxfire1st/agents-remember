@@ -9,7 +9,7 @@ from agents_remember.controlplane.operator_inbox_records import (
     fold_operator_inbox_entries,
 )
 from agents_remember.controlplane.records import GateKind, GateRecord
-from agents_remember.observer.timeutil import age_seconds
+from agents_remember.controlplane.stamps import age_seconds
 
 GATE_RESPONSE_WAIT_TIMEOUT_SECONDS = 300.0
 GATE_RESPONSE_WAIT_POLL_SECONDS = 5.0
@@ -56,8 +56,9 @@ finds one in the fold. Delete it and the fold returns to *permitted-gateless* --
 approval channel governs" -- and the same approval buys a second mutation, with no error and no log
 line. That is this leaf's defect, and until 260731-EFA-L5 R1 the retention pass below was one of
 the things producing it: ``applied`` was pruned at ANY AGE, so any later decision on the lifecycle
-(``mcp/tools/gates.py::_reclaim_gate_log`` runs after every one, and an ``agent-question`` being
-answered is enough) erased the marker within milliseconds. It was already wrong before this leaf --
+(``controlplane/gate_decisions.py::_reclaim_gate_log`` runs after every one, and an
+``agent-question`` being answered is enough) erased the marker within milliseconds. It was already
+wrong before this leaf --
 the same states were pruned on the dashboard's 30s projection tick, so the marker survived at most
 half a minute -- and moving reclamation into the deciding process is what made it prompt and
 deterministic rather than merely likely.
@@ -86,7 +87,7 @@ these two that is exactly right, and for ``applied`` it is the replay:
 * ``cancelled`` -- the gate was WITHDRAWN. It never carried an approval, and cancelling it says
   precisely "this gate no longer governs", so falling back to the chat/commit approval channel is
   the intended outcome. Retention is not even what removes it in production:
-  ``mcp/tools/gates.py::gate_decide_payload`` calls ``GateStore.delete`` on the record the moment
+  ``application/gate_tools.py::gate_decide_tool`` calls ``GateStore.delete`` on the record the moment
   the cancel is recorded.
 * ``expired`` -- the gate was SUPERSEDED. ``expire_gate`` is written only when a newer gate opens
   on the same lifecycle, so the gate that replaced it is in the same log with a newer ``ts`` and
@@ -112,8 +113,7 @@ pruning regardless of age (``prune_expired_lifecycle_event_logs``'s ``protected_
 For those the bound is the series, not the TTL. That is still bounded, and the magnitude is small
 (one record per approval a human granted and a tool consumed, so a handful per leaf), but a
 long-running master holds them all until it finishes. If that ever stops being small, the fix is a
-cap on retained authority records per lifecycle, NOT a TTL -- a count cannot be wrong about how
-long a human takes.
+cap on retained authority records per lifecycle, NOT a TTL.
 
 BOUNDARY, because this reclamation path and the durable-store contract meet here badly:
 ``shutil.rmtree`` removes the whole directory, which includes ``gates.jsonl.lock``. A process

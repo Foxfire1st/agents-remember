@@ -27,6 +27,7 @@ from pathlib import Path
 from typing import Any, Literal, NamedTuple
 
 import agents_remember
+from agents_remember.kernel.harnesses import Harness
 from agents_remember.observer.events import now_iso
 from agents_remember.serving.harness_control_adapter import protocol_adapter_status
 from agents_remember.serving.harness_control_ipc import LocalControlEndpoint
@@ -38,7 +39,6 @@ from agents_remember.serving.harness_control_models import (
 from agents_remember.serving.harness_control_runner import RunnerConfig, control_runner_command
 from agents_remember.serving.harness_launch import ResolvedLaunch
 from agents_remember.serving.harnesses import (
-    Harness,
     Which,
     find_harness,
     invalid_effort_detail,
@@ -53,13 +53,13 @@ from agents_remember.serving.terminal import (
     TerminalHost,
     TerminalSessionBinding,
     TerminalSessionSpec,
-    terminal_session_name,
 )
 from agents_remember.serving.terminal_catalog import (
     TerminalCatalogEntry,
     TerminalSessionKind,
 )
 from agents_remember.serving.terminal_leaf_assignment import leaf_conflict_owner
+from agents_remember.serving.terminal_tmux import tmux_session_name
 
 OpenTerminalStatus = Literal["opened", "leaf-taken", "launch-conflict", "bad-kind"]
 
@@ -120,11 +120,11 @@ class TerminalLaunchRequest:
     """Spawn env seeded at creation -- the L2 knob-injection seam, and the carrier of AR_SPAWN_ROLE."""
     knobs: SpawnKnobs = field(default_factory=SpawnKnobs)
     control: ControlRunnerRequest = field(default_factory=ControlRunnerRequest)
-    legacy_model: str | None = None
-    legacy_effort: str | None = None
-    """``legacy_model``/``legacy_effort`` are the compatibility seam for settings-defined non-native
-    harnesses, whose declared registry mappings are their only launch port. Native adapters take
-    their selection through :attr:`control` instead."""
+    flag_model: str | None = None
+    flag_effort: str | None = None
+    """The model/effort selection for a settings-defined non-native harness, delivered as the
+    ``modelFlag``/``effortFlag`` argv its registry entry declares (:func:`harnesses.knob_argv`).
+    Native adapters take their selection through :attr:`control` instead."""
 
     @property
     def resolved_kind(self) -> TerminalSessionKind:
@@ -227,9 +227,9 @@ def resolve_terminal_launch(launch: TerminalLaunchRequest) -> LaunchCommand:
 
     L2 keeps native-adapter launches focused on the settings-owned base command and free-form launch
     args. Their typed :class:`ResolvedLaunch` rides the runner payload; the adapter validates it
-    against dynamic advertise and applies model/effort after this function returns. The legacy
-    model/effort pair remains an explicit compatibility seam for settings-defined non-native
-    harnesses. A plain ``terminal`` spawn ignores harness launch material.
+    against dynamic advertise and applies model/effort after this function returns. The
+    ``flag_model``/``flag_effort`` pair is how a settings-defined non-native harness receives the
+    same selection. A plain ``terminal`` spawn ignores harness launch material.
     """
     if launch.kind == "terminal":
         return LaunchCommand(launch.workspace_root, (launch.shell,))
@@ -242,8 +242,8 @@ def resolve_terminal_launch(launch: TerminalLaunchRequest) -> LaunchCommand:
             raise ValueError(unknown_harness_detail(harness, registry=launch.harnesses))
         if not is_detected(found, which=launch.which):
             raise ValueError(f"harness not installed: {harness!r}")
-        model = launch.legacy_model
-        effort = launch.legacy_effort
+        model = launch.flag_model
+        effort = launch.flag_effort
         for detail in (
             invalid_model_detail(found, model) if model else None,
             invalid_effort_detail(found, effort) if effort else None,
@@ -390,7 +390,7 @@ def _reopen_state(
     """
 
     if existing is None:
-        return ReopenState(None, attached_at, terminal_session_name(session_id))
+        return ReopenState(None, attached_at, tmux_session_name(session_id))
     return ReopenState(existing, attached_at, existing.tmux_name)
 
 

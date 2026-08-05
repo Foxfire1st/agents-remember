@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   activeConversationStore,
   connectConversation,
+  focusConversation,
   hasWarmConversation,
   LRU_LIMIT,
   readConversationScroll,
@@ -40,6 +41,7 @@ vi.mock("../../data/conversation/store", async (importOriginal) => {
   return {
     ...actual,
     connectConversation: vi.fn(),
+    focusConversation: vi.fn(),
     hasWarmConversation: vi.fn(() => false),
     touchConversation: vi.fn(),
   };
@@ -296,6 +298,7 @@ describe("ChatsStageBody keep-alive pool (F-j)", () => {
 
     rerender(stageElement(b));
     await flushEffects();
+    expect(vi.mocked(focusConversation)).toHaveBeenLastCalledWith("chat-b");
     // chat-a stays MOUNTED (its timeline DOM included) but is hidden + out of the a11y tree;
     // chat-b is the visible surface.
     const hiddenA = getByTestId("conversation-keepalive-chat-a");
@@ -305,6 +308,7 @@ describe("ChatsStageBody keep-alive pool (F-j)", () => {
 
     rerender(stageElement(a));
     await flushEffects();
+    expect(vi.mocked(focusConversation)).toHaveBeenLastCalledWith("chat-a");
     const restoredA = getByTestId("conversation-keepalive-chat-a");
     expect(restoredA.getAttribute("aria-hidden")).toBeNull();
     const restoredViewport = within(restoredA).getByTestId("conversation-viewport");
@@ -602,11 +606,13 @@ describe("ChatsStageBody view-switch scroll restore (F-ac)", () => {
     // what the browser does (jsdom has no layout, so the destruction is applied by hand).
     rerender(stageElement(a, false));
     await flushEffects();
+    expect(vi.mocked(focusConversation)).toHaveBeenLastCalledWith(null);
     viewport.scrollTop = 0;
 
     // Back: the remembered offset is restored on the SAME node (the pool never unmounted it).
     rerender(stageElement(a));
     await flushEffects();
+    expect(vi.mocked(focusConversation)).toHaveBeenLastCalledWith("chat-a");
     const restored = getByTestId("conversation-viewport");
     expect(restored).toBe(viewport);
     expect(restored.scrollTop).toBe(456);
@@ -701,8 +707,10 @@ describe("ChatsStageBody view-switch scroll restore (F-ac)", () => {
       });
       await flushEffects();
       expect(queryByTestId("conversation-new-updates")).toBeNull();
-      expect(alignedTops.length).toBeGreaterThan(0);
-      expect(alignedTops[alignedTops.length - 1]).toBeGreaterThanOrEqual(1400);
+      expect(getByTestId("conversation-viewport").scrollTop).toBe(1400);
+      // This fixture keeps scrollHeight fixed, so the current end is already 1400. The follow stays
+      // armed without issuing TanStack's former no-op scroll/reconcile cycle.
+      expect(alignedTops).toEqual([]);
     } finally {
       vi.useRealTimers();
     }

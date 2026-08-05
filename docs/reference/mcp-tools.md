@@ -50,9 +50,27 @@ surrounding procedure. See the [Skills reference](skills.md).
 | Tool | Purpose | Key args |
 | --- | --- | --- |
 | `memory_init` | Initialize (or repair) a repository's memory root. | `repo_id`, `dry_run=false`, `initialize_git=true` |
-| `drift_check` | Task-start onboarding drift classification; writes a temp drift report. | `repo_id`, `detail_limit=50` |
-| `memory_quality_check` | Closeout memory-quality gate (drift integrity + style checks). | `repo_id`, `checks=None`, `detail_limit=50` |
-| `route_index_refresh` | Regenerate `overview.index.json` route indexes to match the onboarding tree. | `repo_id`, `dry_run=false` |
+| `drift_check` | Task-start onboarding drift classification; writes a temp drift report. | `repo_id`, `detail_limit=50`, `contract_path=None` |
+| `memory_quality_check` | Closeout memory-quality gate (drift integrity + style checks). | `repo_id`, `checks=None`, `detail_limit=50`, `contract_path=None` |
+| `route_index_refresh` | Regenerate `overview.index.json` route indexes to match the onboarding tree. **Writes** into the memory root it resolves. | `repo_id`, `dry_run=false`, `contract_path=None` |
+
+The three rows above take the same optional `contract_path` as the `worktree_*` verbs: a leaf
+enclosure contract path. Omitted, they resolve the configured **official** memory repo (unchanged).
+Supplied, they act on that leaf's **memory worktree** and measure it against the leaf's code
+worktree — how a curator checks its own change-set before handing it back, and the only correct way
+to run `route_index_refresh` from inside a leaf, since without it that tool writes indexes into the
+official repo and leaves it dirty. A contract naming another repo, or one whose memory worktree is
+gone, is refused; nothing falls back to the official repo. The response carries `onboardingRoot`, so
+which tree was acted on is always visible.
+
+Citation ranges are not repaired by hand. `agents-remember memory-citations --repo <id> --contract
+<enclosure contract> [--fix]` regenerates every range that can be regenerated from its anchor — the
+whole tree in one command after a package move — and prints a work order for the rest: the anchor,
+the range, the file, and every location in the code tree that does hold that anchor. It repairs pure
+MOVES only, where a symbol kept its name and changed file; a rename, a deletion and an ambiguous
+match are refused rather than guessed at. `--contract` is **required**: unlike the tools above there
+is no argument list that names the official memory repo, and a contract that points at it is
+refused.
 | `read_ar_files` | Batch read up to 5 repo-relative source paths in a managed repo, each paired with its file-level onboarding, plus the repository + governing route overviews (auto-attached, session-deduped); emits a facts-only `read.packet`. **The research-phase read** — use it instead of a native read up to the build decision; a native read remains the edit precondition during build. | `repo_id`, `files:[{path, source:"full"\|{startLine,endLine}, onboarding?}]`, `refresh=false` |
 
 ## Memory baseline & carryover
@@ -74,7 +92,15 @@ surrounding procedure. See the [Skills reference](skills.md).
 | `worktree_closeout_preview` | Non-mutating preview of a worktree-backed closeout. | `contract_path`, code/memory/ledger commit messages |
 | `worktree_closeout_apply` | Apply a worktree closeout after explicit commit approval; Agents Remember source commits run the strict project quality wrapper before Git commit. | `contract_path`, `intent_note`, commit messages |
 | `worktree_integrate` | Land closed task branches back onto source branches (`ff-only` or `replay`). | `contract_path`, `strategy`, `dry_run=false` |
-| `worktree_cleanup` | Remove worktrees and merged task branches after integration. | `contract_path`, `dry_run=false` |
+| `worktree_cleanup` | Remove worktrees and merged task branches after integration. This is non-terminal for task documents: it never checks off steps or changes task status. | `contract_path`, `dry_run=false` |
+| `lifecycle_finalize_task` | Prove the landed edge, resolve the exact contract-bound leaf, refuse before cleanup unless every parent/nested step is done, then complete that leaf and, when it declares an existing immediate parent, automatically derive and reconcile that exact row. Standalone/no-parent tasks remain supported; the parent document's own task status and higher ancestors are not completed. | `contract_path`; optional `task_doc_path`, `master_doc_path`, and `subtask_number` are independent identity assertions; `dry_run=false` |
+
+## Task documents
+
+| Tool | Purpose | Key args |
+| --- | --- | --- |
+| `task_doc` | Author JSON-primary task documents and deterministic markdown. `skip_step` records an exact intentional skip with a nonblank reason; `Completed` transitions refuse unresolved parent/nested steps or master rows. | `repo_id`, task/contract target, `operation`, edit payload, `dry_run=false` |
+| `task_reopen` | Reopen a fully landed leaf under the same leaf id so new work can be declared explicitly. | `contract_path`, `dry_run=false` |
 
 See [c-09-git-worktree-manager Worktrees And Closeout](worktrees-c09.md) for the lifecycle and gates.
 

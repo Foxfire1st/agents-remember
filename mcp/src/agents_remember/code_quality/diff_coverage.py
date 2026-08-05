@@ -1,72 +1,17 @@
-"""The binding coverage gate: a floor on the lines this change touched.
+"""Enforce 100% coverage of changed measurable Python units.
 
-An aggregate coverage pin does not work here and the numbers say why. This tree has
-88k lines of tests against 44,697 measured statements; a large share of the package is
-executed simply by being imported, so the aggregate starts high and barely moves. On
-2026-07-31 the whole suite reported 87.16% (90.17% statements, 76.52% branches) over
-434 files. One newly added, entirely untested 20-line function moves that figure by
-0.04 percentage points -- below the resolution of any threshold anyone would set, and
-far below the run-to-run wobble of a suite that starts subprocesses. An aggregate pin
-is therefore satisfied by import-time execution and cannot see a regression in a single
-change, which is the only thing a pre-merge gate is for.
+The gate compares Coverage.py's statements and branch arcs with lines added since the
+resolved merge base. Every uncovered changed line and untaken changed branch is named.
+The floor is 100% so its meaning does not weaken as a change grows.
 
-So the gate is on the diff. ``git diff`` against the merge base gives the lines this
-branch introduced; the coverage JSON the wrapper already produces says which of them
-ran. No second coverage run, no second measurement: the units are Coverage.py's own --
-statements plus branch arcs -- so this floor, the aggregate, and CRAP are all reading
-the same number.
+Reported non-measured states are explicit: ``no-changed-lines``,
+``no-python-changes``, and ``no-measurable-changes``. The last state includes affected
+paths and line counts. A repository without a merge base uses git's empty tree, making
+every tracked line part of the diff instead of vacuously passing.
 
-Why the floor is 100%, i.e. zero uncovered changed lines
---------------------------------------------------------
-A floor below 100% is not a standard, it is a per-change budget for untested code, and
-the budget grows with the change. At floor ``X`` a change of ``N`` units may carry
-``floor((1 - X) * N)`` uncovered ones, so the bigger the change the more untested code
-it buys -- exactly backwards, and exactly the shape of the ratchets this repository has
-already deleted.
-
-Measured on this repository rather than assumed. Of the last 40 commits on ``main``, 31
-touch ``mcp/src/agents_remember``: p25 46 added source lines, median 234, p75 532, max
-10,549. Against the median change of 234 units the budget is 23 uncovered units at a
-90% floor, 11 at 95%, 4 at 98%. The median function in this package is about 9
-statements (44,697 statements across 4,672 scored functions), so a 90% floor lets an
-entire untested function land inside an average change without the gate noticing, and
-95% lets one land inside any change past 180 units -- above the observed median. Only
-100% means the same thing for a 3-line change and a 300-line one.
-
-The lower bound argument agrees and rules out the popular numbers outright. A floor at
-or below the tree's own aggregate (87.16%) passes any change that is merely average, so
-the tree can never improve and drifts down as the code grows. That disqualifies 80 and
-85 without needing any argument about budgets at all.
-
-What arming it costs, stated rather than hidden. Measured against this branch's merge
-base on 2026-07-31: 5,302 changed measurable units, 4,899 covered -- 92.40% (94.20% on
-statements alone), leaving 403 uncovered units across 71 files. The floor is not set to
-93% to make that green. Of those 403, 172 are lines whose exact text also appears among
-the diff's removed lines -- code this branch relocated during its parameter-object and
-complexity refactors, and the whole-tree ``ruff format`` in 00e8379 -- and 231 are new
-content. The gate does not subtract the relocated ones: a carve-out for "lines that
-moved" is an exemption list with a different name, and a change that moves uncovered
-code into a new home owns it on arrival.
-
-Reported states, none of which pass silently
---------------------------------------------
-Every run prints the base it used and how it was chosen, then one of:
-
-``measured``
-    Changed Python lines exist inside the measured packages. The floor applies and
-    every uncovered line and untaken branch is named, not counted.
-``no-changed-lines``
-    The diff against the base is empty. Nothing to certify; states so.
-``no-python-changes``
-    The diff touches files, none of them Python. States so.
-``no-measurable-changes``
-    Python changed, but no changed line is inside a measured package -- tests, scripts,
-    provider images. The floor cannot speak for those; the report names the files and
-    their line counts so the hole is visible on every run rather than inferred.
-
-A first commit with no merge base is not a fourth state: the base becomes git's empty
-tree, so every tracked line is a changed line and the floor applies to all of it. That
-is the honest reading of "nothing to compare against", and it is the strict one.
+Known boundary: coverage data cannot score Python outside the measured packages. Those
+files remain visible in ``unmeasured_files`` and require measurement configuration or a
+separate gate.
 """
 
 from __future__ import annotations
@@ -81,10 +26,7 @@ from pathlib import Path
 from agents_remember.code_quality import crap_calculator
 from agents_remember.kernel import git_command
 
-# Zero uncovered changed lines. See the module docstring for the derivation; the short
-# form is that any value below 100 is a budget for untested code that grows with the
-# size of the change, and that a value at or below the tree's own aggregate (87.16% on
-# 2026-07-31) passes a change that is merely average.
+# Zero uncovered changed lines or untaken changed branches.
 DEFAULT_DIFF_COVERAGE_FLOOR = 100.0
 
 # git's empty tree. Diffing against it yields the whole tree, which is what "no merge
@@ -122,6 +64,7 @@ class DiffCoverage:
     uncovered_lines: tuple[str, ...]
     untaken_branches: tuple[str, ...]
     unmeasured_files: tuple[tuple[str, int], ...]
+    changed_files: int
 
     @property
     def ratio(self) -> float:
@@ -135,26 +78,10 @@ class DiffCoverage:
 
 
 def _git(project_root: Path, arguments: list[str]) -> subprocess.CompletedProcess[str]:
-    """This gate's git calls, on the package's one runner.
+    """Run git with literal paths and convert execution errors to gate errors.
 
-    ``core.quotePath=false`` is this gate's own requirement and stays: without it git
-    octal-escapes non-ASCII paths in ``diff`` output and the changed-line parser stops
-    recognising the files it is supposed to score.
-
-    Routing through the shared runner is not cosmetic here. The full tier runs from the
-    ``pre-push`` hook, and git exports ``GIT_DIR`` to its hooks -- so of every git call
-    site in this package, this gate's were the ones most certain to meet the very
-    variables they did not strip, and would then have certified the coverage of a
-    different repository than the one being pushed.
-
-    The conversion to :class:`DiffScopeError` lives here rather than in one of the three
-    callers, so every caller gets it. ``run_git`` used to own it alone while
-    ``revision_exists`` and ``merge_base`` called this function bare, and the shared runner
-    made that difference load-bearing: it raises ``TimeoutExpired`` where the old inline
-    call had no timeout at all, and ``FileNotFoundError`` for a ``project_root`` that does
-    not exist, where the old ``git -C <path>`` with no ``cwd=`` merely exited non-zero and
-    those two answered ``False`` / ``None``. Three siblings on one runner must not disagree
-    about which failures are this gate's own error.
+    ``core.quotePath=false`` keeps non-ASCII paths parseable. The shared runner strips
+    hook-exported repository variables so a pre-push invocation measures ``project_root``.
     """
 
     try:
@@ -386,6 +313,7 @@ def measure(
         uncovered_lines=tuple(tally.uncovered_lines),
         untaken_branches=tuple(tally.untaken_branches),
         unmeasured_files=tuple(unmeasured),
+        changed_files=len(changed),
     )
 
 
@@ -409,6 +337,7 @@ def empty_result(base: BaseResolution, state: str) -> DiffCoverage:
         uncovered_lines=(),
         untaken_branches=(),
         unmeasured_files=(),
+        changed_files=0,
     )
 
 

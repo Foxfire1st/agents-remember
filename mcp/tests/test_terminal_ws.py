@@ -3,7 +3,7 @@
 Two layers:
 
 * **Frame parsing** -- `_apply_terminal_input` is pure-ish (parse a client text frame into a
-  `stdin` write or a `resize`); driven against a recording host, no socket.
+  `stdin` write or a `resize`); driven against a recording session, no socket.
 * **Bridge** -- the `@app.websocket("/api/terminal/{session}")` endpoint via Starlette's
   TestClient against a **fake host** backed by a real `socketpair` (so PTY<->WS forwarding,
   the EOF/exit frame, and the unknown-session refusal all exercise the real add_reader pump).
@@ -55,6 +55,7 @@ from agents_remember.serving.terminal_opener import (
     TerminalLaunchRequest,
     resolve_terminal_launch,
 )
+from agents_remember.serving.terminal_pty import TerminalSession
 from agents_remember.tasks import TaskDocument, write_task_doc
 
 
@@ -147,17 +148,17 @@ def _catalog_entry(
     )
 
 
-class _RecordingHost:
+class _RecordingSession:
     """Captures `write`/`resize` calls for the frame-parser unit tests."""
 
     def __init__(self) -> None:
         self.writes: list[bytes] = []
         self.resizes: list[tuple[int, int]] = []
 
-    def write(self, _sid: str, data: bytes) -> None:
+    def write(self, data: bytes) -> None:
         self.writes.append(data)
 
-    def resize(self, _sid: str, *, cols: int, rows: int) -> None:
+    def resize(self, *, cols: int, rows: int) -> None:
         self.resizes.append((cols, rows))
 
 
@@ -185,26 +186,49 @@ def _binding_from(sid: str, spec: TerminalSessionSpec) -> TerminalSessionBinding
 
 
 class _FakeSession:
-    """A terminal-session stand-in: the fields `_bridge_terminal` reads.
+    """A terminal-session stand-in: the fields `_bridge_terminal` reads and the operations it drives.
 
     Everything about the session other than its PTY fd is the durable identity the host
     already answers with, so the stand-in is built from a ``TerminalSessionBinding`` rather
-    than from a second, hand-kept copy of that model's fields.
+    than from a second, hand-kept copy of that model's fields. Resizes and closes are recorded on
+    the host that spawned it, which is where the assertions read them.
     """
 
-    def __init__(self, binding: TerminalSessionBinding, master_fd: int) -> None:
+    def __init__(
+        self, binding: TerminalSessionBinding, master: socket.socket, host: _FakeTerminalHost
+    ) -> None:
         self.sid = binding.sid
-        self.master_fd = master_fd
+        self.master_fd = master.fileno()
         self.cwd = binding.cwd
         self.tmux_name = binding.tmux_name
         self.command = binding.command
         self.lifecycle_id = binding.lifecycle_id
         self.suspend_unsafe = binding.suspend_unsafe
         self.alive = True
+        self._master = master
+        self._host = host
 
     @property
     def is_alive(self) -> bool:
         return self.alive
+
+    def write(self, data: bytes) -> None:
+        self._master.sendall(data)
+
+    def read_nonblocking(self, max_bytes: int = 65536) -> bytes:
+        try:
+            return self._master.recv(max_bytes)
+        except BlockingIOError:
+            return b""
+        except OSError:
+            return b""
+
+    def resize(self, *, cols: int, rows: int) -> None:
+        self._host.resizes.append((cols, rows))
+
+    def close(self) -> None:
+        self._host.closed.append(self.sid)
+        self._host.release(self)
 
 
 class _FakeTerminalHost:
@@ -315,42 +339,17 @@ class _FakeTerminalHost:
             self._peers.clear()
             return
         if self.registry_session is not None and sid == self.registry_session.sid:
-            self.closed.append(sid)
-            self._close_client(self.registry_session)
+            self.registry_session.close()
             self.registry_session = None
 
-    def close_session(self, session: _FakeSession) -> None:
-        self.closed.append(session.sid)
-        self._close_client(session)
-
-    def read_nonblocking(self, sid: str, max_bytes: int = 65536) -> bytes:
-        session = self.get(sid)
-        if session is None:
-            return b""
-        return self.read_session(session, max_bytes=max_bytes)
-
-    def read_session(self, session: _FakeSession, max_bytes: int = 65536) -> bytes:
-        master = self._masters[id(session)]
-        try:
-            return master.recv(max_bytes)
-        except BlockingIOError:
-            return b""
-        except OSError:
-            return b""
-
-    def write(self, sid: str, data: bytes) -> None:
-        session = self.get(sid)
-        if session is not None:
-            self.write_session(session, data)
-
-    def write_session(self, session: _FakeSession, data: bytes) -> None:
-        self._masters[id(session)].sendall(data)
-
-    def resize(self, _sid: str, *, cols: int, rows: int) -> None:
-        self.resizes.append((cols, rows))
-
-    def resize_session(self, _session: _FakeSession, *, cols: int, rows: int) -> None:
-        self.resizes.append((cols, rows))
+    def release(self, session: _FakeSession) -> None:
+        """Drop the sockets behind ``session`` -- what the real client's ``close`` releases."""
+        session.alive = False
+        for sockets in (self._masters, self._peers):
+            sock = sockets.pop(id(session), None)
+            if sock is not None:
+                with contextlib.suppress(OSError):
+                    sock.close()
 
     def shutdown(self) -> None:
         self.shutdown_called = True
@@ -384,50 +383,42 @@ class _FakeTerminalHost:
         master, peer = socket.socketpair()
         master.setblocking(False)
         peer.settimeout(2.0)
-        session = _FakeSession(binding, master.fileno())
+        session = _FakeSession(binding, master, self)
         self._masters[id(session)] = master
         self._peers[id(session)] = peer
         return session
 
-    def _close_client(self, session: _FakeSession) -> None:
-        session.alive = False
-        for sockets in (self._masters, self._peers):
-            sock = sockets.pop(id(session), None)
-            if sock is not None:
-                with contextlib.suppress(OSError):
-                    sock.close()
-
 
 class ApplyTerminalInputTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.host = _RecordingHost()
+        self.session = _RecordingSession()
 
     def _apply(self, payload: object) -> None:
-        _apply_terminal_input(cast(TerminalHost, self.host), "s", json.dumps(payload))
+        _apply_terminal_input(cast(TerminalSession, self.session), json.dumps(payload))
 
     def test_stdin_frame_writes_bytes(self) -> None:
         self._apply({"type": "stdin", "data": "ls -al\n"})
-        self.assertEqual(self.host.writes, [b"ls -al\n"])
+        self.assertEqual(self.session.writes, [b"ls -al\n"])
 
     def test_resize_frame_forwards_dimensions(self) -> None:
         self._apply({"type": "resize", "cols": 120, "rows": 40})
-        self.assertEqual(self.host.resizes, [(120, 40)])
+        self.assertEqual(self.session.resizes, [(120, 40)])
 
     def test_resize_with_non_int_is_ignored(self) -> None:
         self._apply({"type": "resize", "cols": "wide", "rows": 40})
-        self.assertEqual(self.host.resizes, [])
+        self.assertEqual(self.session.resizes, [])
 
     def test_unknown_type_is_ignored(self) -> None:
         self._apply({"type": "signal", "data": "INT"})
-        self.assertEqual((self.host.writes, self.host.resizes), ([], []))
+        self.assertEqual((self.session.writes, self.session.resizes), ([], []))
 
     def test_malformed_json_is_ignored(self) -> None:
-        _apply_terminal_input(cast(TerminalHost, self.host), "s", "not json{")
-        self.assertEqual((self.host.writes, self.host.resizes), ([], []))
+        _apply_terminal_input(cast(TerminalSession, self.session), "not json{")
+        self.assertEqual((self.session.writes, self.session.resizes), ([], []))
 
     def test_non_object_json_is_ignored(self) -> None:
-        _apply_terminal_input(cast(TerminalHost, self.host), "s", "[1, 2, 3]")
-        self.assertEqual((self.host.writes, self.host.resizes), ([], []))
+        _apply_terminal_input(cast(TerminalSession, self.session), "[1, 2, 3]")
+        self.assertEqual((self.session.writes, self.session.resizes), ([], []))
 
 
 class TerminalWebSocketTests(unittest.TestCase):

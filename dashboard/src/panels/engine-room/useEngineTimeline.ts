@@ -57,7 +57,7 @@ function fxSignature(node: EngineProcessNode): string {
     .map((edge) => edge.kind)
     .sort()
     .join(",");
-  const landing = (node.landing ?? [])
+  const landing = node.landing
     .map((ref) => `${ref.kind}:${ref.state}:${ref.factState}`)
     .sort()
     .join(",");

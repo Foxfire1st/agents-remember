@@ -144,7 +144,7 @@ class ContractMemoryModeTests(unittest.TestCase):
         """The refusal above must reach the caller as a payload.
 
         ``worktree_start``'s handler has no ``except ContractError`` anywhere on its path --
-        not in ``mcp/registration/worktrees.py``, not in ``controllers/worktree_tools.py``,
+        not in ``mcp/registration/worktrees.py``, not in ``application/worktree_tools.py``,
         not in ``mcp/tools/worktree.py`` -- so a construction refusal raised out of
         ``build_start_contract`` would leave the tool as a traceback rather than a blocked
         result the agent can read and correct. ``_build_start_contract`` is patched because

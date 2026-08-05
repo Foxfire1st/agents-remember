@@ -15,6 +15,7 @@ from typing import Literal, TypeVar, cast, get_args
 
 from agents_remember.controlplane.durable_store import SCHEMA_VERSION, schema_version_supported
 from agents_remember.errors import AgentsRememberError
+from agents_remember.kernel.atomic_write import atomic_write_text
 from agents_remember.worktrees.leaf_refs import (
     LeafRefResolutionError,
     canonical_leaf_doc_ids,
@@ -52,7 +53,7 @@ migration is needed.
 # error at the writer rather than a pydantic ValidationError escaping an MCP tool handler
 # with no `except` anywhere on the path (that is the failure 165 of the 213 contracts on
 # disk were reproducing: `cleanup: reopened` and `workflow_kind: chat-task` are written by
-# `tasks/reopen.py` and by `worktree_start`'s own documented argument, and neither was in
+# `worktrees/reopen.py` and by `worktree_start`'s own documented argument, and neither was in
 # the Literal the packet validated against).
 #
 # `WorkflowKind` holds exactly the two task formats a producer can write: `worktree_start`'s
@@ -473,8 +474,7 @@ def load_contract(path: Path) -> WorktreeContract:
 def write_contract(path: Path, contract: WorktreeContract) -> None:
     contract = normalize_contract_leaf_id(contract)
     validate_contract(contract, path=path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(contract_to_text(contract), encoding="utf-8")
+    atomic_write_text(path, contract_to_text(contract))
 
 
 def heal_contract_leaf_ids(coordination_root: Path, *, dry_run: bool = False) -> dict[str, object]:
@@ -896,6 +896,83 @@ def _require_supported_schema_version(data: dict[str, object], contract_path: Pa
         )
 
 
+@dataclass(frozen=True)
+class _ParsedVocabulary:
+    """The six vocabulary cells a contract file carries, each narrowed onto its Literal.
+
+    ``ContractCells`` is the *amendment* shape -- every field optional, because an
+    amendment names only the cells it changes. This is the *parse* shape: every cell has a
+    value, because one that was blank or unreadable has already degraded to its declared
+    default and left a quarantine record behind.
+    """
+
+    workflow_kind: WorkflowKind
+    memory_mode: MemoryMode
+    human_review_status: HumanReviewStatus
+    closeout_status: CloseoutStatus
+    integration_status: IntegrationStatus
+    cleanup: CleanupStatus
+
+
+def _parsed_vocabulary(data: dict[str, object], quarantined: list[str]) -> _ParsedVocabulary:
+    """Read the six vocabulary cells, appending to ``quarantined`` for each one that failed.
+
+    All six read the same way, with one rule and no exceptions: blank is the declared
+    default, a member is itself, anything else is the default plus a quarantine record.
+    `workflow_kind` used to be the odd one out -- no `or <default>`, so a cell a developer
+    had emptied was a hard refusal where its five siblings were tolerant, on a file the
+    packet was perfectly able to report.
+    """
+    memory = _section(data, "memory")
+    human_review = _section(data, "human_review")
+    closeout = _section(data, "closeout")
+    integration = _section(data, "integration")
+    return _ParsedVocabulary(
+        workflow_kind=_vocabulary_cell(
+            _scalar(data.get("workflow_kind")),
+            VALID_WORKFLOW_KINDS,
+            "workflow_kind",
+            DEFAULT_WORKFLOW_KIND,
+            quarantined,
+        ),
+        memory_mode=_vocabulary_cell(
+            _scalar(data.get("memory_mode")) or _scalar(memory.get("mode")),
+            VALID_MEMORY_MODES,
+            "memory_mode",
+            _memory_mode_fallback(memory),
+            quarantined,
+        ),
+        human_review_status=_vocabulary_cell(
+            _scalar(human_review.get("status")),
+            VALID_HUMAN_REVIEW_STATUSES,
+            "human_review status",
+            DEFAULT_HUMAN_REVIEW_STATUS,
+            quarantined,
+        ),
+        closeout_status=_vocabulary_cell(
+            _scalar(closeout.get("status")),
+            VALID_CLOSEOUT_STATUSES,
+            "closeout status",
+            DEFAULT_CLOSEOUT_STATUS,
+            quarantined,
+        ),
+        integration_status=_vocabulary_cell(
+            _scalar(integration.get("status")),
+            VALID_INTEGRATION_STATUSES,
+            "integration status",
+            DEFAULT_INTEGRATION_STATUS,
+            quarantined,
+        ),
+        cleanup=_vocabulary_cell(
+            _scalar(integration.get("cleanup")) or _scalar(closeout.get("cleanup")),
+            VALID_CLEANUP_STATUSES,
+            "cleanup",
+            DEFAULT_CLEANUP_STATUS,
+            quarantined,
+        ),
+    )
+
+
 def _contract_from_data(data: dict[str, object], contract_path: Path) -> WorktreeContract:
     if data.get("schema") != CONTRACT_SCHEMA:
         raise ContractError(
@@ -910,9 +987,9 @@ def _contract_from_data(data: dict[str, object], contract_path: Path) -> Worktre
     closeout = _section(data, "closeout")
     integration = _section(data, "integration")
     lifecycle = _section(data, "lifecycle")
-    memory_mode = _scalar(data.get("memory_mode")) or _scalar(memory.get("mode"))
     # Every cell this parse could not read, collected as it goes and carried on the result.
     quarantined: list[str] = []
+    vocabulary = _parsed_vocabulary(data, quarantined)
     path = (
         _optional_path(coordination.get("series_contract_path", ""))
         or _optional_path(coordination.get("enclosure_path", ""))
@@ -924,25 +1001,8 @@ def _contract_from_data(data: dict[str, object], contract_path: Path) -> Worktre
         task_id=_scalar(data.get("task_id")),
         task_name=_scalar(data.get("task_name")),
         repo_name=_scalar(data.get("repo_name")),
-        # All six vocabulary cells read the same way, with one rule and no exceptions: blank
-        # is the declared default, a member is itself, anything else is the default plus a
-        # quarantine record. `workflow_kind` used to be the odd one out -- no `or <default>`,
-        # so a cell a developer had emptied was a hard refusal where its five siblings were
-        # tolerant, on a file the packet was perfectly able to report.
-        workflow_kind=_vocabulary_cell(
-            _scalar(data.get("workflow_kind")),
-            VALID_WORKFLOW_KINDS,
-            "workflow_kind",
-            DEFAULT_WORKFLOW_KIND,
-            quarantined,
-        ),
-        memory_mode=_vocabulary_cell(
-            memory_mode,
-            VALID_MEMORY_MODES,
-            "memory_mode",
-            _memory_mode_fallback(memory),
-            quarantined,
-        ),
+        workflow_kind=vocabulary.workflow_kind,
+        memory_mode=vocabulary.memory_mode,
         coordination_root=_path(coordination.get("root", ""), "coordination.root", contract_path),
         task_root=_path(coordination.get("task_root", ""), "coordination.task_root", contract_path),
         contract_path=path,
@@ -964,44 +1024,20 @@ def _contract_from_data(data: dict[str, object], contract_path: Path) -> Worktre
         memory_worktree=_optional_path(memory.get("worktree", "")),
         ledger_path=_optional_path(memory.get("ledger", "")),
         memory_state=memory.get("state", ""),
-        human_review_status=_vocabulary_cell(
-            _scalar(human_review.get("status")),
-            VALID_HUMAN_REVIEW_STATUSES,
-            "human_review status",
-            DEFAULT_HUMAN_REVIEW_STATUS,
-            quarantined,
-        ),
+        human_review_status=vocabulary.human_review_status,
         approved_for_commit=human_review.get("approved_for_commit", "no").lower()
         in {"yes", "true", "1"},
         commit_approval_note=human_review.get("commit_approval_note", ""),
-        closeout_status=_vocabulary_cell(
-            _scalar(closeout.get("status")),
-            VALID_CLOSEOUT_STATUSES,
-            "closeout status",
-            DEFAULT_CLOSEOUT_STATUS,
-            quarantined,
-        ),
+        closeout_status=vocabulary.closeout_status,
         code_commit=closeout.get("code_commit", ""),
         memory_content_commit=closeout.get("memory_content_commit", ""),
         ledger_commit=closeout.get("ledger_commit", ""),
-        integration_status=_vocabulary_cell(
-            _scalar(integration.get("status")),
-            VALID_INTEGRATION_STATUSES,
-            "integration status",
-            DEFAULT_INTEGRATION_STATUS,
-            quarantined,
-        ),
+        integration_status=vocabulary.integration_status,
         integration_strategy=integration.get("strategy", ""),
         integrated_code_commit=integration.get("code_commit", ""),
         integrated_memory_content_commit=integration.get("memory_content_commit", ""),
         integrated_ledger_commit=integration.get("ledger_commit", ""),
-        cleanup=_vocabulary_cell(
-            _scalar(integration.get("cleanup")) or _scalar(closeout.get("cleanup")),
-            VALID_CLEANUP_STATUSES,
-            "cleanup",
-            DEFAULT_CLEANUP_STATUS,
-            quarantined,
-        ),
+        cleanup=vocabulary.cleanup,
         leaf_id=coordination.get("leaf_id", ""),
         parent_task_name=coordination.get("parent_task_name", ""),
         parent_contract_path=_optional_path(coordination.get("parent_contract_path", "")),

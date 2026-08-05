@@ -29,9 +29,11 @@ MCP_TESTS = Path(__file__).resolve().parent
 sys.path.insert(0, str(MCP_SRC))
 sys.path.insert(0, str(MCP_TESTS))
 
+from agents_remember.application import gate_tools as gates
+from agents_remember.application import provider_tools, task_doc_tools
+from agents_remember.application.gate_tools import GateWait, InboxWatch
+from agents_remember.application.task_doc_tools import TaskDocEdit, TaskDocError
 from agents_remember.benchmarks.runner_modules import execution as benchmark_execution
-from agents_remember.controllers import provider_tools, task_doc_tools
-from agents_remember.controllers.task_doc_tools import TaskDocEdit, TaskDocError
 from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
 from agents_remember.controlplane.records import GateRecord, GateVerdict
 from agents_remember.controlplane.store import GateStore
@@ -41,15 +43,13 @@ from agents_remember.install.provider_watchers import (
     ProviderWatcherRebind,
     ProviderWatcherRebindReport,
 )
-from agents_remember.mcp.tools import gates
-from agents_remember.mcp.tools.dispatch_brief import HostedDelivery, require_dispatch_target
-from agents_remember.mcp.tools.gates import GateWait, InboxWatch
 from agents_remember.providers.cgc import seed as cgc_seed
 from agents_remember.providers.cgc.lifecycle import backend as cgc_backend
 from agents_remember.providers.grepai import seed as grepai_seed
 from agents_remember.providers.grepai.lifecycle import backend as grepai_backend
 from agents_remember.providers.grepai.lifecycle import embedder as grepai_embedder
 from agents_remember.providers.grepai.lifecycle import runner as grepai_runner
+from agents_remember.serving.dispatch_brief import HostedDelivery, require_dispatch_target
 
 FAILED_COMMAND = {"returncode": 1, "stdout": "", "stderr": "no such image"}
 
@@ -713,7 +713,7 @@ class WorkspaceGateResponseWaitTests(unittest.TestCase):
             )
         )
         gate_id = "G1"
-        gates.gate_decide_payload(
+        gates.gate_decide_tool(
             cast(Any, None),
             gate_id=gate_id,
             lifecycle_id=None,
@@ -721,7 +721,7 @@ class WorkspaceGateResponseWaitTests(unittest.TestCase):
         )
 
         with mock.patch.object(self.inbox, "list_pending") as list_pending:
-            result = gates.gate_response_wait_payload(
+            result = gates.gate_response_wait_tool(
                 cast(Any, None),
                 gate_id=gate_id,
                 lifecycle_id=None,

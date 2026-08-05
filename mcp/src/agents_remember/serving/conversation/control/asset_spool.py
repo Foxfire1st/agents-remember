@@ -17,6 +17,7 @@ from hashlib import sha256
 from pathlib import Path
 from typing import Literal
 
+from agents_remember.kernel.atomic_write import atomic_replace
 from agents_remember.serving.conversation.control.service import (
     CapabilityRefusedError,
     OperationRejectedError,
@@ -130,7 +131,7 @@ def exchange_bytes(
     target = confined_path(assets_root, request_id, asset_id)
     target.parent.mkdir(parents=True, exist_ok=True)
     target.parent.chmod(0o700)
-    os.replace(source.spool_path, target)
+    atomic_replace(source.spool_path, target)
     target.chmod(0o600)
     return AssetRecord(
         asset_id=asset_id,

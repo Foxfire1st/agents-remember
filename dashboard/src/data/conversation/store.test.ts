@@ -5,6 +5,7 @@ import {
   activeConversationStore,
   connectConversation,
   disconnectConversation,
+  focusConversation,
   hydrateAgentConversation,
   LRU_LIMIT,
   touchConversation,
@@ -299,6 +300,85 @@ describe("activeConversationStore orchestration (F4 keep-alive / LRU, F15 error 
     expect(after.sort()).toEqual([...ids].sort());
   });
 
+  it("keeps six projections warm but exactly one physical stream, then refocuses from the cursor without another page", async () => {
+    class FocusedSource {
+      static instances: FocusedSource[] = [];
+      closed = false;
+      constructor(public url: string) {
+        FocusedSource.instances.push(this);
+      }
+      addEventListener(): void {}
+      close(): void {
+        this.closed = true;
+      }
+    }
+    const fetches = new Map<string, number>();
+    const ids = Array.from({ length: LRU_LIMIT }, (_, index) => `focused-${index + 1}`);
+
+    for (const id of ids) {
+      const fetchImpl = (async () => {
+        fetches.set(id, (fetches.get(id) ?? 0) + 1);
+        return { ok: true, status: 200, json: async () => page(id) } as Response;
+      }) as typeof fetch;
+      connectConversation(id, "e1", {
+        fetchImpl,
+        eventSourceCtor: FocusedSource as unknown as EventSourceCtor,
+      });
+      await flush();
+      // The invariant holds at two chats and continues to hold at the full six-chat retention bound.
+      expect(FocusedSource.instances.filter((source) => !source.closed)).toHaveLength(1);
+    }
+
+    expect(Object.keys(activeConversationStore.getState().bySession)).toHaveLength(LRU_LIMIT);
+    expect(FocusedSource.instances.at(-1)?.url).toContain("/focused-6/conversation/events");
+
+    // Hiding the Chats view releases even the focused conversation socket without evicting state.
+    focusConversation(null);
+    expect(FocusedSource.instances.filter((source) => !source.closed)).toHaveLength(0);
+    expect(Object.keys(activeConversationStore.getState().bySession)).toHaveLength(LRU_LIMIT);
+
+    // Refocus is a cursor resume, not a cold hydrate: one new EventSource, zero new page GETs.
+    const pageFetchesBefore = fetches.get("focused-1");
+    touchConversation("focused-1");
+    expect(fetches.get("focused-1")).toBe(pageFetchesBefore);
+    expect(FocusedSource.instances.filter((source) => !source.closed)).toHaveLength(1);
+    expect(FocusedSource.instances.at(-1)?.url).toContain("/focused-1/conversation/events");
+    expect(FocusedSource.instances.at(-1)?.url).toContain("after=evt-0");
+  });
+
+  it("aborts blurred cold hydrates and includes them in the six-session LRU before a page succeeds", async () => {
+    const signals: AbortSignal[] = [];
+    const fetchImpl = vi.fn(
+      async (_input: RequestInfo | URL, init?: RequestInit): Promise<Response> =>
+        new Promise((_resolve, reject) => {
+          const signal = init?.signal;
+          if (signal === null || signal === undefined) return;
+          signals.push(signal);
+          signal.addEventListener(
+            "abort",
+            () => reject(new DOMException("The operation was aborted.", "AbortError")),
+            { once: true },
+          );
+        }),
+    ) as unknown as typeof fetch;
+    const ids = Array.from({ length: LRU_LIMIT + 3 }, (_, index) => `cold-${index + 1}`);
+
+    for (const id of ids) {
+      connectConversation(id, "e1", { fetchImpl, eventSourceCtor: FakeEventSource });
+    }
+    await flush();
+
+    expect(fetchImpl).toHaveBeenCalledTimes(ids.length);
+    expect(signals.filter((signal) => !signal.aborted)).toHaveLength(1);
+    expect(activeConversationStore.getState().touchOrder).toEqual(
+      [...ids].reverse().slice(0, LRU_LIMIT),
+    );
+
+    focusConversation(null);
+    await flush();
+    expect(signals.every((signal) => signal.aborted)).toBe(true);
+  });
+
   it("threads the server's typed error to the store on a first-connect page failure (F15)", async () => {
     connectConversation("s1", "e1", {
       fetchImpl: errorFetch(409, { status: "cursor-reset-required", detail: "epoch rolled" }),
@@ -425,13 +505,16 @@ describe("dead-stream escalation (260718-CHATS-L5I F-h)", () => {
   class ControlledSource {
     static instances: ControlledSource[] = [];
     listeners: Record<string, Array<(event: unknown) => void>> = {};
+    closed = false;
     constructor(public url: string) {
       ControlledSource.instances.push(this);
     }
     addEventListener(type: string, fn: (event: unknown) => void): void {
       (this.listeners[type] ??= []).push(fn);
     }
-    close(): void {}
+    close(): void {
+      this.closed = true;
+    }
     fire(type: string): void {
       for (const fn of this.listeners[type] ?? []) fn({});
     }
@@ -590,13 +673,16 @@ describe("dead-stream re-page transient tolerance (260724 review m6)", () => {
   class ControlledSource {
     static instances: ControlledSource[] = [];
     listeners: Record<string, Array<(event: unknown) => void>> = {};
+    closed = false;
     constructor(public url: string) {
       ControlledSource.instances.push(this);
     }
     addEventListener(type: string, fn: (event: unknown) => void): void {
       (this.listeners[type] ??= []).push(fn);
     }
-    close(): void {}
+    close(): void {
+      this.closed = true;
+    }
     fire(type: string): void {
       for (const fn of this.listeners[type] ?? []) fn({});
     }
@@ -647,6 +733,58 @@ describe("dead-stream re-page transient tolerance (260724 review m6)", () => {
       expect(activeConversationStore.getState().bySession.m6t?.stream).not.toBe("projection-failed");
       expect(activeConversationStore.getState().errorBySession.m6t).toBeUndefined();
       disconnectConversation("m6t");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("hands an aborted re-page back to an immediate refocus after delayed abort settlement", async () => {
+    vi.useFakeTimers();
+    try {
+      ControlledSource.instances = [];
+      let calls = 0;
+      let rejectAbortedPage: ((reason: unknown) => void) | undefined;
+      let abortedPageSignal: AbortSignal | undefined;
+      const delayedAbortFetch = (async (
+        _input: RequestInfo | URL,
+        init?: RequestInit,
+      ): Promise<Response> => {
+        calls += 1;
+        if (calls === 2) {
+          abortedPageSignal = init?.signal ?? undefined;
+          return new Promise((_resolve, reject) => {
+            // Deliberately do not reject on abort yet: this reproduces a transport whose abort
+            // notification settles after the operator has already refocused the warm chat.
+            rejectAbortedPage = reject;
+          });
+        }
+        return { ok: true, status: 200, json: async () => page("focus-race") } as Response;
+      }) as typeof fetch;
+
+      connectConversation("focus-race", "e1", {
+        fetchImpl: delayedAbortFetch,
+        eventSourceCtor: ControlledSource as unknown as EventSourceCtor,
+      });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(calls).toBe(1);
+
+      await driveEscalation();
+      expect(calls).toBe(2);
+
+      focusConversation(null);
+      expect(abortedPageSignal?.aborted).toBe(true);
+      touchConversation("focus-race");
+      expect(calls).toBe(2); // refocus cannot start until the old request settles
+
+      rejectAbortedPage?.(new DOMException("The operation was aborted.", "AbortError"));
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(calls).toBe(3); // exactly one replacement re-page
+      expect(ControlledSource.instances.filter((source) => !source.closed)).toHaveLength(1);
+      expect(ControlledSource.instances.at(-1)?.url).toContain("/focus-race/conversation/events");
+      expect(activeConversationStore.getState().bySession["focus-race"]?.stream).not.toBe(
+        "projection-failed",
+      );
     } finally {
       vi.useRealTimers();
     }

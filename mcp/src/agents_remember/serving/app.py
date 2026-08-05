@@ -41,7 +41,8 @@ import os
 from collections.abc import AsyncGenerator, AsyncIterator, Callable, Sequence
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
+from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Any
 from uuid import uuid4
@@ -68,23 +69,31 @@ from agents_remember.controlplane.attention_dismissals import (
     AttentionDismissalStore,
 )
 from agents_remember.controlplane.expectation_rows import ExpectationRowStore
+from agents_remember.controlplane.gate_decisions import (
+    GateDecisionContext,
+    record_gate_decision,
+    record_lifecycle_gate_decision,
+)
 from agents_remember.controlplane.operator_inbox_records import (
-    AgentRole,
     InboxAddress,
     InboxMessage,
-    InboxMessageKind,
     InboxPoster,
 )
 from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
 from agents_remember.controlplane.orchestration_nudges import OrchestrationNudgeStore
 from agents_remember.controlplane.records import GateVerdict
+from agents_remember.controlplane.store import GateStore
 from agents_remember.controlplane.supervisor_signals import SupervisorSignalCooldownStore
 from agents_remember.errors import HarnessControlError
 from agents_remember.kernel.agentic_settings import load_agentic_settings
-from agents_remember.mcp.tools.dispatch_brief import HostedDelivery
-from agents_remember.mcp.tools.gates import gate_decide_for_lifecycle, gate_decide_payload
-from agents_remember.mcp.tools.operator_inbox import operator_inbox_post_payload
-from agents_remember.models.operator_inbox import OperatorInboxPostResponse
+from agents_remember.models.application_requests import (
+    AgentRole,
+    InboxMessageKind,
+)
+from agents_remember.models.operator_inbox import (
+    OperatorInboxPostResponse,
+)
+from agents_remember.models.tool_response import finalize_tool_response
 from agents_remember.observer import observer_root
 from agents_remember.observer.event_retention import (
     WORKSPACE_EVENT_COMPACT_INTERVAL_SECONDS,
@@ -102,6 +111,7 @@ from agents_remember.providers.metrics import (
     ProviderMetricsStore,
     sample_provider_containers,
 )
+from agents_remember.providers.watcher_service import run_configured_watchers
 from agents_remember.serving.actions import (
     ActionEvaluationContext,
     ActionOutcome,
@@ -120,6 +130,7 @@ from agents_remember.serving.conversation.runtime import (
     ConversationRuntime,
     ConversationScope,
 )
+from agents_remember.serving.dispatch_brief import HostedDelivery
 from agents_remember.serving.events import stream_raw_events
 from agents_remember.serving.files import register_files_routes
 from agents_remember.serving.harness_capability_catalog import HarnessCapabilityCatalog
@@ -144,6 +155,10 @@ from agents_remember.serving.hosted_interactions import HostedInteractionSynchro
 from agents_remember.serving.hosted_session_runtime import HostedSessionRuntime
 from agents_remember.serving.leaf_ref_validation import resolve_catalog_leaf_key
 from agents_remember.serving.notes import register_notes_routes
+from agents_remember.serving.operator_inbox_posts import (
+    OperatorInboxPostContext,
+    post_operator_inbox_entry,
+)
 from agents_remember.serving.projector import (
     DEFAULT_PROJECTION_CADENCE,
     LIVE_PROJECTION_CLOCK,
@@ -205,7 +220,6 @@ from agents_remember.serving.supervisor_heartbeat import (
 )
 from agents_remember.serving.terminal import (
     TerminalHost,
-    TerminalSession,
     TerminalSessionSpec,
 )
 from agents_remember.serving.terminal_catalog import (
@@ -228,6 +242,7 @@ from agents_remember.serving.terminal_opener import (
     open_terminal_session,
 )
 from agents_remember.serving.terminal_paste import TerminalPaster
+from agents_remember.serving.terminal_pty import TerminalSession
 from agents_remember.worktrees.leaf_refs import LeafRefResolutionError
 
 if TYPE_CHECKING:
@@ -358,8 +373,8 @@ def _looks_like_image(body: bytes, ext: str) -> bool:
     return False
 
 
-def _apply_terminal_input(host: TerminalHost, session: str, text: str) -> None:
-    """Apply one client text frame to the session: a ``stdin`` write or a ``resize``.
+def _apply_terminal_input(session: TerminalSession, text: str) -> None:
+    """Apply one client text frame to this connection's PTY client: a ``stdin`` write or a ``resize``.
 
     Malformed frames and unknown types are ignored; the fixed-argv host accepts
     only these two control shapes, never an arbitrary command, so the wire carries no
@@ -374,33 +389,13 @@ def _apply_terminal_input(host: TerminalHost, session: str, text: str) -> None:
     if message.get("type") == "stdin":
         data = message.get("data")
         if isinstance(data, str):
-            with contextlib.suppress(KeyError, OSError):
-                host.write(session, data.encode())
-    elif message.get("type") == "resize":
-        cols, rows = message.get("cols"), message.get("rows")
-        if isinstance(cols, int) and isinstance(rows, int):
-            with contextlib.suppress(KeyError, OSError):
-                host.resize(session, cols=cols, rows=rows)
-
-
-def _apply_terminal_session_input(host: TerminalHost, session: TerminalSession, text: str) -> None:
-    """Apply one client text frame to a concrete PTY client."""
-    try:
-        message = json.loads(text)
-    except (TypeError, ValueError):
-        return
-    if not isinstance(message, dict):
-        return
-    if message.get("type") == "stdin":
-        data = message.get("data")
-        if isinstance(data, str):
             with contextlib.suppress(OSError):
-                host.write_session(session, data.encode())
+                session.write(data.encode())
     elif message.get("type") == "resize":
         cols, rows = message.get("cols"), message.get("rows")
         if isinstance(cols, int) and isinstance(rows, int):
             with contextlib.suppress(OSError):
-                host.resize_session(session, cols=cols, rows=rows)
+                session.resize(cols=cols, rows=rows)
 
 
 async def _terminal_to_socket(websocket: WebSocket, outbound: asyncio.Queue[bytes | None]) -> None:
@@ -414,18 +409,14 @@ async def _terminal_to_socket(websocket: WebSocket, outbound: asyncio.Queue[byte
         await websocket.send_text(_TERMINAL_EXIT_FRAME)
 
 
-async def _socket_to_terminal(
-    websocket: WebSocket, host: TerminalHost, session: TerminalSession
-) -> None:
+async def _socket_to_terminal(websocket: WebSocket, session: TerminalSession) -> None:
     """Forward browser frames (``stdin`` / ``resize``) to the PTY until the socket closes."""
     with contextlib.suppress(WebSocketDisconnect):
         async for text in websocket.iter_text():
-            _apply_terminal_session_input(host, session, text)
+            _apply_terminal_input(session, text)
 
 
-async def _bridge_terminal(
-    websocket: WebSocket, host: TerminalHost, session: TerminalSession
-) -> None:
+async def _bridge_terminal(websocket: WebSocket, session: TerminalSession) -> None:
     """Pump PTY <-> WebSocket until the child exits or the client disconnects.
 
     The PTY master fd is watched via ``loop.add_reader`` (no polling); readable output is
@@ -447,7 +438,7 @@ async def _bridge_terminal(
             loop.remove_reader(fd)
 
     def _on_readable() -> None:
-        data = host.read_session(session)
+        data = session.read_nonblocking()
         if data:
             outbound.put_nowait(data)
         elif not session.is_alive:
@@ -456,7 +447,7 @@ async def _bridge_terminal(
 
     loop.add_reader(fd, _on_readable)
     out_task = asyncio.create_task(_terminal_to_socket(websocket, outbound))
-    in_task = asyncio.create_task(_socket_to_terminal(websocket, host, session))
+    in_task = asyncio.create_task(_socket_to_terminal(websocket, session))
     try:
         await asyncio.wait({out_task, in_task}, return_when=asyncio.FIRST_COMPLETED)
     finally:
@@ -656,6 +647,74 @@ OWNED_SERVING_COLLABORATORS = ServingCollaborators()
 """No injected collaborators: the app constructs and owns every one of them."""
 
 
+def _build_serving_runtime(
+    config: McpRuntimeConfig,
+    cadence: ProjectionCadence,
+    replay: ProjectionReplay,
+    live_inputs: LiveProjectionInputs,
+    collaborators: ServingCollaborators,
+) -> tuple[_ServingRuntime, ProviderMetricsStore]:
+    """Construct the long-lived collaborators one serving app owns, before any route exists.
+
+    Separated from ``create_app`` because the two halves answer different questions: this is
+    what the process will be running, and ``create_app`` is what it will serve. The metrics
+    store rides back beside the runtime rather than on it -- the lifespan owns its sampling
+    loop, and nothing that handles a request reads it.
+    """
+    enabled = live_inputs.resolved(replay)
+    projector = Projector(
+        config,
+        cadence=cadence,
+        replay=replay,
+        refreshers=ProjectionRefreshers(
+            provider=ProviderStateRefresher() if enabled.provider_state else None,
+            landing=LandingStateRefresher(config) if enabled.landing_state else None,
+            change_watcher=ProjectionInputWatcher(config) if enabled.change_watch else None,
+        ),
+    )
+    host = collaborators.terminal_host or TerminalHost()
+    catalog = collaborators.terminal_catalog or TerminalCatalog(
+        terminal_catalog_path(config.coordination_root)
+    )
+    liveness_config = TerminalCatalogLivenessConfig()
+    interaction_synchronizer = HostedInteractionSynchronizer(observer_root(config))
+    liveness_sweeper = TerminalCatalogLivenessSweeper(
+        catalog,
+        host,
+        now=replay.now,
+        probe=LivenessProbe(
+            hysteresis=liveness_config,
+            on_control_snapshot=interaction_synchronizer.observe,
+        ),
+        on_turn_state_change=lambda observation: log_turn_state_change_event(
+            config, observation.entry
+        ),
+    )
+    runtime = _ServingRuntime(
+        config=config,
+        projector=projector,
+        host=host,
+        catalog=catalog,
+        paster=collaborators.terminal_paster or TerminalPaster(),
+        liveness_clock=replay.now or utc_now,
+        liveness_config=liveness_config,
+        liveness_sweeper=liveness_sweeper,
+        # Resolved ONCE at boot: the stamp that makes a stale serving process visible.
+        build=resolve_serving_build(),
+        # The deterministic supervisor sweep runs on its own decoupled cadence
+        # (default ~10s, settings-controlled), zero tokens, pure code. "The model is never the
+        # polling layer": every predicate reads TerminalCatalog/OperatorInboxStore/
+        # ExpectationRowStore/the nudge log DIRECTLY, never the projection.
+        heartbeat_store=SupervisorHeartbeatStore(observer_root(config)),
+        interval=cadence.interval,
+    )
+    # The serving daemon samples labeled provider
+    # containers on its own cadence (decoupled from the 1s projection tick) into
+    # the central metrics store — the feed for provider_status, the statistics
+    # board, and the degradation protocol. Read-only + dockerless-safe.
+    return runtime, ProviderMetricsStore(config.coordination_root)
+
+
 def create_app(
     config: McpRuntimeConfig,
     *,
@@ -675,62 +734,8 @@ def create_app(
     constructed ones (the Mode B2 terminal backend and friends); tests inject fakes to drive the
     WebSocket bridge without a real PTY.
     """
-    enabled = live_inputs.resolved(replay)
-    projector = Projector(
-        config,
-        cadence=cadence,
-        replay=replay,
-        refreshers=ProjectionRefreshers(
-            provider=ProviderStateRefresher() if enabled.provider_state else None,
-            landing=LandingStateRefresher(config) if enabled.landing_state else None,
-            change_watcher=ProjectionInputWatcher(config) if enabled.change_watch else None,
-        ),
-    )
-    interval = cadence.interval
-    host = collaborators.terminal_host or TerminalHost()
-    catalog = collaborators.terminal_catalog or TerminalCatalog(
-        terminal_catalog_path(config.coordination_root)
-    )
-    paster = collaborators.terminal_paster or TerminalPaster()
-    liveness_clock = replay.now or utc_now
-    liveness_config = TerminalCatalogLivenessConfig()
-    interaction_synchronizer = HostedInteractionSynchronizer(observer_root(config))
-    liveness_sweeper = TerminalCatalogLivenessSweeper(
-        catalog,
-        host,
-        now=replay.now,
-        probe=LivenessProbe(
-            hysteresis=liveness_config,
-            on_control_snapshot=interaction_synchronizer.observe,
-        ),
-        on_turn_state_change=lambda observation: log_turn_state_change_event(
-            config, observation.entry
-        ),
-    )
-    # Resolved ONCE at boot: the stamp that makes a stale serving process visible.
-    build = resolve_serving_build()
-
-    # The serving daemon samples labeled provider
-    # containers on its own cadence (decoupled from the 1s projection tick) into
-    # the central metrics store — the feed for provider_status, the statistics
-    # board, and the degradation protocol. Read-only + dockerless-safe.
-    metrics_store = ProviderMetricsStore(config.coordination_root)
-    runtime = _ServingRuntime(
-        config=config,
-        projector=projector,
-        host=host,
-        catalog=catalog,
-        paster=paster,
-        liveness_clock=liveness_clock,
-        liveness_config=liveness_config,
-        liveness_sweeper=liveness_sweeper,
-        build=build,
-        # The deterministic supervisor sweep runs on its own decoupled cadence
-        # (default ~10s, settings-controlled), zero tokens, pure code. "The model is never the
-        # polling layer": every predicate reads TerminalCatalog/OperatorInboxStore/
-        # ExpectationRowStore/the nudge log DIRECTLY, never the projection.
-        heartbeat_store=SupervisorHeartbeatStore(observer_root(config)),
-        interval=interval,
+    runtime, metrics_store = _build_serving_runtime(
+        config, cadence, replay, live_inputs, collaborators
     )
     app = FastAPI(
         title="Agents Remember dashboard",
@@ -756,11 +761,11 @@ def create_app(
                 workspace_root=config.workspace_root,
                 coordination_root=config.coordination_root,
             ),
-            catalog=catalog,
-            host=host,
+            catalog=runtime.catalog,
+            host=runtime.host,
             harness_registry=lambda: load_agentic_settings(config.coordination_root).harnesses,
-            liveness_clock=liveness_clock,
-            liveness_config=liveness_config,
+            liveness_clock=runtime.liveness_clock,
+            liveness_config=runtime.liveness_config,
             capability_catalog=(
                 collaborators.harness_capability_catalog
                 or HarnessCapabilityCatalog(config.workspace_root)
@@ -810,7 +815,15 @@ async def _metrics_loop(config: McpRuntimeConfig, metrics_store: ProviderMetrics
                 sample_provider_containers, cwd=config.coordination_root
             )
             await asyncio.to_thread(metrics_store.record, snapshot)
-            await asyncio.to_thread(evaluate_provider_degradation, config)
+            await asyncio.to_thread(
+                evaluate_provider_degradation,
+                config,
+                stop_provider_stacks=partial(
+                    run_configured_watchers,
+                    action="stop",
+                    dry_run=False,
+                ),
+            )
             # Reclaim the append-only metrics log (O(1) stat unless past its byte budget).
             await asyncio.to_thread(metrics_store.compact)
         except Exception:
@@ -1091,6 +1104,14 @@ def _recorded_gate_decision(
     without a lifecycle id is therefore the gate-id-only cancel that guard let through.
     """
 
+    root = observer_root(config)
+    context = GateDecisionContext(
+        store=GateStore(root),
+        inbox_store=OperatorInboxStore(root),
+        expectation_store=ExpectationRowStore(root),
+        policy=config.orchestration.gate_policy,
+        now=datetime.now(UTC),
+    )
     verdict = GateVerdict(
         decision=decision.decision,
         by="developer",
@@ -1098,14 +1119,23 @@ def _recorded_gate_decision(
         note=decision.note,
     )
     if decision.lifecycle_id is not None:
-        return gate_decide_for_lifecycle(
-            config,
+        payload = record_lifecycle_gate_decision(
+            context,
             lifecycle_id=decision.lifecycle_id,
-            verdict=verdict,
             expected_gate_id=decision.gate_id,
+            verdict=verdict,
+            evidence_refs=None,
         )
+        return finalize_tool_response("gate_decide", payload)
     assert decision.gate_id is not None
-    return gate_decide_payload(config, gate_id=decision.gate_id, lifecycle_id=None, verdict=verdict)
+    payload = record_gate_decision(
+        context,
+        gate_id=decision.gate_id,
+        lifecycle_id=None,
+        verdict=verdict,
+        evidence_refs=None,
+    )
+    return finalize_tool_response("gate_decide", payload)
 
 
 def _gate_decision_response(
@@ -1149,14 +1179,12 @@ def _dismissal_response(
     gate: dict[str, Any] | None = None
     if intent.kind == "gate-open" and intent.gate_id is not None:
         with contextlib.suppress(KeyError):
-            gate = gate_decide_payload(
+            gate = _recorded_gate_decision(
                 config,
-                gate_id=intent.gate_id,
-                lifecycle_id=intent.lifecycle_id,
-                verdict=GateVerdict(
+                GateDecisionIntent(
+                    lifecycle_id=intent.lifecycle_id,
+                    gate_id=intent.gate_id,
                     decision="cancel",
-                    by="developer",
-                    via="dashboard",
                     note=intent.note or "Dismissed from attention queue.",
                 ),
             )
@@ -1209,31 +1237,37 @@ def _operator_inbox_response(
     # pull-based operator inbox. External agents read it through the MCP operator_inbox_poll /
     # operator_inbox_consume tools; this endpoint only owns the developer/dashboard write side.
     try:
-        payload = operator_inbox_post_payload(
-            runtime.config,
-            address=InboxAddress(
-                lifecycle_id=request.lifecycle_id,
-                agent_id=request.agent_id,
-                recipient_role=request.recipient_role,
-            ),
-            message=InboxMessage(
-                ask=request.ask,
-                response=request.response,
-                message_kind=request.message_kind,
-                gate_id=request.gate_id,
-                artifact_path=request.artifact_path,
-            ),
-            poster=InboxPoster(
-                created_by="developer",
-                created_via="dashboard",
-                sender_agent_id=request.sender_agent_id,
-                sender_role=request.sender_role,
-            ),
-            delivery=HostedDelivery(
-                enabled=request.deliver_to_hosted,
-                catalog=runtime.catalog,
-                host=runtime.host,
-                paster=runtime.paster,
+        payload = finalize_tool_response(
+            "operator_inbox_post",
+            post_operator_inbox_entry(
+                OperatorInboxPostContext(
+                    config=runtime.config,
+                    store=OperatorInboxStore(runtime.observer_root),
+                    delivery=HostedDelivery(
+                        enabled=request.deliver_to_hosted,
+                        catalog=runtime.catalog,
+                        host=runtime.host,
+                        paster=runtime.paster,
+                    ),
+                ),
+                address=InboxAddress(
+                    lifecycle_id=request.lifecycle_id,
+                    agent_id=request.agent_id,
+                    recipient_role=request.recipient_role,
+                ),
+                message=InboxMessage(
+                    ask=request.ask,
+                    response=request.response,
+                    message_kind=request.message_kind,
+                    gate_id=request.gate_id,
+                    artifact_path=request.artifact_path,
+                ),
+                poster=InboxPoster(
+                    created_by="developer",
+                    created_via="dashboard",
+                    sender_agent_id=request.sender_agent_id,
+                    sender_role=request.sender_role,
+                ),
             ),
         )
     except ValueError as exc:
@@ -1304,12 +1338,12 @@ async def _serve_terminal_websocket(
         await websocket.close(code=4404)
         return
     try:
-        await _bridge_terminal(websocket, runtime.host, session_obj)
+        await _bridge_terminal(websocket, session_obj)
     finally:
         if not session_obj.is_alive:
             runtime.catalog.mark_exited(session)
         else:
-            runtime.host.close_session(session_obj)
+            session_obj.close()
         with contextlib.suppress(RuntimeError):
             await websocket.close()
 

@@ -3,7 +3,7 @@
 Production code already validates every tool payload against its registered model
 in ``agents_remember.mcp.tools._tool_payload`` (``model_validate(...).model_dump(
 mode="json", exclude_none=True)``). Strict models use ``extra="forbid"`` so
-controller drift fails loudly at runtime. These tests move that guarantee into the
+application-layer drift fails loudly at runtime. These tests move that guarantee into
 suite so drift is caught at dev time instead of in a live call.
 
 For every response-modeled tool payload builder we obtain a *representative*
@@ -34,15 +34,18 @@ MCP_TESTS = Path(__file__).resolve().parent
 sys.path.insert(0, str(MCP_SRC))
 sys.path.insert(0, str(MCP_TESTS))
 
-from agents_remember.controllers.memory_tools import CarryoverSelection
-from agents_remember.controllers.provider_tools import (
+from agents_remember.application.gate_tools import GateRaise, GateWait
+from agents_remember.application.memory_tools import CarryoverSelection
+from agents_remember.application.orchestration_tools import NudgeSubject, NudgeTarget
+from agents_remember.application.provider_tools import (
     GrepaiSearchQuery,
     GrepaiTraceQuery,
     ProviderQueryScope,
 )
-from agents_remember.controllers.task_doc_tools import TaskDocEdit, TaskDocTarget
-from agents_remember.controllers.task_ref import TaskRef
-from agents_remember.controllers.worktree_tools import (
+from agents_remember.application.task_doc_tools import TaskDocEdit, TaskDocTarget
+from agents_remember.application.task_ref import TaskRef
+from agents_remember.application.terminal_tools import RetiredSpawnInputs
+from agents_remember.application.worktree_tools import (
     CloseoutApproval,
     CloseoutCommitMessages,
     StartExecution,
@@ -57,9 +60,6 @@ from agents_remember.controlplane.operator_inbox_records import (
 from agents_remember.controlplane.records import GateAnchor, GateRequest, GateVerdict
 from agents_remember.mcp import tools
 from agents_remember.mcp.config import load_config
-from agents_remember.mcp.tools.gates import GateRaise, GateWait
-from agents_remember.mcp.tools.orchestration import NudgeSubject, NudgeTarget
-from agents_remember.mcp.tools.terminal import RetiredSpawnInputs
 from agents_remember.models.base import FlexibleResponseModel
 from agents_remember.models.tool_registry import TOOL_RESPONSE_MODELS
 from agents_remember.observer import (

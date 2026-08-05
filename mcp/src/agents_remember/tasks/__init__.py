@@ -17,6 +17,7 @@ from .document import (
     HeaderNote,
     Section,
     Step,
+    StepDisposition,
     StepStatus,
     SubStep,
     SubTaskRef,
@@ -28,6 +29,7 @@ from .document import (
     step_done,
     step_total,
 )
+from .readiness import CompletionBlocker, completion_blockers
 from .render import render_markdown
 from .store import (
     doc_stem,
@@ -41,17 +43,20 @@ from .store import (
 __all__ = [
     "TASK_DOCUMENT_SCHEMA",
     "CodeExample",
+    "CompletionBlocker",
     "Decision",
     "DocKind",
     "DocStatus",
     "HeaderNote",
     "Section",
     "Step",
+    "StepDisposition",
     "StepStatus",
     "SubStep",
     "SubTaskRef",
     "TaskDocument",
     "TaskEnclosureRef",
+    "completion_blockers",
     "current_step",
     "doc_stem",
     "json_path_for",

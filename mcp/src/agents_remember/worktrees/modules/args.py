@@ -1,9 +1,9 @@
 """Typed cross-layer DTO for worktree domain operations.
 
 `WorktreeArgs` replaces the loosely typed `argparse.Namespace` that previously
-flowed from the MCP controllers and the worktree CLI into the worktree domain
-functions. Every field carries a sensible default so each operation can build
-just the subset it needs.
+flowed from the MCP application layer and the worktree CLI into the worktree
+domain functions. Every field carries a sensible default so each operation can
+build just the subset it needs.
 """
 
 from __future__ import annotations
@@ -19,7 +19,7 @@ from agents_remember.worktrees.modules.models import WorktreeProviderSetupConfig
 
 @dataclass(frozen=True)
 class WorktreeArgs:
-    """Inputs shared by the worktree controllers, CLI, and domain functions."""
+    """Inputs shared by the worktree application layer, CLI, and domain functions."""
 
     # Coordination / repository resolution
     code_repository_name: str | None = None

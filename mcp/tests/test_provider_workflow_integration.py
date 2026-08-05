@@ -11,8 +11,8 @@ from pathlib import Path
 from typing import Any, cast
 
 import pytest
+from agents_remember.application.worktree_tools import TaskIdentity, worktree_start_tool
 from agents_remember.benchmarks import runner as benchmark_runner
-from agents_remember.controllers.worktree_tools import TaskIdentity, worktree_start_tool
 from agents_remember.kernel.memory_ledger import create_initial_ledger, ledger_to_text
 from agents_remember.mcp.config import load_config
 from agents_remember.providers import lifecycle, provider_setup

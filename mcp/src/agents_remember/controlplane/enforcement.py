@@ -7,7 +7,7 @@ kept free of I/O so mutating tools share one policy and it is unit-testable
 without a store.
 
 The load-bearing rule is the **anti-self-approval** invariant: the agent's own
-``gate_decide`` is attributed ``decidedBy="model"`` (see ``mcp/tools/gates.py``),
+``gate_decide`` is attributed ``decidedBy="model"`` (see ``application/gate_tools.py``),
 so a model-decided ``approved`` snapshot does **not** satisfy enforcement. A
 human approval is always binding; a non-human orchestration approval is binding
 only when the policy explicitly delegates that gate kind to the deciding role and

@@ -4,11 +4,17 @@ from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
-from agents_remember.controlplane.records import GateAnchor, GateRequest, GateVerdict
-from agents_remember.mcp.tools.gates import GateRaise, GateWait
+from agents_remember.models.application_requests import (
+    GateDecisionRequest,
+    LifecycleGateRequest,
+)
 
 from ..config import McpRuntimeConfig
-from ..tools import gate_decide_payload, gate_list_payload, lifecycle_gate_payload
+from ..tools.gates import (
+    gate_list_payload,
+    registered_gate_decide_payload,
+    registered_lifecycle_gate_payload,
+)
 
 
 def register_gate_tools(server: FastMCP, config: McpRuntimeConfig) -> None:
@@ -35,19 +41,19 @@ def register_gate_tools(server: FastMCP, config: McpRuntimeConfig) -> None:
         integration enforcement matches the gate by: the call returns the gateId, the
         raiser carries it in the handover packet, and the delegated decider resolves
         it by id via gate_decide(deciding_role=...)."""
-        return lifecycle_gate_payload(
+        return registered_lifecycle_gate_payload(
             config,
-            GateRaise(
+            LifecycleGateRequest(
                 kind=kind,
-                anchor=GateAnchor(lifecycle_id=lifecycle_id, enclosure=enclosure, repo_id=repo_id),
-                request=GateRequest(
-                    packet=packet,
-                    required_decision=required_decision,
-                    evidence_refs=evidence_refs,
-                ),
                 ask=ask,
+                lifecycle_id=lifecycle_id,
+                enclosure=enclosure,
+                repo_id=repo_id,
+                packet=packet,
+                required_decision=required_decision,
+                evidence_refs=evidence_refs,
+                wait=wait,
             ),
-            wait=GateWait(block=wait, timeout_seconds=None),
         )
 
     @server.tool()
@@ -64,19 +70,18 @@ def register_gate_tools(server: FastMCP, config: McpRuntimeConfig) -> None:
         default the decision is attributed to the model via the cli; with deciding_role it is
         attributed to the active lifecycle via orchestration and checked against the configured
         gate policy."""
-        decided_via = "orchestration" if deciding_role is not None else "cli"
-        return gate_decide_payload(
+        return registered_gate_decide_payload(
             config,
-            gate_id=gate_id,
-            lifecycle_id=lifecycle_id,
-            verdict=GateVerdict(
+            GateDecisionRequest(
+                gate_id=gate_id,
                 decision=decision,
-                by="" if deciding_role is not None else "model",
-                via=decided_via,
+                lifecycle_id=lifecycle_id,
                 note=note,
+                decided_by="" if deciding_role is not None else "model",
+                decided_via="orchestration" if deciding_role is not None else "cli",
                 deciding_role=deciding_role,
+                evidence_refs=evidence_refs,
             ),
-            evidence_refs=evidence_refs,
         )
 
     @server.tool()

@@ -10,7 +10,6 @@ from typing import Protocol, runtime_checkable
 from agents_remember.errors import HarnessControlError
 from agents_remember.serving.harness_capabilities import (
     CapabilitySnapshot,
-    LaunchKnobs,
     SetResult,
 )
 from agents_remember.serving.harness_control_models import (
@@ -71,8 +70,6 @@ class HarnessCapabilityPort(Protocol):
 
     def advertise(self) -> CapabilitySnapshot: ...
 
-    def launch_knobs(self, *, model_key: str, effort: str | None) -> LaunchKnobs: ...
-
     async def set_model(self, model_key: str) -> SetResult: ...
 
     async def set_effort(self, effort: str) -> SetResult: ...
@@ -83,9 +80,12 @@ class LaunchableHarnessProtocolAdapter(
     HarnessCapabilityDiscoverer,
     Protocol,
 ):
-    """Native runtime plus token-free discovery, launch knobs, and live capability setters."""
+    """Native runtime plus token-free discovery and live capability setters.
 
-    def launch_knobs(self, *, model_key: str, effort: str | None) -> LaunchKnobs: ...
+    Spelling a selection on the launch line is NOT part of this contract: see
+    ``harness_control_factories.harness_launch_knobs``, which answers it from the harness id
+    alone, before any adapter is constructed.
+    """
 
 
 @runtime_checkable
@@ -182,10 +182,6 @@ class UnsupportedHarnessProtocolAdapter:
     async def discover(self, launch: LaunchSpec) -> CapabilitySnapshot:
         del launch
         return self.advertise()
-
-    def launch_knobs(self, *, model_key: str, effort: str | None) -> LaunchKnobs:
-        del model_key, effort
-        raise HarnessControlError(f"no protocol adapter is registered for {self._harness_id!r}")
 
     async def set_model(
         self, model_key: str, *, operation: ControlOperationRef | None = None

@@ -13,6 +13,8 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+from _global_state import preserve_owned_mutable_state
+
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
@@ -425,7 +427,7 @@ class CliDaemonDispatchTests(unittest.TestCase):
         )
         args = cli_main.build_parser().parse_args(["dashboard", "--config", str(settings), *flags])
         stdout = io.StringIO()
-        with contextlib.redirect_stdout(stdout):
+        with contextlib.redirect_stdout(stdout), preserve_owned_mutable_state():
             code = cli_dashboard.run(args)
         return code, stdout.getvalue()
 

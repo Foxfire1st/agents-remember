@@ -1,11 +1,4 @@
-"""The changed-lines coverage floor.
-
-Every test here drives a real throwaway git repository rather than a stubbed diff. The
-gate's whole job is to read what git says changed, and a fake `git diff` string proves
-only that the parser agrees with whoever wrote the fixture -- not that it agrees with
-git's hunk headers for an added file, a one-line deletion, a rename, or a change that
-only exists in the working tree.
-"""
+"""Changed-lines coverage bites using real throwaway git repositories."""
 
 from __future__ import annotations
 
@@ -173,9 +166,7 @@ class BaseResolutionTests(unittest.TestCase):
             self.assertIn("default branch", resolution.origin)
 
     def test_a_first_commit_with_no_merge_base_compares_against_the_empty_tree(self) -> None:
-        # The honest reading of "nothing to compare against" is that everything is new,
-        # so the floor applies to the whole tree. The alternative -- skipping -- would
-        # make a brand-new repository the one place the gate certifies nothing.
+        # A first commit is measured in full and never becomes an empty-success state.
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             git(root, "init", "--quiet", "--initial-branch=orphan")
@@ -228,12 +219,7 @@ class BaseResolutionTests(unittest.TestCase):
             self.assertIsNone(diff_coverage.merge_base(root, "main"))
 
     def test_the_three_git_wrappers_agree_on_which_failures_are_this_gate_s_error(self) -> None:
-        # `run_git`, `revision_exists` and `merge_base` all go through one `_git`, and two of
-        # them used to call it bare. Moving onto the shared runner made that difference
-        # matter: it has a timeout where the old inline call had none, and it passes `cwd=`,
-        # so `subprocess.run` raises for a missing project root before git is ever started --
-        # where the old `git -C <missing>` merely exited non-zero and these two answered
-        # `False` / `None`. Three siblings on one runner must not disagree about that.
+        # Every git-facing helper must convert an invalid project root to the same gate error.
         with tempfile.TemporaryDirectory() as tmp:
             missing = Path(tmp) / "no-such-root"
 

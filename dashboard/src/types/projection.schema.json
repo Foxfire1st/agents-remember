@@ -1,0 +1,2788 @@
+{
+  "$defs": {
+    "ActionAvailability": {
+      "additionalProperties": false,
+      "description": "Whether one action is currently safe -- decided by the reducer, never the UI.\n\n``disabledReason`` and ``nextSafeAction`` are load-bearing for slice 06: the\ncockpit renders the affordance and its tooltip straight from this and never\ninfers safety client-side.",
+      "properties": {
+        "action": {
+          "title": "Action",
+          "type": "string"
+        },
+        "disabledReason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Disabledreason"
+        },
+        "enabled": {
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "nextSafeAction": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Nextsafeaction"
+        }
+      },
+      "required": [
+        "action",
+        "enabled"
+      ],
+      "title": "ActionAvailability",
+      "type": "object"
+    },
+    "AgentPickupNode": {
+      "additionalProperties": false,
+      "description": "A pending dashboard response waiting for an agent to consume it.\n\nR5 (260707-HFX2-L1): every pending row here IS an unacked signal -- consume=ack is the only\nterminal outcome, so this list already surfaces \"pending/unacked\" for the dashboard. The\nattempt/backoff/escalation fields ride along so the panel can show redelivery state without a\nsecond surface; an L2 predicate reads the stores directly and never this projection.",
+      "properties": {
+        "ageSeconds": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Ageseconds"
+        },
+        "agentId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Agentid"
+        },
+        "artifactPath": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Artifactpath"
+        },
+        "attemptCount": {
+          "default": 0,
+          "title": "Attemptcount",
+          "type": "integer"
+        },
+        "deliveredToSession": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Deliveredtosession"
+        },
+        "deliveryState": {
+          "default": "queued",
+          "title": "Deliverystate",
+          "type": "string"
+        },
+        "entryId": {
+          "title": "Entryid",
+          "type": "string"
+        },
+        "escalatedAt": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Escalatedat"
+        },
+        "gateId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Gateid"
+        },
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "lastAttemptAt": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Lastattemptat"
+        },
+        "lifecycleId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Lifecycleid"
+        },
+        "messageKind": {
+          "default": "message",
+          "title": "Messagekind",
+          "type": "string"
+        },
+        "nextAttemptAt": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Nextattemptat"
+        },
+        "ownerAgentId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Owneragentid"
+        },
+        "ownerLifecycleId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Ownerlifecycleid"
+        },
+        "ownerRole": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Ownerrole"
+        },
+        "recipientRole": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Recipientrole"
+        },
+        "senderAgentId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Senderagentid"
+        },
+        "senderRole": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Senderrole"
+        },
+        "state": {
+          "title": "State",
+          "type": "string"
+        },
+        "ttlSeconds": {
+          "title": "Ttlseconds",
+          "type": "number"
+        }
+      },
+      "required": [
+        "id",
+        "entryId",
+        "state",
+        "ttlSeconds"
+      ],
+      "title": "AgentPickupNode",
+      "type": "object"
+    },
+    "Analytics": {
+      "additionalProperties": false,
+      "description": "The slice-3b analytical surfaces: charts/feeds for specific cockpit panels.\n\nKept apart from the structural tree (lifecycles/enclosures/providers) so the\nclient-agnostic core stays small. Large raw inventories are deliberately *not*\nhere -- drift rows stay in the snapshot file, the full sidecar list collapses to\nthe histogram + a bounded leaderboard -- so the served projection stays lean.\n\n``attentionQueue`` (slice 05) and ``engineProcesses`` (slice 5e) are the *derived*\nsurfaces here: the reducer composes them from the structural tree + these signals (not\nfrom an input file), so a structural-only caller can still see them populated.",
+      "properties": {
+        "agentPickups": {
+          "items": {
+            "$ref": "#/$defs/AgentPickupNode"
+          },
+          "title": "Agentpickups",
+          "type": "array"
+        },
+        "attentionQueue": {
+          "items": {
+            "$ref": "#/$defs/AttentionItem"
+          },
+          "title": "Attentionqueue",
+          "type": "array"
+        },
+        "driftSnapshots": {
+          "items": {
+            "$ref": "#/$defs/DriftSnapshotNode"
+          },
+          "title": "Driftsnapshots",
+          "type": "array"
+        },
+        "engineProcesses": {
+          "items": {
+            "$ref": "#/$defs/EngineProcessNode"
+          },
+          "title": "Engineprocesses",
+          "type": "array"
+        },
+        "expectationRows": {
+          "items": {
+            "$ref": "#/$defs/ExpectationRowNode"
+          },
+          "title": "Expectationrows",
+          "type": "array"
+        },
+        "ledgers": {
+          "items": {
+            "$ref": "#/$defs/LedgerNode"
+          },
+          "title": "Ledgers",
+          "type": "array"
+        },
+        "routeCoverage": {
+          "items": {
+            "$ref": "#/$defs/RouteCoverageNode"
+          },
+          "title": "Routecoverage",
+          "type": "array"
+        },
+        "series": {
+          "items": {
+            "$ref": "#/$defs/SeriesNode"
+          },
+          "title": "Series",
+          "type": "array"
+        },
+        "setupProgress": {
+          "items": {
+            "$ref": "#/$defs/SetupProgressNode"
+          },
+          "title": "Setupprogress",
+          "type": "array"
+        },
+        "setupSummaries": {
+          "items": {
+            "$ref": "#/$defs/SetupSummaryNode"
+          },
+          "title": "Setupsummaries",
+          "type": "array"
+        },
+        "stalestSidecars": {
+          "items": {
+            "$ref": "#/$defs/SidecarStaleNode"
+          },
+          "title": "Stalestsidecars",
+          "type": "array"
+        },
+        "taskDocuments": {
+          "items": {
+            "$ref": "#/$defs/TaskDocNode"
+          },
+          "title": "Taskdocuments",
+          "type": "array"
+        },
+        "toolReports": {
+          "items": {
+            "$ref": "#/$defs/ToolReportNode"
+          },
+          "title": "Toolreports",
+          "type": "array"
+        }
+      },
+      "title": "Analytics",
+      "type": "object"
+    },
+    "AttentionItem": {
+      "additionalProperties": false,
+      "description": "One thing that needs the human, decided by the reducer (note 06, slice 05).\n\nA ranked cross-section of the structural tree + analytics signals -- the\nhome-screen attention queue. Computed server-side so every client (dashboard,\nTUI, agent) shares one queue, and ``waitSeconds`` is a server-computed age, never\na client's render time. The ``*Id`` / ``enclosure`` cross-refs point back into the\nstructural tree so the UI can couple a queue item to its operation-tree node.",
+      "properties": {
+        "detail": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Detail"
+        },
+        "enclosure": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Enclosure"
+        },
+        "gateId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Gateid"
+        },
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "title": "Kind",
+          "type": "string"
+        },
+        "lane": {
+          "enum": [
+            "repo",
+            "worktree",
+            "lifecycle"
+          ],
+          "title": "Lane",
+          "type": "string"
+        },
+        "lifecycleId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Lifecycleid"
+        },
+        "providerId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Providerid"
+        },
+        "repoId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Repoid"
+        },
+        "severity": {
+          "enum": [
+            "alarm",
+            "warn",
+            "info"
+          ],
+          "title": "Severity",
+          "type": "string"
+        },
+        "signalTs": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Signalts"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        },
+        "waitSeconds": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Waitseconds"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "severity",
+        "lane",
+        "title"
+      ],
+      "title": "AttentionItem",
+      "type": "object"
+    },
+    "CommitRefNode": {
+      "additionalProperties": false,
+      "description": "One side of the official-line/worktree pair: a branch @ commit at a path (slice 5e).\n\n``factState`` is the honesty axis: ``observed`` means the worktree checkout exists on\ndisk; ``derived`` means the value is a recorded contract field whose checkout is not\npresent; ``planned`` is an expected-but-not-yet step; ``missing`` is unobservable; and\n``not-applicable`` is a lane that does not exist (e.g. memory on a ``disabled`` contract).\nThe cockpit colours/animates from this so it never renders a planned path as a live one.",
+      "properties": {
+        "behindSource": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Behindsource"
+        },
+        "branch": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Branch"
+        },
+        "commit": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Commit"
+        },
+        "dirty": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Dirty"
+        },
+        "exists": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Exists"
+        },
+        "factState": {
+          "default": "missing",
+          "enum": [
+            "observed",
+            "derived",
+            "planned",
+            "missing",
+            "stale",
+            "not-applicable"
+          ],
+          "title": "Factstate",
+          "type": "string"
+        },
+        "path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Path"
+        }
+      },
+      "title": "CommitRefNode",
+      "type": "object"
+    },
+    "DriftSnapshotNode": {
+      "additionalProperties": false,
+      "description": "A repo's onboarding-drift result, read from a persisted JSON snapshot (3b, b1).\n\nThe reducer never classifies drift (that is git-per-sidecar -- far too costly for\na poll-cadence write); it reads the snapshot the memory_quality drift run\npersisted and surfaces ``snapshotStaleSeconds`` (age of ``checkedAt``), exactly\nlike a provider tile. The full per-sidecar rows stay in the snapshot file; the\nprojection carries only the classification counts a gauge needs.",
+      "properties": {
+        "actionableCount": {
+          "default": 0,
+          "title": "Actionablecount",
+          "type": "integer"
+        },
+        "branch": {
+          "title": "Branch",
+          "type": "string"
+        },
+        "checkedAt": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Checkedat"
+        },
+        "counts": {
+          "additionalProperties": {
+            "type": "integer"
+          },
+          "title": "Counts",
+          "type": "object"
+        },
+        "memoryRoot": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Memoryroot"
+        },
+        "reportPath": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reportpath"
+        },
+        "repository": {
+          "title": "Repository",
+          "type": "string"
+        },
+        "snapshotStaleSeconds": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Snapshotstaleseconds"
+        },
+        "sourceRoot": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sourceroot"
+        }
+      },
+      "required": [
+        "repository",
+        "branch"
+      ],
+      "title": "DriftSnapshotNode",
+      "type": "object"
+    },
+    "EnclosureNode": {
+      "additionalProperties": false,
+      "description": "A worktree enclosure (contract + group): the persistent identity anchor.\n\n``lifecycleId`` cross-references the lifecycle this enclosure anchors (it is\n``\"\"`` for a legacy contract written before the lifecycle field existed).\n\n``codeWorktreeExists`` / ``memoryWorktreeExists`` are the worktree-existence\nTRUTH (L11): stat'ed at snapshot time in the I/O layer, exactly how the worktree\ntools report existence (``contract.code_worktree.exists()`` in\n``worktree_status``). The tasks surface filters visibility on these, never on a\ncleanup-state proxy — ``cleanup: reopened`` means contract-reset-awaiting-restart\n(worktrees gone until the next ``worktree_start``), not live work.",
+      "properties": {
+        "actions": {
+          "items": {
+            "$ref": "#/$defs/ActionAvailability"
+          },
+          "title": "Actions",
+          "type": "array"
+        },
+        "cleanup": {
+          "title": "Cleanup",
+          "type": "string"
+        },
+        "closeoutStatus": {
+          "title": "Closeoutstatus",
+          "type": "string"
+        },
+        "codeWorktreeExists": {
+          "default": false,
+          "title": "Codeworktreeexists",
+          "type": "boolean"
+        },
+        "enclosure": {
+          "title": "Enclosure",
+          "type": "string"
+        },
+        "enclosureId": {
+          "default": "",
+          "title": "Enclosureid",
+          "type": "string"
+        },
+        "humanReviewStatus": {
+          "title": "Humanreviewstatus",
+          "type": "string"
+        },
+        "integrationStatus": {
+          "title": "Integrationstatus",
+          "type": "string"
+        },
+        "leafId": {
+          "default": "",
+          "title": "Leafid",
+          "type": "string"
+        },
+        "lifecycleId": {
+          "title": "Lifecycleid",
+          "type": "string"
+        },
+        "memoryWorktreeExists": {
+          "default": false,
+          "title": "Memoryworktreeexists",
+          "type": "boolean"
+        },
+        "repoName": {
+          "title": "Reponame",
+          "type": "string"
+        },
+        "taskId": {
+          "title": "Taskid",
+          "type": "string"
+        },
+        "taskName": {
+          "title": "Taskname",
+          "type": "string"
+        },
+        "taskRoot": {
+          "default": "",
+          "title": "Taskroot",
+          "type": "string"
+        },
+        "worktreeGroup": {
+          "title": "Worktreegroup",
+          "type": "string"
+        }
+      },
+      "required": [
+        "enclosure",
+        "taskId",
+        "taskName",
+        "repoName",
+        "lifecycleId",
+        "worktreeGroup",
+        "humanReviewStatus",
+        "closeoutStatus",
+        "integrationStatus",
+        "cleanup"
+      ],
+      "title": "EnclosureNode",
+      "type": "object"
+    },
+    "EngineProcessEdge": {
+      "additionalProperties": false,
+      "description": "One conduit in the process map, with a state-backed visual treatment (slice 5e).\n\nEdges are derived from facts, never decoration: a ``cgc-seed`` edge reads ``running``\nonly while the seed phase is live, ``failed`` on a failed phase, ``planned`` before it\nstarts -- so an animated conduit always means an observed transition.",
+      "properties": {
+        "detail": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Detail"
+        },
+        "fromNode": {
+          "title": "Fromnode",
+          "type": "string"
+        },
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "title": "Kind",
+          "type": "string"
+        },
+        "label": {
+          "title": "Label",
+          "type": "string"
+        },
+        "state": {
+          "title": "State",
+          "type": "string"
+        },
+        "toNode": {
+          "title": "Tonode",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "fromNode",
+        "toNode",
+        "kind",
+        "state",
+        "label"
+      ],
+      "title": "EngineProcessEdge",
+      "type": "object"
+    },
+    "EngineProcessNode": {
+      "additionalProperties": false,
+      "description": "One worktree enclosure as a state-backed process -- the Engine Room's unit (slice 5e).\n\nComposed (like ``attentionQueue``) from the contract + status guidance + provider boot +\nlifecycle, **not** read from a new file. The center of the Engine Room is this enclosure,\nnot a provider card: the official source line, the code/memory worktrees, the contract\ncoupling them, and the two isolated engines bound to that worktree group. ``health`` and\nthe per-side ``factState``s carry the observed/derived/planned/missing honesty 5e demands.",
+      "properties": {
+        "actions": {
+          "items": {
+            "$ref": "#/$defs/ActionAvailability"
+          },
+          "title": "Actions",
+          "type": "array"
+        },
+        "carryoverDoneAt": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Carryoverdoneat"
+        },
+        "cleanup": {
+          "title": "Cleanup",
+          "type": "string"
+        },
+        "closeoutStatus": {
+          "title": "Closeoutstatus",
+          "type": "string"
+        },
+        "codeSource": {
+          "$ref": "#/$defs/CommitRefNode"
+        },
+        "codeWorktree": {
+          "$ref": "#/$defs/CommitRefNode"
+        },
+        "completedPhases": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Completedphases",
+          "type": "array"
+        },
+        "currentPhase": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Currentphase"
+        },
+        "edges": {
+          "items": {
+            "$ref": "#/$defs/EngineProcessEdge"
+          },
+          "title": "Edges",
+          "type": "array"
+        },
+        "enclosure": {
+          "title": "Enclosure",
+          "type": "string"
+        },
+        "failedPhases": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Failedphases",
+          "type": "array"
+        },
+        "health": {
+          "enum": [
+            "nominal",
+            "running",
+            "blocked",
+            "failed",
+            "stale",
+            "skipped",
+            "unknown",
+            "complete"
+          ],
+          "title": "Health",
+          "type": "string"
+        },
+        "heartbeatAgeSeconds": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Heartbeatageseconds"
+        },
+        "humanReviewStatus": {
+          "title": "Humanreviewstatus",
+          "type": "string"
+        },
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "integrationStatus": {
+          "title": "Integrationstatus",
+          "type": "string"
+        },
+        "integrationStrategy": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Integrationstrategy"
+        },
+        "landing": {
+          "items": {
+            "$ref": "#/$defs/LandingRefNode"
+          },
+          "title": "Landing",
+          "type": "array"
+        },
+        "leafId": {
+          "default": "",
+          "title": "Leafid",
+          "type": "string"
+        },
+        "ledgerPath": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Ledgerpath"
+        },
+        "ledgerRowCount": {
+          "default": 0,
+          "title": "Ledgerrowcount",
+          "type": "integer"
+        },
+        "ledgerRows": {
+          "items": {
+            "$ref": "#/$defs/LedgerRefNode"
+          },
+          "title": "Ledgerrows",
+          "type": "array"
+        },
+        "lifecycleId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Lifecycleid"
+        },
+        "memoryMode": {
+          "title": "Memorymode",
+          "type": "string"
+        },
+        "memorySource": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CommitRefNode"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "memoryWorktree": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CommitRefNode"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "missingFacts": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Missingfacts",
+          "type": "array"
+        },
+        "nextAction": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Nextaction"
+        },
+        "phase": {
+          "title": "Phase",
+          "type": "string"
+        },
+        "providers": {
+          "items": {
+            "$ref": "#/$defs/ProviderBootNode"
+          },
+          "title": "Providers",
+          "type": "array"
+        },
+        "repoName": {
+          "title": "Reponame",
+          "type": "string"
+        },
+        "retryArgs": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Retryargs"
+        },
+        "seedFallback": {
+          "default": false,
+          "title": "Seedfallback",
+          "type": "boolean"
+        },
+        "setupState": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Setupstate"
+        },
+        "sourceFiles": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Sourcefiles",
+          "type": "array"
+        },
+        "summary": {
+          "default": "",
+          "title": "Summary",
+          "type": "string"
+        },
+        "taskId": {
+          "title": "Taskid",
+          "type": "string"
+        },
+        "taskName": {
+          "title": "Taskname",
+          "type": "string"
+        },
+        "worktreeGroup": {
+          "title": "Worktreegroup",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "enclosure",
+        "worktreeGroup",
+        "taskId",
+        "taskName",
+        "repoName",
+        "phase",
+        "health",
+        "codeSource",
+        "codeWorktree",
+        "memoryMode",
+        "humanReviewStatus",
+        "closeoutStatus",
+        "integrationStatus",
+        "cleanup"
+      ],
+      "title": "EngineProcessNode",
+      "type": "object"
+    },
+    "ExpectationRowNode": {
+      "additionalProperties": false,
+      "description": "A durable what-must-happen-by-when row (R2/R5, 260707-HFX2-L1): projected for dashboard/\narchitect observability. An L2 predicate reads ``ExpectationRowStore`` directly, never this\nnode -- surfacing only, never the correctness path.",
+      "properties": {
+        "dueAt": {
+          "title": "Dueat",
+          "type": "string"
+        },
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "title": "Kind",
+          "type": "string"
+        },
+        "leafKey": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Leafkey"
+        },
+        "note": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Note"
+        },
+        "overdue": {
+          "default": false,
+          "title": "Overdue",
+          "type": "boolean"
+        },
+        "sourceId": {
+          "title": "Sourceid",
+          "type": "string"
+        },
+        "state": {
+          "title": "State",
+          "type": "string"
+        },
+        "subjectAgentId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Subjectagentid"
+        },
+        "subjectLifecycleId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Subjectlifecycleid"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "state",
+        "sourceId",
+        "dueAt"
+      ],
+      "title": "ExpectationRowNode",
+      "type": "object"
+    },
+    "GateNode": {
+      "additionalProperties": false,
+      "description": "A durable gate materialized into the projection (slice 6c): the dashboard's\nreview surface for a decision point on a lifecycle.\n\nDistinct from the event-derived ``ask`` proto-gate -- this is the persisted\n``GateRecord`` (``controlplane``) the operator acts on. ``decisions`` is the set\nof verbs the cockpit may POST for an open gate (empty once decided), so the UI\nrenders the affordances straight from the reducer, never inferring them.",
+      "properties": {
+        "decidedBy": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Decidedby"
+        },
+        "decidedVia": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Decidedvia"
+        },
+        "decisions": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Decisions",
+          "type": "array"
+        },
+        "evidenceRefs": {
+          "items": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "title": "Evidencerefs",
+          "type": "array"
+        },
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "title": "Kind",
+          "type": "string"
+        },
+        "packet": {
+          "additionalProperties": true,
+          "title": "Packet",
+          "type": "object"
+        },
+        "state": {
+          "title": "State",
+          "type": "string"
+        },
+        "ts": {
+          "title": "Ts",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "state",
+        "ts"
+      ],
+      "title": "GateNode",
+      "type": "object"
+    },
+    "LandingRefNode": {
+      "additionalProperties": false,
+      "description": "One remote/PR participant in the successful-landing arc (slice 5h).\n\nThe landing tail references refs the *worktree* projection has no node for -- ``origin/main``,\n``origin/<feat>``, the PR, ``origin/mem-main``. Like :class:`CommitRefNode`, ``factState`` is the\nhonesty axis so the cockpit never animates a *planned* PR as an observed one: ``observed`` means a\nlive probe (``git ls-remote`` / ``gh``) confirmed it, ``planned`` is an expected-but-not-yet step,\nand ``missing`` is a probe that could not run (e.g. ``gh`` absent/unauthed).",
+      "properties": {
+        "at": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "At"
+        },
+        "detail": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Detail"
+        },
+        "factState": {
+          "default": "planned",
+          "enum": [
+            "observed",
+            "derived",
+            "planned",
+            "missing",
+            "stale",
+            "not-applicable"
+          ],
+          "title": "Factstate",
+          "type": "string"
+        },
+        "kind": {
+          "title": "Kind",
+          "type": "string"
+        },
+        "label": {
+          "title": "Label",
+          "type": "string"
+        },
+        "lastAttemptAt": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Lastattemptat"
+        },
+        "observedAt": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Observedat"
+        },
+        "staleSeconds": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Staleseconds"
+        },
+        "state": {
+          "title": "State",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "label",
+        "state"
+      ],
+      "title": "LandingRefNode",
+      "type": "object"
+    },
+    "LedgerNode": {
+      "additionalProperties": false,
+      "description": "A repo's memory ledger currency (slice 3b, surface 8).\n\n``closeoutCount`` is the ledger row count (one row per closeout); the rows carry\nno timestamps, so \"closeouts over time\" is deliberately not projected -- only the\ncount + the last-verified-code-commit currency.\n\n``rows`` is the newest ``LEDGER_WINDOW`` code<->memory mappings for the OFFICIAL coupler\npopover (5h); ``closeoutCount`` stays the full total so the popover's \"+N more\" footer is right.",
+      "properties": {
+        "baseCodeCommit": {
+          "title": "Basecodecommit",
+          "type": "string"
+        },
+        "closeoutCount": {
+          "default": 0,
+          "title": "Closeoutcount",
+          "type": "integer"
+        },
+        "lastVerifiedCodeCommit": {
+          "title": "Lastverifiedcodecommit",
+          "type": "string"
+        },
+        "repository": {
+          "title": "Repository",
+          "type": "string"
+        },
+        "rows": {
+          "items": {
+            "$ref": "#/$defs/LedgerRefNode"
+          },
+          "title": "Rows",
+          "type": "array"
+        }
+      },
+      "required": [
+        "repository",
+        "lastVerifiedCodeCommit",
+        "baseCodeCommit"
+      ],
+      "title": "LedgerNode",
+      "type": "object"
+    },
+    "LedgerRefNode": {
+      "additionalProperties": false,
+      "description": "One memory.md ledger row -- a code-commit -> memory-commit mapping (5h coupler popover).\n\nThe warp couplers stand for the memory.md ledger link; the popover renders a window of these\nrows with this enclosure's row highlighted. Full SHAs (the popover shortens them for display).\n\nThe optional ``*Subject`` / ``*Date`` fields are the per-side commit message + committer ISO\ndate, probed best-effort from the local repos in the snapshots I/O layer (5h Tier 2: \"hashes\nalone don't tell a story\"). They are ``None`` -- and, since the projection dumps\n``exclude_none=True``, omitted from the wire -- when the commit is not in the local repo or the\ngit probe could not run, so the popover row honestly falls back to the hash alone. Never faked.",
+      "properties": {
+        "codeCommit": {
+          "title": "Codecommit",
+          "type": "string"
+        },
+        "codeDate": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Codedate"
+        },
+        "codeSubject": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Codesubject"
+        },
+        "memoryCommit": {
+          "title": "Memorycommit",
+          "type": "string"
+        },
+        "memoryDate": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Memorydate"
+        },
+        "memorySubject": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Memorysubject"
+        }
+      },
+      "required": [
+        "codeCommit",
+        "memoryCommit"
+      ],
+      "title": "LedgerRefNode",
+      "type": "object"
+    },
+    "LifecycleProjection": {
+      "additionalProperties": false,
+      "description": "One lifecycle's resolved state, folded from its event log.\n\nFleeting lifecycles project as bare-bones entries (no ``enclosure``);\npersistent ones carry the full enclosure detail -- the slice-05 visual\ndistinction falls out of this shape, not UI inference.",
+      "properties": {
+        "actions": {
+          "items": {
+            "$ref": "#/$defs/ActionAvailability"
+          },
+          "title": "Actions",
+          "type": "array"
+        },
+        "ask": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Ask"
+        },
+        "enclosure": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Enclosure"
+        },
+        "fleeting": {
+          "title": "Fleeting",
+          "type": "boolean"
+        },
+        "gate": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/GateNode"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "inferred": {
+          "default": false,
+          "title": "Inferred",
+          "type": "boolean"
+        },
+        "lastEventTs": {
+          "title": "Lasteventts",
+          "type": "string"
+        },
+        "phase": {
+          "enum": [
+            "request",
+            "trust-checkpoint",
+            "reframe-research",
+            "decide",
+            "build",
+            "close"
+          ],
+          "title": "Phase",
+          "type": "string"
+        },
+        "repoId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Repoid"
+        },
+        "scope": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Scope"
+        },
+        "staleSeconds": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Staleseconds"
+        },
+        "startedAt": {
+          "title": "Startedat",
+          "type": "string"
+        },
+        "state": {
+          "enum": [
+            "running",
+            "paused",
+            "blocked",
+            "awaiting-developer",
+            "completed",
+            "abandoned"
+          ],
+          "title": "State",
+          "type": "string"
+        },
+        "stateEnteredAt": {
+          "default": "",
+          "title": "Stateenteredat",
+          "type": "string"
+        },
+        "tokenSeries": {
+          "items": {
+            "$ref": "#/$defs/TokenSample"
+          },
+          "title": "Tokenseries",
+          "type": "array"
+        },
+        "tokens": {
+          "default": 0,
+          "title": "Tokens",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "state",
+        "phase",
+        "fleeting",
+        "startedAt",
+        "lastEventTs"
+      ],
+      "title": "LifecycleProjection",
+      "type": "object"
+    },
+    "Metrics": {
+      "additionalProperties": false,
+      "description": "Workspace rollups: 3a point counts + the 3b derived aggregates.\n\nThe ``*Count`` fields below are not a free-form list: they are exactly\n:data:`STATE_COUNT_FIELDS` (one per non-terminal lifecycle state) plus ``lifecycleCount``,\nthe all-states total. They stay written out because they are the served contract the\ndashboard reads by name and pyright checks by name; what makes them non-drifting is that\nthe reducer fills them from the vocabulary and a test asserts this declaration equals it.\n\n``stalenessHistogram`` buckets every onboarding sidecar by the age of its\n``lastVerifiedCommitDate`` (slice 3b, surface 11) -- the git-free\nverification-age distribution note 03 wanted, computed without classifying\ndrift. Per-lifecycle token *series* live on each ``LifecycleProjection``; these\nare the workspace-wide rollups.",
+      "properties": {
+        "awaitingDeveloperCount": {
+          "default": 0,
+          "title": "Awaitingdevelopercount",
+          "type": "integer"
+        },
+        "blockedCount": {
+          "default": 0,
+          "title": "Blockedcount",
+          "type": "integer"
+        },
+        "lifecycleCount": {
+          "default": 0,
+          "title": "Lifecyclecount",
+          "type": "integer"
+        },
+        "pausedCount": {
+          "default": 0,
+          "title": "Pausedcount",
+          "type": "integer"
+        },
+        "runningCount": {
+          "default": 0,
+          "title": "Runningcount",
+          "type": "integer"
+        },
+        "stalenessHistogram": {
+          "additionalProperties": {
+            "type": "integer"
+          },
+          "title": "Stalenesshistogram",
+          "type": "object"
+        },
+        "totalTokens": {
+          "default": 0,
+          "title": "Totaltokens",
+          "type": "integer"
+        }
+      },
+      "title": "Metrics",
+      "type": "object"
+    },
+    "ProviderBootNode": {
+      "additionalProperties": false,
+      "description": "One isolated engine in a worktree's provider runtime: CGC (code) or GrepAI (memory).\n\nThe boot *sequence* (seed/clone/watcher phases) lives on the owning\n:class:`EngineProcessNode` because provider setup is one progress file per worktree\ngroup; this node is the engine's identity + its current runtime health.",
+      "properties": {
+        "factState": {
+          "default": "observed",
+          "enum": [
+            "observed",
+            "derived",
+            "planned",
+            "missing",
+            "stale",
+            "not-applicable"
+          ],
+          "title": "Factstate",
+          "type": "string"
+        },
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "role": {
+          "title": "Role",
+          "type": "string"
+        },
+        "runtimeState": {
+          "title": "Runtimestate",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "role",
+        "runtimeState"
+      ],
+      "title": "ProviderBootNode",
+      "type": "object"
+    },
+    "ProviderNode": {
+      "additionalProperties": false,
+      "description": "One provider's current-state snapshot (data surfaces 1 and 4).\n\n``snapshotStaleSeconds`` is the age of the ``current.json`` file: provider\nstate is call-triggered and stale between calls, so the reducer surfaces how\nold the snapshot is rather than pretending it is live. Workspace providers\ncan be aggregate nodes or repo-covered nodes when the provider snapshot\ncarries per-repo evidence. Worktree providers carry ``worktreeGroup`` and\nbind to their isolated enclosure.",
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "indexingState": {
+          "default": "unknown",
+          "title": "Indexingstate",
+          "type": "string"
+        },
+        "ok": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Ok"
+        },
+        "repoId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Repoid"
+        },
+        "role": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Role"
+        },
+        "scope": {
+          "default": "workspace",
+          "title": "Scope",
+          "type": "string"
+        },
+        "snapshotStaleSeconds": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Snapshotstaleseconds"
+        },
+        "state": {
+          "title": "State",
+          "type": "string"
+        },
+        "watcherUp": {
+          "default": false,
+          "title": "Watcherup",
+          "type": "boolean"
+        },
+        "worktreeGroup": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Worktreegroup"
+        }
+      },
+      "required": [
+        "id",
+        "state"
+      ],
+      "title": "ProviderNode",
+      "type": "object"
+    },
+    "RouteCoverageNode": {
+      "additionalProperties": false,
+      "description": "One onboarding route's coverage, from its ``overview.index.json`` (3b, surface 10).",
+      "properties": {
+        "childRoutes": {
+          "default": 0,
+          "title": "Childroutes",
+          "type": "integer"
+        },
+        "fileSidecars": {
+          "default": 0,
+          "title": "Filesidecars",
+          "type": "integer"
+        },
+        "repository": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Repository"
+        },
+        "route": {
+          "title": "Route",
+          "type": "string"
+        },
+        "sourceFilesInScope": {
+          "default": 0,
+          "title": "Sourcefilesinscope",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "route"
+      ],
+      "title": "RouteCoverageNode",
+      "type": "object"
+    },
+    "SeriesNode": {
+      "additionalProperties": false,
+      "description": "A series master's progress, keyed by its task FOLDER (R1 -- never a lifecycle).\n\nThe master is also projected as a :class:`TaskDocNode` for direct document selection.\n``SeriesNode`` is the folder-keyed aggregation/compatibility surface: the master\nchecklist where each subtask is one checkbox and ``doneCount`` counts the *declared*\n``Completed`` subtasks, authoritative over a slice's own internal steps. Carries the\nfull master render (subTasks + sections + decisions) so older clients can still render\nthe series reader.",
+      "properties": {
+        "ageSeconds": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Ageseconds"
+        },
+        "createdAt": {
+          "default": "",
+          "title": "Createdat",
+          "type": "string"
+        },
+        "decisions": {
+          "items": {
+            "$ref": "#/$defs/TaskDecisionNode"
+          },
+          "title": "Decisions",
+          "type": "array"
+        },
+        "docPath": {
+          "title": "Docpath",
+          "type": "string"
+        },
+        "doneCount": {
+          "default": 0,
+          "title": "Donecount",
+          "type": "integer"
+        },
+        "objective": {
+          "default": "",
+          "title": "Objective",
+          "type": "string"
+        },
+        "repository": {
+          "title": "Repository",
+          "type": "string"
+        },
+        "sections": {
+          "items": {
+            "$ref": "#/$defs/SeriesSectionNode"
+          },
+          "title": "Sections",
+          "type": "array"
+        },
+        "seriesId": {
+          "title": "Seriesid",
+          "type": "string"
+        },
+        "seriesTokenTotal": {
+          "default": 0,
+          "title": "Seriestokentotal",
+          "type": "integer"
+        },
+        "status": {
+          "title": "Status",
+          "type": "string"
+        },
+        "subTasks": {
+          "items": {
+            "$ref": "#/$defs/SeriesSubTaskNode"
+          },
+          "title": "Subtasks",
+          "type": "array"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        },
+        "totalCount": {
+          "default": 0,
+          "title": "Totalcount",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "seriesId",
+        "repository",
+        "title",
+        "status",
+        "docPath"
+      ],
+      "title": "SeriesNode",
+      "type": "object"
+    },
+    "SeriesSectionNode": {
+      "additionalProperties": false,
+      "description": "One ordered render section of a series master (freeform prose or a structured block).",
+      "properties": {
+        "body": {
+          "default": "",
+          "title": "Body",
+          "type": "string"
+        },
+        "heading": {
+          "title": "Heading",
+          "type": "string"
+        },
+        "kind": {
+          "title": "Kind",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "heading"
+      ],
+      "title": "SeriesSectionNode",
+      "type": "object"
+    },
+    "SeriesSubTaskNode": {
+      "additionalProperties": false,
+      "description": "One subtask of a series master -- a single checkbox.\n\n``status`` is the lever: ``planning`` -> ⬜, ``inProgress`` -> 🔨, ``Completed`` -> ✅.\n``createdAt`` is resolved from the referenced leaf task document when present; the dashboard\nuses it for creation-order display without parsing file-name prefixes.",
+      "properties": {
+        "createdAt": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Createdat"
+        },
+        "file": {
+          "default": "",
+          "title": "File",
+          "type": "string"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "number": {
+          "title": "Number",
+          "type": "string"
+        },
+        "scope": {
+          "default": "",
+          "title": "Scope",
+          "type": "string"
+        },
+        "status": {
+          "title": "Status",
+          "type": "string"
+        }
+      },
+      "required": [
+        "number",
+        "name",
+        "status"
+      ],
+      "title": "SeriesSubTaskNode",
+      "type": "object"
+    },
+    "SetupProgressNode": {
+      "additionalProperties": false,
+      "description": "A worktree group's live provider-setup progress (slice 3b, surface 3).\n\nProjected through ``setup_progress.progress_status``, so a ``running`` group\nwhose heartbeat went stale reads ``stale`` -- the boot-sequence widget data.",
+      "properties": {
+        "completedCount": {
+          "default": 0,
+          "title": "Completedcount",
+          "type": "integer"
+        },
+        "currentPhase": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Currentphase"
+        },
+        "failedPhases": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Failedphases",
+          "type": "array"
+        },
+        "group": {
+          "title": "Group",
+          "type": "string"
+        },
+        "heartbeatAgeSeconds": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Heartbeatageseconds"
+        },
+        "state": {
+          "title": "State",
+          "type": "string"
+        }
+      },
+      "required": [
+        "group",
+        "state"
+      ],
+      "title": "SetupProgressNode",
+      "type": "object"
+    },
+    "SetupSummaryNode": {
+      "additionalProperties": false,
+      "description": "The latest provider-setup outcome for one action (slice 3b, surface 2).",
+      "properties": {
+        "action": {
+          "title": "Action",
+          "type": "string"
+        },
+        "generatedAt": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Generatedat"
+        },
+        "ok": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Ok"
+        },
+        "ready": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Ready"
+        },
+        "resultCounts": {
+          "additionalProperties": {
+            "type": "integer"
+          },
+          "title": "Resultcounts",
+          "type": "object"
+        },
+        "snapshotStaleSeconds": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Snapshotstaleseconds"
+        },
+        "state": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "State"
+        }
+      },
+      "required": [
+        "action"
+      ],
+      "title": "SetupSummaryNode",
+      "type": "object"
+    },
+    "SidecarStaleNode": {
+      "additionalProperties": false,
+      "description": "One onboarding sidecar's verification age (slice 3b, surface 11; git-free).\n\nRead from the sidecar's table metadata (``lastVerifiedCommitDate``) with no git\n-- the always-on complement to the drift snapshot. The projection carries only\nthe *stalest* bounded sample (a leaderboard); the full distribution is the\n``Metrics.stalenessHistogram`` rollup.",
+      "properties": {
+        "ageSeconds": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Ageseconds"
+        },
+        "lastVerifiedDate": {
+          "title": "Lastverifieddate",
+          "type": "string"
+        },
+        "onboardingFile": {
+          "title": "Onboardingfile",
+          "type": "string"
+        },
+        "repository": {
+          "title": "Repository",
+          "type": "string"
+        }
+      },
+      "required": [
+        "onboardingFile",
+        "repository",
+        "lastVerifiedDate"
+      ],
+      "title": "SidecarStaleNode",
+      "type": "object"
+    },
+    "TaskCodeExampleNode": {
+      "additionalProperties": false,
+      "description": "One proposed-code-example block of a task document (the plan's distinct change shapes).",
+      "properties": {
+        "distinctChange": {
+          "title": "Distinctchange",
+          "type": "string"
+        },
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "language": {
+          "default": "",
+          "title": "Language",
+          "type": "string"
+        },
+        "snippet": {
+          "default": "",
+          "title": "Snippet",
+          "type": "string"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        },
+        "why": {
+          "title": "Why",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "distinctChange",
+        "why"
+      ],
+      "title": "TaskCodeExampleNode",
+      "type": "object"
+    },
+    "TaskDecisionNode": {
+      "additionalProperties": false,
+      "description": "One decision-log row of a task document.",
+      "properties": {
+        "at": {
+          "title": "At",
+          "type": "string"
+        },
+        "decision": {
+          "title": "Decision",
+          "type": "string"
+        },
+        "rationale": {
+          "title": "Rationale",
+          "type": "string"
+        }
+      },
+      "required": [
+        "at",
+        "decision",
+        "rationale"
+      ],
+      "title": "TaskDecisionNode",
+      "type": "object"
+    },
+    "TaskDocNode": {
+      "additionalProperties": false,
+      "description": "A task document's progress and reader content (slice 3c, surface 7).\n\nRead from the JSON-primary ``ar-task-document/v1`` document, so the dashboard\ncan show what a task is doing without opening files on disk. ``lifecycleId``\nis runtime attachment, not the admission ticket: planning documents can be\nprojected before an enclosure or lifecycle exists.",
+      "properties": {
+        "ageSeconds": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Ageseconds"
+        },
+        "bodyRevision": {
+          "default": "",
+          "title": "Bodyrevision",
+          "type": "string"
+        },
+        "codeExamples": {
+          "items": {
+            "$ref": "#/$defs/TaskCodeExampleNode"
+          },
+          "title": "Codeexamples",
+          "type": "array"
+        },
+        "createdAt": {
+          "default": "",
+          "title": "Createdat",
+          "type": "string"
+        },
+        "currentStep": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Currentstep"
+        },
+        "decisions": {
+          "items": {
+            "$ref": "#/$defs/TaskDecisionNode"
+          },
+          "title": "Decisions",
+          "type": "array"
+        },
+        "design": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Design"
+        },
+        "docPath": {
+          "title": "Docpath",
+          "type": "string"
+        },
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "title": "Kind",
+          "type": "string"
+        },
+        "lifecycleId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Lifecycleid"
+        },
+        "masterLifecycleId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Masterlifecycleid"
+        },
+        "objective": {
+          "default": "",
+          "title": "Objective",
+          "type": "string"
+        },
+        "openQuestions": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Openquestions",
+          "type": "array"
+        },
+        "orchestrates": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Orchestrates",
+          "type": "array"
+        },
+        "references": {
+          "items": {
+            "type": "string"
+          },
+          "title": "References",
+          "type": "array"
+        },
+        "repository": {
+          "title": "Repository",
+          "type": "string"
+        },
+        "requirements": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Requirements",
+          "type": "array"
+        },
+        "sections": {
+          "items": {
+            "$ref": "#/$defs/TaskSectionNode"
+          },
+          "title": "Sections",
+          "type": "array"
+        },
+        "status": {
+          "title": "Status",
+          "type": "string"
+        },
+        "steps": {
+          "items": {
+            "$ref": "#/$defs/TaskStepNode"
+          },
+          "title": "Steps",
+          "type": "array"
+        },
+        "stepsDone": {
+          "default": 0,
+          "title": "Stepsdone",
+          "type": "integer"
+        },
+        "stepsTotal": {
+          "default": 0,
+          "title": "Stepstotal",
+          "type": "integer"
+        },
+        "subTasks": {
+          "items": {
+            "$ref": "#/$defs/TaskSubTaskRefNode"
+          },
+          "title": "Subtasks",
+          "type": "array"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "repository",
+        "title",
+        "status",
+        "kind",
+        "docPath"
+      ],
+      "title": "TaskDocNode",
+      "type": "object"
+    },
+    "TaskSectionNode": {
+      "additionalProperties": false,
+      "description": "One ordered section of a master's render plan: freeform prose or a generated block (6g).\n\nMirrors ``tasks.document.Section`` so the master overview renders its bespoke sections in order.",
+      "properties": {
+        "body": {
+          "default": "",
+          "title": "Body",
+          "type": "string"
+        },
+        "heading": {
+          "title": "Heading",
+          "type": "string"
+        },
+        "kind": {
+          "title": "Kind",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "heading"
+      ],
+      "title": "TaskSectionNode",
+      "type": "object"
+    },
+    "TaskStepDispositionNode": {
+      "additionalProperties": false,
+      "description": "Why and when one exact task work unit was intentionally skipped.",
+      "properties": {
+        "kind": {
+          "const": "intentionalSkip",
+          "title": "Kind",
+          "type": "string"
+        },
+        "lifecycleId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Lifecycleid"
+        },
+        "reason": {
+          "title": "Reason",
+          "type": "string"
+        },
+        "recordedAt": {
+          "title": "Recordedat",
+          "type": "string"
+        },
+        "recordedVia": {
+          "const": "task_doc.skip_step",
+          "title": "Recordedvia",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "reason",
+        "recordedAt",
+        "recordedVia"
+      ],
+      "title": "TaskStepDispositionNode",
+      "type": "object"
+    },
+    "TaskStepNode": {
+      "additionalProperties": false,
+      "description": "One step of a task document, with its substeps -- the actual task *content* (slice 5c).\n\nThe 3c projection carried only step counts; the cockpit detail needs the step list itself to\nshow what a lifecycle is actually doing, so the served node carries the titles + statuses.",
+      "properties": {
+        "disposition": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TaskStepDispositionNode"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "status": {
+          "title": "Status",
+          "type": "string"
+        },
+        "substeps": {
+          "items": {
+            "$ref": "#/$defs/TaskSubStepNode"
+          },
+          "title": "Substeps",
+          "type": "array"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "status"
+      ],
+      "title": "TaskStepNode",
+      "type": "object"
+    },
+    "TaskSubStepNode": {
+      "additionalProperties": false,
+      "description": "One substep of a task step (the JSON's finer-grained progress unit).",
+      "properties": {
+        "disposition": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TaskStepDispositionNode"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "status": {
+          "title": "Status",
+          "type": "string"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "status"
+      ],
+      "title": "TaskSubStepNode",
+      "type": "object"
+    },
+    "TaskSubTaskRefNode": {
+      "additionalProperties": false,
+      "description": "One slice in a master's series index -- the drill-in row (slice 6g).\n\nMirrors ``tasks.document.SubTaskRef``: ``status`` drives the index marker and ``file`` is the\ndrill-in match key (its stem resolves to the slice document's slug).",
+      "properties": {
+        "file": {
+          "default": "",
+          "title": "File",
+          "type": "string"
+        },
+        "linkedLifecycleId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Linkedlifecycleid"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "number": {
+          "title": "Number",
+          "type": "string"
+        },
+        "scope": {
+          "default": "",
+          "title": "Scope",
+          "type": "string"
+        },
+        "status": {
+          "title": "Status",
+          "type": "string"
+        }
+      },
+      "required": [
+        "number",
+        "name",
+        "status"
+      ],
+      "title": "TaskSubTaskRefNode",
+      "type": "object"
+    },
+    "TokenSample": {
+      "additionalProperties": false,
+      "description": "One point on a lifecycle's cumulative-token fuel gauge (slice 3b, §2.4).\n\nDerived from the event log: every ``tool.completed`` event carries the tokens\nthat call cost, so the running total over event timestamps is the time series\nnote 03 gap #2 (\"no token-spend persistence\") wanted -- now derivable because\nthe event substrate (slice 02) persists it.",
+      "properties": {
+        "cumulative": {
+          "title": "Cumulative",
+          "type": "integer"
+        },
+        "ts": {
+          "title": "Ts",
+          "type": "string"
+        }
+      },
+      "required": [
+        "ts",
+        "cumulative"
+      ],
+      "title": "TokenSample",
+      "type": "object"
+    },
+    "ToolReportNode": {
+      "additionalProperties": false,
+      "description": "A recent verbose tool-report file (slice 3b, surface 12; bounded keep-last-5).",
+      "properties": {
+        "ageSeconds": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Ageseconds"
+        },
+        "label": {
+          "title": "Label",
+          "type": "string"
+        },
+        "path": {
+          "title": "Path",
+          "type": "string"
+        },
+        "tool": {
+          "title": "Tool",
+          "type": "string"
+        }
+      },
+      "required": [
+        "tool",
+        "path",
+        "label"
+      ],
+      "title": "ToolReportNode",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "The whole resolved tree: lifecycles + enclosures + providers + metrics + analytics.",
+  "properties": {
+    "activeWorktreeGroups": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Activeworktreegroups",
+      "type": "array"
+    },
+    "analytics": {
+      "$ref": "#/$defs/Analytics"
+    },
+    "enclosures": {
+      "items": {
+        "$ref": "#/$defs/EnclosureNode"
+      },
+      "title": "Enclosures",
+      "type": "array"
+    },
+    "generatedAt": {
+      "title": "Generatedat",
+      "type": "string"
+    },
+    "lifecycles": {
+      "items": {
+        "$ref": "#/$defs/LifecycleProjection"
+      },
+      "title": "Lifecycles",
+      "type": "array"
+    },
+    "metrics": {
+      "$ref": "#/$defs/Metrics"
+    },
+    "providers": {
+      "items": {
+        "$ref": "#/$defs/ProviderNode"
+      },
+      "title": "Providers",
+      "type": "array"
+    },
+    "version": {
+      "default": 2,
+      "title": "Version",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "generatedAt"
+  ],
+  "title": "WorkspaceProjection",
+  "type": "object"
+}

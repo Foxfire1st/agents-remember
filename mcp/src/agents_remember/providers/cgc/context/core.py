@@ -269,6 +269,44 @@ def _resolve_optional_path(candidate: Path | None, default: Path) -> Path:
     return (candidate or default).resolve()
 
 
+def _unresolved_template_path(value: Any, variables: dict[str, str]) -> Path:
+    """A templated path left exactly as the template spelled it.
+
+    Deliberately not :func:`_template_path`, which calls ``.resolve()``. These two settings
+    are read back and compared against what the runtime installer wrote, so resolving them
+    here would turn an equal pair into an unequal one on any checkout reached through a
+    symlink.
+    """
+    return Path(expand_template(str(value), variables))
+
+
+def _cgc_instance(
+    provider_settings: dict[str, Any],
+    base_variables: dict[str, str],
+    instance_root: Path,
+    state_file: Path,
+) -> CgcInstance:
+    """The per-repository instance paths, templated from settings with packaged defaults."""
+    return CgcInstance(
+        runtime_root=instance_root,
+        requirements_file=_unresolved_template_path(
+            provider_settings.get(
+                "requirementsFile",
+                "<coordination_root>/providers/requirements/codegraphcontext.txt",
+            ),
+            base_variables,
+        ),
+        patches_root=_unresolved_template_path(
+            provider_settings.get(
+                "patchesRoot",
+                "<coordination_root>/providers/patches/codegraphcontext",
+            ),
+            base_variables,
+        ),
+        state_file=state_file,
+    )
+
+
 def cgc_runtime_layout_from_provider_settings(
     *,
     coordination_root: Path,
@@ -325,32 +363,7 @@ def cgc_runtime_layout_from_provider_settings(
             code_repo_root=code_repo_root,
             cgcignore_patterns=_cgcignore_patterns_from_settings(provider_settings, root_settings),
         ),
-        instance=CgcInstance(
-            runtime_root=instance_root,
-            requirements_file=Path(
-                expand_template(
-                    str(
-                        provider_settings.get(
-                            "requirementsFile",
-                            "<coordination_root>/providers/requirements/codegraphcontext.txt",
-                        )
-                    ),
-                    base_variables,
-                )
-            ),
-            patches_root=Path(
-                expand_template(
-                    str(
-                        provider_settings.get(
-                            "patchesRoot",
-                            "<coordination_root>/providers/patches/codegraphcontext",
-                        )
-                    ),
-                    base_variables,
-                )
-            ),
-            state_file=state_file,
-        ),
+        instance=_cgc_instance(provider_settings, base_variables, instance_root, state_file),
         watcher=CgcWatcher(
             image=runner_image,
             build_root=image_build_root,

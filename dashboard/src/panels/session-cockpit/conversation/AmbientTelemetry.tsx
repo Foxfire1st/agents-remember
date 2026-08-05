@@ -55,26 +55,29 @@ export function AmbientTelemetry({
   sessionId,
   epoch,
   statusRevision,
+  active = true,
   base,
 }: {
   sessionId: string;
   epoch: string | undefined;
   /** Bumps refresh when the turn/status advances (ambient, not per-token). */
   statusRevision: number | undefined;
+  /** A retained hidden chat keeps its last chips but owns no background telemetry request. */
+  active?: boolean;
   base?: string;
 }) {
   const [telemetry, setTelemetry] = useState<ConversationTelemetry | null>(null);
 
   useEffect(() => {
-    if (epoch === undefined) return undefined;
-    let cancelled = false;
-    void fetchConversationTelemetry(sessionId, epoch, base ?? "").then((next) => {
-      if (!cancelled) setTelemetry(next);
+    if (!active || epoch === undefined) return undefined;
+    const controller = new AbortController();
+    void fetchConversationTelemetry(sessionId, epoch, base ?? "", fetch, controller.signal).then((next) => {
+      if (!controller.signal.aborted) setTelemetry(next);
     });
     return () => {
-      cancelled = true;
+      controller.abort();
     };
-  }, [sessionId, epoch, statusRevision, base]);
+  }, [sessionId, epoch, statusRevision, active, base]);
 
   if (telemetry === null) return null;
   const chips = usageChips(telemetry);

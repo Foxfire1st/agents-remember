@@ -27,12 +27,18 @@ from _agent_wire_fixtures import (
     turn_completed_params,
     turn_started_params,
 )
-from agents_remember.serving.codex_app_server_adapter import (
+from agents_remember.errors import CodexAppServerError
+from agents_remember.serving.codex_app_server_adapter import CodexAppServerAdapter
+from agents_remember.serving.codex_app_server_events import (
     ADAPTER_EVENT_QUEUE_LIMIT,
-    THREAD_REGISTRY_LIMIT,
-    CodexAppServerAdapter,
+    CodexEventQueue,
 )
 from agents_remember.serving.codex_app_server_protocol import JsonObject
+from agents_remember.serving.codex_app_server_threads import (
+    ITEM_THREAD_INDEX_LIMIT,
+    THREAD_REGISTRY_LIMIT,
+    CodexThreadRegistry,
+)
 from agents_remember.serving.harness_control_models import (
     AR_EVIDENCE_KEY,
     AdapterEvent,
@@ -43,6 +49,7 @@ from test_codex_app_server_adapter import (
     FakeCodexTransport,
     fixture,
     fixture_object,
+    identity,
     launch,
     make_adapter,
     prime_start,
@@ -61,6 +68,11 @@ async def eventually(predicate: Callable[[], bool]) -> None:
             return
         await asyncio.sleep(0)
     raise AssertionError("condition was not reached")
+
+
+def _completed(adapter: CodexAppServerAdapter, thread_id: str, turn_id: str) -> bool:
+    state = adapter._threads.state(thread_id)
+    return state is not None and turn_id in state.completed_turns
 
 
 def live_snapshot(adapter: CodexAppServerAdapter) -> AdapterSnapshot:
@@ -143,12 +155,13 @@ async def test_spawned_subagent_traffic_never_fails_the_bridge() -> None:
         # never moved the parent activity, and the parent's own completion idled it.
         assert snap.activity == "idle"
         for index, thread_id in enumerate(agents):
-            state = adapter._threads[thread_id]
+            state = adapter._threads.state(thread_id)
+            assert state is not None
             assert not state.is_parent
             assert state.status == "completed"
             assert state.active_turn_id is None
             assert list(state.completed_turns) == [f"agent-turn-{index}"]
-        assert adapter._parent_state().active_turn_id is None
+        assert adapter._threads.parent().active_turn_id is None
 
         delta_threads = set()
         transcript_threads = set()
@@ -235,7 +248,7 @@ async def test_collab_items_bind_agent_identity_into_the_registry() -> None:
                 ),
             )
         )
-        await eventually(lambda: "agent-thread-9" in adapter._threads)
+        await eventually(lambda: adapter._threads.state("agent-thread-9") is not None)
         registry = agent_registry(adapter)
         assert registry["agent-thread-9"] == {"status": "running"}
 
@@ -306,8 +319,9 @@ async def test_unknown_item_delta_degrades_without_failing() -> None:
         assert isinstance(bound_payload, dict)
         assert bound_payload["threadId"] == "agent-thread-7"
 
-        await eventually(lambda: "agent-thread-7" in adapter._threads)
-        assert adapter._threads["agent-thread-7"].status == "unresolved"
+        await eventually(lambda: adapter._threads.state("agent-thread-7") is not None)
+        agent_state = adapter._threads.state("agent-thread-7")
+        assert agent_state is not None and agent_state.status == "unresolved"
         assert live_snapshot(adapter).control == "ready"
     finally:
         await adapter.stop("forced")
@@ -433,7 +447,7 @@ async def test_registry_full_degrades_and_settled_threads_evict() -> None:
         # Fill the registry with actively-turning agents: none is evictable.
         for index in range(THREAD_REGISTRY_LIMIT - 1):
             transport.emit(agent_turn_started(f"agent-fill-{index}", f"agent-fill-turn-{index}"))
-        await eventually(lambda: len(adapter._threads) >= THREAD_REGISTRY_LIMIT)
+        await eventually(lambda: len(adapter._threads.thread_ids()) >= THREAD_REGISTRY_LIMIT)
         assert live_snapshot(adapter).control == "ready"
 
         # The next foreign thread cannot register: its frame degrades to raw evidence.
@@ -448,16 +462,14 @@ async def test_registry_full_degrades_and_settled_threads_evict() -> None:
         payload = degraded[AR_EVIDENCE_KEY]
         assert isinstance(payload, dict)
         assert payload["threadId"] == "agent-overflow"
-        assert "agent-overflow" not in adapter._threads
+        assert adapter._threads.state("agent-overflow") is None
 
         # Once an agent's turn completes, that settled thread IS evicted to make room.
         transport.emit(agent_turn_completed("agent-fill-0", "agent-fill-turn-0"))
-        await eventually(
-            lambda: "agent-fill-turn-0" in adapter._threads["agent-fill-0"].completed_turns
-        )
+        await eventually(lambda: _completed(adapter, "agent-fill-0", "agent-fill-turn-0"))
         transport.emit(agent_turn_started("agent-after-evict", "agent-after-evict-turn"))
-        await eventually(lambda: "agent-after-evict" in adapter._threads)
-        assert "agent-fill-0" not in adapter._threads
+        await eventually(lambda: adapter._threads.state("agent-after-evict") is not None)
+        assert adapter._threads.state("agent-fill-0") is None
         assert live_snapshot(adapter).control == "ready"
     finally:
         await adapter.stop("forced")
@@ -725,22 +737,17 @@ async def test_delta_flood_sheds_oldest_deltas_with_an_honest_notice() -> None:
         assert adapter._event_sequence == 6 + total_deltas  # nothing un-sequenced, no raise
 
         # Structural completions survived the shed; the shed count is accounted.
-        drained: list[AdapterEvent] = []
-        while not adapter._events.empty():
-            event = adapter._events.get_nowait()
-            if event is not None:
-                drained.append(event)
+        drained = [event for event in adapter._events.drain() if event is not None]
         completions = [event for event in drained if event.kind == "transcript"]
         assert len(completions) == len(agents)
-        assert adapter._dropped_events > 0
+        assert adapter._events.dropped > 0
 
         # Once the consumer catches up, one notice crosses with the shed count.
         transport.emit(agent_status_changed("flood-1"))
         notice: AdapterEvent | None = None
         for _ in range(100):
             await asyncio.sleep(0)
-            while not adapter._events.empty():
-                candidate = adapter._events.get_nowait()
+            for candidate in adapter._events.drain():
                 if candidate is not None and candidate.raw.get("codexMethod") == "ar/load-shed":
                     notice = candidate
             if notice is not None:
@@ -768,7 +775,7 @@ async def _flood_deltas(
             )
         )
     await eventually(lambda: adapter._event_sequence == total)
-    assert adapter._dropped_events == 76
+    assert adapter._events.dropped == 76
     return 76
 
 
@@ -799,7 +806,7 @@ async def test_load_shed_notice_crosses_on_consumer_drain_without_new_traffic() 
         assert isinstance(payload, dict)
         assert payload["droppedEvents"] == dropped
         assert len(seen) == ADAPTER_EVENT_QUEUE_LIMIT + 1  # queue contents + notice
-        assert adapter._dropped_events == 0
+        assert adapter._events.dropped == 0
         assert live_snapshot(adapter).control == "ready"
     finally:
         await adapter.stop("forced")
@@ -817,9 +824,8 @@ async def test_load_shed_notice_precedes_the_close_sentinel_on_stop() -> None:
     try:
         dropped = await _flood_deltas(adapter, transport, "flood-stop")
         # A synchronous drain leaves the residual shed accounting behind.
-        while not adapter._events.empty():
-            adapter._events.get_nowait()
-        assert adapter._dropped_events == dropped
+        adapter._events.drain()
+        assert adapter._events.dropped == dropped
 
         await adapter.stop("forced")
         # The subscriber sees the notice, then termination — the minted order ends
@@ -832,6 +838,234 @@ async def test_load_shed_notice_precedes_the_close_sentinel_on_stop() -> None:
         payload = seen[0].raw[AR_EVIDENCE_KEY]
         assert isinstance(payload, dict)
         assert payload["droppedEvents"] == dropped
-        assert adapter._dropped_events == 0
+        assert adapter._events.dropped == 0
     finally:
         await adapter.stop("forced")
+
+
+# --- the registry on its own -------------------------------------------------------------
+#
+# Everything above drives the demux through a live adapter and a transport, which is the
+# right shape for "interleaved traffic must not kill the seat". These reach
+# `CodexThreadRegistry` directly, because the cases below are about what the registry does
+# with a frame the adapter would never manufacture: an identity that is not established
+# yet, a thread that turns out to be the seat's own after it was registered as a stranger,
+# and item/delta frames whose shapes are malformed. Producing those through the transport
+# would mean asserting on a fake vendor rather than on the demux.
+
+
+def _registry(
+    session_thread_id: str | None = "session-thread",
+) -> tuple[CodexThreadRegistry, list[str], list[int]]:
+    """A registry, a one-slot box for its session thread id, and its on_register counter."""
+
+    identity = [session_thread_id or ""]
+    registrations: list[int] = []
+    registry = CodexThreadRegistry(
+        session_thread_id=lambda: identity[0] or None,
+        completed_turn_limit=4,
+        on_register=lambda: registrations.append(1),
+    )
+    return registry, identity, registrations
+
+
+def test_the_parent_thread_cannot_be_reached_before_the_session_has_an_identity() -> None:
+    # A frame that arrives between connect and thread/start has no parent to attribute to.
+    # Registering one under a made-up id would bind the seat to a thread the vendor never
+    # opened, so the demux refuses and the message loop degrades the frame to raw evidence.
+    registry, _identity, registrations = _registry(session_thread_id=None)
+
+    with pytest.raises(CodexAppServerError, match="thread identity is not established"):
+        registry.parent()
+
+    assert registry.thread_ids() == ()
+    assert registrations == []
+
+
+def test_a_stranger_thread_that_turns_out_to_be_the_seat_is_promoted_not_replaced() -> None:
+    # A reconnect can hand the adapter a different parent thread id, and traffic for it may
+    # already have auto-registered it as an agent. Promotion has to keep the live
+    # correlation the stranger accumulated -- replacing the state would strand the turn.
+    registry, identity, registrations = _registry()
+    stranger = registry.resolve({"threadId": "later-the-seat"}, context="thread/itemStarted")
+    stranger.active_turn_id = "turn-9"
+    assert (stranger.is_parent, stranger.status, len(registrations)) == (False, "unresolved", 1)
+
+    identity[0] = "later-the-seat"
+    promoted = registry.parent()
+
+    assert promoted is stranger
+    assert promoted.is_parent is True
+    assert promoted.active_turn_id == "turn-9"
+    # Promotion is not a new agent appearing; the published registry has not changed.
+    assert len(registrations) == 1
+    assert registry.agent_registry() == {}
+
+
+def test_the_session_thread_resolves_to_the_parent_rather_than_registering_a_stranger() -> None:
+    # The first frame naming the seat's own thread arrives before anything registered it.
+    # Falling through to auto-registration would file the seat in the agent registry.
+    registry, _identity, registrations = _registry()
+
+    state = registry.resolve({"threadId": "session-thread"}, context="thread/turnStarted")
+
+    assert state is registry.parent()
+    assert (state.is_parent, state.status) == (True, "active")
+    assert registrations == []
+    assert registry.agent_registry() == {}
+
+
+def test_an_interaction_id_nothing_holds_answers_none() -> None:
+    # Answers route by rpc id, so a response for an interaction that already settled (or
+    # never existed) must be reported as unowned rather than aimed at an arbitrary thread.
+    registry, _identity, _registrations = _registry()
+
+    assert registry.interaction_thread("no-such-interaction") is None
+
+    registry.resolve({"threadId": "agent-1"}, context="thread/itemStarted")
+    assert registry.interaction_thread("no-such-interaction") is None
+
+
+def test_an_item_frame_with_no_usable_id_teaches_the_index_nothing() -> None:
+    # `learn_item_thread` is fed raw vendor traffic, so a malformed shape must be skipped
+    # rather than indexed: a blank or non-text item id would bind every later delta that
+    # also arrived without a threadId to whichever thread wrote the malformed frame.
+    registry, _identity, _registrations = _registry()
+
+    registry.learn_item_thread({"threadId": "agent-1", "item": {"id": ""}})
+    registry.learn_item_thread({"threadId": "agent-1", "item": {"id": 7}})
+    registry.learn_item_thread({"threadId": "agent-1", "item": {}})
+
+    for item_id in ("", 7):
+        assert registry.route_delta_params("item/agentMessage/delta", {"itemId": item_id}) == {
+            "itemId": item_id
+        }
+
+
+def test_the_item_index_is_bounded_and_forgets_its_oldest_binding_first() -> None:
+    # The index is per-connection and unbounded traffic feeds it, so it has to be a window.
+    # Oldest-first is what keeps the bindings that still have deltas in flight.
+    registry, _identity, _registrations = _registry()
+    for index in range(ITEM_THREAD_INDEX_LIMIT + 1):
+        registry.learn_item_thread({"threadId": "agent-1", "item": {"id": f"item-{index}"}})
+
+    assert registry.route_delta_params("item/agentMessage/delta", {"itemId": "item-0"}) == {
+        "itemId": "item-0"
+    }
+    newest = f"item-{ITEM_THREAD_INDEX_LIMIT}"
+    assert registry.route_delta_params("item/agentMessage/delta", {"itemId": newest}) == {
+        "itemId": newest,
+        "threadId": "agent-1",
+    }
+
+
+@pytest.mark.parametrize(
+    ("method", "params"),
+    (
+        # Not a delta or patch frame: the index binds continuation traffic, and a frame that
+        # deliberately carries no threadId is not made to carry one retroactively.
+        ("item/agentMessage/completed", {"itemId": "item-1"}),
+        # A malformed itemId. `.get()` on an unhashable key raises, so the shape check is
+        # what keeps one bad frame from taking the message loop down.
+        ("item/agentMessage/delta", {"itemId": ["item-1"]}),
+    ),
+)
+def test_a_frame_the_index_may_not_bind_is_returned_exactly_as_it_arrived(
+    method: str, params: JsonObject
+) -> None:
+    registry, _identity, _registrations = _registry()
+    registry.learn_item_thread({"threadId": "agent-1", "item": {"id": "item-1"}})
+
+    assert registry.route_delta_params(method, dict(params)) == params
+
+
+# --- the bounded queue on its own ---------------------------------------------------------
+#
+# The flood tests above prove the policy end to end through a live adapter. These reach
+# `CodexEventQueue` and `_load_shed_notice` directly, because they are about the two moments
+# a live seat cannot be made to reproduce on demand: the close sentinel arriving while the
+# queue is over its sentinel headroom, and a shed happening before the adapter has a
+# snapshot to sequence the notice against.
+
+
+def _queue_event(sequence: int, method: str = "thread/turnStarted") -> AdapterEvent:
+    """A structural event -- NOT one of `LOAD_SHED_DELTA_METHODS`, so it sheds last."""
+
+    return AdapterEvent(
+        sequence=sequence,
+        kind="vendor",
+        identity=identity(),
+        created_at="2026-07-14T12:02:00+00:00",
+        raw={"codexMethod": method},
+    )
+
+
+def test_the_shed_count_crosses_immediately_before_the_close_sentinel() -> None:
+    """The notice is minted into the headroom the sentinel path makes for it.
+
+    A subscriber stops at the sentinel, so a notice queued behind it is a notice nobody ever
+    sees. `offer(None)` therefore evicts down to notice+sentinel room BEFORE minting, and
+    the two cross in that order.
+    """
+    minted: list[int] = []
+
+    def notice(count: int) -> AdapterEvent:
+        minted.append(count)
+        return _queue_event(900 + count, method="ar/load-shed")
+
+    queue = CodexEventQueue(notice=notice, limit=4)
+    for sequence in range(4):
+        queue.offer(_queue_event(sequence))
+
+    queue.offer(None)
+
+    held = queue.drain()
+    assert [None if event is None else event.raw["codexMethod"] for event in held] == [
+        "thread/turnStarted",
+        "thread/turnStarted",
+        "ar/load-shed",
+        None,
+    ]
+    # Exactly the two that were evicted to make the room, counted once.
+    assert minted == [2]
+    assert queue.dropped == 0
+
+
+def test_shedding_the_close_sentinel_is_not_counted_as_a_lost_event() -> None:
+    """The sentinel is a terminator, not content: evicting it loses no event to report.
+
+    Reachable after a stop whose sentinel is still queued -- the consumer has drained
+    everything ahead of it and late producer traffic refills the queue behind it. Counting
+    it would make the notice overstate the loss by one for every such stop.
+    """
+    queue = CodexEventQueue(notice=lambda count: None, limit=4)
+    queue.offer(None)
+    for sequence in range(4):
+        queue.offer(_queue_event(sequence))
+
+    assert queue.dropped == 0
+    held = queue.drain()
+    assert None not in held
+    assert [event.sequence for event in held if event is not None] == [0, 1, 2, 3]
+
+
+@pytest.mark.anyio
+async def test_events_shed_before_the_first_snapshot_stay_owed() -> None:
+    """A notice needs a snapshot to sequence it against; until then the count is carried.
+
+    The adapter mints the notice, and before `start` there is no snapshot and no launch to
+    build one from. Answering `None` rather than minting is what keeps the count owed -- and
+    what keeps a sequence number from being spent on an event that was never produced.
+    """
+    adapter = make_adapter(FakeCodexTransport())
+    for sequence in range(ADAPTER_EVENT_QUEUE_LIMIT + 3):
+        adapter._events.offer(_queue_event(sequence))
+
+    assert adapter._events.dropped == 3
+    # Draining makes room, so the next offer is the first one that can reach the mint.
+    adapter._events.drain()
+    adapter._events.offer(_queue_event(9999))
+
+    assert adapter._events.dropped == 3
+    assert adapter._event_sequence == 0
+    assert [event.sequence for event in adapter._events.drain() if event is not None] == [9999]

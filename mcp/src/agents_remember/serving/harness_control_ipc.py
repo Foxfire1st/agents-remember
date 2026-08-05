@@ -39,6 +39,7 @@ from agents_remember.serving.harness_control_models import (
     PromptRequest,
     ReconciliationState,
     ShutdownMode,
+    SubmissionAuthorityDescriptor,
     SubmissionSource,
     evidence_page_json,
     interrupt_result_json,
@@ -185,17 +186,23 @@ class HarnessControlServer:
         return capability_snapshot_json(self.bridge.advertise())
 
     async def _set_model(self, payload: Mapping[str, object]) -> dict[str, object]:
-        return set_result_json(await self.bridge.set_model(_required_text(payload, "modelKey")))
+        return set_result_json(
+            await self.bridge.submissions().set_model(_required_text(payload, "modelKey"))
+        )
 
     async def _set_effort(self, payload: Mapping[str, object]) -> dict[str, object]:
-        return set_result_json(await self.bridge.set_effort(_required_text(payload, "effort")))
+        return set_result_json(
+            await self.bridge.submissions().set_effort(_required_text(payload, "effort"))
+        )
 
     async def _submission_authority(self, _payload: Mapping[str, object]) -> dict[str, str]:
-        return submission_authority_json(self.bridge.submission_authority())
+        return submission_authority_json(
+            SubmissionAuthorityDescriptor(bridge_epoch=self.bridge.submissions().bridge_epoch)
+        )
 
     async def _submission_status(self, payload: Mapping[str, object]) -> dict[str, object]:
         return submission_status_batch_json(
-            await self.bridge.submission_status(
+            await self.bridge.submissions().ledger.status(
                 _required_text(payload, "expectedBridgeEpoch"),
                 _required_text_list(payload, "requestIds", minimum=1, maximum=64),
                 cockpit_only=True,
@@ -204,7 +211,7 @@ class HarnessControlServer:
 
     async def _withdraw(self, payload: Mapping[str, object]) -> dict[str, object]:
         return withdrawal_result_json(
-            await self.bridge.withdraw_submission(
+            await self.bridge.submissions().withdraw(
                 _required_text(payload, "expectedBridgeEpoch"),
                 _required_text(payload, "requestId"),
                 cockpit_only=True,
@@ -213,7 +220,7 @@ class HarnessControlServer:
 
     async def _reconcile(self, payload: Mapping[str, object]) -> dict[str, object]:
         return reconciliation_json(
-            await self.bridge.reconcile(
+            await self.bridge.submissions().reconcile(
                 _required_text(payload, "requestId"),
                 expected_bridge_epoch=_optional_text(payload, "expectedBridgeEpoch"),
             )
@@ -228,7 +235,7 @@ class HarnessControlServer:
             raise HarnessControlError("cockpit submission requires expectedBridgeEpoch")
         request_id = _required_text(payload, "requestId")
         assets = await self._submit_assets(payload, request_id)
-        receipt = await self.bridge.submit(
+        receipt = await self.bridge.submissions().submit(
             PromptRequest(
                 request_id=request_id,
                 source=cast(SubmissionSource, source),
@@ -311,7 +318,7 @@ class HarnessControlServer:
             _optional_non_negative_int(payload, "limit", default=MAX_OPERATION_TIMELINE_PAGE),
         )
         return operation_timeline_json(
-            await self.bridge.operation_timeline(
+            await self.bridge.submissions().ledger.operation_timeline(
                 _required_text(payload, "expectedBridgeEpoch"),
                 after_sequence=_optional_non_negative_int(payload, "afterSequence", default=0),
                 limit=max(1, limit),
@@ -319,7 +326,7 @@ class HarnessControlServer:
         )
 
     async def _respond(self, payload: Mapping[str, object]) -> dict[str, object]:
-        snapshot = await self.bridge.respond(
+        snapshot = await self.bridge.submissions().respond(
             InteractionResponse(
                 interaction_id=_required_text(payload, "interactionId"),
                 response=_required_text(payload, "response"),
@@ -332,7 +339,7 @@ class HarnessControlServer:
         state = payload.get("state")
         if state not in {"accepted", "rejected"}:
             raise HarnessControlError("resolution state must be accepted or rejected")
-        result = await self.bridge.resolve_unknown(
+        result = await self.bridge.submissions().resolve_unknown_prompt(
             _required_text(payload, "requestId"),
             state=cast(ReconciliationState, state),
             detail=_required_text(payload, "detail"),
@@ -346,7 +353,7 @@ class HarnessControlServer:
         resolution = payload.get("resolution")
         if resolution not in {"applied", "not-applied"}:
             raise HarnessControlError("resolution must be applied or not-applied")
-        await self.bridge.resolve_operation(
+        await self.bridge.submissions().resolve_operation(
             _required_text(payload, "operationId"),
             cast(ControlOperationKind, operation_kind),
             resolution=cast(OperationResolution, resolution),
@@ -391,7 +398,7 @@ class HarnessControlServer:
 
     async def _submission_provenance(self, payload: Mapping[str, object]) -> dict[str, object]:
         return submission_provenance_batch_json(
-            await self.bridge.submission_provenance(
+            await self.bridge.submissions().ledger.provenance(
                 _required_text(payload, "expectedBridgeEpoch"),
                 _required_text_list(payload, "requestIds", minimum=1, maximum=64),
             )

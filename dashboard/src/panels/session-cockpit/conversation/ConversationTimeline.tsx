@@ -30,6 +30,7 @@ import {
 } from "react";
 import {
   defaultRangeExtractor,
+  elementScroll,
   useVirtualizer,
   type Range,
   type VirtualItem,
@@ -326,9 +327,9 @@ export interface ConversationTimelineProps {
   /** Empty-conversation content rendered INSIDE the well (the well always renders). */
   emptyNote?: ReactNode;
   onLoadOlder: () => void;
-  /** False only while the timeline has no layout box (view switch or library overlay).
-      A keep-alive chat hidden with visibility:hidden still has honest geometry and stays true:
-      changing focus must not arm a restore or write to its preserved scrollbar. */
+  /** False whenever this retained feed is not the operator's active timeline. The viewport DOM,
+      scrollTop, virtual rows, and measurement cache stay mounted; TanStack and the manual
+      scroll/measurement machinery detach from the element until it becomes active again. */
   visible?: boolean;
   /** The session's remembered position at this render (undefined = first-ever open: arms
       an atBottom pending-restore so the chat lands at the CURRENT end once geometry is honest,
@@ -422,6 +423,9 @@ export function ConversationTimeline({
   // re-subscribing on every flip (the chatsLibraryOpenRef pattern in SessionsView).
   const visibleRef = useRef(visible);
   visibleRef.current = visible;
+  // Render-time edge used by effects that run before the restore-arm layout effect. No follower or
+  // TanStack reattachment sync may write during that gap; the restore/retained DOM owns the landing.
+  const becomingVisible = visible && !wasVisibleRef.current;
   // Race 1: the rAF restore driver's per-run state lives in a REF
   // keyed to the ARM, never in the effect closure — the closure state reset every live frame
   // (the driver effect subscribed to tryApplyPendingRestore, a rows-keyed callback, so each
@@ -457,12 +461,29 @@ export function ConversationTimeline({
 
   const virtualizer = useVirtualizer({
     count: rows.length,
-    getScrollElement: () => scrollRef.current,
+    // Returning null runs TanStack's cleanup path (ResizeObserver, scroll listener, rAF) without
+    // `enabled:false`, whose core implementation deliberately clears every measurement cache.
+    getScrollElement: () => (visible ? scrollRef.current : null),
     estimateSize: () => 80,
     overscan: 8,
     getItemKey: (index) => rows[index]?.key ?? index,
     rangeExtractor,
     initialMeasurementsCache,
+    scrollToFn: (offset, options, instance) => {
+      const element = instance.scrollElement;
+      if (element === null) return;
+      // Reattachment normally writes the virtualizer's retained offset immediately. A view-switch
+      // restore may still be looking at a collapsed/partial box, so the bounded restore driver must
+      // remain the sole writer until that geometry is honest. This also prevents TanStack's internal
+      // reconcile from racing the exact remembered offset.
+      if (becomingVisible || pendingRestoreRef.current !== null) return;
+      const target = offset + (options.adjustments ?? 0);
+      const current = instance.options.horizontal ? element.scrollLeft : element.scrollTop;
+      // TanStack syncs its retained offset whenever a detached element is reattached. The DOM already
+      // retains that pixel for visibility-hidden chats; skip the no-op write and its reconcile rAF.
+      if (Math.abs(current - target) < 1) return;
+      elementScroll(offset, options, instance);
+    },
   });
 
   const virtualRows = virtualizer.getVirtualItems();
@@ -526,7 +547,7 @@ export function ConversationTimeline({
   // accumulated every warmed row, so the final slice still mounted all 103 rich rows and caused a
   // measured 227–309ms task. Keeping only one batch lets React unmount each slice after TanStack has
   // retained its measured size, and yields back to the browser before the next slice. A display:none
-  // keep-alive has no measurable geometry, so it must wait until the Chats layer is visible.
+  // inactive keep-alive deliberately owns no measurement work, so it waits until focused.
   useEffect(() => {
     if (
       !visible ||
@@ -638,11 +659,10 @@ export function ConversationTimeline({
   const handleScroll = useCallback(() => {
     const el = scrollRef.current;
     if (el === null) return;
-    // A hidden or box-less timeline has NO honest scroll geometry. The cockpit's display:none
-    // teardown collapses the box (st=0/sh=0/ch=0) and the browser CAN dispatch a scroll event for
-    // the clamp (verified live via Playwright) — reporting it clobbered the remembered position,
-    // so the re-show restored 0 and the chat stayed at the START. While hidden, only the restore
-    // owns the offset; nothing here (position, near-bottom, anchor) may update.
+    // An inactive or box-less timeline owns NO scroll geometry. A cockpit display:none teardown can
+    // dispatch a clamp event, while a retained visibility:hidden chat still has geometry that the
+    // operator cannot be interacting with. Neither may overwrite position/intent/anchors while the
+    // feed is paused; the re-show restore owns that boundary.
     if (!visibleRef.current || el.clientHeight === 0) return;
     // Echo gates: the collapse's clamp event is dispatched LATE
     // (~0.5s), with the box already restored (clientHeight>0 — passes the guard above) but the
@@ -726,6 +746,11 @@ export function ConversationTimeline({
 
   useLayoutEffect(() => {
     const lastKey = rows.length > 0 ? rows[rows.length - 1].key : null;
+    if (!visible || becomingVisible) {
+      // Adopt any final in-flight page while paused; refocus must not synthesize a hidden arrival.
+      prevLastKeyRef.current = lastKey;
+      return;
+    }
     if (lastKey !== prevLastKeyRef.current) {
       if (prevLastKeyRef.current === null) {
         // First content on a FRESH mount (first open, or the keep-alive pool's first mount of this
@@ -742,8 +767,8 @@ export function ConversationTimeline({
       } else if (nearBottomRef.current && !bandHoldRef.current) {
         // Never fire the follow while the feed is box-less (the display:none
         // phases) — degenerate targets only arm 5s tanstack reconciles that race the re-show
-        // restore, which owns the landing. A visibility-hidden keep-alive chat (layout alive,
-        // clientHeight>0) keeps following quietly.
+        // restore, which owns the landing. An unfocused keep-alive chat never reaches this effect;
+        // it preserves the last position while its stream and virtualizer are paused.
         // An operator parked inside the band (bandHoldRef) is NOT yanked to the end by a new
         // row either — the same in-band hold the streaming-delta follow honors. The arrival counts
         // into the pill instead, so a small deliberate scroll-up survives new items, not just
@@ -755,7 +780,7 @@ export function ConversationTimeline({
       }
     }
     prevLastKeyRef.current = lastKey;
-  }, [rows, virtualizer]);
+  }, [becomingVisible, rows, virtualizer, visible]);
 
   // Follow-on-growth (streaming): while the intent lock is engaged, re-pin to the CURRENT end
   // on every content change — a TOTAL-HEIGHT change (every append-block delta grows the last row
@@ -776,13 +801,14 @@ export function ConversationTimeline({
   // above the viewport can never displace the pinned bottom (the upscroll-anchor suite's contract,
   // and the bottom-follow contract).
   useLayoutEffect(() => {
+    if (!visible || becomingVisible) return;
     if (!nearBottomRef.current) return;
     if (pendingRestoreRef.current !== null) return;
     const el = scrollRef.current;
     if (el === null || el.clientHeight === 0) return;
     if ((userInteractionRef.current || bandHoldRef.current) && el.scrollHeight - el.scrollTop - el.clientHeight > 0) return;
     el.scrollTop = el.scrollHeight - el.clientHeight;
-  }, [rows, totalSize]);
+  }, [becomingVisible, rows, totalSize, visible]);
 
   // The latest chip also counts STREAMED arrivals — an append delta grows the last
   // row IN PLACE (no key change, so the row-key effect above never sees it). Count only a growth
@@ -793,6 +819,10 @@ export function ConversationTimeline({
   const streamBaselineRef = useRef<{ key: string | null; size: number | undefined }>({ key: null, size: undefined });
   useLayoutEffect(() => {
     const lastKey = rows.length > 0 ? rows[rows.length - 1].key : null;
+    if (!visible || becomingVisible) {
+      streamBaselineRef.current = { key: lastKey, size: lastRowSize };
+      return;
+    }
     const prev = streamBaselineRef.current;
     if (lastKey !== prev.key) {
       streamBaselineRef.current = { key: lastKey, size: undefined };
@@ -803,7 +833,7 @@ export function ConversationTimeline({
     if (prevSize === undefined || lastRowSize === undefined || lastRowSize <= prevSize) return;
     if (nearBottomRef.current) return;
     setPendingUpdates((count) => count + 1);
-  }, [rows, lastRowSize]);
+  }, [becomingVisible, rows, lastRowSize, visible]);
 
   // Switching cockpit tabs must not reopen the chat at the START: the
   // cockpit's Chats layer hides with display:none, which destroys the scroll offset (unlike the
@@ -850,7 +880,8 @@ export function ConversationTimeline({
       bandHoldRef.current = false;
       setPendingUpdates(0);
       setAwayFromLatest(false);
-      el.scrollTop = el.scrollHeight - el.clientHeight;
+      const end = el.scrollHeight - el.clientHeight;
+      if (Math.abs(el.scrollTop - end) >= 1) el.scrollTop = end;
       return;
     }
     // Left mid-conversation or at the very top: restore the exact pixel offset — but only once
@@ -938,13 +969,17 @@ export function ConversationTimeline({
 
   useLayoutEffect(() => {
     const firstKey = rows.length > 0 ? rows[0].key : null;
+    if (!visible || becomingVisible) {
+      prevFirstKeyRef.current = firstKey;
+      return;
+    }
     const anchor = anchorRef.current;
     if (firstKey !== prevFirstKeyRef.current && prevFirstKeyRef.current !== null && anchor !== null) {
       const anchorIndex = rows.findIndex((row) => row.key === anchor.itemId);
       if (anchorIndex >= 0) virtualizer.scrollToIndex(anchorIndex, { align: "start" });
     }
     prevFirstKeyRef.current = firstKey;
-  }, [rows, virtualizer]);
+  }, [becomingVisible, rows, virtualizer, visible]);
 
   // Anchor preservation on measurement commits (the upscroll jank, JSONLogConsole lineage):
   // while the intent lock is DISENGAGED, rows entering the window measure from estimate to real
@@ -964,6 +999,11 @@ export function ConversationTimeline({
   // the landing), never on a hidden/box-less feed.
   useLayoutEffect(() => {
     const firstKey = rows.length > 0 ? rows[0].key : null;
+    if (becomingVisible || !visibleRef.current) {
+      measurePrevFirstKeyRef.current = firstKey;
+      measureAnchorRef.current = null;
+      return;
+    }
     const prepended = measurePrevFirstKeyRef.current !== null && firstKey !== measurePrevFirstKeyRef.current;
     measurePrevFirstKeyRef.current = firstKey;
     if (prepended) {
@@ -1063,15 +1103,17 @@ export function ConversationTimeline({
   );
 
   useEffect(() => {
+    if (!visible) return undefined;
     const el = scrollRef.current;
     if (el === null) return undefined;
     el.addEventListener("scroll", handleScroll, { passive: true });
     return () => {
       el.removeEventListener("scroll", handleScroll);
     };
-  }, [handleScroll]);
+  }, [handleScroll, visible]);
 
   useEffect(() => {
+    if (!visible) return undefined;
     const el = scrollRef.current;
     if (el === null) return undefined;
     // The operator's TRUSTED input stands an armed restore down (a programmatic
@@ -1113,8 +1155,8 @@ export function ConversationTimeline({
         interactionResetTimeoutRef.current = null;
       }
     };
-    // Refs only — mount once (see the comment above).
-  }, []);
+    // Refs only — one subscription per active interval; blur tears it and its decay timer down.
+  }, [visible]);
 
   const toggleRun = useCallback((key: string) => {
     setExpandedRuns((current) => {

@@ -7,7 +7,10 @@ from pathlib import Path
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
-from agents_remember.kernel.coordination_context.markdown_settings import parse_settings_block
+from agents_remember.kernel.coordination_context.markdown_settings import (
+    _MarkdownSettingsParser,
+    parse_settings_block,
+)
 
 
 class MarkdownSettingsStorageTests(unittest.TestCase):
@@ -290,6 +293,119 @@ class MarkdownSettingsCombinedTests(unittest.TestCase):
         self.assertEqual(rule.get("includes"), ["**/*.py"])
         self.assertEqual(rule.get("excludes"), ["src/generated/**"])
         self.assertEqual([entry.repo for entry in cross_repo.allow], ["repo-b"])
+
+
+class MarkdownSettingsIgnoredLineTests(unittest.TestCase):
+    """Lines the parser must read past without acting on them.
+
+    Each step of the parser is a chain of guarded branches whose LAST arm is "none of
+    these -- do nothing", and a parser that silently does something on an unrecognised
+    line is how a settings file starts meaning two things. These pin the do-nothing arms,
+    which the happy-path tests above never reach.
+    """
+
+    def test_a_storage_line_at_an_unknown_depth_is_ignored(self) -> None:
+        # Indent 6 under `storage:` with no `pathRules:` open: not a config line and not a
+        # rule line, so it must change nothing.
+        block = "onboarding:\n  storage:\n    mode: repo-sidecar\n      stray: value\n"
+
+        storage, _cross_repo, saw_settings = parse_settings_block(block, "internal")
+
+        self.assertTrue(saw_settings)
+        assert storage is not None
+        self.assertEqual(storage.mode, "repo-sidecar")
+        self.assertEqual(storage.path_rules, [])
+
+    def test_an_unrecognised_storage_config_key_is_ignored(self) -> None:
+        block = "onboarding:\n  storage:\n    mode: repo-sidecar\n    unknownKey: value\n"
+
+        storage, _cross_repo, _saw = parse_settings_block(block, "internal")
+
+        assert storage is not None
+        self.assertEqual(storage.mode, "repo-sidecar")
+        self.assertEqual(storage.default, "repo-sidecar")
+        self.assertEqual(storage.path_rules, [])
+
+    def test_a_storage_path_rule_body_before_any_rule_is_ignored(self) -> None:
+        # `includes:` arrives while no `- path:` has opened a rule, so there is nothing to
+        # attach it to and it must not invent one.
+        block = (
+            "onboarding:\n  storage:\n    mode: repo-sidecar\n    pathRules:\n        includes:\n"
+        )
+
+        storage, _cross_repo, _saw = parse_settings_block(block, "internal")
+
+        assert storage is not None
+        self.assertEqual(storage.path_rules, [])
+
+    def test_an_unrecognised_line_inside_an_open_storage_rule_is_ignored(self) -> None:
+        # A rule is open, so the line reaches the rule-body chain -- but it is neither a
+        # `storage:` value, nor a list selector, nor a list item, and must fall through.
+        block = (
+            "onboarding:\n"
+            "  storage:\n"
+            "    mode: repo-sidecar\n"
+            "    pathRules:\n"
+            "      - path: src\n"
+            "        unknownKey: value\n"
+        )
+
+        storage, _cross_repo, _saw = parse_settings_block(block, "internal")
+
+        assert storage is not None
+        self.assertEqual(storage.path_rules, [{"path": "src", "includes": ["*"], "excludes": []}])
+
+    def test_a_global_rule_list_outside_an_eligibility_section_selects_nothing(self) -> None:
+        # `paths:` at the global-rule depth with no `include:`/`exclude:` above it has no
+        # list to name, so the values under it are dropped rather than guessed into one.
+        block = "onboarding:\n  pathRules:\n      paths:\n        - src/**\n"
+
+        storage, _cross_repo, saw_settings = parse_settings_block(block, "internal")
+
+        self.assertTrue(saw_settings)
+        assert storage is not None
+        self.assertEqual(
+            storage.path_rules,
+            [
+                {
+                    "path": "",
+                    "includes": ["*"],
+                    "excludes": [],
+                    "include_file_types": [],
+                    "exclude_file_types": [],
+                }
+            ],
+        )
+
+    def test_appending_a_global_value_records_the_sighting_before_it_needs_a_list(self) -> None:
+        """The seam method's own contract, asserted where the state machine cannot produce it.
+
+        `append_global_rule_value` is public because `markdown_global_rules` -- the block's
+        steps, which live in a sibling module -- calls it. Through `parse` that caller has
+        already checked `current_list is not None` (`is_global_rule_list_item`), so the
+        guard inside the method is unreachable from a document: it is there because
+        `_global_target_list` is typed `list[str] | None` and the type checker requires the
+        narrowing. What the guard PINS is the order: the sighting is recorded whatever
+        happens, and only the append depends on a list being selected. A method that
+        recorded nothing when it could not append would lose the global rule for a
+        `pathRules:` block whose eligibility section named no list.
+        """
+        parser = _MarkdownSettingsParser("internal")
+        self.assertIsNone(parser.current_list)
+
+        parser.append_global_rule_value("src/**")
+
+        self.assertTrue(parser.saw_global_path_rule)
+        self.assertEqual(
+            (parser.include_paths, parser.exclude_paths),
+            ([], []),
+            "the value was filed into a list that was never selected",
+        )
+        # And with a list selected it lands there, so the guard is a precondition rather
+        # than a switch that turns the method off.
+        parser.current_list = "includes"
+        parser.append_global_rule_value("src/**")
+        self.assertEqual(parser.include_paths, ["src/**"])
 
 
 if __name__ == "__main__":

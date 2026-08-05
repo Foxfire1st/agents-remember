@@ -19,12 +19,16 @@ class AuthorityError(AgentsRememberError):
 
     Raised when a caller names a repo that settings do not allow, or passes a
     path that escapes the coordinator root. Centralizing this means every
-    controller reports the same boundary violation the same way.
+    application entry point reports the same boundary violation the same way.
     """
 
 
 class RouteIndexCensusError(AgentsRememberError):
     """A validated repository could not provide one authoritative source census."""
+
+
+class CitationCacheError(AgentsRememberError):
+    """A citation cache authority, capacity, or lifecycle lease was invalid."""
 
 
 class ConversationCompositionError(AgentsRememberError):
@@ -45,6 +49,17 @@ class TokenizerVocabularyError(AgentsRememberError):
     is a network round trip on the server's startup path -- the thing that made a cold
     container, an offline machine and a hermetic CI job unable to start the server.
     A build that failed to ship the file must say so, not work only where egress exists.
+    """
+
+
+class GrammarUnavailableError(AgentsRememberError):
+    """A language the citation check declares it parses has no grammar to parse it with.
+
+    Raised instead of falling back to occurrence matching or to a second parser. The
+    check's whole value is telling a DEFINITION from a MENTION, and a run that quietly
+    lost that for one language would report the same "ok" over a scope nobody stated.
+    The grammars are ordinary wheels pinned in ``mcp/pyproject.toml``; nothing about the
+    parse path reaches the network, so this means an incomplete install.
     """
 
 

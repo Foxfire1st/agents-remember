@@ -15,6 +15,7 @@ MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
 from agents_remember.errors import HarnessControlError
+from agents_remember.kernel.harnesses import HARNESSES
 from agents_remember.serving.harness_capabilities import (
     CapabilitySnapshot,
     EffortOption,
@@ -22,7 +23,6 @@ from agents_remember.serving.harness_capabilities import (
 )
 from agents_remember.serving.harness_capability_catalog import HarnessCapabilityCatalog
 from agents_remember.serving.harness_control_models import LaunchSpec
-from agents_remember.serving.harnesses import HARNESSES
 
 
 def _snapshot(model: str = "model-a") -> CapabilitySnapshot:

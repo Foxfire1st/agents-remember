@@ -94,7 +94,7 @@ function PickupRow({
       </span>
       <span className={meta}>owner lifecycle {pickup.ownerLifecycleId ?? "—"}</span>
       <span className={`${meta} ${numeric}`}>
-        attempts {pickup.attemptCount ?? "—"} · last {pickup.lastAttemptAt ?? "—"} · next{" "}
+        attempts {pickup.attemptCount} · last {pickup.lastAttemptAt ?? "—"} · next{" "}
         {pickup.nextAttemptAt ?? "—"}
       </span>
       <span className={`${meta} ${numeric}`}>

@@ -17,6 +17,8 @@ from pydantic import Field, ValidationError
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
+from agents_remember.application import operator_inbox_tools as inbox_application
+from agents_remember.controlplane import operator_inbox_transitions as inbox_transitions
 from agents_remember.controlplane.interaction_retention import INBOX_MAX_CURRENT_ROWS
 from agents_remember.controlplane.operator_inbox_records import (
     InboxAddress,
@@ -28,17 +30,18 @@ from agents_remember.controlplane.operator_inbox_records import (
     consume_operator_inbox_entry,
     create_operator_inbox_entry,
 )
-from agents_remember.controlplane.operator_inbox_store import (
+from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
+from agents_remember.controlplane.operator_inbox_transitions import (
     DeliveryAttempt,
-    OperatorInboxStore,
+    RedeliveryFloor,
+    RungAdvance,
 )
 from agents_remember.mcp.tools import operator_inbox as inbox_tools
-from agents_remember.mcp.tools.dispatch_brief import HostedDelivery
+from agents_remember.serving.dispatch_brief import HostedDelivery
 from agents_remember.serving.harness_control_models import SubmissionReceipt
 from agents_remember.serving.hosted_session_runtime import HostedSessionRuntime
 from agents_remember.serving.inbox_delivery import (
     InboxDeliveryLog,
-    RedeliveryFloor,
     deliver_inbox_entry,
 )
 from agents_remember.serving.terminal import TerminalHost, TerminalHostSeams
@@ -256,7 +259,8 @@ class OperatorInboxStoreTests(unittest.TestCase):
 
     def test_record_delivery_appends_status_snapshot(self) -> None:
         self.store.append(self._entry("A"))
-        delivered = self.store.record_delivery(
+        delivered = inbox_transitions.record_delivery(
+            self.store,
             "A",
             DeliveryAttempt(
                 delivery_state="delivered",
@@ -278,8 +282,11 @@ class OperatorInboxStoreTests(unittest.TestCase):
         # R1/R3: every attempt -- including a confirmed 'delivered' paste -- bumps attemptCount
         # and schedules a durable nextAttemptAt, because consume=ack is the only terminal outcome.
         self.store.append(self._entry("A"))
-        delivered = self.store.record_delivery(
-            "A", DeliveryAttempt(delivery_state="delivered", delivered_to_session="agent-a"), now=T2
+        delivered = inbox_transitions.record_delivery(
+            self.store,
+            "A",
+            DeliveryAttempt(delivery_state="delivered", delivered_to_session="agent-a"),
+            now=T2,
         )
         self.assertEqual(delivered.attemptCount, 1)
         self.assertEqual(delivered.lastAttemptAt, T2)
@@ -292,8 +299,11 @@ class OperatorInboxStoreTests(unittest.TestCase):
             900.0,
         )
         # A second delivery attempt (e.g. a redelivery pass) bumps again and re-schedules further out.
-        second = self.store.record_delivery(
-            "A", DeliveryAttempt(delivery_state="unconfirmed"), now="2026-06-23T10:10:00+00:00"
+        second = inbox_transitions.record_delivery(
+            self.store,
+            "A",
+            DeliveryAttempt(delivery_state="unconfirmed"),
+            now="2026-06-23T10:10:00+00:00",
         )
         self.assertEqual(second.attemptCount, 2)
         assert second.nextAttemptAt is not None
@@ -301,13 +311,16 @@ class OperatorInboxStoreTests(unittest.TestCase):
 
     def test_record_delivery_clears_schedule_only_via_consume(self) -> None:
         self.store.append(self._entry("A"))
-        self.store.record_delivery("A", DeliveryAttempt(delivery_state="delivered"), now=T2)
+        inbox_transitions.record_delivery(
+            self.store, "A", DeliveryAttempt(delivery_state="delivered"), now=T2
+        )
         consumed, _ = self.store.consume("A", now=T2, consumed_by="model", consumed_via="cli")
         self.assertEqual(consumed.state, "consumed")
 
     def test_list_redeliverable_returns_pending_rows_past_backoff(self) -> None:
         self.store.append(self._entry("A"))
-        self.store.record_delivery(
+        inbox_transitions.record_delivery(
+            self.store,
             "A",
             DeliveryAttempt(delivery_state="no-hosted-session"),
             now="2026-06-23T09:00:00+00:00",
@@ -318,35 +331,40 @@ class OperatorInboxStoreTests(unittest.TestCase):
 
     def test_list_redeliverable_excludes_consumed_rows(self) -> None:
         self.store.append(self._entry("A"))
-        self.store.record_delivery("A", DeliveryAttempt(delivery_state="delivered"), now=T1)
+        inbox_transitions.record_delivery(
+            self.store, "A", DeliveryAttempt(delivery_state="delivered"), now=T1
+        )
         self.store.consume("A", now=T2, consumed_by="model", consumed_via="cli")
         now = datetime.fromisoformat("2026-06-24T09:00:00+00:00")
         self.assertEqual(self.store.list_redeliverable(now=now), [])
 
     def test_mark_escalated_stamps_the_reserved_field(self) -> None:
         self.store.append(self._entry("A"))
-        escalated = self.store.mark_escalated("A", now=T2)
+        escalated = inbox_transitions.mark_escalated(self.store, "A", now=T2)
         self.assertEqual(escalated.escalatedAt, T2)
 
     def test_advance_rung_stamps_rung_and_reanchors_escalated_at(self) -> None:
         self.store.append(self._entry("A"))
-        advanced = self.store.advance_rung("A", rung=1, now=T2)
+        advanced = inbox_transitions.advance_rung(self.store, "A", RungAdvance(rung=1), now=T2)
         self.assertEqual(advanced.rung, 1)
         self.assertEqual(advanced.escalatedAt, T2)
         self.assertEqual(advanced.rungTransitionAt, T2)
         T3 = "2026-06-23T10:20:00+00:00"
-        advanced_again = self.store.advance_rung("A", rung=2, now=T3)
+        advanced_again = inbox_transitions.advance_rung(
+            self.store, "A", RungAdvance(rung=2), now=T3
+        )
         self.assertEqual(advanced_again.rung, 2)
         self.assertEqual(advanced_again.escalatedAt, T3)
         self.assertEqual(advanced_again.rungTransitionAt, T3)
 
     def test_advance_rung_unknown_entry_raises(self) -> None:
         with self.assertRaises(KeyError):
-            self.store.advance_rung("missing", rung=1, now=T2)
+            inbox_transitions.advance_rung(self.store, "missing", RungAdvance(rung=1), now=T2)
 
     def test_ladder_resolved_is_terminal_without_ack(self) -> None:
         self.store.append(self._entry("A"))
-        resolved, resolved_now = self.store.mark_ladder_resolved(
+        resolved, resolved_now = inbox_transitions.mark_ladder_resolved(
+            self.store,
             "A",
             now=T2,
             reason="terminal ladder rung reached for non-live target seat",
@@ -360,6 +378,24 @@ class OperatorInboxStoreTests(unittest.TestCase):
         )
         self.assertFalse(consumed_now)
         self.assertEqual(consumed.state, "ladder-resolved")
+
+    def test_resolving_an_already_resolved_ladder_row_is_idempotent(self) -> None:
+        # The supervisor sweep is level-triggered and re-decides the same finding on every
+        # pass, so this is the ordinary case rather than a corner: the second call must
+        # report `resolved_now=False` and append nothing, or one dead seat would grow the
+        # log a row per sweep.
+        self.store.append(self._entry("A"))
+        inbox_transitions.mark_ladder_resolved(self.store, "A", now=T2, reason="first pass")
+        rows_after_first = len(self.store.read())
+
+        again, resolved_now = inbox_transitions.mark_ladder_resolved(
+            self.store, "A", now="2026-06-23T10:30:00+00:00", reason="second pass"
+        )
+
+        self.assertFalse(resolved_now)
+        self.assertEqual(again.ladderResolvedAt, T2)
+        self.assertEqual(again.ladderResolvedReason, "first pass")
+        self.assertEqual(len(self.store.read()), rows_after_first)
 
     def test_compaction_purges_pending_rows_past_the_pending_ttl(self) -> None:
         # Ruled invariant (developer, 2026-07-09): no row outranks system health -- a pending row
@@ -418,7 +454,8 @@ class OperatorInboxStoreTests(unittest.TestCase):
 
     def test_compaction_prunes_ladder_resolved_rows(self) -> None:
         self.store.append(self._entry("A"))
-        self.store.mark_ladder_resolved(
+        inbox_transitions.mark_ladder_resolved(
+            self.store,
             "A",
             now=T2,
             reason="terminal ladder rung reached for non-live target seat",
@@ -442,7 +479,7 @@ class OperatorInboxToolTests(unittest.TestCase):
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         self.store = OperatorInboxStore(Path(tmp.name))
-        patcher = mock.patch.object(inbox_tools, "_store", return_value=self.store)
+        patcher = mock.patch.object(inbox_application, "_store", return_value=self.store)
         self.addCleanup(patcher.stop)
         patcher.start()
 
@@ -790,7 +827,7 @@ class OperatorInboxDeliveryTests(unittest.TestCase):
                 paster=mock.Mock(),  # type: ignore[arg-type]
             )
             self.assertTrue(delivery_started.wait(timeout=2))
-            with mock.patch.object(inbox_tools, "_store", return_value=self.store):
+            with mock.patch.object(inbox_application, "_store", return_value=self.store):
                 consumed = inbox_tools.operator_inbox_consume_payload(
                     None,  # type: ignore[arg-type]
                     entry_id=entry.id,

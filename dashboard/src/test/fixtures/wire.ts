@@ -3,7 +3,7 @@
 // R6 in one sentence: a test whose fixture is authored by the consumer cannot detect producer
 // drift. This leaf proved it twice — a test asserted `refusedPolarity === "amber"` against a
 // fixture that set the field itself, on a model that is `extra="forbid"` server-side; and three
-// tests built a master `TaskDocNode` carrying `createdAt`, which no server model declares. Both
+// tests built a master `TaskSubTaskRefNode` carrying `createdAt`, which its server model omits. Both
 // fixtures were written with `as SomeWireType`, and an assertion skips excess-property checking, so
 // both compiled.
 //
@@ -16,25 +16,22 @@
 // `fixtures/snapshot.json` and annotated with the mirror type, so it is pinned from both sides at
 // once: a required field the server adds fails to compile until it is filled, and it can only be
 // filled from a served row. Only the REQUIRED fields are carried. Optionals (`gate`, `ask`,
-// `staleSeconds`, `landing`, …) are left off on purpose: a default gate nobody asked for would
+// `staleSeconds`, `seedFallback`, …) are left off on purpose: a default gate nobody asked for would
 // silently change what an attention-queue test is measuring.
 //
-// BE PRECISE ABOUT WHAT PINS WHAT. `snapshot.json` is NOT generated. No generator exists — nothing
-// under `mcp/`, `scripts/` or `dashboard/` writes it — and it is hand-maintained (this change alone
-// edited it by +642/-15 lines). `contract.test.ts` names the same fact from its side ("measured against
-// a hand-kept payload") and files generating it under LEFT FOR CODEGEN. So the chain is:
+// BE PRECISE ABOUT WHAT PINS WHAT. `snapshot.json` is NOT generated; it remains a hand-maintained
+// sampled payload. The producer-to-TypeScript link is generated and checked, while this file and
+// `contract.test.ts` hold dashboard fixtures against that generated contract. So the chain is:
 //
-//   this fixture  --type-checked against-->  types/projection.ts  --measured against-->  snapshot.json
-//                  (`Overrides<O, Node>`,     (`contract.test.ts`, three directions)      ↕ BY HAND
-//                   and every annotated                                            observer/projection.py
-//                   base below)
+//   this fixture  --type-checked against-->  generated types/projection.ts
+//                  (`Overrides<O, Node>`,        ↑ generated + stale-checked from
+//                   and every annotated      observer/projection.py's Pydantic schema
+//                   base below)                  ↕ sampled by `snapshot.json`
 //
-// What a green build here therefore claims is: THE MIRROR could produce this shape, and the mirror
-// agrees with a payload a person wrote to stand in for the server. The mirror↔server link is the
-// hand-maintained one, and it is the only link in the chain no test can hold up. A field the server
-// starts sending that neither the snapshot nor the mirror knows about is invisible to all of it.
-// Read `contract.test.ts` for exactly how far its three directions reach, and for the two kinds of
-// drift (an omitted `T | None`, a vocabulary member no sample carries) that only a schema can catch.
+// What a green build here therefore claims is: the generated wire contract can produce this shape,
+// and the sampled payload exercises it. Read `contract.test.ts` for exactly how far its three
+// fixture directions reach; schema generation separately catches omitted nullable fields and
+// vocabulary members no sample happens to carry.
 //
 // HOW PARTIAL FIXTURES STAY ERGONOMIC. Every builder takes an `Overrides<O, Node>` (see
 // `fixtures/overrides.ts`), so a test that cares about three fields of a fifty-field node names
@@ -86,7 +83,7 @@ const SERVED_ENGINE_PROCESS = demandServed(
   SERVED.analytics.engineProcesses[0],
   "analytics.engineProcesses[0]",
 );
-const SERVED_PICKUP = demandServed(SERVED.analytics.agentPickups?.[0], "analytics.agentPickups[0]");
+const SERVED_PICKUP = demandServed(SERVED.analytics.agentPickups[0], "analytics.agentPickups[0]");
 const SERVED_ATTENTION = demandServed(SERVED.analytics.attentionQueue[0], "analytics.attentionQueue[0]");
 const SERVED_GATE = demandServed(
   SERVED.lifecycles.find((entry) => entry.gate !== undefined)?.gate,
@@ -103,6 +100,7 @@ const BASE_LIFECYCLE: LifecycleProjection = {
   tokens: SERVED_LIFECYCLE.tokens,
   startedAt: SERVED_LIFECYCLE.startedAt,
   lastEventTs: SERVED_LIFECYCLE.lastEventTs,
+  stateEnteredAt: SERVED_LIFECYCLE.stateEnteredAt,
   inferred: SERVED_LIFECYCLE.inferred,
   actions: [],
   tokenSeries: [],
@@ -112,6 +110,7 @@ const BASE_GATE: GateNode = {
   id: SERVED_GATE.id,
   kind: SERVED_GATE.kind,
   state: SERVED_GATE.state,
+  evidenceRefs: [],
   decisions: SERVED_GATE.decisions,
   packet: {},
   ts: SERVED_GATE.ts,
@@ -153,6 +152,8 @@ const BASE_TASK_DOC: TaskDocNode = {
   stepsDone: SERVED_TASK_DOC.stepsDone,
   stepsTotal: SERVED_TASK_DOC.stepsTotal,
   docPath: SERVED_TASK_DOC.docPath,
+  bodyRevision: SERVED_TASK_DOC.bodyRevision,
+  createdAt: SERVED_TASK_DOC.createdAt,
   steps: [],
   objective: SERVED_TASK_DOC.objective,
   requirements: [],
@@ -162,6 +163,7 @@ const BASE_TASK_DOC: TaskDocNode = {
   references: [],
   subTasks: [],
   sections: [],
+  orchestrates: [],
 };
 
 const BASE_ENGINE_PROCESS: EngineProcessNode = {
@@ -188,6 +190,7 @@ const BASE_ENGINE_PROCESS: EngineProcessNode = {
   seedFallback: SERVED_ENGINE_PROCESS.seedFallback,
   providers: [],
   edges: [],
+  landing: [],
   actions: [],
   summary: SERVED_ENGINE_PROCESS.summary,
   missingFacts: [],
@@ -200,6 +203,7 @@ const BASE_PICKUP: AgentPickupNode = {
   messageKind: SERVED_PICKUP.messageKind,
   deliveryState: SERVED_PICKUP.deliveryState,
   state: SERVED_PICKUP.state,
+  attemptCount: SERVED_PICKUP.attemptCount,
   ttlSeconds: SERVED_PICKUP.ttlSeconds,
 };
 

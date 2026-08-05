@@ -20,7 +20,10 @@ from agents_remember.serving.harness_control_adapter import (
     UnsupportedHarnessProtocolAdapter,
 )
 from agents_remember.serving.harness_control_bridge import HarnessControlBridge
-from agents_remember.serving.harness_control_factories import create_harness_protocol_adapter
+from agents_remember.serving.harness_control_factories import (
+    create_harness_protocol_adapter,
+    harness_launch_knobs,
+)
 from agents_remember.serving.harness_control_ipc import HarnessControlServer, LocalControlEndpoint
 from agents_remember.serving.harness_control_models import (
     ControlIdentity,
@@ -217,7 +220,8 @@ async def _prepare_controlled_launch(
         "AR_SPAWN_EFFORT": selection.effort,
     }
     discoverer = create_harness_protocol_adapter(config.harness_id, env=discovery_env)
-    knobs = discoverer.launch_knobs(
+    knobs = harness_launch_knobs(
+        config.harness_id,
         model_key=selection.model_key,
         effort=selection.effort,
     )
@@ -284,7 +288,7 @@ async def _read_terminal_input(surface: HarnessTerminalSurface) -> None:
 async def _submit_session_commands(bridge: HarnessControlBridge, commands: tuple[str, ...]) -> None:
     for index, command in enumerate(commands, start=1):
         now = datetime.now(UTC).isoformat()
-        receipt = await bridge.submit(
+        receipt = await bridge.submissions().submit(
             PromptRequest(
                 request_id=f"{bridge.identity.ar_session_id}:session-command:{index}",
                 source="durable",

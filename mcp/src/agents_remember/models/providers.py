@@ -96,6 +96,27 @@ class ProviderSummary(StrictResponseModel):
 class ProviderStatusResponse(ToolResponse):
     operation: Literal["provider_status"] = "provider_status"
     providers: ProviderSummary
+    # Declared rather than stamped onto the dumped dict. `providers/status.py` used to
+    # inject both keys after `model_dump`, which this envelope (extra="forbid") then met
+    # again at the `_tool_payload` re-validation: any run where the daemon HAD sampled a
+    # metrics row or an index-state row raised ValidationError on the way to the wire.
+    # Declaring them is the same repair L4 made for nextStep/supervisorBanner -- what this
+    # package emits, this package declares -- and `code_quality/wire_contract.py` is the
+    # check that keeps the injection from coming back.
+    metrics: dict[str, Any] | None = Field(
+        default=None,
+        description=(
+            "Newest daemon-sampled containment metrics row, or null before the serving "
+            "daemon's first sample. Present even when providers are disabled."
+        ),
+    )
+    indexState: list[dict[str, Any]] | None = Field(
+        default=None,
+        description=(
+            "Newest index-lifecycle rows (seed catch-up, staleIndex, watcher readiness), "
+            "oldest first, or null when none have been recorded."
+        ),
+    )
 
 
 class ProviderRawStatus(FlexibleResponseModel):

@@ -262,8 +262,8 @@ function SessionsViewImpl({
     (state) => state.analytics?.taskDocuments ?? EMPTY_DOCS,
   );
   const taskDocuments = suppliedTaskDocuments ?? projectedTaskDocuments;
-  const pickups = useDashboard(
-    (state) => state.analytics?.agentPickups ?? EMPTY_PICKUPS,
+  const pickups = useDashboard((state) =>
+    state.analytics ? state.analytics.agentPickups : EMPTY_PICKUPS,
   );
   const supervisorHeartbeat = useDashboard(
     (state) => state.supervisorHeartbeat,

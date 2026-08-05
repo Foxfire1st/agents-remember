@@ -12,13 +12,13 @@ promotion ratchet keep the catalog alive.
 ### CS-1 — Production-wiring walk
 
 **Trace the real call path, never a hand-aligned harness.** A claim that a consumer or an
-enforcement point exists must be walked through the PRODUCTION call path — the controller, the
-tool registration, the store fold — not through a test that hand-assembles the pieces into
-alignment. A test can pass while the production consumer is inert.
+enforcement point exists must be walked through the PRODUCTION call path — the application
+entry point, the tool registration, the store fold — not through a test that hand-assembles
+the pieces into alignment. A test can pass while the production consumer is inert.
 
 - Catching evidence: 260703-L8 review 3 (AR3-1) — the integrate consumer was proven **inert**: the
-  policy was omitted at the controller and the gate was looked up on the wrong lifecycle, while a
-  hand-aligned test passed (L8 decision log, cycle-6 entry).
+  policy was omitted at the application entry point and the gate was looked up on the wrong
+  lifecycle, while a hand-aligned test passed (L8 decision log, cycle-6 entry).
 
 ### CS-2 — Fail-open hunt
 

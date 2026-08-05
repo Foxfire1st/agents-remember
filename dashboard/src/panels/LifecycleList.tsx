@@ -287,9 +287,9 @@ const LifecycleListRender = memo(
     sessions,
     nowMs,
   }: LifecycleListRenderProps) {
-    const docs = analytics?.taskDocuments ?? [];
-    const series = analytics?.series ?? [];
-    const agentPickups = analytics?.agentPickups ?? [];
+    const docs = analytics ? analytics.taskDocuments : [];
+    const series = analytics ? analytics.series : [];
+    const agentPickups = analytics ? analytics.agentPickups : [];
     const enclosuresByLifecycle = groupEnclosuresByLifecycle(Object.values(enclosures));
     const rows = operationRows({
       lifecycles: Object.values(lifecycles),
@@ -588,7 +588,7 @@ function docRow(
   allDocs: TaskDocNode[],
   nowMs: number,
 ): OperationRow {
-  const progress = doc.kind === "master" ? subTaskProgress(doc.subTasks) : topLevelStepProgress(doc);
+  const progress = doc.kind === "master" ? subTaskProgress(doc.subTasks) : taskStepProgress(doc);
   const label = taskDocHierarchyLabel(doc, seriesList);
   const repo = doc.repository || lifecycle?.repoId || "—";
   const phase = lifecycle?.phase ?? doc.status;
@@ -622,7 +622,7 @@ function docRow(
       leafKey: qualifiedLeafKey(doc),
       ...(lifecycle ? { lifecycleId: lifecycle.id } : {}),
     },
-    createdAt: doc.createdAt ?? "",
+    createdAt: doc.createdAt,
     fallbackOrder: doc.docPath,
     parentKey: command.parentKey ?? taskDocParentKey(doc, seriesList, masterDocPaths),
     depth: 0,
@@ -676,7 +676,7 @@ function seriesRow(
     gate,
     pickup,
     chatIdentity: lifecycle ? { lifecycleId: lifecycle.id } : {},
-    createdAt: series.createdAt ?? "",
+    createdAt: series.createdAt,
     fallbackOrder: series.docPath,
     parentKey: commander,
     depth: 0,
@@ -889,7 +889,7 @@ function pickupForLifecycle(
 
 function taskHint(docs: TaskDocNode[]): string {
   if (docs.length > 1) return `series ${docs.length}`; // a multi-task series (subtask slices)
-  if (docs.length === 1) return progressHint(topLevelStepProgress(docs[0])); // single task progress
+  if (docs.length === 1) return progressHint(taskStepProgress(docs[0])); // single task progress
   return "";
 }
 
@@ -956,10 +956,10 @@ function lifecycleForEnclosure(
     );
 }
 
-function topLevelStepProgress(doc: TaskDocNode): { done: number; total: number } {
+function taskStepProgress(doc: TaskDocNode): { done: number; total: number } {
   return {
-    done: doc.steps.filter((step) => step.status === "done").length,
-    total: doc.steps.length,
+    done: doc.stepsDone,
+    total: doc.stepsTotal,
   };
 }
 

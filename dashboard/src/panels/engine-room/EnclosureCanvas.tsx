@@ -1350,7 +1350,7 @@ export function EnclosureCanvas({ node, gateNode, workspaceEngines = [], officia
   // Show the landing dock only while the enclosure is actually retiring to the official line,
   // and only the refs the probe could resolve: a `missing` ref (probe couldn't run, e.g. gh absent)
   // carries no signal and is dropped, never rendered as an "unknown" chip.
-  const landingRefs = (node.landing ?? []).filter((ref) => ref.factState !== "missing");
+  const landingRefs = node.landing.filter((ref) => ref.factState !== "missing");
   const showLanding =
     landingRefs.length > 0 && (LANDING_PHASES.has(node.phase) || Boolean(node.integrationStrategy));
   // Cleanup teardown: a retiring enclosure (abandon OR a landed cleanup) keeps the historical
@@ -1358,7 +1358,7 @@ export function EnclosureCanvas({ node, gateNode, workspaceEngines = [], officia
   const retiring = node.phase === "abandoned" || node.phase === "cleanup-pending";
   const cleanupTip =
     node.phase === "cleanup-pending"
-      ? node.landing?.find((ref) => ref.kind === "origin-main" && ref.factState !== "missing")
+      ? node.landing.find((ref) => ref.kind === "origin-main" && ref.factState !== "missing")
       : undefined;
   return (
     <>

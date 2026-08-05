@@ -38,8 +38,8 @@ class WorktreeProviderSetupConfig:
     settings_path: Path
     seed_source_coordination_root: Path | None = None
     # True when settings_path is a temporary file whose lifetime must extend
-    # into the background setup thread; the launcher then owns the unlink and
-    # the controller must skip its own cleanup for a "starting" result.
+    # into the background setup thread; the launcher then owns the unlink and the
+    # application entry point must skip its own cleanup for a "starting" result.
     unlink_settings_after_setup: bool = False
 
 

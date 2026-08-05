@@ -6,9 +6,15 @@ skill-install targets. Skill-sync writes skill files into many agent dirs, inclu
 the harnesses that (a) Agents Remember actively supports and (b) run as a terminal UI the Mode B2
 terminal host can spawn. Gemini CLI is not supported in main; the GUI tools are not spawnable TUIs.
 
+What a harness IS -- the :class:`~agents_remember.kernel.harnesses.Harness` record and the curated
+:data:`~agents_remember.kernel.harnesses.HARNESSES` table -- is a SETTINGS VOCABULARY and lives in
+``kernel/harnesses.py``, because ``kernel/agentic_settings.py`` parses the ``orchestration.harnesses``
+family into it. This module owns the two things that are genuinely the served process's: DETECTION
+(is it installed on this machine) and LAUNCH (what argv a knob turns into).
+
 The registry is GOOD DEFAULTS, not a wall (developer ruling 2026-07-07): the
 ``orchestration.harnesses`` settings family (parsed by ``kernel/agentic_settings.py``, documented in
-``docs/reference/harnesses.md`` -- THE manual for this surface) merges over this table by id. New
+``docs/reference/harnesses.md`` -- THE manual for this surface) merges over that table by id. New
 ids ADD a harness (users teach the system a TUI we never enumerated); existing ids OVERRIDE the
 defaults (e.g. a pre-customized ``argv`` -- launch the harness exactly the way the user would run it
 themselves). A harness id known neither here nor in settings refuses LOUDLY at dispatch, naming the
@@ -34,61 +40,11 @@ from __future__ import annotations
 import shutil
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from typing import Literal
+
+from agents_remember.kernel.harnesses import HARNESSES, Harness
 
 Which = Callable[[str], str | None]
 """A :func:`shutil.which`-shaped lookup: a command name -> its resolved path, or ``None`` if absent."""
-EffortValidation = Literal["enumerated", "non-empty"]
-
-
-@dataclass(frozen=True)
-class Harness:
-    """One supported TUI harness: a stable ``id``, a display ``name``, the ``command`` to detect on
-    ``PATH``, and the fixed ``argv`` used to launch it (at the workspace root, like the plain shell).
-
-    The optional knob-mapping fields (260703-L16) describe how settings-defined non-native harnesses
-    receive spawn knobs. Native Claude/Codex/Pi adapters ignore this legacy mapping surface and own
-    their dynamic model-gated catalogs and launch channels directly.
-    """
-
-    id: str
-    name: str
-    command: str
-    argv: tuple[str, ...]
-    # The custom-harness launch flag the model knob maps onto (``--model <value>``).
-    model_flag: str | None = None
-    # The launch flag the effort knob maps onto, and the values that flag ACCEPTS. Values outside
-    # ``effort_flag_values`` are never put on the flag (the claude CLI warns-then-silently-degrades).
-    effort_flag: str | None = None
-    effort_flag_values: tuple[str, ...] = ()
-    # Custom harnesses may expose an explicit enum or accept a non-empty value.
-    effort_validation: EffortValidation = "enumerated"
-    # Custom-harness effort values delivered by its explicitly declared running-session command.
-    effort_session_values: tuple[str, ...] = ()
-    effort_session_command: str | None = None
-    effort_flag_value_template: str | None = None
-    # Where this entry came from. ``registry`` = these curated defaults (a settings OVERRIDE of a
-    # builtin keeps it); ``settings`` = a NEW ``orchestration.harnesses`` id. A mapping-less
-    # settings harness REFUSES model/effort; native builtins use the normalized adapter port.
-    defined_in: Literal["registry", "settings"] = "registry"
-
-
-HARNESSES: tuple[Harness, ...] = (
-    Harness(
-        id="claude",
-        name="Claude Code",
-        command="claude",
-        argv=("claude",),
-    ),
-    Harness(
-        id="codex",
-        name="Codex",
-        command="codex",
-        argv=("codex",),
-    ),
-    Harness(id="pi", name="Pi.dev", command="pi", argv=("pi",)),
-)
-"""The developer-curated max set (2026-06-18): the native harnesses AR supports."""
 
 _BY_ID: dict[str, Harness] = {harness.id: harness for harness in HARNESSES}
 

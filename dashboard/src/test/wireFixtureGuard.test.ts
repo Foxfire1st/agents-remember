@@ -23,12 +23,11 @@ import path from "node:path";
 // shape THE MIRROR can produce. The two are halves of one claim, and neither is worth much alone:
 // a perfect mirror nobody is checked against, or fixtures checked against a mirror that lies.
 //
-// Say the chain exactly, because the third link does not exist: fixture ⊆ mirror is held here and
-// in `contract.test.ts`; mirror ⊆ server is held by NOTHING. `snapshot.json` is hand-maintained —
-// there is no generator anywhere under `mcp/`, `scripts/` or `dashboard/`, and no Python test reads
-// the mirror or the snapshot. So a fixture that passes every rule below is a shape the server can
-// produce only insofar as somebody kept the mirror right by hand. `wire.ts`'s header carries the
-// same chain; codegen is what would close it.
+// Say the chain exactly: fixture ⊆ mirror is held here and in `contract.test.ts`; mirror ⊆
+// producer schema is held by the projection generator, its Python regressions, and
+// `scripts/sync-projection-types.py --check`. `snapshot.json` itself remains a hand-maintained
+// sample, so these guards still matter: they ensure dashboard fixture builders exercise the
+// generated wire contract instead of bypassing it. `wire.ts`'s header carries the same chain.
 //
 // The mechanism is in `wireFixtureGuard.ts`; read its header for the five rules and why banning
 // `as` is only the first of them. What lives HERE is the part a mechanism cannot supply itself:
@@ -207,9 +206,9 @@ describe("the guard has something to police", () => {
   });
 
   it("knows the types the two proven defects lived on", () => {
-    // `refusedPolarity` was invented on `EngineProcessEdge`; `createdAt` on `TaskDocNode`.
+    // `refusedPolarity` was invented on `EngineProcessEdge`; `createdAt` on `TaskSubTaskRefNode`.
     expect(vocabulary).toContain("src/types/projection.ts:EngineProcessEdge");
-    expect(vocabulary).toContain("src/types/projection.ts:TaskDocNode");
+    expect(vocabulary).toContain("src/types/projection.ts:TaskSubTaskRefNode");
     expect(vocabulary).toContain("src/types/event.ts:ObserverEvent");
     expect(vocabulary).toContain("src/data/conversation/types.ts:ConversationCapabilities");
   });

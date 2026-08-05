@@ -22,8 +22,8 @@ from unittest import mock
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
+from agents_remember.application import provider_tools
 from agents_remember.benchmarks.runner_modules.analysis import range_text
-from agents_remember.controllers import provider_tools
 from agents_remember.controlplane.records import (
     GateAnchor,
     GateRecord,

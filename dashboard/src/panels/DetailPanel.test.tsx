@@ -26,6 +26,7 @@ function taskDoc(over: Partial<TaskDocNode> & Pick<TaskDocNode, "kind" | "docPat
     repository: "repo-a",
     title: "doc",
     status: "inProgress",
+    bodyRevision: "",
     createdAt: "2026-06-20T09:00:00+00:00",
     stepsDone: 0,
     stepsTotal: 0,
@@ -36,6 +37,7 @@ function taskDoc(over: Partial<TaskDocNode> & Pick<TaskDocNode, "kind" | "docPat
     decisions: [],
     openQuestions: [],
     references: [],
+    orchestrates: [],
     subTasks: [],
     sections: [],
     ...over,
@@ -52,6 +54,7 @@ function seriesNode(over: Partial<SeriesNode> & Pick<SeriesNode, "seriesId">): S
     doneCount: 0,
     totalCount: 0,
     seriesTokenTotal: 0,
+    createdAt: "2026-06-20T09:00:00+00:00",
     sections: [],
     decisions: [],
     docPath: `/t/${over.seriesId}/task.json`,
@@ -96,6 +99,7 @@ function seedSeries(
     tokens: 0,
     startedAt: "2026-06-20T09:00:00+00:00",
     lastEventTs: "2026-06-20T09:00:30+00:00",
+    stateEnteredAt: "2026-06-20T09:00:00+00:00",
     inferred: false,
     actions: [],
     tokenSeries: [],
@@ -173,6 +177,8 @@ function seedSeries(
       series: [master],
       attentionQueue: [],
       engineProcesses: [],
+      agentPickups: [],
+      expectationRows: [],
     },
   };
   dashboardStore.getState().applySnapshot(projection);
@@ -234,6 +240,8 @@ function seedSeriesOrdering() {
       series: [master],
       attentionQueue: [],
       engineProcesses: [],
+      agentPickups: [],
+      expectationRows: [],
     },
   };
   dashboardStore.getState().applySnapshot(projection);
@@ -257,6 +265,8 @@ function seedTaskDocuments(
       series: [],
       attentionQueue: [],
       engineProcesses: [],
+      agentPickups: [],
+      expectationRows: [],
     },
   });
 }
@@ -283,6 +293,8 @@ function seedProjection(over: Partial<WorkspaceProjection>) {
       series: [],
       attentionQueue: [],
       engineProcesses: [],
+      agentPickups: [],
+      expectationRows: [],
     },
     ...over,
   };
@@ -300,6 +312,7 @@ function seedPromotedLeaf() {
     tokens: 0,
     startedAt: "2026-06-24T06:00:00+00:00",
     lastEventTs: "2026-06-24T06:00:30+00:00",
+    stateEnteredAt: "2026-06-24T06:00:00+00:00",
     inferred: false,
     actions: [],
     tokenSeries: [],
@@ -378,6 +391,8 @@ function seedPromotedLeaf() {
       ],
       attentionQueue: [],
       engineProcesses: [],
+      agentPickups: [],
+      expectationRows: [],
     },
   };
   dashboardStore.getState().applySnapshot(projection);
@@ -506,6 +521,7 @@ describe("DetailPanel master series navigation (6g)", () => {
       tokens: 0,
       startedAt: "2026-06-20T09:00:00+00:00",
       lastEventTs: "2026-06-20T09:00:30+00:00",
+      stateEnteredAt: "2026-06-20T09:00:00+00:00",
       inferred: false,
       actions: [],
       tokenSeries: [],
@@ -548,6 +564,8 @@ describe("DetailPanel master series navigation (6g)", () => {
         series: [],
         attentionQueue: [],
         engineProcesses: [],
+        agentPickups: [],
+        expectationRows: [],
       },
     });
 
@@ -630,6 +648,50 @@ describe("DetailPanel master series navigation (6g)", () => {
     expect(getByText("E4 — Master leaf list uses task-specific numbers")).toBeTruthy();
     expect(queryByText("Make Operations disappearance archive/delete-based")).toBeNull();
     expect(queryByText("Master leaf list uses task-specific numbers")).toBeNull();
+  });
+
+  it("labels parent and nested intentional skips without relabeling ordinary done", () => {
+    const disposition = {
+      kind: "intentionalSkip" as const,
+      reason: "Superseded by the accepted path.",
+      recordedAt: "2026-08-03T12:00:00+00:00",
+      recordedVia: "task_doc.skip_step" as const,
+    };
+    const doc = taskDoc({
+      lifecycleId: undefined,
+      kind: "subTask",
+      title: "Skip display",
+      docPath: "/tasks/repo-a/planning/skips.json",
+      stepsDone: 3,
+      stepsTotal: 3,
+      steps: [
+        {
+          id: "S1",
+          title: "Skipped parent",
+          status: "done",
+          disposition,
+          substeps: [
+            {
+              id: "C1",
+              title: "Skipped child",
+              status: "done",
+              disposition: { ...disposition, reason: "Child became unnecessary." },
+            },
+          ],
+        },
+        { id: "S2", title: "Ordinary done", status: "done", substeps: [] },
+      ],
+    });
+    seedTaskDocuments([doc]);
+
+    const { getAllByText, getByText } = render(
+      <DetailPanel selectedId="taskdoc:/tasks/repo-a/planning/skips.json" />,
+    );
+
+    expect(getAllByText("SKIPPED")).toHaveLength(2);
+    expect(getByText(/Superseded by the accepted path/)).toBeTruthy();
+    expect(getByText(/Child became unnecessary/)).toBeTruthy();
+    expect(getByText("S2 — Ordinary done").closest("li")?.textContent).not.toContain("SKIPPED");
   });
 
   it("pins the sub-task index above the description and keeps the in-section copy", () => {
@@ -728,24 +790,24 @@ describe("DetailPanel master series navigation (6g)", () => {
     expect(queryByText("2. Alpha later")).toBeNull();
   });
 
-  it("summarizes task progress with top-level implementation steps", () => {
+  it("summarizes task progress with every declared parent and nested step", () => {
     seedSeries({
       sliceDoc: {
         title: "Parallel Leaf Enclosure Workflow",
-        stepsDone: 40,
-        stepsTotal: 42,
+        stepsDone: 46,
+        stepsTotal: 49,
         steps: nestedProgressSteps(),
       },
     });
     const { getByRole, getByTestId, queryByText } = render(<DetailPanel selectedId="series" />);
 
     const row = getByTestId("subtask-open-1");
-    expect(row.textContent).toContain("6/7 · inProgress");
-    expect(row.textContent).not.toContain("40/42");
+    expect(row.textContent).toContain("46/49 · inProgress");
+    expect(row.textContent).not.toContain("6/7");
 
     fireEvent.click(row);
-    expect(getByRole("img", { name: "steps done" }).textContent).toBe("6/7");
-    expect(queryByText("40/42")).toBeNull();
+    expect(getByRole("img", { name: "steps done" }).textContent).toBe("46/49");
+    expect(queryByText("6/7")).toBeNull();
   });
 
   it("renders master content when a selected task-id lifecycle maps to the series task name", () => {
@@ -812,6 +874,7 @@ describe("DetailPanel master series navigation (6g)", () => {
           tokens: 0,
           startedAt: "2026-07-12T08:00:00+00:00",
           lastEventTs: "2026-07-12T08:00:01+00:00",
+          stateEnteredAt: "2026-07-12T08:00:00+00:00",
           inferred: false,
           actions: [],
           tokenSeries: [],
@@ -1305,6 +1368,8 @@ describe("DetailPanel doc-reader change-set bar (L4a)", () => {
         series: [],
         attentionQueue: [],
         engineProcesses: [],
+        agentPickups: [],
+        expectationRows: [],
       },
     });
     const onOpenChangeSet = vi.fn();

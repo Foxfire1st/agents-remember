@@ -7,14 +7,13 @@ does not re-spam onboarding the model already holds. The ledger survives a
 context compaction (the same lifecycle continues in place), so the dedup state is
 on-disk, not only in process memory.
 
-A compaction would otherwise leave the served set stale (onboarding the model
-lost to truncation would not re-serve), but a session-hook producer for the
-``compact-reset.json`` marker is **not** planned: compaction-reset is a
-fresh-worker / lifecycle concern (small work -> new worker -> new lifecycle ->
-fresh ledger) deferred to the post-3.0 agentic-control-plane follow-up, and
-``clear`` / a new chat already yields a fresh lifecycle and ledger. Until then
-``refresh=true`` is the working manual reset; the controller-side marker consumer
-(``read_files._maybe_reset_served``) stays as defensive scaffolding.
+A compaction would otherwise leave the served set stale: onboarding the model lost
+to truncation would not re-serve. ``refresh=true`` forces the re-serve, and
+``clear`` / a new chat yields a fresh lifecycle and a fresh ledger. The
+``compact-reset.json`` marker that would make that recovery automatic has no
+producer yet; the producer is owned by ``260628_developer-notification-reliability``
+leaf 05 (POST-COMPACTION RECOVERY, gap G2), and
+``read_files._maybe_reset_served`` is the consumer already waiting for it.
 
 Served records live in ``<observer_root>/lifecycles/<lifecycle-id>/served.jsonl``
 beside that lifecycle's ``events.jsonl`` / ``gates.jsonl`` -- the GateStore
@@ -26,10 +25,17 @@ single-writer assumption the event and gate stores make.
 This is a *record*, not a public MCP response: it carries no token fields and is
 never returned by a tool, so it is not registered in
 ``PUBLIC_TOOL_RESPONSE_MODELS``.
+
+Two classes, one substrate: :class:`ServedStore` is the file (paths, append, read,
+fold), and :class:`ServedLedger` is the live read-through cache over it that the
+running process actually asks -- the hot path is a set membership test, not a log
+read.
 """
 
 from __future__ import annotations
 
+import contextlib
+import threading
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -113,3 +119,79 @@ class ServedStore:
     def served_set(self, lifecycle_id: str) -> set[str]:
         """Fold the log into the set of ``"<kind>:<path>:<hash>"`` keys served."""
         return {record.key() for record in self.read(lifecycle_id)}
+
+
+class ServedLedger:
+    """The live served-key sets, read through to :class:`ServedStore` on first use.
+
+    One set per lifecycle, hydrated from ``served.jsonl`` the first time that lifecycle
+    is asked about, so the dedup survives a context compaction (the same process keeps
+    running) without re-reading the log on every attach decision.
+
+    ITS OWN LOCK, DELIBERATELY, not the ambient lifecycle's. The lifecycle's lock exists
+    because the heartbeat ticker thread and the request thread both append to one
+    ``events.jsonl`` and the event store is single-writer-per-file; this ledger writes a
+    different file that the ticker never touches. What it does need is protection of the
+    in-memory sets against two request threads, which is what this lock is. The one
+    ordering that exists -- the lifecycle takes its own lock and then calls
+    :meth:`forget` -- is safe because nothing here ever calls back into the lifecycle.
+
+    Durability must never break the read it records, so a disk error is contained in
+    both writers; the in-memory set still advances, which is what stops the same process
+    re-serving the same piece twice.
+    """
+
+    def __init__(self, store: ServedStore) -> None:
+        self._store = store
+        self._lock = threading.Lock()
+        self._sets: dict[str, set[str]] = {}
+
+    def is_served(self, lifecycle_id: str, kind: str, path: str, content_hash: str) -> bool:
+        """True when this exact ``(kind, path, hash)`` was already served."""
+        with self._lock:
+            return served_key(kind, path, content_hash) in self._hydrated(lifecycle_id)
+
+    def record(
+        self, lifecycle_id: str, kind: str, path: str, content_hash: str, *, ts: str
+    ) -> None:
+        """Record a served onboarding piece in memory and on disk (append-only)."""
+        with self._lock:
+            self._hydrated(lifecycle_id).add(served_key(kind, path, content_hash))
+            with contextlib.suppress(OSError):
+                self._store.append(
+                    lifecycle_id,
+                    ServedRecord(kind=kind, path=path, hash=content_hash, ts=ts),
+                )
+
+    def reset(self, lifecycle_id: str) -> None:
+        """Clear the served set for a lifecycle (the compaction/refresh reset).
+
+        Drops the in-memory set and deletes the on-disk ``served.jsonl`` so the next read
+        re-serves every onboarding piece from scratch. The single live owner deleting its
+        own ledger keeps the single-writer invariant intact.
+        """
+        with self._lock:
+            self._sets.pop(lifecycle_id, None)
+            with contextlib.suppress(OSError):
+                path = self._store.log_path(lifecycle_id)
+                if path.exists():
+                    path.unlink()
+
+    def forget(self, lifecycle_id: str) -> None:
+        """Drop the in-memory set for an ended or left lifecycle; keep the log.
+
+        The counterpart of :meth:`reset`: that one is a deliberate re-serve and deletes
+        the durable record, this one only releases memory for a lifecycle nothing will
+        ask about again. Deleting the log here would destroy the history of a lifecycle
+        that merely paused.
+        """
+        with self._lock:
+            self._sets.pop(lifecycle_id, None)
+
+    def _hydrated(self, lifecycle_id: str) -> set[str]:
+        """The set for a lifecycle, read through from disk on first use (lock held)."""
+        cached = self._sets.get(lifecycle_id)
+        if cached is None:
+            cached = self._store.served_set(lifecycle_id)
+            self._sets[lifecycle_id] = cached
+        return cached

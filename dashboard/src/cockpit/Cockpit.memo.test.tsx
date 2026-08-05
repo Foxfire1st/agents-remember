@@ -148,6 +148,7 @@ function seedDrillableMaster() {
     tokens: 0,
     startedAt: "2026-06-20T09:00:00+00:00",
     lastEventTs: "2026-06-20T09:00:30+00:00",
+    stateEnteredAt: "2026-06-20T09:00:00+00:00",
     inferred: false,
     actions: [],
     tokenSeries: [],
@@ -195,6 +196,8 @@ function seedDrillableMaster() {
       series: [],
       attentionQueue: [],
       engineProcesses: [],
+      agentPickups: [],
+      expectationRows: [],
     },
   };
   dashboardStore.getState().applySnapshot(projection);

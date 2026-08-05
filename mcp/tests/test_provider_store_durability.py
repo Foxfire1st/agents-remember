@@ -66,7 +66,9 @@ import tempfile
 import unittest
 from collections.abc import Iterator
 from pathlib import Path
+from typing import Any
 
+from _global_state import preserve_owned_mutable_state
 from _store_durability import (
     ADAPTERS,
     PROVIDER_CASES,
@@ -245,7 +247,9 @@ def _describe(result: dict[str, object]) -> str:
         f"{result['case']} / {result['scenario']}: {lost} of {attempted} records reported "
         f"written were missing afterwards ({percent:.2f}% loss); "
         f"sample={result['lost_sample']} torn_lines={result['torn_lines']} "
-        f"reclaim_ticks={result.get('reclaim_ticks')} stragglers={result['stragglers']}"
+        f"reclaim_attempts={result.get('reclaim_attempts')} "
+        f"successful_reclaims={result.get('successful_reclaims')} "
+        f"stragglers={result['stragglers']}"
     )
 
 
@@ -266,7 +270,8 @@ class _TempRootTest(unittest.TestCase):
         at the source, where it also covered the control-plane suite that had the same layout and
         no such workaround. ``_store_durability.harness_work_dir`` now derives the scratch
         directory from ``root`` itself so no caller has to know any of this, and
-        ``MIN_RECLAIM_TICKS`` refuses the result if a reclaimer barely runs for any other reason.
+        ``MIN_SUCCESSFUL_RECLAIMS`` refuses the result if a reclaimer barely compacts for any
+        other reason.
         What is left here is the ordinary requirement that separate runs get separate stores.
         """
         return self.tmp / scenario / case / "observer"
@@ -292,7 +297,8 @@ class ProviderStoreDurabilityTests(_TempRootTest):
         """The unforced version: concurrent processes, no interposition anywhere.
 
         The reclaim tick count is load-bearing, and it is no longer checked here: this file's
-        ``reclaim_ticks > 1`` moved into the instrument as ``MIN_RECLAIM_TICKS`` (10) and applies
+        the successful-compaction floor moved into the instrument as
+        ``MIN_SUCCESSFUL_RECLAIMS`` (10) and applies
         to every caller of ``run_stress`` now, including the control-plane suite that did not have
         it and the base-commit script entry point that could not have had it. A local repeat would
         be unreachable behind a floor ten times its size. Every loss number in this file is a
@@ -526,7 +532,10 @@ class ProviderReadPolicyTests(_TempRootTest):
             metrics.record(_memory_sample(f"grepai-{index}", ratio=0.85))
         before = metrics.log_path.read_bytes()
 
-        verdict = evaluate_provider_degradation(config)
+        def unreachable_stopper(_: McpRuntimeConfig) -> dict[str, Any]:
+            raise AssertionError("this evaluation must not reach the critical failsafe")
+
+        verdict = evaluate_provider_degradation(config, stop_provider_stacks=unreachable_stopper)
 
         self.assertEqual(verdict["state"], "degraded", "these rows must have decided something")
         self.assertIsNone(verdict["event"], "a transition here would test the alert path instead")
@@ -626,6 +635,12 @@ class ProviderOwnershipTests(_TempRootTest):
     decision it implements; here nothing in the MCP process removes a provider row at all, so a
     single owner is available -- and where one is available the leaf requires it.
     """
+
+    def setUp(self) -> None:
+        super().setUp()
+        state = preserve_owned_mutable_state()
+        state.__enter__()
+        self.addCleanup(state.__exit__, None, None, None)
 
     def test_both_provider_logs_declare_the_dashboard_their_compaction_owner(self) -> None:
         """The declaration and the predicate that reads it -- NOT who calls the reclaim.

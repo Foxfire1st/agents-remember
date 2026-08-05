@@ -264,7 +264,7 @@ describe("scenario player model (5i)", () => {
     expect(phases.slice(1)).toEqual(["abandoned", "abandoned", "abandoned"]);
     // TERMINAL — never lands: no landing dock refs on any abandon frame
     for (const frame of abandon!.frames.slice(1)) {
-      expect(frame.projection.analytics.engineProcesses[0].landing ?? []).toHaveLength(0);
+      expect(frame.projection.analytics.engineProcesses[0].landing).toHaveLength(0);
     }
     expect(abandon!.frames[2].durMs).toBe(1300); // X2 holds the dissolve longest
     const ids = new Set(abandon!.frames.map((frame) => frame.projection.analytics.engineProcesses[0].id));

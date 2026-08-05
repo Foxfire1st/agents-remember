@@ -10,7 +10,9 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
-from agents_remember.controllers import worktree_tools
+from agents_remember.application import gate_tools as gates
+from agents_remember.application import worktree_tools
+from agents_remember.application.gate_tools import GateRaise, GateWait
 from agents_remember.controlplane.enforcement import evaluate_closeout_gate, evaluate_gate
 from agents_remember.controlplane.gate_policy import (
     DEFAULT_GATE_POLICY,
@@ -40,8 +42,6 @@ from agents_remember.controlplane.records import (
     decide_gate,
 )
 from agents_remember.controlplane.store import GateStore
-from agents_remember.mcp.tools import gates
-from agents_remember.mcp.tools.gates import GateRaise, GateWait
 from agents_remember.mcp.tools.lifecycle import lifecycle_start_payload
 from agents_remember.observer import AmbientLifecycle, EventStore, install_ambient, reset_ambient
 from agents_remember.observer.ambient import AmbientTiming
@@ -179,7 +179,7 @@ class GateToolTests(unittest.TestCase):
         inbox_patcher.start()
 
     def _create(self, kind: str = "closeout-approval") -> str:
-        created = gates.gate_create_payload(
+        created = gates.gate_create_tool(
             None,  # type: ignore[arg-type]  # the store is patched; config is unused here
             kind=kind,
             anchor=GateAnchor(lifecycle_id="L1"),
@@ -193,7 +193,7 @@ class GateToolTests(unittest.TestCase):
             "ambient",
             return_value=SimpleNamespace(current=SimpleNamespace(id="L-ACTIVE")),
         ):
-            created = gates.gate_create_payload(
+            created = gates.gate_create_tool(
                 None,  # type: ignore[arg-type]
                 kind="agent-question",
                 anchor=GateAnchor(lifecycle_id=None),
@@ -208,7 +208,7 @@ class GateToolTests(unittest.TestCase):
             mock.patch.object(gates, "ambient", return_value=None),
             self.assertRaisesRegex(Exception, "active lifecycle"),
         ):
-            gates.gate_create_payload(
+            gates.gate_create_tool(
                 None,  # type: ignore[arg-type]
                 kind="agent-question",
                 anchor=GateAnchor(lifecycle_id=None),
@@ -216,7 +216,7 @@ class GateToolTests(unittest.TestCase):
 
     def test_create_then_decide_records_attribution(self) -> None:
         gate_id = self._create()
-        decided = gates.gate_decide_payload(
+        decided = gates.gate_decide_tool(
             None,  # type: ignore[arg-type]
             gate_id=gate_id,
             lifecycle_id="L1",
@@ -232,7 +232,7 @@ class GateToolTests(unittest.TestCase):
             orchestration=SimpleNamespace(gate_policy=MANAGER_CLOSEOUT_WITH_VERDICT_POLICY)
         )
 
-        decided = gates.gate_decide_payload(
+        decided = gates.gate_decide_tool(
             config,  # type: ignore[arg-type]
             gate_id=gate_id,
             lifecycle_id="L1",
@@ -261,7 +261,7 @@ class GateToolTests(unittest.TestCase):
         config = SimpleNamespace(orchestration=SimpleNamespace(gate_policy=MANAGER_CLOSEOUT_POLICY))
 
         with self.assertRaisesRegex(ValueError, "owning lifecycle"):
-            gates.gate_decide_payload(
+            gates.gate_decide_tool(
                 config,  # type: ignore[arg-type]
                 gate_id=gate_id,
                 lifecycle_id="L1",
@@ -279,7 +279,7 @@ class GateToolTests(unittest.TestCase):
         )
 
         with self.assertRaisesRegex(ValueError, "requires reviewer verdict evidence"):
-            gates.gate_decide_payload(
+            gates.gate_decide_tool(
                 config,  # type: ignore[arg-type]
                 gate_id=gate_id,
                 lifecycle_id="L1",
@@ -297,7 +297,7 @@ class GateToolTests(unittest.TestCase):
         self.assertEqual(current[first].state, "expired")
         self.assertEqual(current[second].state, "open")
 
-        result = gates.gate_wait_payload(
+        result = gates.gate_wait_tool(
             None,  # type: ignore[arg-type]
             gate_id=first,
             lifecycle_id="L1",
@@ -316,7 +316,7 @@ class GateToolTests(unittest.TestCase):
         clock = iter([0.0, 0.0])
 
         with mock.patch.object(gates, "require_ambient", return_value=lifecycle):
-            result = gates.lifecycle_gate_payload(
+            result = gates.lifecycle_gate_tool(
                 None,  # type: ignore[arg-type]
                 GateRaise(
                     kind="plan-approval",
@@ -374,7 +374,7 @@ class GateToolTests(unittest.TestCase):
             )
 
         with mock.patch.object(gates, "require_ambient", return_value=lifecycle):
-            result = gates.lifecycle_gate_payload(
+            result = gates.lifecycle_gate_tool(
                 None,  # type: ignore[arg-type]
                 GateRaise(
                     kind="plan-approval",
@@ -422,7 +422,7 @@ class GateToolTests(unittest.TestCase):
             )
 
         with mock.patch.object(gates, "require_ambient", return_value=lifecycle):
-            result = gates.lifecycle_gate_payload(
+            result = gates.lifecycle_gate_tool(
                 None,  # type: ignore[arg-type]
                 GateRaise(
                     kind="plan-approval",
@@ -443,7 +443,7 @@ class GateToolTests(unittest.TestCase):
             mock.patch.object(gates, "require_ambient", return_value=lifecycle),
             self.assertRaisesRegex(Exception, "does not match active lifecycle"),
         ):
-            gates.lifecycle_gate_payload(
+            gates.lifecycle_gate_tool(
                 None,  # type: ignore[arg-type]
                 GateRaise(kind="plan-approval", anchor=GateAnchor(lifecycle_id="other")),
             )
@@ -456,7 +456,7 @@ class GateToolTests(unittest.TestCase):
         self.addCleanup(reset_ambient)
         started = lifecycle_start_payload()
 
-        result = gates.lifecycle_gate_payload(
+        result = gates.lifecycle_gate_tool(
             None,  # type: ignore[arg-type]
             GateRaise(
                 kind="plan-approval",
@@ -506,7 +506,7 @@ class GateToolTests(unittest.TestCase):
     def test_decide_unknown_decision_raises(self) -> None:
         gate_id = self._create("alarm-ack")
         with self.assertRaises(ValueError):
-            gates.gate_decide_payload(
+            gates.gate_decide_tool(
                 None,  # type: ignore[arg-type]
                 gate_id=gate_id,
                 lifecycle_id="L1",
@@ -515,7 +515,7 @@ class GateToolTests(unittest.TestCase):
 
     def test_decide_missing_gate_raises(self) -> None:
         with self.assertRaises(KeyError):
-            gates.gate_decide_payload(
+            gates.gate_decide_tool(
                 None,  # type: ignore[arg-type]
                 gate_id="nope",
                 lifecycle_id="L1",
@@ -524,13 +524,13 @@ class GateToolTests(unittest.TestCase):
 
     def test_wait_returns_when_decided(self) -> None:
         gate_id = self._create("agent-question")
-        gates.gate_decide_payload(
+        gates.gate_decide_tool(
             None,  # type: ignore[arg-type]
             gate_id=gate_id,
             lifecycle_id="L1",
             verdict=GateVerdict(decision="approve", by="developer", via="dashboard"),
         )
-        result = gates.gate_wait_payload(
+        result = gates.gate_wait_tool(
             None,  # type: ignore[arg-type]
             gate_id=gate_id,
             lifecycle_id="L1",
@@ -541,7 +541,7 @@ class GateToolTests(unittest.TestCase):
 
     def test_wait_returns_decision_note(self) -> None:
         gate_id = self._create("agent-question")
-        gates.gate_decide_payload(
+        gates.gate_decide_tool(
             None,  # type: ignore[arg-type]
             gate_id=gate_id,
             lifecycle_id="L1",
@@ -549,7 +549,7 @@ class GateToolTests(unittest.TestCase):
                 decision="reject", by="developer", via="dashboard", note="Needs another pass."
             ),
         )
-        result = gates.gate_wait_payload(
+        result = gates.gate_wait_tool(
             None,  # type: ignore[arg-type]
             gate_id=gate_id,
             lifecycle_id="L1",
@@ -571,7 +571,7 @@ class GateToolTests(unittest.TestCase):
             )
         )
 
-        decided = gates.gate_decide_payload(
+        decided = gates.gate_decide_tool(
             None,  # type: ignore[arg-type]
             gate_id=gate_id,
             lifecycle_id="L1",
@@ -585,7 +585,7 @@ class GateToolTests(unittest.TestCase):
     def test_wait_times_out_while_open(self) -> None:
         gate_id = self._create("agent-question")
         clock = iter([0.0, 0.0, 99.0])  # deadline calc, first check, past-deadline check
-        result = gates.gate_wait_payload(
+        result = gates.gate_wait_tool(
             None,  # type: ignore[arg-type]
             gate_id=gate_id,
             lifecycle_id="L1",
@@ -610,7 +610,7 @@ class GateToolTests(unittest.TestCase):
             )
         )
 
-        result = gates.gate_response_wait_payload(
+        result = gates.gate_response_wait_tool(
             None,  # type: ignore[arg-type]
             gate_id=gate_id,
             lifecycle_id="L1",
@@ -625,7 +625,7 @@ class GateToolTests(unittest.TestCase):
 
     def test_response_wait_returns_gate_decision_and_note(self) -> None:
         gate_id = self._create("agent-question")
-        gates.gate_decide_payload(
+        gates.gate_decide_tool(
             None,  # type: ignore[arg-type]
             gate_id=gate_id,
             lifecycle_id="L1",
@@ -634,7 +634,7 @@ class GateToolTests(unittest.TestCase):
             ),
         )
 
-        result = gates.gate_response_wait_payload(
+        result = gates.gate_response_wait_tool(
             None,  # type: ignore[arg-type]
             gate_id=gate_id,
             lifecycle_id="L1",
@@ -648,7 +648,7 @@ class GateToolTests(unittest.TestCase):
         self.assertNotIn(gate_id, self.store.current("L1"))
 
     def test_response_wait_deleted_gate_returns_cancelled(self) -> None:
-        result = gates.gate_response_wait_payload(
+        result = gates.gate_response_wait_tool(
             None,  # type: ignore[arg-type]
             gate_id="deleted",
             lifecycle_id="L1",
@@ -660,7 +660,7 @@ class GateToolTests(unittest.TestCase):
 
     def test_list_returns_folded_gates(self) -> None:
         gate_id = self._create()
-        listed = gates.gate_list_payload(None, lifecycle_id="L1")  # type: ignore[arg-type]
+        listed = gates.gate_list_tool(None, lifecycle_id="L1")  # type: ignore[arg-type]
         self.assertEqual(len(listed["gates"]), 1)
         self.assertEqual(listed["gates"][0]["id"], gate_id)
         self.assertEqual(listed["gates"][0]["schema"], "ar-gate-record/v1")
@@ -673,7 +673,7 @@ class GateToolTests(unittest.TestCase):
             "ambient",
             return_value=SimpleNamespace(current=SimpleNamespace(id="L1")),
         ):
-            listed = gates.gate_list_payload(None, lifecycle_id=None)  # type: ignore[arg-type]
+            listed = gates.gate_list_tool(None, lifecycle_id=None)  # type: ignore[arg-type]
         self.assertEqual(listed["lifecycleId"], "L1")
         self.assertEqual([gate["id"] for gate in listed["gates"]], [gate_id])
 
@@ -685,7 +685,7 @@ class GateToolTests(unittest.TestCase):
         )
         self._create()  # a lifecycle-scoped gate that must NOT appear
         with mock.patch.object(gates, "ambient", return_value=None):
-            listed = gates.gate_list_payload(None, lifecycle_id=None)  # type: ignore[arg-type]
+            listed = gates.gate_list_tool(None, lifecycle_id=None)  # type: ignore[arg-type]
         self.assertIsNone(listed.get("lifecycleId"))  # workspace scope (None is stripped)
         self.assertEqual([gate["id"] for gate in listed["gates"]], ["01W"])
 
@@ -700,7 +700,7 @@ class GateToolTests(unittest.TestCase):
                 "closeout-approval", gate_id="B", now=T2, anchor=GateAnchor(lifecycle_id="L1")
             )
         )
-        result = gates.gate_decide_for_lifecycle(
+        result = gates.gate_decide_for_lifecycle_tool(
             None,  # type: ignore[arg-type]
             lifecycle_id="L1",
             verdict=GateVerdict(decision="approve", by="developer", via="dashboard"),
@@ -716,7 +716,7 @@ class GateToolTests(unittest.TestCase):
                 "closeout-approval", gate_id="A", now=T1, anchor=GateAnchor(lifecycle_id="L1")
             )
         )
-        result = gates.gate_decide_for_lifecycle(
+        result = gates.gate_decide_for_lifecycle_tool(
             None,  # type: ignore[arg-type]
             lifecycle_id="L1",
             expected_gate_id="A",
@@ -739,7 +739,7 @@ class GateToolTests(unittest.TestCase):
             )
         )
         with self.assertRaisesRegex(KeyError, "current open gate"):
-            gates.gate_decide_for_lifecycle(
+            gates.gate_decide_for_lifecycle_tool(
                 None,  # type: ignore[arg-type]
                 lifecycle_id="L1",
                 expected_gate_id="A",
@@ -748,7 +748,7 @@ class GateToolTests(unittest.TestCase):
 
     def test_decide_for_lifecycle_no_open_gate_raises(self) -> None:
         with self.assertRaises(KeyError):
-            gates.gate_decide_for_lifecycle(
+            gates.gate_decide_for_lifecycle_tool(
                 None,  # type: ignore[arg-type]
                 lifecycle_id="L1",
                 verdict=GateVerdict(decision="approve", by="developer", via="dashboard"),
@@ -761,7 +761,7 @@ class GateToolTests(unittest.TestCase):
             )
         )
         with self.assertRaises(ValueError):
-            gates.gate_decide_for_lifecycle(
+            gates.gate_decide_for_lifecycle_tool(
                 None,  # type: ignore[arg-type]
                 lifecycle_id="L1",
                 verdict=GateVerdict(decision="bogus", by="developer", via="dashboard"),
@@ -1227,7 +1227,7 @@ class HandoverEnforcementHelperTests(unittest.TestCase):
         self.assertFalse(self._guard().permitted)
 
     def test_worktree_integrate_tool_passes_configured_policy(self) -> None:
-        # The controller/args layer (mirror of the closeout path): the CONFIGURED
+        # The application/args layer (mirror of the closeout path): the CONFIGURED
         # policy reaches integrate_result's guard, not the dataclass default.
         config = SimpleNamespace(
             coordination_root=self.coord,
@@ -1431,7 +1431,7 @@ class SeamChannelTests(unittest.TestCase):
 
     def _raise_handover(self, lifecycle_id: str = "L-MANAGER") -> str:
         with self._ambient(lifecycle_id):
-            payload = gates.lifecycle_gate_payload(
+            payload = gates.lifecycle_gate_tool(
                 self.config,  # type: ignore[arg-type]
                 GateRaise(
                     kind="master-handover-approval", anchor=GateAnchor(enclosure=self.MASTER)
@@ -1462,7 +1462,7 @@ class SeamChannelTests(unittest.TestCase):
         self.store.append(sibling)
         all_human = SimpleNamespace(orchestration=SimpleNamespace(gate_policy=DEFAULT_GATE_POLICY))
         with self._ambient("L-MANAGER"), self.assertRaisesRegex(ValueError, "not delegated"):
-            gates.lifecycle_gate_payload(
+            gates.lifecycle_gate_tool(
                 all_human,  # type: ignore[arg-type]
                 GateRaise(kind="master-handover-approval"),
                 wait=GateWait(timeout_seconds=None, block=False),
@@ -1489,7 +1489,7 @@ class SeamChannelTests(unittest.TestCase):
                 self._ambient("L-MANAGER"),
                 self.assertRaisesRegex(ValueError, "requires\\s+enclosure=<master task name>"),
             ):
-                gates.lifecycle_gate_payload(
+                gates.lifecycle_gate_tool(
                     self.config,  # type: ignore[arg-type]
                     GateRaise(
                         kind="master-handover-approval", anchor=GateAnchor(enclosure=enclosure)
@@ -1507,7 +1507,7 @@ class SeamChannelTests(unittest.TestCase):
             self._ambient("L-MANAGER"),
             self.assertRaisesRegex(ValueError, "reserved for delegated seam kinds"),
         ):
-            gates.lifecycle_gate_payload(
+            gates.lifecycle_gate_tool(
                 self.config,  # type: ignore[arg-type]
                 GateRaise(kind="plan-approval"),
                 wait=GateWait(timeout_seconds=None, block=False),
@@ -1521,7 +1521,7 @@ class SeamChannelTests(unittest.TestCase):
             "ambient",
             return_value=SimpleNamespace(current=SimpleNamespace(id="L-ORCH", state="running")),
         ):
-            decided = gates.gate_decide_payload(
+            decided = gates.gate_decide_tool(
                 self.config,  # type: ignore[arg-type]
                 gate_id=gate_id,
                 lifecycle_id=None,
@@ -1550,7 +1550,7 @@ class SeamChannelTests(unittest.TestCase):
             ),
             self.assertRaisesRegex(ValueError, "reviewer verdict"),
         ):
-            gates.gate_decide_payload(
+            gates.gate_decide_tool(
                 self.config,  # type: ignore[arg-type]
                 gate_id=gate_id,
                 lifecycle_id=None,
@@ -1562,7 +1562,7 @@ class SeamChannelTests(unittest.TestCase):
     def test_cli_decide_refused_on_delegated_kind(self) -> None:
         gate_id = self._raise_handover()
         with self.assertRaisesRegex(ValueError, "delegated by the active gate policy"):
-            gates.gate_decide_payload(
+            gates.gate_decide_tool(
                 self.config,  # type: ignore[arg-type]
                 gate_id=gate_id,
                 lifecycle_id=None,
@@ -1571,7 +1571,7 @@ class SeamChannelTests(unittest.TestCase):
 
     def test_cancel_still_allowed_for_the_raiser(self) -> None:
         gate_id = self._raise_handover()
-        cancelled = gates.gate_decide_payload(
+        cancelled = gates.gate_decide_tool(
             self.config,  # type: ignore[arg-type]
             gate_id=gate_id,
             lifecycle_id=None,

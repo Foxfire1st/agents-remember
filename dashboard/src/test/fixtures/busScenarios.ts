@@ -1,8 +1,9 @@
 import type { AgentPickupNode, SupervisorHeartbeat } from "../../types/projection";
 
 // FEUI-L7 fixture pack: current pickup owner/redelivery fields plus one persisted legacy row whose
-// additive fields are absent. Tests use these same shapes for fleet/filter, escalation, replies,
-// heartbeat counts, and backward-compatible rendering.
+// optional ownership timestamps are absent and whose required attempt count serializes as zero.
+// Tests use these same shapes for fleet/filter, escalation, replies, heartbeat counts, and
+// backward-compatible rendering.
 
 export const L7_DECISION_PICKUP = {
   id: "pickup-decision-1",
@@ -39,6 +40,7 @@ export const L7_SENDER_AGENT_ONLY_PICKUP = {
   messageKind: "escalation",
   artifactPath: "notes/escalation-agent-only.md",
   deliveryState: "unconfirmed",
+  attemptCount: 0,
   state: "check-chat",
   ttlSeconds: 900,
 } satisfies AgentPickupNode;
@@ -51,6 +53,7 @@ export const L7_SENDER_ROLE_ONLY_PICKUP = {
   recipientRole: "worker",
   messageKind: "decision-item",
   deliveryState: "queued",
+  attemptCount: 0,
   state: "waiting-for-agent",
   ttlSeconds: 900,
 } satisfies AgentPickupNode;
@@ -62,6 +65,7 @@ export const L7_LIFECYCLE_ONLY_PICKUP = {
   recipientRole: "worker",
   messageKind: "decision-item",
   deliveryState: "queued",
+  attemptCount: 0,
   state: "waiting-for-agent",
   ttlSeconds: 900,
 } satisfies AgentPickupNode;
@@ -87,7 +91,7 @@ export const L7_ESCALATED_PICKUP = {
   ttlSeconds: 900,
 } satisfies AgentPickupNode;
 
-/** Persisted pre-owner/pre-redelivery projection: absence must remain visible, never synthesized. */
+/** Persisted pre-owner projection: optional ownership timestamps remain visibly absent. */
 export const L7_LEGACY_PICKUP = {
   id: "pickup-legacy-1",
   entryId: "inbox-legacy-1",
@@ -95,6 +99,7 @@ export const L7_LEGACY_PICKUP = {
   recipientRole: "worker",
   messageKind: "dispatch-brief",
   deliveryState: "queued",
+  attemptCount: 0,
   state: "waiting-for-agent",
   ageSeconds: 15,
   ttlSeconds: 300,

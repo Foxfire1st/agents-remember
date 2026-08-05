@@ -55,7 +55,7 @@ class HarnessTerminalSurface:
     ) -> SubmissionReceipt:
         """Submit caller-committed terminal text as one whole message, never draft keystrokes."""
 
-        return await self.bridge.submit(
+        return await self.bridge.submissions().submit(
             self.bridge.prompt(text, source="terminal", request_id=request_id)
         )
 
@@ -64,7 +64,7 @@ class HarnessTerminalSurface:
     ) -> SubmissionReceipt:
         """Submit one automated message without reading or mutating the human draft."""
 
-        return await self.bridge.submit(
+        return await self.bridge.submissions().submit(
             self.bridge.prompt(text, source="durable", request_id=request_id)
         )
 

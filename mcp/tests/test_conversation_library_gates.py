@@ -6,6 +6,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from agents_remember.kernel.harnesses import Harness
 from agents_remember.serving.conversation.library import gates as gates_module
 from agents_remember.serving.conversation.library.errors import LibraryStoreError
 from agents_remember.serving.conversation.library.gates import (
@@ -13,7 +14,6 @@ from agents_remember.serving.conversation.library.gates import (
     GateProbes,
     LibraryGateRegistry,
 )
-from agents_remember.serving.harnesses import Harness
 
 CODEX = Harness(id="codex", name="Codex", command="codex", argv=("codex",))
 CLAUDE = Harness(id="claude", name="Claude", command="claude", argv=("claude",))

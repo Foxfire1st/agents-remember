@@ -97,6 +97,8 @@ from agents_remember.observer.reducer import (
     TOKEN_SERIES_RECENT,
     AnalyticalInputs,
     WorkspaceStructure,
+    _process_health,
+    _ref_fact_state,
     build_analytics,
     build_attention_queue,
     build_engine_processes,
@@ -3238,6 +3240,47 @@ class TaskDocumentsReaderTests(unittest.TestCase):
         )
         self.assertEqual(nodes[0].createdAt, "2026-01-01T00:00")
 
+    def test_projects_intentional_skip_for_parent_and_nested_step(self) -> None:
+        root = self.coord / "tasks" / "repo-a" / "demo"
+        disposition = {
+            "kind": "intentionalSkip",
+            "reason": "Superseded.",
+            "recordedAt": "2026-08-03T12:00:00+00:00",
+            "recordedVia": "task_doc.skip_step",
+            "lifecycleId": "LC1",
+        }
+        write_task_doc(
+            root,
+            self._doc(
+                lifecycleId="LC1",
+                steps=[
+                    {
+                        "id": "S1",
+                        "title": "Parent",
+                        "status": "done",
+                        "disposition": disposition,
+                        "substeps": [
+                            {
+                                "id": "C1",
+                                "title": "Child",
+                                "status": "done",
+                                "disposition": disposition,
+                            }
+                        ],
+                    }
+                ],
+            ),
+        )
+        [node] = read_task_documents(self.coord, enclosures=[], now=FRESH)
+        self.assertEqual(node.stepsDone, 2)
+        self.assertEqual(node.stepsTotal, 2)
+        parent_disposition = node.steps[0].disposition
+        child_disposition = node.steps[0].substeps[0].disposition
+        assert parent_disposition is not None
+        assert child_disposition is not None
+        self.assertEqual(parent_disposition.reason, "Superseded.")
+        self.assertEqual(child_disposition.recordedVia, "task_doc.skip_step")
+
     def test_projects_docs_without_lifecycle_and_skips_non_task_json(self) -> None:
         root = self.coord / "tasks" / "repo-a" / "demo"
         write_task_doc(root, self._doc(slug="03c_x", kind="subTask"))  # no lifecycleId
@@ -3706,6 +3749,26 @@ def _facts(
 
 class EngineProcessTests(unittest.TestCase):
     """The slice-5e enclosure-centered process map (``build_engine_processes``)."""
+
+    def test_process_fact_state_narrows_raw_status_facts_to_the_closed_vocabulary(self) -> None:
+        self.assertEqual(_ref_fact_state(False, True), "missing")
+        self.assertEqual(_ref_fact_state(True, True), "observed")
+        self.assertEqual(_ref_fact_state(True, False), "derived")
+        self.assertEqual(_ref_fact_state(True, "unexpected"), "missing")
+
+    def test_process_health_narrows_raw_process_facts_to_the_closed_vocabulary(self) -> None:
+        cases = (
+            (("worktree-started", "failed", []), "failed"),
+            (("worktree-started", "ok", ["seed: failed"]), "failed"),
+            (("worktree-started", "stale", []), "stale"),
+            (("worktree-started", "running", []), "running"),
+            (("sync-needed", "ok", []), "blocked"),
+            (("completed", "ok", []), "complete"),
+            (("worktree-started", "ok", []), "nominal"),
+        )
+        for arguments, expected in cases:
+            with self.subTest(arguments=arguments):
+                self.assertEqual(_process_health(*arguments), expected)
 
     def test_ledger_rows_pass_through_to_the_worktree_coupler(self) -> None:
         # 5h: the worktree coupler popover reads node.ledgerRows/ledgerRowCount. The reducer is a pure

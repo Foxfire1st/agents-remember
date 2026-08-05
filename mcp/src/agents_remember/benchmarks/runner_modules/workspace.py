@@ -5,9 +5,8 @@ from pathlib import Path
 from typing import Any
 
 from agents_remember.benchmarks.runner_modules.commands import (
-    git_command,
     repo_has_commit,
-    run_command,
+    run_git_command,
 )
 from agents_remember.benchmarks.runner_modules.constants import (
     SOURCE_ONLY_AGENTS_TEMPLATE,
@@ -33,6 +32,7 @@ from agents_remember.benchmarks.runner_modules.models import (
     BenchmarkPreparation,
     BenchmarkWorkspace,
 )
+from agents_remember.kernel.git_command import GIT_BULK_REMOTE_TIMEOUT_SECONDS
 
 
 def prepare_repo(
@@ -51,15 +51,28 @@ def prepare_repo(
             remove_path(repo_root)
     existing_repo = not force_clone and (repo_root / ".git").exists()
     if not existing_repo:
-        run_command(git_command("clone", url, str(repo_root)), dry_run)
+        # The clone runs from the parent created above, because its own destination is what
+        # it is about to make; ``repo_root`` stays the repository the command is about.
+        run_git_command(
+            repo_root,
+            ["clone", url, str(repo_root)],
+            dry_run,
+            work_dir=repo_root.parent,
+            timeout=GIT_BULK_REMOTE_TIMEOUT_SECONDS,
+        )
     elif repo_has_commit(repo_root, commit):
         if dry_run:
             print(f"Would reuse cached repository {repo_root} at {commit}")
     else:
-        run_command(git_command("-C", str(repo_root), "fetch", "--all", "--tags"), dry_run)
-    run_command(git_command("-C", str(repo_root), "checkout", "--detach", commit), dry_run)
-    run_command(git_command("-C", str(repo_root), "reset", "--hard", commit), dry_run)
-    run_command(git_command("-C", str(repo_root), "clean", "-fdx"), dry_run)
+        run_git_command(
+            repo_root,
+            ["fetch", "--all", "--tags"],
+            dry_run,
+            timeout=GIT_BULK_REMOTE_TIMEOUT_SECONDS,
+        )
+    run_git_command(repo_root, ["checkout", "--detach", commit], dry_run)
+    run_git_command(repo_root, ["reset", "--hard", commit], dry_run)
+    run_git_command(repo_root, ["clean", "-fdx"], dry_run)
 
 
 def workspace_root(benchmarks_root: Path, case: BenchmarkCase) -> Path:

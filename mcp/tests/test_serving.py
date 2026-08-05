@@ -39,6 +39,7 @@ sys.path.insert(0, str(MCP_SRC))
 
 import inspect
 
+from _global_state import preserve_owned_mutable_state
 from agents_remember.cli import __main__ as cli_main
 from agents_remember.cli import dashboard as cli_dashboard
 from agents_remember.controlplane.attention_dismissals import (
@@ -1597,6 +1598,11 @@ class CliTests(unittest.TestCase):
 
 
 class CliRunTests(unittest.TestCase):
+    def setUp(self) -> None:
+        state = preserve_owned_mutable_state()
+        state.__enter__()
+        self.addCleanup(state.__exit__, None, None, None)
+
     def _args(self, **overrides: object) -> argparse.Namespace:
         base = {
             "config": "/abs/settings.json",
@@ -2364,6 +2370,9 @@ class ActionEndpointTests(unittest.TestCase):
 
 class CliSimTests(unittest.TestCase):
     def setUp(self) -> None:
+        state = preserve_owned_mutable_state()
+        state.__enter__()
+        self.addCleanup(state.__exit__, None, None, None)
         self._dir = tempfile.TemporaryDirectory()
         self.tmp = Path(self._dir.name)
 

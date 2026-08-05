@@ -10,13 +10,20 @@ import sys
 from pathlib import Path
 
 from agents_remember.kernel.git_command import run_git
-from agents_remember.memory_quality.integrity.onboarding_drift_check.discovery import rel
+from agents_remember.memory_quality.integrity.onboarding_drift_check.discovery import (
+    parse_table_metadata,
+    rel,
+)
 from agents_remember.memory_quality.integrity.onboarding_drift_check.git_ops import (
     current_branch_name,
 )
 from agents_remember.memory_quality.integrity.onboarding_drift_check.models import (
     CLASSIFICATIONS,
     DriftRow,
+)
+from agents_remember.memory_quality.integrity.onboarding_drift_check.unclaimed_entities import (
+    UnclaimedEntityReport,
+    rank_unclaimed_entity_sources,
 )
 
 
@@ -42,6 +49,70 @@ def default_report_path(temp_root: Path, repo_root: Path) -> Path:
 
 def counts(rows: list[DriftRow]) -> dict[str, int]:
     return {name: sum(1 for row in rows if row.classification == name) for name in CLASSIFICATIONS}
+
+
+def _entity_catalog_path(onboarding_root: Path) -> Path | None:
+    for path in sorted(onboarding_root.rglob("*.md")):
+        if parse_table_metadata(path).get("doc_type") == "repo-entity-catalog":
+            return path
+    return None
+
+
+def _append_unclaimed_entity_report(lines: list[str], report: UnclaimedEntityReport) -> None:
+    lines.extend(
+        [
+            "",
+            "## Ranked Unclaimed Entity Sources (report only)",
+            "",
+            (
+                f"The entity register claims {report.claimed_source_count} of "
+                f"{report.source_count} tracked repository files; {report.unclaimed_source_count} "
+                f"are unclaimed; ranked count: {len(report.ranked)}."
+            ),
+            "",
+            (
+                "All tracked repository files participate in the unclaimed count. Only Python "
+                "declaration signals are currently ranked; non-Python artifacts remain counted "
+                "but unranked, as do ordinary Python modules with no ranking declaration."
+            ),
+            "",
+            (
+                "Ranking signals, in order: versioned contract plus `StoreOwnership` authority; "
+                "versioned contract; authority; schema. Counts and source path break ties."
+            ),
+            "",
+            "| Priority | Source | Versioned contracts | Authority declarations | Schemas |",
+            "| --- | --- | --- | --- | --- |",
+        ]
+    )
+    if not report.ranked:
+        lines.append("| _None_ |  |  |  |  |")
+    for source in report.ranked:
+        lines.append(
+            "| "
+            + " | ".join(
+                [
+                    source.priority,
+                    f"`{source.path}`",
+                    ", ".join(f"`{value}`" for value in source.versioned_contracts),
+                    ", ".join(f"`{value}`" for value in source.authority_declarations),
+                    ", ".join(f"`{value}`" for value in source.schema_declarations),
+                ]
+            )
+            + " |"
+        )
+    lines.extend(
+        [
+            "",
+            (
+                "Remediation: review the highest-ranked files. Add a file to an existing "
+                "entity's `Evidence Paths` when it defines that entity, or define a new entity "
+                "when the contract or authority is a distinct reusable concept; then recompute "
+                "the affected `git-blob-set-v1` fingerprint. This section never changes drift "
+                "classifications or the command's exit status."
+            ),
+        ]
+    )
 
 
 def write_markdown_report(
@@ -97,6 +168,12 @@ def write_markdown_report(
     else:
         lines.append("| _None_ |  |  |  |  |  |")
 
+    entity_catalog = _entity_catalog_path(onboarding_root)
+    if entity_catalog is not None:
+        _append_unclaimed_entity_report(
+            lines,
+            rank_unclaimed_entity_sources(repo_root, entity_catalog),
+        )
     lines.append("")
     report_path.parent.mkdir(parents=True, exist_ok=True)
     report_path.write_text("\n".join(lines), encoding="utf-8")

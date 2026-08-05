@@ -1,12 +1,12 @@
 """Shared, side-effect-free code<->onboarding sidecar pairing + path confinement.
 
-Extracted from :mod:`agents_remember.controllers.read_files` (the ``read_ar_files``
+Extracted from :mod:`agents_remember.application.read_files` (the ``read_ar_files``
 tool) so the same 1:1 sidecar resolution, governing-index walk, and repo-relative
 path confinement back **both** the MCP tool and the dashboard ``serving.files``
-HTTP API -- without importing the side-effecting controller (which emits a
-``read.packet`` event and mutates the served ledger). Every function here is pure
-over ``(root, rel)`` arguments: it reads only the onboarding / route-index files
-it is explicitly asked about, raises no domain events, and writes nothing.
+HTTP API -- without importing the side-effecting application entry point (which
+emits a ``read.packet`` event and mutates the served ledger). Every function here
+is pure over ``(root, rel)`` arguments: it reads only the onboarding/route-index
+files it is explicitly asked about, raises no domain events, and writes nothing.
 
 A missing sidecar is never an error here: :func:`route_sidecar_status` returns
 ``"absent"`` and :func:`sidecar_body` returns ``None`` -- the caller decides how to
@@ -21,6 +21,7 @@ from typing import Any
 
 from agents_remember.errors import AuthorityError
 from agents_remember.kernel import filesystem
+from agents_remember.kernel.coordination_context_resolver import mirror_onboarding_path
 from agents_remember.kernel.onboarding_doc import meaningful_body
 from agents_remember.kernel.route_index import (
     ENTITY_CATALOG_NAME,
@@ -29,9 +30,6 @@ from agents_remember.kernel.route_index import (
     sidecar_status,
 )
 from agents_remember.mcp.config import path_is_relative_to
-from agents_remember.memory_quality.integrity.onboarding_drift_check.discovery import (
-    mirror_onboarding_path,
-)
 
 
 def confine_rel(code_root: Path, requested: str) -> str:

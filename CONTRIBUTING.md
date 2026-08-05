@@ -134,15 +134,24 @@ Set it up once per clone:
 `.githooks/pre-commit` and `.githooks/pre-push` are thin wrappers over
 `.githooks/_gate.sh`, which takes the tier as its argument:
 
-| Tier | Hook | Certifies | Runs | Cost |
+| Tier | Hook | Input state it reports | Runs | Cost |
 | --- | --- | --- | --- | --- |
 | `fast` | pre-commit | the staged content | generated-copy checks (skills, runtime, harness), ruff, `ruff format --check`, Pyright | about 20 seconds |
-| `full` | pre-push | the working tree | generated-copy checks, then the full wrapper | minutes |
+| `full` | pre-push | Git's ref updates plus current-checkout bytes at index-known paths; the changed-lines rail is base-to-working-tree | generated-copy checks, then the full wrapper | minutes |
 
-Both tiers read their scope from `git ls-files '*.py'`, so neither can fall
-behind the tree, and neither names a directory by hand. Neither passes a
-narrowing flag to ruff either: `ruff check` runs at the configured selection in
-both, so the complexity rules bite at commit time and not only on push.
+Both tiers enumerate Python paths with `git ls-files '*.py'`; every rail prints
+that input, its resolved config, and its unit count before its result. The manual
+and full wrapper also enumerate non-ignored untracked files inside the quality
+scope roots and state that they are **not** in the index/diff measurement. That is
+a report, never implicit staging. Neither tier passes a narrowing flag to ruff:
+`ruff check` runs at the configured selection in both, so the complexity rules
+bite at commit time and not only on push.
+
+The pre-push hook forwards Git's four-field ref-update lines as provenance. It
+does not stage, stash, or mutate the index, and it does not claim the current
+checkout is the pushed commit tree. The fixed rails still read current-checkout
+bytes at index-known paths, and changed-lines coverage still compares the
+resolved base to the working tree; the output says exactly that limitation.
 
 The fast tier is cheap on purpose. `--no-verify` is all-or-nothing: it disables
 every check, not only the slow one. A pre-commit hook expensive enough to be

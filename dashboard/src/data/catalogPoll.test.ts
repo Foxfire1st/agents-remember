@@ -11,8 +11,8 @@ import { sessionCockpitStore } from "./sessionCockpitStore";
 import { sessionStore } from "./sessions";
 import { TERMINAL_CATALOG_REQUEST_TIMEOUT_MS } from "./terminal";
 
-// The hoisted shared poll driver: one interval regardless of subscriber
-// count, poll-health beats recorded on every read.
+// The hoisted shared poll driver: one self-scheduled request regardless of subscriber count,
+// poll-health beats recorded once per physical attempt rather than once per logical waiter.
 
 const okResponse = (sessions: unknown[]) =>
   ({ ok: true, json: async () => ({ sessions }) }) as Response;
@@ -76,6 +76,26 @@ describe("hydrateTerminalSessionsFromCatalog", () => {
     expect(sessionCockpitStore.getState().pollHealth).toMatchObject({ missedBeats: 0, healthy: true });
   });
 
+  it("records one missed beat when four logical hydrators share one failed physical request", async () => {
+    let release: ((response: Response) => void) | undefined;
+    const pending = new Promise<Response>((resolve) => {
+      release = resolve;
+    });
+    const fetchMock = vi.fn().mockReturnValue(pending);
+    vi.stubGlobal("fetch", fetchMock);
+
+    const hydrators = Array.from({ length: 4 }, () => hydrateTerminalSessionsFromCatalog(false));
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    release?.({ ok: false, status: 503, json: async () => ({}) } as Response);
+    await Promise.all(hydrators);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(sessionCockpitStore.getState().pollHealth).toMatchObject({
+      missedBeats: 1,
+      healthy: true,
+    });
+  });
+
   it("a hung catalog socket expires as ONE honestly-recorded missed beat; the poll loop survives (260721 live wedge)", async () => {
     vi.useFakeTimers();
     try {
@@ -128,6 +148,27 @@ describe("hydrateTerminalSessionsFromCatalog", () => {
     expect(sessionStore.getState().sessions.map((session) => session.id)).toEqual(["alive"]);
   });
 
+  it("shares termination exclusions across every waiter on one physical snapshot", async () => {
+    let release: ((response: Response) => void) | undefined;
+    const pending = new Promise<Response>((resolve) => {
+      release = resolve;
+    });
+    const fetchMock = vi.fn().mockReturnValue(pending);
+    vi.stubGlobal("fetch", fetchMock);
+
+    // The termination confirmer attaches first; a normal poll joins second. Without a shared
+    // exclusion union, the later continuation re-applies the same stale `dead` row.
+    const excluding = hydrateTerminalSessionsFromCatalog(true, new Set(["dead"]));
+    const ordinary = hydrateTerminalSessionsFromCatalog(true);
+    release?.(
+      okResponse([catalogRow({ id: "dead" }), catalogRow({ id: "alive" })]),
+    );
+    await Promise.all([excluding, ordinary]);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(sessionStore.getState().sessions.map((session) => session.id)).toEqual(["alive"]);
+  });
+
   it("does zero store work on an unchanged payload, reconciles a changed one (260721 F2)", async () => {
     let rows = [catalogRow({ id: "row-1" }), catalogRow({ id: "row-2" })];
     vi.stubGlobal(
@@ -162,7 +203,7 @@ describe("hydrateTerminalSessionsFromCatalog", () => {
 });
 
 describe("startCatalogPollDriver (refcounted)", () => {
-  it("runs ONE 2500 ms interval for any number of subscribers and stops with the last release", async () => {
+  it("runs ONE 2500 ms self-scheduled loop for any number of subscribers and stops with the last release", async () => {
     vi.useFakeTimers();
     const fetchMock = vi.fn().mockResolvedValue(okResponse([catalogRow({ id: "tick" })]));
     vi.stubGlobal("fetch", fetchMock);
@@ -180,6 +221,43 @@ describe("startCatalogPollDriver (refcounted)", () => {
     releaseB();
     await vi.advanceTimersByTimeAsync(CATALOG_REFRESH_INTERVAL_MS * 3);
     expect(fetchMock).toHaveBeenCalledTimes(2); // stopped with the last release
+  });
+
+  it("does not stack interval callers behind a hung 10 s request", async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi
+      .fn()
+      .mockImplementationOnce(
+        (_url: string, init?: RequestInit) =>
+          new Promise((_resolve, reject) => {
+            init?.signal?.addEventListener("abort", () =>
+              reject(new DOMException("The operation was aborted.", "AbortError")),
+            );
+          }),
+      )
+      .mockResolvedValueOnce(okResponse([catalogRow({ id: "recovered" })]));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const release = startCatalogPollDriver();
+    try {
+      await vi.advanceTimersByTimeAsync(CATALOG_REFRESH_INTERVAL_MS);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(CATALOG_REFRESH_INTERVAL_MS * 3);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(sessionCockpitStore.getState().pollHealth.missedBeats).toBe(0);
+
+      await vi.advanceTimersByTimeAsync(
+        TERMINAL_CATALOG_REQUEST_TIMEOUT_MS - CATALOG_REFRESH_INTERVAL_MS * 3,
+      );
+      expect(sessionCockpitStore.getState().pollHealth.missedBeats).toBe(1);
+
+      await vi.advanceTimersByTimeAsync(CATALOG_REFRESH_INTERVAL_MS);
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(sessionStore.getState().sessions.map((session) => session.id)).toEqual(["recovered"]);
+      expect(sessionCockpitStore.getState().pollHealth.missedBeats).toBe(0);
+    } finally {
+      release();
+    }
   });
 });
 

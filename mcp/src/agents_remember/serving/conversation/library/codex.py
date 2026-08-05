@@ -22,6 +22,7 @@ from pathlib import Path
 from types import TracebackType
 
 from agents_remember.errors import CodexAppServerError, CodexAppServerRpcError
+from agents_remember.kernel.harnesses import Harness
 from agents_remember.observer.events import now_iso
 from agents_remember.serving.codex_app_server_protocol import (
     CodexAppServerTransport,
@@ -63,7 +64,6 @@ from agents_remember.serving.conversation.models import (
     NativeResumeTarget,
 )
 from agents_remember.serving.harness_control_models import ControlIdentity, LaunchSpec
-from agents_remember.serving.harnesses import Harness
 
 _CLIENT_NAME = "agents_remember"
 _CLIENT_VERSION = "3.0.0"

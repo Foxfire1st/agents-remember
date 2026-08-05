@@ -36,7 +36,6 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, cast
 
-from agents_remember.controllers.provider_tools import provider_watchers_tool
 from agents_remember.controlplane.durable_store import (
     SCHEMA_VERSION,
     StoreOwnership,
@@ -255,14 +254,28 @@ class ProviderDegradationStore:
 
 
 ProviderStopper = Callable[["McpRuntimeConfig"], dict[str, Any]]
+"""The critical failsafe's one action, as a PORT this package declares and never implements.
+
+Stopping the provider stacks is a tool call, and the tool lives at the edge
+(``application.provider_tools.provider_watchers_tool``). This module used to import it for a
+default, which is a rank-10 package importing a rank-15 one (``layers.toml``) so that a
+degradation VERDICT could not be computed without loading the tool surface. The caller that
+owns the tool now supplies the action, which is also the only caller that can say whether a
+failsafe should be able to fire at all.
+"""
 
 
 def evaluate_provider_degradation(
     config: McpRuntimeConfig,
     *,
-    stop_provider_stacks: ProviderStopper | None = None,
+    stop_provider_stacks: ProviderStopper,
 ) -> dict[str, Any]:
-    """Evaluate metrics, emit one event per state change, and run the critical failsafe."""
+    """Evaluate metrics, emit one event per state change, and run the critical failsafe.
+
+    ``stop_provider_stacks`` is required and has no default: there is no implementation of it
+    this package could name without importing the edge, and a failsafe wired to nothing is
+    worse than one the caller had to think about.
+    """
 
     settings = config.provider_degradation
     if not settings.enabled:
@@ -289,11 +302,10 @@ def evaluate_provider_degradation(
             metric_store=metric_store,
         )
         if state == "critical" and settings.fail_safe_enabled:
-            stopper = stop_provider_stacks or _stop_provider_stacks
             event["criticalFailsafe"] = {
                 "enabled": True,
                 "action": "provider_watchers stop",
-                "result": _run_critical_failsafe(stopper, config),
+                "result": _run_critical_failsafe(stop_provider_stacks, config),
             }
         elif state == "critical":
             event["criticalFailsafe"] = {"enabled": False}
@@ -674,10 +686,6 @@ def _alert_response(event: dict[str, Any], instruction: str) -> str:
     if isinstance(failsafe, dict):
         parts.extend(["", f"critical failsafe: {json.dumps(failsafe, sort_keys=True)}"])
     return "\n".join(parts)
-
-
-def _stop_provider_stacks(config: McpRuntimeConfig) -> dict[str, Any]:
-    return provider_watchers_tool(config, action="stop", dry_run=False)
 
 
 def _run_critical_failsafe(stopper: ProviderStopper, config: McpRuntimeConfig) -> dict[str, Any]:

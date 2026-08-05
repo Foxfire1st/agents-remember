@@ -18,7 +18,7 @@ from unittest import mock
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
-from agents_remember.controllers import worktree_tools
+from agents_remember.application import worktree_tools
 from agents_remember.mcp.config import McpRuntimeConfig, RetirementSettings
 from agents_remember.mcp.tools.terminal import session_rename_payload, session_retire_payload
 from agents_remember.serving.landing import land_seats_for_leaf
@@ -182,9 +182,12 @@ class SessionRetireToolTests(unittest.TestCase):
     def _with_catalog_patched(self, fn):
         with (
             mock.patch(
-                "agents_remember.mcp.tools.terminal.TerminalCatalog", return_value=self.catalog
+                "agents_remember.application.terminal_tools.TerminalCatalog",
+                return_value=self.catalog,
             ),
-            mock.patch("agents_remember.mcp.tools.terminal.TerminalHost", return_value=_FakeHost()),
+            mock.patch(
+                "agents_remember.application.terminal_tools.TerminalHost", return_value=_FakeHost()
+            ),
         ):
             return fn()
 
@@ -325,7 +328,7 @@ class SessionRenameToolTests(unittest.TestCase):
 
     def _rename(self, session_id: str, label: str) -> dict:
         with mock.patch(
-            "agents_remember.mcp.tools.terminal.TerminalCatalog", return_value=self.catalog
+            "agents_remember.application.terminal_tools.TerminalCatalog", return_value=self.catalog
         ):
             return session_rename_payload(self.config, session_id=session_id, label=label)
 
@@ -631,7 +634,7 @@ class LandSeatsForLeafTests(unittest.TestCase):
 
 
 class AutoLandHookIntegrationTests(unittest.TestCase):
-    """The completion-edge wiring in ``controllers/worktree_tools.py``."""
+    """The completion-edge wiring in ``application/worktree_tools.py``."""
 
     def setUp(self) -> None:
         self._dir = tempfile.TemporaryDirectory()

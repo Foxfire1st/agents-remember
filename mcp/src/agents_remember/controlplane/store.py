@@ -50,7 +50,7 @@ Appends and rewrites exclude each other through the log's own lockfile, always
 and in every process -- that is what makes the loss zero. Reclamation is named as
 the MCP process's, but nothing in this module enforces that: :meth:`GateStore.compact`
 takes the lock and rewrites, and a dashboard call would go through. The guard is at
-the CALL SITE (``mcp/tools/gates.py``, which asks
+the CALL SITE (``application/gate_tools.py``, which asks
 :meth:`~agents_remember.controlplane.durable_store.StoreOwnership.is_compaction_owner`
 before reclaiming) and STRUCTURALLY, in that the dashboard's projection tick no
 longer rewrites this log at all. Both are advisory and neither raises; the
@@ -252,7 +252,7 @@ class GateStore:
         and rewrites, and a call from any process proceeds. ``rewrite_lines`` checks only that
         the lock is held (``require_lock_held``), never who is calling.
 
-        The ownership guard is at the CALL SITE: ``mcp/tools/gates.py`` asks
+        The ownership guard is at the CALL SITE: ``application/gate_tools.py`` asks
         :meth:`~agents_remember.controlplane.durable_store.StoreOwnership.is_compaction_owner`
         and skips the reclaim when it is not the owner. It has to live there rather than here for
         the reason that predicate's docstring gives -- the decide path is shared code executed by

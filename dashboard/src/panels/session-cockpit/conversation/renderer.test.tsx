@@ -1161,6 +1161,67 @@ describe("ConversationTimeline — upscroll anchor preservation (B3)", () => {
     return el as HTMLElement;
   }
 
+  it("detaches TanStack observers and manual scroll work while hidden without losing DOM identity or scroll state", async () => {
+    vi.useFakeTimers();
+    try {
+      const onScrollMemory = vi.fn();
+      const items = feedOf(10);
+      const { container, rerender } = render(
+        <ConversationTimeline
+          items={items}
+          hasOlder={false}
+          busy={false}
+          onLoadOlder={() => {}}
+          onScrollMemory={onScrollMemory}
+        />,
+      );
+      const viewport = screen.getByTestId("conversation-viewport");
+      pinGeometry(viewport, 6000, 600);
+      await act(async () => { await vi.advanceTimersByTimeAsync(250); });
+      const lastRow = rowElement(container, "m-10");
+      expect(roCallbacks.some((registered) => registered.targets.size > 0)).toBe(true);
+
+      fireEvent.wheel(viewport);
+      viewport.scrollTop = 321;
+      fireEvent.scroll(viewport);
+      onScrollMemory.mockClear();
+
+      rerender(
+        <ConversationTimeline
+          items={items}
+          hasOlder={false}
+          busy={false}
+          onLoadOlder={() => {}}
+          onScrollMemory={onScrollMemory}
+          visible={false}
+        />,
+      );
+      expect(roCallbacks.every((registered) => registered.targets.size === 0)).toBe(true);
+      fireEvent.scroll(viewport);
+      expect(onScrollMemory).not.toHaveBeenCalled();
+      expect(screen.getByTestId("conversation-viewport")).toBe(viewport);
+      expect(rowElement(container, "m-10")).toBe(lastRow);
+      expect(viewport.scrollTop).toBe(321);
+
+      rerender(
+        <ConversationTimeline
+          items={items}
+          hasOlder={false}
+          busy={false}
+          onLoadOlder={() => {}}
+          onScrollMemory={onScrollMemory}
+          visible
+        />,
+      );
+      expect(roCallbacks.some((registered) => registered.targets.size > 0)).toBe(true);
+      expect(screen.getByTestId("conversation-viewport")).toBe(viewport);
+      expect(rowElement(container, "m-10")).toBe(lastRow);
+      expect(viewport.scrollTop).toBe(321);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("a row growing above the scrolled-up viewport compensates scrollTop by the delta — and the write never flips the intent lock", async () => {
     vi.useFakeTimers();
     try {

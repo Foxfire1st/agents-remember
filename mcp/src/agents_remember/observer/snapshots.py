@@ -35,6 +35,7 @@ from agents_remember.controlplane.interaction_retention import (
 )
 from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
 from agents_remember.controlplane.records import GateRecord
+from agents_remember.controlplane.stamps import age_seconds
 from agents_remember.controlplane.store import GateStore
 from agents_remember.kernel.git_command import run_git
 from agents_remember.kernel.memory_ledger import LedgerError, LedgerRow, load_ledger
@@ -72,6 +73,7 @@ from agents_remember.observer.projection import (
     TaskDecisionNode,
     TaskDocNode,
     TaskSectionNode,
+    TaskStepDispositionNode,
     TaskStepNode,
     TaskSubStepNode,
     TaskSubTaskRefNode,
@@ -82,7 +84,6 @@ from agents_remember.observer.provider_nodes import (
     worktree_provider_node,
 )
 from agents_remember.observer.task_document_cache import TaskDocumentPayloadCache
-from agents_remember.observer.timeutil import age_seconds
 from agents_remember.providers.context import ContextProviderError
 from agents_remember.providers.current_state import current_state_path
 from agents_remember.providers.lifecycle.command_runner import run_command
@@ -527,11 +528,12 @@ def read_gates(coordination_root: Path, *, now: datetime | None = None) -> list[
     the dashboard one row for one tick, never a crashed tick -- the STRICT read is what the
     enforcement fold uses, and it still raises.
 
-    THE SUPPRESSION IS NAMED, NOT BROAD, for the reason ``mcp/tools/gates.py::_reclaim_gate_log``
-    gives: ``ValidationError`` subclasses ``ValueError``, so a ``suppress`` written for I/O
-    silently swallows a malformed record too, and this leaf narrowed that spelling there on
-    principle. Two spellings of one decision is what the principle is against. Here the narrowing
-    removes a net rather than a catch: ``projected_current`` is the TOLERANT read and already
+    THE SUPPRESSION IS NAMED, NOT BROAD, for the reason
+    ``controlplane/gate_decisions.py::_reclaim_gate_log`` gives: ``ValidationError`` subclasses
+    ``ValueError``, so a ``suppress`` written for I/O silently swallows a malformed record too, and
+    this leaf narrowed that spelling there on principle. Two spellings of one decision is what the
+    principle is against. Here the narrowing removes a net rather than a catch:
+    ``projected_current`` is the TOLERANT read and already
     skips an unreadable row per row, so no ``ValidationError`` can reach this line, and
     ``age_seconds`` -- the only other thing in the fold that parses -- returns ``None`` on a stamp
     it cannot read rather than raising. What is left to suppress is the I/O the suppress was
@@ -554,7 +556,7 @@ def read_agent_pickups(coordination_root: Path, *, now: datetime) -> list[AgentP
     torn row really does raise out of both calls below and really must not crash the tick. Spelt
     ``ValidationError`` rather than ``ValueError`` all the same: the wide net would also swallow
     an unrelated ``ValueError`` from anywhere in the loop, which is the trap this leaf closed in
-    ``mcp/tools/gates.py``. ``DurableStoreError`` is a ``RuntimeError`` and still propagates.
+    ``application/gate_tools.py``. ``DurableStoreError`` is a ``RuntimeError`` and still propagates.
     """
     store = OperatorInboxStore(observer_logs_root(coordination_root))
     with contextlib.suppress(OSError, ValidationError):
@@ -604,7 +606,7 @@ def read_expectation_rows(coordination_root: Path, *, now: datetime) -> list[Exp
     swallow ONE torn line by discarding EVERY deadline in the file, and the dashboard showed an
     operator nothing due. The tolerant read degrades per row instead, so the suppress is now
     ``OSError`` only -- it is the I/O it was always for, and keeping ``ValueError`` beside a
-    tolerant read would leave the same wide net this leaf narrowed in ``mcp/tools/gates.py``. The
+    tolerant read would leave the same wide net this leaf narrowed in ``application/gate_tools.py``. The
     inner ``except ValueError`` below is a different question and stays: it is the per-row parse
     of one ``dueAt``, and an unparseable deadline means "not overdue", not "drop every row".
     """
@@ -1371,6 +1373,35 @@ def _ref_lifecycle(
     return lifecycle_by_dir.get((base_dir / ref_file).resolve().parent)
 
 
+def _task_step_nodes(doc: TaskDocument) -> list[TaskStepNode]:
+    return [
+        TaskStepNode(
+            id=step.id,
+            title=step.title,
+            status=step.status,
+            disposition=(
+                TaskStepDispositionNode.model_validate(step.disposition.model_dump())
+                if step.disposition is not None
+                else None
+            ),
+            substeps=[
+                TaskSubStepNode(
+                    id=sub.id,
+                    title=sub.title,
+                    status=sub.status,
+                    disposition=(
+                        TaskStepDispositionNode.model_validate(sub.disposition.model_dump())
+                        if sub.disposition is not None
+                        else None
+                    ),
+                )
+                for sub in step.substeps
+            ],
+        )
+        for step in doc.steps
+    ]
+
+
 def _task_doc_node(
     doc: TaskDocument,
     path: Path,
@@ -1405,18 +1436,7 @@ def _task_doc_node(
         bodyRevision=body_revision,
         createdAt=doc.createdAt,
         ageSeconds=_file_age_seconds(path, now),
-        steps=[
-            TaskStepNode(
-                id=step.id,
-                title=step.title,
-                status=step.status,
-                substeps=[
-                    TaskSubStepNode(id=sub.id, title=sub.title, status=sub.status)
-                    for sub in step.substeps
-                ],
-            )
-            for step in doc.steps
-        ],
+        steps=_task_step_nodes(doc),
         objective=doc.objective if include_body else "",
         requirements=list(doc.requirements) if include_body else [],
         design=doc.design if include_body else None,

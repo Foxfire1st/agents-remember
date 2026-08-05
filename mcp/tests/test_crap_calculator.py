@@ -47,14 +47,7 @@ class CrapCalculatorTests(unittest.TestCase):
     def test_a_partially_taken_branch_lowers_the_score_a_statement_reader_calls_perfect(
         self,
     ) -> None:
-        """The defect this reader was changed to remove, in one function.
-
-        Every statement of `branchy` runs, so a statement-only reader scores it 1.0 and
-        CRAP reports the bare complexity, 2.0. The false arm of the `if` was never taken,
-        so counting arcs gives 5/6 and the score rises above the complexity floor. A
-        metric that cannot see this is the wrong metric to put inside a formula whose
-        other term counts branches.
-        """
+        """Count an untaken branch even when every statement executed."""
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             source = root / "sample.py"

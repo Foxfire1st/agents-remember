@@ -4,6 +4,8 @@ from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
+from agents_remember.application.terminal_tools import RetiredSpawnInputs, SpawnedBy, SpawnSeat
+
 from ..config import McpRuntimeConfig
 from ..tools import (
     attach_terminal_session_to_leaf_payload,
@@ -12,10 +14,23 @@ from ..tools import (
     session_retire_payload,
     spawn_agent_session_payload,
 )
-from ..tools.terminal import RetiredSpawnInputs, SpawnedBy, SpawnSeat
 
 
 def register_session_tools(server: FastMCP, config: McpRuntimeConfig) -> None:
+    """Register the session tools, split by what the caller is doing to a session.
+
+    `spawn_agent_session` gets a helper to itself: its signature IS the published MCP input
+    schema and its docstring IS the contract a caller reads, so neither can be shortened
+    without a wire change.
+    """
+    _register_session_attachment_tools(server, config)
+    _register_session_spawn_tools(server, config)
+    _register_session_seat_tools(server, config)
+
+
+def _register_session_attachment_tools(server: FastMCP, config: McpRuntimeConfig) -> None:
+    """Bind an already-running hosted session to a durable task leaf."""
+
     @server.tool()
     def attach_terminal_session_to_leaf(
         session_id: str,
@@ -34,6 +49,10 @@ def register_session_tools(server: FastMCP, config: McpRuntimeConfig) -> None:
             leaf_key=leaf_key,
             role=role,
         )
+
+
+def _register_session_spawn_tools(server: FastMCP, config: McpRuntimeConfig) -> None:
+    """Spawn a role-configured, leaf-attached hosted agent session."""
 
     @server.tool()
     def spawn_agent_session(
@@ -116,6 +135,10 @@ def register_session_tools(server: FastMCP, config: McpRuntimeConfig) -> None:
                 lifecycle_id=spawned_by_lifecycle,
             ),
         )
+
+
+def _register_session_seat_tools(server: FastMCP, config: McpRuntimeConfig) -> None:
+    """Operate on a seat that already exists: check it, retire it, relabel it."""
 
     @server.tool()
     def hosted_session_readiness(session_id: str, wait_seconds: float = 0.0) -> dict[str, Any]:

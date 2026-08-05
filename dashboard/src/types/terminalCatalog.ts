@@ -2,7 +2,7 @@
 // mcp/src/agents_remember/serving/terminal_catalog.py `TerminalCatalogEntry.to_json()`, served
 // verbatim by `GET /api/terminal/sessions` (serving/app.py `_catalog_payload`). camelCase to match
 // the wire form; written-only-when-set fields are optional (`?:`). The Python entry is the source
-// of truth — keep in lockstep by hand (same posture as types/projection.ts).
+// of truth — keep this dataclass-backed surface in lockstep by hand.
 
 export type TerminalOpenKind = "terminal" | "harness";
 export type TerminalSessionStatus = "running" | "exited" | "landed" | "terminated";

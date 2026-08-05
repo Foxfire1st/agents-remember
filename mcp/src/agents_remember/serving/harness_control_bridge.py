@@ -14,7 +14,7 @@ from agents_remember.errors import (
     HarnessBridgeEpochMismatchError,
     HarnessControlError,
 )
-from agents_remember.serving.harness_capabilities import CapabilitySnapshot, SetResult
+from agents_remember.serving.harness_capabilities import CapabilitySnapshot
 from agents_remember.serving.harness_control_adapter import (
     HarnessProtocolAdapter,
     InterruptCapableAdapter,
@@ -26,40 +26,29 @@ from agents_remember.serving.harness_control_models import (
     CONTROL_PROTOCOL_VERSION,
     EVIDENCE_PAGE_BYTE_BUDGET,
     MAX_NATIVE_EVIDENCE_PAGE,
-    MAX_OPERATION_TIMELINE_PAGE,
     REQUIRED_ADAPTER_CAPABILITIES,
     AdapterEvent,
     AdapterHandshake,
     AdapterSnapshot,
     ControlIdentity,
-    ControlOperationKind,
     EvidenceFrame,
     EvidencePage,
-    InteractionResponse,
     InterruptResult,
     LaunchSpec,
     NativeEvidencePage,
     NativePageReader,
-    OperationTimeline,
     PromptRequest,
-    ReconciliationResult,
-    ReconciliationState,
     ShutdownMode,
-    SubmissionAuthorityDescriptor,
-    SubmissionProvenanceBatch,
-    SubmissionReceipt,
     SubmissionSource,
-    SubmissionStatusBatch,
     TranscriptEntry,
-    WithdrawalResult,
     clip_evidence_payload,
     evidence_frame_wire_bytes,
 )
-from agents_remember.serving.harness_control_queue import (
+from agents_remember.serving.harness_submission_authority import (
     BridgeSnapshotPort,
-    HarnessControlQueue,
+    HarnessSubmissionAuthority,
+    SubmissionLimits,
 )
-from agents_remember.serving.harness_submission_authority import OperationResolution
 
 Clock = Callable[[], str]
 
@@ -131,7 +120,7 @@ class HarnessControlBridge:
         self._started = False
         self._stopped = False
         self._event_task: asyncio.Task[None] | None = None
-        self._command_queue = HarnessControlQueue(
+        self._authority = HarnessSubmissionAuthority(
             adapter,
             BridgeSnapshotPort(
                 clock=clock,
@@ -139,9 +128,9 @@ class HarnessControlBridge:
                 set_snapshot=self._set_snapshot,
                 publish=self._publish,
             ),
-            queue_limit=queue_limit,
-            submission_limit=submission_limit,
+            SubmissionLimits(timeline=queue_limit, ledger=submission_limit),
         )
+        self._authority_started = False
 
     async def start(self, launch: LaunchSpec) -> AdapterSnapshot:
         if self._started:
@@ -158,7 +147,8 @@ class HarnessControlBridge:
             raise
         self._snapshot = handshake.snapshot
         self._started = True
-        self._command_queue.start()
+        self._authority_started = True
+        self._authority.start()
         if self._snapshot.control != "unsupported":
             self._event_task = asyncio.create_task(self._run_events())
         self._publish()
@@ -230,7 +220,7 @@ class HarnessControlBridge:
             latest_sequence=self._evidence[-1].sequence if self._evidence else 0,
             evicted_before_sequence=self._evicted_before_sequence,
             truncated=truncated,
-            bridge_epoch=self._command_queue.bridge_epoch,
+            bridge_epoch=self._authority.bridge_epoch,
         )
 
     async def native_page(
@@ -278,15 +268,7 @@ class HarnessControlBridge:
                 ) from exc
         if page.bridge_epoch:
             raise HarnessControlError("native evidence adapter must not mint the bridge epoch")
-        return replace(page, bridge_epoch=self._command_queue.bridge_epoch)
-
-    async def submission_provenance(
-        self,
-        expected_bridge_epoch: str,
-        request_ids: tuple[str, ...],
-    ) -> SubmissionProvenanceBatch:
-        self._require_running()
-        return await self._command_queue.provenance(expected_bridge_epoch, request_ids)
+        return replace(page, bridge_epoch=self._authority.bridge_epoch)
 
     async def interrupt(
         self,
@@ -315,26 +297,10 @@ class HarnessControlBridge:
         )
         if result.bridge_epoch:
             raise HarnessControlError("interrupt adapter must not mint the bridge epoch")
-        return replace(result, bridge_epoch=self._command_queue.bridge_epoch)
-
-    async def operation_timeline(
-        self,
-        expected_bridge_epoch: str,
-        *,
-        after_sequence: int = 0,
-        limit: int = MAX_OPERATION_TIMELINE_PAGE,
-        byte_budget: int = EVIDENCE_PAGE_BYTE_BUDGET,
-    ) -> OperationTimeline:
-        self._require_running()
-        return await self._command_queue.operation_timeline(
-            expected_bridge_epoch,
-            after_sequence=after_sequence,
-            limit=limit,
-            byte_budget=byte_budget,
-        )
+        return replace(result, bridge_epoch=self._authority.bridge_epoch)
 
     def _require_epoch(self, expected_bridge_epoch: str) -> None:
-        actual = self._command_queue.bridge_epoch
+        actual = self._authority.bridge_epoch
         if expected_bridge_epoch != actual:
             raise HarnessBridgeEpochMismatchError(expected_bridge_epoch, actual)
 
@@ -354,100 +320,20 @@ class HarnessControlBridge:
             expected_bridge_epoch=expected_bridge_epoch,
         )
 
-    async def submit(self, request: PromptRequest) -> SubmissionReceipt:
+    def submissions(self) -> HarnessSubmissionAuthority:
+        """The submission authority and its ``ledger``, refused while this bridge is not running.
+
+        The running check is spent here, at the moment the authority is taken hold of. Call it per
+        operation: a reference cached across an await outlives the check that granted it, and the
+        authority itself does not know the bridge stopped or failed under it.
+        """
+
         self._require_running()
-        return await self._command_queue.submit(request)
-
-    def submission_authority(self) -> SubmissionAuthorityDescriptor:
-        self._require_running()
-        return self._command_queue.descriptor()
-
-    async def submission_status(
-        self,
-        expected_bridge_epoch: str,
-        request_ids: tuple[str, ...],
-        *,
-        cockpit_only: bool = False,
-    ) -> SubmissionStatusBatch:
-        self._require_running()
-        return await self._command_queue.status(
-            expected_bridge_epoch,
-            request_ids,
-            cockpit_only=cockpit_only,
-        )
-
-    async def withdraw_submission(
-        self,
-        expected_bridge_epoch: str,
-        request_id: str,
-        *,
-        cockpit_only: bool = False,
-    ) -> WithdrawalResult:
-        self._require_running()
-        return await self._command_queue.withdraw(
-            expected_bridge_epoch,
-            request_id,
-            cockpit_only=cockpit_only,
-        )
-
-    @property
-    def retained_submission_count(self) -> int:
-        """Current bounded receipt/reconciliation ledger size for diagnostics and scaling proof."""
-
-        return self._command_queue.retained_submission_count
-
-    async def respond(self, response: InteractionResponse) -> AdapterSnapshot:
-        self._require_running()
-        return await self._command_queue.respond(response)
-
-    async def reconcile(
-        self, request_id: str, *, expected_bridge_epoch: str | None = None
-    ) -> ReconciliationResult:
-        self._require_running()
-        return await self._command_queue.reconcile(
-            request_id,
-            expected_bridge_epoch=expected_bridge_epoch,
-        )
-
-    async def resolve_unknown(
-        self,
-        request_id: str,
-        *,
-        state: ReconciliationState,
-        detail: str,
-    ) -> ReconciliationResult:
-        self._require_running()
-        return await self._command_queue.resolve_unknown(request_id, state=state, detail=detail)
-
-    async def resolve_operation(
-        self,
-        operation_id: str,
-        operation_kind: ControlOperationKind,
-        *,
-        resolution: OperationResolution,
-        detail: str,
-    ) -> None:
-        self._require_running()
-        if resolution not in {"applied", "not-applied"}:
-            raise HarnessControlError("operation resolution must be applied or not-applied")
-        await self._command_queue.resolve_operation(
-            operation_id,
-            operation_kind,
-            resolution=resolution,
-            detail=detail,
-        )
+        return self._authority
 
     def advertise(self) -> CapabilitySnapshot:
         self._require_running()
         return self._adapter.advertise()
-
-    async def set_model(self, model_key: str) -> SetResult:
-        self._require_running()
-        return await self._command_queue.set_model(model_key)
-
-    async def set_effort(self, effort: str) -> SetResult:
-        self._require_running()
-        return await self._command_queue.set_effort(effort)
 
     async def stop(self, mode: ShutdownMode = "graceful") -> None:
         if self._stopped:
@@ -455,14 +341,48 @@ class HarnessControlBridge:
         if mode == "forced":
             self._stopped = True
             await self._cancel_event_task()
-            await self._command_queue.force_stop()
+            await self._stop_authority(forced=True)
             return
         self._require_started()
         self._stopped = True
         try:
-            await self._command_queue.graceful_stop()
+            await self._stop_authority(forced=False)
         finally:
             await self._cancel_event_task()
+
+    async def _stop_authority(self, *, forced: bool) -> None:
+        """Stop the authority at most once and publish the snapshot that stop leaves behind.
+
+        A bridge whose launch failed never started an authority, and its ``failed`` snapshot must
+        survive the forced stop the runner issues on the way out -- so an unstarted authority is a
+        no-op here rather than a transition to ``disconnected``.
+        """
+
+        if not self._authority_started:
+            return
+        self._authority_started = False
+        try:
+            await self._authority.stop(forced=forced)
+        except Exception as exc:
+            error = HarnessControlError(
+                f"unexpected adapter {type(exc).__name__} during control stop: {exc}"
+            )
+            self._snapshot = replace(
+                self._snapshot,
+                control="failed",
+                activity="unknown",
+                acceptance="rejected",
+                raw={**self._snapshot.raw, "bridgeError": str(error)},
+            )
+            self._publish()
+            raise error from exc
+        self._snapshot = replace(
+            self._snapshot,
+            control="disconnected",
+            activity="unknown" if forced else "idle",
+            acceptance="rejected",
+        )
+        self._publish()
 
     def _validate_handshake(self, handshake: AdapterHandshake) -> None:
         if handshake.protocol_version != CONTROL_PROTOCOL_VERSION:
@@ -504,7 +424,7 @@ class HarnessControlBridge:
                     # The authority consumes the direct event before public subscribers see the
                     # coalesced snapshot. Draining from subscribe() would lose intermediate
                     # completion identity under subscriber backpressure.
-                    await self._command_queue.observe_event(reduced_event)
+                    await self._authority.observe_event(reduced_event)
                     self._append_transcript(reduced_event.transcript)
                 except HarnessControlError as exc:
                     self._snapshot = replace(
@@ -517,7 +437,7 @@ class HarnessControlBridge:
                     self._publish()
                     return
                 self._snapshot = updated
-                self._command_queue.notify_snapshot_updated()
+                self._authority.notify_snapshot_updated()
                 self._publish()
             if not self._stopped and self._snapshot.control == "ready":
                 self._snapshot = replace(

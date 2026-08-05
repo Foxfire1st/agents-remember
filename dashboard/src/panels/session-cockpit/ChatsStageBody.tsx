@@ -15,6 +15,7 @@ import {
 } from "../../data/submissionLifecycleClient";
 import {
   connectConversation,
+  focusConversation,
   hasWarmConversation,
   LRU_LIMIT,
   touchConversation,
@@ -46,9 +47,9 @@ const pool = css({
 });
 // A hidden-but-mounted surface is taken out of the flow (absolute over the pool) and hidden with
 // `visibility` — NEVER display:none. display:none destroys the scroll offset and the virtualizer's
-// measurements, which is exactly the top-then-jump-to-bottom glitch being fixed; visibility keeps
-// layout alive (scroll state, measured rows, bottom-follow all keep working while hidden) while
-// removing the surface from pointer, keyboard, tab-order, and the accessibility tree.
+// retained measurements, which is exactly the top-then-jump-to-bottom glitch being fixed. The DOM,
+// pixel offset, and TanStack cache remain intact here; the hidden timeline separately detaches its
+// observers/listeners so retaining identity does not mean retaining background work.
 const keptHidden = css({
   position: "absolute",
   top: "0",
@@ -167,6 +168,10 @@ export function ChatsStageBody({
 }) {
   const controlled = focused !== undefined && isControlledSession(focused);
   const sessionId = focused?.id;
+  const harnessId = focused === undefined ? null : harnessOf(focused);
+  const showLibrary = controlled && libraryOpen && harnessId !== null;
+  const conversationActive =
+    controlled && sessionId !== undefined && viewActive && !showLibrary;
   // The epoch phase is keyed BY SESSION, never held component-wide. With the
   // keep-alive pool a cold resolve for chat B can still be in flight after the operator has moved
   // on, and one shared phase let B's outcome paint chat A's surface — the alarm ("structured
@@ -180,11 +185,11 @@ export function ChatsStageBody({
 
   const connect = useCallback(
     async (refresh: boolean) => {
-      if (sessionId === undefined || !controlled) return;
+      if (sessionId === undefined || !conversationActive) return;
       // A warm projection is REUSED on refocus: switching back otherwise re-showed the "connecting"
-      // pane and paid a full connect each time. No epoch re-resolve, no re-hydrate, no stream churn
-      // — just an LRU touch. An explicit Retry (refresh=true) still forces the full re-resolve, and
-      // a failed/evicted projection falls through to the ordinary connect.
+      // pane and paid a full connect each time. No epoch re-resolve or re-hydrate — the LRU touch
+      // resumes a fresh EventSource from the retained cursor. An explicit Retry (refresh=true) still
+      // forces the full re-resolve, and a failed/evicted projection falls through to cold connect.
       if (!refresh && hasWarmConversation(sessionId)) {
         // The warm short-circuit is still a connect, so it bumps the generation like every
         // other one. `generationRef.current` names the ONE live resolve; skipping the bump here
@@ -240,7 +245,7 @@ export function ChatsStageBody({
         }
       }
     },
-    [sessionId, controlled, markEpochPhase],
+    [sessionId, conversationActive, markEpochPhase],
   );
 
   // The stage renders exactly one session's phase: the focused one's. An unseen session's phase is
@@ -250,13 +255,24 @@ export function ChatsStageBody({
     sessionId === undefined ? "resolving" : epochPhases[sessionId] ?? "resolving";
 
   useEffect(() => {
-    if (sessionId === undefined || !controlled) return undefined;
+    if (sessionId === undefined || !conversationActive) {
+      // Moving to another cockpit view, the library, or a raw terminal leaves no visible structured
+      // chat. Cancel any cold authority resolve and release the one conversation SSE slot.
+      generationRef.current += 1;
+      focusConversation(null);
+      return undefined;
+    }
+    // Transport focus changes before any async epoch/page work. The previous chat's stream closes
+    // immediately, while its projection, cursor, DOM, scroll state, and TanStack cache remain warm.
+    focusConversation(sessionId);
     void connect(false);
-    // NO disconnect on unmount/focus switch — recently-focused conversations stay warm so
-    // switching back is instant. The LRU (store.enforceLru) and session termination
-    // (sessionLifecycle) are the only disconnectors now.
-    return undefined;
-  }, [sessionId, controlled, connect]);
+    return () => {
+      // Invalidate an in-flight authority resolve before the next focus can claim transport. This is
+      // a pause, not a disconnect: the retained runtime/projection remains the instant refocus path.
+      generationRef.current += 1;
+      focusConversation(null);
+    };
+  }, [sessionId, conversationActive, connect]);
 
   // Recovery: once the projection DID fail loud, a later catalog flip to
   // controlState=ready is the daemon's own proof the bridge finally came up — re-drive the connect
@@ -339,8 +355,6 @@ export function ChatsStageBody({
   // Sibling-only chrome changes do not resize the hidden terminal: it freezes at its last visible
   // box until selected again.
   const terminalFocused = focused !== undefined && !controlled;
-  const harnessId = focused === undefined ? null : harnessOf(focused);
-  const showLibrary = controlled && libraryOpen && harnessId !== null;
   const ptyLayerBox = useVisiblePtyBox(viewActive && terminalFocused);
   const [ptySessionId, setPtySessionId] = useState<string | undefined>(undefined);
   useEffect(() => {
@@ -420,8 +434,8 @@ export function ChatsStageBody({
                 ) : (
                   <ConversationSurface
                     sessionId={id}
-                    visible={isFocused && !showLibrary}
-                    scrollGeometryActive={viewActive && !showLibrary}
+                    visible={isFocused && viewActive && !showLibrary}
+                    scrollGeometryActive={isFocused && viewActive && !showLibrary}
                     onRetry={() => void connect(true)}
                     onShowDiagnostics={() => onToggleDiagnostics(true)}
                   />

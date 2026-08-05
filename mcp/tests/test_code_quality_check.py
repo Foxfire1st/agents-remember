@@ -11,7 +11,7 @@ import tomllib
 import unittest
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeGuard
 from unittest import mock
 
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
@@ -333,7 +333,7 @@ class EveryEnforcingStepCanFailTests(unittest.TestCase):
         # why it is gone, and a substring search cannot tell that from the flag itself.
         self.assertEqual(
             shell_command_lines(REPOSITORY_ROOT / ".githooks" / "_gate.sh", "-m ruff check"),
-            ['over_tracked_python "$py" -m ruff check || return 1'],
+            ['if over_tracked_python "$py" -m ruff check; then'],
         )
 
 
@@ -762,7 +762,22 @@ def write_sample_repository(root: Path) -> Path:
     """A throwaway repository shaped like this one: a package, a test tree, a script."""
     run_git(root, "init", "--quiet")
     (root / "pyproject.toml").write_text(
-        '[tool.pytest.ini_options]\ntestpaths = ["tests"]\n', encoding="utf-8"
+        "\n".join(
+            (
+                "[tool.ruff]",
+                "line-length = 100",
+                "[tool.pyright]",
+                'include = ["."]',
+                "[tool.radon]",
+                'cc_min = "B"',
+                "[tool.coverage.run]",
+                "branch = true",
+                "[tool.pytest.ini_options]",
+                'testpaths = ["tests"]',
+                "",
+            )
+        ),
+        encoding="utf-8",
     )
     for directory in ("pkg", "tests", "scripts"):
         (root / directory).mkdir()
@@ -805,26 +820,28 @@ def exempted_tool_modules() -> list[Path]:
 
 
 def ordinary_code_in_tool_module(module: Path) -> list[str]:
-    """Everything in ``module`` that is not a published tool declaration or its registrar.
+    """Everything in ``module`` that is not a published tool declaration or a registrar.
 
     The exemption's justification -- a signature that IS the published MCP input schema --
     covers `@server.tool()` declarations and the thin `register_*_tools(server, config)`
     that hosts them. Nothing else in these files has that excuse, so anything else is named
     here and the caller fails on it.
 
+    260731-EFA-L6 taught this two more shapes, because a registrar body grows one tool at a
+    time and six of them had reached 127-163 lines under the 100-line cap that leaf armed.
+    A registrar may now delegate to another registrar DEFINED IN THE SAME MODULE, and it
+    may carry a docstring saying what it groups. That is the whole widening, and it stays
+    tight where it matters: a call to anything this module does not define as a registrar
+    is still ordinary code, so delegation cannot become a route for arbitrary calls, and a
+    private `_register_*_tools` helper is held to the same body rule as the public one.
+
     Read from the AST rather than the source text. A grep for the decorator cannot tell a
     real declaration from the same characters in a docstring, and cannot see that a helper
     two levels down is undecorated at all.
     """
     tree = ast.parse(module.read_text(encoding="utf-8"), filename=str(module))
-    registrars = {
-        node
-        for node in tree.body
-        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef)
-        and node.name.startswith("register_")
-        and node.name.endswith("_tools")
-        and not node.decorator_list
-    }
+    registrars = {node for node in tree.body if is_tool_registrar(node)}
+    registrar_names = {registrar.name for registrar in registrars}
     findings: list[str] = []
     for node in ast.walk(tree):
         where = f"{module.name}:{getattr(node, 'lineno', 0)}"
@@ -836,14 +853,59 @@ def ordinary_code_in_tool_module(module: Path) -> list[str]:
             findings.append(f"{where} lambda")
         elif isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
             if node in registrars:
-                findings.extend(
-                    f"{where} registrar {node.name} contains {type(statement).__name__}"
-                    for statement in node.body
-                    if not isinstance(statement, ast.FunctionDef | ast.AsyncFunctionDef)
-                )
+                findings.extend(registrar_body_findings(node, registrar_names, module.name))
             elif not any(is_server_tool_decorator(decorator) for decorator in node.decorator_list):
                 findings.append(f"{where} function {node.name} is not a @server.tool()")
     return findings
+
+
+def is_tool_registrar(node: ast.stmt) -> TypeGuard[ast.FunctionDef | ast.AsyncFunctionDef]:
+    """A module-level, undecorated ``[_]register_<something>_tools`` host."""
+    return (
+        isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef)
+        and node.name.lstrip("_").startswith("register_")
+        and node.name.endswith("_tools")
+        and not node.decorator_list
+    )
+
+
+def registrar_body_findings(
+    registrar: ast.FunctionDef | ast.AsyncFunctionDef,
+    registrar_names: set[str],
+    module_name: str,
+) -> list[str]:
+    """Registrar statements that are neither a tool declaration nor a delegation."""
+    findings: list[str] = []
+    for index, statement in enumerate(registrar.body):
+        if isinstance(statement, ast.FunctionDef | ast.AsyncFunctionDef):
+            continue
+        if index == 0 and is_docstring(statement):
+            continue
+        if is_registrar_delegation(statement, registrar_names):
+            continue
+        findings.append(
+            f"{module_name}:{statement.lineno} registrar {registrar.name} contains "
+            f"{type(statement).__name__}"
+        )
+    return findings
+
+
+def is_docstring(statement: ast.stmt) -> bool:
+    return (
+        isinstance(statement, ast.Expr)
+        and isinstance(statement.value, ast.Constant)
+        and isinstance(statement.value.value, str)
+    )
+
+
+def is_registrar_delegation(statement: ast.stmt, registrar_names: set[str]) -> bool:
+    """A bare call to a registrar this module defines -- and to nothing else."""
+    return (
+        isinstance(statement, ast.Expr)
+        and isinstance(statement.value, ast.Call)
+        and isinstance(statement.value.func, ast.Name)
+        and statement.value.func.id in registrar_names
+    )
 
 
 def is_server_tool_decorator(decorator: ast.expr) -> bool:

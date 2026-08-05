@@ -25,6 +25,7 @@ from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
+from agents_remember.kernel.harnesses import Harness
 from agents_remember.observer.events import now_iso
 from agents_remember.serving.conversation.library import codex as codex_library
 from agents_remember.serving.conversation.library.errors import LibraryStoreError
@@ -39,7 +40,7 @@ from agents_remember.serving.conversation.models import (
     HarnessId,
     HistoryCapabilities,
 )
-from agents_remember.serving.harnesses import Harness, Which
+from agents_remember.serving.harnesses import Which
 
 # Informational only (260718-CHATS-L5F R4): the codex version whose contract was captured in the
 # landed fixture. It is NOT a gate — nothing compares it to the observed runtime. Retained as a

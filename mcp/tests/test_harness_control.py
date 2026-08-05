@@ -58,6 +58,7 @@ from agents_remember.serving.harness_control_client import (
     read_submission_authority,
     read_submission_status,
     reconcile_control_prompt,
+    request_control,
     set_control_effort,
     set_control_model,
     submit_control_prompt,
@@ -121,6 +122,7 @@ class _FakeAdapter:
         self.capabilities = capabilities
         self.handshake_identity = handshake_identity
         self.current: AdapterSnapshot | None = None
+        self.stop_error: BaseException | None = None
         self.events: asyncio.Queue[AdapterEvent | None] = asyncio.Queue()
         self.acceptances: deque[AcceptanceState] = deque()
         self.disconnects: deque[bool | None] = deque()
@@ -254,6 +256,8 @@ class _FakeAdapter:
 
     async def stop(self, mode: ShutdownMode) -> None:
         self.stop_modes.append(mode)
+        if self.stop_error is not None:
+            raise self.stop_error
 
     def emit(self, event: AdapterEvent) -> None:
         if event.snapshot is not None:
@@ -443,10 +447,12 @@ class HarnessControlConformanceTests(unittest.IsolatedAsyncioTestCase):
         bridge = HarnessControlBridge(identity, adapter)
         await bridge.start(_launch(identity))
         try:
-            model_task = asyncio.create_task(bridge.set_model("model-b"))
+            model_task = asyncio.create_task(bridge.submissions().set_model("model-b"))
             await asyncio.sleep(0)
             prompt_task = asyncio.create_task(
-                bridge.submit(bridge.prompt("after set", source="durable", request_id="after-set"))
+                bridge.submissions().submit(
+                    bridge.prompt("after set", source="durable", request_id="after-set")
+                )
             )
             model, receipt = await asyncio.gather(model_task, prompt_task)
             self.assertEqual((model.ok, model.acceptance), (True, "immediate"))
@@ -468,7 +474,7 @@ class HarnessControlConformanceTests(unittest.IsolatedAsyncioTestCase):
         bridge = HarnessControlBridge(identity, adapter)
         await bridge.start(_launch(identity))
         try:
-            setter = asyncio.create_task(bridge.set_model("model-b"))
+            setter = asyncio.create_task(bridge.submissions().set_model("model-b"))
             await asyncio.wait_for(adapter.set_started.wait(), timeout=1.0)
             setter.cancel()
             with self.assertRaises(asyncio.CancelledError):
@@ -476,7 +482,7 @@ class HarnessControlConformanceTests(unittest.IsolatedAsyncioTestCase):
             adapter.release_set.set()
 
             receipt = await asyncio.wait_for(
-                bridge.submit(
+                bridge.submissions().submit(
                     bridge.prompt(
                         "still alive",
                         source="durable",
@@ -513,9 +519,9 @@ class HarnessControlConformanceTests(unittest.IsolatedAsyncioTestCase):
                 bridge = HarnessControlBridge(identity, adapter)
                 await bridge.start(_launch(identity))
                 try:
-                    projected = await bridge.set_model("value")
+                    projected = await bridge.submissions().set_model("value")
                     self.assertEqual((projected.ok, projected.acceptance), (False, "unknown"))
-                    receipt = await bridge.submit(
+                    receipt = await bridge.submissions().submit(
                         bridge.prompt(
                             "runner survives",
                             source="durable",
@@ -524,7 +530,7 @@ class HarnessControlConformanceTests(unittest.IsolatedAsyncioTestCase):
                     )
                     self.assertEqual(receipt.acceptance, "queued")
                     operation = adapter.setter_operations[-1]
-                    await bridge.resolve_operation(
+                    await bridge.submissions().resolve_operation(
                         operation.operation_id,
                         "set-model",
                         resolution="not-applied",
@@ -644,13 +650,49 @@ class HarnessControlConformanceTests(unittest.IsolatedAsyncioTestCase):
             await stream.aclose()
             await bridge.stop("forced")
 
+    async def test_an_adapter_that_fails_to_stop_is_reported_as_failed_not_disconnected(
+        self,
+    ) -> None:
+        """A stop that did not happen must not be published as a clean disconnect.
+
+        ``disconnected`` is the word for "the harness is gone and nothing is running". If
+        the adapter raised on the way out, the vendor process may well still be alive, and
+        a subscriber that saw ``disconnected`` would offer to start a second one on the same
+        tmux name. The bridge therefore publishes ``failed`` with the error, and re-raises
+        as a `HarnessControlError` so the caller does not meet a raw vendor exception.
+        """
+        identity = _identity()
+        adapter = _FakeAdapter()
+        adapter.stop_error = RuntimeError("vendor process refused to die")
+        bridge = HarnessControlBridge(identity, adapter)
+        await bridge.start(_launch(identity))
+        stream = bridge.subscribe()
+        try:
+            await anext(stream)
+
+            with self.assertRaisesRegex(
+                HarnessControlError, "unexpected adapter RuntimeError during control stop"
+            ):
+                await bridge.stop("graceful")
+
+            published = await asyncio.wait_for(anext(stream), timeout=1.0)
+            self.assertEqual(
+                (published.control, published.activity, published.acceptance),
+                ("failed", "unknown", "rejected"),
+            )
+            self.assertIn("vendor process refused to die", str(published.raw["bridgeError"]))
+            # And the failure is the bridge's own state, not just something a subscriber saw.
+            self.assertEqual(bridge.snapshot().control, "failed")
+        finally:
+            await stream.aclose()
+
     async def test_busy_blocked_settling_completion_and_readable_transcript(self) -> None:
         identity = _identity()
         adapter = _FakeAdapter()
         bridge = HarnessControlBridge(identity, adapter)
         await bridge.start(_launch(identity))
         try:
-            receipt = await bridge.submit(
+            receipt = await bridge.submissions().submit(
                 bridge.prompt("run work", source="terminal", request_id="request-1")
             )
             self.assertEqual(receipt.acceptance, "immediate")
@@ -732,7 +774,7 @@ class HarnessControlConformanceTests(unittest.IsolatedAsyncioTestCase):
         bridge = HarnessControlBridge(identity, adapter)
         await bridge.start(_launch(identity))
         try:
-            await bridge.submit(
+            await bridge.submissions().submit(
                 bridge.prompt("ask", source="terminal", request_id="question-operation")
             )
             operation = adapter.submissions[-1].operation
@@ -752,7 +794,7 @@ class HarnessControlConformanceTests(unittest.IsolatedAsyncioTestCase):
             adapter.emit(AdapterEvent(1, "state", identity, pending.created_at, snapshot=blocked))
             await _settle_events()
 
-            result = await bridge.respond(
+            result = await bridge.submissions().respond(
                 InteractionResponse(
                     interaction_id="question-1",
                     response="continue",
@@ -796,7 +838,7 @@ class HarnessControlConformanceTests(unittest.IsolatedAsyncioTestCase):
             await _settle_events()
 
             # No ordinary operation was ever submitted: the guard is parent-only.
-            result = await bridge.respond(
+            result = await bridge.submissions().respond(
                 InteractionResponse(
                     interaction_id="agent-approval-1",
                     response="allow",
@@ -809,7 +851,7 @@ class HarnessControlConformanceTests(unittest.IsolatedAsyncioTestCase):
             self.assertIsNone(adapter.responses[-1].operation)
 
             with self.assertRaises(HarnessInteractionNotPendingError):
-                await bridge.respond(
+                await bridge.submissions().respond(
                     InteractionResponse(
                         interaction_id="agent-approval-unknown",
                         response="allow",
@@ -862,7 +904,7 @@ class HarnessControlConformanceTests(unittest.IsolatedAsyncioTestCase):
 
             # No active ordinary operation: the parent-thread tuple entry is guarded...
             with self.assertRaises(HarnessInteractionNotPendingError):
-                await bridge.respond(
+                await bridge.submissions().respond(
                     InteractionResponse(
                         interaction_id="parent-approval-2",
                         response="allow",
@@ -870,7 +912,7 @@ class HarnessControlConformanceTests(unittest.IsolatedAsyncioTestCase):
                     )
                 )
             # ...while the agent entry still answers without one.
-            await bridge.respond(
+            await bridge.submissions().respond(
                 InteractionResponse(
                     interaction_id="agent-approval-1",
                     response="allow",
@@ -949,7 +991,7 @@ class HarnessControlConformanceTests(unittest.IsolatedAsyncioTestCase):
         before_bridge = HarnessControlBridge(identity, before_adapter)
         await before_bridge.start(_launch(identity))
         try:
-            before = await before_bridge.submit(
+            before = await before_bridge.submissions().submit(
                 before_bridge.prompt("before", source="terminal", request_id="before")
             )
             self.assertEqual(before.acceptance, "queued")
@@ -962,7 +1004,7 @@ class HarnessControlConformanceTests(unittest.IsolatedAsyncioTestCase):
         after_bridge = HarnessControlBridge(identity, after_adapter)
         await after_bridge.start(_launch(identity))
         try:
-            after = await after_bridge.submit(
+            after = await after_bridge.submissions().submit(
                 after_bridge.prompt("after", source="durable", request_id="after")
             )
             self.assertEqual(after.acceptance, "unknown")
@@ -974,7 +1016,7 @@ class HarnessControlConformanceTests(unittest.IsolatedAsyncioTestCase):
                 reconciled_at="2026-07-13T18:05:00+00:00",
                 vendor_correlation_id="vendor-after",
             )
-            reconciled = await after_bridge.reconcile("after")
+            reconciled = await after_bridge.submissions().reconcile("after")
             self.assertEqual(reconciled.state, "accepted")
             self.assertEqual(len(after_adapter.submissions), 1)
         finally:
@@ -986,11 +1028,11 @@ class HarnessControlConformanceTests(unittest.IsolatedAsyncioTestCase):
         bridge = HarnessControlBridge(identity, adapter)
         await bridge.start(_launch(identity))
         try:
-            first = await bridge.submit(
+            first = await bridge.submissions().submit(
                 bridge.prompt("only once", source="terminal", request_id="request-duplicate")
             )
             self.assertEqual(first.acceptance, "immediate")
-            duplicate = await bridge.submit(
+            duplicate = await bridge.submissions().submit(
                 bridge.prompt(
                     "only once",
                     source="terminal",
@@ -999,7 +1041,7 @@ class HarnessControlConformanceTests(unittest.IsolatedAsyncioTestCase):
             )
             self.assertEqual(duplicate, first)
             with self.assertRaises(HarnessRequestConflictError):
-                await bridge.submit(
+                await bridge.submissions().submit(
                     bridge.prompt(
                         "must not replace the first payload",
                         source="terminal",
@@ -1021,13 +1063,13 @@ class HarnessControlConformanceTests(unittest.IsolatedAsyncioTestCase):
         await bridge.start(_launch(identity))
         try:
             first = asyncio.create_task(
-                bridge.submit(
+                bridge.submissions().submit(
                     bridge.prompt("first payload", source="terminal", request_id="pending-id")
                 )
             )
             await asyncio.wait_for(adapter.submit_started.wait(), timeout=1.0)
             duplicate = asyncio.create_task(
-                bridge.submit(
+                bridge.submissions().submit(
                     bridge.prompt(
                         "first payload",
                         source="terminal",
@@ -1062,10 +1104,10 @@ class HarnessControlConformanceTests(unittest.IsolatedAsyncioTestCase):
                 bridge = HarnessControlBridge(identity, adapter)
                 await bridge.start(_launch(identity))
                 try:
-                    receipt = await bridge.submit(
+                    receipt = await bridge.submissions().submit(
                         bridge.prompt("payload", source="terminal", request_id=acceptance)
                     )
-                    result = await bridge.reconcile(acceptance)
+                    result = await bridge.submissions().reconcile(acceptance)
                     self.assertEqual((receipt.acceptance, result.state), (acceptance, state))
                     self.assertEqual(adapter.reconciliation_requests, [])
                 finally:
@@ -1076,11 +1118,13 @@ class HarnessControlConformanceTests(unittest.IsolatedAsyncioTestCase):
         bridge = HarnessControlBridge(identity, adapter)
         await bridge.start(_launch(identity))
         try:
-            await bridge.submit(bridge.prompt("active", source="terminal", request_id="active"))
-            queued = await bridge.submit(
+            await bridge.submissions().submit(
+                bridge.prompt("active", source="terminal", request_id="active")
+            )
+            queued = await bridge.submissions().submit(
                 bridge.prompt("payload", source="terminal", request_id="queued")
             )
-            result = await bridge.reconcile("queued")
+            result = await bridge.submissions().reconcile("queued")
             self.assertEqual((queued.acceptance, result.state), ("queued", "accepted"))
             self.assertEqual(adapter.reconciliation_requests, [])
         finally:
@@ -1093,21 +1137,21 @@ class HarnessControlConformanceTests(unittest.IsolatedAsyncioTestCase):
         bridge = HarnessControlBridge(identity, adapter, limits=BridgeLimits(queue=2, submission=2))
         await bridge.start(_launch(identity))
         try:
-            first = await bridge.submit(
+            first = await bridge.submissions().submit(
                 bridge.prompt("prompt", source="durable", request_id="unknown-1")
             )
-            second = await bridge.submit(
+            second = await bridge.submissions().submit(
                 bridge.prompt("prompt", source="durable", request_id="unknown-2")
             )
             self.assertEqual((first.acceptance, second.acceptance), ("unknown", "queued"))
-            refused = await bridge.submit(
+            refused = await bridge.submissions().submit(
                 bridge.prompt("third", source="durable", request_id="unknown-3")
             )
             self.assertEqual(refused.acceptance, "rejected")
             self.assertIn("ledger", refused.detail or "")
             self.assertEqual(len(adapter.submissions), 1)
 
-            resolution = await bridge.resolve_unknown(
+            resolution = await bridge.submissions().resolve_unknown_prompt(
                 "unknown-1", state="rejected", detail="operator confirmed no visible turn"
             )
             self.assertEqual(resolution.state, "rejected")
@@ -1132,12 +1176,16 @@ class HarnessControlConformanceTests(unittest.IsolatedAsyncioTestCase):
         bridge = HarnessControlBridge(identity, adapter)
         await bridge.start(_launch(identity))
         first = asyncio.create_task(
-            bridge.submit(bridge.prompt("first", source="terminal", request_id="first"))
+            bridge.submissions().submit(
+                bridge.prompt("first", source="terminal", request_id="first")
+            )
         )
         try:
             await asyncio.wait_for(adapter.submit_started.wait(), timeout=1.0)
             second = asyncio.create_task(
-                bridge.submit(bridge.prompt("second", source="durable", request_id="second"))
+                bridge.submissions().submit(
+                    bridge.prompt("second", source="durable", request_id="second")
+                )
             )
             await asyncio.sleep(0)
             adapter.release_submit.set()
@@ -1147,7 +1195,7 @@ class HarnessControlConformanceTests(unittest.IsolatedAsyncioTestCase):
                 ("unknown", "queued"),
             )
             self.assertEqual(bridge.snapshot().control, "disconnected")
-            third = await bridge.submit(
+            third = await bridge.submissions().submit(
                 bridge.prompt("third", source="terminal", request_id="third")
             )
             self.assertEqual(third.acceptance, "queued")
@@ -1165,7 +1213,9 @@ class HarnessControlConformanceTests(unittest.IsolatedAsyncioTestCase):
         bridge = HarnessControlBridge(identity, adapter)
         await bridge.start(_launch(identity))
         active = asyncio.create_task(
-            bridge.submit(bridge.prompt("active", source="terminal", request_id="active"))
+            bridge.submissions().submit(
+                bridge.prompt("active", source="terminal", request_id="active")
+            )
         )
         stop = None
         try:
@@ -1174,7 +1224,9 @@ class HarnessControlConformanceTests(unittest.IsolatedAsyncioTestCase):
             await asyncio.sleep(0)
             with self.assertRaisesRegex(HarnessControlError, "control bridge is stopped"):
                 await asyncio.wait_for(
-                    bridge.submit(bridge.prompt("racing", source="durable", request_id="racing")),
+                    bridge.submissions().submit(
+                        bridge.prompt("racing", source="durable", request_id="racing")
+                    ),
                     timeout=1.0,
                 )
             adapter.release_submit.set()
@@ -1197,11 +1249,15 @@ class HarnessControlConformanceTests(unittest.IsolatedAsyncioTestCase):
         bridge = HarnessControlBridge(identity, adapter)
         await bridge.start(_launch(identity))
         active = asyncio.create_task(
-            bridge.submit(bridge.prompt("active", source="terminal", request_id="active"))
+            bridge.submissions().submit(
+                bridge.prompt("active", source="terminal", request_id="active")
+            )
         )
         await asyncio.wait_for(adapter.submit_started.wait(), timeout=1.0)
         queued = asyncio.create_task(
-            bridge.submit(bridge.prompt("queued", source="durable", request_id="queued"))
+            bridge.submissions().submit(
+                bridge.prompt("queued", source="durable", request_id="queued")
+            )
         )
         await asyncio.sleep(0)
         await asyncio.wait_for(bridge.stop("forced"), timeout=1.0)
@@ -1215,16 +1271,22 @@ class HarnessControlConformanceTests(unittest.IsolatedAsyncioTestCase):
         bridge = HarnessControlBridge(identity, adapter, limits=BridgeLimits(queue=1, submission=1))
         await bridge.start(_launch(identity))
         try:
-            await bridge.submit(bridge.prompt("old", source="terminal", request_id="old"))
+            await bridge.submissions().submit(
+                bridge.prompt("old", source="terminal", request_id="old")
+            )
             adapter.complete("old")
             await _settle_events()
-            await bridge.submit(bridge.prompt("new", source="terminal", request_id="new"))
+            await bridge.submissions().submit(
+                bridge.prompt("new", source="terminal", request_id="new")
+            )
             adapter.complete("new")
             await _settle_events()
             with self.assertRaisesRegex(HarnessControlError, "no longer retained"):
-                await asyncio.wait_for(bridge.reconcile("old"), timeout=1.0)
+                await asyncio.wait_for(bridge.submissions().reconcile("old"), timeout=1.0)
             survived = await asyncio.wait_for(
-                bridge.submit(bridge.prompt("after", source="terminal", request_id="after")),
+                bridge.submissions().submit(
+                    bridge.prompt("after", source="terminal", request_id="after")
+                ),
                 timeout=1.0,
             )
             self.assertEqual(survived.acceptance, "immediate")
@@ -1243,7 +1305,7 @@ class HarnessControlConformanceTests(unittest.IsolatedAsyncioTestCase):
             await bridge.start(replace(_launch(identity), harness_id="settings-harness"))
             try:
                 for index in range(total):
-                    receipt = await bridge.submit(
+                    receipt = await bridge.submissions().submit(
                         bridge.prompt(
                             f"message-{index}",
                             source="durable",
@@ -1251,7 +1313,7 @@ class HarnessControlConformanceTests(unittest.IsolatedAsyncioTestCase):
                         )
                     )
                     self.assertEqual(receipt.acceptance, "unsupported")
-                self.assertLessEqual(bridge.retained_submission_count, 4)
+                self.assertLessEqual(bridge.submissions().ledger.retained_record_count, 4)
             finally:
                 await bridge.stop("forced")
 
@@ -1344,7 +1406,7 @@ class HarnessControlConformanceTests(unittest.IsolatedAsyncioTestCase):
             replace(_launch(identity), harness_id="settings-harness")
         )
         self.assertEqual(snapshot.control, "unsupported")
-        receipt = await unsupported.submit(
+        receipt = await unsupported.submissions().submit(
             unsupported.prompt("hello", source="terminal", request_id="unsupported-1")
         )
         self.assertEqual(receipt.acceptance, "unsupported")
@@ -1575,7 +1637,7 @@ class HarnessControlIpcTests(unittest.IsolatedAsyncioTestCase):
             adapter = _BlockingSubmitAdapter()
             bridge = HarnessControlBridge(identity, adapter)
             await bridge.start(_launch(identity))
-            bridge_epoch = bridge.submission_authority().bridge_epoch
+            bridge_epoch = bridge.submissions().bridge_epoch
             endpoint = LocalControlEndpoint.for_session(root / "control", identity)
             server = HarnessControlServer(endpoint, bridge)
             await server.start()
@@ -1677,7 +1739,7 @@ class HarnessControlIpcTests(unittest.IsolatedAsyncioTestCase):
             adapter = _FakeAdapter()
             bridge = HarnessControlBridge(identity, adapter)
             await bridge.start(_launch(identity))
-            bridge_epoch = bridge.submission_authority().bridge_epoch
+            bridge_epoch = bridge.submissions().bridge_epoch
             endpoint = LocalControlEndpoint.for_session(root / "control", identity)
             server = HarnessControlServer(endpoint, bridge)
             await server.start()
@@ -1721,7 +1783,7 @@ class HarnessControlIpcTests(unittest.IsolatedAsyncioTestCase):
                     ),
                     TestClient(app) as client,
                 ):
-                    await bridge.submit(
+                    await bridge.submissions().submit(
                         bridge.prompt("ask", source="terminal", request_id="question-operation")
                     )
                     pending = PendingInteraction(
@@ -1841,6 +1903,112 @@ class HarnessControlIpcTests(unittest.IsolatedAsyncioTestCase):
                 await server.close()
                 await bridge.stop("forced")
 
+    async def test_operator_resolution_crosses_the_socket_for_both_wire_actions(self) -> None:
+        """`resolve` and `resolve-operation` are the operator's half of the ambiguity barrier.
+
+        An ambiguous send parks the timeline: the authority cannot say whether the prompt
+        landed, so nothing else is admitted until a human answers. Both actions are declared
+        in `_CONTROL_ACTIONS`, and until now neither had crossed the socket in a test -- so
+        the two things asserted here are that the payload reaches the authority intact and
+        that the barrier is actually lifted, which is the whole point of the round trip.
+        """
+        with tempfile.TemporaryDirectory() as tmp_str:
+            identity = _identity("operator-resolution")
+            adapter = _FakeAdapter()
+            adapter.disconnects.extend((True, True))
+            bridge = HarnessControlBridge(
+                identity, adapter, limits=BridgeLimits(queue=4, submission=4)
+            )
+            await bridge.start(_launch(identity))
+            endpoint = LocalControlEndpoint.for_session(Path(tmp_str), identity)
+            server = HarnessControlServer(endpoint, bridge)
+            await server.start()
+            entry = _ControlledEntry(
+                identity.ar_session_id,
+                identity.tmux_name,
+                identity.created_at,
+                endpoint.path,
+            )
+            try:
+                ambiguous = await bridge.submissions().submit(
+                    bridge.prompt("first", source="durable", request_id="unknown-1")
+                )
+                queued = await bridge.submissions().submit(
+                    bridge.prompt("second", source="durable", request_id="unknown-2")
+                )
+                self.assertEqual((ambiguous.acceptance, queued.acceptance), ("unknown", "queued"))
+                self.assertIsNotNone(bridge.submissions().active_operation)
+
+                resolved = await asyncio.to_thread(
+                    request_control,
+                    entry,
+                    "resolve",
+                    {
+                        "requestId": "unknown-1",
+                        "state": "rejected",
+                        "detail": "operator saw no turn in the pane",
+                    },
+                )
+                assert isinstance(resolved, dict)
+                self.assertEqual(resolved["state"], "rejected")
+                self.assertEqual(resolved["requestId"], "unknown-1")
+                self.assertEqual(resolved["detail"], "operator saw no turn in the pane")
+                # The barrier is gone: the parked timeline is free again.
+                self.assertIsNone(bridge.submissions().active_operation)
+
+                # A refusal the handler itself owns, so a malformed state never reaches
+                # the authority as an unknown reconciliation word.
+                with self.assertRaises(HarnessControlError):
+                    await asyncio.to_thread(
+                        request_control,
+                        entry,
+                        "resolve",
+                        {"requestId": "unknown-1", "state": "maybe", "detail": "d"},
+                    )
+
+                # The prompt queued behind the barrier now dispatches, and disconnects the
+                # same way -- so there is a second ambiguous head for the other action.
+                assert adapter.current is not None
+                adapter.emit(
+                    AdapterEvent(
+                        sequence=1,
+                        kind="state",
+                        identity=identity,
+                        created_at="runner-ready-again",
+                        snapshot=adapter.current,
+                    )
+                )
+                for _ in range(200):
+                    if bridge.submissions().active_operation is not None:
+                        break
+                    await _settle_events()
+                active = bridge.submissions().active_operation
+                assert active is not None
+                self.assertEqual(active.operation_id, "unknown-2")
+
+                acknowledged = await asyncio.to_thread(
+                    request_control,
+                    entry,
+                    "resolve-operation",
+                    {
+                        "operationId": "unknown-2",
+                        "operationKind": "prompt",
+                        "resolution": "applied",
+                        "detail": "operator saw the turn start",
+                    },
+                )
+                self.assertEqual(acknowledged, {"resolved": True})
+                self.assertIsNone(bridge.submissions().active_operation)
+                status = await bridge.submissions().ledger.status(
+                    bridge.submissions().bridge_epoch, ("unknown-2",), cockpit_only=False
+                )
+                settled = status.submissions[0].submission
+                assert settled is not None
+                self.assertEqual(settled.detail, "operator saw the turn start")
+            finally:
+                await server.close()
+                await bridge.stop("forced")
+
     async def test_peer_timeout_after_submit_preserves_reconciliation_result(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_str:
             identity = _identity()
@@ -1883,7 +2051,9 @@ class HarnessControlIpcTests(unittest.IsolatedAsyncioTestCase):
                 await asyncio.wait_for(server.connection_finished.wait(), timeout=1.0)
                 await asyncio.sleep(0)
                 self.assertEqual(callback_exceptions, [])
-                reconciled = await asyncio.wait_for(bridge.reconcile("ipc-timeout"), timeout=1.0)
+                reconciled = await asyncio.wait_for(
+                    bridge.submissions().reconcile("ipc-timeout"), timeout=1.0
+                )
                 self.assertEqual(reconciled.state, "accepted")
                 self.assertEqual(reconciled.vendor_correlation_id, "vendor-ipc-timeout")
                 self.assertEqual(

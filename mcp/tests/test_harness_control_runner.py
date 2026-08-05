@@ -15,17 +15,21 @@ from agents_remember.serving.codex_app_server_adapter import CodexAppServerAdapt
 from agents_remember.serving.harness_capabilities import (
     CapabilitySnapshot,
     EffortOption,
-    LaunchKnobs,
     ModelCapability,
 )
 from agents_remember.serving.harness_control_adapter import UnsupportedHarnessProtocolAdapter
 from agents_remember.serving.harness_control_bridge import HarnessControlBridge
 from agents_remember.serving.harness_control_claude import ClaudeStreamJsonAdapter
-from agents_remember.serving.harness_control_factories import create_harness_protocol_adapter
+from agents_remember.serving.harness_control_factories import (
+    create_harness_protocol_adapter,
+    harness_launch_knobs,
+)
 from agents_remember.serving.harness_control_models import (
+    AcceptanceState,
     AdapterSnapshot,
     ControlIdentity,
     LaunchSpec,
+    PromptRequest,
     SubmissionReceipt,
     TerminalResult,
     TranscriptEntry,
@@ -35,6 +39,7 @@ from agents_remember.serving.harness_control_runner import (
     _prepare_controlled_launch,
     _read_terminal_input,
     _render_updates,
+    _submit_session_commands,
     adapter_argv,
     control_runner_command,
     parse_runner_config,
@@ -122,29 +127,20 @@ class RunnerConfigTests(unittest.TestCase):
         )
 
     def test_native_adapters_own_their_exact_launch_channels(self) -> None:
-        claude = create_harness_protocol_adapter("claude", env={})
-        codex = create_harness_protocol_adapter(
-            "codex",
-            env={},
-            resolved_launch=ResolvedLaunch("codex", "gpt-test", "high", Path("/workspace")),
-            launch_knobs=LaunchKnobs(
-                session_config={"model": "gpt-test", "model_reasoning_effort": "high"}
-            ),
-        )
-        pi = create_harness_protocol_adapter("pi", env={})
-
         self.assertEqual(
-            claude.launch_knobs(model_key="claude-fable-5", effort="max").argv,
+            harness_launch_knobs("claude", model_key="claude-fable-5", effort="max").argv,
             ("--model", "claude-fable-5", "--effort", "max"),
         )
         self.assertEqual(
-            codex.launch_knobs(model_key="gpt-test", effort="high").session_config,
+            harness_launch_knobs("codex", model_key="gpt-test", effort="high").session_config,
             {"model": "gpt-test", "model_reasoning_effort": "high"},
         )
         self.assertEqual(
-            pi.launch_knobs(model_key="provider/model", effort="xhigh").argv,
+            harness_launch_knobs("pi", model_key="provider/model", effort="xhigh").argv,
             ("--model", "provider/model", "--thinking", "xhigh"),
         )
+        with self.assertRaisesRegex(HarnessControlError, "no protocol adapter is registered"):
+            harness_launch_knobs("custom", model_key="provider/model", effort="high")
 
 
 class _LaunchAdapter:
@@ -166,10 +162,6 @@ class _LaunchAdapter:
             selected_model_key=None,
             selected_effort=None,
         )
-
-    def launch_knobs(self, *, model_key: str, effort: str | None) -> LaunchKnobs:
-        assert effort is not None
-        return LaunchKnobs(argv=("--model", model_key, "--thinking", effort))
 
 
 class LaunchPreparationTests(unittest.IsolatedAsyncioTestCase):
@@ -287,16 +279,6 @@ class LaunchPreparationTests(unittest.IsolatedAsyncioTestCase):
             resolved_launch=ResolvedLaunch("codex", "provider/model", "high", Path("/workspace")),
         )
         factory = mock.Mock(return_value=discoverer)
-        discoverer.launch_knobs = mock.Mock(
-            return_value=LaunchKnobs(
-                session_config={
-                    "model": "provider/model",
-                    "model_reasoning_effort": "high",
-                },
-                owned_argv_options=("--model", "-m"),
-                owned_config_keys=("model", "model_reasoning_effort"),
-            )
-        )
         with (
             mock.patch(
                 "agents_remember.serving.harness_control_runner.create_harness_protocol_adapter",
@@ -560,6 +542,67 @@ class RunnerLoopTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("hello world", output)
         self.assertIn("[control] failed activity=unknown acceptance=unknown", output)
         self.assertEqual(surface.bridge.calls, [0, 1])
+
+
+class _SessionCommandAuthority:
+    def __init__(self, acceptances: tuple[str, ...]) -> None:
+        self.acceptances = list(acceptances)
+        self.requests: list[PromptRequest] = []
+
+    async def submit(self, request: PromptRequest) -> SubmissionReceipt:
+        self.requests.append(request)
+        acceptance = self.acceptances[len(self.requests) - 1]
+        return SubmissionReceipt(
+            request_id=request.request_id,
+            acceptance=cast(AcceptanceState, acceptance),
+            submitted_at=request.submitted_at,
+            detail=None if acceptance in {"immediate", "queued"} else "harness said no",
+        )
+
+
+class _SessionCommandBridge:
+    def __init__(self, acceptances: tuple[str, ...]) -> None:
+        self.identity = _identity()
+        self.authority = _SessionCommandAuthority(acceptances)
+
+    def submissions(self) -> _SessionCommandAuthority:
+        return self.authority
+
+
+class RunnerSessionCommandTests(unittest.IsolatedAsyncioTestCase):
+    async def test_session_commands_carry_a_deterministic_durable_identity(self) -> None:
+        """The request id is the authority's duplicate key, so it must be derivable, not fresh.
+
+        `run_controlled_session` replays `sessionCommands` every time it brings a session
+        up, and a hosted session is re-launched on reconnect. A per-run id would make each
+        replay a NEW prompt: the same `/model` line submitted again, into a live thread.
+        Deriving it from the session id and the command's position is what makes the second
+        run a duplicate the authority recognises and answers from the ledger.
+
+        They are `durable`, not `terminal`: nobody typed them, and the source is what the
+        cockpit uses to tell an operator's message from the runner's own setup.
+        """
+        bridge = _SessionCommandBridge(("immediate", "unsupported"))
+        stdout = io.StringIO()
+
+        with redirect_stdout(stdout):
+            await _submit_session_commands(
+                cast(HarnessControlBridge, bridge), ("/model fable", "/compact")
+            )
+
+        self.assertEqual(
+            [request.request_id for request in bridge.authority.requests],
+            ["session-1:session-command:1", "session-1:session-command:2"],
+        )
+        self.assertEqual(
+            [request.text for request in bridge.authority.requests],
+            ["/model fable", "/compact"],
+        )
+        self.assertEqual({request.source for request in bridge.authority.requests}, {"durable"})
+        # Only the one the harness would not take is reported; an accepted command is silent.
+        output = stdout.getvalue()
+        self.assertNotIn("session command 1", output)
+        self.assertIn("session command 2 unsupported: harness said no", output)
 
 
 if __name__ == "__main__":

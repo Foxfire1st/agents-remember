@@ -9,6 +9,7 @@ from typing import Any
 
 import pytest
 from agents_remember.errors import AuthorityError
+from agents_remember.kernel.harnesses import Harness
 from agents_remember.serving.conversation import resolve_conversation_authorization
 from agents_remember.serving.conversation.authorization import (
     LOCAL_OPERATOR_PRINCIPAL_PREFIX,
@@ -28,7 +29,6 @@ from agents_remember.serving.conversation.runtime import (
     install_conversation_runtime,
 )
 from agents_remember.serving.harness_capability_catalog import HarnessCapabilityCatalog
-from agents_remember.serving.harnesses import Harness
 from agents_remember.serving.terminal_catalog import TerminalCatalog
 from agents_remember.serving.terminal_liveness import (
     TerminalCatalogLivenessConfig,

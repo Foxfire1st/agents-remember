@@ -5,9 +5,10 @@
 //
 // The store orchestrates the page<->stream contract: connect hydrates a native page then opens the
 // resumable stream; a reducer-signalled `gap`/`reset` recovery stops the stream, re-pages native
-// authority, and resumes ONLY from the fresh page's atomically-captured eventCursor (§6.8). A bounded
-// LRU may evict an unfocused session's DOM/projection; it is simply rehydrated on refocus — history
-// authority is always native, never this store.
+// authority, and resumes ONLY from the fresh page's atomically-captured eventCursor (§6.8). Retained
+// sessions keep their runtime/projection/cursor, but only the focused session owns a physical stream;
+// refocus resumes from the retained cursor without paying another page fetch. A bounded LRU may evict
+// an unfocused session's DOM/projection; history authority is always native, never this store.
 
 import { useStore } from "zustand";
 import { createStore } from "zustand/vanilla";
@@ -159,13 +160,25 @@ export const activeConversationStore = createStore<ActiveConversationState>((set
 
   evict: (sessionId) =>
     set((state) => {
-      if (state.bySession[sessionId] === undefined) return state;
+      if (
+        state.bySession[sessionId] === undefined &&
+        !state.touchOrder.includes(sessionId)
+      ) {
+        return state;
+      }
       const bySession = { ...state.bySession };
       delete bySession[sessionId];
       return { bySession, touchOrder: state.touchOrder.filter((id) => id !== sessionId) };
     }),
 
   reset: () => {
+    for (const runtime of runtimeBySession.values()) {
+      runtime.disposed = true;
+      stopRuntimeStream(runtime);
+      runtime.pageAbortController?.abort();
+    }
+    runtimeBySession.clear();
+    focusedConversationId = null;
     scrollMemoryBySession.clear();
     set({
       bySession: {},
@@ -190,6 +203,14 @@ interface SessionRuntime {
   fetchImpl: FetchLike;
   eventSourceCtor?: EventSourceCtor;
   controller: { reconnect: () => void; stop: () => void } | null;
+  /** A page/re-page is already establishing the cursor; focus must not open a competing stream. */
+  pageInFlight: boolean;
+  /** Cancels a cold hydrate/re-page immediately when that conversation loses transport focus. */
+  pageAbortController: AbortController | null;
+  /** Page work that blur suspended and a later refocus must resume before opening SSE. */
+  pendingPageKind: "hydrate" | "repage" | null;
+  /** The page size used by a cursor recovery after this runtime is resumed. */
+  limit?: number;
   generation: number;
   disposed: boolean;
   /** Consecutive stream attempts that errored WITHOUT opening (reset by any open). */
@@ -203,6 +224,10 @@ interface SessionRuntime {
 }
 
 const runtimeBySession = new Map<string, SessionRuntime>();
+// Browser connection groups are shared with the dashboard's two global SSE channels and ordinary
+// catalog/history GETs. Keeping one EventSource per retained chat exhausts the HTTP/1.1 group at four
+// chats, so transport focus is deliberately singular while the bounded warm runtimes remain plural.
+let focusedConversationId: string | null = null;
 
 export interface ConnectOptions {
   base?: string;
@@ -231,7 +256,25 @@ const INITIAL_CONNECT_WINDOW_MS = 30_000;
 const INITIAL_CONNECT_RETRY_MS = 250;
 const INITIAL_CONNECT_RETRY_MAX_MS = 1_000;
 
-const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+const abortableDelay = (ms: number, signal: AbortSignal): Promise<boolean> =>
+  new Promise((resolve) => {
+    if (signal.aborted) {
+      resolve(false);
+      return;
+    }
+    let settled = false;
+    const finish = (completed: boolean): void => {
+      if (settled) return;
+      settled = true;
+      window.clearTimeout(timer);
+      signal.removeEventListener("abort", onAbort);
+      resolve(completed);
+    };
+    const onAbort = (): void => finish(false);
+    const timer = window.setTimeout(() => finish(true), ms);
+    signal.addEventListener("abort", onAbort, { once: true });
+    if (signal.aborted) onAbort();
+  });
 
 // Only a TRANSIENT first-connect failure is the launch/boot race: a connection refused before the
 // runner is listening (httpStatus 0) or a 5xx while the bridge composes (the diagnosis saw the codex
@@ -252,44 +295,79 @@ async function fetchPageAcrossBootWindow(
   runtime: SessionRuntime,
   limit: number | undefined,
   generation: number,
+  signal: AbortSignal,
 ): Promise<PageResult | null> {
   const startedAt = Date.now();
   for (let attempt = 1; ; attempt += 1) {
+    if (signal.aborted || !runtimeCanStream(sessionId, runtime)) return null;
     const page = await fetchConversationPage(
       sessionId,
       runtime.epoch,
       { limit },
       runtime.base,
       runtime.fetchImpl,
+      signal,
     );
-    if (runtime.disposed || runtime.generation !== generation) return null;
+    if (
+      signal.aborted ||
+      runtime.disposed ||
+      runtime.generation !== generation ||
+      !runtimeCanStream(sessionId, runtime)
+    ) {
+      return null;
+    }
     if (page.ok) return page;
     const elapsed = Date.now() - startedAt;
     if (!isTransientBootFailure(page.error) || elapsed >= INITIAL_CONNECT_WINDOW_MS) return page;
     // Transient boot race: give the bridge time to come up, then retry from the same window.
-    await delay(
+    const completed = await abortableDelay(
       Math.min(
-        INITIAL_CONNECT_RETRY_MS * 2 ** (attempt - 1),
-        INITIAL_CONNECT_RETRY_MAX_MS,
-        INITIAL_CONNECT_WINDOW_MS - elapsed,
-      ),
+          INITIAL_CONNECT_RETRY_MS * 2 ** (attempt - 1),
+          INITIAL_CONNECT_RETRY_MAX_MS,
+          INITIAL_CONNECT_WINDOW_MS - elapsed,
+        ),
+      signal,
     );
-    if (runtime.disposed || runtime.generation !== generation) return null;
+    if (!completed || runtime.disposed || runtime.generation !== generation) return null;
   }
 }
 
 async function hydrateAndStream(sessionId: string, runtime: SessionRuntime, limit?: number): Promise<void> {
   const generation = runtime.generation;
+  runtime.pendingPageKind = "hydrate";
   // Stay on the quiet `connecting` phase while the boot window retries a transient first fetch.
   activeConversationStore.getState().setStreamPhase(sessionId, "connecting");
-  const page = await fetchPageAcrossBootWindow(sessionId, runtime, limit, generation);
-  if (page === null) return;
+  const pageAbortController = new AbortController();
+  runtime.pageAbortController = pageAbortController;
+  runtime.pageInFlight = true;
+  const page = await fetchPageAcrossBootWindow(
+    sessionId,
+    runtime,
+    limit,
+    generation,
+    pageAbortController.signal,
+  );
+  if (runtime.pageAbortController === pageAbortController) {
+    runtime.pageAbortController = null;
+    runtime.pageInFlight = false;
+  }
+  if (page === null) {
+    // Blur may abort this page while an immediate refocus still sees `pageInFlight=true` and cannot
+    // take ownership itself. Once cancellation settles, hand the still-focused runtime a fresh
+    // acquisition instead of stranding it with neither page work nor a stream.
+    if (runtimeCanStream(sessionId, runtime)) {
+      void hydrateAndStream(sessionId, runtime, limit);
+    }
+    return;
+  }
   if (page.ok) {
+    runtime.pendingPageKind = null;
     activeConversationStore.getState().applyPage(sessionId, page.page, "initial");
-    startStream(sessionId, runtime, limit);
+    if (runtimeCanStream(sessionId, runtime)) startStream(sessionId, runtime);
     return;
   }
   // A hard failure, or the boot window is exhausted: fail loud with the server's reason.
+  runtime.pendingPageKind = null;
   activeConversationStore.getState().failStream(sessionId, page.error);
 }
 
@@ -301,7 +379,8 @@ async function hydrateAndStream(sessionId: string, runtime: SessionRuntime, limi
 const STREAM_OPEN_FAILURES_BEFORE_REPAGE = 2;
 const MAX_DEAD_STREAM_RECOVERIES = 3;
 
-function startStream(sessionId: string, runtime: SessionRuntime, limit?: number): void {
+function startStream(sessionId: string, runtime: SessionRuntime): void {
+  if (!runtimeCanStream(sessionId, runtime) || runtime.pageInFlight) return;
   runtime.controller?.stop();
   runtime.controller = openConversationStream({
     sessionId,
@@ -311,12 +390,18 @@ function startStream(sessionId: string, runtime: SessionRuntime, limit?: number)
     getResumeCursor: () => activeConversationStore.getState().bySession[sessionId]?.eventCursor ?? null,
     handlers: {
       onOpen: () => {
+        if (!runtimeCanStream(sessionId, runtime)) return;
         runtime.openFailures = 0;
         runtime.streamRecoveries = 0;
         activeConversationStore.getState().setStreamPhase(sessionId, "live");
       },
-      onDisconnect: () => activeConversationStore.getState().setStreamPhase(sessionId, "reconnecting"),
+      onDisconnect: () => {
+        if (runtimeCanStream(sessionId, runtime)) {
+          activeConversationStore.getState().setStreamPhase(sessionId, "reconnecting");
+        }
+      },
       onOpenFailure: () => {
+        if (!runtimeCanStream(sessionId, runtime)) return;
         runtime.openFailures += 1;
         if (runtime.openFailures < STREAM_OPEN_FAILURES_BEFORE_REPAGE) return;
         runtime.openFailures = 0;
@@ -327,12 +412,13 @@ function startStream(sessionId: string, runtime: SessionRuntime, limit?: number)
           return;
         }
         runtime.streamRecoveries += 1;
-        void repageAndResume(sessionId, runtime, limit);
+        void repageAndResume(sessionId, runtime, runtime.limit);
       },
       onEnvelope: (envelope) => {
+        if (!runtimeCanStream(sessionId, runtime)) return;
         activeConversationStore.getState().ingestEvent(sessionId, envelope);
         const proj = activeConversationStore.getState().bySession[sessionId];
-        if (proj?.recovery !== undefined) void handleRecovery(sessionId, runtime, limit);
+        if (proj?.recovery !== undefined) void handleRecovery(sessionId, runtime, runtime.limit);
       },
     },
   });
@@ -365,12 +451,28 @@ async function repageAndResume(
   runtime: SessionRuntime,
   limit?: number,
 ): Promise<void> {
+  if (runtime.pageInFlight) return;
+  runtime.pendingPageKind = "repage";
+  const pageAbortController = new AbortController();
+  runtime.pageAbortController = pageAbortController;
+  runtime.pageInFlight = true;
   runtime.controller?.stop();
   runtime.controller = null;
   const generation = runtime.generation;
+  let recovered = false;
+  let cancelled = false;
   for (;;) {
-    const page = await fetchPageAcrossBootWindow(sessionId, runtime, limit, generation);
-    if (page === null) return;
+    const page = await fetchPageAcrossBootWindow(
+      sessionId,
+      runtime,
+      limit,
+      generation,
+      pageAbortController.signal,
+    );
+    if (page === null) {
+      cancelled = true;
+      break;
+    }
     if (page.ok) {
       // applyInitialPage clears the recovery + fault and re-establishes the resume cursor; then resume.
       activeConversationStore.getState().applyPage(sessionId, page.page, "initial");
@@ -380,8 +482,8 @@ async function repageAndResume(
           bySession: { ...state.bySession, [sessionId]: clearRecovery(cleared) },
         }));
       }
-      startStream(sessionId, runtime, limit);
-      return;
+      recovered = true;
+      break;
     }
     // A terminal (4xx) answer or an exhausted boot window: a FAILED recovery attempt. Past the cap
     // fail loud with the server's reason; else count it and re-attempt (matching the never-opened
@@ -389,10 +491,76 @@ async function repageAndResume(
     // reaches here, so it can never burn the budget.
     if (runtime.streamRecoveries >= MAX_DEAD_STREAM_RECOVERIES) {
       activeConversationStore.getState().failStream(sessionId, page.error);
-      return;
+      break;
     }
     runtime.streamRecoveries += 1;
   }
+  if (runtime.pageAbortController === pageAbortController) {
+    runtime.pageAbortController = null;
+    runtime.pageInFlight = false;
+  }
+  if (cancelled && runtimeCanStream(sessionId, runtime)) {
+    void repageAndResume(sessionId, runtime, limit);
+    return;
+  }
+  if (!cancelled) runtime.pendingPageKind = null;
+  if (recovered && runtimeCanStream(sessionId, runtime)) startStream(sessionId, runtime);
+}
+
+function runtimeCanStream(sessionId: string, runtime: SessionRuntime): boolean {
+  return (
+    focusedConversationId === sessionId &&
+    runtimeBySession.get(sessionId) === runtime &&
+    !runtime.disposed
+  );
+}
+
+function stopRuntimeStream(runtime: SessionRuntime): void {
+  runtime.controller?.stop();
+  runtime.controller = null;
+}
+
+function selectFocusedConversation(sessionId: string | null): void {
+  if (focusedConversationId === sessionId) return;
+  const previous = focusedConversationId;
+  focusedConversationId = sessionId;
+  if (previous !== null) {
+    const previousRuntime = runtimeBySession.get(previous);
+    if (previousRuntime !== undefined) {
+      stopRuntimeStream(previousRuntime);
+      previousRuntime.pageAbortController?.abort();
+    }
+  }
+}
+
+/**
+ * Give one retained conversation the physical SSE transport, or pause transport while no chat is
+ * visible. Pausing preserves the runtime, projection, cursor, selected-child state, and scroll state;
+ * refocus opens a fresh EventSource from that cursor and performs no page fetch.
+ */
+export function focusConversation(sessionId: string | null): void {
+  selectFocusedConversation(sessionId);
+  if (sessionId === null) return;
+  const runtime = runtimeBySession.get(sessionId);
+  const projection = activeConversationStore.getState().bySession[sessionId];
+  if (
+    runtime === undefined ||
+    projection === undefined ||
+    projection.stream === "projection-failed" ||
+    runtime.controller !== null ||
+    runtime.pageInFlight
+  ) {
+    return;
+  }
+  if (runtime.pendingPageKind === "hydrate") {
+    void hydrateAndStream(sessionId, runtime, runtime.limit);
+    return;
+  }
+  if (runtime.pendingPageKind === "repage") {
+    void repageAndResume(sessionId, runtime, runtime.limit);
+    return;
+  }
+  startStream(sessionId, runtime);
 }
 
 /** Begin (or restart) a session's live projection: hydrate a page, then open the resumable stream. */
@@ -401,9 +569,13 @@ export function connectConversation(
   epoch: string,
   options: ConnectOptions = {},
 ): void {
+  // A cold connect is necessarily the operator's selected conversation. Close the previous physical
+  // stream before starting any page work so ordinary GETs retain a connection slot throughout boot.
+  selectFocusedConversation(sessionId);
   const existing = runtimeBySession.get(sessionId);
   if (existing !== undefined) {
     existing.controller?.stop();
+    existing.pageAbortController?.abort();
     existing.disposed = true;
   }
   const runtime: SessionRuntime = {
@@ -412,6 +584,10 @@ export function connectConversation(
     fetchImpl: options.fetchImpl ?? fetch,
     eventSourceCtor: options.eventSourceCtor,
     controller: null,
+    pageInFlight: false,
+    pageAbortController: null,
+    pendingPageKind: "hydrate",
+    limit: options.limit,
     generation: (existing?.generation ?? 0) + 1,
     disposed: false,
     openFailures: 0,
@@ -423,7 +599,13 @@ export function connectConversation(
   activeConversationStore.setState((state) => {
     const agentHistoryBySession = { ...state.agentHistoryBySession };
     delete agentHistoryBySession[sessionId];
-    return { agentHistoryBySession };
+    return {
+      agentHistoryBySession,
+      // Reserve cold hydrates in the same six-seat LRU before their first page succeeds. Without
+      // this reservation, rapid switching across not-yet-ready chats leaves every 30 s retry loop
+      // alive outside the projection-only order.
+      touchOrder: touch(state.touchOrder, sessionId),
+    };
   });
   enforceLru(sessionId);
   void hydrateAndStream(sessionId, runtime, options.limit);
@@ -433,8 +615,10 @@ export function disconnectConversation(sessionId: string): void {
   const runtime = runtimeBySession.get(sessionId);
   if (runtime === undefined) return;
   runtime.disposed = true;
-  runtime.controller?.stop();
+  stopRuntimeStream(runtime);
+  runtime.pageAbortController?.abort();
   runtimeBySession.delete(sessionId);
+  if (focusedConversationId === sessionId) focusedConversationId = null;
   activeConversationStore.setState((state) => {
     const agentHistoryBySession = { ...state.agentHistoryBySession };
     delete agentHistoryBySession[sessionId];
@@ -448,8 +632,8 @@ export function disconnectConversation(sessionId: string): void {
 // ── Keep-warm focus switching ────────────────────────────────────────────
 // The stage used to disconnect on every focus switch, so switching back ALWAYS paid a full
 // epoch-resolve + hydrate + stream-open ("connecting…" on every refocus).
-// Recently-focused conversations now stay connected; the LRU is the ONLY passive evictor and
-// session termination the only active one.
+// Recently-focused conversations now stay retained; the focused one resumes from its stored cursor,
+// while the LRU is the ONLY passive evictor and session termination the only active one.
 
 /** True when the session already has a live runtime + projection worth reusing on refocus. */
 export function hasWarmConversation(sessionId: string): boolean {
@@ -459,12 +643,13 @@ export function hasWarmConversation(sessionId: string): boolean {
   return proj !== undefined && proj.stream !== "projection-failed";
 }
 
-/** Bump refocus recency and re-run the LRU without touching the live stream. */
+/** Bump refocus recency, re-run the LRU, and resume this retained session from its cursor. */
 export function touchConversation(sessionId: string): void {
   activeConversationStore.setState((state) => ({
     touchOrder: touch(state.touchOrder, sessionId),
   }));
   enforceLru(sessionId);
+  focusConversation(sessionId);
 }
 
 /** Trigger selected/on-demand child history without replacing the parent page or live stream. */
@@ -627,8 +812,8 @@ function enforceLru(focused: string): void {
   const keep = new Set(ranked.slice(0, LRU_LIMIT));
   for (const id of order) {
     if (keep.has(id)) continue;
-    // Under keep-warm, evicted sessions may still hold a live runtime — the LRU now owns
-    // disconnecting it (the stage no longer disconnects on focus switch). Refocus rehydrates.
+    // Under keep-warm, evicted sessions still hold a retained runtime — the LRU owns disconnecting
+    // it. Focus switching only pauses/resumes transport; an actual LRU eviction rehydrates later.
     disconnectConversation(id);
     activeConversationStore.getState().evict(id);
   }

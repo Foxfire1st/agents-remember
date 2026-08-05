@@ -21,14 +21,11 @@ import type {
 import { asServedProjection } from "./servedProjection";
 import snapshot from "../fixtures/snapshot.json";
 
-// The contract guard: the only thing binding the TypeScript mirror (`types/projection.ts`) to
-// the served projection (`observer/projection.py`). `snapshot.json` stands in for the server: it
-// is meant to be a payload the SERVER could have sent — owing its shape to the *pydantic models*
-// rather than to the mirror — and it is what the mirror is measured against. That independence is
-// the whole reason it can act as an oracle, and it is maintained BY HAND. No generator exists;
-// nothing derives this file from those models. So "shaped by the pydantic models" is an intent a
-// human has to keep true, not a fact any mechanism enforces — which is exactly what the third
-// seam below is about, and why `LEFT FOR CODEGEN` is still open.
+// The fixture-coverage guard. `types/projection.ts` is generated from the Pydantic schema, and the
+// Python codegen tests plus `scripts/sync-projection-types.py --check` enforce that producer-to-
+// mirror link. `snapshot.json` remains a hand-authored sampled payload: this file measures the
+// generated contract against that independent sample so required fields and runtime vocabulary
+// coverage cannot disappear from dashboard fixtures unnoticed.
 //
 // It has to bite in BOTH directions, and it does so at three seams:
 //
@@ -60,10 +57,8 @@ import snapshot from "../fixtures/snapshot.json";
 // runtime assertions below cover what types cannot — the string VOCABULARIES, which a JSON module
 // import widens to `string` (see `AsJsonModule`) and which therefore no type can check here.
 //
-// LEFT FOR CODEGEN (R3): generating this fixture from the pydantic models, so that "the server
-// grew a field" becomes a fact rather than a hand-edit someone has to remember to make. None of
-// the assertions in this file change when that lands — they already read the fixture as the
-// server's word. What generation reaches and a sample cannot, even a sample this file now polices:
+// WHAT SCHEMA CODEGEN CLOSES. The generated contract reaches two forms of producer drift that a
+// sample cannot, even a sample this file polices:
 //   (1) a server field that is `T | None` and currently null is *omitted* by `exclude_none=True`,
 //       so no sampled payload can reveal it — only the schema can;
 //   (2) a vocabulary member the server declares and no sample happens to carry. `VOCABULARIES`
@@ -74,7 +69,7 @@ import snapshot from "../fixtures/snapshot.json";
 //       `extra="forbid"` models — but they declare the same three fields, so TypeScript's
 //       structural typing keeps them interchangeable and no walk over any payload can tell them
 //       apart. It is the `TaskSubTaskRefNode` / `SeriesSubTaskNode` collapse this file pins at the
-//       bottom, standing one model over, and only a mirror generated per model makes it bite.
+//       bottom, standing one model over; generation still emits both named model declarations.
 
 const served = asServedProjection(snapshot);
 
@@ -285,6 +280,16 @@ const VOCABULARIES: Record<
   "projection.analytics.engineProcesses[].memoryWorktree.factState": PROCESS_FACT_STATES,
   "projection.analytics.engineProcesses[].providers[].factState": PROCESS_FACT_STATES,
   "projection.analytics.engineProcesses[].landing[].factState": PROCESS_FACT_STATES,
+  "projection.analytics.taskDocuments[].steps[].disposition.kind": ["intentionalSkip"],
+  "projection.analytics.taskDocuments[].steps[].disposition.recordedVia": [
+    "task_doc.skip_step",
+  ],
+  "projection.analytics.taskDocuments[].steps[].substeps[].disposition.kind": [
+    "intentionalSkip",
+  ],
+  "projection.analytics.taskDocuments[].steps[].substeps[].disposition.recordedVia": [
+    "task_doc.skip_step",
+  ],
 };
 
 // Reads every value the payload carries at one of the registry's dotted paths. `[]` fans out over
@@ -429,6 +434,7 @@ describe("metrics bucket every live lifecycle state", () => {
         tokens: 0,
         startedAt: "2026-06-14T09:00:00+00:00",
         lastEventTs: "2026-06-14T09:00:00+00:00",
+        stateEnteredAt: "2026-06-14T09:00:00+00:00",
         inferred: false,
         actions: [],
         tokenSeries: [],

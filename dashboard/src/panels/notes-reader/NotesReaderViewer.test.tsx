@@ -194,6 +194,7 @@ function masterDoc(): TaskDocNode {
     status: "inProgress",
     kind: "master",
     docPath: `/tasks/${REPO}/${MASTER}/task.json`,
+    bodyRevision: "",
     createdAt: "2026-07-07T09:00:00+00:00",
     stepsDone: 0,
     stepsTotal: 0,
@@ -204,6 +205,7 @@ function masterDoc(): TaskDocNode {
     decisions: [],
     openQuestions: [],
     references: [],
+    orchestrates: [],
     subTasks: [],
     sections: [],
   };
@@ -220,6 +222,7 @@ function seedMaster() {
     analytics: {
       driftSnapshots: [], stalestSidecars: [], setupSummaries: [], setupProgress: [], routeCoverage: [],
       toolReports: [], ledgers: [], taskDocuments: [masterDoc()], series: [], attentionQueue: [], engineProcesses: [],
+      agentPickups: [], expectationRows: [],
     },
   } satisfies WorkspaceProjection;
   dashboardStore.getState().applySnapshot(projection);

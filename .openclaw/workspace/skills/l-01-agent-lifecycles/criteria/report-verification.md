@@ -47,6 +47,23 @@ builder report carries against the decision log.
   finding + named follow-ups lived only in the builder report; the leaf's `decisions[]` was
   empty. Both folded by the owner at closeout.
 
+### RV-5 — Canonical invocation target provenance *(promoted to standing at 260731-EFA-L6 — 2 catches)*
+
+**Every test, mutation pin, benchmark, and evidence command must prove that its resolved source
+checkout and task/contract are the artifacts under review.** A nominally canonical command can
+resolve an editable install from another checkout, name the wrong worktree contract, or refuse
+before producing the output later attributed to it. Verify the source/import path and the
+task/contract scope consumed by the exact invocation; mutation-test pins under that same invocation.
+A green result or measurement without matching target provenance is not evidence for the change set.
+
+- Catching evidence: (1) 260703-L18 review (L18R-1) — the inbox delivered/unconfirmed pin failed
+  its mutation check only under `PYTHONPATH=src`; under the canonical `pytest mcp/tests`, the
+  main-repo editable install shadowed the worktree and the mutated code still passed. Remedy: the
+  `sys.path` pin idiom the sibling suites carry. (2) 260731-EFA-L6 S31 round-1 review (RV-5) — the
+  reported canonical cold-index command named the parent series contract, which has no L6 memory
+  worktree and was refused before cache creation; it therefore could not have produced the reported
+  L6 snapshot. The command needed the L6 enclosure contract to exercise the artifact under review.
+
 ## Candidate Criteria (seeded exploratory — one catching engagement each; promote at ≥2)
 
 Run under the exploratory mandate; a candidate is proposed for promotion into the standing list
@@ -62,19 +79,6 @@ after the change.
 - Catching evidence (single engagement): 260703-L10 round 1 — the partial hook flip made **two
   install-doc claims false** ("injects the same startup directive" no longer held); round 2
   restored byte-identity so the claims became true again (L10 decision log + builder report).
-
-### RV-5 — Worktree-shadowed regression pins *(candidate — 1 catch)*
-
-**A regression test must bite under the invocation the owner actually runs.** An editable
-install pointing at another checkout can shadow the worktree's sources, making a mutation-tested
-pin pass vacuously under the canonical invocation while failing only under a hand-set
-`PYTHONPATH`. Verify sensitivity by mutating the target and running the CANONICAL invocation;
-a pin that only bites under a nonstandard environment is not yet a pin.
-
-- Catching evidence (single engagement): 260703-L18 review (L18R-1) — the inbox
-  delivered/unconfirmed pin failed its mutation check only under `PYTHONPATH=src`; under the
-  canonical `pytest mcp/tests` the main-repo editable install shadowed the worktree and the
-  mutated code still passed. Remedy: the `sys.path` pin idiom the sibling suites carry.
 
 ## Exploratory Mandate
 

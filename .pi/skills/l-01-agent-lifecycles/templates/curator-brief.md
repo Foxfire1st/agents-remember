@@ -24,6 +24,8 @@ memory pass from the inputs below, then stop.
 ## Worktrees
 - Code:   `<code-worktree-path>` (branch `<work-branch>`, base `<base-commit>`) — read-only for you.
 - Memory: `<memory-worktree-path>` (branch `<memory-work-branch>`) — your only write surface.
+- Enclosure contract: `<enclosure-contract-path>` — pass this as `contract_path` to every memory
+  tool below; it is what scopes them to this leaf instead of the official memory repo.
 
 ## The landed change set (fed, not inferred)
 - Code diff: `<base-commit>..<worker-head-commit-or-HEAD>` in the code worktree — <changed-path
@@ -52,15 +54,31 @@ Overview-dumping (writing everything into the nearest overview because it is eas
 ## Tool surface
 - Native reads in the code worktree; native reads/edits in the memory worktree.
 - `c-05-create-or-update-onboarding-files` skill workflows for sidecars and entity catalogs.
-- Local `route_index_refresh`-equivalent (`build_route_indexes(...)`) from the memory worktree.
+- `route_index_refresh`, `memory_quality_check`, `drift_check` — always with
+  `contract_path="<enclosure-contract-path>"`.
 - Inbox for one clarification row back to <owning-seat contact> if the fed change set is missing or
   ambiguous — never invent a change set from memory.
-- No `worktree_*`, `lifecycle_*`, `task_doc`, `gate_*`, `memory_quality_check`-mutating tools beyond
-  what your role file names, no code edits.
+- No `worktree_*`, `lifecycle_*`, `task_doc`, `gate_*` tools, no code edits.
 
-## Checks (before you report)
-- `git diff --check` in the memory worktree.
-- Any onboarding/reference checks the brief or your role file names.
+## Self-check (before you report — your output is checked at closeout)
+The manager runs `memory_quality_check` before the memory commit; a failure there comes straight
+back to you as a respawn. Green your change-set here instead, the way a builder runs targeted tests
+before handing back. This is not the gate — the commit gate stays the hard gate.
+
+1. `route_index_refresh(repo_id="<repo-id>", contract_path="<enclosure-contract-path>")`
+2. `memory_quality_check(repo_id="<repo-id>", contract_path="<enclosure-contract-path>")` — fix what
+   it reports, rerun until clean.
+3. `drift_check(repo_id="<repo-id>", contract_path="<enclosure-contract-path>")` if your pass
+   changed which files onboarding claims to cover.
+4. `git diff --check` in the memory worktree, plus any other check named above.
+
+A `cit:(...)` wrapped in backticks is read as a QUOTATION of the citation grammar — which is how
+these documents document it — so it is not checked; write a real citation unbackticked.
+
+Drop `contract_path` and all three resolve the OFFICIAL memory repo instead: `route_index_refresh`
+WRITES, so an unscoped call dirties a repo you do not own and blocks the next `worktree_start`.
+Confirm `onboardingRoot` in each response is `<memory-worktree-path>/onboarding`. A finding count
+implausible for this change set is a measurement problem to report, not a backlog to fix.
 
 ## Memory-pass report (mandatory, last act)
 Write `<notes-reports-path>/<leaf-id>-curator-report.md`: changed onboarding files (with which
@@ -74,6 +92,9 @@ reviewer's verdict — is exactly the manager's three closeout inputs.
 **Compiler notes for the manager.**
 
 - Fill every `<placeholder>`; a brief with an unresolved placeholder is not dispatchable.
+- `<enclosure-contract-path>` is the leaf's `series-contract.md` under the master's
+  `enclosures/<leaf-id>/`. Without it the curator cannot run the closeout check on its own work,
+  and its `route_index_refresh` writes into the official memory repo.
 - Pull the change-set counters/paths from the leaf's actual landed range (the leaf contract's
   recorded base commit through the builder's current HEAD/worktree state) — do not hand the curator
   a stale or guessed diff.

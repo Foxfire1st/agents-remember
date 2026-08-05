@@ -2,7 +2,7 @@
 
 Slice 6a is the substrate -- the ``GateRecord`` entity and an append-only
 ``GateStore`` co-located with the observer event log -- plus the ``gate_*`` MCP
-tools (in ``agents_remember.mcp.tools.gates``) that create, decide, wait on, and
+application operations (in ``agents_remember.application.gate_tools``) that create, decide, wait on, and
 list gates. Enforcement uses the kind-generic gate policy: ``apply_gate`` (the
 ``applied`` transition a mutating tool writes once it consumes an approval) and
 ``evaluate_gate`` / ``evaluate_closeout_gate`` (the pure policy mutating tools

@@ -159,7 +159,9 @@ exits non-zero when any step it enforces fails. Four steps enforce — ruff (lin
 `ruff format --check`, Pyright, and the full pytest suite — followed by mandatory CRAP
 threshold enforcement. Take no path arguments to it: there are none, because its scope is
 `git ls-files '*.py'` and narrowing what a gate certifies is how a gate stops meaning
-anything.
+anything. Each rail states its current input, resolved config, and unit count before its
+result. On a manual dirty tree, non-ignored untracked files inside the quality scope roots
+are reported as outside the index/diff measurement; reporting never stages or stashes them.
 
 Nothing in this gate is exempt from anything. There is no baseline, ratchet, allowlist or
 grandfather file anywhere in it, and none may be added: a finding is fixed, never

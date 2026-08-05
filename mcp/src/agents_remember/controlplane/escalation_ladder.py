@@ -37,13 +37,13 @@ from datetime import datetime
 from typing import Literal
 
 from agents_remember.controlplane.operator_inbox_records import OperatorInboxEntry
+from agents_remember.controlplane.seats import SeatDirectory
 from agents_remember.controlplane.signal_routing import (
     RoutedOwner,
     derive_architect_owner,
     derive_skip_level_owner,
     is_seat_dead,
 )
-from agents_remember.serving.terminal_catalog import TerminalCatalog
 
 MAX_RUNG = 3
 MIN_RUNG_DWELL_SECONDS = 5 * 60.0
@@ -121,7 +121,7 @@ def rung_due(
 
 
 def next_step(
-    catalog: TerminalCatalog,
+    catalog: SeatDirectory,
     entry: OperatorInboxEntry,
 ) -> LadderStep:
     """The next rung + addressee for ``entry``. The addressee that "silence" is measured against
@@ -153,7 +153,7 @@ def next_step(
 
 
 def seat_is_suspect(
-    catalog: TerminalCatalog,
+    catalog: SeatDirectory,
     agent_id: str | None,
     *,
     now: datetime,

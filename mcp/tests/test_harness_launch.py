@@ -11,6 +11,10 @@ from agents_remember.serving.harness_capabilities import (
     LaunchKnobs,
     ModelCapability,
 )
+from agents_remember.serving.harness_control_factories import (
+    BUILTIN_PROTOCOL_HARNESSES,
+    harness_launch_knobs,
+)
 from agents_remember.serving.harness_control_models import ControlIdentity, LaunchSpec
 from agents_remember.serving.harness_launch import (
     ResolvedLaunch,
@@ -367,3 +371,57 @@ def test_codex_unrelated_launch_arguments_pass_owned_selector_preflight(
     applied = apply_launch_knobs(launch, CODEX_OWNED_KNOBS)
 
     assert applied.argv == launch.argv
+
+
+# --- launch-selection refusals, one contract across all three built-in harnesses -----------
+#
+# `claude_launch_knobs`, `codex_launch_knobs` and `pi_launch_knobs` each open with the same
+# two guards, and each spells the resulting knobs differently (Claude and Pi as argv, Codex
+# as session config). Driving them through `harness_launch_knobs` -- the registry the
+# adapter factory itself uses -- asserts the contract rather than three implementations of
+# it, and a fourth harness added to `BUILTIN_PROTOCOL_HARNESSES` is held to it without an
+# edit here.
+#
+# WHY REFUSAL AND NOT NORMALISATION. A padded ` high` is not a typo the launcher may quietly
+# fix: the same string is compared against the vendor's echo by `verify_effective_launch`,
+# so a selection silently stripped here would be launched as one value and verified as
+# another. The guards say so by refusing, and these cases fail if anyone replaces them with
+# a `.strip()`.
+
+
+def _knob_values(knobs: LaunchKnobs) -> set[str]:
+    return {*knobs.argv, *(str(value) for value in knobs.session_config.values())}
+
+
+@pytest.mark.parametrize("harness_id", sorted(BUILTIN_PROTOCOL_HARNESSES))
+@pytest.mark.parametrize(
+    ("model_key", "effort", "subject"),
+    (
+        ("", "high", "model"),
+        ("   ", "high", "model"),
+        (" provider/model", "high", "model"),
+        ("provider/model\t", "high", "model"),
+        ("provider/model", None, "effort"),
+        ("provider/model", "", "effort"),
+        ("provider/model", " high", "effort"),
+        ("provider/model", "high ", "effort"),
+    ),
+)
+def test_every_harness_refuses_a_blank_or_padded_launch_selection(
+    harness_id: str, model_key: str, effort: str | None, subject: str
+) -> None:
+    with pytest.raises(
+        HarnessControlError, match=rf"launch {subject} must be non-empty with no outer whitespace"
+    ):
+        harness_launch_knobs(harness_id, model_key=model_key, effort=effort)
+
+
+@pytest.mark.parametrize("harness_id", sorted(BUILTIN_PROTOCOL_HARNESSES))
+def test_every_harness_carries_a_clean_selection_into_its_own_launch_vocabulary(
+    harness_id: str,
+) -> None:
+    # The other half of the refusals above: the guards reject exactly the malformed pairs and
+    # let a well-formed one through into whichever vocabulary that harness owns.
+    knobs = harness_launch_knobs(harness_id, model_key="provider/model", effort="high")
+
+    assert {"provider/model", "high"} <= _knob_values(knobs)

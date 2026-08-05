@@ -12,12 +12,10 @@ and surfaces the set, via the same catalog spawn-provenance trace every other pr
 
 from __future__ import annotations
 
-from agents_remember.serving.terminal_catalog import TerminalCatalog, TerminalCatalogEntry
+from agents_remember.controlplane.seats import SeatDirectory, SeatRow
 
 
-def find_orphaned_workers(
-    catalog: TerminalCatalog, *, manager_agent_id: str
-) -> list[TerminalCatalogEntry]:
+def find_orphaned_workers(catalog: SeatDirectory, *, manager_agent_id: str) -> list[SeatRow]:
     """Every still-``running`` worker seat spawned by ``manager_agent_id`` (pure catalog read).
 
     Called once a manager seat is confirmed dead/respawned (``serving/supervisor.py``'s dead-

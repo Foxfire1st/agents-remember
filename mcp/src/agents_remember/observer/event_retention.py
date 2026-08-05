@@ -11,14 +11,13 @@ throwaway event log can always be cleaned up regardless of lifecycle type.
 from __future__ import annotations
 
 import json
-import os
 import shutil
 from collections.abc import Iterator
-from contextlib import suppress
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+from agents_remember.kernel.atomic_write import atomic_write_bytes
 from agents_remember.observer.store import (
     HEARTBEAT_KIND,
     WORKSPACE_SOURCE,
@@ -148,15 +147,8 @@ def compact_workspace_river(
         with path.open("rb") as handle:
             handle.seek(retained_start)
             retained = handle.read()
-        tmp = path.with_name(f".{path.name}.compact.{os.getpid()}.tmp")
-        try:
-            tmp.write_bytes(retained)
-            os.replace(tmp, path)
-            set_workspace_base_offset(root, workspace_base_offset(root) + retained_start)
-        except BaseException:
-            with suppress(OSError):
-                tmp.unlink()
-            raise
+        atomic_write_bytes(path, retained)
+        set_workspace_base_offset(root, workspace_base_offset(root) + retained_start)
         return dropped
 
 

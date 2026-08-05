@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from agents_remember.controllers.task_ref import TaskRef
-from agents_remember.controllers.worktree_tools import (
+from agents_remember.application.task_ref import TaskRef
+from agents_remember.application.worktree_tools import (
     DEFAULT_START_EXECUTION,
     DEFAULT_TASK_BASES,
     CloseoutApproval,
@@ -13,17 +13,16 @@ from agents_remember.controllers.worktree_tools import (
     StartExecution,
     TaskBases,
     TaskIdentity,
+    summarized_worktree_start_tool,
     worktree_abandon_tool,
     worktree_attach_tool,
     worktree_cleanup_tool,
     worktree_closeout_apply_tool,
     worktree_closeout_preview_tool,
     worktree_integrate_tool,
-    worktree_start_tool,
     worktree_status_tool,
     worktree_sync_tool,
 )
-from agents_remember.providers.lifecycle.log_capture import summarize_command_logs
 
 from ..config import McpRuntimeConfig
 from .base import _tool_payload
@@ -38,9 +37,7 @@ def worktree_start_payload(
 ) -> dict[str, Any]:
     return _tool_payload(
         "worktree_start",
-        summarize_command_logs(
-            worktree_start_tool(config, identity, bases=bases, execution=execution)
-        ),
+        summarized_worktree_start_tool(config, identity, bases=bases, execution=execution),
     )
 
 

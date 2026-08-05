@@ -67,7 +67,7 @@ class VerbatimAdapter(_AuthorityAdapter):
 
 
 async def state_of(authority: HarnessSubmissionAuthority, request_id: str) -> str:
-    batch = await authority.status("epoch-1", (request_id,), cockpit_only=True)
+    batch = await authority.ledger.status("epoch-1", (request_id,), cockpit_only=True)
     submission = batch.submissions[0].submission
     assert submission is not None
     return submission.state

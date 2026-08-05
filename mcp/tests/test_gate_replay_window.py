@@ -43,6 +43,7 @@ from unittest import mock
 
 from _store_durability import parked_rewrite
 from agents_remember.controlplane.enforcement import CLOSEOUT_GATE_KIND
+from agents_remember.controlplane.gate_decisions import _reclaim_gate_log
 from agents_remember.controlplane.interaction_retention import (
     CONSUMED_APPROVAL_GATE_KINDS,
     INTERACTION_RECORD_TTL_SECONDS,
@@ -56,7 +57,6 @@ from agents_remember.controlplane.records import (
     decide_gate,
 )
 from agents_remember.controlplane.store import GateStore
-from agents_remember.mcp.tools.gates import _reclaim_gate_log
 from agents_remember.observer.paths import observer_logs_root
 from agents_remember.worktrees import git_worktree_manager as worktree_manager
 from agents_remember.worktrees.modules import closeout as closeout_mod
@@ -328,10 +328,10 @@ class AppliedMarkerRetentionTests(unittest.TestCase):
     """R1: the reclaim pass must not be able to delete the record that closes the window.
 
     ``PRUNE_IMMEDIATE_GATE_STATES`` used to contain ``applied``, so ``_keep_gate`` dropped a
-    consumed approval at ANY AGE -- and this leaf moved gate reclamation into
-    ``mcp/tools/gates.py::_reclaim_gate_log``, which runs after EVERY gate decision in the MCP
-    process. The attack needs no race and no privilege: decide any second gate on the same
-    lifecycle and the marker is gone.
+    consumed approval at ANY AGE -- and the shared decision owner runs
+    ``controlplane/gate_decisions.py::_reclaim_gate_log`` after EVERY gate decision. The attack
+    needs no race and no privilege: decide any second gate on the same lifecycle and the marker
+    is gone.
     """
 
     def setUp(self) -> None:
@@ -361,7 +361,7 @@ class AppliedMarkerRetentionTests(unittest.TestCase):
             )
         )
 
-        _reclaim_gate_log(self.store, LIFECYCLE)
+        _reclaim_gate_log(self.store, LIFECYCLE, now=datetime.now(UTC))
 
         self.assertIn(
             GATE_ID,

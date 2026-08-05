@@ -12,8 +12,9 @@
 #   pre-commit -> fast tier: certifies the STAGED content with the generated-copy
 #                 checks, ruff, `ruff format --check`, and Pyright. About 20
 #                 seconds.
-#   pre-push   -> full tier: certifies the working tree with the whole quality
-#                 wrapper (ruff + format + Pyright + pytest + mandatory CRAP).
+#   pre-push   -> full tier: records Git's ref-update stream, then runs the whole
+#                 quality wrapper over current-checkout bytes at index-known paths.
+#                 It does not stage or claim to certify the pushed commit tree.
 #                 Its Radon steps are reports and cannot fail it.
 #
 # It also points local `git blame` at .git-blame-ignore-revs, so the whole-tree

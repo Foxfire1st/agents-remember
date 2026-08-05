@@ -64,6 +64,7 @@ function lifecycle(partial: Partial<LifecycleProjection> & { id: string }): Life
     lastEventTs: "2026-06-23T10:11:12+00:00",
     phase: "build",
     startedAt: "2026-06-23T10:00:00+00:00",
+    stateEnteredAt: "2026-06-23T10:00:00+00:00",
     state: "running",
     tokenSeries: [],
     tokens: 0,
@@ -100,6 +101,8 @@ function taskDoc(partial: Partial<TaskDocNode> & { docPath: string }): TaskDocNo
     codeExamples: [],
     decisions: [],
     docPath,
+    bodyRevision: "rev-fixture",
+    createdAt: "2026-06-23T10:00:00+00:00",
     id: "20",
     kind: "subTask",
     objective: "",
@@ -114,15 +117,18 @@ function taskDoc(partial: Partial<TaskDocNode> & { docPath: string }): TaskDocNo
     stepsTotal: 21,
     subTasks: [],
     title: "Event River Readable Activity Feed",
+    orchestrates: [],
     ...rest,
   };
 }
 
 function analyticsWithTaskDocuments(taskDocuments: TaskDocNode[]): Analytics {
   return {
+    agentPickups: [],
     attentionQueue: [],
     driftSnapshots: [],
     engineProcesses: [],
+    expectationRows: [],
     ledgers: [],
     routeCoverage: [],
     series: [],

@@ -22,16 +22,16 @@ MCP_TESTS = Path(__file__).resolve().parent
 sys.path.insert(0, str(MCP_SRC))
 sys.path.insert(0, str(MCP_TESTS))
 
-from agents_remember.benchmarks import runner as benchmark_runner
-from agents_remember.controllers.benchmark_tools import CodexBenchmarkRun
-from agents_remember.controllers.memory_tools import CarryoverSelection
-from agents_remember.controllers.provider_tools import (
+from agents_remember.application.benchmark_tools import CodexBenchmarkRun
+from agents_remember.application.memory_tools import CarryoverSelection
+from agents_remember.application.provider_tools import (
     GrepaiRepoScope,
     GrepaiSearchQuery,
     GrepaiTraceQuery,
     ProviderQueryScope,
 )
-from agents_remember.controllers.runtime_install import RuntimeInstallRequest
+from agents_remember.application.runtime_install import RuntimeInstallRequest
+from agents_remember.benchmarks import runner as benchmark_runner
 from agents_remember.mcp import SERVER_VERSION
 from agents_remember.mcp.config import load_config
 from agents_remember.mcp.server import create_server
@@ -167,7 +167,7 @@ class McpToolTests(unittest.TestCase):
             self.assertIn("before any code", tools["worktree_closeout_apply"])
             self.assertIn("approval precede apply", tools["worktree_closeout_apply"])
 
-    def test_context_packet_tool_delegates_to_controller(self) -> None:
+    def test_context_packet_tool_delegates_to_application(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)
             initialize_context_fixture(root)
@@ -220,7 +220,7 @@ class McpToolTests(unittest.TestCase):
             config = load_config(path)
 
             with patch(
-                "agents_remember.controllers.provider_tools.lifecycle_service.run_watchers_lifecycle",
+                "agents_remember.providers.watcher_service.run_watchers_lifecycle",
                 return_value=ready_status_payload(root),
             ) as run_watchers:
                 payload = provider_watchers_payload(config, action="status")
@@ -359,7 +359,7 @@ class McpToolTests(unittest.TestCase):
             config = load_config(path)
 
             with patch(
-                "agents_remember.controllers.benchmark_tools.benchmark_runner.resolve_codex_executable",
+                "agents_remember.application.benchmark_tools.benchmark_runner.resolve_codex_executable",
                 side_effect=benchmark_runner.CodexExecutableNotFound(
                     "codex executable was not found on PATH"
                 ),
@@ -376,7 +376,7 @@ class McpToolTests(unittest.TestCase):
             self.assertTrue(payload["codexExecutionPolicy"]["benchmarkOnly"])
 
             with patch(
-                "agents_remember.controllers.benchmark_tools.benchmark_runner.resolve_codex_executable",
+                "agents_remember.application.benchmark_tools.benchmark_runner.resolve_codex_executable",
                 side_effect=benchmark_runner.CodexExecutableNotFound(
                     "codex executable was not found on PATH"
                 ),
@@ -421,15 +421,15 @@ class McpToolTests(unittest.TestCase):
 
             with (
                 patch(
-                    "agents_remember.controllers.memory_tools.baseline.baseline_status",
+                    "agents_remember.application.memory_tools.baseline.baseline_status",
                     return_value={"state": "ready"},
                 ),
                 patch(
-                    "agents_remember.controllers.memory_tools.carryover.build_plan_for_request",
+                    "agents_remember.application.memory_tools.carryover.build_plan_for_request",
                     return_value={"state": "would-carryover"},
                 ),
                 patch(
-                    "agents_remember.controllers.benchmark_tools.benchmark_runner.prepare_benchmarks",
+                    "agents_remember.application.benchmark_tools.benchmark_runner.prepare_benchmarks",
                     return_value={
                         "ok": True,
                         "operation": "codex_benchmark_prepare",
@@ -468,7 +468,7 @@ class McpToolTests(unittest.TestCase):
             config = load_config(path)
 
             with patch(
-                "agents_remember.controllers.benchmark_tools.benchmark_runner.prepare_benchmarks",
+                "agents_remember.application.benchmark_tools.benchmark_runner.prepare_benchmarks",
                 return_value={
                     "ok": True,
                     "operation": "codex_benchmark_prepare",

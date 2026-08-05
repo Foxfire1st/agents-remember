@@ -27,6 +27,7 @@ from typing import Any
 
 from agents_remember.controlplane.attention_dismissals import AttentionDismissalRecord
 from agents_remember.controlplane.records import DECISION_STATES, GateRecord
+from agents_remember.controlplane.stamps import age_seconds
 from agents_remember.observer.events import Event
 from agents_remember.observer.lifecycle_state import (
     INITIAL_PHASE,
@@ -53,6 +54,8 @@ from agents_remember.observer.projection import (
     LedgerNode,
     LifecycleProjection,
     Metrics,
+    ProcessFactState,
+    ProcessHealth,
     ProviderBootNode,
     ProviderNode,
     RouteCoverageNode,
@@ -66,7 +69,7 @@ from agents_remember.observer.projection import (
     WorkspaceProjection,
 )
 from agents_remember.observer.series_tokens import attach_series_token_totals
-from agents_remember.observer.timeutil import STALE_AFTER_SECONDS, TTL_SECONDS, age_seconds
+from agents_remember.observer.timeutil import STALE_AFTER_SECONDS, TTL_SECONDS
 
 # The whole vocabulary, as strings. Taken from :data:`STATES` rather than from
 # ``get_args(State)``: on the union form (``Literal[...] | Other``) ``get_args`` returns
@@ -1450,7 +1453,7 @@ def _engine_runtime_state(provider: ProviderNode) -> str:
     return "nominal"
 
 
-def _ref_fact_state(has_status: bool, exists: object) -> str:
+def _ref_fact_state(has_status: bool, exists: object) -> ProcessFactState:
     """observed = on disk; derived = recorded but absent; missing = unobservable."""
     if not has_status:
         return "missing"
@@ -1474,7 +1477,7 @@ def _process_phase(
     return base
 
 
-def _process_health(phase: str, setup_state: str | None, failed_phases: list[str]) -> str:
+def _process_health(phase: str, setup_state: str | None, failed_phases: list[str]) -> ProcessHealth:
     if failed_phases or setup_state in _SETUP_FAILED:
         return "failed"
     if setup_state == "stale":

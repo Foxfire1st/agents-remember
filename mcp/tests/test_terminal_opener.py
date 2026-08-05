@@ -21,9 +21,9 @@ MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
 import agents_remember
+from agents_remember.kernel.harnesses import Harness
 from agents_remember.serving.harness_control_runner import parse_runner_config
 from agents_remember.serving.harness_launch import ResolvedLaunch
-from agents_remember.serving.harnesses import Harness
 from agents_remember.serving.hosted_session_runtime import HostedSessionRuntime
 from agents_remember.serving.terminal import TerminalSessionBinding, TerminalSessionSpec
 from agents_remember.serving.terminal_catalog import TerminalCatalog, TerminalCatalogEntry

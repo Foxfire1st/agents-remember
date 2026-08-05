@@ -1,1 +1,1 @@
-"""Command-line adapters for package controllers."""
+"""Command-line adapters for the application layer."""

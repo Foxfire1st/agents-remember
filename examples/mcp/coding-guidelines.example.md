@@ -108,7 +108,7 @@ Owns argument parsing, command wiring, and conversion into application calls.
 
 Must not own core business logic.
 
-### Controller
+### Application entry point
 
 Owns high-level request flow.
 
@@ -178,7 +178,7 @@ The following patterns are not acceptable:
 4. "I avoided creating a new file because that seemed heavier."
 5. "I kept the logic inline so the reader can see everything in one place."
 6. "I added comments instead of extracting the concept."
-7. "I reused the controller because it already had access to all dependencies."
+7. "I reused the application entry point because it already had access to all dependencies."
 8. "I added another mode flag instead of creating separate strategies."
 9. "I passed more booleans instead of introducing a request/options object."
 10. "I changed unrelated logic because it was nearby."

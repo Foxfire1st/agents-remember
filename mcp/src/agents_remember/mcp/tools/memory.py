@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from agents_remember.controllers.memory_tools import (
+from agents_remember.application.memory_tools import (
     DEFAULT_CARRYOVER_MESSAGES,
     DEFAULT_MEMORY_BRANCHES,
     CarryoverCommitMessages,
@@ -30,10 +30,16 @@ def drift_check_payload(
     repo_id: str,
     *,
     detail_limit: int = 50,
+    contract_path: str | None = None,
 ) -> dict[str, Any]:
     return _tool_payload(
         "drift_check",
-        drift_check_tool(config, repo_id=repo_id, detail_limit=detail_limit),
+        drift_check_tool(
+            config,
+            repo_id=repo_id,
+            detail_limit=detail_limit,
+            contract_path=contract_path,
+        ),
     )
 
 
@@ -43,6 +49,7 @@ def memory_quality_check_payload(
     *,
     checks: list[str] | None = None,
     detail_limit: int = 50,
+    contract_path: str | None = None,
 ) -> dict[str, Any]:
     return _tool_payload(
         "memory_quality_check",
@@ -51,6 +58,7 @@ def memory_quality_check_payload(
             repo_id=repo_id,
             checks=checks,
             detail_limit=detail_limit,
+            contract_path=contract_path,
         ),
     )
 
@@ -60,10 +68,16 @@ def route_index_refresh_payload(
     repo_id: str,
     *,
     dry_run: bool = False,
+    contract_path: str | None = None,
 ) -> dict[str, Any]:
     return _tool_payload(
         "route_index_refresh",
-        route_index_refresh_tool(config, repo_id=repo_id, dry_run=dry_run),
+        route_index_refresh_tool(
+            config,
+            repo_id=repo_id,
+            dry_run=dry_run,
+            contract_path=contract_path,
+        ),
     )
 
 

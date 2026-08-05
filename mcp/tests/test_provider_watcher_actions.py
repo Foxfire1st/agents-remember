@@ -14,7 +14,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import cast
 
-from agents_remember.controllers.provider_tools import provider_watchers_tool
+from agents_remember.application.provider_tools import provider_watchers_tool
 from agents_remember.mcp.config import ConfigError, McpRuntimeConfig
 
 

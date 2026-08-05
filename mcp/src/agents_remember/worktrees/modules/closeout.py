@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import replace
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
@@ -16,7 +16,12 @@ from agents_remember.kernel.memory_ledger import (
     prepend_mapping,
     write_ledger,
 )
-from agents_remember.memory_quality.check import DriftCheckContext, run_memory_quality_check
+from agents_remember.memory_quality.check import (
+    AFTER_METADATA_REFRESH_CHECKS,
+    BEFORE_METADATA_REFRESH_CHECKS,
+    DriftCheckContext,
+    run_memory_quality_check,
+)
 from agents_remember.observer.events import now_iso
 from agents_remember.observer.paths import observer_logs_root
 from agents_remember.worktrees.modules.args import WorktreeArgs
@@ -211,14 +216,31 @@ def _completed_integration_reopen(
     }
 
 
-def closeout_preview_payload(contract, args: WorktreeArgs) -> dict[str, object]:
-    ledger_message = (
-        args.ledger_commit_message
-        or f"[{contract.task_id}] Ledger sync: <code_commit> -> <memory_commit>"
-    )
-    code_dirty = worktree_dirty(contract.code_worktree)
-    memory_dirty = contract.memory_mode == "external" and worktree_dirty(contract.memory_worktree)
-    worklist = closeout_changed_paths(contract)
+@dataclass(frozen=True)
+class _MemoryRefreshPreview:
+    """What external-memory closeout would refresh, and what the body gates make of it.
+
+    Six values computed by one step and consumed by one caller. They are grouped rather
+    than returned as a tuple because the caller reads them by name, and grouped rather
+    than left inline because the six ``contract.memory_mode == "external"`` conditionals
+    that produce them were 66 of ``closeout_preview_payload``'s 153 lines.
+    """
+
+    metadata: OnboardingRefreshPlan
+    entities: EntityFingerprintRefreshPlan
+    route_overviews: RouteOverviewRefreshPlan
+    route_indexes: dict[str, Any]
+    sidecar_body_gate: SidecarBodyClassification
+    route_overview_body_gate: RouteOverviewBodyClassification
+
+
+def _memory_refresh_preview(contract, worklist: dict[str, list[str]]) -> _MemoryRefreshPreview:
+    """Plan the external-memory refresh and classify it, without touching anything.
+
+    Every field is the same conditional: plan it for real when the task carries external
+    memory, and answer with the empty plan when it does not -- internal-memory closeout has
+    no onboarding tree to refresh.
+    """
     changed_paths = worklist["all"]
     metadata_refresh: OnboardingRefreshPlan = (
         onboarding_refresh_plan(contract, changed_paths, working_paths=worklist["working"])
@@ -286,8 +308,65 @@ def closeout_preview_payload(contract, args: WorktreeArgs) -> dict[str, object]:
             "stamped_without_body_review": [],
         }
     )
+    return _MemoryRefreshPreview(
+        metadata=metadata_refresh,
+        entities=entity_refresh,
+        route_overviews=route_overview_refresh,
+        route_indexes=route_index_refresh,
+        sidecar_body_gate=sidecar_body_gate,
+        route_overview_body_gate=route_overview_body_gate,
+    )
+
+
+def _proposed_commits(
+    contract,
+    args: WorktreeArgs,
+    code_dirty: bool,
+    memory_would_commit: bool,
+    code_quality_gate: dict[str, Any],
+) -> dict[str, object]:
+    """The three commits the preview is asking approval for, and what each is gated on.
+
+    ``ledger_message`` is derived here because this is its only reader: the preview's
+    default text names the two commits the ledger will map once they exist.
+    """
+    ledger_message = (
+        args.ledger_commit_message
+        or f"[{contract.task_id}] Ledger sync: <code_commit> -> <memory_commit>"
+    )
+    return {
+        "code": {
+            "would_commit": code_dirty,
+            "message": args.code_commit_message,
+            "worktree": contract.code_worktree.as_posix(),
+            "strict_code_quality_before_commit": bool(code_quality_gate["required"]),
+        },
+        "memory": {
+            "would_commit": memory_would_commit,
+            "message": args.memory_commit_message,
+            "worktree": contract.memory_worktree.as_posix() if contract.memory_worktree else "",
+            "metadata_refresh_after_code_commit": contract.memory_mode == "external",
+            "entity_fingerprint_refresh_after_code_commit": contract.memory_mode == "external",
+            "route_refresh_after_code_commit": contract.memory_mode == "external",
+            "memory_quality_check_before_commit": contract.memory_mode == "external",
+        },
+        "ledger": {
+            "would_update": contract.memory_mode == "external",
+            "message": ledger_message,
+            "path": contract.ledger_path.as_posix() if contract.ledger_path else "",
+        },
+    }
+
+
+def closeout_preview_payload(contract, args: WorktreeArgs) -> dict[str, object]:
+    """Answer what closeout would do, having done none of it."""
+    code_dirty = worktree_dirty(contract.code_worktree)
+    memory_dirty = contract.memory_mode == "external" and worktree_dirty(contract.memory_worktree)
+    worklist = closeout_changed_paths(contract)
+    changed_paths = worklist["all"]
+    refresh = _memory_refresh_preview(contract, worklist)
     memory_would_commit = memory_dirty or _refresh_plans_have_work(
-        metadata_refresh, entity_refresh, route_overview_refresh, route_index_refresh
+        refresh.metadata, refresh.entities, refresh.route_overviews, refresh.route_indexes
     )
     code_quality_gate = code_quality_gate_preview(
         contract.code_worktree,
@@ -328,41 +407,26 @@ def closeout_preview_payload(contract, args: WorktreeArgs) -> dict[str, object]:
         ],
         "changed_code_paths": _bounded_paths(changed_paths),
         "changed_code_paths_committed": _bounded_paths(worklist["committed"]),
-        "onboarding_metadata_refresh": _bounded_refresh_plan_view(metadata_refresh),
-        "sidecar_body_gate": _bounded_classification_view(sidecar_body_gate),
-        "sidecars_attested_no_impact": _bounded_paths(sidecar_body_gate["attested_no_impact"]),
-        "entity_fingerprint_refresh": entity_refresh,
-        "route_overview_metadata_refresh": route_overview_refresh,
-        "route_overview_body_gate": route_overview_body_gate,
-        "route_overviews_attested_no_impact": route_overview_body_gate["attested_no_impact"],
-        "route_index_refresh": route_index_refresh,
+        "onboarding_metadata_refresh": _bounded_refresh_plan_view(refresh.metadata),
+        "sidecar_body_gate": _bounded_classification_view(refresh.sidecar_body_gate),
+        "sidecars_attested_no_impact": _bounded_paths(
+            refresh.sidecar_body_gate["attested_no_impact"]
+        ),
+        "entity_fingerprint_refresh": refresh.entities,
+        "route_overview_metadata_refresh": refresh.route_overviews,
+        "route_overview_body_gate": refresh.route_overview_body_gate,
+        "route_overviews_attested_no_impact": refresh.route_overview_body_gate[
+            "attested_no_impact"
+        ],
+        "route_index_refresh": refresh.route_indexes,
         "code_quality_gate": code_quality_gate,
         "integration_reopen": _preview_integration_reopen(
             contract, code_dirty=code_dirty, memory_would_commit=memory_would_commit
         ),
         "closeout_gate": _closeout_gate_payload(_closeout_gate_guard(contract, args)),
-        "proposed_commits": {
-            "code": {
-                "would_commit": code_dirty,
-                "message": args.code_commit_message,
-                "worktree": contract.code_worktree.as_posix(),
-                "strict_code_quality_before_commit": bool(code_quality_gate["required"]),
-            },
-            "memory": {
-                "would_commit": memory_would_commit,
-                "message": args.memory_commit_message,
-                "worktree": contract.memory_worktree.as_posix() if contract.memory_worktree else "",
-                "metadata_refresh_after_code_commit": contract.memory_mode == "external",
-                "entity_fingerprint_refresh_after_code_commit": contract.memory_mode == "external",
-                "route_refresh_after_code_commit": contract.memory_mode == "external",
-                "memory_quality_check_before_commit": contract.memory_mode == "external",
-            },
-            "ledger": {
-                "would_update": contract.memory_mode == "external",
-                "message": ledger_message,
-                "path": contract.ledger_path.as_posix() if contract.ledger_path else "",
-            },
-        },
+        "proposed_commits": _proposed_commits(
+            contract, args, code_dirty, memory_would_commit, code_quality_gate
+        ),
     }
 
 
@@ -543,9 +607,10 @@ def _memory_quality_failure_message(result: dict[str, Any]) -> str:
     )
 
 
-def _run_memory_quality_gate(context) -> dict[str, Any]:
+def _run_memory_quality_phase(context, checks: tuple[str, ...]) -> dict[str, Any]:
     result = run_memory_quality_check(
         context.onboarding_root,
+        checks=checks,
         drift_context=DriftCheckContext(
             code_repository_root=context.code_repository_root,
             context=context,
@@ -557,19 +622,56 @@ def _run_memory_quality_gate(context) -> dict[str, Any]:
     return result
 
 
+def _combined_memory_quality(
+    before_refresh: dict[str, Any], after_refresh: dict[str, Any]
+) -> dict[str, Any]:
+    """One official closeout gate, reported after both temporal phases pass."""
+    report_only_sample = [
+        *before_refresh["reportOnlySample"],
+        *after_refresh["reportOnlySample"],
+    ][:50]
+    return {
+        "ok": True,
+        "checks": {**before_refresh["checks"], **after_refresh["checks"]},
+        "findingCount": before_refresh["findingCount"] + after_refresh["findingCount"],
+        "findings": [*before_refresh["findings"], *after_refresh["findings"]],
+        "reportOnlyFindingCount": (
+            before_refresh["reportOnlyFindingCount"] + after_refresh["reportOnlyFindingCount"]
+        ),
+        "reportOnlySample": report_only_sample,
+        "reportOnlySampleCount": len(report_only_sample),
+        "closeoutPhases": {
+            "beforeMetadataRefresh": list(BEFORE_METADATA_REFRESH_CHECKS),
+            "afterMetadataRefresh": list(AFTER_METADATA_REFRESH_CHECKS),
+        },
+    }
+
+
+@dataclass(frozen=True)
+class _MemoryCloseoutOutcome:
+    """What external-memory closeout committed and refreshed.
+
+    The defaults are what internal-memory closeout produces: no memory commit, no ledger
+    commit, nothing refreshed. That is why the caller can build one unconditionally and
+    replace it only when the task carries external memory, instead of initialising seven
+    separate names above an ``if`` and hoping every arm assigns all of them.
+    """
+
+    memory_commit: str = ""
+    ledger_commit: str = ""
+    refreshed_onboarding: list[dict[str, str]] = field(default_factory=list)
+    refreshed_entities: list[dict[str, object]] = field(default_factory=list)
+    refreshed_route_overviews: list[dict[str, str]] = field(default_factory=list)
+    route_index_refresh: dict[str, object] = field(default_factory=dict)
+    memory_quality: dict[str, object] = field(default_factory=dict)
+
+
 def _external_closeout_commits(
     contract,
     args: WorktreeArgs,
     change: VerifiedChange,
-) -> tuple[
-    str,
-    str,
-    list[dict[str, str]],
-    list[dict[str, object]],
-    list[dict[str, str]],
-    dict[str, object],
-    dict[str, object],
-]:
+    memory_quality_before_refresh: dict[str, Any],
+) -> _MemoryCloseoutOutcome:
     if contract.memory_worktree is None or contract.ledger_path is None:
         raise RuntimeError("external-memory closeout requires memory worktree and ledger path")
     code_commit = change.commit
@@ -583,7 +685,10 @@ def _external_closeout_commits(
     )
     refreshed_entities = refresh_entity_fingerprints_for_context(context, change.changed_paths)
     route_index_refresh = refresh_route_indexes_for_context(context)
-    memory_quality = _run_memory_quality_gate(context)
+    memory_quality_after_refresh = _run_memory_quality_phase(context, AFTER_METADATA_REFRESH_CHECKS)
+    memory_quality = _combined_memory_quality(
+        memory_quality_before_refresh, memory_quality_after_refresh
+    )
     memory_content_dirty = worktree_dirty(contract.memory_worktree)
     memory_commit = (
         commit_if_dirty(contract.memory_worktree, args.memory_commit_message)
@@ -602,14 +707,14 @@ def _external_closeout_commits(
             args.ledger_commit_message
             or f"[{contract.task_id}] Ledger sync: {code_commit} -> {memory_commit}",
         )
-    return (
-        memory_commit,
-        ledger_commit,
-        refreshed_onboarding,
-        refreshed_entities,
-        refreshed_route_overviews,
-        route_index_refresh,
-        memory_quality,
+    return _MemoryCloseoutOutcome(
+        memory_commit=memory_commit,
+        ledger_commit=ledger_commit,
+        refreshed_onboarding=refreshed_onboarding,
+        refreshed_entities=refreshed_entities,
+        refreshed_route_overviews=refreshed_route_overviews,
+        route_index_refresh=route_index_refresh,
+        memory_quality=memory_quality,
     )
 
 
@@ -740,102 +845,72 @@ def _gate_staged_code(code_worktree: Path, *, diff_base: str) -> dict[str, objec
     return run_strict_code_quality_gate(code_worktree, diff_base=diff_base)
 
 
-def closeout_result(args: WorktreeArgs) -> WorktreeCommandResult:
-    assert args.contract_path is not None
-    contract = load_contract(args.contract_path)
-    _validate_closeout_source_heads(contract)
-    if args.dry_run:
-        return WorktreeCommandResult(0, closeout_preview_payload(contract, args))
-    approval_note = _closeout_approval_note(args)
-    _refuse_unsatisfied_closeout_gate(contract, args)
+@dataclass(frozen=True)
+class _CloseoutAttestations:
+    """What the onboarding body gates found, read before anything is committed.
 
-    worklist = closeout_changed_paths(contract)
+    Validating rather than merely planning: ``validate_onboarding_refresh_plan`` and
+    ``validate_route_overview_refresh_plan`` raise on a plan closeout must not proceed
+    with, so this step is also the last refusal before the approval is claimed.
+    """
+
+    attested_sidecars: list[str] = field(default_factory=list)
+    attested_overviews: list[str] = field(default_factory=list)
+    stamped_overviews: list[str] = field(default_factory=list)
+    unonboarded_paths: list[str] = field(default_factory=list)
+
+
+def _closeout_attestations(contract, worklist: dict[str, list[str]]) -> _CloseoutAttestations:
+    """Validate and classify the onboarding refresh for a closeout that is about to run."""
+    if contract.memory_mode != "external":
+        return _CloseoutAttestations()
     changed_paths = worklist["all"]
-    attested_sidecars: list[str] = []
-    attested_overviews: list[str] = []
-    stamped_overviews: list[str] = []
-    unonboarded_paths: list[str] = []
-    if contract.memory_mode == "external":
-        sidecar_plan = validate_onboarding_refresh_plan(
-            contract, changed_paths, working_paths=worklist["working"]
-        )
-        unonboarded_paths = sidecar_plan["unonboarded"]
-        attested_sidecars = classify_sidecar_updates(
-            contract_context(contract),
-            sidecar_plan,
-            memory_tree=contract.memory_worktree,
-            memory_verified_commit=contract_memory_verified_commit(contract),
-        )["attested_no_impact"]
-        overview_plan = validate_route_overview_refresh_plan(contract, changed_paths)
-        overview_gate = classify_route_overview_updates(
-            contract_context(contract),
-            overview_plan,
-            changed_paths,
-            memory_tree=contract.memory_worktree,
-            memory_verified_commit=contract_memory_verified_commit(contract),
-        )
-        attested_overviews = overview_gate["attested_no_impact"]
-        stamped_overviews = overview_gate["stamped_without_body_review"]
-    code_would_commit = worktree_dirty(contract.code_worktree)
-    code_quality_gate = code_quality_gate_preview(
-        contract.code_worktree,
-        code_would_commit=code_would_commit,
-        diff_base=contract.code_base_commit,
+    sidecar_plan = validate_onboarding_refresh_plan(
+        contract, changed_paths, working_paths=worklist["working"]
     )
-    if requires_strict_code_quality(contract.code_worktree, code_would_commit=code_would_commit):
-        code_quality_gate = _gate_staged_code(
-            contract.code_worktree, diff_base=contract.code_base_commit
-        )
-    # THE CLAIM, and it goes exactly here: the last line before the first irreversible act.
-    # Everything above only reads or touches the index of the task's own disposable worktree, so a
-    # refusal up there must not spend the approval; everything below writes a commit somebody
-    # would have to undo, so none of it may run on an approval this closeout has not already
-    # consumed. Do not move this line down past the commit -- that is R3, and it is what let a
-    # closeout finish its mutations and leave the approval spendable.
-    gate_guard = _claim_closeout_gate(contract, args)
-    code_commit = commit_if_dirty(contract.code_worktree, args.code_commit_message)
-    code_commit_date = commit_date(contract.code_worktree, code_commit)
-    memory_commit = ""
-    ledger_commit = ""
-    refreshed_onboarding: list[dict[str, str]] = []
-    refreshed_entities: list[dict[str, object]] = []
-    refreshed_route_overviews: list[dict[str, str]] = []
-    route_index_refresh: dict[str, object] = {}
-    memory_quality: dict[str, object] = {}
-    if contract.memory_mode == "external":
-        (
-            memory_commit,
-            ledger_commit,
-            refreshed_onboarding,
-            refreshed_entities,
-            refreshed_route_overviews,
-            route_index_refresh,
-            memory_quality,
-        ) = _external_closeout_commits(
-            contract,
-            args,
-            VerifiedChange(
-                commit=code_commit,
-                commit_date=code_commit_date,
-                changed_paths=changed_paths,
-                working_paths=worklist["working"],
-            ),
-        )
-    integration_reopen = _completed_integration_reopen(
-        contract,
-        code_commit=code_commit,
-        memory_content_commit=memory_commit,
-        ledger_commit=ledger_commit,
+    attested_sidecars = classify_sidecar_updates(
+        contract_context(contract),
+        sidecar_plan,
+        memory_tree=contract.memory_worktree,
+        memory_verified_commit=contract_memory_verified_commit(contract),
+    )["attested_no_impact"]
+    overview_plan = validate_route_overview_refresh_plan(contract, changed_paths)
+    overview_gate = classify_route_overview_updates(
+        contract_context(contract),
+        overview_plan,
+        changed_paths,
+        memory_tree=contract.memory_worktree,
+        memory_verified_commit=contract_memory_verified_commit(contract),
     )
-    reopened = bool(integration_reopen["reopened"])
-    updated = amend_contract(
+    return _CloseoutAttestations(
+        attested_sidecars=attested_sidecars,
+        attested_overviews=overview_gate["attested_no_impact"],
+        stamped_overviews=overview_gate["stamped_without_body_review"],
+        unonboarded_paths=sidecar_plan["unonboarded"],
+    )
+
+
+def _amended_closeout_contract(
+    contract,
+    approval_note: str,
+    code_commit: str,
+    memory: _MemoryCloseoutOutcome,
+    reopened: bool,
+):
+    """The contract as closeout leaves it: approved, committed, and possibly reopened.
+
+    ``reopened`` means the closeout produced a commit that is not on the recorded source
+    branch, so every integration cell it had earned is cleared and cleanup goes back to
+    pending -- the task is not integrated any more, whatever it said a moment ago.
+    """
+    return amend_contract(
         replace(
             contract,
             approved_for_commit=True,
             commit_approval_note=approval_note,
             code_commit=code_commit,
-            memory_content_commit=memory_commit,
-            ledger_commit=ledger_commit,
+            memory_content_commit=memory.memory_commit,
+            ledger_commit=memory.ledger_commit,
             integration_strategy="" if reopened else contract.integration_strategy,
             integrated_code_commit="" if reopened else contract.integrated_code_commit,
             integrated_memory_content_commit=""
@@ -852,6 +927,75 @@ def closeout_result(args: WorktreeArgs) -> WorktreeCommandResult:
             cleanup="pending" if reopened else contract.cleanup,
         ),
     )
+
+
+def closeout_result(args: WorktreeArgs) -> WorktreeCommandResult:
+    """Run closeout for real, in the order the preview promised.
+
+    Nothing moved across the claim on line "THE CLAIM" below, and nothing may: the ordering
+    it enforces is the whole point of 260731-EFA-L5 R3.
+    """
+    assert args.contract_path is not None
+    contract = load_contract(args.contract_path)
+    _validate_closeout_source_heads(contract)
+    if args.dry_run:
+        return WorktreeCommandResult(0, closeout_preview_payload(contract, args))
+    approval_note = _closeout_approval_note(args)
+    _refuse_unsatisfied_closeout_gate(contract, args)
+
+    worklist = closeout_changed_paths(contract)
+    changed_paths = worklist["all"]
+    attestations = _closeout_attestations(contract, worklist)
+    code_would_commit = worktree_dirty(contract.code_worktree)
+    code_quality_gate = code_quality_gate_preview(
+        contract.code_worktree,
+        code_would_commit=code_would_commit,
+        diff_base=contract.code_base_commit,
+    )
+    if requires_strict_code_quality(contract.code_worktree, code_would_commit=code_would_commit):
+        code_quality_gate = _gate_staged_code(
+            contract.code_worktree, diff_base=contract.code_base_commit
+        )
+    memory_quality_before_refresh: dict[str, Any] = {}
+    if contract.memory_mode == "external":
+        memory_quality_before_refresh = _run_memory_quality_phase(
+            _closeout_contract_context(contract), BEFORE_METADATA_REFRESH_CHECKS
+        )
+    # THE CLAIM, and it goes exactly here: the last line before the first irreversible act.
+    # Everything above only reads or touches the index of the task's own disposable worktree, so a
+    # refusal up there must not spend the approval; everything below writes a commit somebody
+    # would have to undo, so none of it may run on an approval this closeout has not already
+    # consumed. Do not move this line down past the commit -- that is R3, and it is what let a
+    # closeout finish its mutations and leave the approval spendable.
+    gate_guard = _claim_closeout_gate(contract, args)
+    code_commit = commit_if_dirty(contract.code_worktree, args.code_commit_message)
+    code_commit_date = commit_date(contract.code_worktree, code_commit)
+    memory = _MemoryCloseoutOutcome()
+    if contract.memory_mode == "external":
+        memory = _external_closeout_commits(
+            contract,
+            args,
+            VerifiedChange(
+                commit=code_commit,
+                commit_date=code_commit_date,
+                changed_paths=changed_paths,
+                working_paths=worklist["working"],
+            ),
+            memory_quality_before_refresh,
+        )
+    integration_reopen = _completed_integration_reopen(
+        contract,
+        code_commit=code_commit,
+        memory_content_commit=memory.memory_commit,
+        ledger_commit=memory.ledger_commit,
+    )
+    updated = _amended_closeout_contract(
+        contract,
+        approval_note,
+        code_commit,
+        memory,
+        bool(integration_reopen["reopened"]),
+    )
     write_contract(contract.contract_path, updated)
     return WorktreeCommandResult(
         0,
@@ -860,19 +1004,19 @@ def closeout_result(args: WorktreeArgs) -> WorktreeCommandResult:
             **status_payload(updated),
             "summary": "Closeout completed; integrate the task branches back into their source branches.",
             "code_commit": code_commit,
-            "memory_content_commit": memory_commit,
-            "ledger_commit": ledger_commit,
+            "memory_content_commit": memory.memory_commit,
+            "ledger_commit": memory.ledger_commit,
             "refreshed_onboarding": _bounded_paths(
-                [item["source_path"] for item in refreshed_onboarding]
+                [item["source_path"] for item in memory.refreshed_onboarding]
             ),
-            "sidecars_attested_no_impact": _bounded_paths(attested_sidecars),
-            "unonboarded_changed_paths": _bounded_paths(unonboarded_paths),
-            "refreshed_entities": refreshed_entities,
-            "refreshed_route_overviews": refreshed_route_overviews,
-            "route_overviews_attested_no_impact": attested_overviews,
-            "route_overviews_stamped_without_body_review": stamped_overviews,
-            "route_index_refresh": route_index_refresh,
-            "memory_quality": memory_quality,
+            "sidecars_attested_no_impact": _bounded_paths(attestations.attested_sidecars),
+            "unonboarded_changed_paths": _bounded_paths(attestations.unonboarded_paths),
+            "refreshed_entities": memory.refreshed_entities,
+            "refreshed_route_overviews": memory.refreshed_route_overviews,
+            "route_overviews_attested_no_impact": attestations.attested_overviews,
+            "route_overviews_stamped_without_body_review": attestations.stamped_overviews,
+            "route_index_refresh": memory.route_index_refresh,
+            "memory_quality": memory.memory_quality,
             "code_quality_gate": code_quality_gate,
             "integration_reopen": integration_reopen,
             "closeout_gate": _closeout_gate_payload(gate_guard),

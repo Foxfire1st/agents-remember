@@ -91,7 +91,7 @@ export function parentTaskLinkForDoc(
 export function isOrchestrationDoc(
   doc: Pick<TaskDocNode, "kind" | "orchestrates">,
 ): boolean {
-  return doc.kind === "master" && (doc.orchestrates?.length ?? 0) > 0;
+  return doc.kind === "master" && doc.orchestrates.length > 0;
 }
 
 /** The names a master answers to when matched against an `orchestrates` list. */
@@ -116,7 +116,7 @@ export function orchestratorParentKey(
     (doc) =>
       isOrchestrationDoc(doc) &&
       doc.docPath !== selfDocPath &&
-      (doc.orchestrates ?? []).some((name) => nameSet.has(name)),
+      doc.orchestrates.some((name) => nameSet.has(name)),
   );
   return commander ? taskDocSelectionKey(commander.docPath) : undefined;
 }

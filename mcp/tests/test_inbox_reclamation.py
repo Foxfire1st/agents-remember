@@ -13,6 +13,7 @@ from unittest import mock
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
+from agents_remember.controlplane import operator_inbox_transitions as inbox_transitions
 from agents_remember.controlplane.expectation_rows import ExpectationRowStore
 from agents_remember.controlplane.operator_inbox_records import (
     InboxAddress,
@@ -189,7 +190,8 @@ class ReconcileAndCompactTests(unittest.TestCase):
     def test_terminal_fold_dominates_a_physically_later_stale_pending_snapshot(self) -> None:
         pending = _inbox_entry("n1")
         self.store.append(pending)
-        self.store.mark_ladder_resolved(
+        inbox_transitions.mark_ladder_resolved(
+            self.store,
             "n1",
             now=(NOW + timedelta(seconds=1)).isoformat(),
             reason=CONFIRMED_GONE_REASON,

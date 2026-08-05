@@ -17,7 +17,6 @@ from agents_remember.serving.hosted_control_projection import (
     project_control_snapshot,
     snapshot_turn_state,
 )
-from agents_remember.serving.terminal import TmuxProbeResult
 from agents_remember.serving.terminal_catalog import (
     DEFAULT_LIVENESS_HYSTERESIS,
     SeatTurnState,
@@ -27,6 +26,7 @@ from agents_remember.serving.terminal_catalog import (
     TerminalLivenessEvidence,
 )
 from agents_remember.serving.terminal_paste import capture_pane as _default_capture_pane
+from agents_remember.serving.terminal_tmux import TmuxProbeResult
 from agents_remember.serving.turn_state import TurnStateClassification, classify_turn_state
 
 logger = logging.getLogger(__name__)

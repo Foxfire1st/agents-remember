@@ -26,6 +26,7 @@ from agents_remember.serving.codex_app_server_adapter import (
     CodexAppServerAdapter,
     CodexAppServerSettings,
 )
+from agents_remember.serving.codex_app_server_turns import turn_input as codex_turn_input
 from agents_remember.serving.harness_capabilities import CapabilitySnapshot, SetResult
 from agents_remember.serving.harness_control_bridge import BridgeLimits, HarnessControlBridge
 from agents_remember.serving.harness_control_claude import ClaudeStreamJsonAdapter
@@ -709,7 +710,7 @@ class PiInterruptTests(unittest.IsolatedAsyncioTestCase):
             transport.emit({"type": "agent_settled"})
             settled = await asyncio.wait_for(anext(events), timeout=1.0)
             self.assertEqual(settled.kind, "completed")
-            self.assertIsNone(adapter.active_operation)
+            self.assertIsNone(adapter._active_operation)
             await _pi_active_operation(adapter, "op-b")
             with self.assertRaises(HarnessControlError):
                 await adapter.interrupt(turn_id=None, expected_operation_id="op-a")
@@ -858,7 +859,7 @@ class ClaudeInterruptTests(unittest.IsolatedAsyncioTestCase):
 
     async def _active_turn(self, transport: _FakeClaudeTransport, bridge) -> None:
         submission = asyncio.create_task(
-            bridge.submit(
+            bridge.submissions().submit(
                 bridge.prompt("write an essay", source="terminal", request_id="req-int-1")
             )
         )
@@ -1152,12 +1153,12 @@ class OperationTimelineTests(unittest.IsolatedAsyncioTestCase):
             bridge = HarnessControlBridge(identity, adapter, clock=lambda: NOW)
             await bridge.start(_launch(identity))
             try:
-                epoch = bridge.submission_authority().bridge_epoch
+                epoch = bridge.submissions().bridge_epoch
                 ids = [
                     f"caller-minted-operation-id-{index:03d}-" + "x" * 64 for index in range(256)
                 ]
                 for request_id in ids:
-                    await bridge.submit(
+                    await bridge.submissions().submit(
                         bridge.prompt(
                             f"payload-{request_id[:12]}-{'z' * 24}",
                             source="durable",
@@ -1170,7 +1171,7 @@ class OperationTimelineTests(unittest.IsolatedAsyncioTestCase):
                 pages = 0
                 worst_page_bytes = 0
                 while True:
-                    page = await bridge.operation_timeline(
+                    page = await bridge.submissions().ledger.operation_timeline(
                         epoch,
                         after_sequence=after,
                         byte_budget=EVIDENCE_PAGE_BYTE_BUDGET,
@@ -1544,6 +1545,47 @@ class AssetNativeConstructionTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(len([r for r in transport.requests if r[0] == "turn/start"]), 1)
             finally:
                 await adapter.stop("forced")
+
+    def test_an_asset_with_no_local_path_is_refused_before_the_native_write(self) -> None:
+        """`spool_path` is runner-local and never serialized, so a rebuilt reference has none.
+
+        A reference that came back over the wire -- or one a caller built from a receipt --
+        carries the digest and the size but no staged file. Codex is handed a filesystem
+        PATH for a local image, so there is nothing to hand it: the turn input refuses
+        rather than building a block that names nothing, and the refusal is the same
+        `CodexAppServerError` a corrupted staged file gets.
+        """
+        unstaged = AssetReference(
+            asset_id="img-1",
+            mime_type="image/png",
+            byte_size=9,
+            sha256="0" * 64,
+        )
+
+        with self.assertRaisesRegex(CodexAppServerError, "requires a verified spool path"):
+            codex_turn_input(
+                PromptRequest(
+                    request_id="req-unstaged",
+                    source="cockpit",
+                    text="see image",
+                    submitted_at=NOW,
+                    assets=(unstaged,),
+                )
+            )
+
+        # The text block alone is built without complaint, so the refusal is about the
+        # asset rather than about the request.
+        self.assertEqual(
+            codex_turn_input(
+                PromptRequest(
+                    request_id="req-text",
+                    source="cockpit",
+                    text="no image",
+                    submitted_at=NOW,
+                )
+            ),
+            [{"type": "text", "text": "no image"}],
+        )
 
     async def test_pi_image_content_blocks_and_receipt_asset_ids(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

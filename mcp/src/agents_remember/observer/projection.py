@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Literal, TypeAlias
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -31,6 +31,15 @@ from agents_remember.observer.lifecycle_state import (
     Phase,
     State,
 )
+
+AttentionSeverity: TypeAlias = Literal["alarm", "warn", "info"]
+AttentionLane: TypeAlias = Literal["repo", "worktree", "lifecycle"]
+ProcessFactState: TypeAlias = Literal[
+    "observed", "derived", "planned", "missing", "stale", "not-applicable"
+]
+ProcessHealth: TypeAlias = Literal[
+    "nominal", "running", "blocked", "failed", "stale", "skipped", "unknown", "complete"
+]
 
 
 class ActionAvailability(BaseModel):
@@ -501,6 +510,18 @@ class LedgerNode(BaseModel):
     rows: list[LedgerRefNode] = Field(default_factory=list)
 
 
+class TaskStepDispositionNode(BaseModel):
+    """Why and when one exact task work unit was intentionally skipped."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["intentionalSkip"]
+    reason: str
+    recordedAt: str
+    recordedVia: Literal["task_doc.skip_step"]
+    lifecycleId: str | None = None
+
+
 class TaskSubStepNode(BaseModel):
     """One substep of a task step (the JSON's finer-grained progress unit)."""
 
@@ -509,6 +530,7 @@ class TaskSubStepNode(BaseModel):
     id: str
     title: str
     status: str
+    disposition: TaskStepDispositionNode | None = None
 
 
 class TaskStepNode(BaseModel):
@@ -523,6 +545,7 @@ class TaskStepNode(BaseModel):
     id: str
     title: str
     status: str
+    disposition: TaskStepDispositionNode | None = None
     substeps: list[TaskSubStepNode] = Field(default_factory=list)
 
 
@@ -702,8 +725,8 @@ class AttentionItem(BaseModel):
 
     id: str
     kind: str
-    severity: str
-    lane: str
+    severity: AttentionSeverity
+    lane: AttentionLane
     title: str
     detail: str | None = None
     waitSeconds: float | None = None
@@ -740,7 +763,7 @@ class CommitRefNode(BaseModel):
     # How far the recorded base is behind the *local* source-branch tip (fetch-free; a
     # parallel cycle that landed). 0/None when current or unknown.
     behindSource: int | None = None
-    factState: str = "missing"  # observed | derived | planned | missing | not-applicable
+    factState: ProcessFactState = "missing"
 
 
 class ProviderBootNode(BaseModel):
@@ -756,7 +779,7 @@ class ProviderBootNode(BaseModel):
     id: str
     role: str  # "code" (CGC) | "memory" (GrepAI)
     runtimeState: str  # nominal | indexing | down | configured | missing | unknown
-    factState: str = "observed"
+    factState: ProcessFactState = "observed"
 
 
 class EngineProcessEdge(BaseModel):
@@ -796,7 +819,7 @@ class LandingRefNode(BaseModel):
     kind: str  # origin-main | origin-feat | origin-mem-main | pr
     label: str  # display: "origin/main", "PR #128"
     state: str  # behind | tip | open | merged | pushed | planned | unknown
-    factState: str = "planned"  # observed | derived | planned | missing | stale
+    factState: ProcessFactState = "planned"
     detail: str | None = None
     # gh's own milestone timestamp for the PR ref -- mergedAt once merged, else createdAt (slice 5l
     # P2). ISO-8601 string; None for branch refs and PRs gh could not time. Display-only (05k).
@@ -830,7 +853,7 @@ class EngineProcessNode(BaseModel):
     # provider-setup|sync-needed|commit-approval-pending|closeout-pending|integration-pending|
     # integration-blocked|carryover-pending|cleanup-pending|completed|abandoned|unknown
     phase: str
-    health: str  # nominal|running|blocked|failed|stale|skipped|unknown|complete
+    health: ProcessHealth
 
     codeSource: CommitRefNode
     codeWorktree: CommitRefNode

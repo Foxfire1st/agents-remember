@@ -14,7 +14,7 @@ from unittest import mock
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
-from agents_remember.controllers.worktree_tools import _settings_owned_by_background
+from agents_remember.application.worktree_tools import _settings_owned_by_background
 from agents_remember.providers.setup_progress import read_setup_progress
 from agents_remember.worktrees.modules import abandon as worktree_abandon
 from agents_remember.worktrees.modules import cleanup as worktree_cleanup

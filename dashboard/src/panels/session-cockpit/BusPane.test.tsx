@@ -65,7 +65,7 @@ describe("BusPane", () => {
     );
     const legacy = view.getByTestId("bus-pickup-inbox-legacy-1").textContent ?? "";
     expect(legacy).toContain("system → owner unavailable");
-    expect(legacy).toContain("attempts — · last — · next —");
+    expect(legacy).toContain("attempts 0 · last — · next —");
     expect(view.getByTestId("bus-heartbeat-state").textContent).toBe("active");
     expect(view.getByTestId("bus-heartbeat-counts").textContent).toBe("3 / 1");
     expect(view.getByTestId("bus-limits-copy").textContent).toContain(

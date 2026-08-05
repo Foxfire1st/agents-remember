@@ -42,6 +42,11 @@ from agents_remember.serving.harness_submission_authority import (
     HarnessSubmissionAuthority,
     SubmissionLimits,
 )
+from agents_remember.serving.harness_submission_ledger import (
+    MAX_LOOKUP_REQUEST_IDS,
+    OperationRecord,
+    SubmissionLedger,
+)
 
 NOW = "2026-07-17T12:00:00+00:00"
 
@@ -71,6 +76,7 @@ class _AuthorityAdapter:
         self.block_set = False
         self.stop_modes: list[ShutdownMode] = []
         self.preflight_results: deque[Exception] = deque()
+        self.reconcile_results: deque[ReconciliationResult] = deque()
         self.preflight_started = asyncio.Event()
         self.release_preflight = asyncio.Event()
         self.block_preflight = False
@@ -166,7 +172,9 @@ class _AuthorityAdapter:
         self.current = replace(self.current, pending_interaction=None)
 
     async def reconcile(self, request_id: str) -> ReconciliationResult:
-        return ReconciliationResult(request_id, "unresolved", NOW)
+        if not self.reconcile_results:
+            return ReconciliationResult(request_id, "unresolved", NOW)
+        return replace(self.reconcile_results.popleft(), request_id=request_id)
 
     async def stop(self, mode: ShutdownMode) -> None:
         self.stop_modes.append(mode)
@@ -231,7 +239,7 @@ class HarnessSubmissionAuthorityTests(unittest.IsolatedAsyncioTestCase):
             second = await authority.submit(_prompt("second", "withdraw me"))
             self.assertEqual(second.acceptance, "queued")
             status = await asyncio.wait_for(
-                authority.status("epoch-1", ("second",), cockpit_only=True),
+                authority.ledger.status("epoch-1", ("second",), cockpit_only=True),
                 0.1,
             )
             second_status = status.submissions[0].submission
@@ -280,7 +288,7 @@ class HarnessSubmissionAuthorityTests(unittest.IsolatedAsyncioTestCase):
             adapter.release_submit.set()
             submission = None
             for _ in range(10):
-                status = await authority.status("epoch-1", ("grace",), cockpit_only=True)
+                status = await authority.ledger.status("epoch-1", ("grace",), cockpit_only=True)
                 submission = status.submissions[0].submission
                 assert submission is not None
                 if submission.state == "delivered":
@@ -329,7 +337,9 @@ class HarnessSubmissionAuthorityTests(unittest.IsolatedAsyncioTestCase):
             await asyncio.sleep(0)
             await asyncio.sleep(0)
             self.assertEqual(adapter.submissions, [])
-            status = await authority.status("epoch-1", ("withdraw-preflight",), cockpit_only=True)
+            status = await authority.ledger.status(
+                "epoch-1", ("withdraw-preflight",), cockpit_only=True
+            )
             submission = status.submissions[0].submission
             self.assertIsNotNone(submission)
             assert submission is not None
@@ -564,7 +574,7 @@ class HarnessSubmissionAuthorityTests(unittest.IsolatedAsyncioTestCase):
         try:
             receipt = await authority.submit(_prompt("busy"))
             self.assertEqual(receipt.acceptance, "queued")
-            status = await authority.status("epoch-1", ("busy",), cockpit_only=True)
+            status = await authority.ledger.status("epoch-1", ("busy",), cockpit_only=True)
             busy_status = status.submissions[0].submission
             self.assertIsNotNone(busy_status)
             assert busy_status is not None
@@ -581,7 +591,9 @@ class HarnessSubmissionAuthorityTests(unittest.IsolatedAsyncioTestCase):
             receipt = await authority.submit(_prompt("preflight-busy"))
             self.assertEqual(receipt.acceptance, "queued")
             self.assertEqual(adapter.submissions, [])
-            status = await authority.status("epoch-1", ("preflight-busy",), cockpit_only=True)
+            status = await authority.ledger.status(
+                "epoch-1", ("preflight-busy",), cockpit_only=True
+            )
             submission = status.submissions[0].submission
             self.assertIsNotNone(submission)
             assert submission is not None
@@ -636,7 +648,7 @@ class HarnessSubmissionAuthorityTests(unittest.IsolatedAsyncioTestCase):
             )
             await adapter.submit_started.wait()
             await authority.submit(_prompt("cockpit"))
-            status = await authority.status(
+            status = await authority.ledger.status(
                 "epoch-1", ("terminal", "cockpit", "missing"), cockpit_only=True
             )
             self.assertEqual(
@@ -672,6 +684,246 @@ class HarnessSubmissionAuthorityTests(unittest.IsolatedAsyncioTestCase):
             malformed = {**valid, key: value}
             with self.subTest(malformed=malformed), self.assertRaises(HarnessControlError):
                 ControlOperationRef.from_json(malformed)
+
+    async def test_a_reconciled_refusal_terminates_the_operation_and_frees_the_head(self) -> None:
+        """An ambiguous send the vendor later disowns must stop blocking the timeline.
+
+        The unknown barrier exists because the authority does not know whether the prompt
+        landed. When the adapter finally answers ``rejected`` or ``unsupported`` it DOES
+        know, and the record has to become terminal AND release the head -- an operation
+        that is provably not in flight must not keep the next one out.
+        """
+        for state in ("rejected", "unsupported"):
+            with self.subTest(state=state):
+                adapter = _AuthorityAdapter()
+                adapter.preflight_results.append(
+                    HarnessAdapterDisconnectedError(
+                        "preflight claimed possible send",
+                        may_have_sent=True,
+                        vendor_correlation_id="vendor-amb",
+                    )
+                )
+                adapter.reconcile_results.append(
+                    ReconciliationResult("amb", state, NOW, detail="the vendor disowned it")  # type: ignore[arg-type]
+                )
+                authority = _authority(adapter)
+                try:
+                    receipt = await authority.submit(_prompt("amb"))
+                    self.assertEqual(receipt.acceptance, "unknown")
+                    self.assertIsNotNone(authority.active_operation)
+
+                    result = await authority.reconcile("amb")
+
+                    self.assertEqual((result.state, result.submission_state), (state, state))
+                    self.assertEqual(result.bridge_epoch, "epoch-1")
+                    # The head is released: nothing is in flight any more.
+                    self.assertIsNone(authority.active_operation)
+                    status = await authority.ledger.status("epoch-1", ("amb",), cockpit_only=True)
+                    settled = status.submissions[0].submission
+                    assert settled is not None
+                    self.assertEqual(
+                        (settled.state, settled.detail), (state, "the vendor disowned it")
+                    )
+                    self.assertFalse(settled.withdrawable)
+                finally:
+                    await authority.stop(forced=True)
+
+    async def test_a_setter_is_refused_outright_when_the_timeline_has_no_room(self) -> None:
+        """A full timeline answers ``unknown`` immediately rather than parking the setter.
+
+        A setter carries a caller waiting on a future. Admitting one with nowhere to run it
+        would leave that caller blocked on a slot that only frees when the operation ahead
+        completes -- so the refusal is the honest answer, and it must reach no adapter.
+        """
+        adapter = _AuthorityAdapter()
+        adapter.block_submit = True
+        authority = _authority(adapter, timeline_limit=1)
+        held = asyncio.create_task(authority.submit(_prompt("holds-the-only-slot")))
+        try:
+            await asyncio.wait_for(adapter.submit_started.wait(), 1)
+
+            refused = await authority.set_model("model-b")
+
+            self.assertEqual((refused.ok, refused.acceptance), (False, "unknown"))
+            self.assertEqual(refused.requested_value, "model-b")
+            assert refused.detail is not None
+            self.assertIn("ledger is full", refused.detail)
+            self.assertEqual(adapter.set_operations, [])
+        finally:
+            adapter.release_submit.set()
+            await held
+            await authority.stop(forced=True)
+
+
+class SubmissionLedgerTests(unittest.IsolatedAsyncioTestCase):
+    """The record store on its own: what it forgets, what it refuses, and what it answers.
+
+    Reached directly rather than through the authority because these are the ledger's own
+    boundaries -- a store with no room, a page with no size, a lookup batch with no bound --
+    and driving them through a live authority would mean asserting on a fake adapter's
+    scheduling rather than on the store's contract.
+    """
+
+    def _ledger(self, *, limit: int = 4) -> SubmissionLedger:
+        return SubmissionLedger(bridge_epoch="epoch-1", limit=limit, lock=asyncio.Lock())
+
+    def _enrol(
+        self,
+        ledger: SubmissionLedger,
+        kind: str,
+        state: str,
+        *,
+        operation_id: str | None = None,
+        requested_value: str | None = None,
+    ) -> OperationRecord:
+        record = OperationRecord(
+            ref=ledger.next_ref(kind, operation_id),  # type: ignore[arg-type]
+            state=state,  # type: ignore[arg-type]
+            submitted_at=NOW,
+            updated_at=NOW,
+            source="cockpit",
+            requested_value=requested_value,
+        )
+        ledger.enrol(record)
+        return record
+
+    def test_a_ledger_with_nothing_droppable_refuses_room_rather_than_forgetting_a_row(
+        self,
+    ) -> None:
+        # A live row is the only evidence that a send may have landed, and a pinned row is
+        # one the caller is still dispatching. Making room by dropping either would answer
+        # "not-found" for an operation that is still happening.
+        for label, state, pinned in (
+            ("live rows", "queued", lambda key: False),
+            ("pinned terminal rows", "delivered", lambda key: True),
+        ):
+            with self.subTest(label):
+                ledger = self._ledger(limit=2)
+                self._enrol(ledger, "prompt", state, operation_id="first")
+                self._enrol(ledger, "prompt", state, operation_id="second")
+
+                self.assertFalse(ledger.make_room(pinned))
+                self.assertEqual(ledger.retained_record_count, 2)
+                self.assertIsNotNone(ledger.by_request_id("first"))
+
+    async def test_making_room_keeps_evicting_past_a_setter_and_says_what_it_forgot(
+        self,
+    ) -> None:
+        """Eviction runs until one more fits, and the timeline reports the water mark.
+
+        A setter row carries no caller-owned request id, so forgetting one touches no
+        prompt index -- and that must not end the sweep early. Bounded is only honest if
+        the ledger says where its retention starts, which is what
+        ``evicted_before_sequence`` is for.
+        """
+        ledger = self._ledger(limit=2)
+        first = self._enrol(ledger, "set-model", "delivered", requested_value="a")
+        second = self._enrol(ledger, "set-effort", "delivered", requested_value="high")
+        self._enrol(ledger, "prompt", "delivered", operation_id="survivor")
+
+        self.assertTrue(ledger.make_room(lambda key: False))
+
+        self.assertEqual(ledger.retained_record_count, 1)
+        self.assertIsNone(ledger.by_key(first.key))
+        self.assertIsNone(ledger.by_key(second.key))
+        # The prompt index is intact for what survived, and only for it.
+        self.assertIsNotNone(ledger.by_request_id("survivor"))
+        page = await ledger.operation_timeline("epoch-1")
+        self.assertEqual(page.evicted_before_sequence, second.ref.sequence)
+        self.assertEqual([item.operation_id for item in page.items], ["survivor"])
+
+    def test_a_pending_dispatch_receipt_reports_the_state_the_record_actually_reached(
+        self,
+    ) -> None:
+        """The grace expiring is not evidence: the record answers for wherever it now is.
+
+        Only a record still in ``dispatching`` is owed the "evidence is pending" wording. A
+        record that raced into ``queued`` is plainly queued, and one that reached a terminal
+        state answers through the duplicate mapping -- reporting either as "in flight" would
+        tell a caller to keep reconciling something that has already settled.
+        """
+        ledger = self._ledger()
+        expected = {
+            "dispatching": ("queued", "acceptance evidence is pending"),
+            "queued": ("queued", None),
+            "delivered": ("immediate", None),
+            "rejected": ("rejected", None),
+            "withdrawn": ("rejected", "was withdrawn and will not be dispatched"),
+        }
+        for state, (acceptance, detail_fragment) in expected.items():
+            with self.subTest(state=state):
+                record = self._enrol(ledger, "prompt", state, operation_id=f"req-{state}")
+
+                receipt = record.pending_dispatch_receipt("epoch-1")
+
+                self.assertEqual(receipt.acceptance, acceptance)
+                if detail_fragment is None:
+                    self.assertIsNone(receipt.detail)
+                else:
+                    assert receipt.detail is not None
+                    self.assertIn(detail_fragment, receipt.detail)
+
+    async def test_a_lookup_batch_names_between_one_and_the_maximum_distinct_ids(self) -> None:
+        """Unbounded or repeated ids are refused, not trimmed.
+
+        The batch is answered under the authority's lock, so its size is the cost of every
+        other operation waiting behind it; and a repeated id makes the positional answer
+        ambiguous. Both are the caller's mistake and are named as such.
+        """
+        ledger = self._ledger()
+        too_many = tuple(f"req-{index}" for index in range(MAX_LOOKUP_REQUEST_IDS + 1))
+        for subject, call in (
+            ("submission status", lambda ids: ledger.status("epoch-1", ids, cockpit_only=True)),
+            ("submission provenance", lambda ids: ledger.provenance("epoch-1", ids)),
+        ):
+            for label, ids, complaint in (
+                ("empty", (), f"1\\.\\.{MAX_LOOKUP_REQUEST_IDS} request ids"),
+                ("over the cap", too_many, f"1\\.\\.{MAX_LOOKUP_REQUEST_IDS} request ids"),
+                ("repeated", ("req-a", "req-a"), "must be unique"),
+            ):
+                with (
+                    self.subTest(subject=subject, ids=label),
+                    self.assertRaisesRegex(HarnessControlError, f"{subject}.*{complaint}"),
+                ):
+                    await call(ids)
+
+    async def test_an_operation_timeline_page_must_have_a_size(self) -> None:
+        # A zero limit or zero budget would answer "no items, truncated", which reads
+        # exactly like a ledger that has nothing in it. Refusing keeps the two apart.
+        ledger = self._ledger()
+        self._enrol(ledger, "prompt", "delivered", operation_id="req-1")
+        for label, kwargs in (
+            ("limit", {"limit": 0}),
+            ("byte budget", {"byte_budget": 0}),
+        ):
+            with (
+                self.subTest(label),
+                self.assertRaisesRegex(HarnessControlError, "positive limit and byte budget"),
+            ):
+                await ledger.operation_timeline("epoch-1", **kwargs)  # type: ignore[arg-type]
+        # ... and a page that does have a size still answers.
+        self.assertEqual(len((await ledger.operation_timeline("epoch-1")).items), 1)
+
+    async def test_an_ambiguous_setter_with_no_recorded_value_settles_nobody(self) -> None:
+        """The ambiguity barrier is installed unconditionally; a set-result is not invented.
+
+        ``HarnessSubmissionAuthority`` never builds this shape -- every setter it admits
+        carries the value the caller asked for -- but ``OperationRecord`` is a plain mutable
+        dataclass whose fields are independently assignable, so the state is representable
+        and the projection has to answer for it. Reporting ``requested_value=""`` to a
+        waiter would be the authority telling a caller it asked for something it did not.
+        """
+        ledger = self._ledger()
+        record = self._enrol(ledger, "set-model", "unknown")
+        record.result_future = asyncio.get_running_loop().create_future()
+
+        record.mark_unknown("adapter went away mid-set", "vendor-7", at="LATER", bridge_epoch="e")
+
+        self.assertEqual(record.state, "unknown")
+        self.assertEqual(record.detail, "adapter went away mid-set")
+        self.assertEqual(record.vendor_correlation_id, "vendor-7")
+        self.assertEqual(record.updated_at, "LATER")
+        self.assertFalse(record.result_future.done())
 
 
 if __name__ == "__main__":

@@ -10,12 +10,13 @@ renders it directly (``/api/state`` / ``/api/stream``, mirroring ``servingBuild`
 from __future__ import annotations
 
 import json
-import os
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict
+
+from agents_remember.kernel.atomic_write import atomic_write_text
 
 
 @dataclass(frozen=True)
@@ -104,9 +105,8 @@ class SupervisorHeartbeatStore:
             redeliverableInboxCount=redeliverable_inbox_count,
             lastSweepDurationSeconds=last_sweep_duration_seconds,
         )
-        self._path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = self._path.with_name(f"{self._path.name}.{os.getpid()}.tmp")
-        tmp.write_text(
+        atomic_write_text(
+            self._path,
             json.dumps(
                 {
                     "lastTickAt": heartbeat.lastTickAt,
@@ -117,9 +117,7 @@ class SupervisorHeartbeatStore:
                 }
             )
             + "\n",
-            encoding="utf-8",
         )
-        os.replace(tmp, self._path)
         return heartbeat
 
 

@@ -13,6 +13,11 @@ MCP_TESTS = Path(__file__).resolve().parent
 sys.path.insert(0, str(MCP_SRC))
 sys.path.insert(0, str(MCP_TESTS))
 
+from agents_remember.application.orchestration_tools import (
+    NudgeSubject,
+    NudgeTarget,
+    orchestration_nudge_manager_tool,
+)
 from agents_remember.controlplane.orchestration_artifacts import (
     escalation_packet,
     turn_report_artifact,
@@ -23,11 +28,6 @@ from agents_remember.controlplane.orchestration_nudges import (
     missing_artifact,
 )
 from agents_remember.mcp.config import McpRuntimeConfig, load_config
-from agents_remember.mcp.tools.orchestration import (
-    NudgeSubject,
-    NudgeTarget,
-    orchestration_nudge_manager_payload,
-)
 from agents_remember.observer import observer_root
 from agents_remember.observer.store import EventStore
 from test_config import settings_payload
@@ -154,7 +154,7 @@ class NudgeToolTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)
             config = _config(root)
-            payload = orchestration_nudge_manager_payload(
+            payload = orchestration_nudge_manager_tool(
                 config,
                 reason="missing-turn-report",
                 target=NudgeTarget(agent_id="manager-a"),

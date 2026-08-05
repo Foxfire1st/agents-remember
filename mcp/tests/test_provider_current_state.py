@@ -13,6 +13,8 @@ sys.path.insert(0, str(MCP_SRC))
 sys.path.insert(0, str(MCP_TESTS))
 
 from agents_remember.mcp.config import load_config
+from agents_remember.models.providers import ProviderStatusResponse
+from agents_remember.models.tool_registry import TOOL_RESPONSE_MODELS
 from agents_remember.providers import current_state
 from agents_remember.providers import status as provider_status
 from agents_remember.providers.lifecycle.docker_runtime import (
@@ -239,6 +241,85 @@ class ProviderCurrentStateTests(unittest.TestCase):
             self.assertNotIn("currentState", providers)
             self.assertEqual(diagnostics["currentState"]["state"], "ready")
             self.assertNotIn("lastSetup", diagnostics["currentState"])
+
+    def test_a_sampled_status_packet_still_validates_at_the_wire_boundary(self) -> None:
+        """260731-EFA-L6 R10: metrics/indexState are MODEL FIELDS, not post-dump injections.
+
+        Both keys used to be stamped onto the already-dumped ``ProviderStatusResponse``.
+        That envelope is ``extra="forbid"`` and ``mcp/tools/base.py::_tool_payload``
+        re-validates every tool payload against its model, so any run where the daemon HAD
+        sampled a container row or recorded an index-state row raised ValidationError on
+        the way to the wire -- `provider_status` returned an error instead of a status.
+
+        The suite could not see it because the two halves were tested apart: the tests that
+        call ``provider_status_packet`` never populated the metrics store, and the tests
+        that populate the metrics store never go through the wire re-validation. This test
+        is the intersection, which is where the bug lived.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config_path = root / "mcp-settings.json"
+            write_json(config_path, settings_payload(root))
+            config = load_config(config_path)
+
+            metrics_root = config.coordination_root / "logs" / "observer" / "providers"
+            metrics_root.mkdir(parents=True, exist_ok=True)
+            sample = {
+                "schema": "ar-provider-metrics/v1",
+                "sampledAt": "2026-07-31T09:00:00+00:00",
+                "containers": [],
+                "runningCount": 0,
+            }
+            index_row = {
+                "schema": "ar-provider-index-state/v1",
+                "sampledAt": "2026-07-31T09:00:01+00:00",
+                "providerId": "codegraphcontext-code",
+                "state": "staleIndex",
+            }
+            (metrics_root / "metrics-current.json").write_text(
+                json.dumps(sample) + "\n", encoding="utf-8"
+            )
+            (metrics_root / "metrics.jsonl").write_text(
+                json.dumps(sample) + "\n" + json.dumps(index_row) + "\n", encoding="utf-8"
+            )
+
+            with mock.patch.object(
+                provider_status,
+                "_watchers_status",
+                return_value=ready_status_payload(root),
+            ):
+                packet = provider_status.provider_status_packet(config)
+
+            # The sampled facts really did ride the packet ...
+            self.assertEqual(packet["metrics"]["schema"], "ar-provider-metrics/v1")
+            self.assertEqual(packet["indexState"][-1]["state"], "staleIndex")
+            # ... and the packet is still inside its own contract. This is the assertion
+            # that used to raise. The registry lookup is asserted separately from the
+            # validation so the validated object keeps its concrete type: the registry is
+            # a union over every tool response, and re-validating through it would say
+            # nothing about `metrics`/`indexState` being real declared fields.
+            self.assertIs(TOOL_RESPONSE_MODELS["provider_status"], ProviderStatusResponse)
+            revalidated = ProviderStatusResponse.model_validate(packet)
+            self.assertEqual(revalidated.metrics, packet["metrics"])
+            self.assertEqual(revalidated.indexState, packet["indexState"])
+
+    def test_an_unsampled_status_packet_omits_both_keys_entirely(self) -> None:
+        # exclude_none keeps the empty case byte-identical to before the fields existed,
+        # so declaring them changed no response anybody was already receiving.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config_path = root / "mcp-settings.json"
+            write_json(config_path, settings_payload(root))
+            config = load_config(config_path)
+            with mock.patch.object(
+                provider_status,
+                "_watchers_status",
+                return_value=ready_status_payload(root),
+            ):
+                packet = provider_status.provider_status_packet(config)
+            self.assertNotIn("metrics", packet)
+            self.assertNotIn("indexState", packet)
+            ProviderStatusResponse.model_validate(packet)
 
     def test_provider_status_summarizes_structured_cgc_last_refresh(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

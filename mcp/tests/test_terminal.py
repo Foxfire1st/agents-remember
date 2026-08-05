@@ -1,8 +1,10 @@
-"""Tests for the dashboard terminal host (slice 6d-1, ``serving.terminal``).
+"""Tests for the dashboard terminal host and its PTY clients (slice 6d-1).
 
-Three layers, mirroring the host's one impure seam:
+Four layers, mirroring the host's one impure seam. The subject spans three modules: the tmux
+command layer (``serving.terminal_tmux``), the PTY client (``serving.terminal_pty``) and the
+registry that spawns clients against durable tmux sessions (``serving.terminal``).
 
-* **Pure command construction** -- ``_build_tmux_command`` / ``_tmux_session_name`` have no I/O.
+* **Pure command construction** -- ``build_tmux_command`` / ``tmux_session_name`` have no I/O.
 * **Registry** -- a pipe-backed *fake* spawner exercises open/idempotency/replace/close/lookup
   without a real child or tmux.
 * **Real PTY** -- a spawner that unwraps the tmux argv and runs the bare harness on a real
@@ -25,7 +27,7 @@ import tempfile
 import termios
 import time
 import unittest
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from unittest import mock
 
@@ -33,25 +35,25 @@ MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
 from agents_remember.serving.terminal import (
-    PtyProcess,
     TerminalHost,
     TerminalHostSeams,
-    TerminalSession,
     TerminalSessionSpec,
-    _build_tmux_command,
+)
+from agents_remember.serving.terminal_pty import PtyProcess, TerminalSession, spawn_pty
+from agents_remember.serving.terminal_tmux import (
     _parse_tmux_version,
-    _spawn_pty,
-    _tmux_cancel_copy_mode,
-    _tmux_client_environment,
-    _tmux_create_detached,
-    _tmux_enable_mouse,
-    _tmux_kill_session,
-    _tmux_probe_session,
-    _tmux_session_name,
     _tmux_supports_client_capabilities,
     _tmux_version,
+    build_tmux_command,
     ensure_terminal_input_ready,
     pane_in_mode,
+    tmux_cancel_copy_mode,
+    tmux_client_environment,
+    tmux_create_detached,
+    tmux_enable_mouse,
+    tmux_kill_session,
+    tmux_probe_session,
+    tmux_session_name,
 )
 
 _HAS_TMUX = shutil.which("tmux") is not None
@@ -103,33 +105,22 @@ def _raw_spawn(argv: Sequence[str], cwd: Path) -> PtyProcess:
     tmux installed -- the kernel PTY is the thing under test here, not the tmux client.
     """
     harness = list(argv[argv.index("--") + 1 :])
-    return _spawn_pty(harness, cwd)
+    return spawn_pty(harness, cwd)
 
 
-def _read_until(host: TerminalHost, sid: str, marker: bytes, timeout: float = 10.0) -> bytes:
-    """Accumulate PTY output until ``marker`` appears or ``timeout`` elapses."""
-    session = host.get(sid)
-    assert session is not None
-    return _read_until_session(host, session, marker, timeout)
-
-
-def _read_until_session(
-    host: TerminalHost, session: TerminalSession, marker: bytes, timeout: float = 10.0
-) -> bytes:
-    """Accumulate output from one concrete (possibly unregistered) PTY client."""
+def _read_until(session: TerminalSession, marker: bytes, timeout: float = 10.0) -> bytes:
+    """Accumulate output from one PTY client until ``marker`` appears or ``timeout`` elapses."""
     fd = session.master_fd
     buf = bytearray()
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline and marker not in buf:
         readable, _, _ = select.select([fd], [], [], 0.2)
         if readable:
-            buf.extend(host.read_session(session))
+            buf.extend(session.read_nonblocking())
     return bytes(buf)
 
 
-def _wait_dead(host: TerminalHost, sid: str, timeout: float = 5.0) -> None:
-    session = host.get(sid)
-    assert session is not None
+def _wait_dead(session: TerminalSession, timeout: float = 5.0) -> None:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline and session.is_alive:
         time.sleep(0.02)
@@ -137,7 +128,7 @@ def _wait_dead(host: TerminalHost, sid: str, timeout: float = 5.0) -> None:
 
 class BuildCommandTests(unittest.TestCase):
     def test_tmux_client_environment_owns_terminal_identity(self) -> None:
-        child = _tmux_client_environment(
+        child = tmux_client_environment(
             {
                 "TMUX": "/tmp/tmux/default,12,3",
                 "TMUX_PANE": "%9",
@@ -166,13 +157,13 @@ class BuildCommandTests(unittest.TestCase):
         }
         with (
             mock.patch.dict(os.environ, contaminated, clear=False),
-            mock.patch("agents_remember.serving.terminal.subprocess.run", side_effect=run),
+            mock.patch("agents_remember.serving.terminal_tmux.subprocess.run", side_effect=run),
         ):
-            self.assertTrue(_tmux_probe_session("ar-worker").exists)
-            _tmux_kill_session("ar-worker")
-            _tmux_create_detached("ar-worker", Path("/work/tree"), ["cat"])
-            _tmux_enable_mouse("ar-worker")
-            _tmux_cancel_copy_mode("ar-worker")
+            self.assertTrue(tmux_probe_session("ar-worker").exists)
+            tmux_kill_session("ar-worker")
+            tmux_create_detached("ar-worker", Path("/work/tree"), ["cat"])
+            tmux_enable_mouse("ar-worker")
+            tmux_cancel_copy_mode("ar-worker")
             self.assertFalse(pane_in_mode("ar-worker"))
 
         self.assertEqual(len(calls), 6)
@@ -186,7 +177,7 @@ class BuildCommandTests(unittest.TestCase):
             self.assertEqual(child["AR_KEEP"], "required")
 
     def test_build_tmux_command_wraps_harness(self) -> None:
-        argv = _build_tmux_command(
+        argv = build_tmux_command(
             "ar-lc1", Path("/work/tree"), ["claude", "--resume"], client_capabilities=True
         )
         self.assertEqual(
@@ -210,7 +201,7 @@ class BuildCommandTests(unittest.TestCase):
     def test_build_tmux_command_omits_capability_flag_without_support(self) -> None:
         # tmux < 3.2 has no -T global and rejects unknown globals hard (usage, exit 1, no session),
         # so the client-capability assertion must vanish rather than take the whole attach down.
-        argv = _build_tmux_command(
+        argv = build_tmux_command(
             "ar-lc1", Path("/work/tree"), ["claude", "--resume"], client_capabilities=False
         )
         self.assertEqual(
@@ -231,10 +222,10 @@ class BuildCommandTests(unittest.TestCase):
 
     def test_build_tmux_command_consults_version_probe_by_default(self) -> None:
         # The default path is the one every browser attach takes: no explicit capability argument.
-        with mock.patch("agents_remember.serving.terminal._tmux_version", return_value=(3, 1)):
-            old = _build_tmux_command("ar-lc1", Path("/work/tree"), ["cat"])
-        with mock.patch("agents_remember.serving.terminal._tmux_version", return_value=(3, 2)):
-            new = _build_tmux_command("ar-lc1", Path("/work/tree"), ["cat"])
+        with mock.patch("agents_remember.serving.terminal_tmux._tmux_version", return_value=(3, 1)):
+            old = build_tmux_command("ar-lc1", Path("/work/tree"), ["cat"])
+        with mock.patch("agents_remember.serving.terminal_tmux._tmux_version", return_value=(3, 2)):
+            new = build_tmux_command("ar-lc1", Path("/work/tree"), ["cat"])
         self.assertNotIn("-T", old)
         self.assertEqual(new[:3], ["tmux", "-T", "sync"])
 
@@ -270,7 +261,9 @@ class BuildCommandTests(unittest.TestCase):
 
         _tmux_version.cache_clear()
         try:
-            with mock.patch("agents_remember.serving.terminal.subprocess.run", side_effect=run):
+            with mock.patch(
+                "agents_remember.serving.terminal_tmux.subprocess.run", side_effect=run
+            ):
                 self.assertEqual(_tmux_version(), (3, 4))
                 self.assertEqual(_tmux_version(), (3, 4))
         finally:
@@ -289,7 +282,7 @@ class BuildCommandTests(unittest.TestCase):
                 _tmux_version.cache_clear()
                 try:
                     with mock.patch(
-                        "agents_remember.serving.terminal.subprocess.run",
+                        "agents_remember.serving.terminal_tmux.subprocess.run",
                         side_effect=[outcome],
                     ):
                         self.assertIsNone(_tmux_version())
@@ -298,10 +291,10 @@ class BuildCommandTests(unittest.TestCase):
 
     def test_session_name_sanitizes_unsafe_chars(self) -> None:
         # tmux names cannot carry "." or ":" -- both collapse to a single hyphen.
-        self.assertEqual(_tmux_session_name("lifecycle.42:closeout"), "ar-lifecycle-42-closeout")
+        self.assertEqual(tmux_session_name("lifecycle.42:closeout"), "ar-lifecycle-42-closeout")
 
     def test_session_name_falls_back_when_all_unsafe(self) -> None:
-        self.assertEqual(_tmux_session_name("..."), "ar-session")
+        self.assertEqual(tmux_session_name("..."), "ar-session")
 
 
 class TerminalHostRegistryTests(unittest.TestCase):
@@ -335,7 +328,7 @@ class TerminalHostRegistryTests(unittest.TestCase):
 
     def test_open_builds_tmux_command_and_registers(self) -> None:
         # Pinned to a known-modern tmux so the argv assertion does not depend on the host's binary.
-        with mock.patch("agents_remember.serving.terminal._tmux_version", return_value=(3, 4)):
+        with mock.patch("agents_remember.serving.terminal_tmux._tmux_version", return_value=(3, 4)):
             session = self.host.open(
                 "lc1", TerminalSessionSpec(cwd=self.tmp, command=("claude",), lifecycle_id="LC-1")
             )
@@ -354,7 +347,7 @@ class TerminalHostRegistryTests(unittest.TestCase):
         # The whole point of M5: on tmux < 3.2 the client argv must still be *runnable*. -T is the
         # sole client-attaching global here, so keeping it would cost every browser attach (both
         # kinds), not just the synchronized-output framing it buys.
-        with mock.patch("agents_remember.serving.terminal._tmux_version", return_value=(3, 1)):
+        with mock.patch("agents_remember.serving.terminal_tmux._tmux_version", return_value=(3, 1)):
             durable = self.host.open(
                 "lc1", TerminalSessionSpec(cwd=self.tmp, command=("claude",), lifecycle_id="LC-1")
             )
@@ -398,7 +391,7 @@ class TerminalHostRegistryTests(unittest.TestCase):
         self.assertEqual(self.host.sessions(), [durable])
         # Every attach re-asserts session options against the existing durable session.
         self.assertEqual(self.configured_tmux, [durable.tmux_name, durable.tmux_name])
-        self.host.close_session(first)
+        first.close()
         self.assertIs(self.host.get("lc1"), durable)
         self.assertTrue(second.is_alive)
 
@@ -445,13 +438,9 @@ class TerminalHostRegistryTests(unittest.TestCase):
     def test_close_unknown_is_noop(self) -> None:
         self.host.close("never-opened")  # must not raise
 
-    def test_write_unknown_session_raises(self) -> None:
-        with self.assertRaises(KeyError):
-            self.host.write("ghost", b"x")
-
-    def test_resize_unknown_session_raises(self) -> None:
-        with self.assertRaises(KeyError):
-            self.host.resize("ghost", cols=80, rows=24)
+    def test_unknown_session_is_absent_from_the_registry(self) -> None:
+        self.assertIsNone(self.host.get("ghost"))
+        self.assertEqual(self.host.for_lifecycle("ghost"), [])
 
     def test_custom_name_overrides_derived(self) -> None:
         session = self.host.open(
@@ -489,19 +478,19 @@ class TerminalHostPtyTests(unittest.TestCase):
         self.host.shutdown()
 
     def test_write_then_read_roundtrip(self) -> None:
-        self.host.open("io", TerminalSessionSpec(cwd=self.tmp, command=("cat",)))
-        self.host.write("io", b"ar-terminal\n")  # cat echoes the line back through the PTY
-        self.assertIn(b"ar-terminal", _read_until(self.host, "io", b"ar-terminal"))
+        session = self.host.open("io", TerminalSessionSpec(cwd=self.tmp, command=("cat",)))
+        session.write(b"ar-terminal\n")  # cat echoes the line back through the PTY
+        self.assertIn(b"ar-terminal", _read_until(session, b"ar-terminal"))
 
     def test_read_nonblocking_returns_empty_when_idle(self) -> None:
-        self.host.open(
+        session = self.host.open(
             "io", TerminalSessionSpec(cwd=self.tmp, command=("cat",))
         )  # cat waits for stdin
-        self.assertEqual(self.host.read_nonblocking("io"), b"")
+        self.assertEqual(session.read_nonblocking(), b"")
 
     def test_resize_sets_pty_winsize(self) -> None:
         session = self.host.open("io", TerminalSessionSpec(cwd=self.tmp, command=("cat",)))
-        self.host.resize("io", cols=120, rows=40)
+        session.resize(cols=120, rows=40)
         packed = fcntl_ioctl_getwinsize(session.master_fd)
         rows, cols, _, _ = struct.unpack("HHHH", packed)
         self.assertEqual((rows, cols), (40, 120))
@@ -518,36 +507,34 @@ class TerminalHostPtyTests(unittest.TestCase):
         # For a suspend-unsafe (bare-pane harness) session, 0x1a (Ctrl-Z) is dropped before it reaches
         # the PTY -- it would suspend the harness with no shell to `fg` it back. `cat` echoes whatever it
         # receives, so the readback proves the byte never arrived (the surrounding "a"/"b" are contiguous).
-        self.host.open(
+        session = self.host.open(
             "z", TerminalSessionSpec(cwd=self.tmp, command=("cat",), suspend_unsafe=True)
         )
-        self.host.write("z", b"a\x1ab\n")
-        out = _read_until(self.host, "z", b"ab")
+        session.write(b"a\x1ab\n")
+        out = _read_until(session, b"ab")
         self.assertIn(b"ab", out)
         self.assertNotIn(b"\x1a", out)
 
     def test_harness_write_all_ctrl_z_is_noop(self) -> None:
         # An all-Ctrl-Z frame to a harness collapses to empty and must not write (or raise) -- nothing cat.
-        self.host.open(
+        session = self.host.open(
             "z2", TerminalSessionSpec(cwd=self.tmp, command=("cat",), suspend_unsafe=True)
         )
-        self.host.write("z2", b"\x1a\x1a")
-        self.assertEqual(self.host.read_nonblocking("z2"), b"")
+        session.write(b"\x1a\x1a")
+        self.assertEqual(session.read_nonblocking(), b"")
 
     @unittest.skipUnless(_HAS_TRUE, "needs `true` for an immediately-exiting child")
     def test_read_empty_after_child_exit(self) -> None:
-        self.host.open("done", TerminalSessionSpec(cwd=self.tmp, command=("true",)))
-        _wait_dead(self.host, "done")
-        session = self.host.get("done")
-        assert session is not None
+        session = self.host.open("done", TerminalSessionSpec(cwd=self.tmp, command=("true",)))
+        _wait_dead(session)
         self.assertFalse(session.is_alive)
-        self.assertEqual(self.host.read_nonblocking("done"), b"")
+        self.assertEqual(session.read_nonblocking(), b"")
 
 
 class _PipeWriteSpawner:
     """Backs each session's ``master_fd`` with the WRITE end of a pipe so a test reads back exactly the
-    bytes :meth:`TerminalHost.write` forwarded -- no PTY line discipline, so 0x1a is never consumed as a
-    signal. The complement of :class:`_FakeSpawner` (which exposes a readable master)."""
+    bytes :meth:`TerminalSession.write` forwarded -- no PTY line discipline, so 0x1a is never consumed as
+    a signal. The complement of :class:`_FakeSpawner` (which exposes a readable master)."""
 
     def __init__(self) -> None:
         self.read_fds: list[int] = []
@@ -578,33 +565,27 @@ class TerminalHostSuspendScopingTests(unittest.TestCase):
                 os.close(read_fd)
 
     def test_harness_session_strips_ctrl_z(self) -> None:
-        self.host.open(
+        session = self.host.open(
             "h", TerminalSessionSpec(cwd=self.tmp, command=("claude",), suspend_unsafe=True)
         )
-        self.host.write("h", b"a\x1ab")
+        session.write(b"a\x1ab")
         self.assertEqual(os.read(self.spawner.read_fds[0], 64), b"ab")
 
     def test_shell_session_keeps_ctrl_z(self) -> None:
         # A plain shell (suspend_unsafe defaults False) must NOT lose Ctrl-Z -- it is the legitimate
         # job-control keystroke to background a foreground program back to the prompt.
-        self.host.open("s", TerminalSessionSpec(cwd=self.tmp, command=("bash",)))
-        self.host.write("s", b"a\x1ab")
+        session = self.host.open("s", TerminalSessionSpec(cwd=self.tmp, command=("bash",)))
+        session.write(b"a\x1ab")
         self.assertEqual(os.read(self.spawner.read_fds[0], 64), b"a\x1ab")
 
     def test_harness_all_ctrl_z_writes_nothing(self) -> None:
-        self.host.open(
+        session = self.host.open(
             "h2", TerminalSessionSpec(cwd=self.tmp, command=("claude",), suspend_unsafe=True)
         )
-        self.host.write("h2", b"\x1a\x1a")  # collapses to empty -> no os.write
+        session.write(b"\x1a\x1a")  # collapses to empty -> no os.write
         os.set_blocking(self.spawner.read_fds[0], False)
         with self.assertRaises(BlockingIOError):
             os.read(self.spawner.read_fds[0], 64)
-
-    def test_unknown_session_all_ctrl_z_still_raises(self) -> None:
-        # _require runs BEFORE the strip, so an all-0x1a frame to an unknown sid still raises -- pins the
-        # require-before-strip ordering the suppress(KeyError) on the WS path would otherwise hide.
-        with self.assertRaises(KeyError):
-            self.host.write("ghost", b"\x1a\x1a")
 
 
 class TerminalHostCopyModeCancelTests(unittest.TestCase):
@@ -625,40 +606,54 @@ class TerminalHostCopyModeCancelTests(unittest.TestCase):
             with contextlib.suppress(OSError):
                 os.close(read_fd)
 
+    def _codex_session(self) -> TerminalSession:
+        return self.host.open("m", TerminalSessionSpec(cwd=self.tmp, command=("codex",)))
+
     def test_mouse_reports_pass_through_without_cancel(self) -> None:
-        self.host.open("m", TerminalSessionSpec(cwd=self.tmp, command=("codex",)))
-        self.host.write("m", b"\x1b[<64;10;5M\x1b[<65;10;6m")
+        self._codex_session().write(b"\x1b[<64;10;5M\x1b[<65;10;6m")
         self.assertEqual(self.cancelled, [])
         self.assertEqual(os.read(self.spawner.read_fds[0], 64), b"\x1b[<64;10;5M\x1b[<65;10;6m")
 
     def test_typing_without_prior_mouse_never_cancels(self) -> None:
-        self.host.open("m", TerminalSessionSpec(cwd=self.tmp, command=("codex",)))
-        self.host.write("m", b"hello")
+        self._codex_session().write(b"hello")
         self.assertEqual(self.cancelled, [])
         self.assertEqual(os.read(self.spawner.read_fds[0], 64), b"hello")
 
     def test_first_typing_after_mouse_cancels_copy_mode_once(self) -> None:
-        self.host.open("m", TerminalSessionSpec(cwd=self.tmp, command=("codex",)))
-        self.host.write("m", b"\x1b[<64;10;5M")  # wheel-up: tmux may now be in copy-mode
-        self.host.write("m", b"h")  # first typed byte cancels, then passes through
-        self.host.write("m", b"i")  # further typing does not cancel again
+        session = self._codex_session()
+        session.write(b"\x1b[<64;10;5M")  # wheel-up: tmux may now be in copy-mode
+        session.write(b"h")  # first typed byte cancels, then passes through
+        session.write(b"i")  # further typing does not cancel again
         self.assertEqual(self.cancelled, ["ar-m"])
         self.assertEqual(os.read(self.spawner.read_fds[0], 64), b"\x1b[<64;10;5Mhi")
 
     def test_mouse_after_typing_rearms_the_cancel(self) -> None:
-        self.host.open("m", TerminalSessionSpec(cwd=self.tmp, command=("codex",)))
-        self.host.write("m", b"\x1b[<64;10;5M")
-        self.host.write("m", b"a")
-        self.host.write("m", b"\x1b[<64;10;5M")
-        self.host.write("m", b"b")
+        session = self._codex_session()
+        session.write(b"\x1b[<64;10;5M")
+        session.write(b"a")
+        session.write(b"\x1b[<64;10;5M")
+        session.write(b"b")
         self.assertEqual(self.cancelled, ["ar-m", "ar-m"])
 
     def test_mixed_mouse_and_typing_frame_counts_as_typing(self) -> None:
         # A frame that is not purely mouse reports is treated as typing: cancel while armed.
-        self.host.open("m", TerminalSessionSpec(cwd=self.tmp, command=("codex",)))
-        self.host.write("m", b"\x1b[<64;10;5M")
-        self.host.write("m", b"\x1b[<64;10;5Mx")
+        session = self._codex_session()
+        session.write(b"\x1b[<64;10;5M")
+        session.write(b"\x1b[<64;10;5Mx")
         self.assertEqual(self.cancelled, ["ar-m"])
+
+
+def _tmux_outcome(
+    outcome: BaseException | subprocess.CompletedProcess[str],
+) -> Callable[..., subprocess.CompletedProcess[str]]:
+    """A ``subprocess.run`` stand-in that either raises or answers, from one table."""
+
+    def run(*_args: object, **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        if isinstance(outcome, BaseException):
+            raise outcome
+        return outcome
+
+    return run
 
 
 class TerminalInputReadinessTests(unittest.TestCase):
@@ -690,10 +685,108 @@ class TerminalInputReadinessTests(unittest.TestCase):
             with self.subTest(stdout=stdout):
                 completed = subprocess.CompletedProcess([], 0, stdout=stdout)
                 with mock.patch(
-                    "agents_remember.serving.terminal.subprocess.run",
+                    "agents_remember.serving.terminal_tmux.subprocess.run",
                     return_value=completed,
                 ):
                     self.assertIs(pane_in_mode("ar-worker"), expected)
+
+    def test_a_pane_whose_mode_cannot_be_read_is_unknown_and_never_assumed_ready(self) -> None:
+        """ "Could not ask" is not "not in copy mode", and the difference is keystrokes.
+
+        Input sent to a pane in copy mode is swallowed by tmux's copy-mode key table rather
+        than reaching the harness. So an unreadable probe answers ``None``, and
+        ``ensure_terminal_input_ready`` turns that into a refusal -- returning ``False``
+        here instead would let the browser type into a pane that may be scrolled back.
+        """
+        outcomes: tuple[tuple[str, BaseException | subprocess.CompletedProcess[str]], ...] = (
+            ("tmux is not there", OSError("no tmux")),
+            ("tmux timed out", subprocess.TimeoutExpired(["tmux"], 5.0)),
+            ("tmux exited non-zero", subprocess.CompletedProcess([], 1, stdout="")),
+        )
+        for label, outcome in outcomes:
+            with (
+                self.subTest(label),
+                mock.patch(
+                    "agents_remember.serving.terminal_tmux.subprocess.run",
+                    side_effect=_tmux_outcome(outcome),
+                ),
+            ):
+                self.assertIsNone(pane_in_mode("ar-worker"))
+                self.assertFalse(ensure_terminal_input_ready("ar-worker"))
+
+    def test_a_pane_that_is_not_in_copy_mode_is_ready_without_being_cancelled(self) -> None:
+        # The cancel is a real keystroke into the pane's key table. Sending one to a pane
+        # that is not in copy mode is not free, and re-probing after it costs a second
+        # tmux round trip on the input path of every keystroke frame.
+        cancelled: list[str] = []
+        probes: list[str] = []
+
+        def probe(name: str) -> bool:
+            probes.append(name)
+            return False
+
+        self.assertTrue(
+            ensure_terminal_input_ready(
+                "ar-worker", mode_probe=probe, mode_canceller=cancelled.append
+            )
+        )
+        self.assertEqual(cancelled, [])
+        self.assertEqual(probes, ["ar-worker"])
+
+    def test_a_probe_that_could_not_run_is_not_evidence_that_the_pane_is_gone(self) -> None:
+        """The evidence kind is what keeps a tmux hiccup from retiring a live session.
+
+        ``has-session`` exits non-zero both for "no such session" and for "tmux could not
+        answer". Collapsing them would make a transient failure look like a dead pane, and
+        the liveness sweep retires on ``pane-gone``.
+        """
+        for outcome in (OSError("no tmux"), subprocess.SubprocessError("broken pipe")):
+            with self.subTest(outcome=type(outcome).__name__):
+                with mock.patch(
+                    "agents_remember.serving.terminal_tmux.subprocess.run", side_effect=outcome
+                ):
+                    result = tmux_probe_session("ar-worker")
+                self.assertEqual((result.exists, result.evidence), (False, "tmux-command-failed"))
+
+        # The contrast: tmux DID answer, and said the session is not there.
+        with mock.patch(
+            "agents_remember.serving.terminal_tmux.subprocess.run",
+            return_value=subprocess.CompletedProcess(
+                [], 1, stdout="", stderr="can't find session: ar-worker"
+            ),
+        ):
+            gone = tmux_probe_session("ar-worker")
+        self.assertEqual((gone.exists, gone.evidence), (False, "pane-gone"))
+
+    def test_a_spawn_that_never_started_leaves_no_pty_fd_behind(self) -> None:
+        """A failed spawn must not leak the master fd; the dashboard opens one per attach.
+
+        `finally` closes the slave whatever happens, but the master is the long-lived half
+        and only the failure path closes it. A leak here is invisible until the serving
+        process runs out of descriptors and every later terminal fails to open.
+        """
+        opened: list[tuple[int, int]] = []
+        real_openpty = os.openpty
+
+        def recording_openpty() -> tuple[int, int]:
+            pair = real_openpty()
+            opened.append(pair)
+            return pair
+
+        with (
+            mock.patch("agents_remember.serving.terminal_pty.pty.openpty", recording_openpty),
+            mock.patch(
+                "agents_remember.serving.terminal_pty.subprocess.Popen",
+                side_effect=FileNotFoundError("no such executable"),
+            ),
+            self.assertRaises(FileNotFoundError),
+        ):
+            spawn_pty(("definitely-not-an-executable",), Path.cwd())
+
+        self.assertEqual(len(opened), 1)
+        for fd in opened[0]:
+            with self.assertRaises(OSError):
+                os.fstat(fd)
 
 
 @unittest.skipUnless(
@@ -704,7 +797,7 @@ class TerminalHostTmuxIntegrationTests(unittest.TestCase):
     """The full default spawner: a real tmux-wrapped PTY running a marker-printing child."""
 
     def setUp(self) -> None:
-        self.host = TerminalHost()  # real _spawn_pty -> real tmux
+        self.host = TerminalHost()  # real spawn_pty -> real tmux
         self.tmp = Path(tempfile.mkdtemp())
         self.tmux_name: str | None = None
 
@@ -717,7 +810,7 @@ class TerminalHostTmuxIntegrationTests(unittest.TestCase):
                     check=False,
                     capture_output=True,
                     timeout=5,
-                    env=_tmux_client_environment(os.environ),
+                    env=tmux_client_environment(os.environ),
                 )
 
     def test_real_tmux_ensure_and_attach_ignore_launcher_identity(self) -> None:
@@ -746,12 +839,9 @@ class TerminalHostTmuxIntegrationTests(unittest.TestCase):
             )
         self.tmux_name = binding.tmux_name
         try:
-            self.assertIn(
-                b"AR_READY_MARKER",
-                _read_until_session(self.host, session, b"AR_READY_MARKER"),
-            )
+            self.assertIn(b"AR_READY_MARKER", _read_until(session, b"AR_READY_MARKER"))
         finally:
-            self.host.close_session(session)
+            session.close()
 
 
 def fcntl_ioctl_getwinsize(fd: int) -> bytes:

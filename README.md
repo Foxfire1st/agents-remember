@@ -243,6 +243,14 @@ before creating an Agents Remember code commit even when hooks are not
 configured. See CONTRIBUTING.md for the tier table and the staged-content
 stash contract.
 
+Every rail prints one provenance line naming its actual input, resolved config,
+and unit count. A manual dirty-tree run also lists non-ignored untracked files
+inside source, test, script, generated-copy, and dashboard roots as **not in the
+index/diff measurement**; it reports them without staging or stashing them. The
+pre-push hook forwards Git's ref updates for context but still says that the
+wrapper reads current-checkout bytes at index-known paths and a base-to-working-
+tree diff. It never claims that this is a checkout of the pushed commit range.
+
 The installed runtime lives in `ar-coordination/` — by default `<workspace>/ar-coordination/`,
 inside the workspace (never your home directory) — not in the source checkout. The
 `c-13-install-and-onboard` skill shows this and every other install path as a workspace-first
