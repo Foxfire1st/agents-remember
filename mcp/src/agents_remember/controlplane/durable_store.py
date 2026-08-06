@@ -371,6 +371,15 @@ def exclusive_access(log_path: Path, ownership: StoreOwnership) -> Iterator[None
 
     The nested acquisition returns BEFORE either lock, so the outermost frame on a thread owns
     the mutex for the whole nest and a re-entrant call cannot queue behind itself.
+
+    ONE ORDER ACROSS STORES, TOO: no thread may hold one store's lock --
+    mutex, RLock, or flock -- while acquiring another store's lock. Evidence a transaction
+    needs from a second store is gathered BEFORE entering this one, or the side effect runs
+    AFTER leaving it; never nested. The two nestings this rule now forbids were each locally
+    documented (the liveness sweep's catalog batch across the synchronizer's inbox/gate locks;
+    the supervisor's inbox transaction across a catalog read) and their unexamined composition
+    deadlocked the serving daemon in production on 2026-08-05 -- an ABBA no single store's own
+    ordering rule could see, because each store's order was internally correct.
     """
     path = lock_path_for(log_path)
     path.parent.mkdir(parents=True, exist_ok=True)

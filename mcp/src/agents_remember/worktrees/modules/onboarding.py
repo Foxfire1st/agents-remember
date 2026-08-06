@@ -25,6 +25,7 @@ from agents_remember.worktrees.modules.git import (
     commit_text_or_none,
     committed_changed_paths,
     require_git,
+    run_git,
 )
 from agents_remember.worktrees.modules.models import (
     PATH_SAMPLE_LIMIT,
@@ -780,6 +781,75 @@ def refresh_onboarding_metadata_for_context(
             )
         filesystem.write_text(onboarding_path, text, encoding="utf-8")
         refreshed.append(item)
+    refreshed.extend(
+        _refresh_regenerated_documents(
+            context,
+            memory_tree=memory_tree,
+            verified_commit=verified_commit,
+            verified_date=verified_date,
+            already={item["onboarding_file"] for item in refreshed},
+        )
+    )
+    return refreshed
+
+
+def _refresh_regenerated_documents(
+    context,
+    *,
+    memory_tree: Path | None,
+    verified_commit: str,
+    verified_date: str,
+    already: set[str],
+) -> list[dict[str, str]]:
+    """Stamp the task's regenerated citation documents to the new commit as well.
+
+    The citation gate clears a changed claim by making its citation CURRENT (the fixer
+    regenerates the range against the working tree), so a document can be fully reviewed and
+    repaired without its own source file changing. Those documents are outside the
+    changed-source plan; stamping only the plan would leave their fresh ranges pinned to a
+    commit whose constructs no longer exist. Any onboarding document the task touched (memory
+    worktree diff) that carries verification metadata advances here, except route overviews and
+    entity catalogs, which have their own refresh passes.
+    """
+    if memory_tree is None:
+        return []
+    onboarding_root = context.onboarding_root
+    refreshed: list[dict[str, str]] = []
+    status = run_git(memory_tree, ["status", "--porcelain"])
+    if status.returncode != 0:
+        return []
+    # Porcelain is "XY<space>path" and the leading column is significant: read raw stdout
+    # (a stripped runner would eat the first entry's leading space and drop that file).
+    for line in status.stdout.splitlines():
+        relative = line[3:]
+        if not relative.startswith("onboarding/"):
+            continue
+        relative = relative[len("onboarding/") :]
+        if (
+            not relative.endswith(".md")
+            or relative.endswith(("overview.md", "entities.md", "memory.md"))
+            or not (onboarding_root / relative).exists()
+        ):
+            continue
+        document = onboarding_root / relative
+        if document.as_posix() in already:
+            continue
+        text = filesystem.read_text(document, encoding="utf-8")
+        if "lastVerifiedCommitHash" not in text:
+            continue
+        text, hash_found = onboarding_metadata_row(
+            text, "lastVerifiedCommitHash", verified_commit, code=True
+        )
+        text, date_found = onboarding_metadata_row(text, "lastVerifiedCommitDate", verified_date)
+        if not hash_found or not date_found:
+            continue
+        filesystem.write_text(document, text, encoding="utf-8")
+        refreshed.append(
+            {
+                "source_path": "",
+                "onboarding_file": document.as_posix(),
+            }
+        )
     return refreshed
 
 

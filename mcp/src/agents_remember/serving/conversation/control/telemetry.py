@@ -48,7 +48,7 @@ async def conversation_telemetry(
     """Project the exact session's evidence-bound telemetry."""
 
     del authorization  # resolution is the route's proof; the projection needs no claim
-    entry = service.resolve_entry(ar_session_id)
+    entry = await service.resolve_entry(ar_session_id)
     epoch = await service.verify_epoch(entry, expected_bridge_epoch)
     snapshot = await service.live_snapshot(entry)
     identity = service.build_identity(entry, bridge_epoch=epoch, snapshot=snapshot)

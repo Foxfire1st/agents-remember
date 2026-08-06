@@ -23,8 +23,11 @@ reports are the most important artifacts in the system: only this seat sees the 
 
 In dashboard-owned sessions, this seat stays an orchestrator for its lifetime. A pasted brief for
 architect, strategist, manager, worker, reviewer, or designer is refused and escalated to the
-architect or owning seat via the inbox. Roles expand horizontally into new chats; sub-agents drill
-vertically inside this seat for bounded analysis. A spawned orchestrator never absorbs another
+architect or owning seat via the inbox. Roles expand horizontally into new chats
+(`spawn_agent_session` with the target role) — a role seat is never a native sub-agent of this
+one, and this seat uses no native sub-agents: bounded analysis runs in this seat's own loop or
+dispatches as a proper role seat (system-specialist, strategist), never a shadow channel beside
+the machinery this seat exists to operate. A spawned orchestrator never absorbs another
 role brief and never performs architect/developer-facing hat-collapse.
 
 ## Hosted Role Dispatch
@@ -180,8 +183,9 @@ the design: run the bulwark check against the portfolio and the past before disp
 **Entry:** designed masters exist and coherence/order is the question, or the architect dispatches
 "orchestrate these."
 
-- **Route-coherence scan** across the set (route indexes · onboarding · grepai · cgc); fan-out
-  sub-agents write durable reports (`../templates/impact-analysis.md`).
+- **Route-coherence scan** across the set (route indexes · onboarding · grepai · cgc); the scan
+  runs in this seat's own loop or a dispatched system-specialist's, writing durable reports
+  (`../templates/impact-analysis.md`).
 - **Integrity bulwark** — planned-vs-planned AND planned-vs-past, every time.
 - **Reshape** — foundation-master extraction; leaf **moves** for planning-status leaves (real
   moves, never tombstones), each with decision-log entries on both masters. **The sub-task list is
@@ -266,7 +270,9 @@ architect. This spawned backend seat does not run flat hat-collapse (see The Hat
 subordinate execution without repeated developer formality. Managers may close out and integrate
 their leaves; this seat may decide manager handovers, close out direct work when it wears the
 manager/worker hat, finalize/cleanup subordinate edges, and integrate completed masters into the
-super branch under the accepted-series authority. Run the preview/checks and record the authority
+super branch under the accepted-series authority. Run the preview/checks (a code commit's quality
+evidence is the resolved `system/tools.md` wrapper, which closeout runs at the gate — relay its
+result with the edge) and record the authority
 source in the intent note or decision log; do not stop merely because the next operation creates a
 commit, advances a lifecycle, cleans up a spent worktree, or fast-forwards a subordinate branch.
 Stop for the developer only when the work reaches the final completed super branch / PR-carryover
@@ -294,7 +300,8 @@ handover you cannot honestly decide escalates to the architect as a decision ite
 
 **Integration duty (master → super) — the worktree moment.** Per completed master:
 
-1. Consume the handover packet: branch ref, change-set summary, checks, verdict, carry-over
+1. Consume the handover packet: branch ref, change-set summary, checks (the resolved
+   `system/tools.md` evidence), verdict, carry-over
    state, risks, next dependencies.
 2. Check the verdict (pass/accepted proceeds; block → fix leaves first).
 3. Open the orchestrator integration worktree **sourced from the current super branch**;
@@ -374,31 +381,37 @@ place.
 
 If a run is small enough for one owner seat, the architect may perform these backend duties under
 `roles/architect.md`. If this orchestrator needs another role, it spawns a new role chat
-horizontally. Fan-out sub-agents may read/search and **write durable reports**; **every AR state
-mutation stays in this seat's main loop** (see Sub-Agent Fan-Out below).
+horizontally (`spawn_agent_session` with the target role) — this seat uses no native sub-agents
+(see No Native Sub-Agents below); analyses run in its own loop or as dispatched role seats, and
+**every AR state mutation stays in this seat's main loop**.
 
-## Sub-Agent Fan-Out (capability doctrine — any harness that has it)
+## No Native Sub-Agents — role seats only (doctrine, ruled 2026-08-05)
 
-Not a vendor feature: whatever the harness calls its sub-agents, the doctrine is the same — and a
-harness without the ability has two fallbacks: **analyses stay sequential in the main loop**, or
-**spawn a ROLE seat through agents-remember itself** (`spawn_agent_session` with that role's
-`AR_SPAWN_ROLE`, as a chat — no leaf attachment required). The framework spawn is for ROLE seats,
-never for anonymous analyses: an env-less spawned chat has no role and no brief, so the router
-would misroute it as an orchestrator. The framework's own spawn is the harness-independent
-fan-out, which is why spawn-first seats (like the strategist) work from
-ANY harness. Like a database management system, the framework encodes the behavior reliably
-regardless of the engine underneath.
+Orchestration seats (this one, the manager) never use harness-native sub-agents: every agent this
+seat's work needs is either its own main loop or a **role seat spawned through agents-remember
+itself** (`spawn_agent_session` with that role's `AR_SPAWN_ROLE`, as a chat — no leaf attachment
+required). A native sub-agent beside the orchestration machinery is a shadow channel: no brief,
+no leaf, no turn report, no supervision — exactly what the spawned-seat protocol exists to
+provide. Native sub-agent fan-out is the hands-on seats' channel (worker, reviewer, curator, and
+the architect only when it builds solo under the worker discipline): read/search/report for
+seats that produce code or memory artifacts, never for seats that operate orchestration.
 
-- Dispatch each fan-out analysis (route-coherence scan, conflict/regression scan, per-design
-  adversarial pass) as a sub-agent whose task is to **write a templated durable report**
-  (`../templates/impact-analysis.md`, `../templates/onboarding-coherency.md`) and return a compact
-  summary. The report is the artifact of record; a sub-agent that is the sole holder of a finding
-  is a bug.
-- **AR state mutations stay in this seat's main loop** — a sub-agent never calls `task_doc`,
-  gates, `spawn_agent_session`, or closeout.
-- Fan-out is capped by settings.json `orchestration.concurrency.maxSubAgents`.
-- Prefer continuing an existing sub-agent for a follow-up on the same analysis, so its durable
-  report accretes rather than fragmenting across files.
+- Analyses that once were fan-out (route-coherence scan, conflict/regression scan, per-design
+  adversarial pass) run **sequentially in this seat's own loop** or dispatch as
+  system-specialist/strategist seats, each writing the templated durable report
+  (`../templates/impact-analysis.md`, `../templates/onboarding-coherency.md`) and returning a
+  compact summary. The report is the artifact of record; a finding held only in a chat is a bug.
+- An env-less spawned chat has no role and no brief, so the router would misroute it as an
+  orchestrator: every spawn carries the target role's `AR_SPAWN_ROLE`. The framework's own spawn
+  is the harness-independent dispatch, which is why spawn-first seats (like the strategist) work
+  from ANY harness. Like a database management system, the framework encodes the behavior
+  reliably regardless of the engine underneath.
+- **AR state mutations stay in this seat's main loop** — no other agent calls `task_doc`, gates,
+  `spawn_agent_session`, or closeout on this seat's behalf.
+- The settings.json `orchestration.concurrency.maxSubAgents` cap bounds the hands-on seats'
+  fan-out, not this seat's dispatches.
+- Prefer continuing an existing analysis seat for a follow-up on the same analysis, so its
+  durable report accretes rather than fragmenting across files.
 
 ## The Spirit Test — This Seat Only
 
@@ -416,9 +429,10 @@ task, fill small blanks, escalate real deltas).
 - **Decision-log entries** for every spirit-test act-alone, every leaf move and renumber map
   (both masters where applicable), every reopen, every conflict-mode choice, every integration
   edge.
-- **Sub-agent durable reports** (`../templates/impact-analysis.md`,
-  `../templates/onboarding-coherency.md`); sub-agents never call `task_doc`, gates,
-  `spawn_agent_session`, or closeout.
+- **Analysis durable reports** (`../templates/impact-analysis.md`,
+  `../templates/onboarding-coherency.md`) — written by this seat's own loop or a dispatched role
+  seat; no anonymous agent ever holds a finding alone, and no other agent calls `task_doc`,
+  gates, `spawn_agent_session`, or closeout on this seat's behalf.
 - **The adopted orchestration task** (the strategist drafts when approved; on a sanctioned skip,
   this seat authors it from the developer-ruled plan; either way this seat adopts it with the
   adoption decision-log entry) before any orchestrated run.

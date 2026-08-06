@@ -252,6 +252,190 @@ class CodeProvenanceTests(ChangeDetectionCase):
         self.assertEqual(self.codes(result), ["citation_provenance_invalid"])
         self.assertIn("did not exist", result["findings"][0]["message"])  # type: ignore[index]
 
+    def test_a_construct_added_after_the_stamp_surfaces_when_current(self) -> None:
+        """File existed at the stamp, construct added later: the absent-at-stamp change rule."""
+        self.tree.code_file("pkg/subject.py", "subject = 1\n")
+        baseline = self.tree.commit(self.tree.code, "baseline")
+        self.tree.code_file("pkg/subject.py", "subject = 1\n\n\ndef added():\n    return 2\n")
+        self.tree.memory_file("system/rules.md", "x\n")
+        memory_commit = self.tree.commit(self.tree.memory, "memory baseline")
+        self.tree.map_memory(baseline, memory_commit)
+        self.tree.card(
+            "pkg/subject.py",
+            ["| The new helper. | `added` | pkg/subject.py:4-5 |"],
+            last_verified=baseline,
+        )
+
+        result = self.tree.run()
+
+        self.assert_clean(result)
+        surfaced = result["surfacedFindings"][0]  # type: ignore[index]
+        self.assertEqual(surfaced["code"], "citation_claim_reopened")  # type: ignore[index]
+        self.assertIn("did not exist", surfaced["message"])  # type: ignore[index]
+
+    def test_a_construct_added_after_the_stamp_is_enforced_when_stale(self) -> None:
+        self.tree.code_file("pkg/subject.py", "subject = 1\n")
+        baseline = self.tree.commit(self.tree.code, "baseline")
+        self.tree.code_file("pkg/subject.py", "subject = 1\n\n\ndef added():\n    return 2\n")
+        self.tree.memory_file("system/rules.md", "x\n")
+        memory_commit = self.tree.commit(self.tree.memory, "memory baseline")
+        self.tree.map_memory(baseline, memory_commit)
+        self.tree.card(
+            "pkg/subject.py",
+            ["| The new helper. | `added` | pkg/subject.py:1-1 |"],
+            last_verified=baseline,
+        )
+
+        result = self.tree.run()
+
+        self.assertEqual(self.codes(result), ["citation_claim_reopened"])
+        self.assertIn("did not exist", result["findings"][0]["message"])  # type: ignore[index]
+
+    def test_a_construct_added_after_the_stamp_and_ambiguous_now_is_invalid(self) -> None:
+        self.tree.code_file("pkg/subject.py", "subject = 1\n")
+        baseline = self.tree.commit(self.tree.code, "baseline")
+        self.tree.code_file(
+            "pkg/subject.py",
+            "subject = 1\nadded = 1\n\n\ndef added():\n    return 2\n",
+        )
+        self.tree.memory_file("system/rules.md", "x\n")
+        memory_commit = self.tree.commit(self.tree.memory, "memory baseline")
+        self.tree.map_memory(baseline, memory_commit)
+        self.tree.card(
+            "pkg/subject.py",
+            ["| The new helper. | `added` | pkg/subject.py:4-5 |"],
+            last_verified=baseline,
+        )
+
+        result = self.tree.run()
+
+        self.assertEqual(self.codes(result), ["citation_provenance_invalid"])
+        self.assertIn("no exact candidate is unique", result["findings"][0]["message"])  # type: ignore[index]
+
+    def test_ambiguous_provenance_in_an_untouched_document_is_debt(self) -> None:
+        self.tree.code_file("pkg/dupes.py", "value = 1\n\n\ndef duplicate():\n    return 1\n")
+        baseline = self.tree.commit(self.tree.code, "baseline")
+        self.tree.code_file(
+            "pkg/dupes.py", "value = 1\nduplicate = 0\n\n\ndef duplicate():\n    return 1\n"
+        )
+        self.tree.memory_file("system/rules.md", "x\n")
+        memory_commit = self.tree.commit(self.tree.memory, "memory baseline")
+        self.tree.map_memory(baseline, memory_commit)
+        self.tree.card(
+            "pkg/dupes.py",
+            ["| The helper. | `duplicate` | pkg/dupes.py:1-2 |"],
+            last_verified=baseline,
+        )
+        self.tree.commit(self.tree.memory, "commit the card: the document is untouched now")
+
+        result = self.tree.run()
+
+        self.assert_clean(result)
+        self.assertEqual(len(result["debtFindings"]), 1)  # type: ignore[arg-type]
+        self.assertEqual(result["debtFindings"][0]["code"], "citation_provenance_invalid")  # type: ignore[index]
+
+    def test_ambiguous_provenance_in_a_touched_document_stays_enforced(self) -> None:
+        self.tree.code_file("pkg/dupes.py", "value = 1\n\n\ndef duplicate():\n    return 1\n")
+        baseline = self.tree.commit(self.tree.code, "baseline")
+        self.tree.code_file(
+            "pkg/dupes.py", "value = 1\nduplicate = 0\n\n\ndef duplicate():\n    return 1\n"
+        )
+        self.tree.memory_file("system/rules.md", "x\n")
+        memory_commit = self.tree.commit(self.tree.memory, "memory baseline")
+        self.tree.map_memory(baseline, memory_commit)
+        self.tree.card(
+            "pkg/dupes.py",
+            ["| The helper. | `duplicate` | pkg/dupes.py:1-2 |"],
+            last_verified=baseline,
+        )
+
+        result = self.tree.run()
+
+        self.assertEqual(self.codes(result), ["citation_provenance_invalid"])
+
+    def test_demote_preexisting_debt_holds_everything_enforced_without_a_git_repo(self) -> None:
+        findings = [
+            claim_reopen.QualityFinding(
+                check=claim_reopen.CHECK_NAME,
+                path="a.md",
+                line=1,
+                severity="error",
+                code=claim_reopen.INVALID,
+                message="ambiguous",
+            )
+        ]
+        with tempfile.TemporaryDirectory() as not_a_repo:
+            enforced, debt = claim_reopen._demote_preexisting_provenance_debt(
+                findings, Path(not_a_repo)
+            )
+        self.assertEqual(len(enforced), 1)
+        self.assertEqual(debt, [])
+
+    def test_demote_preexisting_debt_never_demotes_a_missing_stamp(self) -> None:
+        findings = [
+            claim_reopen.QualityFinding(
+                check=claim_reopen.CHECK_NAME,
+                path="a.md",
+                line=1,
+                severity="error",
+                code=claim_reopen.MISSING,
+                message="no stamp",
+            )
+        ]
+        enforced, debt = claim_reopen._demote_preexisting_provenance_debt(
+            findings, self.tree.memory
+        )
+        self.assertEqual(len(enforced), 1)
+        self.assertEqual(debt, [])
+
+    def test_demote_preexisting_debt_follows_renames(self) -> None:
+        """A `R old -> new` porcelain row maps the demote judgement to the new path."""
+        self.tree.code_file("pkg/dupes.py", "value = 1\n\n\ndef duplicate():\n    return 1\n")
+        baseline = self.tree.commit(self.tree.code, "baseline")
+        self.tree.code_file(
+            "pkg/dupes.py", "value = 1\nduplicate = 0\n\n\ndef duplicate():\n    return 1\n"
+        )
+        self.tree.memory_file("system/rules.md", "x\n")
+        memory_commit = self.tree.commit(self.tree.memory, "memory baseline")
+        self.tree.map_memory(baseline, memory_commit)
+        self.tree.card(
+            "pkg/dupes.py",
+            ["| The helper. | `duplicate` | pkg/dupes.py:1-2 |"],
+            last_verified=baseline,
+        )
+        self.tree.commit(self.tree.memory, "track the card")
+        git(
+            self.tree.memory,
+            "mv",
+            "onboarding/pkg/dupes.py.md",
+            "onboarding/pkg/renamed.py.md",
+        )
+
+        result = self.tree.run()
+
+        self.assertEqual(self.codes(result), ["citation_provenance_invalid"])
+
+    def test_a_bogus_anchor_that_never_resolves_is_enforced(self) -> None:
+        """before==0 and now==0: the anchor resolves nowhere — stale-pointer finding, not invalid."""
+        self.tree.code_file("pkg/subject.py", "subject = 1\n")
+        baseline = self.tree.commit(self.tree.code, "baseline")
+        # The cited file changes, so the claim pays for semantic evaluation; the anchor still
+        # resolves nowhere, in either revision.
+        self.tree.code_file("pkg/subject.py", "subject = 1\nother = 2\n")
+        self.tree.memory_file("system/rules.md", "x\n")
+        memory_commit = self.tree.commit(self.tree.memory, "memory baseline")
+        self.tree.map_memory(baseline, memory_commit)
+        self.tree.card(
+            "pkg/subject.py",
+            ["| Imaginary helper. | `nonexistent_helper` | pkg/subject.py:1-1 |"],
+            last_verified=baseline,
+        )
+
+        result = self.tree.run()
+
+        self.assertEqual(self.codes(result), ["citation_claim_reopened"])
+        self.assertIn("no longer resolves", result["findings"][0]["message"])  # type: ignore[index]
+
     def test_a_parentless_commit_object_is_not_code_history(self) -> None:
         baseline = self.baseline()
         tree = git(self.tree.code, "rev-parse", f"{baseline}^{{tree}}")
@@ -309,8 +493,12 @@ class MemoryProvenanceTests(ChangeDetectionCase):
 
         result = self.tree.run()
 
-        self.assertEqual(self.codes(result), ["citation_claim_reopened"])
-        self.assertIn("memory commit", result["findings"][0]["message"])  # type: ignore[index]
+        # The construct changed AND the citation still covers it: the review surface lands in
+        # the surfaced bucket, not in enforced findings, and the memory history proves the diff.
+        self.assert_clean(result)
+        surfaced = result["surfacedFindings"][0]  # type: ignore[index]
+        self.assertEqual(surfaced["code"], "citation_claim_reopened")  # type: ignore[index]
+        self.assertIn("memory commit", surfaced["message"])  # type: ignore[index]
 
     def test_a_missing_code_to_memory_mapping_is_reported(self) -> None:
         self.tree.code_file("pkg/subject.py", "subject = 1\n")

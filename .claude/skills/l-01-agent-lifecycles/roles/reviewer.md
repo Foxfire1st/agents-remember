@@ -81,7 +81,11 @@ and make every finding traceable to a durable evidence file.
 
 1. **Completion vs task docs** — every requirement/step addressed; deltas justified in decision logs.
    (`../templates/impact-analysis.md` for the surface swept.)
-2. **Code quality** — the resolved `system/tools.md` suite (lint · typecheck · tests · complexity) and
+2. **Code quality** — the resolved `system/tools.md` suite (lint · typecheck · tests · complexity),
+   **guideline adherence** (the change set's added lines read against the memory layer's
+   `system/coding-guidelines.md`: file/function budgets, responsibility and anti-pattern rules,
+   source-comment scope, typed-boundary (DTO) rules, D1/D2/D3 — the wrapper proves none of this,
+   so this read is the only place adherence is independently verified), and
    regressions **vs the past** (route indexes, cgc, grepai — the "fixed one, broke two" surface).
 3. **Onboarding-vs-code** — changed files' sidecars updated in the same pass · drift clean · route
    overviews current. This is the paired `read_ar_files` + `memory_quality_check` + `drift_check`

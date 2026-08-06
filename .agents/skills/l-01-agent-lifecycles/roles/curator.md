@@ -79,10 +79,13 @@ state. Do not run c-12/c-05 rewiring experiments from this role.
 ### 4 — Checks And Report
 
 **Your output is checked at closeout, and you can run that check yourself now.** The manager runs
-`memory_quality_check` before the memory commit and a failure there is a closeout failure that comes
-straight back to a respawned curator. Green your own change-set first — the same shift-left the
-builder does with targeted tests. This does NOT replace the closeout gate; the commit gate stays the
-hard gate.
+`memory_quality_check` at closeout — BEFORE the code commit and the test wrapper, so a failure
+snaps in seconds — and it comes straight back to a respawned curator. Green your own change-set
+first — the same shift-left the builder does with targeted tests. Citation findings clear by
+making the citation CURRENT, never by attestation prose: regenerate the range with the fixer,
+re-anchor what no longer resolves, and re-read the claims whose constructs changed so the wording
+still holds. Skipping this does not stay hidden — the same tool is the gate. This does NOT
+replace the closeout gate; the commit gate stays the hard gate.
 
 Three tools, all scoped to THIS leaf by passing your enclosure contract path — the same
 `contract_path` the `worktree_*` verbs take. Your brief names it; it is the leaf's

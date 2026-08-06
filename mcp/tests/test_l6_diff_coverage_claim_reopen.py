@@ -75,10 +75,10 @@ class TestAnchorChange:
             [_source()],
             cast(SourceViews, FakeViews([], [])),
             dependency_sources=True,
-        ) == ([], [])
+        ) == ([], [], [])
 
     def test_non_unique_historical(self) -> None:
-        changed, invalid = anchor_change(
+        changed, surfaced, invalid = anchor_change(
             model.Anchor(kind=model.SYMBOL, text="f"),
             [_source()],
             cast(
@@ -87,19 +87,19 @@ class TestAnchorChange:
             ),
             dependency_sources=False,
         )
-        assert changed == [] and invalid and "resolved 2 times" in invalid[0]
+        assert changed == [] and surfaced == [] and invalid and "resolved 2 times" in invalid[0]
 
     def test_missing_now(self) -> None:
-        changed, _invalid = anchor_change(
+        changed, surfaced, _invalid = anchor_change(
             model.Anchor(kind=model.SYMBOL, text="f"),
             [_source()],
             cast(SourceViews, FakeViews([_candidate("a")], [])),
             dependency_sources=False,
         )
-        assert changed and "no longer resolves" in changed[0]
+        assert changed and surfaced == [] and "no longer resolves" in changed[0]
 
     def test_non_unique_now(self) -> None:
-        changed, invalid = anchor_change(
+        changed, surfaced, invalid = anchor_change(
             model.Anchor(kind=model.SYMBOL, text="f"),
             [_source()],
             cast(
@@ -108,7 +108,7 @@ class TestAnchorChange:
             ),
             dependency_sources=False,
         )
-        assert changed == [] and invalid and "resolves 2 times now" in invalid[0]
+        assert changed == [] and surfaced == [] and invalid and "resolves 2 times now" in invalid[0]
 
     def test_unchanged_and_changed(self) -> None:
         assert anchor_change(
@@ -116,13 +116,26 @@ class TestAnchorChange:
             [_source()],
             cast(SourceViews, FakeViews([_candidate("same")], [_candidate("same")])),
             dependency_sources=False,
-        ) == ([], [])
-        changed, _ = anchor_change(
+        ) == ([], [], [])
+
+    def test_changed_construct_with_current_citation_surfaces_report_only(self) -> None:
+        changed, surfaced, invalid = anchor_change(
             model.Anchor(kind=model.SYMBOL, text="f"),
             [_source()],
             cast(SourceViews, FakeViews([_candidate("old")], [_candidate("new")])),
             dependency_sources=False,
         )
+        assert changed == [] and invalid == []
+        assert surfaced and "changed structurally" in surfaced[0]
+
+    def test_changed_construct_with_stale_range_is_enforced(self) -> None:
+        changed, surfaced, invalid = anchor_change(
+            model.Anchor(kind=model.SYMBOL, text="f"),
+            [_source()],
+            cast(SourceViews, FakeViews([_candidate("old")], [_candidate("new", start=5)])),
+            dependency_sources=False,
+        )
+        assert surfaced == [] and invalid == []
         assert changed and "changed structurally" in changed[0]
 
 

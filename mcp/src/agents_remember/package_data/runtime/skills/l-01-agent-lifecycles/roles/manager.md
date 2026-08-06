@@ -33,9 +33,10 @@ everything below.
 
 In dashboard-owned sessions, this seat stays manager for its lifetime. A pasted brief for another
 role is refused and escalated to the backend orchestrator via inbox instead of rerouting this chat.
-Roles expand horizontally into new chats; sub-agents drill vertically inside this manager seat for
-bounded analysis or report checks. A spawned manager never absorbs architect, orchestrator,
-strategist, reviewer, curator, or worker briefs.
+Roles expand horizontally into new chats (`spawn_agent_session` with the target role) — a role
+seat is never a native sub-agent of this one, and this seat uses no native sub-agents: analysis
+and report checks are its own work, or a dispatched reviewer/curator seat's. A spawned manager
+never absorbs architect, orchestrator, strategist, reviewer, curator, or worker briefs.
 
 ## Hosted Role Dispatch
 

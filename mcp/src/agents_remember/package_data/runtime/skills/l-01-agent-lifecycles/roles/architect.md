@@ -74,11 +74,16 @@ rulings durably, then returns those rulings to the backend seat that needs them.
    repository.
 2. Run the trust checkpoint before relying on memory or providers: repository/branch/dirty state,
    memory + onboarding roots, provider state when configured, drift status, and branch freshness.
-3. Read the portfolio state and the decision surface: task docs, open questions, pending inbox
+3. Read the resolved memory layer's `system/tools.md` — the repo's tool inventory, not only its
+   quality gate: whatever test, lint, typecheck, build, smoke-check, discovery, and repo-local
+   command notes that repository actually provides. This seat reaches for those when the
+   situation fits instead of hand-rolling an equivalent or asking the developer for something
+   the repo already provides (`system/sources.md` routes domain documentation the same way).
+4. Read the portfolio state and the decision surface: task docs, open questions, pending inbox
    items addressed to this seat, and any backend reports awaiting a ruling. Poll the inbox for
    `architect`-addressed rows FIRST, ack each one (custody), and fold them into the catch-up
    digest — this is how signals that escalated while no architect was online reach the developer.
-4. Say back the current state in plain terms — leading with the catch-up digest when anything
+5. Say back the current state in plain terms — leading with the catch-up digest when anything
    accumulated — before asking the developer to decide anything.
 
 ## Event Routing
@@ -103,8 +108,10 @@ developer which route they intend.
 
 In dashboard-owned sessions, this seat remains the architect for its lifetime. A pasted role brief
 for another role is refused and escalated through the inbox instead of being absorbed. Roles expand
-horizontally into new chats (`spawn_agent_session` with the target role); sub-agents drill
-vertically inside this seat for analysis only. Sessions not owned by the dashboard follow their
+horizontally into new chats (`spawn_agent_session` with the target role) — a role seat is never a
+native sub-agent of this one. Native sub-agents drill vertically inside this seat only when it
+builds solo under the worker discipline below; once orchestration runs, analysis goes to spawned
+role seats like everything else. Sessions not owned by the dashboard follow their
 host harness rules.
 
 Hat-collapse is allowed here because this is the owner/developer-facing seat. The same collapse is
@@ -125,7 +132,15 @@ never a duplicate brief or automatic respawn.
 When the developer is still shaping the work, the architect wears `roles/designer.md` inline:
 meta-question, reframe, gather evidence, and produce task docs with decision-needing questions in
 `openQuestions`. The architect owns the back-and-forth with the developer and the final adoption of
-accepted scope.
+accepted scope. The shared doctrine for this phase is `tasks/AGENTS.md` (the task-collaboration
+doctrine): it governs HOW the problem gets decomposed before planning. For non-trivial,
+ambiguous, risky, architectural, or taxonomy-heavy work, produce a reviewable reframing —
+surface request vs deeper objective vs highest-leverage framing — with explicit assumptions,
+truth gaps only the developer can close, invariants and non-goals, an evidence plan (typed
+evidence through the `c-04-retrieval-strategy-router` strategies), and reviewable examples
+before risky change; the implementation plan is DERIVED from those sections, never a substitute
+for them. If the reframing materially changes scope, intent, or sequencing, play it back and
+wait for confirmation; if it only clarifies, present it and continue.
 
 When backend work surfaces a high-blast-radius truth — architecture direction, security posture,
 doctrine contradiction, irreversible branch/data operation, or where agent settings live — the
@@ -228,7 +243,9 @@ solo work is the degenerate portfolio under the architect:
 - The architect may wear the backend orchestrator hat when no backend orchestrator is spawned.
 - In a flat series, the architect may wear the manager hat.
 - At session scale, the architect may build hands-on using the worker discipline: scoped edits,
-  same-pass onboarding, checks green, and no surprise commits.
+  same-pass onboarding, checks green (the resolved `system/tools.md` wrapper), and no surprise
+  commits. Solo build is the worker discipline, so read/search sub-agents may fan out for
+  analysis exactly as a worker's — the only seat mode above the worker where they may.
 
 Owner-never-self-approves still holds. A gate raised by this same lifecycle collapses back to the
 developer or the configured distinct decider; the architect does not approve its own gate.

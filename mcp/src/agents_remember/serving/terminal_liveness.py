@@ -82,9 +82,33 @@ class LivenessProbe:
     pane_capturer: PaneCapturer | None = None
     snapshot_reader: SnapshotReader = read_control_snapshot
     on_control_snapshot: ControlSnapshotObserver | None = None
+    # When set (the sweeps' deferred drain), the synchronizer's evidence is APPENDED here
+    # inside the catalog batch and the side effect runs after the commit; None (direct
+    # callers outside a batch -- WS attach, paste) keeps the legacy inline call. Bundled
+    # with the observer it defers, so the call signature keeps the bundled shape the
+    # four-parameter mistake taught -- rather than growing a sixth argument.
+    sync_collector: list[_PendingInteractionSync] | None = None
 
 
 DEFAULT_LIVENESS_PROBE = LivenessProbe()
+
+
+@dataclass(frozen=True)
+class _PendingInteractionSync:
+    """One hosted-interaction sync deferred to after the catalog batch commit.
+
+    The synchronizer takes the operator-inbox and gate locks, and the catalog batch (RLock +
+    flock held for the whole sweep) must never be held across another store's lock -- the
+    supervisor's reconcile takes the same inbox lock and then reads the catalog, the
+    mirror-image nesting whose ABBA deadlocked the serving daemon in production. The
+    evidence (projected entry + snapshot + prior quarantine marker) is captured inside the
+    sweep exactly as before; only the side effect moves, to just past the batch commit, still
+    on the one sweep tick ("no second hot loop").
+    """
+
+    entry: TerminalCatalogEntry
+    snapshot: AdapterSnapshot
+    previous_sync_error: str | None
 
 
 Clock = Callable[[], datetime]
@@ -130,12 +154,19 @@ class TerminalCatalogLivenessSweeper:
             # per-entry probes' read-modify-writes and the terminated-row reclamation all hit the batch's
             # in-memory buffer; the single atomic commit lands on ``batch()`` exit. Without this each of
             # the n probes re-read and rewrote the full catalog file -- O(n^2) disk work per sweep.
+            # The hosted-interaction synchronizer is NOT run inside the batch: its inbox/gate locks
+            # must never be taken under the catalog lock, so its evidence is
+            # collected here and drained by ``_run_deferred_interaction_syncs`` after the commit.
+            pending_syncs: list[_PendingInteractionSync] = []
             with self._catalog.batch():
                 observations = [
-                    self._observe_catalog_entry(entry, checked_at=moment)
+                    self._observe_catalog_entry(
+                        entry, checked_at=moment, sync_collector=pending_syncs
+                    )
                     for entry in self._catalog.list()
                 ]
                 self._catalog.compact(now=moment)
+            self._run_deferred_interaction_syncs(pending_syncs)
             if self._on_turn_state_change is not None:
                 for observation in observations:
                     if observation.turn_state_changed:
@@ -176,10 +207,15 @@ class TerminalCatalogLivenessSweeper:
             if self._starting_rate_limited(moment):
                 return self._catalog.list()
             self._last_starting_sweep_at = moment
+            pending_syncs: list[_PendingInteractionSync] = []
             with self._catalog.batch():
                 observations = [
-                    self._observe_catalog_entry(entry, checked_at=moment) for entry in starting
+                    self._observe_catalog_entry(
+                        entry, checked_at=moment, sync_collector=pending_syncs
+                    )
+                    for entry in starting
                 ]
+            self._run_deferred_interaction_syncs(pending_syncs)
             if self._on_turn_state_change is not None:
                 for observation in observations:
                     if observation.turn_state_changed:
@@ -203,13 +239,44 @@ class TerminalCatalogLivenessSweeper:
         )
 
     def _observe_catalog_entry(
-        self, entry: TerminalCatalogEntry, *, checked_at: datetime
+        self,
+        entry: TerminalCatalogEntry,
+        *,
+        checked_at: datetime,
+        sync_collector: list[_PendingInteractionSync] | None = None,
     ) -> TerminalLivenessObservation:
         if entry.status == "landed":
             return TerminalLivenessObservation(entry=entry, alive=True)
+        probe = self._probe
+        if sync_collector is not None:
+            probe = replace(probe, sync_collector=sync_collector)
         return observe_terminal_liveness(
-            self._catalog, self._host, entry, checked_at=checked_at, probe=self._probe
+            self._catalog, self._host, entry, checked_at=checked_at, probe=probe
         )
+
+    def _run_deferred_interaction_syncs(self, pending: list[_PendingInteractionSync]) -> None:
+        """Drain the hosted-interaction syncs collected during the sweep, batch already committed.
+
+        The synchronizer folds the operator-inbox and gate stores, and the
+        catalog batch lock must never be held across another store's lock (the ABBA with the
+        supervisor's lock-held reconcile that deadlocked the serving daemon twice on 2026-08-05).
+        The row is re-read before each quarantine upsert so the marker composes with the turn
+        state the batch just committed instead of clobbering it with the pre-commit snapshot;
+        the only visible cost is that a freshly-quarantined row shows its marker from the next
+        read of the catalog rather than inside this sweep's return value.
+        """
+        observer = self._probe.on_control_snapshot
+        if observer is None:
+            return
+        for item in pending:
+            current = self._catalog.get(item.entry.id) or item.entry
+            _observe_control_snapshot(
+                self._catalog,
+                current,
+                item.snapshot,
+                observer,
+                previous_sync_error=item.previous_sync_error,
+            )
 
 
 def observe_terminal_liveness(
@@ -224,19 +291,27 @@ def observe_terminal_liveness(
 
     An ALIVE harness row is queried through its exact bridge on this SAME sweep call -- no second
     hot loop. Pane classification remains visible as diagnostic detail but cannot set turn state.
+    ``probe.sync_collector`` defers the hosted-interaction synchronizer to the caller's post-batch
+    drain; ``None`` runs it inline, as direct callers outside a batch do.
     """
     session = _host_session(host, entry.id)
     if session is not None and session.is_alive:
         updated = catalog.record_liveness_probe(entry.id, alive=True, checked_at=checked_at)
         return _observe_alive(
-            catalog, updated or entry.with_liveness_success(), checked_at=checked_at, probe=probe
+            catalog,
+            updated or entry.with_liveness_success(),
+            checked_at=checked_at,
+            probe=probe,
         )
 
     tmux = _probe_tmux(host, entry.tmux_name)
     if tmux.exists:
         updated = catalog.record_liveness_probe(entry.id, alive=True, checked_at=checked_at)
         return _observe_alive(
-            catalog, updated or entry.with_liveness_success(), checked_at=checked_at, probe=probe
+            catalog,
+            updated or entry.with_liveness_success(),
+            checked_at=checked_at,
+            probe=probe,
         )
 
     updated = catalog.record_liveness_probe(
@@ -291,15 +366,23 @@ def _observe_alive(
     previous_sync_error = (entry.control_raw or {}).get("interactionSyncError")
     catalog.upsert(projected)
     if probe.on_control_snapshot is not None:
-        projected = _observe_control_snapshot(
-            catalog,
-            projected,
-            snapshot,
-            probe.on_control_snapshot,
-            previous_sync_error=previous_sync_error
-            if isinstance(previous_sync_error, str)
-            else None,
-        )
+        prior_error = previous_sync_error if isinstance(previous_sync_error, str) else None
+        if probe.sync_collector is not None:
+            # Defer the synchronizer to the caller's post-batch drain -- its
+            # inbox/gate locks must never be taken while the catalog batch lock is held.
+            probe.sync_collector.append(
+                _PendingInteractionSync(
+                    entry=projected, snapshot=snapshot, previous_sync_error=prior_error
+                )
+            )
+        else:
+            projected = _observe_control_snapshot(
+                catalog,
+                projected,
+                snapshot,
+                probe.on_control_snapshot,
+                previous_sync_error=prior_error,
+            )
     return _record_adapter_turn_state(
         catalog,
         projected,

@@ -66,11 +66,14 @@ INTEGRITY_CHECKS = (DRIFT_CHECK_NAME,)
 AVAILABLE_CHECKS = (*INTEGRITY_CHECKS, *STYLE_CHECKS)
 DEFAULT_STYLE_CHECKS = tuple(STYLE_CHECKS)
 DEFAULT_CONTEXT_CHECKS = (*INTEGRITY_CHECKS, *DEFAULT_STYLE_CHECKS)
-# Closeout is one quality gate with two temporal phases. Historical claim evidence must be
-# compared while the persisted verification stamp is still old; drift and the other style
-# rules must see the single ordinary metadata refresh. Splitting this declared check list is
-# what preserves both truths without copying or double-stamping provenance.
-BEFORE_METADATA_REFRESH_CHECKS = (claim_reopen.CHECK_NAME,)
+# Closeout's citation gate runs before the code commit and the strict test wrapper: the
+# citation checks are working-tree semantics (pointer validity plus the construct-diff review
+# surface), so they need no commit to clear, and a failure here rejects in seconds instead of
+# after the expensive suite. The curator runs the same `memory_quality_check` during the leaf;
+# the gate is its fallback, so findings here are the exception, not the rule. The post-commit
+# phase keeps the remaining checks (drift, document shape, history order) as the sanity pass
+# over the single ordinary metadata refresh.
+BEFORE_METADATA_REFRESH_CHECKS = (range_resolution.CHECK_NAME, claim_reopen.CHECK_NAME)
 AFTER_METADATA_REFRESH_CHECKS = tuple(
     check for check in DEFAULT_CONTEXT_CHECKS if check not in BEFORE_METADATA_REFRESH_CHECKS
 )

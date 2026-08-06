@@ -43,6 +43,13 @@ manager -> builder -> reviewer -> curator chain: builder code + reviewer verdict
 Leaf spec: `<leaf-doc-path>` (read it first). <One-paragraph task statement: the bug/feature, the
 files involved, the invariants that must hold, what NOT to touch.>
 
+## Coding guidelines (read before your first edit)
+`<memory-worktree-path>/system/coding-guidelines.md` — your diff is written against it: file and
+function budgets, responsibility rules, source-comment scope (no task/leaf ids in shipped
+comments), typed boundary parameters, D1/D2/D3 stability. Green wrapper rails prove none of this.
+Name any guideline finding or plan conflict in your turn report; a contradiction you hide is a
+verdict finding, not a style note.
+
 ## Checks (green before you report)
 - Focused: <lint/typecheck/tests over changed paths, exact commands>.
 - Full: <the resolved system/tools.md wrapper command> — must exit 0.

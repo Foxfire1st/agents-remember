@@ -1206,12 +1206,22 @@ def run_supervisor_sweep(ctx: SupervisorContext, *, now: datetime) -> Supervisor
     # anything for redelivery. The existing TTL/cap compaction remains the fallback in this same
     # transaction. Holding the lock through resolve+compact makes a concurrent consume authoritative.
     reclamation: InboxReclamationPlan | None = None
+    # The catalog snapshot is fetched BEFORE the inbox lock is taken, not inside
+    # the reconcile callback. The lock-held transaction itself (fold -> resolve -> compact) is
+    # untouched, but no thread may hold one store's lock while acquiring another's -- the
+    # liveness sweep held the catalog batch lock while reaching for the inbox lock, the mirror
+    # image of this nesting, and the ABBA deadlocked the serving daemon twice on 2026-08-05.
+    # The staleness this accepts is one-directional and benign: a subject that terminates after
+    # this snapshot reads as non-terminated and is KEPT this sweep (never a false resolve), the
+    # tmux snapshot inside the callback is still fresh and fail-closed, and the supervisor is
+    # level-triggered, so a kept row is simply re-judged on the next sweep.
+    catalog_entries = ctx.catalog.list(include_terminated=True)
 
     def reconcile(current: dict[str, OperatorInboxEntry]) -> dict[str, str]:
         nonlocal reclamation
         reclamation = plan_confirmed_gone_reclamation(
             current,
-            catalog_entries=ctx.catalog.list(include_terminated=True),
+            catalog_entries=catalog_entries,
             snapshotter=ctx.tmux_name_snapshotter,
         )
         return dict(reclamation.resolve_reasons)

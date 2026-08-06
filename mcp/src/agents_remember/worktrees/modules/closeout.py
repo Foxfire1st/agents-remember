@@ -625,18 +625,23 @@ def _run_memory_quality_phase(context, checks: tuple[str, ...]) -> dict[str, Any
 def _combined_memory_quality(
     before_refresh: dict[str, Any], after_refresh: dict[str, Any]
 ) -> dict[str, Any]:
-    """One official closeout gate, reported after both temporal phases pass."""
+    """One official closeout gate, reported after both temporal phases pass.
+
+    The before phase may be empty: claim evidence is only comparable once the commit it must
+    be compared against exists, so phases with no declared checks contribute no result at all.
+    """
     report_only_sample = [
-        *before_refresh["reportOnlySample"],
+        *before_refresh.get("reportOnlySample", []),
         *after_refresh["reportOnlySample"],
     ][:50]
     return {
         "ok": True,
-        "checks": {**before_refresh["checks"], **after_refresh["checks"]},
-        "findingCount": before_refresh["findingCount"] + after_refresh["findingCount"],
-        "findings": [*before_refresh["findings"], *after_refresh["findings"]],
+        "checks": {**before_refresh.get("checks", {}), **after_refresh["checks"]},
+        "findingCount": before_refresh.get("findingCount", 0) + after_refresh["findingCount"],
+        "findings": [*before_refresh.get("findings", []), *after_refresh["findings"]],
         "reportOnlyFindingCount": (
-            before_refresh["reportOnlyFindingCount"] + after_refresh["reportOnlyFindingCount"]
+            before_refresh.get("reportOnlyFindingCount", 0)
+            + after_refresh["reportOnlyFindingCount"]
         ),
         "reportOnlySample": report_only_sample,
         "reportOnlySampleCount": len(report_only_sample),
@@ -952,14 +957,17 @@ def closeout_result(args: WorktreeArgs) -> WorktreeCommandResult:
         code_would_commit=code_would_commit,
         diff_base=contract.code_base_commit,
     )
-    if requires_strict_code_quality(contract.code_worktree, code_would_commit=code_would_commit):
-        code_quality_gate = _gate_staged_code(
-            contract.code_worktree, diff_base=contract.code_base_commit
-        )
+    # The citation gate is working-tree semantics and rejects in seconds, so it runs BEFORE the
+    # expensive wrapper and the code commit: the curator clears it during the leaf with the same
+    # memory_quality_check, and a failure here is the exception, not the rule.
     memory_quality_before_refresh: dict[str, Any] = {}
     if contract.memory_mode == "external":
         memory_quality_before_refresh = _run_memory_quality_phase(
             _closeout_contract_context(contract), BEFORE_METADATA_REFRESH_CHECKS
+        )
+    if requires_strict_code_quality(contract.code_worktree, code_would_commit=code_would_commit):
+        code_quality_gate = _gate_staged_code(
+            contract.code_worktree, diff_base=contract.code_base_commit
         )
     # THE CLAIM, and it goes exactly here: the last line before the first irreversible act.
     # Everything above only reads or touches the index of the task's own disposable worktree, so a

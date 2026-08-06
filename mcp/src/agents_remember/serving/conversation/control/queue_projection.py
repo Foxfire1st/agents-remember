@@ -53,7 +53,7 @@ async def operation_queue(
 ) -> OperationQueueProjection:
     """The complete retained live queue; never a body from another source."""
 
-    entry = service.resolve_entry(ar_session_id)
+    entry = await service.resolve_entry(ar_session_id)
     epoch = await service.verify_epoch(entry, expected_bridge_epoch)
     channel = service.channel(ar_session_id, epoch)
     items = await service.read_full_timeline(entry, expected_bridge_epoch=epoch)

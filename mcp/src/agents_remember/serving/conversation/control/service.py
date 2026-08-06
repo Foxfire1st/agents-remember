@@ -288,8 +288,15 @@ class ConversationControlService:
         for key in [key for key in self._channels if key[0] == ar_session_id]:
             del self._channels[key]
 
-    def resolve_entry(self, ar_session_id: str) -> TerminalCatalogEntry:
-        return resolve_running_entry(self._runtime, ar_session_id)
+    async def resolve_entry(self, ar_session_id: str) -> TerminalCatalogEntry:
+        # Offloaded like every blocking read on this service (``verify_epoch``,
+        # ``live_snapshot``, ``read_full_timeline``): ``resolve_running_entry`` takes the
+        # TerminalCatalog RLock and reads its JSON file, and every caller here runs on the
+        # uvicorn event loop, where a catalog lock wait parks the whole server
+        # (measured live on 2026-08-05: the loop thread queued on the catalog RLock and the
+        # daemon stopped accepting). Sync callers needing resolution use
+        # ``factories.resolve_running_entry`` directly, off the loop.
+        return await asyncio.to_thread(resolve_running_entry, self._runtime, ar_session_id)
 
     async def verify_epoch(self, entry: TerminalCatalogEntry, expected_bridge_epoch: str) -> str:
         actual = await asyncio.to_thread(current_bridge_epoch, entry)

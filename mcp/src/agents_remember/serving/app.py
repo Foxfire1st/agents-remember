@@ -1850,7 +1850,9 @@ async def _terminal_image_response(
     # keyed by an unguessable client UUID, so cross-origin/CSRF writes can't target a real session;
     # an Origin/Host allowlist for all write routes is folded into the documented remote-auth story.
     session_obj = runtime.host.get(session)
-    entry = runtime.catalog.get(session)
+    # The catalog read takes the catalog RLock + a JSON file read; this handler runs on the
+    # uvicorn loop, so offload it like every other blocking store read.
+    entry = await asyncio.to_thread(runtime.catalog.get, session)
     cwd = session_obj.cwd if session_obj is not None else (entry.cwd if entry else None)
     if cwd is None:
         return JSONResponse(content={"status": "unknown-session"}, status_code=404)
@@ -1866,9 +1868,15 @@ async def _terminal_image_response(
     if not body or not _looks_like_image(body, ext):
         return JSONResponse(content={"status": "bad-type"}, status_code=400)  # empty / not an image
     dest = cwd / ".dashboard-pastes" / f"{uuid4().hex}.{ext}"
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    dest.write_bytes(body)  # flush before the path is injected -- the harness validates existence
+    # flush before the path is injected -- the harness validates existence; blocking disk I/O
+    # stays off the event loop.
+    await asyncio.to_thread(_write_paste_image, dest, body)
     return JSONResponse(content={"path": str(dest.resolve())}, status_code=200)
+
+
+def _write_paste_image(dest: Path, body: bytes) -> None:
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    dest.write_bytes(body)
 
 
 def _register_terminal_control_routes(app: FastAPI, runtime: _ServingRuntime) -> None:

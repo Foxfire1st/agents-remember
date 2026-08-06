@@ -209,6 +209,18 @@ stale content defeats the commit-hash-based drift check. In the curator chain, c
 updated during the curator's memory pass, not at the metadata-refresh step, and not by the builder
 during implementation.
 
+The change set also reads against the resolved memory layer's
+`system/coding-guidelines.md` (when present) before the closeout preview. The quality wrapper
+certifies lint, types, tests, coverage, and CRAP; it does not read for guideline adherence — a
+task identifier in a shipped comment, a new positional boolean flag, an `object`-typed boundary
+parameter, or an already-oversize file growing again all pass every rail. Read the change set's
+added lines against the guideline file- and function-size budgets, the responsibility and
+anti-pattern rules, the source-comment scope, the typed-boundary (DTO) rules, and the D1/D2/D3
+stability doctrine; repair what falls inside the task's scope and relay everything else as named
+findings at the commit-approval gate. A guideline contradiction that lands unmentioned is a
+closeout failure, and in the manager -> builder -> reviewer -> curator chain this read is part of
+the reviewer seat's evidence, not something to patch silently at closeout time.
+
 The closeout worklist covers the working tree plus the leaf contract-recorded
 committed range: every path changed between the last verified commit (the
 contract's recorded closeout commit, falling back to the task base) and the
@@ -233,24 +245,29 @@ External-memory closeout order is:
    separate curator seat create it directly)
 3. after preview and the applicable commit authority are complete, call
    `worktree_closeout_apply`; its initial checks are read-only
-4. when code would commit and the checkout carries the wrapper, reset the index, stage the whole
+4. the citation gate runs BEFORE the strict wrapper and the code commit: `range_resolution` and
+   `claim_reopen` over the working tree — a changed construct whose citation is current is only
+   the report-only review surface, while a stale pointer, an absent or ambiguous anchor, or
+   unverifiable provenance refuses in seconds. The curator clears the same
+   `memory_quality_check` during the leaf, so findings here are the exception, not the rule
+5. when code would commit and the checkout carries the wrapper, reset the index, stage the whole
    task worktree, and run the default strict project-owned quality wrapper over exactly that staged
    content, before any commit; a refusal leaves the worktree staged and commits nothing, and the
    next run's reset means it starts from the working tree either way; mandatory CRAP enforcement
    fails every score at or above the configured threshold. A checkout with no wrapper runs no gate
    and commits as it always has.
-5. commit code changes and capture `C2` plus its commit date
-6. run the `c-02-memory-quality-control` skill's drift check against `C2` to produce the full memory update worklist
-7. verify each changed source file's sidecar content was updated in this task (by the curator's pass
+6. commit code changes and capture `C2` plus its commit date
+7. run the `c-02-memory-quality-control` skill's drift check against `C2` to produce the full memory update worklist
+8. verify each changed source file's sidecar content was updated in this task (by the curator's pass
    in the chain above), then refresh affected onboarding `lastVerifiedCommitHash` and `lastVerifiedCommitDate` to `C2`; a changed source file with an unmodified sidecar body fails the closeout instead of receiving a metadata-only refresh
-8. refresh affected repo entity catalog `git-blob-set-v1` fingerprints against `C2` when changed source paths are listed as entity evidence
-9. refresh affected route overview `lastVerifiedCommitHash` / `lastVerifiedCommitDate` metadata to `C2`
-10. refresh generated route indexes so `overview.index.json` matches the updated onboarding tree
-11. run MCP `memory_quality_check`; fix reported memory findings before continuing
-12. commit memory-content changes and capture `M2`
-13. prepend `C2 | M2` to `memory.md`
-14. commit the ledger update as `L2`
-15. update the task contract closeout state
+9. refresh affected repo entity catalog `git-blob-set-v1` fingerprints against `C2` when changed source paths are listed as entity evidence
+10. refresh affected route overview `lastVerifiedCommitHash` / `lastVerifiedCommitDate` metadata to `C2`
+11. refresh generated route indexes so `overview.index.json` matches the updated onboarding tree
+12. run MCP `memory_quality_check` (the post-refresh sanity phase: drift, document shape, history order); fix reported memory findings before continuing
+13. commit memory-content changes and capture `M2`
+14. prepend `C2 | M2` to `memory.md`
+15. commit the ledger update as `L2`
+16. update the task contract closeout state
 
 ## Internal-Memory Order
 
@@ -370,3 +387,4 @@ curator seat runs that skill itself.
 7. The `c-12-closeout` skill must not create a memory content commit before route overview metadata, generated route indexes, and `memory_quality_check` are clean for the new code commit.
 8. The `c-12-closeout` skill must not push automatically.
 9. The `c-12-closeout` skill must not advance `lastVerifiedCommitHash` / `lastVerifiedCommitDate` for a changed source file whose sidecar content was not updated in the current task; a metadata-only refresh that masks drift is prohibited.
+10. The `c-12-closeout` skill must not close out a change set that contradicts the memory layer's `system/coding-guidelines.md` without the contradiction being repaired in scope or named at the commit-approval relay; the wrapper's green rails are not evidence of guideline adherence.

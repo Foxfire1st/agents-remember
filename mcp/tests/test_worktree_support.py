@@ -13,6 +13,7 @@ from argparse import Namespace
 from contextlib import contextmanager, redirect_stdout
 from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 from unittest import mock
 
@@ -54,6 +55,7 @@ from agents_remember.worktrees.modules.models import (
     RouteOverviewRefreshPlan,
 )
 from agents_remember.worktrees.modules.onboarding import (
+    _refresh_regenerated_documents,
     classify_route_overview_updates,
     require_updated_route_overview_content,
     require_updated_sidecar_content,
@@ -571,6 +573,97 @@ def integrated_external_contract_fixture(root: Path):
 
 
 class WorktreeSupportTests(unittest.TestCase):
+    def test_refresh_regenerated_documents_stamps_only_touched_citation_documents(self) -> None:
+        """The regenerated-citation refresh: modified metadata docs advance, everything else skips.
+
+        Covers the extension's branches: a stamped document, an already-planned one, an excluded
+        overview, a document without verification metadata, and a prose-only field mention whose
+        metadata row is not a real row.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            memory_repo = Path(tmp) / "memory"
+            init_repo(memory_repo, "main")
+            onboarding_root = memory_repo / "onboarding"
+            onboarding_root.mkdir()
+
+            def write_doc(relative: str, *, metadata: str = "table", stamp: str = "0" * 40) -> Path:
+                rows = {
+                    "table": f"| lastVerifiedCommitHash | `{stamp}` |\n| lastVerifiedCommitDate | 2026-01-01T00:00:00+00:00 |",
+                    "none": "",
+                    "prose": "Mentions lastVerifiedCommitHash in prose without a table row.",
+                }
+                path = onboarding_root / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(f"# {relative}\n\n{rows[metadata]}\n", encoding="utf-8")
+                return path
+
+            write_doc("a/touched.py.md")
+            write_doc("a/planned.py.md")
+            write_doc("overview.md", metadata="none")
+            write_doc("a/no_metadata.py.md", metadata="none")
+            write_doc("a/prose.py.md", metadata="prose")
+            (memory_repo / "memory.md").write_text("# ledger\n", encoding="utf-8")
+            git(memory_repo, "add", "-A")
+            git(memory_repo, "commit", "-m", "baseline")
+            # Touch only some of them after the baseline commit (plus a non-onboarding file).
+            (memory_repo / "memory.md").write_text("# ledger\n\nedited\n", encoding="utf-8")
+            for relative in (
+                "a/touched.py.md",
+                "a/planned.py.md",
+                "overview.md",
+                "a/no_metadata.py.md",
+                "a/prose.py.md",
+            ):
+                path = onboarding_root / relative
+                path.write_text(
+                    path.read_text(encoding="utf-8") + "\nEdited in the task.\n", encoding="utf-8"
+                )
+
+            context = SimpleNamespace(onboarding_root=onboarding_root)
+            refreshed = _refresh_regenerated_documents(
+                context,
+                memory_tree=memory_repo,
+                verified_commit="f" * 40,
+                verified_date="2026-08-06T00:00:00+02:00",
+                already={(onboarding_root / "a/planned.py.md").as_posix()},
+            )
+
+            self.assertEqual(len(refreshed), 1)
+            self.assertEqual(
+                read_onboarding_field(
+                    onboarding_root / "a/touched.py.md", "lastVerifiedCommitHash"
+                ),
+                "f" * 40,
+            )
+            # Planned, excluded overview, no-metadata, and prose-only documents are untouched.
+            self.assertEqual(
+                read_onboarding_field(
+                    onboarding_root / "a/planned.py.md", "lastVerifiedCommitHash"
+                ),
+                "0" * 40,
+            )
+
+    def test_refresh_regenerated_documents_is_empty_without_a_memory_tree(self) -> None:
+        refreshed = _refresh_regenerated_documents(
+            SimpleNamespace(onboarding_root=Path("/nonexistent")),
+            memory_tree=None,
+            verified_commit="f" * 40,
+            verified_date="2026-08-06T00:00:00+02:00",
+            already=set(),
+        )
+        self.assertEqual(refreshed, [])
+
+    def test_refresh_regenerated_documents_is_empty_without_a_git_repo(self) -> None:
+        with tempfile.TemporaryDirectory() as not_a_repo:
+            refreshed = _refresh_regenerated_documents(
+                SimpleNamespace(onboarding_root=Path(not_a_repo)),
+                memory_tree=Path(not_a_repo),
+                verified_commit="f" * 40,
+                verified_date="2026-08-06T00:00:00+02:00",
+                already=set(),
+            )
+        self.assertEqual(refreshed, [])
+
     def test_memory_base_for_source_uses_source_branch_tip_not_head(self) -> None:
         # Regression (L3): worktree_start must record the memory base from the source branch the
         # worktree is created off, NOT the memory repo's current HEAD (which may sit on an unrelated
@@ -1995,7 +2088,13 @@ class WorktreeSupportTests(unittest.TestCase):
             self.assertEqual(git(contract.memory_worktree, "rev-parse", "HEAD"), memory_head)
             self.assertEqual(load_contract(contract.contract_path).closeout_status, "not-started")
 
-    def test_closeout_reopens_a_changed_claim_before_advancing_its_old_stamp(self) -> None:
+    def test_closeout_advances_the_stamp_past_a_changed_claim(self) -> None:
+        """A construct that changed in the task: the claim re-verifies against the new commit.
+
+        Claim evidence can only be compared once the commit it must be compared against exists,
+        so the closeout commits code, advances the stamp to it, and the changed claim closes
+        against the new tree instead of deadlocking the gate before the commit.
+        """
         with tempfile.TemporaryDirectory() as tmp:
             contract, baseline, sidecar = claimed_external_contract_fixture(Path(tmp))
             (contract.code_worktree / "feature.py").write_text(
@@ -2003,12 +2102,29 @@ class WorktreeSupportTests(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            with self.assertRaisesRegex(RuntimeError, "citation_claim_reopened"):
+            self.assertEqual(worktree_manager.command_closeout(closeout_args(contract)), 0)
+
+            code_head = git(contract.code_worktree, "rev-parse", "HEAD")
+            self.assertNotEqual(code_head, baseline)
+            self.assertEqual(read_onboarding_field(sidecar, "lastVerifiedCommitHash"), code_head)
+            self.assertEqual(load_contract(contract.contract_path).closeout_status, "completed")
+
+    def test_closeout_refuses_a_deleted_construct_before_the_code_commit(self) -> None:
+        """The citation gate snaps first: a deleted anchor rejects before any commit is spent."""
+        with tempfile.TemporaryDirectory() as tmp:
+            contract, baseline, _sidecar = claimed_external_contract_fixture(Path(tmp))
+            assert contract.memory_worktree is not None
+            memory_head = git(contract.memory_worktree, "rev-parse", "HEAD")
+            (contract.code_worktree / "feature.py").write_text(
+                "def renamed(value: int) -> int:\n    return value + 2\n",
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(RuntimeError, "citation_anchor_absent_from_range"):
                 worktree_manager.command_closeout(closeout_args(contract))
 
-            self.assertEqual(read_onboarding_field(sidecar, "lastVerifiedCommitHash"), baseline)
             self.assertEqual(git(contract.code_worktree, "rev-parse", "HEAD"), baseline)
-            self.assertTrue(worktree_manager.worktree_dirty(contract.code_worktree))
+            self.assertEqual(git(contract.memory_worktree, "rev-parse", "HEAD"), memory_head)
             self.assertEqual(load_contract(contract.contract_path).closeout_status, "not-started")
 
     def test_closeout_advances_the_stamp_after_a_clean_claim_passes(self) -> None:
@@ -2034,7 +2150,11 @@ class WorktreeSupportTests(unittest.TestCase):
             )
             self.assertEqual(
                 payload["memory_quality"]["closeoutPhases"]["beforeMetadataRefresh"],
-                ["style.citations.claim_reopen"],
+                ["style.citations.range_resolution", "style.citations.claim_reopen"],
+            )
+            self.assertNotIn(
+                "style.citations.claim_reopen",
+                payload["memory_quality"]["closeoutPhases"]["afterMetadataRefresh"],
             )
             self.assertEqual(load_contract(contract.contract_path).closeout_status, "completed")
 

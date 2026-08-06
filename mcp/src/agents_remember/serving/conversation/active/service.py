@@ -184,7 +184,9 @@ class ActiveConversationService:
     ) -> tuple[ActiveSessionProjector, ActiveConversationRef]:
         """Resolve/create one session projector without duplicate replacement races."""
 
-        entry = resolve_running_entry(self._runtime, ar_session_id)
+        # The catalog resolution takes the TerminalCatalog RLock + file read; offload it off
+        # the event loop like the epoch/snapshot reads below.
+        entry = await asyncio.to_thread(resolve_running_entry, self._runtime, ar_session_id)
         actual_epoch = await asyncio.to_thread(current_bridge_epoch, entry)
         if actual_epoch != expected_bridge_epoch:
             raise HarnessBridgeEpochMismatchError(expected_bridge_epoch, actual_epoch)

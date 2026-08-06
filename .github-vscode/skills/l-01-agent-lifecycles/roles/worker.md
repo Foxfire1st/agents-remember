@@ -46,6 +46,12 @@ says otherwise. You edit nothing outside your named surfaces.
 - Read the files you will touch **paired with their onboarding** — via the `read_ar_files` MCP tool
   (note: it serves the official baseline, not your worktree) and native reads inside the worktree
   for current state. Native read is your edit precondition.
+- Read the memory layer's `system/coding-guidelines.md` (the brief names the path) **before your
+  first edit** — the closeout chain judges your diff against it: file/function budgets,
+  responsibility and anti-pattern rules, source-comment scope, typed-boundary (DTO) rules, and the
+  D1/D2/D3 stability doctrine. The quality wrapper does not read for any of this, so green rails
+  prove nothing here. A conflict between the guidelines and the leaf plan is an escalation to the
+  owning seat, never a silent choice.
 - Retrieval when the leaf needs it: `grepai_search` (semantics), `cgc_*` (relationships) — both
   read-only, with whatever stack key the brief names. Keep the evidence tally your brief asks for
   (calls made, files inspected, gaps remaining).

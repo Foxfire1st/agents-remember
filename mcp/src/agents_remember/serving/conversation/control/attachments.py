@@ -149,7 +149,7 @@ async def stage(
     require_safe_component(request_id, label="requestId")
     if not 1 <= len(uploads) <= 4:
         raise OperationRejectedError("attachment staging requires 1..4 assets per request")
-    entry = service.resolve_entry(ar_session_id)
+    entry = await service.resolve_entry(ar_session_id)
     epoch = await service.verify_epoch(entry, expected_bridge_epoch)
     channel = service.channel(ar_session_id, epoch)
     _sweep_expired(service, channel)
@@ -211,7 +211,7 @@ async def submit(
     """The typed composer submit; disposition ``next`` over the AR FIFO."""
 
     require_safe_component(body.request_id, label="requestId")
-    entry = service.resolve_entry(ar_session_id)
+    entry = await service.resolve_entry(ar_session_id)
     epoch = await service.verify_epoch(entry, body.expected_bridge_epoch)
     channel = service.channel(ar_session_id, epoch)
     _sweep_expired(service, channel)
@@ -356,7 +356,7 @@ async def attachment_status(
     expected_bridge_epoch = request.expected_bridge_epoch
 
     del authorization
-    entry = service.resolve_entry(ar_session_id)
+    entry = await service.resolve_entry(ar_session_id)
     epoch = await service.verify_epoch(entry, expected_bridge_epoch)
     channel = service.channel(ar_session_id, epoch)
     _sweep_expired(service, channel)
@@ -386,7 +386,7 @@ async def rebind(
     expected_bridge_epoch = request.expected_bridge_epoch
 
     require_safe_component(request_id, label="requestId")
-    entry = service.resolve_entry(ar_session_id)
+    entry = await service.resolve_entry(ar_session_id)
     epoch = await service.verify_epoch(entry, expected_bridge_epoch)
     payload = decode_ref(
         service.secret,

@@ -132,7 +132,7 @@ async def withdraw(
     ar_session_id = request.ar_session_id
     expected_bridge_epoch = request.expected_bridge_epoch
 
-    entry = service.resolve_entry(ar_session_id)
+    entry = await service.resolve_entry(ar_session_id)
     epoch = await service.verify_epoch(entry, expected_bridge_epoch)
     scope = request.resolved(epoch)
     identity = _verify_refs(scope, operation_ref, withdrawal_ref)
@@ -198,7 +198,7 @@ async def withdraw_status(
     ar_session_id = request.ar_session_id
     expected_bridge_epoch = request.expected_bridge_epoch
 
-    entry = service.resolve_entry(ar_session_id)
+    entry = await service.resolve_entry(ar_session_id)
     epoch = await service.verify_epoch(entry, expected_bridge_epoch)
     channel = service.channel(ar_session_id, epoch)
     sweep_recoveries(service, channel)
@@ -232,7 +232,7 @@ async def pending_recoveries(
     ar_session_id = request.ar_session_id
     expected_bridge_epoch = request.expected_bridge_epoch
 
-    entry = service.resolve_entry(ar_session_id)
+    entry = await service.resolve_entry(ar_session_id)
     epoch = await service.verify_epoch(entry, expected_bridge_epoch)
     channel = service.channel(ar_session_id, epoch)
     sweep_recoveries(service, channel)
@@ -275,7 +275,7 @@ async def fetch_recovery(
     ar_session_id = request.ar_session_id
     expected_bridge_epoch = request.expected_bridge_epoch
 
-    entry = service.resolve_entry(ar_session_id)
+    entry = await service.resolve_entry(ar_session_id)
     epoch = await service.verify_epoch(entry, expected_bridge_epoch)
     channel = service.channel(ar_session_id, epoch)
     sweep_recoveries(service, channel)
@@ -310,7 +310,7 @@ async def acknowledge_recovery(
     ar_session_id = request.ar_session_id
     expected_bridge_epoch = request.expected_bridge_epoch
 
-    entry = service.resolve_entry(ar_session_id)
+    entry = await service.resolve_entry(ar_session_id)
     epoch = await service.verify_epoch(entry, expected_bridge_epoch)
     channel = service.channel(ar_session_id, epoch)
     sweep_recoveries(service, channel)
