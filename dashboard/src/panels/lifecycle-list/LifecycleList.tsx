@@ -9,11 +9,11 @@ import {
   ToggleButtonGroup,
 } from "react-aria-components";
 
-import { css, cva } from "../../styled-system/css";
-import { fmtWait, hasLiveWorktree, type Pivot } from "../data/selectors";
-import { servedAgeSeconds, useNowMs } from "../data/servedAges";
-import { type OpenSession, useSessions } from "../data/sessions";
-import { useDashboard } from "../data/store";
+import { css, cva } from "../../../styled-system/css";
+import { fmtWait, hasLiveWorktree, type Pivot } from "../../data/selectors";
+import { servedAgeSeconds, useNowMs } from "../../data/servedAges";
+import { type OpenSession, useSessions } from "../../data/sessions";
+import { useDashboard } from "../../data/store";
 import {
   isOrchestrationDoc,
   masterCommandNames,
@@ -22,7 +22,7 @@ import {
   pathStem,
   taskDocHierarchyLabel,
   taskDocParentKey,
-} from "../data/taskHierarchy";
+} from "../../data/taskHierarchy";
 import {
   findLifecycleEnclosure,
   groupEnclosuresByLifecycle,
@@ -32,10 +32,10 @@ import {
   seriesSelectionKey,
   taskDocSelectionKey,
   taskLabel,
-} from "../data/taskIdentity";
-import { Dot } from "../grammar/Dot";
-import { Panel } from "../grammar/Panel";
-import { RankBadge, type RankTier } from "../grammar/RankBadge";
+} from "../../data/taskIdentity";
+import { Dot } from "../../grammar/Dot";
+import { Panel } from "../../grammar/Panel";
+import { RankBadge, type RankTier } from "../../grammar/RankBadge";
 import type {
   AgentPickupNode,
   Analytics,
@@ -43,16 +43,16 @@ import type {
   LifecycleProjection,
   SeriesNode,
   TaskDocNode,
-} from "../types/projection";
-import { AgentPickupIndicator } from "./AgentPickupIndicator";
+} from "../../types/projection";
+import { AgentPickupIndicator } from "../AgentPickupIndicator";
 import {
   ChatActivityIndicator,
   summarizeChatActivity,
   type ChatActivityIdentity,
   type ChatActivitySummary,
-} from "./ChatActivityIndicator";
-import { TaskGroupDisclosure } from "./TaskGroupDisclosure";
-import { useCollapsedTaskGroups } from "./useCollapsedTaskGroups";
+} from "../ChatActivityIndicator";
+import { TaskGroupDisclosure } from "../TaskGroupDisclosure";
+import { useCollapsedTaskGroups } from "../useCollapsedTaskGroups";
 
 // The single unit list (note 01: the lifecycle is THE unit; note 06 IA). A BY REPO | BY PHASE pivot
 // (React Aria ToggleButtonGroup) over every lifecycle (fleeting + persistent), presented as a React

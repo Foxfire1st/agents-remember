@@ -1,0 +1,573 @@
+// The DetailPanel task-document reader family: master overview, sub-task index, slice list, spine
+// lanes, full reader, and the small section primitives (Section/Bullets/StepList/CodeExample/
+// DecisionList). All presentation logic lives here; doc selection stays in model.ts.
+import type { ReactNode } from "react";
+
+import { cx } from "../../../styled-system/css";
+import { Markdown } from "../../grammar/Markdown";
+import { ProgressFill } from "../../grammar/ProgressFill";
+import {
+  type TaskDocumentBodyState,
+} from "../../data/useTaskDocumentBody";
+import { orderedByCreation } from "../../data/taskHierarchy";
+import { qualifiedLeafKey } from "../../data/taskIdentity";
+import type {
+  ProviderNode,
+  SubTaskRow,
+  TaskCodeExampleNode,
+  TaskDecisionNode,
+  TaskDocNode,
+  TaskSectionNode,
+  TaskStepNode,
+} from "../../types/projection";
+import { DocChangeSetBar } from "./changeSetBar";
+import {
+  dirName,
+  labelWithId,
+  sliceForRef,
+  sliceSlug,
+  subTaskKey,
+  taskStepProgress,
+  type MasterDocView,
+} from "./model";
+import {
+  SUBSTEP,
+  badge,
+  crossButton,
+  label,
+  lane,
+  laneMeta,
+  laneRepo,
+  laneTitle,
+  masterTokenValue,
+  masterTokens,
+  series,
+  skippedDisposition,
+  skippedWord,
+  slice,
+  sliceButton,
+  sliceMeta,
+  slices,
+  STEP_MARK,
+  STEP_TITLE,
+  stepMarkBase,
+  stepRow,
+  stepsList,
+  substeps,
+  taskHead,
+  taskdoc,
+  taskdocBullets,
+  taskdocCode,
+  taskdocCodeHead,
+  taskdocCodeMeta,
+  taskdocDecision,
+  taskdocDecisionMeta,
+  taskdocDecisions,
+  taskdocH,
+  taskdocHead,
+  taskdocSection,
+  taskdocSnippet,
+  taskdocStatus,
+  taskdocTitle,
+} from "./styles";
+import type { ChangeSetTarget } from "../changeset/ChangeSetViewer";
+import type { NotesReaderTarget } from "../notes-reader/NotesReaderViewer";
+import { TaskNotes } from "../TaskNotes";
+
+export function TaskContent({
+  docs,
+  bodyState,
+  onOpen,
+  onJump,
+  onOpenChangeSet,
+  onOpenNotes,
+}: {
+  docs: TaskDocNode[];
+  bodyState: TaskDocumentBodyState | undefined;
+  onOpen: (slug: string) => void;
+  onJump: (id: string) => void;
+  onOpenChangeSet?: (target: ChangeSetTarget) => void;
+  onOpenNotes?: (target: NotesReaderTarget) => void;
+}) {
+  if (docs.length === 0) {
+    return <p className="muted">No task document bound to this task.</p>;
+  }
+  const master = docs.find((doc) => doc.kind === "master");
+  const sliceDocs = docs.filter((doc) => doc.kind !== "master");
+  if (master) {
+    return (
+      <MasterOverview
+        doc={master}
+        bodyState={bodyState}
+        sliceDocs={sliceDocs}
+        onOpen={onOpen}
+        onJump={onJump}
+        onOpenChangeSet={onOpenChangeSet}
+        onOpenNotes={onOpenNotes}
+      />
+    );
+  }
+  if (sliceDocs.length === 1) {
+    return (
+      <TaskReader
+        doc={sliceDocs[0]}
+        bodyState={bodyState}
+        onOpenChangeSet={onOpenChangeSet}
+        onOpenNotes={onOpenNotes}
+      />
+    );
+  }
+  return <SliceList sliceDocs={sliceDocs} onOpen={onOpen} />;
+}
+
+// The master overview: identity + objective, then its ordered render plan (`sections`). A
+// `subTasks` section renders the clickable index in place; `sharedDecisions` renders the decision
+// table. If no section drives the index but the master carries one, it is appended.
+export function MasterOverview({
+  doc,
+  bodyState,
+  sliceDocs,
+  onOpen,
+  onJump,
+  onOpenChangeSet,
+  onOpenNotes,
+}: {
+  doc: MasterDocView;
+  bodyState: TaskDocumentBodyState | undefined;
+  sliceDocs: TaskDocNode[];
+  onOpen: (slug: string) => void;
+  onJump: (id: string) => void;
+  onOpenChangeSet?: (target: ChangeSetTarget) => void;
+  onOpenNotes?: (target: NotesReaderTarget) => void;
+}) {
+  return (
+    <div className={taskdoc}>
+      <div className={taskdocHead}>
+        <span className={badge}>{doc.kind}</span>
+        <span className={taskdocTitle}>{doc.title}</span>
+        <span className={taskdocStatus}>{doc.status}</span>
+      </div>
+      <TaskBodyNotice state={bodyState} />
+      {bodyState !== "loading" ? (
+        <DocChangeSetBar
+          kind="master"
+          repo={doc.repository}
+          master={dirName(doc.docPath)}
+          onOpen={onOpenChangeSet}
+        />
+      ) : null}
+      <MasterTokenSummary total={doc.seriesTokenTotal} />
+      {/* Pinned navigation: the sub-task index sits above the description, always reachable. The
+          authored `subTasks` section still renders its own copy in place (MasterSection). */}
+      {doc.subTasks.length > 0 ? (
+        <Section title="Sub-tasks">
+          <SubTaskIndex refs={doc.subTasks} sliceDocs={sliceDocs} onOpen={onOpen} onJump={onJump} />
+        </Section>
+      ) : null}
+      {doc.objective ? (
+        <Section title="Objective">
+          <Markdown>{doc.objective}</Markdown>
+        </Section>
+      ) : null}
+      {doc.sections.map((section) => (
+        <MasterSection
+          key={section.heading}
+          section={section}
+          doc={doc}
+          sliceDocs={sliceDocs}
+          onOpen={onOpen}
+          onJump={onJump}
+        />
+      ))}
+      {/* The series' coordination notes (design records, friction ledger, reports/) —
+          browsable from the master overview too, not only from a drilled leaf reader. */}
+      {bodyState !== "loading" ? (
+        <TaskNotes
+          repo={doc.repository}
+          master={dirName(doc.docPath)}
+          references={[]}
+          onOpenNotes={onOpenNotes}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+export function MasterTokenSummary({ total }: { total: number | undefined }) {
+  if (total === undefined) return null;
+  return (
+    <div className={masterTokens} aria-label={`${total} aggregate series tokens`}>
+      <span className={label}>series tokens</span>
+      <span className={masterTokenValue}>{total.toLocaleString()} tok</span>
+    </div>
+  );
+}
+
+export function MasterSection({
+  section,
+  doc,
+  sliceDocs,
+  onOpen,
+  onJump,
+}: {
+  section: TaskSectionNode;
+  doc: MasterDocView;
+  sliceDocs: TaskDocNode[];
+  onOpen: (slug: string) => void;
+  onJump: (id: string) => void;
+}) {
+  return (
+    <Section title={section.heading}>
+      {section.body ? <Markdown>{section.body}</Markdown> : null}
+      {section.kind === "subTasks" ? (
+        <SubTaskIndex
+          refs={doc.subTasks}
+          sliceDocs={sliceDocs}
+          onOpen={onOpen}
+          onJump={onJump}
+          testidPrefix="subtask-mid"
+        />
+      ) : null}
+      {section.kind === "sharedDecisions" ? <DecisionList items={doc.decisions} /> : null}
+    </Section>
+  );
+}
+
+// The clickable series index: one row per master `SubTaskRef`. A row whose slice has been authored
+// as a task document opens its reader; an un-migrated slice shows as a static index row.
+export function SubTaskIndex({
+  refs,
+  sliceDocs,
+  onOpen,
+  onJump,
+  testidPrefix = "subtask-open",
+}: {
+  refs: SubTaskRow[];
+  sliceDocs: TaskDocNode[];
+  onOpen: (slug: string) => void;
+  onJump: (id: string) => void;
+  testidPrefix?: string;
+}) {
+  if (refs.length === 0) {
+    return <p className="muted">No sub-tasks indexed.</p>;
+  }
+  // Rendered in the order received, deliberately. Neither source needs a client-side sort: a
+  // master's `TaskSubTaskRefNode` rows carry no `createdAt` at all (so the old
+  // `orderedByCreation(refs)` here could never do anything), and a series' `SeriesSubTaskNode`
+  // rows arrive already ordered by it from `snapshots.py::_series_subtask_nodes`.
+  return (
+    <ul className={slices}>
+      {refs.map((ref, index) => {
+        const position = index + 1;
+        const match = sliceForRef(sliceDocs, ref);
+        const displayNumber = match?.id || ref.number;
+        const displayName = match?.title || ref.name;
+        const label = `${displayNumber}. ${displayName}`;
+        const progress = match ? taskStepProgress(match) : undefined;
+        const meta = (
+          <span className={sliceMeta}>
+            {progress && progress.total > 0 ? `${progress.done}/${progress.total} · ` : ""}
+            {ref.status}
+          </span>
+        );
+        // A row whose ref points at another master is a parallel/external series → jump lifecycles.
+        // Only a task-doc master's rows can cross-link: `SeriesSubTaskNode` has no such field, so
+        // this branch is structurally unreachable for a series rendered via `seriesAsMasterDoc`.
+        const linkedLifecycleId = "linkedLifecycleId" in ref ? ref.linkedLifecycleId : undefined;
+        if (linkedLifecycleId) {
+          return (
+            <li key={subTaskKey(ref, index)}>
+              <button
+                type="button"
+                className={crossButton}
+                onClick={() => onJump(linkedLifecycleId)}
+                data-testid={`${testidPrefix}-link-${position}`}
+                title={`open the ${linkedLifecycleId} series`}
+              >
+                <span>→ {label}</span>
+                {meta}
+              </button>
+            </li>
+          );
+        }
+        return (
+          <li key={subTaskKey(ref, index)}>
+            {match ? (
+              <button
+                type="button"
+                className={sliceButton}
+                onClick={() => onOpen(sliceSlug(match))}
+                data-testid={`${testidPrefix}-${position}`}
+              >
+                <span>{label}</span>
+                {meta}
+              </button>
+            ) : (
+              <div
+                className={slice}
+                data-testid={`${testidPrefix}-${position}`}
+                title="not authored as a task document yet"
+              >
+                <span>{label}</span>
+                {meta}
+              </div>
+            )}
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
+// Fallback for a series with no master yet: the slice list, now clickable into each reader.
+export function SliceList({
+  sliceDocs,
+  onOpen,
+}: {
+  sliceDocs: TaskDocNode[];
+  onOpen: (slug: string) => void;
+}) {
+  return (
+    <div className={series}>
+      <div className={taskHead}>
+        <span className={badge}>series</span> {sliceDocs.length} task slices
+      </div>
+      <ul className={slices}>
+        {orderedByCreation(sliceDocs)
+          .map((doc) => {
+            const progress = taskStepProgress(doc);
+            return (
+              <li key={doc.docPath}>
+                <button
+                  type="button"
+                  className={sliceButton}
+                  onClick={() => onOpen(sliceSlug(doc))}
+                  data-testid={`slice-open-${sliceSlug(doc)}`}
+                >
+                  <span>{doc.title}</span>
+                  <span className={sliceMeta}>
+                    {progress.total > 0 ? `${progress.done}/${progress.total} · ` : ""}
+                    {doc.status}
+                  </span>
+                </button>
+              </li>
+            );
+          })}
+      </ul>
+    </div>
+  );
+}
+
+export function SpineLane({
+  kind,
+  title,
+  repo,
+  engines,
+}: {
+  kind: "code" | "memory";
+  title: string;
+  repo: string;
+  engines: ProviderNode[];
+}) {
+  return (
+    <div className={lane({ kind })}>
+      <div className={laneTitle}>{title}</div>
+      <div className={laneRepo}>{repo}</div>
+      {engines.length > 0 ? (
+        <div className={laneMeta}>
+          {engines.map((engine) => (
+            <span key={engine.id}>{engine.state}</span>
+          ))}
+        </div>
+      ) : (
+        <span className="muted">no isolated engine recorded</span>
+      )}
+    </div>
+  );
+}
+
+export function TaskReader({
+  doc,
+  bodyState,
+  onOpenChangeSet,
+  onOpenNotes,
+}: {
+  doc: TaskDocNode;
+  bodyState: TaskDocumentBodyState | undefined;
+  onOpenChangeSet?: (target: ChangeSetTarget) => void;
+  onOpenNotes?: (target: NotesReaderTarget) => void;
+}) {
+  const progress = taskStepProgress(doc);
+  const leafKey = qualifiedLeafKey(doc);
+  return (
+    <div className={taskdoc} data-task-leaf-key={leafKey}>
+      <div className={taskdocHead}>
+        <span className={badge}>{doc.kind}</span>
+        <span className={taskdocTitle}>{doc.title}</span>
+        <span className={taskdocStatus}>{doc.status}</span>
+        <ProgressFill completed={progress.done} total={progress.total} label="steps done" />
+      </div>
+      <TaskBodyNotice state={bodyState} />
+      {bodyState !== "loading" ? (
+        <DocChangeSetBar
+          kind="leaf"
+          repo={doc.repository}
+          master={dirName(doc.docPath)}
+          leaf={doc.id}
+          onOpen={onOpenChangeSet}
+        />
+      ) : null}
+      {doc.objective ? (
+        <Section title="Objective">
+          <Markdown>{doc.objective}</Markdown>
+        </Section>
+      ) : null}
+      {doc.requirements.length > 0 ? (
+        <Section title="Requirements">
+          <Bullets items={doc.requirements} />
+        </Section>
+      ) : null}
+      {doc.design ? (
+        <Section title="Design">
+          <Markdown>{doc.design}</Markdown>
+        </Section>
+      ) : null}
+      {doc.steps.length > 0 ? (
+        <Section title="Implementation steps">
+          <StepList steps={doc.steps} />
+        </Section>
+      ) : null}
+      {doc.codeExamples.length > 0 ? (
+        <Section title="Proposed code">
+          {doc.codeExamples.map((example) => (
+            <CodeExample key={example.id} example={example} />
+          ))}
+        </Section>
+      ) : null}
+      {doc.decisions.length > 0 ? (
+        <Section title="Decision log">
+          <DecisionList items={doc.decisions} />
+        </Section>
+      ) : null}
+      {doc.openQuestions.length > 0 ? (
+        <Section title="Open questions">
+          <Bullets items={doc.openQuestions} />
+        </Section>
+      ) : null}
+      {doc.sections.map((section) => (
+        <Section key={`${section.kind}:${section.heading}`} title={section.heading}>
+          {section.body ? <Markdown>{section.body}</Markdown> : null}
+        </Section>
+      ))}
+      {/* References moved into TaskNotes so a reference naming an existing notes/ file
+          renders as an openable link into the series-notes view (plain text otherwise). */}
+      {bodyState !== "loading" ? (
+        <TaskNotes
+          repo={doc.repository}
+          master={dirName(doc.docPath)}
+          references={doc.references}
+          onOpenNotes={onOpenNotes}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+export function TaskBodyNotice({ state }: { state: TaskDocumentBodyState | undefined }) {
+  if (state === "loading") {
+    return (
+      <p className="muted" role="status">
+        Loading complete task document…
+      </p>
+    );
+  }
+  if (state === "unavailable") {
+    return (
+      <p className="muted">Full task document details are unavailable; showing the available summary.</p>
+    );
+  }
+  return null;
+}
+
+export function Section({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <section className={taskdocSection}>
+      <h3 className={taskdocH}>{title}</h3>
+      {children}
+    </section>
+  );
+}
+
+export function Bullets({ items }: { items: string[] }) {
+  return (
+    <ul className={taskdocBullets}>
+      {items.map((item) => (
+        <li key={item}>
+          <Markdown inline>{item}</Markdown>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+export function StepList({ steps }: { steps: TaskStepNode[] }) {
+  return (
+    <ol className={stepsList}>
+      {steps.map((s) => (
+        <li key={s.id} className={stepRow}>
+          <span className={cx(stepMarkBase, STEP_MARK[s.status] ?? "")} aria-hidden="true" />
+          <span className={STEP_TITLE[s.status] ?? ""}>
+            {labelWithId(s.id, s.title)}
+            {s.disposition ? <SkippedDisposition reason={s.disposition.reason} /> : null}
+          </span>
+          {s.substeps.length > 0 ? (
+            <ul className={substeps}>
+              {s.substeps.map((sub) => (
+                <li key={sub.id} className={SUBSTEP[sub.status] ?? ""}>
+                  {labelWithId(sub.id, sub.title)}
+                  {sub.disposition ? <SkippedDisposition reason={sub.disposition.reason} /> : null}
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </li>
+      ))}
+    </ol>
+  );
+}
+
+export function SkippedDisposition({ reason }: { reason: string }) {
+  return (
+    <span className={skippedDisposition}>
+      <span className={skippedWord}>SKIPPED</span> — {reason}
+    </span>
+  );
+}
+
+export function CodeExample({ example }: { example: TaskCodeExampleNode }) {
+  return (
+    <div className={taskdocCode}>
+      <div className={taskdocCodeHead}>{labelWithId(example.id, example.title)}</div>
+      <div className={taskdocCodeMeta}>covers: {example.distinctChange}</div>
+      <div className={taskdocCodeMeta}>why: {example.why}</div>
+      {example.snippet ? <pre className={taskdocSnippet}>{example.snippet}</pre> : null}
+    </div>
+  );
+}
+
+export function DecisionList({ items }: { items: TaskDecisionNode[] }) {
+  return (
+    <ul className={taskdocDecisions}>
+      {items.map((item) => (
+        <li key={`${item.at}:${item.decision}`}>
+          <div className={taskdocDecision}>
+            <Markdown inline>{item.decision}</Markdown>
+          </div>
+          <div className={taskdocDecisionMeta}>
+            {item.at} — <Markdown inline>{item.rationale}</Markdown>
+          </div>
+        </li>
+      ))}
+    </ul>
+  );
+}

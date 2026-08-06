@@ -30,6 +30,29 @@ export default defineConfig({
     // config-backed run at the measured safe ceiling.
     maxWorkers: 2,
     setupFiles: ["./src/test/setup.ts"],
+    coverage: {
+      provider: "v8",
+      include: ["src/**/*.{ts,tsx}"],
+      exclude: [
+        "src/**/*.test.{ts,tsx}",
+        "src/**/*.test-utils.{ts,tsx}",
+        "src/test/**",
+        "src/dev/**",
+        "src/types/**",
+        "src/vite-env.d.ts",
+      ],
+      // Measured baseline (2026-08-06): lines 88.6 / statements 86.0 / functions 86.9 /
+      // branches 77.3. Thresholds sit below the measured floor so regressions fail while the
+      // current suite stays green; the changed-lines floor (coverage:diff) is the strict gate.
+      thresholds: {
+        lines: 85,
+        statements: 82,
+        functions: 82,
+        branches: 70,
+      },
+      reporter: ["text", "json", "html"],
+      reportsDirectory: "coverage",
+    },
     // Vitest owns logic tests under src/; the e2e/ Playwright specs (which import
     // @playwright/test) are run by `npm run e2e`, never collected here.
     include: ["src/**/*.{test,spec}.{ts,tsx}"],

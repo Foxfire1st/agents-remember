@@ -33,292 +33,43 @@ import {
   elementScroll,
   useVirtualizer,
   type Range,
-  type VirtualItem,
 } from "@tanstack/react-virtual";
 
-import { css, cx } from "../../../../styled-system/css";
-import type { ConversationScrollMemory } from "../../../data/conversation/store";
-import type { ConversationItem } from "../../../data/conversation/types";
-import { groupUnknownVendorRuns, type DisplayRow } from "./collapse";
-import { ConversationItemView, itemAccessibleName } from "./ConversationItemView";
-
-const BOTTOM_FOLLOW_PX = 120;
-// A moderate transcript is cheaper to measure during initial settling than to let estimates surface
-// row-by-row under the operator's upward scroll. A sliding batch warms TanStack's measurement cache
-// without ever retaining the whole rich transcript in the DOM; truly large histories keep the
-// ordinary bounded virtual window.
-const INITIAL_PREMEASURE_MAX_ROWS = 200;
-// Ten-ish rich Markdown/tool rows stay below a frame-sized task in the live 103-row transcript.
-// Timer-separated slices keep the chat interactive while the measurement frontier advances upward.
-const INITIAL_PREMEASURE_BATCH_ROWS = 12;
-// A delay is intentional: re-queuing requestIdleCallback from its own React commit collapsed all
-// slices into one 304ms Chrome idle task in the live transcript. Separate tasks preserved paint and
-// input opportunities while still warming the full 103-row page in well under a second.
-const INITIAL_PREMEASURE_SLICE_DELAY_MS = 24;
-// Continuous browser/rail drags can emit a width on every frame. Let the ordinary ResizeObserver
-// keep mounted rows fluid, then rebuild offscreen measurements once the width settles.
-const MEASUREMENT_RESIZE_SETTLE_MS = 160;
-const MEASUREMENT_CACHE_PREFIX = "cockpit.chats.measurements.v1:";
-
-interface StoredMeasurementCache {
-  windowWidth: number;
-  viewportWidth: number;
-  items: VirtualItem[];
-}
-
-function measurementStorageKey(cacheId: string): string {
-  return `${MEASUREMENT_CACHE_PREFIX}${encodeURIComponent(cacheId)}`;
-}
-
-function readStoredMeasurements(cacheId: string | undefined): StoredMeasurementCache | null {
-  if (cacheId === undefined || typeof window === "undefined") return null;
-  try {
-    const raw = window.sessionStorage.getItem(measurementStorageKey(cacheId));
-    if (raw === null) return null;
-    const parsed = JSON.parse(raw) as StoredMeasurementCache;
-    if (
-      parsed.windowWidth !== window.innerWidth ||
-      !Number.isFinite(parsed.viewportWidth) ||
-      !Array.isArray(parsed.items)
-    ) {
-      return null;
-    }
-    return parsed;
-  } catch {
-    // This is an optional performance cache, never conversation authority. Storage can be denied
-    // or externally corrupted; losing the cache must fall back to ordinary measurement rather
-    // than making the transcript unavailable.
-    return null;
-  }
-}
-
-function storeMeasurements(
-  cacheId: string | undefined,
-  viewportWidth: number,
-  items: VirtualItem[],
-): void {
-  if (cacheId === undefined || typeof window === "undefined" || viewportWidth <= 0) return;
-  try {
-    window.sessionStorage.setItem(
-      measurementStorageKey(cacheId),
-      JSON.stringify({ windowWidth: window.innerWidth, viewportWidth, items }),
-    );
-  } catch {
-    // Same optional-cache boundary as the read path: quota/privacy failures may cost a future
-    // warm-up, but must never alter the current conversation.
-  }
-}
-
-// Keys that mean "the operator is scrolling this feed" for the trusted-input restore cancel
-// (a programmatic clamp never carries input) — mirror of the feed's own keyboard scrolling.
-// ArrowDown is deliberately ABSENT: on a non-empty roster the conversation surface hijacks it
-// into the agents line, so it is no longer a scroll key here — PageUp/PageDown, [/] and the
-// wheel remain the scroll paths. Exported for the surface keyboard-contract tests.
-export const OPERATOR_SCROLL_KEYS = new Set([
-  "Home",
-  "End",
-  "PageUp",
-  "PageDown",
-  "ArrowUp",
-  " ",
-  "[",
-  "]",
-]);
-
-// Bound on the rAF restore driver (the re-measure window may produce no renders).
-const RESTORE_DRIVE_MAX_MS = 2_500;
-// The atBottom restore consumes only after the feed's height holds stable for this many
-// consecutive driver frames (~160ms — the measured re-measure recovery is ~40–55ms), so an
-// estimate-degenerate frame can never finalize the wrong end.
-const RESTORE_SETTLE_FRAMES = 10;
-// Genuine operator input marks the interaction window the intent lock consults; the flag
-// decays this long after the last input (the JSONLogConsole model — covers a scrollbar drag's
-// event stream: one pointerdown, then the drag's scroll events within the window).
-const INTERACTION_DECAY_MS = 500;
-
-// The terminal "well": the conversation feed inherits the SAME dark inset the xterm pty
-// pane uses (background: well, 1px grid border), so the structured stage stops reading as a generic
-// web panel sharing the page background. Horizontal inset only (vertical scroll math stays clean for
-// the virtualizer). Content spans the FULL well width like a real TUI (no centered max-width
-// column); the 2ch inline padding is the deliberate terminal gutter, so text never sits flush
-// against the well border.
-const viewport = css({
-  flex: "1",
-  minHeight: "0",
-  overflowY: "auto",
-  overflowX: "hidden",
-  position: "relative",
-  outline: "none",
-  background: "well",
-  borderWidth: "1px",
-  borderStyle: "solid",
-  borderColor: "grid",
-  borderRadius: "3px",
-  paddingInline: "2ch",
-});
-const feedInner = css({ position: "relative", width: "100%" });
-// The empty conversation remains inside the terminal well, but gets enough space to behave like
-// a real TUI landing screen. It is ordinary flow content so short viewports can still scroll it.
-const emptyInWell = css({
-  minHeight: "100%",
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "center",
-  paddingBlock: "clamp(2rem, 7vh, 5rem)",
-});
-// Line-grid rhythm: no per-article hairline rule (neither Toad nor Claude Code rules between
-// items); one blank line of breathing below each item instead of a boxed web-list divider.
-const rowShell = css({
-  position: "absolute",
-  top: "0",
-  left: "0",
-  width: "100%",
-  paddingBlockStart: "0.15rem",
-  paddingBlockEnd: "0.9rem",
-  _focusVisible: { outline: "1px solid token(colors.amber)", outlineOffset: "-1px" },
-});
-// The viewport's positioning shell. Absolutely-positioned children of a SCROLL container scroll
-// with its content (verified live), so anything meant to FLOAT over the visible frame — the latest
-// chip — is a child of this shell, a sibling of the scroller, never a child of it. The shell hugs
-// the scroller exactly (flex column, the well keeps its own flex:1), so
-// the overlay coordinates coincide with the visible viewport.
-const viewportShell = css({
-  position: "relative",
-  display: "flex",
-  flexDirection: "column",
-  flex: "1",
-  minHeight: "0",
-  minWidth: "0",
-});
-// One state-aware route back to the live edge. It sits clear of the native scrollbar rather
-// than sharing its hit corridor, and folds the old "N new updates" pill into the same action.
-const latestChip = css({
-  position: "absolute",
-  right: "1.6rem",
-  bottom: "0.65rem",
-  display: "inline-flex",
-  alignItems: "center",
-  gap: "0.35rem",
-  font: "inherit",
-  fontSize: "0.68rem",
-  lineHeight: "1",
-  color: "ink",
-  background: "bgPanel",
-  borderWidth: "1px",
-  borderStyle: "solid",
-  borderColor: "grid",
-  borderRadius: "3px",
-  paddingInline: "0.5rem",
-  minHeight: "1.75rem",
-  whiteSpace: "nowrap",
-  cursor: "pointer",
-  boxShadow: "0 2px 8px oklch(0 0 0 / 0.32)",
-  transition: "transform 120ms cubic-bezier(0.23, 1, 0.32, 1)",
-  _hover: { color: "amber", borderColor: "amber" },
-  _active: { transform: "scale(0.97)" },
-  _focusVisible: { outline: "1px solid token(colors.amber)", outlineOffset: "1px" },
-});
-const latestChipWithUpdates = css({
-  color: "amber",
-  borderColor: "amber",
-});
-const olderBar = css({ display: "flex", justifyContent: "center", paddingBlock: "0.3rem" });
-const olderButton = css({
-  font: "inherit",
-  fontSize: "0.66rem",
-  color: "muted",
-  background: "transparent",
-  borderWidth: "1px",
-  borderStyle: "solid",
-  borderColor: "grid",
-  borderRadius: "2px",
-  paddingInline: "0.5rem",
-  paddingBlock: "0.1rem",
-  cursor: "pointer",
-  _hover: { color: "amber", borderColor: "amber" },
-  _focusVisible: { outline: "1px solid token(colors.amber)", outlineOffset: "1px" },
-});
-// The collapsed unknown-vendor run is a dim gutter line, not a boxed web row.
-const runRow = css({ display: "grid", gap: "0.15rem", color: "dormant", fontSize: "0.7rem", fontFamily: "mono" });
-const runHead = css({ display: "flex", gap: "0.4rem", alignItems: "baseline", minWidth: "0" });
-const runSummary = css({ minWidth: "0", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" });
-// The clamp control reads as a text affordance and NEVER wraps its own label.
-const runButton = css({
-  font: "inherit",
-  fontSize: "0.7rem",
-  flex: "none",
-  whiteSpace: "nowrap",
-  color: "muted",
-  background: "transparent",
-  border: "none",
-  paddingInline: "0",
-  cursor: "pointer",
-  textDecoration: "underline",
-  textDecorationColor: "color-mix(in oklch, token(colors.grid) 60%, transparent)",
-  textUnderlineOffset: "2px",
-  _hover: { color: "amber" },
-  _focusVisible: { outline: "1px solid token(colors.amber)", outlineOffset: "1px" },
-});
-const runMember = css({ fontFamily: "mono", fontSize: "0.66rem", color: "dormant", overflowWrap: "anywhere", paddingInlineStart: "2ch" });
-
-function isEditableTarget(target: HTMLElement): boolean {
-  return (
-    target.tagName === "INPUT" ||
-    target.tagName === "TEXTAREA" ||
-    target.tagName === "SELECT" ||
-    target.isContentEditable ||
-    target.closest("button,a,[contenteditable],.cm-editor") !== null
-  );
-}
-
-function inOverflowRegion(target: HTMLElement): boolean {
-  // Labeled code/diff/output scroll regions own Home/End so they scroll rather than navigate.
-  return target.closest('[role="group"], pre') !== null;
-}
-
-function UnknownVendorRun({
-  row,
-  expanded,
-  onToggle,
-}: {
-  row: Extract<DisplayRow, { kind: "unknown-run" }>;
-  expanded: boolean;
-  onToggle: () => void;
-}) {
-  return (
-    <div className={runRow} data-testid="unknown-vendor-run">
-      <div className={runHead}>
-        <span
-          className={runSummary}
-          title={`${row.items.length} unknown vendor events (same summary) — ${row.summary}`}
-        >
-          {/* "same summary", not "identical": the events share this summary but each carries its
-              own distinct evidence id (they are not duplicates), so the copy must not imply sameness. */}
-          {row.items.length} unknown vendor events (same summary) — {row.summary}
-        </span>
-        <button
-          type="button"
-          className={runButton}
-          aria-expanded={expanded}
-          onClick={onToggle}
-          data-testid="unknown-vendor-run-toggle"
-        >
-          {expanded ? "collapse" : "show each"}
-        </button>
-      </div>
-      {expanded ? (
-        <div>
-          {row.items.map((item) => (
-            <div className={runMember} key={item.itemId} data-testid="unknown-vendor-run-member">
-              #{item.globalOrdinal} · {item.evidenceRef ?? item.itemId}
-            </div>
-          ))}
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
+import { cx } from "../../../../../styled-system/css";
+import type { ConversationScrollMemory } from "../../../../data/conversation/store";
+import type { ConversationItem } from "../../../../data/conversation/types";
+import { groupUnknownVendorRuns, type DisplayRow } from "../collapse";
+import { ConversationItemView, itemAccessibleName } from "../ConversationItemView";
+import {
+  BOTTOM_FOLLOW_PX,
+  INITIAL_PREMEASURE_BATCH_ROWS,
+  INITIAL_PREMEASURE_MAX_ROWS,
+  INITIAL_PREMEASURE_SLICE_DELAY_MS,
+  INTERACTION_DECAY_MS,
+  MEASUREMENT_RESIZE_SETTLE_MS,
+  OPERATOR_SCROLL_KEYS,
+  RESTORE_DRIVE_MAX_MS,
+  RESTORE_SETTLE_FRAMES,
+  readStoredMeasurements,
+  storeMeasurements,
+} from "./measurements";
+export { OPERATOR_SCROLL_KEYS } from "./measurements";
+import {
+  emptyInWell,
+  feedInner,
+  latestChip,
+  latestChipWithUpdates,
+  olderBar,
+  olderButton,
+  rowShell,
+  viewport,
+  viewportShell,
+} from "./styles";
+import {
+  UnknownVendorRun,
+  inOverflowRegion,
+  isEditableTarget,
+} from "./unknownRun";
 export interface ConversationTimelineProps {
   items: ConversationItem[];
   totalItems?: number;

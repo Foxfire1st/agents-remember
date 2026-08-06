@@ -1,0 +1,17 @@
+{
+  "$schema": "https://unpkg.com/knip@latest/schema.json",
+  "entry": [
+    "index.html",
+    "src/main.tsx",
+    "vite.config.ts",
+    "vitest.config.ts",
+    "playwright.config.ts",
+    "playwright.production.config.ts",
+    "playwright.chats-e2e.config.ts",
+    "playwright.perf.config.ts",
+    "panda.config.ts",
+    "postcss.config.cjs"
+  ],
+  "project": ["src/**/*.{ts,tsx}", "scripts/**/*.{ts,mjs}", "e2e/**/*.{ts,mjs}"],
+  "ignore": ["src/dev/**", "src/test/**", "src/types/projection.ts"]
+}

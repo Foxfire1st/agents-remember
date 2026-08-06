@@ -1,6 +1,6 @@
 import { css } from "../../../styled-system/css";
 import type { EngineProcessNode } from "../../types/projection";
-import { sectionLabel, timeline, timelineMark, timelineStep } from "./engineRoomStyles";
+import { sectionLabel, timeline, timelineMark, timelineStep } from "./styles";
 
 type StepState =
   | "complete"

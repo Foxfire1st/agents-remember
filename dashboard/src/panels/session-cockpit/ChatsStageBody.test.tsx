@@ -974,3 +974,31 @@ describe("ChatsStageBody B1: persistent conversation + PTY layers", () => {
     expect(onVisibleCols).toHaveBeenCalledWith(null);
   });
 });
+
+describe("ChatsStageBody empty state (adjutant backdrop)", () => {
+  it("renders the adjutant boomerang backdrop with a pointer to the rail when no chat is selected", () => {
+    document.documentElement.dataset.effects = "on";
+    try {
+      const { getByTestId, getByText } = render(
+        <ChatsStageBody
+          focused={undefined}
+          libraryOpen={false}
+          onCloseLibrary={() => {}}
+          diagnosticsOpen={false}
+          onToggleDiagnostics={() => {}}
+          onSessionOpened={() => {}}
+        />,
+      );
+      expect(getByTestId("chats-stage-body").getAttribute("data-mode")).toBe(
+        "empty",
+      );
+      const video = getByTestId("empty-backdrop").querySelector("video");
+      expect(video?.getAttribute("src")).toBe(
+        "/assets/sc2-adjutant-boomerang.mp4",
+      );
+      expect(getByText(/Select a chat to inspect it/)).not.toBeNull();
+    } finally {
+      delete document.documentElement.dataset.effects;
+    }
+  });
+});

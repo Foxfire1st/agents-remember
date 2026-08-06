@@ -29,7 +29,7 @@ import { AgentsArea } from "./AgentsArea";
 import { AmbientTelemetry } from "./AmbientTelemetry";
 import { CapabilityReason } from "./primitives";
 import { ConversationReconnect } from "./ConversationReconnect";
-import { ConversationTimeline } from "./ConversationTimeline";
+import { ConversationTimeline } from "./conversation-timeline/ConversationTimeline";
 import { ConversationWelcome } from "./ConversationWelcome";
 
 const surface = css({ display: "flex", flexDirection: "column", flex: "1", minHeight: "0", minWidth: "0", gap: "0.3rem" });

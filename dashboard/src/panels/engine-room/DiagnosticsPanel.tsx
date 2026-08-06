@@ -14,7 +14,7 @@ import {
   missingTitle,
   phaseLineList,
   sectionLabel,
-} from "./engineRoomStyles";
+} from "./styles";
 
 function CommitRow({ label, refNode }: { label: string; refNode: CommitRefNode }) {
   const ref = [refNode.branch, refNode.commit?.slice(0, 8)].filter(Boolean).join(" @ ");

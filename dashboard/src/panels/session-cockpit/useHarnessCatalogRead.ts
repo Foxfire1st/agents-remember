@@ -31,6 +31,8 @@ export function useHarnessCatalogRead({
   const [catalog, setCatalog] = useState<HarnessCatalogState>({ status: "idle" });
   const activeRef = useRef<ActiveRead | null>(null);
   const observedBootRef = useRef<string | null>(null);
+  const servingBootedAtRef = useRef(servingBootedAt);
+  servingBootedAtRef.current = servingBootedAt;
 
   const abortActive = useCallback(() => {
     const active = activeRef.current;
@@ -68,7 +70,7 @@ export function useHarnessCatalogRead({
       setCatalog({ status: "idle" });
       return undefined;
     }
-    observedBootRef.current = servingBootedAt;
+    observedBootRef.current = servingBootedAtRef.current;
     read();
     return abortActive;
   }, [abortActive, open, read]);

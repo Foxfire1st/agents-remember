@@ -11,7 +11,7 @@ import {
   stackMeta,
   stackRepo,
   stackTaskName,
-} from "./engineRoomStyles";
+} from "./styles";
 import type { EngineProcessView } from "./engineRoomTypes";
 
 const headWrap = css({ display: "flex", alignItems: "center", gap: "0.35rem", minWidth: "0" });

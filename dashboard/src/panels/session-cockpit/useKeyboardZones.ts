@@ -93,5 +93,5 @@ export function useKeyboardZones({
       };
     }
     return tinykeys(window, map, { ignore: () => false, capture: true });
-  }, [active, keymap.signature]);
+  }, [active, keymap]);
 }

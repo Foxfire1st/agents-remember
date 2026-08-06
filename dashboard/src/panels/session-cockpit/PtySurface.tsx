@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 
 import { css } from "../../../styled-system/css";
 import { matchReservedChord } from "../../data/keymap/reserved";
@@ -178,10 +178,14 @@ export function PtySurface({
       current.includes(focusedId) ? current : [...current, focusedId],
     );
   }, [focusedId]);
-  const inspectableIds = new Set(
-    sessions
-      .filter((session) => isInspectable(session.status))
-      .map((session) => session.id),
+  const inspectableIds = useMemo(
+    () =>
+      new Set(
+        sessions
+          .filter((session) => isInspectable(session.status))
+          .map((session) => session.id),
+      ),
+    [sessions],
   );
   const mounted = mountedIds.filter((id) => inspectableIds.has(id));
   useEffect(() => {
@@ -190,7 +194,7 @@ export function PtySurface({
       const keep = current.filter((id) => inspectableIds.has(id));
       return keep.length === current.length ? current : keep;
     });
-  }, [sessions]); // inspectableIds derives from sessions
+  }, [inspectableIds]); // inspectableIds derives from sessions
 
   // Focusing a seat acknowledges its bell marker (the marker exists to pull attention here).
   useEffect(() => {

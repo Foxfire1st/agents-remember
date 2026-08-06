@@ -23,6 +23,7 @@ import {
 } from "../../data/conversation/store";
 import type { HarnessId } from "../../data/conversation/types";
 import { sessionStore, useSessions, type OpenSession } from "../../data/sessions";
+import { EmptyStateBackdrop } from "../EmptyStateBackdrop";
 import { ConversationReconnect } from "./conversation/ConversationReconnect";
 import { ConversationSurface } from "./conversation/ConversationSurface";
 import { TerminalDiagnosticsDrawer } from "./conversation/TerminalDiagnosticsDrawer";
@@ -369,7 +370,18 @@ export function ChatsStageBody({
     if (!terminalFocused) onVisibleCols?.(null);
   }, [terminalFocused, onVisibleCols]);
 
-  if (focused === undefined) return null;
+  if (focused === undefined) {
+    // No chat selected: the main column keeps the adjutant boomerang backdrop (restored from the
+    // pre-consolidation Chats empty canvas) with a quiet pointer to the rail. Effects-gated like
+    // every other backdrop (calm-cockpit / prefers-reduced-motion → text only).
+    return (
+      <div className={body} data-testid="chats-stage-body" data-mode="empty">
+        <EmptyStateBackdrop src="/assets/sc2-adjutant-boomerang.mp4">
+          Select a chat to inspect it — or start one from the chat rail.
+        </EmptyStateBackdrop>
+      </div>
+    );
+  }
 
   // The most recently focused terminal seat owns the PTY layer while a harness seat has the stage.
   // Resolving through the store keeps its status fresh (a landed/exited seat prunes honestly

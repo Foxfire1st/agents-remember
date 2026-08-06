@@ -32,7 +32,7 @@ import {
   conversationStatus,
 } from "../../../test/fixtures/conversationWire";
 import { ConversationSurface } from "./ConversationSurface";
-import { OPERATOR_SCROLL_KEYS } from "./ConversationTimeline";
+import { OPERATOR_SCROLL_KEYS } from "./conversation-timeline/ConversationTimeline";
 
 vi.mock("../../../data/announcer", () => ({
   announcePolite: vi.fn(),

@@ -1,12 +1,6 @@
 // The canonical Chats cockpit: rail / stage / inspector as a react-resizable-panels group with
 // the narrow-width rules (inspector auto-collapses <~1100px, rail <~900px — both reopenable) and
-// the ~80-col PTY floor hint chip. The rail (SessionRail — ruled role hierarchy + fleet
-// attention), the stage container + HeaderStrip (the ModelEffortControl slot and the WorkingLine
-// slot — source-selected: the SSE-driven ConversationWorkingLine while the focused harness seat's
-// conversation stream is live, the catalog-driven WorkingLine otherwise; the slot sits between
-// conversation and composer, not in the stage's top chrome), and the focused-seat inspector card
-// (tabbed). The PTY and reliable composer are keyboard-zone anchors. The view root carries
-// [data-view="sessions"]: the WebTUI scope root and the keyboard layer's home.
+
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Panel,
@@ -15,17 +9,17 @@ import {
   type ImperativePanelHandle,
 } from "react-resizable-panels";
 
-import { css, cx } from "../../../styled-system/css";
+import { cx } from "../../../../styled-system/css";
 import {
   preferLiveSession,
   readLastActiveSessionId,
-} from "../../data/catalogPoll";
+} from "../../../data/catalogPoll";
 import {
   createCommandRegistry,
   registerDefaultCommands,
   type CommandContext,
   type PalettePage,
-} from "../../data/commands";
+} from "../../../data/commands";
 import {
   FOCUS_REGIONS,
   nextRegion,
@@ -33,34 +27,31 @@ import {
   regionTargetSelector,
   STAGE_HEADER_SELECTOR,
   type FocusRegion,
-} from "../../data/keymap/focus";
+} from "../../../data/keymap/focus";
 import {
   attentionRollup,
   buildRailModel,
   criticalBusSessionIds,
-  interactionPromptPreview,
-  jumpToAttentionTarget,
   masterLabels,
   railCycleOrder,
   smartDefaultFocus,
-  waitingSeats,
-} from "../../data/railModel";
-import { startSeatStateAnnouncer } from "../../data/announcer";
+} from "../../../data/railModel";
+import { startSeatStateAnnouncer } from "../../../data/announcer";
 import {
   sessionCockpitStore,
   startCockpitMirror,
   useSessionCockpit,
-} from "../../data/sessionCockpitStore";
-import { startRetireResidualSweep } from "../../data/sessionLifecycle";
-import { seatVisualState } from "../../data/stateGrammar";
+} from "../../../data/sessionCockpitStore";
+import { startRetireResidualSweep } from "../../../data/sessionLifecycle";
+import { seatVisualState } from "../../../data/stateGrammar";
 import {
   cycleEffortRequested,
   startSetPromotionWatcher,
-} from "../../data/setClient";
+} from "../../../data/setClient";
 import {
   hasUnackedSetAttention,
   queuedComposerHint,
-} from "../../data/setChips";
+} from "../../../data/setChips";
 import {
   autoCollapseTransition,
   hasPersistedPanelLayout,
@@ -70,117 +61,50 @@ import {
   RAIL_FALLBACK_PERCENT,
   railDefaultPercent,
   stageBelowPtyFloor,
-} from "../../data/sessionLayout";
-import { useActiveConversation } from "../../data/conversation/store";
-import { pendingInteractionAgentLabel } from "../../data/interactionAnswer";
-import { sessionPendingInteractionPayload, useSessions } from "../../data/sessions";
-import { shortId } from "../../data/conversation/format";
-import { useDashboard } from "../../data/store";
-import type { AgentPickupNode, TaskDocNode } from "../../types/projection";
-import { CockpitLiveRegions } from "./CockpitLiveRegions";
-import { ChatContextBar, ChatSessionActions } from "./ChatContextBar";
-import { CommandPalette } from "./CommandPalette";
-import { FailedLaunchBanner } from "./FailedLaunchBanner";
-import { InteractionBar } from "./InteractionBar";
-import { LaunchFlow, type LaunchPrefill } from "./LaunchFlow";
-import { LandedCleanupNotice } from "./LandedCleanupNotice";
-import { ChatsStageBody } from "./ChatsStageBody";
-import { ConversationWorkingLine } from "./conversation/ConversationWorkingLine";
-import { useConversationInterrupt } from "./conversation/useConversationControls";
-import { SeatInspector } from "./SeatInspector";
-import { endLanded, SessionRail } from "./SessionRail";
-import { SessionStage } from "./SessionStage";
-import { SetOutcomeToasts } from "./SetOutcomeToasts";
-import { useKeyboardZones } from "./useKeyboardZones";
-import { WorkingLine } from "./WorkingLine";
+} from "../../../data/sessionLayout";
+import { useActiveConversation } from "../../../data/conversation/store";
+import { useSessions } from "../../../data/sessions";
+import { shortId } from "../../../data/conversation/format";
+import { useDashboard } from "../../../data/store";
+import type { AgentPickupNode, TaskDocNode } from "../../../types/projection";
+import { CockpitLiveRegions } from "../CockpitLiveRegions";
+import { ChatContextBar, ChatSessionActions } from "../ChatContextBar";
+import { CommandPalette } from "../CommandPalette";
+import { FailedLaunchBanner } from "../FailedLaunchBanner";
+import { InteractionBar } from "../InteractionBar";
+import { LaunchFlow, type LaunchPrefill } from "../LaunchFlow";
+import { LandedCleanupNotice } from "../LandedCleanupNotice";
+import { ChatsStageBody } from "../ChatsStageBody";
+import { ConversationWorkingLine } from "../conversation/ConversationWorkingLine";
+import { useConversationInterrupt } from "../conversation/useConversationControls";
+import { SeatInspector } from "../SeatInspector";
+import { SessionRail } from "../SessionRail";
+import { SessionStage } from "../SessionStage";
+import { SetOutcomeToasts } from "../SetOutcomeToasts";
+import { useKeyboardZones } from "../useKeyboardZones";
+import { useSessionsPaletteCommands } from "./useSessionsPaletteCommands";
+import { WorkingLine } from "../WorkingLine";
 import {
   SessionComposer,
   type SessionComposerHandle,
-} from "../SessionComposer";
-import { usePersistedFlag } from "../file-viewer/usePersistedFlag";
+} from "../../SessionComposer";
+import { usePersistedFlag } from "../../file-viewer/usePersistedFlag";
+import {
+  INSPECTOR_OPEN_KEY,
+  PANELS_AUTOSAVE_ID,
+  RAIL_MAX_PERCENT,
+  RAIL_MIN_PERCENT,
+  floorChip,
+  inspectorScroll,
+  pane,
+  paneHeading,
+  reopenButton,
+  resizeHandle,
+  root,
+  stagePane,
+  workingLineSlot,
+} from "./styles";
 
-const root = css({
-  position: "relative", // anchors the palette overlay inside the scope root
-  display: "flex",
-  flexDirection: "column",
-  flex: "1",
-  minHeight: "0",
-  minWidth: "0",
-  gap: "0.4rem",
-});
-// The WorkingLine slot — zero-height when idle, docked between conversation and composer.
-const workingLineSlot = css({ flexShrink: 0, minHeight: "0" });
-const pane = css({
-  height: "100%",
-  minWidth: "0",
-  display: "flex",
-  flexDirection: "column",
-  gap: "0.4rem",
-  background: "bgPanel",
-  borderWidth: "1px",
-  borderStyle: "solid",
-  borderColor: "grid",
-  borderRadius: "3px",
-  padding: "0.5rem 0.6rem",
-  overflow: "hidden",
-});
-const stagePane = css({
-  height: "100%",
-  minWidth: "0",
-  display: "flex",
-  flexDirection: "column",
-  gap: "0.4rem",
-  overflow: "hidden",
-  // The stage sat flush against the rail (a measured 3px gap, zero
-  // padding), gluing the stage title to the rail edge. A deliberate inline gutter separates
-  // the two panels.
-  paddingInlineStart: "0.75rem",
-});
-const floorChip = css({
-  fontSize: "0.64rem",
-  color: "amber",
-  borderWidth: "1px",
-  borderStyle: "solid",
-  borderColor: "amber",
-  borderRadius: "2px",
-  paddingInline: "0.35rem",
-});
-const inspectorScroll = css({ flex: "1", minHeight: "0", overflowY: "auto" });
-const reopenButton = css({
-  font: "inherit",
-  fontSize: "0.68rem",
-  letterSpacing: "0.06em",
-  paddingInline: "0.45rem",
-  paddingBlock: "0.06rem",
-  background: "transparent",
-  color: "muted",
-  borderWidth: "1px",
-  borderStyle: "solid",
-  borderColor: "grid",
-  borderRadius: "2px",
-  cursor: "pointer",
-  _hover: { color: "amber", borderColor: "amber" },
-  _focusVisible: {
-    outlineWidth: "1px",
-    outlineStyle: "solid",
-    outlineColor: "amber",
-    outlineOffset: "1px",
-  },
-});
-const resizeHandle = css({
-  width: "3px",
-  background: "grid",
-  transition: "background 0.15s ease",
-  _hover: { background: "amber" },
-  "&[data-resize-handle-state='drag']": { background: "amber" },
-});
-const paneHeading = css({ flexShrink: 0 });
-
-const PANELS_AUTOSAVE_ID = "cockpit.chats.panels";
-const INSPECTOR_OPEN_KEY = "cockpit.chats.inspector-open.v1";
-// The rail panel's percentage bounds — shared by the Panel props and the ~280px calibration.
-const RAIL_MIN_PERCENT = 12;
-const RAIL_MAX_PERCENT = 40;
 
 const EMPTY_DOCS: TaskDocNode[] = [];
 const EMPTY_PICKUPS: AgentPickupNode[] = [];
@@ -316,11 +240,14 @@ function SessionsViewImpl({
     const turn = status.turn.state;
     return turn === "working" || turn === "settling" || turn === "retrying" || turn === "compacting";
   });
-  const focusedBase = sessions.find((session) => session.id === focusedSessionId);
-  const focused =
-    focusedBase !== undefined && focusedLiveTurnWorking
+  const focused = useMemo(() => {
+    const focusedBase = sessions.find(
+      (session) => session.id === focusedSessionId,
+    );
+    return focusedBase !== undefined && focusedLiveTurnWorking
       ? { ...focusedBase, liveTurnWorking: true }
       : focusedBase;
+  }, [focusedLiveTurnWorking, focusedSessionId, sessions]);
   const focusedLive =
     focused !== undefined && (focused.status ?? "running") === "running";
   // The WorkingLine slot's source-selection rule. A harness seat whose
@@ -508,171 +435,28 @@ function SessionsViewImpl({
     sessionCockpitStore.getState().setPaletteOpen(palette.open);
   }, [palette.open]);
 
-  // The launch command — the palette is the flow's entry point (design §7.1).
-  useEffect(() => {
-    return registry.register({
-      id: "session.launch",
-      title: "Launch session…",
-      keywords: ["launch", "new", "open", "harness", "model", "effort"],
-      run: () => setLaunch({ open: true }),
-    });
-  }, [registry]);
 
-  // The ModelEffortControl's palette surface — the SAME popover the header trigger opens.
-  useEffect(() => {
-    const controlAvailable = () =>
-      focused !== undefined &&
-      focused.harness !== undefined &&
-      (focused.status ?? "running") === "running";
-    const disposers = [
-      registry.register({
-        id: "control.setModel",
-        title: "Set model…",
-        keywords: ["model", "switch", "change", "capability"],
-        when: controlAvailable,
-        run: () => setControlPopoverOpen(true),
-      }),
-      registry.register({
-        id: "control.setEffort",
-        title: "Set effort…",
-        keywords: ["effort", "thinking", "reasoning", "capability"],
-        when: controlAvailable,
-        run: () => setControlPopoverOpen(true),
-      }),
-    ];
-    return () => {
-      for (const dispose of disposers) dispose();
-    };
-  }, [registry, focused]);
+  // Palette commands + the exact-turn interrupt chord: all registration lives in the hook so
+  // this view keeps only its state, geometry, and layout surface.
+  useSessionsPaletteCommands({
+    registry,
+    focused,
+    setLaunch,
+    setControlPopoverOpen,
+    openChatsLibrary,
+    closeChatsLibrary,
+    toggleChatsDiagnostics,
+    chatsInterruptRef,
+    chatsLibraryOpenRef,
+    chatsDiagnosticsOpenRef,
+    treeView,
+    rollup,
+    sessions,
+    model,
+    focusSession,
+    rootRef,
+  });
 
-  // The structured-Chats stage toggles are discoverable palette commands (design
-  // §12.6) — browse native history in-stage, and the default-off terminal-diagnostics drawer. Both
-  // gate on a focused controlled session.
-  useEffect(() => {
-    const controlled = () =>
-      focused !== undefined &&
-      focused.harness !== undefined &&
-      (focused.status ?? "running") === "running";
-    const disposers = [
-      registry.register({
-        id: "conversation.browseHistory",
-        title: "Browse conversation history…",
-        keywords: ["history", "browse", "prior", "resume", "open", "library"],
-        when: controlled,
-        run: () => openChatsLibrary(),
-      }),
-      registry.register({
-        id: "conversation.terminalDiagnostics",
-        title: "Toggle terminal diagnostics",
-        keywords: ["terminal", "diagnostics", "runner", "log", "pty"],
-        when: controlled,
-        run: () => toggleChatsDiagnostics(!chatsDiagnosticsOpenRef.current),
-      }),
-      // §4.4 return path: a palette return command consuming the same library focus token.
-      registry.register({
-        id: "conversation.backToChat",
-        title: "Back to current chat",
-        keywords: ["back", "return", "close history", "current chat"],
-        when: () => chatsLibraryOpenRef.current,
-        run: () => closeChatsLibrary(),
-      }),
-      // §9.5: the exact-turn interrupt — palette command + the Control+Shift+. chord both dispatch
-      // this. `when` gates it to an interruptible working turn, so it never offers a dead stop.
-      registry.register({
-        id: "conversation.stop",
-        title: "Stop turn",
-        keywords: ["stop", "interrupt", "cancel", "turn", "abort"],
-        chord: "ctrl+shift+.",
-        when: () => chatsInterruptRef.current.available,
-        run: () => chatsInterruptRef.current.onStop?.(),
-      }),
-    ];
-    return () => {
-      for (const dispose of disposers) dispose();
-    };
-  }, [registry, focused, openChatsLibrary]);
-
-  // Palette commands (dynamic titles carry the HONEST preview counts + names): the tree
-  // toggle, jump-to-attention, bulk end at sprint + master level, and question triage.
-  useEffect(() => {
-    const disposers = [
-      registry.register({
-        id: "rail.treeToggle",
-        title: treeView
-          ? "Rail: show role hierarchy"
-          : "Rail: show orchestration tree",
-        keywords: ["tree", "spawn", "provenance", "hierarchy", "rail"],
-        run: () =>
-          sessionCockpitStore.getState().setOrchestrationTreeView(!treeView),
-      }),
-      registry.register({
-        id: "attention.jump",
-        title: "Jump to attention",
-        keywords: ["attention", "next", "triage"],
-        when: () => jumpToAttentionTarget(rollup, sessions) !== null,
-        run: () => {
-          const target = jumpToAttentionTarget(rollup, sessions);
-          if (target) focusSession(target);
-        },
-      }),
-    ];
-    const allLanded = [
-      ...model.masters.flatMap((master) => master.completed),
-      ...model.completedUnattached,
-    ];
-    if (allLanded.length > 0) {
-      disposers.push(
-        registry.register({
-          id: "sessions.endCompleted",
-          title: `End ${allLanded.length} completed — sprint: ${allLanded.map((s) => s.label).join(", ")}`,
-          keywords: ["end", "completed", "bulk", "cleanup"],
-          run: () => void endLanded(allLanded),
-        }),
-      );
-    }
-    for (const master of model.masters) {
-      if (master.completed.length === 0) continue;
-      disposers.push(
-        registry.register({
-          id: `sessions.endDone.${master.key}`,
-          title: `End ${master.completed.length} done — ${master.label}: ${master.completed.map((s) => s.label).join(", ")}`,
-          keywords: ["end", "done", "bulk", master.label],
-          run: () => void endLanded(master.completed),
-        }),
-      );
-    }
-    for (const seat of waitingSeats(sessions)) {
-      // Parent's singular slot first, else the first sub-agent entry; the title names WHO
-      // asks when the payload carries the adapter-bound agent label.
-      const payload = sessionPendingInteractionPayload(seat);
-      const rawPreview = interactionPromptPreview(payload, 60);
-      const asker = pendingInteractionAgentLabel(payload);
-      const preview =
-        rawPreview !== undefined && asker !== undefined ? `${asker}: ${rawPreview}` : rawPreview;
-      disposers.push(
-        registry.register({
-          id: `triage.${seat.id}`,
-          title: `Answer pending question — ${seat.label}${preview ? `: “${preview}”` : ""}`,
-          keywords: ["answer", "question", "pending", "input"],
-          // Answering was the user's explicit intent — focus the seat's InteractionBar
-          // (the palette invoked it; this is the invoked action, not a focus steal).
-          run: () => {
-            focusSession(seat.id);
-            window.requestAnimationFrame(() =>
-              rootRef.current
-                ?.querySelector<HTMLElement>(
-                  '[data-testid="interaction-bar"] button',
-                )
-                ?.focus(),
-            );
-          },
-        }),
-      );
-    }
-    return () => {
-      for (const dispose of disposers) dispose();
-    };
-  }, [registry, model, rollup, sessions, treeView, focused, focusSession]);
 
   const focusSelector = useCallback((selector: string) => {
     const target = rootRef.current?.querySelector<HTMLElement>(selector);

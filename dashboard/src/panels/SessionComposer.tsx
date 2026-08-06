@@ -245,9 +245,11 @@ export const SessionComposer = forwardRef<SessionComposerHandle, SessionComposer
     const editorRef = useRef<EditorView | null>(null);
     const syncingDraftRef = useRef(false);
     const composingRef = useRef(false);
-    const editable = useMemo(() => new Compartment(), [session.id]);
-    const profileCompartment = useMemo(() => new Compartment(), [session.id]);
-    const keymapCompartment = useMemo(() => new Compartment(), [session.id]);
+    // A compartment is a plain extension key: one instance can be re-used across editor
+    // instances, and the EditorView itself is recreated per session identity below.
+    const editable = useMemo(() => new Compartment(), []);
+    const profileCompartment = useMemo(() => new Compartment(), []);
+    const keymapCompartment = useMemo(() => new Compartment(), []);
     const effectiveKeymap = useEffectiveKeymap();
     const callbackRef = useRef({ onSlashAtLineStart, onEscape });
     callbackRef.current = { onSlashAtLineStart, onEscape };
@@ -350,7 +352,7 @@ export const SessionComposer = forwardRef<SessionComposerHandle, SessionComposer
           // With plain Enter bound to send, Shift+Enter is the explicit
           // newline — bound here at the same precedence so no profile/default can shadow it.
           .concat([{ key: "Shift-Enter", run: insertNewlineAndIndent }]),
-      [effectiveKeymap.signature],
+      [effectiveKeymap],
     );
 
     useImperativeHandle(
@@ -365,20 +367,35 @@ export const SessionComposer = forwardRef<SessionComposerHandle, SessionComposer
       [],
     );
 
+    // The EditorView captures the configuration that exists at (re)creation time; live
+    // draft/editable/profile/keymap updates flow through the compartments in the effects
+    // below. Refs make that initial-only contract explicit to exhaustive-deps instead of
+    // pretending the editor depends on every later value.
+    const initialDraftRef = useRef(draft.draft);
+    initialDraftRef.current = draft.draft;
+    const initialAriaLabelRef = useRef(ariaLabel);
+    initialAriaLabelRef.current = ariaLabel;
+    const initialEditableRef = useRef(gate.editable);
+    initialEditableRef.current = gate.editable;
+    const initialComposerProfileRef = useRef(effectiveKeymap.composerProfile);
+    initialComposerProfileRef.current = effectiveKeymap.composerProfile;
+    const initialComposerKeymapRef = useRef(composerKeymap);
+    initialComposerKeymapRef.current = composerKeymap;
+
     useEffect(() => {
       const parent = frameRef.current;
       if (!parent) return undefined;
       const view = new EditorView({
         parent,
         state: EditorState.create({
-          doc: draft.draft,
+          doc: initialDraftRef.current,
           extensions: [
             markdown(),
             EditorView.lineWrapping,
             composerTheme,
-            editable.of(EditorView.editable.of(gate.editable)),
+            editable.of(EditorView.editable.of(initialEditableRef.current)),
             EditorView.contentAttributes.of({
-              "aria-label": ariaLabel,
+              "aria-label": initialAriaLabelRef.current,
               "data-focus-target": "true",
             }),
             EditorView.updateListener.of((update) => {
@@ -388,11 +405,13 @@ export const SessionComposer = forwardRef<SessionComposerHandle, SessionComposer
                 .setComposerDraft(session.id, update.state.doc.toString());
             }),
             profileCompartment.of(
-              effectiveKeymap.composerProfile === "vim" ? vim() : [],
+              initialComposerProfileRef.current === "vim" ? vim() : [],
             ),
             // House commands stay above editor-profile keys. Escape is deliberately absent in
             // Vim mode so the plugin owns insert→normal; F6 remains the global focus escape.
-            keymapCompartment.of(Prec.highest(keymap.of(composerKeymap))),
+            keymapCompartment.of(
+              Prec.highest(keymap.of(initialComposerKeymapRef.current)),
+            ),
             EditorView.domEventHandlers({
               compositionstart() {
                 composingRef.current = true;

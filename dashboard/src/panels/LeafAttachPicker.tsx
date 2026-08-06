@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
 import { css } from "../../styled-system/css";
@@ -176,7 +176,7 @@ export function LeafAttachPicker({
   const triggerRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
 
-  const measure = () => {
+  const measure = useCallback(() => {
     const rect = triggerRef.current?.getBoundingClientRect();
     if (!rect) return;
     const viewportPadding = 8;
@@ -198,7 +198,7 @@ export function LeafAttachPicker({
             left: Math.max(viewportPadding, rect.left),
           },
     );
-  };
+  }, [align]);
 
   // Re-measure while open (cover scroll/resize of any container) and wire click-outside + Escape. The
   // menu is portaled out of `ref`, so the outside check spans BOTH the trigger and the portaled menu.
@@ -224,7 +224,7 @@ export function LeafAttachPicker({
       document.removeEventListener("mousedown", onDoc);
       document.removeEventListener("keydown", onKey);
     };
-  }, [open]);
+  }, [open, measure]);
 
   const toggle = () => {
     if (!open) {

@@ -11,7 +11,7 @@ import {
   cleanupRecord,
   dissolveShell,
   stageContent,
-} from "./engineRoomStyles";
+} from "./styles";
 import { useElementVisible } from "./useElementVisible";
 import { useShouldAnimate } from "./useShouldAnimate";
 

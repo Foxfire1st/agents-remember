@@ -8,7 +8,7 @@ import {
   engineSpine,
   fxOverlaySvg,
   warpSurge,
-} from "./engineRoomStyles";
+} from "./styles";
 
 type Point = {
   x: number;
