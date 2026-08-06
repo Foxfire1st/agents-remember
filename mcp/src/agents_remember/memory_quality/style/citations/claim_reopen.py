@@ -40,6 +40,7 @@ from pathlib import Path
 from typing import Any
 
 from agents_remember.kernel.git_command import run_git
+from agents_remember.kernel.memory_ledger import LedgerError, load_ledger
 from agents_remember.memory_quality.integrity.onboarding_drift_check.discovery import (
     parse_table_metadata,
     rel,
@@ -501,6 +502,52 @@ def dependency_changes(
     return changed, invalid
 
 
+def _mapping_pending_for_code_head(error: str, evaluation: Evaluation) -> bool:
+    """The route failed only because the code HEAD's ledger mapping is not written yet.
+
+    Verification stamps are written by the closeout refresh, so a stamp naming the code
+    worktree's HEAD exists only mid-closeout: the run that stamped it has not written the
+    C2->M2 ledger row yet. Pending means exactly that -- HEAD is unmapped AND the ledger
+    already maps an ancestor of HEAD (the closeout is mid-update on this line). An unmapped
+    HEAD with no mapped ancestor is a different, genuinely invalid provenance.
+    """
+    if "no ledger mapping for code commit" not in error:
+        return False
+    code_root = evaluation.trees.code_root
+    head = run_git(code_root, ["rev-parse", "HEAD"])
+    if head.returncode != 0 or head.stdout.strip() not in error:
+        return False
+    try:
+        ledger = load_ledger(evaluation.trees.memory_root / "memory.md")
+    except (LedgerError, OSError, UnicodeError):
+        return False
+    return any(
+        run_git(
+            code_root, ["merge-base", "--is-ancestor", row.code_commit, head.stdout.strip()]
+        ).returncode
+        == 0
+        for row in ledger.rows
+        if row.code_commit != head.stdout.strip()
+    )
+
+
+def _route_error_finding(
+    document: str, claim: model.Claim, error: str, evaluation: Evaluation
+) -> QualityFinding | None:
+    if _mapping_pending_for_code_head(error, evaluation):
+        # The stamp names the code worktree's HEAD -- a commit the in-flight closeout made
+        # (or recorded) and whose C2->M2 ledger mapping this same closeout writes at the
+        # end. The claims were gated when the run stamped them; faulting them for a mapping
+        # the gate itself is about to write would deadlock every interrupted-closeout resume.
+        return None
+    return provenance_finding(
+        document,
+        claim,
+        INVALID,
+        f"exact-path change routing failed: {error}",
+    )
+
+
 def evaluate_claim(
     document: str,
     claim: model.Claim,
@@ -508,12 +555,7 @@ def evaluate_claim(
 ) -> QualityFinding | None:
     route = evaluation.router.route_claim(claim.citations, evaluation.code_commit)
     if route.status == "error":
-        return provenance_finding(
-            document,
-            claim,
-            INVALID,
-            f"exact-path change routing failed: {route.error}",
-        )
+        return _route_error_finding(document, claim, route.error or "", evaluation)
     local: list[LocalSource] = []
     dependencies = list(route.dependencies)
     invalid: list[str] = []

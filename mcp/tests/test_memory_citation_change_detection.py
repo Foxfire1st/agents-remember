@@ -9,6 +9,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
+from typing import cast
 from unittest import mock
 
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
@@ -414,6 +415,56 @@ class CodeProvenanceTests(ChangeDetectionCase):
         result = self.tree.run()
 
         self.assertEqual(self.codes(result), ["citation_provenance_invalid"])
+
+    def test_mapping_pending_returns_false_when_head_is_not_in_the_error(self) -> None:
+        evaluation = cast(
+            claim_reopen.Evaluation,
+            SimpleNamespace(
+                trees=SimpleNamespace(code_root=self.tree.code, memory_root=self.tree.memory)
+            ),
+        )
+        self.assertFalse(
+            claim_reopen._mapping_pending_for_code_head(
+                "no ledger mapping for code commit " + "f" * 40, evaluation
+            )
+        )
+
+    def test_mapping_pending_returns_false_for_an_invalid_ledger(self) -> None:
+        self.tree.code_file("pkg/subject.py", "subject = 1\n")
+        self.tree.commit(self.tree.code, "baseline")
+        (self.tree.memory / "memory.md").write_text("not a ledger\n", encoding="utf-8")
+        evaluation = cast(
+            claim_reopen.Evaluation,
+            SimpleNamespace(
+                trees=SimpleNamespace(code_root=self.tree.code, memory_root=self.tree.memory)
+            ),
+        )
+        head = git(self.tree.code, "rev-parse", "HEAD")
+        self.assertFalse(
+            claim_reopen._mapping_pending_for_code_head(
+                f"no ledger mapping for code commit {head}", evaluation
+            )
+        )
+
+    def test_a_mapping_pending_for_the_code_head_is_not_a_fault(self) -> None:
+        """A stamp naming the code HEAD with no ledger mapping yet: the interrupted-closeout resume."""
+        self.tree.code_file("pkg/subject.py", "subject = 1\n")
+        baseline = self.tree.commit(self.tree.code, "baseline")
+        self.tree.code_file("pkg/subject.py", "subject = 2\n")
+        head = self.tree.commit(self.tree.code, "second")
+        self.tree.memory_file("system/rules.md", "## Rule\n\nKeep one.\n")
+        memory_commit = self.tree.commit(self.tree.memory, "memory baseline")
+        # The ledger maps the baseline only; HEAD's mapping is the closeout's pending write.
+        self.tree.map_memory(baseline, memory_commit)
+        self.tree.card(
+            "pkg/subject.py",
+            ["| The rule. | `## Rule` | system/rules.md:1-3 |"],
+            last_verified=head,
+        )
+
+        result = self.tree.run()
+
+        self.assert_clean(result)
 
     def test_a_bogus_anchor_that_never_resolves_is_enforced(self) -> None:
         """before==0 and now==0: the anchor resolves nowhere — stale-pointer finding, not invalid."""
