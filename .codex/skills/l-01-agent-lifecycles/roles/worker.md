@@ -69,9 +69,13 @@ says otherwise. You edit nothing outside your named surfaces.
 
 ### 4 — Checks (green before you report)
 
-Run what the brief prescribes — typically the focused suite over your changed paths plus the full
-`system/tools.md` wrapper from the code worktree root — and record the exact commands + outcomes for
-the report. A red check you cannot fix inside the leaf's scope is an escalation, not a workaround.
+Run what the brief prescribes and record the exact commands + outcomes for the report. Under the
+quality altitude ladder (260731-EFA-L17), leaf checks are change-set-scoped: the pre-push tier and
+the closeout staged gate run `agents_remember.code_quality.check --targeted` (changed files +
+reverse-import closure + derived test subset), and `memory_quality_check` stays a per-leaf
+closeout gate. The **full** wrapper is not a leaf check: it runs once per master, at the master
+integration gate, memory-capped. A red check you cannot fix inside the leaf's scope is an
+escalation, not a workaround.
 
 ### 5 — The Turn Report (mandatory, your last act)
 

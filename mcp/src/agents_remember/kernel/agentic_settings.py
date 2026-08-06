@@ -3,7 +3,8 @@
 The agentic settings family -- everything under the top-level ``orchestration``
 key: gate delegation, the three-party-loop knobs, per-role knob overrides,
 concurrency caps, the spawn harness preference, and the harness-definition
-extension/override table (``orchestration.harnesses``, 260703-L16) -- lives in
+extension/override table (``orchestration.harnesses``, 260703-L16), and the full
+quality gate's memory cap (``orchestration.qualityGate``, 260731-EFA-L17) -- lives in
 TWO JSON files that are merged on every read:
 
 - GLOBAL: ``<coordination_root>/system/settings.json``
@@ -40,6 +41,7 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
+from agents_remember.code_quality.memory_cap import DEFAULT_FULL_GATE_MEMORY_CAP_BYTES
 from agents_remember.controlplane.gate_policy import (
     DEFAULT_GATE_POLICY,
     GatePolicy,
@@ -76,6 +78,7 @@ KNOWN_ORCHESTRATION_FIELDS = frozenset(
         "expectations",
         "supervisor",
         "escalation",
+        "qualityGate",
     }
 )
 # One ``orchestration.harnesses.<id>`` entry (260703-L16): define a NEW harness or override a
@@ -140,6 +143,9 @@ KNOWN_SUPERVISOR_FIELDS = frozenset(
 KNOWN_ESCALATION_FIELDS = frozenset(
     {"slaSeconds", "rungSeconds", "nudgeRateLimitSeconds", "respawnAfterRung"}
 )
+# L17-R3 (260731-EFA-L17): the full quality gate's memory cap. One scalar knob,
+# settings-owned so the once-per-master full run is bounded without a code change.
+KNOWN_QUALITY_GATE_FIELDS = frozenset({"memoryCapBytes"})
 DEFAULT_SUPERVISOR_INTERVAL_SECONDS = 10.0
 DEFAULT_SUPERVISOR_STALE_CUTOFF_SECONDS = 60.0
 DEFAULT_SUPERVISOR_REDELIVER_BUDGET = 1
@@ -345,6 +351,20 @@ class EscalationSettings:
 
 
 @dataclass(frozen=True)
+class QualityGateSettings:
+    """``orchestration.qualityGate`` -- the full quality gate's resource knobs (L17-R3).
+
+    ``memory_cap_bytes`` bounds every full-wrapper run at the master integration
+    gate. The integration step wraps the run in a systemd scope with MemoryMax when
+    one is available, and falls back to a POSIX address-space rlimit inside the
+    wrapper otherwise (see ``code_quality.memory_cap``). Targeted leaf runs are not
+    full runs and are not capped by this knob.
+    """
+
+    memory_cap_bytes: int = DEFAULT_FULL_GATE_MEMORY_CAP_BYTES
+
+
+@dataclass(frozen=True)
 class AgenticSettings:
     """The merged, typed agentic settings for one read (global <- local)."""
 
@@ -364,6 +384,7 @@ class AgenticSettings:
     expectations: ExpectationSettings = field(default_factory=ExpectationSettings)
     supervisor: SupervisorSettings = field(default_factory=SupervisorSettings)
     escalation: EscalationSettings = field(default_factory=EscalationSettings)
+    quality_gate: QualityGateSettings = field(default_factory=QualityGateSettings)
     spawn_harness: str | None = None
     # The EFFECTIVE harness registry (260703-L16): the builtin defaults merged with the
     # ``orchestration.harnesses`` family -- new ids added, builtin ids possibly pre-customized.
@@ -424,6 +445,7 @@ def default_agentic_settings_seed() -> dict[str, Any]:
         "version": 1,
         "orchestration": {
             "gateDelegation": {"policy": "all-human"},
+            "qualityGate": {"memoryCapBytes": DEFAULT_FULL_GATE_MEMORY_CAP_BYTES},
             "loops": {
                 "defaults": {
                     "maxRounds": DEFAULT_LOOP_MAX_ROUNDS,
@@ -674,6 +696,7 @@ def _parse_orchestration(
         expectations=_parse_expectations(raw.get("expectations"), source=source),
         supervisor=_parse_supervisor(raw.get("supervisor"), source=source),
         escalation=_parse_escalation(raw.get("escalation"), source=source),
+        quality_gate=_parse_quality_gate(raw.get("qualityGate"), source=source),
         spawn_harness=_parse_spawn(raw.get("spawn"), source=source, harness_ids=harness_ids),
         harnesses=harnesses,
         sources=sources,
@@ -1309,6 +1332,27 @@ def _parse_escalation(raw: object, *, source: str) -> EscalationSettings:
         nudge_rate_limit_seconds=nudge_rate_limit_seconds,
         respawn_after_rung=_parse_respawn_after_rung(block, source=source),
     )
+
+
+def _parse_quality_gate(raw: object, *, source: str) -> QualityGateSettings:
+    """``orchestration.qualityGate`` (L17-R3): the full gate's memory cap in bytes.
+
+    Absent -> the documented default (2 GiB). Unknown keys fail loud like every other
+    orchestration family; a null at the family key is refused by
+    :func:`_refuse_null_families` before this parser runs.
+    """
+    if raw is None:
+        return QualityGateSettings()
+    block = _require_object(raw, "orchestration.qualityGate", source)
+    _refuse_unknown(block, KNOWN_QUALITY_GATE_FIELDS, "orchestration.qualityGate", source)
+    memory_cap_bytes = DEFAULT_FULL_GATE_MEMORY_CAP_BYTES
+    if "memoryCapBytes" in block:
+        memory_cap_bytes = _require_positive_int(
+            block["memoryCapBytes"],
+            "orchestration.qualityGate.memoryCapBytes",
+            source,
+        )
+    return QualityGateSettings(memory_cap_bytes=memory_cap_bytes)
 
 
 def _parse_escalation_sla_seconds(raw: object, *, source: str) -> dict[str, float]:

@@ -7,6 +7,7 @@ from agents_remember.controlplane.enforcement import GateGuard, evaluate_gate
 from agents_remember.controlplane.gate_policy import GatePolicy
 from agents_remember.controlplane.records import GateRecord
 from agents_remember.controlplane.store import GateStore
+from agents_remember.kernel.agentic_settings import load_agentic_settings
 from agents_remember.kernel.git_command import run_git
 from agents_remember.kernel.memory_ledger import (
     find_mapping,
@@ -16,6 +17,14 @@ from agents_remember.kernel.memory_ledger import (
 )
 from agents_remember.observer.paths import observer_logs_root
 from agents_remember.worktrees.modules.args import WorktreeArgs
+from agents_remember.worktrees.modules.code_quality_gate import (
+    GATE_FULL,
+    GATE_TARGETED,
+    QualityGatePlan,
+    code_quality_gate_preview,
+    requires_strict_code_quality,
+    run_strict_code_quality_gate,
+)
 from agents_remember.worktrees.modules.git import (
     branch_exists,
     commit_if_dirty,
@@ -40,6 +49,41 @@ from agents_remember.worktrees.worktree_contract import (
 )
 
 HANDOVER_GATE_KIND = "master-handover-approval"
+
+
+def quality_gate_mode(contract: WorktreeContract) -> str:
+    """The altitude routing for one integration.
+
+    A leaf contract integrates into its master branch and certifies its own change
+    set; the master's series contract is the once-per-master gate and runs the full
+    wrapper, memory-capped, inside the integration step itself.
+    """
+    return GATE_TARGETED if contract.kind == "leaf" else GATE_FULL
+
+
+def _quality_gate_memory_cap(contract: WorktreeContract) -> int:
+    settings = load_agentic_settings(contract.coordination_root, repo_root=contract.code_repo_path)
+    return settings.quality_gate.memory_cap_bytes
+
+
+def _quality_gate_preview(contract: WorktreeContract) -> dict[str, object]:
+    mode = quality_gate_mode(contract)
+    memory_cap_bytes = _quality_gate_memory_cap(contract) if mode == GATE_FULL else None
+    return code_quality_gate_preview(
+        contract.code_worktree,
+        code_would_commit=True,
+        diff_base=contract.code_base_commit,
+        plan=QualityGatePlan(mode=mode, memory_cap_bytes=memory_cap_bytes),
+    )
+
+
+@dataclass(frozen=True)
+class IntegratePreview:
+    """The evaluated seam guard and the planned altitude-routed quality gate."""
+
+    guard: GateGuard
+    handover_warning: dict[str, object] | None
+    quality_gate: dict[str, object]
 
 
 def integration_branch(contract: WorktreeContract) -> str:
@@ -326,8 +370,7 @@ def _dry_run_result(
     args: WorktreeArgs,
     sources: IntegrationSources,
     *,
-    guard: GateGuard,
-    handover_warning: dict[str, object] | None,
+    preview: IntegratePreview,
 ) -> WorktreeCommandResult:
     # The preview EVALUATES (never enforces) the seam guard, so the c-09-mandated
     # dry_run preflight cannot promise "would-integrate" and then have the real run
@@ -335,7 +378,7 @@ def _dry_run_result(
     # mutation.
     summary = (
         "Dry run completed; integration preflight can proceed with the selected strategy."
-        if guard.permitted
+        if preview.guard.permitted
         else "Dry run completed; the real run would refuse with handover-gate-blocked — "
         "decide the addressed master-handover-approval gate first."
     )
@@ -357,14 +400,15 @@ def _dry_run_result(
         "code_replay_required": sources.code_replay_required,
         "memory_replay_required": sources.memory_replay_required,
         "handover_gate": {
-            "permitted": guard.permitted,
-            "gateId": guard.gate_id,
-            "reason": guard.reason,
+            "permitted": preview.guard.permitted,
+            "gateId": preview.guard.gate_id,
+            "reason": preview.guard.reason,
         },
+        "quality_gate": preview.quality_gate,
         "cleanup_question": "After successful integration, ask whether to remove the code and memory worktrees plus merged local task branches.",
     }
-    if handover_warning is not None:
-        payload["handover_gate_warning"] = handover_warning
+    if preview.handover_warning is not None:
+        payload["handover_gate_warning"] = preview.handover_warning
     return WorktreeCommandResult(0, payload)
 
 
@@ -486,6 +530,7 @@ def _integrated_result(
     commits: IntegratedCommits,
     *,
     handover_warning: dict[str, object] | None,
+    quality_gate: dict[str, object],
 ) -> WorktreeCommandResult:
     updated = amend_contract(
         replace(
@@ -506,6 +551,7 @@ def _integrated_result(
         "integrated_code_commit": commits.code,
         "integrated_memory_content_commit": commits.memory_content,
         "integrated_ledger_commit": commits.ledger,
+        "quality_gate": quality_gate,
         "cleanup_question": "Integration completed. Remove the code and memory worktrees plus merged local task branches now?",
     }
     if handover_warning is not None:
@@ -562,8 +608,11 @@ def integrate_result(args: WorktreeArgs) -> WorktreeCommandResult:
             contract,
             args,
             sources,
-            guard=guard,
-            handover_warning=handover_warning,
+            preview=IntegratePreview(
+                guard=guard,
+                handover_warning=handover_warning,
+                quality_gate=_quality_gate_preview(contract),
+            ),
         )
 
     return _apply_integration(
@@ -587,6 +636,9 @@ def _apply_integration(
     )
     if blocked is not None:
         return WorktreeCommandResult(2, blocked)
+    quality_gate, blocked = _run_integration_quality_gate(contract)
+    if blocked is not None:
+        return WorktreeCommandResult(2, blocked)
     integrated_memory_content_commit, integrated_ledger_commit, blocked = (
         _integrated_memory_commits(
             contract, args, sources.current_memory_source, integrated_code_commit
@@ -600,4 +652,42 @@ def _apply_integration(
         ledger=integrated_ledger_commit,
     )
     _merge_integrated_commits(contract, commits)
-    return _integrated_result(contract, args, commits, handover_warning=handover_warning)
+    return _integrated_result(
+        contract,
+        args,
+        commits,
+        handover_warning=handover_warning,
+        quality_gate=quality_gate,
+    )
+
+
+def _run_integration_quality_gate(
+    contract: WorktreeContract,
+) -> tuple[dict[str, object], dict[str, object] | None]:
+    """The altitude-routed quality gate for one integration, run before any merge.
+
+    Leaf integration certifies the leaf's change set (targeted); master integration
+    runs the full wrapper once, memory-capped, inside the integration step itself so
+    no manager or orchestrator has to remember a separate full-gate invocation.
+    """
+    if not requires_strict_code_quality(contract.code_worktree, code_would_commit=True):
+        return _quality_gate_preview(contract), None
+    mode = quality_gate_mode(contract)
+    memory_cap_bytes = _quality_gate_memory_cap(contract) if mode == GATE_FULL else None
+    try:
+        gate = run_strict_code_quality_gate(
+            contract.code_worktree,
+            diff_base=contract.code_base_commit,
+            plan=QualityGatePlan(
+                mode=mode,
+                memory_cap_bytes=memory_cap_bytes,
+            ),
+            invocation="master-integration" if mode == GATE_FULL else "leaf-integration",
+        )
+    except RuntimeError as error:
+        return {}, blocked_integration_payload(
+            contract,
+            "blocked-quality-gate",
+            f"integration refused by the quality gate: {error}",
+        )
+    return gate, None

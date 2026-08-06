@@ -6,7 +6,7 @@ Agents Remember has FOUR settings families, each with exactly one home:
 | --- | --- | --- |
 | Boot infrastructure (repos, providers, transport, timeoutCaps, dashboard) | MCP authority settings file (outside the coordinator root) | boot |
 | Memory topology (`onboarding.storage`, `pathRules`, `crossRepo`) | memory-root `system/settings.json` (beside `settings.md`) | per resolution |
-| **Agentic settings** (`orchestration.*`: gate delegation, loops, roles + rolesPerLevel, concurrency, spawn preference, harness definitions) | **coordinator `system/settings.json`** (global), `<code-repo>/system/settings.json` (local override) | per use (`gateDelegation`: boot snapshot) |
+| **Agentic settings** (`orchestration.*`: gate delegation, loops, roles + rolesPerLevel, concurrency, spawn preference, harness definitions, qualityGate memory cap) | **coordinator `system/settings.json`** (global), `<code-repo>/system/settings.json` (local override) | per use (`gateDelegation`: boot snapshot) |
 | Provider lifecycle settings | server-generated from the authority config (`--from-settings`) | per command |
 
 `system/settings.md` remains the human and agent prose guidance file beside a
@@ -278,7 +278,7 @@ Reserved Families below).
 
 **Null rule.** A JSON `null` at a known `orchestration.*` family key
 (`gateDelegation` · `loops` · `roles` · `rolesPerLevel` · `concurrency` ·
-`spawn` · `harnesses`), in EITHER layer, is REFUSED naming the offending file.
+`spawn` · `harnesses` · `qualityGate`), in EITHER layer, is REFUSED naming the offending file.
 `null` reads as *absent* to every family parser and the deep merge REPLACES a
 non-object, so `"concurrency": null` in the repo-local layer would otherwise
 SILENTLY wipe the global caps — the one scalar collision that used to defeat
@@ -293,7 +293,8 @@ a harness/MCP restart.
 
 **Defaults.** An absent file, or an absent key, means: all-human gate
 delegation, the loop defaults below, no role overrides, no concurrency caps,
-no spawn harness preference (detection-gated spawns).
+no spawn harness preference (detection-gated spawns), and the full quality
+gate's default memory cap (2 GiB, see `orchestration.qualityGate`).
 
 ### orchestration.gateDelegation
 
@@ -414,6 +415,26 @@ fields are optional; an empty block keeps the safe defaults.
 2026-07-09 redelivery-cadence incident the global coordinator settings disabled
 the supervisor until the 15-minute redelivery and signal-cooldown fix landed and
 passed smoke.
+
+### orchestration.qualityGate
+
+`orchestration.qualityGate` owns the full quality wrapper's resource knobs
+(260731-EFA-L17). The full wrapper runs exactly once per master, at the master
+integration gate, and every such run is memory-bounded.
+
+| Field | Default | Notes |
+| --- | --- | --- |
+| `memoryCapBytes` | `2147483648` (2 GiB) | The memory cap for a full-wrapper run. On hosts with systemd the integration step runs the wrapper in a `systemd-run --scope` with `MemoryMax=<bytes>` and `MemorySwapMax=0` (so swap cannot mask the hard cap); otherwise the wrapper applies a POSIX `RLIMIT_AS` address-space rlimit to itself and every rail it spawns (the closest available mechanism). An over-cap run dies inside its own scope/process with a loud failure naming this policy key. Positive integer. |
+
+```jsonc
+"orchestration": {
+  "qualityGate": { "memoryCapBytes": 2147483648 }
+}
+```
+
+Targeted leaf runs (pre-push hook, leaf closeout, leaf integration) are not full
+runs and are not capped by this knob. Raise `memoryCapBytes` only after the run
+itself is proven healthy; the gate treats a killed run as a failure, never a skip.
 
 ### orchestration.concurrency, orchestration.spawn
 

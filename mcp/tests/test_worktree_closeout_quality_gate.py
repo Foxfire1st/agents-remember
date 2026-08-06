@@ -55,7 +55,11 @@ class CodeQualityGateTests(unittest.TestCase):
 
             self.assertTrue(preview["required"])
             self.assertEqual(preview["status"], code_quality_gate.GATE_ENFORCED)
-            self.assertEqual(preview["command"], "python -m agents_remember.code_quality.check")
+            self.assertEqual(
+                preview["command"],
+                "python -m agents_remember.code_quality.check --targeted",
+            )
+            self.assertEqual(preview["mode"], code_quality_gate.GATE_TARGETED)
             self.assertIn("before the code commit", str(preview["reason"]))
             self.assertTrue(
                 code_quality_gate.requires_strict_code_quality(worktree, code_would_commit=True)
@@ -120,7 +124,12 @@ class CodeQualityGateTests(unittest.TestCase):
             command, cwd, env = calls[0]
             self.assertEqual(
                 command,
-                [sys.executable, "-m", "agents_remember.code_quality.check"],
+                [
+                    sys.executable,
+                    "-m",
+                    "agents_remember.code_quality.check",
+                    "--targeted",
+                ],
             )
             self.assertEqual(cwd, worktree)
             self.assertEqual(
@@ -159,6 +168,7 @@ class CodeQualityGateTests(unittest.TestCase):
                     sys.executable,
                     "-m",
                     "agents_remember.code_quality.check",
+                    "--targeted",
                     "--diff-base",
                     "c1dc5056",
                 ],
@@ -174,7 +184,145 @@ class CodeQualityGateTests(unittest.TestCase):
                 worktree, code_would_commit=True, diff_base="c1dc5056"
             )
             self.assertEqual(preview["diffBase"], "c1dc5056")
-            self.assertIn("--diff-base c1dc5056", str(preview["command"]))
+            self.assertIn("--targeted --diff-base c1dc5056", str(preview["command"]))
+
+    def test_gate_command_refuses_unknown_modes(self) -> None:
+        with self.assertRaisesRegex(ValueError, "unknown quality gate mode"):
+            code_quality_gate._gate_command("", mode="bogus")
+
+    def test_gate_command_requires_a_cap_for_the_full_mode(self) -> None:
+        with self.assertRaisesRegex(ValueError, "requires memory_cap_bytes"):
+            code_quality_gate._gate_command("", mode=code_quality_gate.GATE_FULL)
+
+    def test_full_gate_preview_names_the_memory_cap_and_policy(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            worktree = _checkout_with_wrapper(Path(tmp))
+            preview = code_quality_gate.code_quality_gate_preview(
+                worktree,
+                code_would_commit=True,
+                diff_base="c1dc5056",
+                plan=code_quality_gate.QualityGatePlan(
+                    mode=code_quality_gate.GATE_FULL,
+                    memory_cap_bytes=2147483648,
+                    systemd_run_available=False,
+                ),
+            )
+            self.assertEqual(preview["mode"], code_quality_gate.GATE_FULL)
+            self.assertIn("--memory-cap-bytes 2147483648", str(preview["command"]))
+            memory_cap = preview["memoryCap"]
+            assert isinstance(memory_cap, dict)
+            self.assertEqual(memory_cap["capBytes"], 2147483648)
+            self.assertEqual(memory_cap["policy"], "orchestration.qualityGate.memoryCapBytes")
+
+    def test_full_gate_preview_without_a_cap_is_refused(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            worktree = _checkout_with_wrapper(Path(tmp))
+
+            with self.assertRaisesRegex(ValueError, "requires memory_cap_bytes"):
+                code_quality_gate.code_quality_gate_preview(
+                    worktree,
+                    code_would_commit=True,
+                    plan=code_quality_gate.QualityGatePlan(mode=code_quality_gate.GATE_FULL),
+                )
+
+    def test_full_gate_without_a_cap_is_refused(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            worktree = _checkout_with_wrapper(Path(tmp))
+
+            with (
+                mock.patch.object(
+                    code_quality_gate,
+                    "quality_python",
+                    return_value=Path(sys.executable),
+                ),
+                self.assertRaisesRegex(RuntimeError, "settings-owned memory cap"),
+            ):
+                code_quality_gate.run_strict_code_quality_gate(
+                    worktree,
+                    plan=code_quality_gate.QualityGatePlan(mode=code_quality_gate.GATE_FULL),
+                    runner=lambda command, cwd, env: subprocess.CompletedProcess(
+                        command, 0, stdout=""
+                    ),
+                )
+
+    def test_gate_run_refuses_unknown_modes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            worktree = _checkout_with_wrapper(Path(tmp))
+
+            with (
+                mock.patch.object(
+                    code_quality_gate, "quality_python", return_value=Path(sys.executable)
+                ),
+                self.assertRaisesRegex(ValueError, "unknown quality gate mode"),
+            ):
+                code_quality_gate.run_strict_code_quality_gate(
+                    worktree,
+                    plan=code_quality_gate.QualityGatePlan(mode="bogus"),
+                    runner=lambda command, cwd, env: subprocess.CompletedProcess(
+                        command, 0, stdout=""
+                    ),
+                )
+
+    def test_full_gate_run_uses_the_planned_cap_mechanism(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            worktree = _checkout_with_wrapper(Path(tmp))
+            calls: list[list[str]] = []
+
+            def runner(
+                command: list[str], cwd: Path, env: Mapping[str, str]
+            ) -> subprocess.CompletedProcess[str]:
+                calls.append(command)
+                return subprocess.CompletedProcess(command, 0, stdout="passed\n")
+
+            with mock.patch.object(
+                code_quality_gate, "quality_python", return_value=Path(sys.executable)
+            ):
+                result = code_quality_gate.run_strict_code_quality_gate(
+                    worktree,
+                    diff_base="c1dc5056",
+                    plan=code_quality_gate.QualityGatePlan(
+                        mode=code_quality_gate.GATE_FULL,
+                        memory_cap_bytes=1024,
+                        systemd_run_available=False,
+                    ),
+                    runner=runner,
+                )
+
+            self.assertTrue(result["passed"])
+            self.assertIn("--memory-cap-bytes", calls[0])
+            self.assertIn("1024", calls[0])
+            self.assertEqual(result["mode"], code_quality_gate.GATE_FULL)
+            memory_cap = result["memoryCap"]
+            assert isinstance(memory_cap, dict)
+            self.assertEqual(memory_cap["mechanism"], "rlimit-address-space")
+
+    def test_full_gate_kill_names_the_policy_loudly(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            worktree = _checkout_with_wrapper(Path(tmp))
+
+            def runner(
+                command: list[str], cwd: Path, env: Mapping[str, str]
+            ) -> subprocess.CompletedProcess[str]:
+                del cwd, env
+                return subprocess.CompletedProcess(command, 137, stdout="")
+
+            with (
+                mock.patch.object(
+                    code_quality_gate, "quality_python", return_value=Path(sys.executable)
+                ),
+                self.assertRaisesRegex(RuntimeError, "killed by the memory cap") as caught,
+            ):
+                code_quality_gate.run_strict_code_quality_gate(
+                    worktree,
+                    plan=code_quality_gate.QualityGatePlan(
+                        mode=code_quality_gate.GATE_FULL,
+                        memory_cap_bytes=1024,
+                        systemd_run_available=False,
+                    ),
+                    runner=runner,
+                )
+
+            self.assertIn("orchestration.qualityGate.memoryCapBytes", str(caught.exception))
 
     def test_gate_failure_includes_bounded_wrapper_output(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -300,7 +448,9 @@ class CloseoutCodeQualityGateTests(unittest.TestCase):
 
             self.assertEqual(deciders, [contract.code_worktree])
             gate_run.assert_called_once_with(
-                contract.code_worktree, diff_base=contract.code_base_commit
+                contract.code_worktree,
+                diff_base=contract.code_base_commit,
+                plan=code_quality_gate.QualityGatePlan(mode=code_quality_gate.GATE_TARGETED),
             )
 
     def test_gate_failure_precedes_all_closeout_commits(self) -> None:
@@ -336,12 +486,17 @@ class CloseoutCodeQualityGateTests(unittest.TestCase):
             contract = dirty_open_external_contract_fixture(Path(tmp))
             events: list[str] = []
 
-            def run_gate(_worktree: Path, *, diff_base: str = "") -> dict[str, object]:
+            def run_gate(
+                _worktree: Path,
+                *,
+                diff_base: str = "",
+                plan: code_quality_gate.QualityGatePlan | None = None,
+            ) -> dict[str, object]:
                 events.append("quality")
                 return {
                     "required": True,
                     "passed": True,
-                    "command": "python -m agents_remember.code_quality.check",
+                    "command": "python -m agents_remember.code_quality.check --targeted",
                     "diffBase": diff_base,
                 }
 
@@ -432,7 +587,14 @@ class _ScopeRecordingGate:
     def __init__(self) -> None:
         self.lint_paths: list[str] = []
 
-    def __call__(self, worktree: Path, *, diff_base: str = "") -> dict[str, object]:
+    def __call__(
+        self,
+        worktree: Path,
+        *,
+        diff_base: str = "",
+        plan: code_quality_gate.QualityGatePlan | None = None,
+    ) -> dict[str, object]:
+        del plan
         self.lint_paths = quality_check.posix_args(quality_check.derive_scope(worktree).lint_paths)
         completed = subprocess.run(
             [sys.executable, "-m", "ruff", "check", "--no-cache", *self.lint_paths],

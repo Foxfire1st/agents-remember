@@ -52,7 +52,11 @@ verdict finding, not a style note.
 
 ## Checks (green before you report)
 - Focused: <lint/typecheck/tests over changed paths, exact commands>.
-- Full: <the resolved system/tools.md wrapper command> — must exit 0.
+- Leaf (change-set-scoped): `PYTHONPATH=<code-worktree>/mcp/src <venv-python-path> -m
+  agents_remember.code_quality.check --targeted` with `AR_GATE_DIFF_BASE=<leaf base>` — must
+  exit 0. The FULL wrapper is NOT a leaf check (quality altitude ladder, 260731-EFA-L17): it runs
+  once per master at the master integration gate, memory-capped; `memory_quality_check` stays a
+  per-leaf closeout gate.
 - `git diff --check` in both worktrees.
 
 ## Curator handoff input

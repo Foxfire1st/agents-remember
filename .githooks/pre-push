@@ -1,6 +1,7 @@
 #!/usr/bin/env sh
-# Full pre-push tier: preserve Git's ref-update input as provenance, then run the
-# project-owned suite without staging, stashing, or mutating the index.
+# Targeted pre-push tier: preserve Git's ref-update input as provenance, then run
+# the leaf change-set-scoped project-owned suite without staging, stashing, or
+# mutating the index.
 #
 # Bypass intentionally with `git push --no-verify`.
 
@@ -12,4 +13,4 @@ push_updates="$(cat)" || {
 AR_QUALITY_INVOCATION="pre-push"
 AR_QUALITY_PUSH_UPDATES="$push_updates"
 export AR_QUALITY_INVOCATION AR_QUALITY_PUSH_UPDATES
-exec "$hook_dir/_gate.sh" full
+exec "$hook_dir/_gate.sh" targeted

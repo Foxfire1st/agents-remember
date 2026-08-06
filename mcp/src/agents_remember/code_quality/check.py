@@ -2,9 +2,12 @@
 
 Ruff, Ruff format, Pyright, pytest, CRAP, and changed-lines coverage enforce. Radon CC
 and MI are labelled reports because Radon findings do not change its exit status. Scope
-comes from ``code_quality.scope``: lint/type paths are index-known, while Radon and
-Coverage.py recursively consume the configured on-disk production roots. The wrapper
-reports relevant untracked files separately because the index and diff omit them.
+comes from ``code_quality.scope`` for a full run; ``--targeted`` derives the leaf
+change-set scope from ``code_quality.targeted`` (changed files, reverse-import closure,
+and the derived test subset). Full runs may additionally run under a settings-owned
+memory cap (``--memory-cap-bytes`` / ``orchestration.qualityGate.memoryCapBytes``).
+The wrapper reports relevant untracked files separately because the index and diff
+omit them.
 
 Each rail prints its actual input, config, nonzero population or result denominator, and
 explicit result. Missing/vacuous inputs and tool failures refuse. Findings are remediated
@@ -15,6 +18,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import resource
 import subprocess
 import sys
 import tempfile
@@ -25,7 +29,9 @@ from pathlib import Path
 from agents_remember.code_quality import (
     crap_calculator,
     diff_coverage,
+    memory_cap,
     scope_reporting,
+    targeted,
 )
 from agents_remember.code_quality import (
     scope as quality_scope,
@@ -69,6 +75,9 @@ class CheckConfig:
     top: int
     diff_base: str | None = None
     diff_floor: float = diff_coverage.DEFAULT_DIFF_COVERAGE_FLOOR
+    targeted: bool = False
+    targeted_base: diff_coverage.BaseResolution | None = None
+    targeted_scope: targeted.TargetedScopeResult | None = None
 
 
 @dataclass(frozen=True)
@@ -118,11 +127,20 @@ def run_subprocess(name: str, command: list[str], cwd: Path, env: Mapping[str, s
 
 def quality_steps(config: CheckConfig, coverage_json: Path) -> list[Step]:
     scope = config.scope
+    targeted = getattr(config, "targeted", False)
     lint_args = posix_args(scope.lint_paths)
     type_args = posix_args(scope.type_paths)
-    coverage_args = posix_args(scope.coverage_paths)
+    targeted_scope = getattr(config, "targeted_scope", None)
+    if targeted and targeted_scope is not None:
+        # Coverage.py instruments the top-level package root (the same shape the full
+        # wrapper uses, which is the proven-safe FastMCP/pydantic path); records are
+        # only written for modules the test subset actually imports. CRAP is still
+        # scoped to the changed modules below.
+        coverage_args = list(targeted_scope.coverage_root_modules)
+    else:
+        coverage_args = posix_args(scope.coverage_paths)
     test_args = posix_args(scope.test_paths)
-    return [
+    steps = [
         # No `--extend-ignore` and no `--select`: this step lints exactly what
         # `pyproject.toml` selects, C901/PLR0911/PLR0912/PLR0915 included. Anything routed
         # off this command line is a rule the gate stops enforcing, which is the whole
@@ -142,63 +160,78 @@ def quality_steps(config: CheckConfig, coverage_json: Path) -> list[Step]:
                 *type_args,
             ],
         ),
-        Step(
-            "radon-cc",
-            [
-                sys.executable,
-                "-m",
-                "radon",
-                "cc",
-                *coverage_args,
-                "-s",
-                "-n",
-                "B",
-                "--order",
-                "SCORE",
-            ],
-            report_note=RADON_REPORT_NOTE,
-        ),
-        Step(
-            "radon-mi",
-            [sys.executable, "-m", "radon", "mi", *coverage_args, "-s", "-n", "B"],
-            report_note=RADON_REPORT_NOTE,
-        ),
-        Step(
-            "pytest",
-            [
-                sys.executable,
-                "-m",
-                "pytest",
-                *test_args,
-                *coverage_arguments(scope.coverage_paths),
+    ]
+    # A targeted run scopes radon and coverage/CRAP to the changed production
+    # modules. When no production module changed (tests-only or non-Python leaves),
+    # the radon report rails are not applicable and are skipped loudly by the
+    # caller's not-applicable lines rather than run vacuous.
+    if not targeted or scope.coverage_paths:
+        steps.append(
+            Step(
+                "radon-cc",
+                [
+                    sys.executable,
+                    "-m",
+                    "radon",
+                    "cc",
+                    *coverage_args,
+                    "-s",
+                    "-n",
+                    "B",
+                    "--order",
+                    "SCORE",
+                ],
+                report_note=RADON_REPORT_NOTE,
+            )
+        )
+        steps.append(
+            Step(
+                "radon-mi",
+                [sys.executable, "-m", "radon", "mi", *coverage_args, "-s", "-n", "B"],
+                report_note=RADON_REPORT_NOTE,
+            )
+        )
+    if not targeted or scope.test_paths:
+        pytest_args = [sys.executable, "-m", "pytest", *test_args]
+        if scope.coverage_paths:
+            pytest_args += [
+                *(f"--cov={module}" for module in coverage_args),
                 f"--cov-report=json:{coverage_json.as_posix()}",
                 "--cov-report=term",
-            ],
-        ),
-    ]
+            ]
+        steps.append(Step("pytest", pytest_args))
+    return steps
 
 
 def posix_args(paths: list[Path]) -> list[str]:
     return [path.as_posix() for path in paths]
 
 
-def coverage_arguments(coverage_paths: list[Path]) -> list[str]:
-    return [f"--cov={path.as_posix()}" for path in coverage_paths]
-
-
 def source_import_roots(project_root: Path, coverage_paths: list[Path]) -> list[Path]:
     """Import roots for the tracked source packages.
 
-    Each coverage path points at a package directory (e.g. ``mcp/src/agents_remember``);
-    its parent (``mcp/src``) is the directory that must be importable. Putting these on
-    PYTHONPATH makes the wrapper's subprocesses import and cover *this* checkout's source
-    rather than whatever an editable install resolves to, so the gate behaves identically
-    from the primary clone and from any git worktree.
+    A coverage path pointing at a package directory (e.g. ``mcp/src/agents_remember``)
+    resolves to the directory that must be importable (``mcp/src``). A targeted run's
+    coverage path is a *file* inside the package, so the package root is recovered by
+    walking up while ``__init__.py`` exists. Putting these on PYTHONPATH makes the
+    wrapper's subprocesses import and cover *this* checkout's source rather than
+    whatever an editable install resolves to, so the gate behaves identically from the
+    primary clone and from any git worktree.
     """
     roots: list[Path] = []
+    resolved_root = project_root.resolve()
     for source in coverage_paths:
         resolved = source if source.is_absolute() else project_root / source
-        root = resolved.resolve().parent
+        if resolved.is_file() and resolved.suffix == ".py":
+            package_root = resolved.resolve().parent
+            while (package_root / "__init__.py").is_file() and package_root not in {
+                package_root.parent,
+                resolved_root,
+            }:
+                package_root = package_root.parent
+            root = resolved_root if (package_root / "__init__.py").is_file() else package_root
+        else:
+            root = resolved.resolve().parent
         if root not in roots:
             roots.append(root)
     return roots
@@ -224,7 +257,30 @@ def run_quality_check(
     printer: Printer = print_line,
 ) -> int:
     project_root = config.project_root.resolve()
-    printer(scope_reporting.wrapper_scope_line(project_root, config.scope))
+    targeted = getattr(config, "targeted", False)
+    if targeted and config.targeted_scope is not None and config.targeted_base is not None:
+        for line in scope_reporting.targeted_scope_lines(
+            config.targeted_base, config.targeted_scope
+        ):
+            printer(line)
+        if not config.scope.lint_paths:
+            printer(
+                "targeted: no Python files changed against the leaf base; there is nothing "
+                "for the leaf rails to certify"
+            )
+            printer("result: quality-wrapper PASS")
+            return 0
+        if not config.scope.coverage_paths:
+            printer(
+                "targeted: radon report and CRAP rails are not applicable -- no changed "
+                "production modules"
+            )
+        if not config.scope.test_paths:
+            printer(
+                "targeted: pytest rail is not applicable -- no test subset was derived "
+                "(no changed production modules and no changed tests)"
+            )
+    printer(scope_reporting.wrapper_scope_line(project_root, config.scope, targeted=targeted))
     for line in scope_reporting.untracked_scope_lines(config.scope):
         printer(line)
     with coverage_path_context(config.coverage_json, project_root) as coverage_json:
@@ -256,6 +312,7 @@ def run_fixed_checks(
     printer: Printer,
 ) -> int:
     env = subprocess_env(config)
+    targeted = getattr(config, "targeted", False)
     failed_steps = 0
     for step in quality_steps(config, coverage_json):
         printer(step_header(step))
@@ -264,6 +321,7 @@ def run_fixed_checks(
                 step.name,
                 config.project_root,
                 config.scope,
+                targeted=targeted,
             )
         )
         result = runner(step.name, step.command, config.project_root, env)
@@ -280,6 +338,14 @@ def run_fixed_checks(
             continue
         failed_steps += 1
         printer(step_failure(step, result.return_code))
+        cap = os.environ.get(memory_cap.MEMORY_CAP_ENV)
+        if cap:
+            printer(
+                f"{step.name} may have died from the quality memory cap "
+                f"(policy={memory_cap.QUALITY_MEMORY_CAP_POLICY}; "
+                f"mechanism={memory_cap.RLIMIT_MECHANISM}; cap={cap} bytes; "
+                "see the memory-cap line at the top of this run)"
+            )
     return failed_steps
 
 
@@ -313,6 +379,13 @@ def run_crap_calculator(
     printer: Printer,
 ) -> int:
     printer("\n## CRAP-Calculator")
+    if getattr(config, "targeted", False) and not config.scope.coverage_paths:
+        printer(
+            "not applicable: targeted run changed no production modules, so there are no "
+            "changed functions for a CRAP floor to score"
+        )
+        printer("result: CRAP-Calculator PASS (not applicable)")
+        return 0
     if not coverage_json.exists():
         printer(
             scope_reporting.crap_scope_line(
@@ -407,6 +480,17 @@ def run_diff_coverage(
     invocation is a gate somebody has to remember, which is the same as not having one.
     """
     printer("\n## diff-coverage")
+    if (
+        getattr(config, "targeted", False)
+        and not coverage_json.exists()
+        and not config.scope.coverage_paths
+    ):
+        printer(
+            "not applicable: targeted run changed no production modules, so no coverage "
+            "report was produced and there is no changed production line to score"
+        )
+        printer("result: diff-coverage PASS (not applicable)")
+        return 0
     if not coverage_json.exists():
         printer(
             scope_reporting.scope_line(
@@ -479,6 +563,25 @@ def build_parser() -> argparse.ArgumentParser:
             "file anywhere in it can excuse a finding."
         )
     )
+    parser.add_argument(
+        "--targeted",
+        action="store_true",
+        help=(
+            "Run the leaf change-set contract instead of the full tree: ruff over the "
+            "changed Python files, pyright over the changed files plus the reverse-import "
+            "closure, pytest over the derived test subset, and coverage/CRAP scoped to the "
+            "changed production modules. The derivation is printed for review."
+        ),
+    )
+    parser.add_argument(
+        "--memory-cap-bytes",
+        type=int,
+        help=(
+            "Apply a POSIX address-space rlimit (RLIMIT_AS) to this process and every rail "
+            "it spawns, so an over-cap run dies inside its own process instead of taking the "
+            f"host down. Policy: {memory_cap.QUALITY_MEMORY_CAP_POLICY}."
+        ),
+    )
     parser.add_argument("--project-root", type=Path, default=Path.cwd())
     parser.add_argument(
         "--coverage-json",
@@ -519,6 +622,22 @@ def config_from_args(args: argparse.Namespace) -> CheckConfig:
         scope_reporting.validate_invocation_environment()
     except scope_reporting.ScopeReportingError as error:
         raise ScopeError(str(error)) from error
+    if args.targeted:
+        base = diff_coverage.resolve_base(project_root, explicit_base=args.diff_base)
+        derived = targeted.derive_targeted_scope(project_root, base.revision)
+        full_scope = derive_scope(project_root)
+        return CheckConfig(
+            project_root=project_root,
+            scope=derived.to_gate_scope(full_scope),
+            coverage_json=args.coverage_json,
+            threshold=args.threshold,
+            top=args.top,
+            diff_base=args.diff_base,
+            diff_floor=args.diff_floor,
+            targeted=True,
+            targeted_base=base,
+            targeted_scope=derived,
+        )
     return CheckConfig(
         project_root=project_root,
         scope=derive_scope(project_root),
@@ -533,13 +652,46 @@ def config_from_args(args: argparse.Namespace) -> CheckConfig:
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+    if args.memory_cap_bytes is not None and args.memory_cap_bytes <= 0:
+        print_line(
+            "--memory-cap-bytes must be a positive integer "
+            f"(policy={memory_cap.QUALITY_MEMORY_CAP_POLICY})"
+        )
+        print_line("result: quality-wrapper FAIL")
+        return 1
+    if args.memory_cap_bytes is not None:
+        try:
+            resource.setrlimit(resource.RLIMIT_AS, (args.memory_cap_bytes, args.memory_cap_bytes))
+        except (ValueError, OSError) as error:
+            print_line(
+                f"memory-cap could not be applied (policy={memory_cap.QUALITY_MEMORY_CAP_POLICY}; "
+                f"mechanism={memory_cap.RLIMIT_MECHANISM}; cap={args.memory_cap_bytes} bytes): "
+                f"{error}"
+            )
+            print_line("result: quality-wrapper FAIL")
+            return 1
+        os.environ[memory_cap.MEMORY_CAP_ENV] = str(args.memory_cap_bytes)
+        print_line(
+            f"memory-cap: policy={memory_cap.QUALITY_MEMORY_CAP_POLICY}; "
+            f"mechanism={memory_cap.RLIMIT_MECHANISM}; cap={args.memory_cap_bytes} bytes"
+        )
     try:
         config = config_from_args(args)
+        return run_quality_check(config)
     except ScopeError as error:
         print_line(f"gate scope could not be derived: {error}")
         print_line("result: quality-wrapper FAIL")
         return 1
-    return run_quality_check(config)
+    except MemoryError:
+        if args.memory_cap_bytes is not None:
+            print_line(
+                "result: quality-wrapper FAIL (memory cap exceeded; "
+                f"policy={memory_cap.QUALITY_MEMORY_CAP_POLICY}; "
+                f"mechanism={memory_cap.RLIMIT_MECHANISM}; cap={args.memory_cap_bytes} bytes)"
+            )
+        else:
+            print_line("result: quality-wrapper FAIL (out of memory)")
+        return 1
 
 
 if __name__ == "__main__":

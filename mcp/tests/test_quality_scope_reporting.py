@@ -565,7 +565,7 @@ class CallerProvenanceTests(unittest.TestCase):
             )
 
         self.assertEqual(completed.returncode, 0, completed.stderr)
-        self.assertEqual(completed.stdout.splitlines(), ["full", "pre-push", update])
+        self.assertEqual(completed.stdout.splitlines(), ["targeted", "pre-push", update])
 
     def test_pre_push_with_no_updates_refuses_vacuous_range(self) -> None:
         environment = {
@@ -582,6 +582,19 @@ class CallerProvenanceTests(unittest.TestCase):
 
         self.assertEqual(environment[scope_reporting.INVOCATION_ENV], "closeout-staged")
         self.assertIn("staged candidate", scope_reporting.invocation_description(environment))
+
+    def test_integration_invocations_name_the_clean_checkout(self) -> None:
+        base = diff_coverage.BaseResolution("c0", "test")
+
+        master = scope_reporting.diff_input_description(
+            base, {scope_reporting.INVOCATION_ENV: "master-integration"}
+        )
+        leaf = scope_reporting.diff_input_description(
+            base, {scope_reporting.INVOCATION_ENV: "leaf-integration"}
+        )
+
+        self.assertIn("master integration tree", master)
+        self.assertIn("leaf integration tree", leaf)
 
     def test_every_generated_hook_gate_has_a_counted_target_map(self) -> None:
         scripts = {

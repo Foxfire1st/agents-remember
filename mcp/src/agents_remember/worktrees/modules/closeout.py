@@ -26,6 +26,7 @@ from agents_remember.observer.events import now_iso
 from agents_remember.observer.paths import observer_logs_root
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.code_quality_gate import (
+    QualityGatePlan,
     code_quality_gate_preview,
     requires_strict_code_quality,
     run_strict_code_quality_gate,
@@ -372,12 +373,13 @@ def closeout_preview_payload(contract, args: WorktreeArgs) -> dict[str, object]:
         contract.code_worktree,
         code_would_commit=code_dirty,
         diff_base=contract.code_base_commit,
+        plan=QualityGatePlan(mode="targeted"),
     )
     return {
         "state": "would-closeout",
         **status_payload(contract),
         "phase": "commit-approval-pending",
-        "summary": "Closeout preview only; no commits were created. The staging step and its two refusals belong to the strict code-quality gate, so they apply exactly when this preview reports the gate as enforced: when code would commit and this checkout carries the quality wrapper, closeout refuses outright if the code checkout is not the task's own worktree or has unresolved merge conflicts; otherwise it resets the index and stages the whole task worktree so the gate's scope is the commit's content -- files the task created included, not only the ones it edited -- and runs strict project-owned code quality over exactly that. A refused gate leaves the worktree staged and commits nothing; nothing is unstaged, because a retry resets and restages from the working tree and so reaches the same content a first run would. A checkout carrying no wrapper runs no gate, stages nothing early, and commits as it always has. External-memory closeout then refreshes onboarding verification metadata, affected entity fingerprints, route overview metadata, and route indexes to that code commit, runs memory_quality_check, and commits memory and ledger.",
+        "summary": "Closeout preview only; no commits were created. The staging step and its two refusals belong to the leaf change-set-scoped quality gate, so they apply exactly when this preview reports the gate as enforced: when code would commit and this checkout carries the quality wrapper, closeout refuses outright if the code checkout is not the task's own worktree or has unresolved merge conflicts; otherwise it resets the index and stages the whole task worktree so the gate's scope is the commit's content -- files the task created included, not only the ones it edited -- and runs the leaf's targeted quality contract (--targeted: changed files + reverse-import closure + derived test subset) over exactly that. The full wrapper is not a leaf gate; it runs once per master at the master integration gate, memory-capped. A refused gate leaves the worktree staged and commits nothing; nothing is unstaged, because a retry resets and restages from the working tree and so reaches the same content a first run would. A checkout carrying no wrapper runs no gate, stages nothing early, and commits as it always has. memory_quality_check stays a per-leaf closeout gate. External-memory closeout then refreshes onboarding verification metadata, affected entity fingerprints, route overview metadata, and route indexes to that code commit, runs memory_quality_check, and commits memory and ledger.",
         **recovery_guidance(
             "request_commit_approval",
             tool="worktree_closeout_apply",
@@ -792,7 +794,7 @@ def _refuse_conflicted_worktree(code_worktree: Path) -> None:
 
 
 def _gate_staged_code(code_worktree: Path, *, diff_base: str) -> dict[str, object]:
-    """Reset and stage the task worktree, then run the strict gate over exactly what it commits.
+    """Reset and stage the task worktree, then run the targeted leaf gate over exactly what it commits.
 
     Every rail of the gate reads the index. ``derive_scope`` lists what ruff and pyright
     are given with ``git ls-files``; ``diff_coverage`` diffs the base against the tracked
@@ -847,7 +849,9 @@ def _gate_staged_code(code_worktree: Path, *, diff_base: str) -> dict[str, objec
     _refuse_conflicted_worktree(code_worktree)
     require_git(code_worktree, ["reset", "--mixed", "--quiet", "HEAD"])
     require_git(code_worktree, ["add", "-A"])
-    return run_strict_code_quality_gate(code_worktree, diff_base=diff_base)
+    return run_strict_code_quality_gate(
+        code_worktree, diff_base=diff_base, plan=QualityGatePlan(mode="targeted")
+    )
 
 
 @dataclass(frozen=True)
@@ -956,6 +960,7 @@ def closeout_result(args: WorktreeArgs) -> WorktreeCommandResult:
         contract.code_worktree,
         code_would_commit=code_would_commit,
         diff_base=contract.code_base_commit,
+        plan=QualityGatePlan(mode="targeted"),
     )
     # The citation gate is working-tree semantics and rejects in seconds, so it runs BEFORE the
     # expensive wrapper and the code commit: the curator clears it during the leaf with the same

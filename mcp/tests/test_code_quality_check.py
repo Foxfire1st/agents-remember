@@ -113,7 +113,8 @@ class CodeQualityCheckTests(unittest.TestCase):
 
     def test_repository_gates_use_default_strict_wrapper(self) -> None:
         # The git hooks no longer inline the wrapper command: both delegate to the
-        # shared tiered body, and the full tier is where the wrapper runs. Follow the
+        # shared tiered body, and the pre-push tier runs the change-set-scoped wrapper.
+        # Follow the
         # indirection rather than dropping the assertion -- every repository gate must
         # still reach the wrapper with no threshold opt-out.
         gate_files = [
@@ -128,7 +129,7 @@ class CodeQualityCheckTests(unittest.TestCase):
                 self.assertNotIn("fail-on-crap-threshold", content)
 
     def test_git_hooks_delegate_to_the_shared_tiered_gate(self) -> None:
-        hook_tiers = {"pre-commit": "fast", "pre-push": "full"}
+        hook_tiers = {"pre-commit": "fast", "pre-push": "targeted"}
 
         for hook_name, tier in hook_tiers.items():
             hook = REPOSITORY_ROOT / ".githooks" / hook_name
@@ -136,6 +137,15 @@ class CodeQualityCheckTests(unittest.TestCase):
                 content = hook.read_text(encoding="utf-8")
                 self.assertIn(f'exec "$hook_dir/_gate.sh" {tier}', content)
                 self.assertNotIn("fail-on-crap-threshold", content)
+
+    def test_the_pre_push_tier_runs_the_targeted_contract(self) -> None:
+        gate = (REPOSITORY_ROOT / ".githooks" / "_gate.sh").read_text(encoding="utf-8")
+
+        self.assertIn("run_targeted_checks", gate)
+        self.assertIn("code_quality.check --targeted", gate)
+        # The full wrapper stays available only as a manual tier; the ladder moves it
+        # to the master integration gate.
+        self.assertIn("usage: _gate.sh <fast|targeted|full>", gate)
 
     def test_run_fixed_checks_threads_checkout_source_onto_pythonpath(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

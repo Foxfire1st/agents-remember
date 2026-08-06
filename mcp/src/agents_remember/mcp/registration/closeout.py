@@ -27,10 +27,11 @@ def register_closeout_tools(server: FastMCP, config: McpRuntimeConfig) -> None:
         memory_commit_message: str = "",
         ledger_commit_message: str = "",
     ) -> dict[str, Any]:
-        """Non-mutating preview of a worktree-backed closeout. Reports the proposed
-        code/memory/ledger commits and whether strict project-owned code quality, including
-        mandatory CRAP enforcement, will run over the staged task worktree
-        before the code commit. Pair with worktree_closeout_apply after approval."""
+        """Non-mutating preview of a worktree-backed closeout: proposed commits and whether
+        the leaf change-set-scoped quality gate (--targeted: changed files, reverse-import
+        closure, derived test subset, mandatory CRAP enforcement over changed modules) runs
+        over the staged task worktree before the code commit. memory_quality_check stays a
+        per-leaf closeout gate."""
         return worktree_closeout_preview_payload(
             config,
             contract_path,
@@ -50,20 +51,15 @@ def register_closeout_tools(server: FastMCP, config: McpRuntimeConfig) -> None:
         ledger_commit_message: str = "",
         dry_run: bool = False,
     ) -> dict[str, Any]:
-        """Apply an approved worktree closeout. When code would commit AND the checkout carries
-        the project-owned quality wrapper, resets the index, stages the whole task worktree, and
-        runs strict quality with mandatory CRAP enforcement over exactly that staged content,
-        before any code, memory, ledger, contract, or applied-gate commit; then commits code,
-        memory, and ledger in order. Staging is what lets the gate see files the task created
-        rather than only the ones it edited; the reset is what makes a retry stage what a first
-        run would, instead of inheriting a refused attempt's index. Staging is not undone if the
-        gate refuses: the checkout staged is the task's own disposable worktree. The two refusals
-        guard that staging step, so they run only where the gate runs -- it refuses before staging
-        when the code checkout is not a task worktree (a series/master contract records the
-        repository path itself) or has unresolved merge conflicts. A checkout carrying no wrapper
-        runs neither the gate nor those refusals, and reaches the ordinary commit step's own
-        'git add -A' exactly as it always has. MUTATING and commit-gated: preview and
-        approval precede apply. Requires intent_note."""
+        """Apply an approved worktree closeout. When code would commit and the checkout
+        carries the wrapper, resets the index, stages the whole task worktree, and runs the
+        leaf change-set-scoped contract (--targeted: changed files, reverse-import closure,
+        derived test subset, mandatory CRAP enforcement over changed modules) over exactly
+        that staged content, before any code, memory, ledger, contract, or applied-gate
+        commit; then commits in order. The full wrapper is NOT a leaf gate: it runs once per
+        master at the master integration gate, memory-capped. A refused gate leaves the task
+        worktree staged and commits nothing; retries reset and restage from the working tree.
+        MUTATING and commit-gated: preview and approval precede apply. Requires intent_note."""
         return worktree_closeout_apply_payload(
             config,
             contract_path,
@@ -82,9 +78,11 @@ def register_closeout_tools(server: FastMCP, config: McpRuntimeConfig) -> None:
         ledger_commit_message: str = "",
         dry_run: bool = False,
     ) -> dict[str, Any]:
-        """Land a closed task branch back onto its source branch (strategy 'ff-only' or 'replay').
-        MUTATING: moves branch refs. Do not move protected branches without explicit approval.
-        Preview with dry_run=true."""
+        """Land a closed task branch back onto its source branch (strategy 'ff-only' or
+        'replay'). Runs the altitude-routed quality gate before any merge: leaf integration
+        certifies its change set (--targeted); master integration runs the full wrapper once,
+        memory-capped (orchestration.qualityGate.memoryCapBytes), inside this step. MUTATING:
+        moves branch refs; preview with dry_run=true."""
         return worktree_integrate_payload(
             config,
             contract_path,

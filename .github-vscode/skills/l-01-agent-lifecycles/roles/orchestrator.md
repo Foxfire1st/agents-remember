@@ -322,6 +322,13 @@ handover you cannot honestly decide escalates to the architect as a decision ite
    Owner-never-self-retires still holds (you can never retire your own seat). Use
    this by hand for a stuck/abandoned seat the automation missed; transcripts are never deleted.
 
+**Quality altitude ladder (260731-EFA-L17).** The full quality wrapper is owned by the master
+integration gate: `worktree_integrate` on a master/series contract runs it exactly once, inside
+the integration step, memory-capped (`orchestration.qualityGate.memoryCapBytes`, systemd scope or
+the rlimit fallback). Leaf closeouts and leaf integrations run only the change-set-scoped
+contract (`--targeted`), and `memory_quality_check` stays a per-leaf closeout gate. Do not run a
+separate full wrapper per leaf — that is the waste the ladder removes.
+
 **The topology (single home — this section owns it):**
 
 ```

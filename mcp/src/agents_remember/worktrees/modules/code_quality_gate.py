@@ -6,8 +6,10 @@ import os
 import subprocess
 import sys
 from collections.abc import Callable, Mapping
+from dataclasses import dataclass
 from pathlib import Path
 
+from agents_remember.code_quality import memory_cap
 from agents_remember.kernel.git_command import git_environment, run_git
 
 QUALITY_WRAPPER = Path("mcp/src/agents_remember/code_quality/check.py")
@@ -17,8 +19,19 @@ FAILURE_OUTPUT_LINES = 40
 GATE_ENFORCED = "enforced"
 GATE_NO_CODE_COMMIT = "no-code-commit"
 GATE_WRAPPER_UNAVAILABLE = "wrapper-unavailable"
+GATE_TARGETED = "targeted"
+GATE_FULL = "full"
 
 QualityRunner = Callable[[list[str], Path, Mapping[str, str]], subprocess.CompletedProcess[str]]
+
+
+@dataclass(frozen=True)
+class QualityGatePlan:
+    """What one gate run is: which contract, and (for full runs) the memory cap."""
+
+    mode: str = GATE_TARGETED
+    memory_cap_bytes: int | None = None
+    systemd_run_available: bool | None = None
 
 
 def quality_wrapper_path(code_worktree: Path) -> Path:
@@ -26,10 +39,29 @@ def quality_wrapper_path(code_worktree: Path) -> Path:
     return code_worktree / QUALITY_WRAPPER
 
 
-def _gate_command(diff_base: str) -> str:
+def _gate_command(
+    diff_base: str,
+    *,
+    mode: str = GATE_TARGETED,
+    memory_cap_bytes: int | None = None,
+    systemd_run_available: bool | None = None,
+) -> str:
     """The command as reported, so a payload reader can rerun exactly what ran."""
+    if mode not in {GATE_TARGETED, GATE_FULL}:
+        raise ValueError(f"unknown quality gate mode: {mode}")
     base = f" --diff-base {diff_base}" if diff_base else ""
-    return f"python -m {QUALITY_MODULE}{base}"
+    if mode == GATE_TARGETED:
+        return f"python -m {QUALITY_MODULE} --targeted{base}"
+    if memory_cap_bytes is None:
+        raise ValueError("full quality gate command requires memory_cap_bytes")
+    plan = memory_cap.plan_capped_command(
+        "python",
+        ["-m", QUALITY_MODULE],
+        memory_cap_bytes,
+        systemd_run_available=systemd_run_available,
+    )
+    rendered = " ".join(plan.command)
+    return f"{rendered}{base}"
 
 
 def requires_strict_code_quality(code_worktree: Path, *, code_would_commit: bool) -> bool:
@@ -43,7 +75,11 @@ def requires_strict_code_quality(code_worktree: Path, *, code_would_commit: bool
 
 
 def code_quality_gate_preview(
-    code_worktree: Path, *, code_would_commit: bool, diff_base: str = ""
+    code_worktree: Path,
+    *,
+    code_would_commit: bool,
+    diff_base: str = "",
+    plan: QualityGatePlan | None = None,
 ) -> dict[str, object]:
     """Report which of the three gate states this closeout is in.
 
@@ -69,15 +105,41 @@ def code_quality_gate_preview(
                 "code commit is not quality-checked"
             ),
         }
+    plan = plan or QualityGatePlan()
+    memory_cap_payload: dict[str, object] = {}
+    if plan.mode == GATE_FULL:
+        cap_bytes = plan.memory_cap_bytes
+        if cap_bytes is None:
+            raise ValueError("full quality gate preview requires memory_cap_bytes")
+        memory_cap_payload = {
+            "memoryCap": {
+                "capBytes": cap_bytes,
+                "policy": memory_cap.QUALITY_MEMORY_CAP_POLICY,
+                "mechanism": memory_cap.plan_capped_command(
+                    "python",
+                    ["-m", QUALITY_MODULE],
+                    cap_bytes,
+                    systemd_run_available=plan.systemd_run_available,
+                ).mechanism,
+            }
+        }
     return {
         "required": True,
         "status": GATE_ENFORCED,
-        "command": _gate_command(diff_base),
+        "command": _gate_command(
+            diff_base,
+            mode=plan.mode,
+            memory_cap_bytes=plan.memory_cap_bytes,
+            systemd_run_available=plan.systemd_run_available,
+        ),
         "diffBase": diff_base,
+        "mode": plan.mode,
+        **memory_cap_payload,
         "reason": (
             "closeout stages the whole task worktree so the gate's scope is the commit's "
-            "content, then runs the strict project-owned quality wrapper over exactly that "
-            "before the code commit"
+            "content, then runs the leaf change-set-scoped quality contract (--targeted) "
+            "over exactly that before the code commit. The full wrapper runs once per "
+            "master, at the master integration gate, not at leaf closeout."
         ),
     }
 
@@ -101,24 +163,16 @@ def run_strict_code_quality_gate(
     code_worktree: Path,
     *,
     diff_base: str = "",
+    plan: QualityGatePlan | None = None,
+    invocation: str = "closeout-staged",
     runner: QualityRunner = run_subprocess,
 ) -> dict[str, object]:
-    """Run this worktree's mandatory quality wrapper or refuse the commit.
+    """Run the altitude-routed quality contract or refuse before the commit.
 
-    ``diff_base`` must be the leaf's recorded base commit. Without it the wrapper
-    falls back to ``origin/HEAD``/``main``, and the per-diff coverage floor then
-    demands 100% branch coverage of every change on the whole integration branch
-    rather than of this leaf's own diff -- which no leaf can pass, so the gate
-    would be as useless as one that cannot fail. CI keeps the ``main`` default
-    because a pull request genuinely is measured against ``main``; a leaf closeout
-    is measured against the leaf.
-
-    The wrapper derives its scope from the index, so what is staged when this runs is what
-    gets certified. This function certifies the index it is handed and says nothing about
-    how it came to look that way: ``runner`` is a public parameter and closeout is not the
-    only caller this signature admits, so the failure message below states only what is
-    true of every caller -- that nothing was committed. It deliberately does not say the
-    staging was undone, because closeout does not undo it.
+    ``diff_base`` must be the recorded base commit so the coverage floor measures
+    this change set, not the whole integration branch. The wrapper certifies the
+    index/working tree it is handed; on failure nothing is committed and closeout
+    deliberately leaves its staging in place.
     """
     wrapper = quality_wrapper_path(code_worktree)
     if not wrapper.is_file():
@@ -126,25 +180,96 @@ def run_strict_code_quality_gate(
             "strict code-quality gate cannot run before code commit: "
             f"project-owned wrapper is missing at {wrapper}"
         )
-    python = quality_python(code_worktree)
-    command = [python.as_posix(), "-m", QUALITY_MODULE]
-    if diff_base:
-        command += ["--diff-base", diff_base]
-    result = runner(command, code_worktree, quality_environment(code_worktree))
+    plan = plan or QualityGatePlan()
+    if plan.mode not in {GATE_TARGETED, GATE_FULL}:
+        raise ValueError(f"unknown quality gate mode: {plan.mode}")
+    command, invocation, cap_plan = _gate_command_parts(code_worktree, plan, diff_base, invocation)
+    result = runner(
+        command,
+        code_worktree,
+        quality_environment(code_worktree, invocation=invocation),
+    )
     if result.returncode != 0:
-        details = _failure_output(result.stdout)
-        raise RuntimeError(
-            "strict code-quality gate failed before code commit"
-            f" with exit code {result.returncode}; code, memory, and ledger remain uncommitted."
-            f"{details}"
-        )
+        raise RuntimeError(_gate_failure_message(result, cap_plan))
     return {
         "required": True,
         "status": GATE_ENFORCED,
         "passed": True,
-        "command": _gate_command(diff_base),
+        "command": _gate_command(
+            diff_base,
+            mode=plan.mode,
+            memory_cap_bytes=plan.memory_cap_bytes,
+            systemd_run_available=plan.systemd_run_available,
+        ),
         "diffBase": diff_base,
+        "mode": plan.mode,
+        **(
+            {
+                "memoryCap": {
+                    "capBytes": cap_plan.cap_bytes,
+                    "policy": cap_plan.policy,
+                    "mechanism": cap_plan.mechanism,
+                }
+            }
+            if cap_plan is not None
+            else {}
+        ),
     }
+
+
+def _gate_command_parts(
+    code_worktree: Path,
+    plan: QualityGatePlan,
+    diff_base: str,
+    invocation: str,
+) -> tuple[list[str], str, memory_cap.MemoryCapPlan | None]:
+    """The concrete command, its invocation label, and (full runs) the cap plan."""
+    python = quality_python(code_worktree)
+    module_args = ["-m", QUALITY_MODULE]
+    if plan.mode == GATE_TARGETED:
+        module_args.append("--targeted")
+    if diff_base:
+        module_args += ["--diff-base", diff_base]
+    if plan.mode != GATE_FULL:
+        return [python.as_posix(), *module_args], invocation, None
+    if plan.memory_cap_bytes is None:
+        raise RuntimeError(
+            "full quality gate requires a settings-owned memory cap "
+            f"({memory_cap.QUALITY_MEMORY_CAP_POLICY})"
+        )
+    cap_plan = memory_cap.plan_capped_command(
+        python,
+        module_args,
+        plan.memory_cap_bytes,
+        systemd_run_available=plan.systemd_run_available,
+    )
+    return cap_plan.command, "master-integration", cap_plan
+
+
+def _gate_failure_message(
+    result: subprocess.CompletedProcess[str],
+    cap_plan: memory_cap.MemoryCapPlan | None,
+) -> str:
+    """One refusal message: nothing committed, plus cap policy when a cap ran."""
+    details = _failure_output(result.stdout)
+    if cap_plan is not None:
+        killed = (
+            " The scope was killed by the memory cap (exit 137) inside its own scope."
+            if result.returncode == 137
+            else ""
+        )
+        details += (
+            f"\nfull gate memory policy: {cap_plan.policy}; "
+            f"mechanism={cap_plan.mechanism}; cap={cap_plan.cap_bytes} bytes; "
+            f"exit code {result.returncode}.{killed}"
+            " Raise orchestration.qualityGate.memoryCapBytes only after the run itself "
+            "is proven healthy."
+        )
+    return (
+        "strict code-quality gate failed before code commit"
+        f" with exit code {result.returncode}; code, memory, and ledger remain uncommitted."
+        f"{details}"
+    )
 
 
 def quality_python(code_worktree: Path) -> Path:
@@ -165,7 +290,9 @@ def quality_python(code_worktree: Path) -> Path:
     )
 
 
-def quality_environment(code_worktree: Path) -> dict[str, str]:
+def quality_environment(
+    code_worktree: Path, *, invocation: str = "closeout-staged"
+) -> dict[str, str]:
     """Put the current worktree package first even when Python comes from another checkout.
 
     Built from :func:`git_environment` rather than ``os.environ``: the wrapper this hands the
@@ -181,10 +308,10 @@ def quality_environment(code_worktree: Path) -> dict[str, str]:
     if existing:
         entries.append(existing)
     env["PYTHONPATH"] = os.pathsep.join(entries)
-    # Closeout has already reset and staged the whole task worktree before this process
-    # starts. Naming that state lets the shared wrapper distinguish it from a manual dirty
-    # tree or a pre-push ref range without inventing a second closeout-only gate.
-    env["AR_QUALITY_INVOCATION"] = "closeout-staged"
+    # Naming the invoking altitude lets the shared wrapper describe what it certifies:
+    # closeout has already reset and staged the whole task worktree; integration runs
+    # on a clean checkout at the commit about to land.
+    env["AR_QUALITY_INVOCATION"] = invocation
     return env
 
 

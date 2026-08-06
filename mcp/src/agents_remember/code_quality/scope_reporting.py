@@ -26,7 +26,7 @@ from agents_remember.code_quality.scope import (
 )
 
 if TYPE_CHECKING:
-    from agents_remember.code_quality import diff_coverage
+    from agents_remember.code_quality import diff_coverage, targeted
 
 INVOCATION_ENV = "AR_QUALITY_INVOCATION"
 PUSH_UPDATES_ENV = "AR_QUALITY_PUSH_UPDATES"
@@ -85,17 +85,21 @@ def validate_invocation_environment(environment: dict[str, str] | None = None) -
 def invocation_description(environment: dict[str, str] | None = None) -> str:
     env = os.environ if environment is None else environment
     invocation = env.get(INVOCATION_ENV, "manual")
-    if invocation == "closeout-staged":
-        return (
+    named = {
+        "closeout-staged": (
             "closeout staged candidate; closeout synchronized index and working-tree bytes "
             "before this wrapper"
-        )
-    if invocation == "ci":
-        return "CI checkout at HEAD; index and working-tree bytes are expected identical"
-    if invocation == "pre-commit-staged":
-        return "pre-commit staged/index candidate isolated into the working tree"
-    if invocation == "pre-commit-sequencer":
-        return "pre-commit merge/rebase working tree; stash isolation is unsafe in this state"
+        ),
+        "master-integration": "master integration tree; clean checkout at the commit about to land",
+        "leaf-integration": "leaf integration tree; clean checkout at the leaf commit about to land",
+        "ci": "CI checkout at HEAD; index and working-tree bytes are expected identical",
+        "pre-commit-staged": "pre-commit staged/index candidate isolated into the working tree",
+        "pre-commit-sequencer": (
+            "pre-commit merge/rebase working tree; stash isolation is unsafe in this state"
+        ),
+    }
+    if invocation in named:
+        return named[invocation]
     if invocation == "pre-push":
         updates = parse_push_updates(env.get(PUSH_UPDATES_ENV, ""))
         summaries = ", ".join(update.summary() for update in updates)
@@ -132,13 +136,21 @@ def wrapper_scope_line(
     environment: dict[str, str] | None = None,
     *,
     name: str = "quality-wrapper",
+    targeted: bool = False,
 ) -> str:
+    if targeted:
+        name = "targeted-quality-wrapper"
     return scope_line(
         name,
         invocation_description(environment),
         f"{(project_root / 'pyproject.toml').name} validated quality sections",
         (
-            f"{len(scope.lint_paths)} index-known Python files; "
+            f"{len(scope.lint_paths)} changed Python files; "
+            f"{len(scope.type_paths)} pyright files (changed + reverse-import closure); "
+            f"{len(scope.coverage_paths)} changed production modules; "
+            f"{len(scope.test_paths)} derived test files"
+            if targeted
+            else f"{len(scope.lint_paths)} index-known Python files; "
             f"{len(scope.coverage_paths)} production roots; {len(scope.test_paths)} test roots"
         ),
     )
@@ -150,22 +162,35 @@ def fixed_step_scope_line(
     scope: GateScope,
     *,
     python_executable: str = sys.executable,
+    targeted: bool = False,
 ) -> str:
     production = python_files_under(project_root, scope.coverage_paths)
     tests = python_files_under(project_root, scope.test_paths)
     if name in {"ruff", "ruff-format"}:
         return scope_line(
             name,
-            "current checkout bytes at paths enumerated by git ls-files '*.py'",
+            (
+                "current checkout bytes at changed paths from git diff against the leaf base"
+                if targeted
+                else "current checkout bytes at paths enumerated by git ls-files '*.py'"
+            ),
             "pyproject.toml [tool.ruff]",
-            f"{len(scope.lint_paths)} index-known Python files",
+            f"{len(scope.lint_paths)} changed Python files"
+            if targeted
+            else f"{len(scope.lint_paths)} index-known Python files",
         )
     if name == "pyright":
         return scope_line(
             name,
-            "current checkout bytes at paths enumerated by git ls-files '*.py'",
+            (
+                "current checkout bytes at changed paths plus the reverse-import closure"
+                if targeted
+                else "current checkout bytes at paths enumerated by git ls-files '*.py'"
+            ),
             pyright_config_description(project_root, python_executable),
-            f"{len(scope.type_paths)} index-known Python files",
+            f"{len(scope.type_paths)} files (changed + reverse-import closure)"
+            if targeted
+            else f"{len(scope.type_paths)} index-known Python files",
         )
     if name in {"radon-cc", "radon-mi"}:
         return scope_line(
@@ -177,14 +202,50 @@ def fixed_step_scope_line(
     if name == "pytest":
         return scope_line(
             name,
-            "configured test roots on disk plus coverage over production package roots",
+            (
+                "derived test subset covering changed modules"
+                if targeted
+                else "configured test roots on disk plus coverage over production package roots"
+            ),
             "pyproject.toml [tool.pytest.ini_options] + [tool.coverage.run]",
             (
-                f"{len(tests)} Python files present under test roots; "
+                f"{len(scope.test_paths)} derived test files; "
+                f"{len(scope.coverage_paths)} changed production modules offered to Coverage.py"
+                if targeted
+                else f"{len(tests)} Python files present under test roots; "
                 f"{len(production)} on-disk production Python files offered to Coverage.py"
             ),
         )
     raise ScopeReportingError(f"no scope contract is registered for wrapper step {name!r}")
+
+
+def targeted_scope_lines(
+    base: diff_coverage.BaseResolution,
+    result: targeted.TargetedScopeResult,
+) -> list[str]:
+    """The full derivation a targeted run prints, so the selection is reviewable."""
+    changed = [path.as_posix() for path in result.changed_paths]
+    closure = [path.as_posix() for path in result.reverse_import_closure]
+    tests = [path.as_posix() for path in result.test_paths]
+    lines = [
+        scope_line(
+            "targeted",
+            "git diff --diff-filter=ACMR against the leaf base, base-to-working-tree",
+            f"base: {base.revision} ({base.origin})",
+            f"{len(changed)} changed Python files",
+        ),
+        f"targeted changed files ({len(changed)}):",
+        *(f"  {path}" for path in changed),
+        (
+            f"targeted reverse-import closure for pyright adds {len(closure)} file(s):"
+            if closure
+            else "targeted reverse-import closure: none"
+        ),
+        *(f"  {path}" for path in closure),
+        f"targeted test subset ({len(tests)} file(s)):",
+        *(f"  {path}" for path in tests),
+    ]
+    return lines
 
 
 def coverage_result_scope_line(coverage_json: Path) -> str:
@@ -238,6 +299,10 @@ def diff_input_description(
         target = "staged candidate (working tree synchronized by closeout)"
     elif invocation == "ci":
         target = "CI checkout at HEAD"
+    elif invocation == "master-integration":
+        target = "master integration tree (clean checkout at the commit about to land)"
+    elif invocation == "leaf-integration":
+        target = "leaf integration tree (clean checkout at the leaf commit about to land)"
     elif invocation == "pre-push":
         target = "current checkout; pushed ref ranges are stated by the wrapper tier"
     else:
@@ -529,7 +594,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--project-root", type=Path, default=Path.cwd())
     subparsers = parser.add_subparsers(dest="command", required=True)
     tier = subparsers.add_parser("hook-tier")
-    tier.add_argument("--tier", choices=("fast", "full"), required=True)
+    tier.add_argument("--tier", choices=("fast", "targeted", "full"), required=True)
     fixed = subparsers.add_parser("fixed-step")
     fixed.add_argument(
         "--name",

@@ -35,6 +35,11 @@ master's leaf loop to the master-exit seam, then hand over.
   knob overrides: <settings/orchestration notes or none>.
 - Leaf closeout chain: manager -> builder -> reviewer -> curator. The manager closes a leaf from
   builder code + reviewer verdict + curator memory pass — never before the curator pass exists.
+- Quality altitude ladder (260731-EFA-L17): leaf closeout and leaf integration run the
+  change-set-scoped contract (`agents_remember.code_quality.check --targeted`); the FULL wrapper
+  runs exactly once per master inside `worktree_integrate` at master altitude, memory-capped
+  (`orchestration.qualityGate.memoryCapBytes`). `memory_quality_check` stays a per-leaf closeout
+  gate; a leaf closeout that skips its required checks is refused, not passed.
 - Curator spawns: `../templates/curator-brief.md`, `env={"AR_SPAWN_ROLE": "curator"}`, fresh per
   leaf with the qualified leaf key, so the environment role and qualified leaf claim the
   curator's `(leaf, role)` seat; dispatch only after builder code and the reviewer verdict are

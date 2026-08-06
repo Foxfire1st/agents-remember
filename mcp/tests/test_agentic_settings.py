@@ -136,6 +136,7 @@ class MergePrecedenceTests(unittest.TestCase):
         self.assertIsNone(settings.concurrency.max_parallel_leaves)
         self.assertIsNone(settings.concurrency.max_sub_agents)
         self.assertIsNone(settings.spawn_harness)
+        self.assertEqual(settings.quality_gate.memory_cap_bytes, 2147483648)
         self.assertEqual(settings.sources, ())
 
     def test_repo_root_is_optional(self) -> None:
@@ -950,10 +951,68 @@ class SeedTests(unittest.TestCase):
         self.assertEqual(seeded.loops, absent.loops)
         self.assertEqual(seeded.roles, absent.roles)
         self.assertEqual(seeded.concurrency, absent.concurrency)
+        self.assertEqual(seeded.quality_gate, absent.quality_gate)
         self.assertIsNone(seeded.spawn_harness)
         # The seed EXPLICITLY configures gateDelegation (all-human) so the
         # boot-snapshot consumer treats the file as the key's home.
         self.assertTrue(seeded.gate_delegation_configured)
+
+
+class QualityGateSettingsTests(unittest.TestCase):
+    """``orchestration.qualityGate`` (260731-EFA-L17-R3): the full gate memory cap."""
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        root = Path(self.tmp.name)
+        self.coordination_root = root / "ar-coordination"
+        self.coordination_root.mkdir(parents=True)
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def test_defaults_when_absent(self) -> None:
+        settings = load_agentic_settings(self.coordination_root)
+
+        self.assertEqual(settings.quality_gate.memory_cap_bytes, 2147483648)
+
+    def test_memory_cap_bytes_parses_and_overrides(self) -> None:
+        write_settings(
+            self.coordination_root,
+            {"orchestration": {"qualityGate": {"memoryCapBytes": 1073741824}}},
+        )
+
+        settings = load_agentic_settings(self.coordination_root)
+
+        self.assertEqual(settings.quality_gate.memory_cap_bytes, 1073741824)
+
+    def test_an_empty_quality_gate_block_keeps_the_default(self) -> None:
+        write_settings(
+            self.coordination_root,
+            {"orchestration": {"qualityGate": {}}},
+        )
+
+        settings = load_agentic_settings(self.coordination_root)
+
+        self.assertEqual(settings.quality_gate.memory_cap_bytes, 2147483648)
+
+    def test_unknown_quality_gate_key_fails_loud(self) -> None:
+        path = write_settings(
+            self.coordination_root,
+            {"orchestration": {"qualityGate": {"memoryCapMegabytes": 1}}},
+        )
+
+        with self.assertRaisesRegex(AgenticSettingsError, "memoryCapMegabytes") as caught:
+            load_agentic_settings(self.coordination_root)
+        self.assertIn(str(path), str(caught.exception))
+
+    def test_memory_cap_must_be_a_positive_integer(self) -> None:
+        write_settings(
+            self.coordination_root,
+            {"orchestration": {"qualityGate": {"memoryCapBytes": 0}}},
+        )
+
+        with self.assertRaisesRegex(AgenticSettingsError, "positive integer"):
+            load_agentic_settings(self.coordination_root)
 
 
 if __name__ == "__main__":

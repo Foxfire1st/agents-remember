@@ -1,24 +1,30 @@
 #!/usr/bin/env sh
 # Shared body for this repository's git hooks, in two tiers.
 #
-#     _gate.sh fast    pre-commit: check staged/index content, cheaply.
-#     _gate.sh full    pre-push:   report the pushed refs, then run the full wrapper.
+#     _gate.sh fast      pre-commit: check staged/index content, cheaply.
+#     _gate.sh targeted  pre-push:   report the pushed refs, then run the leaf
+#                                    change-set-scoped quality wrapper.
+#     _gate.sh full      manual:     run the full wrapper (the master integration
+#                                    gate owns the once-per-master full run).
 #
 # Enable once per clone:  ./setup-hooks.sh
 # Prerequisite:           pip install -e "mcp[dev]"
 #
-# The fast tier runs staged/index checks before commit; the full tier runs the complete
-# wrapper before push. In linked worktrees, use the primary worktree's virtual environment
-# when necessary and put the current checkout's source first on PYTHONPATH.
+# The fast tier runs staged/index checks before commit; the targeted tier runs the
+# leaf change-set contract before push. The full wrapper is owned by the master
+# integration gate and is available here only for manual runs. In linked worktrees,
+# use the primary worktree's virtual environment when necessary and put the current
+# checkout's source first on PYTHONPATH.
 
 set -u
 
 tier="${1:-}"
 case "$tier" in
   fast) label="pre-commit" ;;
-  full) label="pre-push" ;;
+  targeted) label="pre-push" ;;
+  full) label="manual-full" ;;
   *)
-    echo "[githooks] usage: _gate.sh <fast|full>" >&2
+    echo "[githooks] usage: _gate.sh <fast|targeted|full>" >&2
     exit 2
     ;;
 esac
@@ -160,10 +166,22 @@ run_fast_checks() {
 # the base it chose. Export AR_GATE_DIFF_BASE before pushing from a leaf branch cut
 # from a series branch: git cannot infer that fork point, and without it the floor
 # compares against the default branch and asks you to cover the series' lines too.
+run_targeted_checks() {
+  report_wrapper_tier || return 1
+  generated_copy_checks || return 1
+  echo "[$label] running change-set-scoped quality wrapper (ruff + format + Pyright with reverse-import closure + targeted pytest + CRAP over changed modules + diff coverage)..."
+  if "$py" -m agents_remember.code_quality.check --targeted; then
+    echo "[$label] result: targeted quality wrapper PASS"
+    return 0
+  fi
+  echo "[$label] result: targeted quality wrapper FAIL" >&2
+  return 1
+}
+
 run_full_checks() {
   report_wrapper_tier || return 1
   generated_copy_checks || return 1
-  echo "[$label] running quality wrapper (ruff + format + Pyright + pytest + CRAP + diff coverage)..."
+  echo "[$label] running full quality wrapper (ruff + format + Pyright + pytest + CRAP + diff coverage)..."
   if "$py" -m agents_remember.code_quality.check; then
     echo "[$label] result: full quality wrapper PASS"
     return 0
@@ -254,6 +272,15 @@ on_signal() {
 }
 
 # --- run ---------------------------------------------------------------------
+
+if [ "$tier" = "targeted" ]; then
+  if run_targeted_checks; then
+    echo "[$label] result: targeted-tier PASS"
+    exit 0
+  fi
+  echo "[$label] result: targeted-tier FAIL" >&2
+  exit 1
+fi
 
 if [ "$tier" = "full" ]; then
   if run_full_checks; then
