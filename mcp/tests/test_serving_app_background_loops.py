@@ -53,7 +53,7 @@ from agents_remember.providers.metrics import (
     MetricsSnapshot,
     ProviderMetricsStore,
 )
-from agents_remember.serving import app as app_module
+from agents_remember.serving import _app_lifespan as lifespan_module
 from agents_remember.serving.app import (
     ServingCollaborators,
     _malloc_trim_loop,
@@ -193,8 +193,8 @@ class MetricsLoopTests(unittest.IsolatedAsyncioTestCase):
             raise RuntimeError(f"docker daemon went away ({len(calls)})")
 
         with (
-            mock.patch.object(app_module, "sample_provider_containers", sample),
-            mock.patch.object(app_module, "DEFAULT_SAMPLE_INTERVAL_SECONDS", 0),
+            mock.patch.object(lifespan_module, "sample_provider_containers", sample),
+            mock.patch.object(lifespan_module, "DEFAULT_SAMPLE_INTERVAL_SECONDS", 0),
             self.assertLogs(LOGGER_NAME, level="ERROR") as logs,
         ):
             # Wait on the LOGGED failures, not the attempts: a pass that has entered the sampler
@@ -259,7 +259,7 @@ class SupervisorLoopTests(unittest.IsolatedAsyncioTestCase):
                 raise RuntimeError("expectation store unreadable")
 
         with (
-            mock.patch.object(app_module, "run_supervisor_sweep", sweep),
+            mock.patch.object(lifespan_module, "run_supervisor_sweep", sweep),
             self.assertLogs(LOGGER_NAME, level="ERROR") as logs,
         ):
             await _run_until(
@@ -288,8 +288,8 @@ class MallocTrimLoopTests(unittest.IsolatedAsyncioTestCase):
             return 1
 
         with (
-            mock.patch.object(app_module, "malloc_trim_interval_seconds", interval),
-            mock.patch.object(app_module, "trim_malloc", trim),
+            mock.patch.object(lifespan_module, "malloc_trim_interval_seconds", interval),
+            mock.patch.object(lifespan_module, "trim_malloc", trim),
         ):
             await _run_until(
                 _malloc_trim_loop(),
@@ -310,8 +310,8 @@ class MallocTrimLoopTests(unittest.IsolatedAsyncioTestCase):
             return 0
 
         with (
-            mock.patch.object(app_module, "malloc_trim_interval_seconds", lambda: 0.0),
-            mock.patch.object(app_module, "trim_malloc", trim),
+            mock.patch.object(lifespan_module, "malloc_trim_interval_seconds", lambda: 0.0),
+            mock.patch.object(lifespan_module, "trim_malloc", trim),
             self.assertLogs(LOGGER_NAME, level="ERROR") as logs,
         ):
             await _run_until(
@@ -353,7 +353,7 @@ class WorkspaceRiverCompactionLoopTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(self._river().read_text(encoding="utf-8").splitlines()), 2)
 
         runtime = _runtime(self.tmp)
-        with mock.patch.object(app_module, "WORKSPACE_EVENT_COMPACT_INTERVAL_SECONDS", 0):
+        with mock.patch.object(lifespan_module, "WORKSPACE_EVENT_COMPACT_INTERVAL_SECONDS", 0):
             await _run_until(
                 _workspace_river_compaction_loop(runtime),
                 lambda: len(self._river().read_text(encoding="utf-8").splitlines()) == 1,
@@ -375,8 +375,8 @@ class WorkspaceRiverCompactionLoopTests(unittest.IsolatedAsyncioTestCase):
             return 0
 
         with (
-            mock.patch.object(app_module, "WORKSPACE_EVENT_COMPACT_INTERVAL_SECONDS", 0),
-            mock.patch.object(app_module, "compact_workspace_river", compact),
+            mock.patch.object(lifespan_module, "WORKSPACE_EVENT_COMPACT_INTERVAL_SECONDS", 0),
+            mock.patch.object(lifespan_module, "compact_workspace_river", compact),
             self.assertLogs(LOGGER_NAME, level="ERROR") as logs,
         ):
             await _run_until(
@@ -429,8 +429,8 @@ class OptionalLifespanTaskTests(unittest.TestCase):
     def _boot(self, environment: dict[str, str]) -> None:
         with (
             mock.patch.dict(os.environ, environment, clear=False),
-            mock.patch.object(app_module, "heap_diag_loop", self.heap),
-            mock.patch.object(app_module, "_malloc_trim_loop", self.trim),
+            mock.patch.object(lifespan_module, "heap_diag_loop", self.heap),
+            mock.patch.object(lifespan_module, "_malloc_trim_loop", self.trim),
             TestClient(self._app()) as client,
         ):
             self.assertEqual(client.get("/api/state").status_code, 200)

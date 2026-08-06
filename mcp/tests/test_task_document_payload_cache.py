@@ -9,7 +9,7 @@ import unittest
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from agents_remember.observer import snapshots
+from agents_remember.observer.snapshots_impl import _common as snapshots_common
 from agents_remember.tasks import TASK_DOCUMENT_SCHEMA
 
 NOW = datetime(2026, 7, 27, 12, 0, tzinfo=UTC)
@@ -17,7 +17,7 @@ NOW = datetime(2026, 7, 27, 12, 0, tzinfo=UTC)
 
 class TaskDocumentPayloadCacheTests(unittest.TestCase):
     def tearDown(self) -> None:
-        snapshots._task_doc_cache.clear()
+        snapshots_common._task_doc_cache.clear()
 
     def test_two_corpus_sizes_reparse_only_changed_and_new_files(self) -> None:
         for count in (32, 320):
@@ -27,7 +27,7 @@ class TaskDocumentPayloadCacheTests(unittest.TestCase):
                 task_root.mkdir(parents=True)
                 paths = [self._write_doc(task_root, index) for index in range(count)]
                 calls: list[Path] = []
-                original = snapshots._read_json
+                original = snapshots_common._read_json
 
                 def counting_read(  # type: ignore[no-untyped-def]
                     path: Path,
@@ -37,17 +37,17 @@ class TaskDocumentPayloadCacheTests(unittest.TestCase):
                     _calls.append(path)
                     return _original(path)
 
-                snapshots._task_doc_cache.clear()
-                snapshots._read_json = counting_read  # type: ignore[assignment]
+                snapshots_common._task_doc_cache.clear()
+                snapshots_common._read_json = counting_read  # type: ignore[assignment]
                 try:
-                    first = snapshots._iter_task_document_payloads(
+                    first = snapshots_common._iter_task_document_payloads(
                         coordination_root / "tasks", now=NOW
                     )
                     self.assertEqual(len(first), count)
                     self.assertEqual(calls, paths)
 
                     calls.clear()
-                    unchanged = snapshots._iter_task_document_payloads(
+                    unchanged = snapshots_common._iter_task_document_payloads(
                         coordination_root / "tasks", now=NOW + timedelta(minutes=30)
                     )
                     self.assertEqual(len(unchanged), count)
@@ -63,17 +63,17 @@ class TaskDocumentPayloadCacheTests(unittest.TestCase):
                     deleted = paths[0]
                     deleted.unlink()
                     calls.clear()
-                    updated = snapshots._iter_task_document_payloads(
+                    updated = snapshots_common._iter_task_document_payloads(
                         coordination_root / "tasks", now=NOW + timedelta(hours=1)
                     )
                     self.assertEqual(len(updated), count)
                     self.assertEqual(calls, [changed, added])
                     self.assertEqual(
-                        snapshots._task_doc_cache.entry_count(coordination_root / "tasks"),
+                        snapshots_common._task_doc_cache.entry_count(coordination_root / "tasks"),
                         count,
                     )
                 finally:
-                    snapshots._read_json = original  # type: ignore[assignment]
+                    snapshots_common._read_json = original  # type: ignore[assignment]
 
     @staticmethod
     def _write_doc(root: Path, index: int) -> Path:
@@ -96,5 +96,5 @@ class TaskDocumentPayloadCacheTests(unittest.TestCase):
         return path
 
 
-if __name__ == "__main__":
+if __name__ == "__main__":  # pragma: no cover
     unittest.main()

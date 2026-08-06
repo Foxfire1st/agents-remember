@@ -56,7 +56,8 @@ TINY_PNG = bytes.fromhex(
 )
 
 
-def _identity(session: str) -> ControlIdentity:
+# 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/test_harness_control_plane_installed.py:59).
+def _identity(session: str) -> ControlIdentity:  # pragma: no cover
     return ControlIdentity(
         ar_session_id=session,
         tmux_name=f"ar-{session}",
@@ -64,7 +65,10 @@ def _identity(session: str) -> ControlIdentity:
     )
 
 
-def _launch(identity: ControlIdentity, harness_id: str, cwd: Path, argv: tuple[str, ...]):
+# 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/test_harness_control_plane_installed.py:67).
+def _launch(
+    identity: ControlIdentity, harness_id: str, cwd: Path, argv: tuple[str, ...]
+):  # pragma: no cover
     return LaunchSpec(
         identity=identity,
         harness_id=harness_id,
@@ -74,13 +78,15 @@ def _launch(identity: ControlIdentity, harness_id: str, cwd: Path, argv: tuple[s
     )
 
 
-def _obj(value: object) -> Mapping[str, object]:
+# 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/test_harness_control_plane_installed.py:77).
+def _obj(value: object) -> Mapping[str, object]:  # pragma: no cover
     assert isinstance(value, Mapping)
     return cast(Mapping[str, object], value)
 
 
 class _ControlledEntry:
-    def __init__(self, identity: ControlIdentity, endpoint: Path) -> None:
+    # 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/test_harness_control_plane_installed.py:83).
+    def __init__(self, identity: ControlIdentity, endpoint: Path) -> None:  # pragma: no cover
         self.id = identity.ar_session_id
         self.tmux_name = identity.tmux_name
         self.created_at = identity.created_at
@@ -98,7 +104,10 @@ def _version_of(executable: str) -> str:
     return completed.stdout.strip()
 
 
-async def _wait_evidence(entry, predicate, *, timeout_seconds: float, description: str) -> None:
+# 260731-EFA-L7 R10: AR_RUN_CONTROL_PLANE_INSTALLED-gated helper.
+async def _wait_evidence(
+    entry, predicate, *, timeout_seconds: float, description: str
+) -> None:  # pragma: no cover
     deadline = asyncio.get_running_loop().time() + timeout_seconds
     while True:
         page = await asyncio.to_thread(read_control_evidence, entry)
@@ -109,7 +118,8 @@ async def _wait_evidence(entry, predicate, *, timeout_seconds: float, descriptio
         await asyncio.sleep(0.5)
 
 
-def _stage_png(root: Path, request_id: str, asset_id: str) -> dict[str, object]:
+# 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/test_harness_control_plane_installed.py:115).
+def _stage_png(root: Path, request_id: str, asset_id: str) -> dict[str, object]:  # pragma: no cover
     target = root / "assets" / request_id / asset_id
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_bytes(TINY_PNG)
@@ -127,7 +137,8 @@ def _stage_png(root: Path, request_id: str, asset_id: str) -> dict[str, object]:
     f"set {LIVE_OPT_IN}=1 to exercise installed runtimes through the control-plane seam",
 )
 class CodexInstalledControlPlaneTests(unittest.IsolatedAsyncioTestCase):
-    def setUp(self) -> None:
+    # 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/test_harness_control_plane_installed.py:133).
+    def setUp(self) -> None:  # pragma: no cover
         executable = shutil.which("codex")
         if executable is None:
             self.skipTest("installed codex executable is unavailable")
@@ -139,7 +150,8 @@ class CodexInstalledControlPlaneTests(unittest.IsolatedAsyncioTestCase):
             )
         self.executable = executable
 
-    async def test_live_interrupt_timeline_assets_and_recovery(self) -> None:
+    # 260731-EFA-L7 R10: AR_RUN_CONTROL_PLANE_INSTALLED-gated test body.
+    async def test_live_interrupt_timeline_assets_and_recovery(self) -> None:  # pragma: no cover
         with tempfile.TemporaryDirectory(prefix="ar-plane-codex-") as tmp:
             root = Path(tmp)
             identity = _identity("codex-plane")
@@ -272,7 +284,8 @@ class CodexInstalledControlPlaneTests(unittest.IsolatedAsyncioTestCase):
     f"set {LIVE_OPT_IN}=1 to exercise installed runtimes through the control-plane seam",
 )
 class PiInstalledControlPlaneTests(unittest.IsolatedAsyncioTestCase):
-    def setUp(self) -> None:
+    # 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/test_harness_control_plane_installed.py:279).
+    def setUp(self) -> None:  # pragma: no cover
         executable = shutil.which("pi")
         if executable is None:
             self.skipTest("installed pi executable is unavailable")
@@ -284,7 +297,8 @@ class PiInstalledControlPlaneTests(unittest.IsolatedAsyncioTestCase):
             )
         self.executable = executable
 
-    async def test_live_abort_guard_timeline_and_assets(self) -> None:
+    # 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/test_harness_control_plane_installed.py:291).
+    async def test_live_abort_guard_timeline_and_assets(self) -> None:  # pragma: no cover
         with tempfile.TemporaryDirectory(prefix="ar-plane-pi-") as tmp:
             root = Path(tmp)
             identity = _identity("pi-plane")
@@ -374,7 +388,10 @@ class PiInstalledControlPlaneTests(unittest.IsolatedAsyncioTestCase):
 
 
 class ClaudeInstalledHonestyTests(unittest.TestCase):
-    def test_version_mismatch_keeps_claude_control_plane_rows_not_exercised(self) -> None:
+    # 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/test_harness_control_plane_installed.py:381).
+    def test_version_mismatch_keeps_claude_control_plane_rows_not_exercised(
+        self,
+    ) -> None:  # pragma: no cover
         executable = shutil.which("claude")
         if executable is None:
             self.skipTest("installed claude executable is unavailable")

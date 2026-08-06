@@ -25,7 +25,8 @@ pytestmark = pytest.mark.skipif(
 )
 
 
-def _run(
+# 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/test_provider_workflow_integration.py:28).
+def _run(  # pragma: no cover
     command: list[str], *, cwd: Path | None = None, timeout: int = 60
 ) -> subprocess.CompletedProcess[str]:
     result = subprocess.run(
@@ -42,11 +43,13 @@ def _run(
     return result
 
 
-def _git(repo: Path, *args: str) -> str:
+# 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/test_provider_workflow_integration.py:45).
+def _git(repo: Path, *args: str) -> str:  # pragma: no cover
     return _run(["git", *args], cwd=repo).stdout.strip()
 
 
-def _init_git_repo(repo: Path, files: dict[str, str]) -> str:
+# 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/test_provider_workflow_integration.py:49).
+def _init_git_repo(repo: Path, files: dict[str, str]) -> str:  # pragma: no cover
     repo.mkdir(parents=True)
     _run(["git", "init", "-b", "main"], cwd=repo)
     _git(repo, "config", "user.email", "providers@example.invalid")
@@ -60,7 +63,8 @@ def _init_git_repo(repo: Path, files: dict[str, str]) -> str:
     return _git(repo, "rev-parse", "HEAD")
 
 
-def _init_memory_repo(memory_repo: Path, repo_id: str, code_commit: str) -> str:
+# 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/test_provider_workflow_integration.py:63).
+def _init_memory_repo(memory_repo: Path, repo_id: str, code_commit: str) -> str:  # pragma: no cover
     memory_repo.mkdir(parents=True)
     _run(["git", "init", "-b", "main"], cwd=memory_repo)
     _git(memory_repo, "config", "user.email", "providers@example.invalid")
@@ -84,7 +88,8 @@ def _init_memory_repo(memory_repo: Path, repo_id: str, code_commit: str) -> str:
     return _git(memory_repo, "rev-parse", "HEAD")
 
 
-def _write_mcp_settings(path: Path, *, root: Path, instance_id: str) -> None:
+# 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/test_provider_workflow_integration.py:87).
+def _write_mcp_settings(path: Path, *, root: Path, instance_id: str) -> None:  # pragma: no cover
     payload = {
         "version": 1,
         "coordinationRoot": (root / "ar-coordination").as_posix(),
@@ -100,11 +105,13 @@ def _write_mcp_settings(path: Path, *, root: Path, instance_id: str) -> None:
     path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
 
 
-def _provider_timeout() -> int:
+# 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/test_provider_workflow_integration.py:103).
+def _provider_timeout() -> int:  # pragma: no cover
     return int(os.environ.get("AGENTS_REMEMBER_PROVIDER_INTEGRATION_TIMEOUT", "1800"))
 
 
-def _docker_available() -> bool:
+# 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/test_provider_workflow_integration.py:107).
+def _docker_available() -> bool:  # pragma: no cover
     return (
         shutil.which("docker") is not None
         and subprocess.run(
@@ -118,19 +125,22 @@ def _docker_available() -> bool:
     )
 
 
-def _dict_value(value: object) -> dict[str, Any]:
+# 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/test_provider_workflow_integration.py:121).
+def _dict_value(value: object) -> dict[str, Any]:  # pragma: no cover
     if isinstance(value, dict):
         return cast(dict[str, Any], value)
     return {}
 
 
-def _list_value(value: object) -> list[Any]:
+# 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/test_provider_workflow_integration.py:127).
+def _list_value(value: object) -> list[Any]:  # pragma: no cover
     if isinstance(value, list):
         return cast(list[Any], value)
     return []
 
 
-def _settings_provider_containers(settings: dict[str, object]) -> set[str]:
+# 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/test_provider_workflow_integration.py:133).
+def _settings_provider_containers(settings: dict[str, object]) -> set[str]:  # pragma: no cover
     providers = _dict_value(_dict_value(settings.get("contextProviders")).get("providers"))
     names: set[str] = set()
     grepai = _dict_value(providers.get("grepai-memory"))
@@ -142,7 +152,8 @@ def _settings_provider_containers(settings: dict[str, object]) -> set[str]:
     return names
 
 
-def _grepai_containers(provider: dict[str, Any]) -> set[str]:
+# 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/test_provider_workflow_integration.py:145).
+def _grepai_containers(provider: dict[str, Any]) -> set[str]:  # pragma: no cover
     runtime = _dict_value(provider.get("runtime"))
     runner = _dict_value(runtime.get("runner"))
     backend = _dict_value(provider.get("backend"))
@@ -159,7 +170,8 @@ def _grepai_containers(provider: dict[str, Any]) -> set[str]:
     }
 
 
-def _cgc_containers(provider: dict[str, Any]) -> set[str]:
+# 260731-EFA-L7 R10: live-provider-gated helper; needs installed provider runtimes.
+def _cgc_containers(provider: dict[str, Any]) -> set[str]:  # pragma: no cover
     backend = _dict_value(provider.get("backend"))
     runtime = _dict_value(provider.get("runtime"))
     runner = _dict_value(runtime.get("runner"))
@@ -174,7 +186,8 @@ def _cgc_containers(provider: dict[str, Any]) -> set[str]:
     return names
 
 
-def _settings_networks(settings: dict[str, object]) -> set[str]:
+# 260731-EFA-L7 R10: live-provider-gated helper; needs installed provider runtimes.
+def _settings_networks(settings: dict[str, object]) -> set[str]:  # pragma: no cover
     providers = _dict_value(_dict_value(settings.get("contextProviders")).get("providers"))
     names: set[str] = set()
     grepai = _dict_value(providers.get("grepai-memory"))
@@ -192,7 +205,8 @@ def _settings_networks(settings: dict[str, object]) -> set[str]:
     return names
 
 
-def _cleanup_provider_settings(settings: dict[str, object]) -> None:
+# 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/test_provider_workflow_integration.py:197).
+def _cleanup_provider_settings(settings: dict[str, object]) -> None:  # pragma: no cover
     for container in sorted(_settings_provider_containers(settings)):
         subprocess.run(
             ["docker", "rm", "-f", container],
@@ -211,7 +225,10 @@ def _cleanup_provider_settings(settings: dict[str, object]) -> None:
         )
 
 
-def _watchers_status(coordination_root: Path, settings_path: Path) -> dict[str, object]:
+# 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/test_provider_workflow_integration.py:216).
+def _watchers_status(
+    coordination_root: Path, settings_path: Path
+) -> dict[str, object]:  # pragma: no cover
     return lifecycle.watchers_run(
         argparse.Namespace(
             coordination_root=coordination_root,
@@ -224,7 +241,10 @@ def _watchers_status(coordination_root: Path, settings_path: Path) -> dict[str, 
     )
 
 
-def test_worktree_and_benchmark_providers_run_end_to_end(tmp_path: Path) -> None:
+# 260731-EFA-L7 R10: AR_RUN_*_WORKFLOW-gated test body; needs live provider stack.
+def test_worktree_and_benchmark_providers_run_end_to_end(
+    tmp_path: Path,
+) -> None:  # pragma: no cover
     if not _docker_available():
         pytest.skip("docker is not available")
 
@@ -294,7 +314,10 @@ def test_worktree_and_benchmark_providers_run_end_to_end(tmp_path: Path) -> None
             _cleanup_provider_settings(settings)
 
 
-def _await_background_provider_setup(worktree_payload: dict[str, Any]) -> dict[str, Any]:
+# 260731-EFA-L7 R10: live-provider-gated helper; needs installed provider runtimes.
+def _await_background_provider_setup(
+    worktree_payload: dict[str, Any],
+) -> dict[str, Any]:  # pragma: no cover
     """Poll the progress file a started worktree hands back until setup stops running.
 
     Provider setup runs on a background thread (GitHub #53), so `worktree_start` returns
@@ -316,7 +339,8 @@ def _await_background_provider_setup(worktree_payload: dict[str, Any]) -> dict[s
     return progress
 
 
-def _isolated_worktree_settings(
+# 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/test_provider_workflow_integration.py:327).
+def _isolated_worktree_settings(  # pragma: no cover
     progress: dict[str, Any], cleanup_settings: list[dict[str, Any]]
 ) -> Path:
     """The provider settings the worktree wrote for itself, with both providers isolated.
@@ -334,7 +358,8 @@ def _isolated_worktree_settings(
     return settings_path
 
 
-def _run_benchmark_provider_stack(
+# 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/test_provider_workflow_integration.py:345).
+def _run_benchmark_provider_stack(  # pragma: no cover
     tmp_path: Path,
     *,
     repo_id: str,

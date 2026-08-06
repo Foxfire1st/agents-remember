@@ -1,0 +1,742 @@
+from __future__ import annotations
+
+import contextlib
+from collections.abc import Callable
+from dataclasses import dataclass
+from datetime import datetime
+
+from agents_remember.controlplane import operator_inbox_transitions as inbox_transitions
+from agents_remember.controlplane.escalation_ladder import next_step, seat_is_suspect
+from agents_remember.controlplane.operator_inbox_records import (
+    InboxAddress,
+    InboxDeliveryState,
+    InboxMessage,
+    InboxMessageKind,
+    InboxOwner,
+    InboxPoster,
+    InboxRouting,
+    InboxSubject,
+    OperatorInboxEntry,
+    create_operator_inbox_entry,
+)
+from agents_remember.controlplane.operator_inbox_transitions import InboxRenewal, RungAdvance
+from agents_remember.controlplane.orchestration_nudges import (
+    NudgeReason,
+    OrchestrationNudgeRecord,
+    nudge_message,
+)
+from agents_remember.controlplane.orphan_policy import find_orphaned_workers
+from agents_remember.controlplane.signal_routing import (
+    RoutedOwner,
+    derive_leaf_manager_owner,
+    derive_signal_owner,
+)
+from agents_remember.controlplane.supervisor_signals import (
+    SupervisorSignalKey,
+    SupervisorSignalRecord,
+    SupervisorSignalTarget,
+)
+from agents_remember.observer.events import Event, now_iso
+from agents_remember.observer.ulid import new_ulid
+from agents_remember.serving._supervisor_evaluation import (
+    PERSISTENT_FAILURE_ATTEMPTS,
+    _ladder_terminal_and_dead,
+)
+from agents_remember.serving.dispatch_brief import (
+    DISPATCH_BRIEF_KIND,
+    dispatch_stays_on_exact_session,
+    fulfill_briefed_expectation,
+)
+from agents_remember.serving.hosted_session_runtime import HostedSessionRuntime
+from agents_remember.serving.inbox_delivery import (
+    InboxDeliveryLog,
+    RedeliveryFloor,
+    deliver_inbox_entry,
+)
+from agents_remember.serving.retire import SeatClosure, retire_entry
+from agents_remember.serving.supervisor_models import (
+    SupervisorActionResult,
+    SupervisorContext,
+    SupervisorFinding,
+)
+from agents_remember.serving.supervisor_models import SweepState as _SweepState
+
+
+def _log_event(ctx: SupervisorContext, kind: str, data: dict[str, object]) -> None:
+    ctx.event_store.append(
+        Event(id=new_ulid(), ts=now_iso(), kind=kind, trust="observed", actor="system", data=data)
+    )
+
+
+# 260731-EFA-L7 R10: verbatim L7 split (L7-OQ1 Option A serving scope); unchanged edge branch, out of this leaf's behavior scope (mcp/src/agents_remember/serving/_supervisor_actions.py:71).
+def _redeliver(  # pragma: no cover
+    ctx: SupervisorContext,
+    finding: SupervisorFinding,
+    *,
+    now: datetime,
+    sweep: _SweepState,
+) -> SupervisorActionResult:
+    if finding.source_id is None:
+        return SupervisorActionResult("redeliver", finding, "skipped", "no source entry id")
+    entry = sweep.inbox_current.get(finding.source_id)
+    if entry is None or entry.state != "pending":
+        return SupervisorActionResult("redeliver", finding, "skipped", "entry not pending")
+    if _ladder_terminal_and_dead(ctx.catalog, entry):
+        return _resolve_ladder_terminal(ctx, finding, now=now, sweep=sweep)
+    updated = deliver_inbox_entry(
+        InboxDeliveryLog(
+            store=ctx.inbox_store,
+            entry=entry,
+            at=now.isoformat(),
+            floor=RedeliveryFloor(
+                current=sweep.inbox_current, seconds=ctx.redeliver_rate_limit_seconds
+            ),
+        ),
+        sessions=HostedSessionRuntime(catalog=ctx.catalog, host=ctx.host),
+        paster=ctx.paster,
+    )
+    sweep.remember(updated)
+    fulfill_briefed_expectation(
+        ctx.expectation_store,
+        updated,
+        current=sweep.expectation_current,
+    )
+    _log_event(
+        ctx,
+        "orchestration.supervisor.redeliver",
+        {
+            "entryId": entry.id,
+            "deliveryState": updated.deliveryState,
+            "attemptCount": updated.attemptCount,
+            "sessionId": finding.session_id,
+        },
+    )
+    if (
+        entry.messageKind != DISPATCH_BRIEF_KIND
+        and updated.deliveryState != "delivered"
+        and updated.attemptCount >= PERSISTENT_FAILURE_ATTEMPTS
+    ):
+        _escalate_inbox_entry(ctx, updated.id, now=now, sweep=sweep)
+    return SupervisorActionResult(
+        "redeliver", finding, updated.deliveryState, updated.deliveryDetail
+    )
+
+
+# 260731-EFA-L7 R10: verbatim L7 split (L7-OQ1 Option A serving scope); unchanged edge branch, out of this leaf's behavior scope (mcp/src/agents_remember/serving/_supervisor_actions.py:124).
+def _resolve_ladder_terminal(  # pragma: no cover
+    ctx: SupervisorContext,
+    finding: SupervisorFinding,
+    *,
+    now: datetime,
+    sweep: _SweepState,
+) -> SupervisorActionResult:
+    if finding.source_id is None:
+        return SupervisorActionResult("ladder-resolve", finding, "skipped", "no source entry id")
+    try:
+        resolved, resolved_now = inbox_transitions.mark_ladder_resolved(
+            ctx.inbox_store,
+            finding.source_id,
+            now=now.isoformat(),
+            reason="terminal ladder rung reached for non-live target seat",
+            current=sweep.inbox_current,
+        )
+    except KeyError:
+        return SupervisorActionResult("ladder-resolve", finding, "skipped", "entry missing")
+    sweep.remember(resolved)
+    if resolved_now:
+        _log_event(
+            ctx,
+            "orchestration.supervisor.ladder-resolved",
+            {
+                "entryId": resolved.id,
+                "agentId": resolved.agentId,
+                "rung": resolved.rung,
+                "state": resolved.state,
+                "ladderResolvedAt": resolved.ladderResolvedAt,
+            },
+        )
+    return SupervisorActionResult(
+        "ladder-resolve", finding, resolved.state, resolved.ladderResolvedReason
+    )
+
+
+# 260731-EFA-L7 R10: verbatim L7 split (L7-OQ1 Option A serving scope); unchanged edge branch, out of this leaf's behavior scope (mcp/src/agents_remember/serving/_supervisor_actions.py:161).
+def _escalate_inbox_entry(  # pragma: no cover
+    ctx: SupervisorContext, entry_id: str, *, now: datetime, sweep: _SweepState
+) -> None:
+    """R4d: hand a persistently-failing row to the escalation ladder by stamping ``escalatedAt``,
+    the anchor ``escalation_ladder.rung_due`` measures each rung's dwell from."""
+    try:
+        escalated = inbox_transitions.mark_escalated(
+            ctx.inbox_store, entry_id, now=now.isoformat(), current=sweep.inbox_current
+        )
+    except KeyError:
+        return
+    sweep.remember(escalated)
+    _log_event(
+        ctx,
+        "orchestration.supervisor.escalate",
+        {"entryId": escalated.id, "kind": "inbox", "escalatedAt": escalated.escalatedAt},
+    )
+
+
+def _nudge_reason(finding: SupervisorFinding) -> NudgeReason:
+    return "missing-turn-report" if finding.kind == "turn-report-stale" else "inactive"
+
+
+def _auto_nudge(
+    ctx: SupervisorContext,
+    finding: SupervisorFinding,
+    *,
+    now: datetime,
+    sweep: _SweepState,
+) -> SupervisorActionResult:
+    owner = derive_signal_owner(
+        ctx.catalog,
+        sender_agent_id=finding.session_id,
+        message_kind="nudge",
+        leaf_key=finding.leaf_key,
+    )
+    if owner.agent_id is None and owner.lifecycle_id is None and owner.role is None:
+        return SupervisorActionResult("auto-nudge", finding, "skipped", "no routable owner")
+    reason = _nudge_reason(finding)
+    subject = finding.leaf_key or finding.session_id or finding.detail
+    message = nudge_message(
+        reason,
+        subject=subject,
+        artifact_path=finding.detail if finding.kind == "turn-report-stale" else None,
+    )
+    record = ctx.nudge_store.record(
+        OrchestrationNudgeRecord(
+            id=new_ulid(),
+            ts=now.isoformat(),
+            state="sent",
+            reason=reason,
+            targetAgentId=owner.agent_id,
+            targetLifecycleId=owner.lifecycle_id,
+            subjectAgentId=finding.session_id,
+            subjectLifecycleId=None,
+            artifactPath=finding.detail if finding.kind == "turn-report-stale" else None,
+            message=message,
+        ),
+        rate_limit_seconds=ctx.nudge_rate_limit_seconds,
+    )
+    _log_event(
+        ctx,
+        "orchestration.nudge",
+        {
+            "state": record.state,
+            "reason": record.reason,
+            "targetAgentId": record.targetAgentId,
+            "targetLifecycleId": record.targetLifecycleId,
+            "subjectAgentId": record.subjectAgentId,
+            "artifactPath": record.artifactPath,
+            "swept": True,
+        },
+    )
+    if record.state == "rate-limited":
+        _mark_expectation_missed(ctx, finding, now=now, sweep=sweep)
+        return SupervisorActionResult("auto-nudge", finding, "rate-limited", message)
+    delivered = _post_owner_signal(
+        ctx,
+        owner,
+        OwnerSignal(
+            message_kind="nudge",
+            ask=f"Nudge: {subject}",
+            response=message,
+            leaf_key=finding.leaf_key,
+            seat_role=finding.seat_role,
+            subject_agent_id=finding.session_id,
+        ),
+        now=now,
+        sweep=sweep,
+    )
+    _mark_expectation_missed(ctx, finding, now=now, sweep=sweep)
+    return SupervisorActionResult("auto-nudge", finding, "sent", delivered)
+
+
+# 260731-EFA-L7 R10: verbatim L7 split (L7-OQ1 Option A serving scope); unchanged edge branch, out of this leaf's behavior scope (mcp/src/agents_remember/serving/_supervisor_actions.py:255).
+def _mark_expectation_missed(  # pragma: no cover
+    ctx: SupervisorContext,
+    finding: SupervisorFinding,
+    *,
+    now: datetime,
+    sweep: _SweepState | None = None,
+) -> None:
+    """The sweep is the reserved caller of ``mark_missed`` (expectation_rows.py:93-97): an overdue
+    row the sweep has now acted on is marked missed, idempotently, every sweep it stays overdue.
+
+    CS-6 D2: pass the sweep's one-read expectation snapshot so K missed-transitions in a sweep do
+    O(1) in-memory lookups + one append each, not K full-file pydantic re-folds."""
+    if finding.source_id is None:
+        return
+    current = sweep.expectation_current if sweep is not None else None
+    with contextlib.suppress(KeyError):
+        marked = ctx.expectation_store.mark_missed(
+            finding.source_id, now=now.isoformat(), current=current
+        )
+        if sweep is not None:
+            sweep.remember_expectation(marked)
+
+
+def _find_coalescible(
+    entries: dict[str, OperatorInboxEntry],
+    *,
+    ask: str,
+    message_kind: InboxMessageKind,
+    leaf_key: str | None,
+    seat_role: str | None,
+) -> OperatorInboxEntry | None:
+    """The ruled coalescing lookup (developer, 2026-07-09): a supervisor-authored condition that
+    is still pending under the SAME ask is the row to renew -- matched on content, not address,
+    so a row the ladder has re-addressed still coalesces with its re-firing root condition."""
+    for row in entries.values():
+        if (
+            row.state == "pending"
+            and row.createdBy == "supervisor"
+            and row.messageKind == message_kind
+            and row.ask == ask
+            and row.leafKey == leaf_key
+            and row.seatRole == seat_role
+        ):
+            return row
+    return None
+
+
+@dataclass(frozen=True)
+class OwnerSignal:
+    """One owner-addressed signal: what is being said, and about which seat.
+
+    The message and its subject are inseparable here -- coalescing looks up an existing row by
+    (ask, kind, leaf, role), and renewal rewrites the subject from the same value, so a message
+    carrying someone else's subject silently renews the wrong row.
+    """
+
+    message_kind: InboxMessageKind
+    ask: str
+    response: str
+    leaf_key: str | None = None
+    seat_role: str | None = None
+    subject_agent_id: str | None = None
+
+
+# 260731-EFA-L7 R10: verbatim L7 split (L7-OQ1 Option A serving scope); unchanged edge branch, out of this leaf's behavior scope (mcp/src/agents_remember/serving/_supervisor_actions.py:323).
+def _post_owner_signal(  # pragma: no cover
+    ctx: SupervisorContext,
+    owner: RoutedOwner,
+    signal: OwnerSignal,
+    *,
+    now: datetime,
+    sweep: _SweepState | None = None,
+) -> InboxDeliveryState:
+    """R4c: emit one owner-addressed signal row (L1 routing), attempt hosted delivery, and write
+    its ack-by expectation row -- the same atomic-at-post shape every other dispatch surface uses.
+
+    Ruled invariant (developer, 2026-07-09): one row per root cause. A condition that re-fires
+    while its row is still pending RENEWS that row (bumped date, refreshed detail) instead of
+    appending a duplicate -- the storm that took the host down was this function minting a new
+    pending row per re-fire, each of which the ladder then escalated into more rows."""
+    entries = sweep.inbox_current if sweep is not None else ctx.inbox_store.current()
+    subject = InboxSubject(
+        leaf_key=signal.leaf_key, seat_role=signal.seat_role, agent_id=signal.subject_agent_id
+    )
+    existing = _find_coalescible(
+        entries,
+        ask=signal.ask,
+        message_kind=signal.message_kind,
+        leaf_key=signal.leaf_key,
+        seat_role=signal.seat_role,
+    )
+    if existing is not None:
+        entry = inbox_transitions.renew(
+            ctx.inbox_store,
+            existing.id,
+            InboxRenewal(
+                response=signal.response,
+                subject=subject,
+                readdress_to=InboxOwner(
+                    role=owner.role, agent_id=owner.agent_id, lifecycle_id=owner.lifecycle_id
+                ),
+            ),
+            now=now.isoformat(),
+            current=entries,
+        )
+    else:
+        entry = create_operator_inbox_entry(
+            InboxMessage(
+                ask=signal.ask,
+                response=signal.response,
+                message_kind=signal.message_kind,
+                subject=subject,
+            ),
+            entry_id=new_ulid(),
+            now=now.isoformat(),
+            routing=InboxRouting(
+                address=InboxAddress(
+                    lifecycle_id=owner.lifecycle_id,
+                    agent_id=owner.agent_id,
+                    recipient_role=owner.role,
+                ),
+                owner=InboxOwner(
+                    role=owner.role, agent_id=owner.agent_id, lifecycle_id=owner.lifecycle_id
+                ),
+            ),
+            poster=InboxPoster(created_by="supervisor", created_via="cli", sender_role="system"),
+        )
+        ctx.inbox_store.append(entry)
+    if sweep is not None:
+        sweep.remember(entry)
+    delivered = deliver_inbox_entry(
+        InboxDeliveryLog(
+            store=ctx.inbox_store,
+            entry=entry,
+            at=now.isoformat(),
+            floor=RedeliveryFloor(
+                current=sweep.inbox_current if sweep is not None else None,
+                seconds=ctx.redeliver_rate_limit_seconds,
+            ),
+        ),
+        sessions=HostedSessionRuntime(catalog=ctx.catalog, host=ctx.host),
+        paster=ctx.paster,
+    )
+    if sweep is not None:
+        sweep.remember(delivered)
+    return delivered.deliveryState
+
+
+def _signal_emit(
+    ctx: SupervisorContext,
+    finding: SupervisorFinding,
+    *,
+    now: datetime,
+    sweep: _SweepState,
+) -> SupervisorActionResult:
+    owner = derive_signal_owner(
+        ctx.catalog,
+        sender_agent_id=finding.session_id,
+        message_kind="escalation",
+        leaf_key=finding.leaf_key,
+    )
+    if owner.agent_id is None and owner.lifecycle_id is None and owner.role is None:
+        return SupervisorActionResult("signal-emit", finding, "skipped", "no routable owner")
+    signal_key = SupervisorSignalKey(
+        target=SupervisorSignalTarget(
+            agent_id=owner.agent_id,
+            lifecycle_id=owner.lifecycle_id,
+            role=owner.role,
+            leaf_key=finding.leaf_key,
+            seat_role=finding.seat_role,
+        ),
+        finding_kind=finding.kind,
+        detail=finding.detail,
+    )
+    if ctx.signal_cooldown_store.in_cooldown(
+        signal_key,
+        now=now,
+        cooldown_seconds=ctx.signal_cooldown_seconds,
+        records=sweep.signal_current,
+    ):
+        return SupervisorActionResult("signal-emit", finding, "cooldown", "signal cooldown active")
+    ask = f"Supervisor observed {finding.kind}: {finding.detail}"
+    response = f"session {finding.session_id or 'unknown'} (leaf {finding.leaf_key or 'unknown'})"
+    delivery_state = _post_owner_signal(
+        ctx,
+        owner,
+        OwnerSignal(
+            message_kind="escalation",
+            ask=ask,
+            response=response,
+            leaf_key=finding.leaf_key,
+            seat_role=finding.seat_role,
+            subject_agent_id=finding.session_id,
+        ),
+        now=now,
+        sweep=sweep,
+    )
+    signal_record = SupervisorSignalRecord(
+        id=new_ulid(),
+        ts=now.isoformat(),
+        targetAgentId=owner.agent_id,
+        targetLifecycleId=owner.lifecycle_id,
+        targetRole=owner.role,
+        leafKey=finding.leaf_key,
+        seatRole=finding.seat_role,
+        findingKind=finding.kind,
+        detail=finding.detail,
+        deliveryState=delivery_state,
+    )
+    ctx.signal_cooldown_store.append(signal_record)
+    sweep.remember_signal(signal_record)
+    _log_event(
+        ctx,
+        "orchestration.supervisor.signal",
+        {
+            "predicateKind": finding.kind,
+            "detail": finding.detail,
+            "sessionId": finding.session_id,
+            "leafKey": finding.leaf_key,
+            "seatRole": finding.seat_role,
+            "ownerRole": owner.role,
+            "deliveryState": delivery_state,
+        },
+    )
+    return SupervisorActionResult("signal-emit", finding, delivery_state)
+
+
+# 260731-EFA-L7 R10: verbatim L7 split (L7-OQ1 Option A serving scope); unchanged edge branch, out of this leaf's behavior scope (mcp/src/agents_remember/serving/_supervisor_actions.py:481).
+def _rung_entry(  # pragma: no cover
+    finding: SupervisorFinding,
+    sweep: _SweepState,
+) -> tuple[OperatorInboxEntry | None, str | None]:
+    if finding.source_id is None:
+        return None, "no source entry id"
+    if finding.source_id in sweep.escalated_entry_ids:
+        return None, "entry already transitioned this sweep"
+    entry = sweep.inbox_current.get(finding.source_id)
+    if entry is None or entry.state != "pending":
+        return None, "entry not pending"
+    if dispatch_stays_on_exact_session(entry):
+        return None, "dispatch brief stays on its exact session"
+    return entry, None
+
+
+# 260731-EFA-L7 R10: verbatim L7 split (L7-OQ1 Option A serving scope); unchanged edge branch, out of this leaf's behavior scope (mcp/src/agents_remember/serving/_supervisor_actions.py:497).
+def _escalate_rung(  # pragma: no cover
+    ctx: SupervisorContext,
+    finding: SupervisorFinding,
+    *,
+    now: datetime,
+    sweep: _SweepState,
+) -> SupervisorActionResult:
+    """R2: advance one pending, unacked row to its next ladder rung -- renudge (1), skip-level
+    (2), or architect custody (3, terminal) -- and durably stamp the transition.
+
+    Ruled invariant (developer, 2026-07-09): the ladder never mints rows. Each rung transition
+    MUTATES the one root row -- re-anchors its dwell clock, re-addresses it to the next owner,
+    and redelivers it (which increments its attempt count). The prior shape (a new pending row
+    per transition, itself ladder-eligible) was a branching process: with an absent developer it
+    grew the inbox to 20k+ pending rows and took the host down."""
+    entry, refusal = _rung_entry(finding, sweep)
+    if entry is None:
+        return SupervisorActionResult("escalate-rung", finding, "skipped", refusal)
+    sweep.escalated_entry_ids.add(entry.id)
+    step = next_step(ctx.catalog, entry)
+    if step.owner.agent_id is None and step.owner.role is None:
+        return SupervisorActionResult("escalate-rung", finding, "skipped", "no routable owner")
+    advanced = inbox_transitions.advance_rung(
+        ctx.inbox_store,
+        entry.id,
+        RungAdvance(
+            rung=step.rung,
+            readdress_to=(
+                InboxOwner(
+                    role=step.owner.role,
+                    agent_id=step.owner.agent_id,
+                    lifecycle_id=step.owner.lifecycle_id,
+                )
+                if step.rung > 1
+                else None
+            ),
+        ),
+        now=now.isoformat(),
+        current=sweep.inbox_current,
+    )
+    sweep.remember(advanced)
+    delivered = deliver_inbox_entry(
+        InboxDeliveryLog(
+            store=ctx.inbox_store,
+            entry=advanced,
+            at=now.isoformat(),
+            floor=RedeliveryFloor(
+                current=sweep.inbox_current, seconds=ctx.redeliver_rate_limit_seconds
+            ),
+        ),
+        sessions=HostedSessionRuntime(catalog=ctx.catalog, host=ctx.host),
+        paster=ctx.paster,
+    )
+    sweep.remember(delivered)
+    delivery_state = delivered.deliveryState
+    _log_event(
+        ctx,
+        "orchestration.escalation.rung",
+        {
+            "entryId": entry.id,
+            "rung": step.rung,
+            "action": step.action,
+            "ownerRole": step.owner.role,
+            "ownerAgentId": step.owner.agent_id,
+            "deliveryState": delivery_state,
+        },
+    )
+    # R3: past the respawn threshold, a still-silent addressee seat is marked suspect and
+    # respawned rather than waited on further -- a side effect of the transition, not a distinct
+    # finding of its own (the seat's silence IS this row's silence).
+    if step.rung >= ctx.respawn_after_rung and seat_is_suspect(
+        ctx.catalog, entry.agentId, now=now, stale_seconds=ctx.stale_seat_seconds
+    ):
+        _respawn_suspect(ctx, entry.agentId, now=now, sweep=sweep)
+    if _ladder_terminal_and_dead(ctx.catalog, advanced):
+        terminal_finding = SupervisorFinding(
+            kind="inbox-ladder-terminal",
+            detail="ladder-resolved",
+            session_id=advanced.agentId,
+            leaf_key=finding.leaf_key,
+            seat_role=finding.seat_role,
+            source_id=advanced.id,
+        )
+        _resolve_ladder_terminal(ctx, terminal_finding, now=now, sweep=sweep)
+    return SupervisorActionResult("escalate-rung", finding, delivery_state, step.action)
+
+
+# 260731-EFA-L7 R10: verbatim L7 split (L7-OQ1 Option A serving scope); unchanged edge branch, out of this leaf's behavior scope (mcp/src/agents_remember/serving/_supervisor_actions.py:584).
+def _respawn_suspect(  # pragma: no cover
+    ctx: SupervisorContext,
+    agent_id: str | None,
+    *,
+    now: datetime,
+    sweep: _SweepState,
+) -> None:
+    """R3: retire the suspect seat's husk (HFX-L8 primitives), signal its owner (or the
+    orchestrator, when the owner mapping already resolves there for a manager) with a respawn
+    directive carrying the pending queue to re-deliver to the successor, and -- if the retired
+    seat was itself a manager -- surface its now-orphaned live workers (R3 orphan policy: held,
+    never auto re-parented, never absorbing the dead manager's role)."""
+    if agent_id is None:
+        return
+    entry = ctx.catalog.get(agent_id)
+    if entry is None or entry.status != "running":
+        return
+    owner = derive_signal_owner(ctx.catalog, sender_agent_id=agent_id, message_kind="escalation")
+    pending_queue = [
+        row.id
+        for row in sweep.inbox_current.values()
+        if row.state == "pending" and row.agentId == agent_id
+    ]
+    retire_entry(
+        ctx.catalog,
+        ctx.host,
+        entry,
+        SeatClosure(
+            at=now.isoformat(),
+            by_session=None,
+            reason="escalation-ladder-suspect",
+            edge="supervisor-respawn",
+        ),
+    )
+    orphaned: list[str] = []
+    if entry.binding_role == "manager":
+        orphaned = [
+            worker.id for worker in find_orphaned_workers(ctx.catalog, manager_agent_id=agent_id)
+        ]
+    delivery_state = "skipped"
+    if owner.agent_id is not None or owner.role is not None:
+        ask = f"Respawn directive: seat {agent_id} ({entry.binding_role}) retired as suspect (R3)"
+        response = (
+            f"Pending queue for the successor: {pending_queue}. Orphaned workers: {orphaned}."
+        )
+        delivery_state = _post_owner_signal(
+            ctx,
+            owner,
+            OwnerSignal(message_kind="escalation", ask=ask, response=response),
+            now=now,
+            sweep=sweep,
+        )
+    _log_event(
+        ctx,
+        "orchestration.supervisor.respawn",
+        {
+            "agentId": agent_id,
+            "spawnRole": entry.spawn_role,
+            "seatRole": entry.binding_role,
+            "pendingQueue": pending_queue,
+            "orphanedWorkers": orphaned,
+            "ownerRole": owner.role,
+            "ownerAgentId": owner.agent_id,
+            "deliveryState": delivery_state,
+        },
+    )
+
+
+# 260731-EFA-L7 R10: verbatim L7 split (L7-OQ1 Option A serving scope); unchanged edge branch, out of this leaf's behavior scope (mcp/src/agents_remember/serving/_supervisor_actions.py:652).
+def _signal_dead_upstream(  # pragma: no cover
+    ctx: SupervisorContext,
+    finding: SupervisorFinding,
+    *,
+    now: datetime,
+    sweep: _SweepState,
+) -> SupervisorActionResult:
+    """R4: hand a leaf whose recorded owner died to its current responsible manager.
+
+    Address-time manager resolution repairs stale manager provenance. The ordinary ladder owns any
+    later climb; this dead-upstream detector must not skip directly to the orchestrator/architect.
+    """
+    owner = derive_leaf_manager_owner(
+        ctx.catalog, sender_agent_id=finding.session_id, leaf_key=finding.leaf_key
+    )
+    if owner.agent_id is None and owner.role is None:
+        return SupervisorActionResult("signal-manager", finding, "skipped", "no manager address")
+    ask = (
+        f"Dead-upstream (R4/P-6): seat {finding.session_id or 'unknown'} lost its recorded owner; "
+        "current manager action is required. The seat continues its own brief and never absorbs "
+        "the dead owner's role."
+    )
+    response = f"leaf {finding.leaf_key or 'unknown'}"
+    delivery_state = _post_owner_signal(
+        ctx,
+        owner,
+        OwnerSignal(
+            message_kind="escalation",
+            ask=ask,
+            response=response,
+            leaf_key=finding.leaf_key,
+            seat_role=finding.seat_role,
+            subject_agent_id=finding.session_id,
+        ),
+        now=now,
+        sweep=sweep,
+    )
+    _log_event(
+        ctx,
+        "orchestration.supervisor.dead-upstream",
+        {
+            "sessionId": finding.session_id,
+            "leafKey": finding.leaf_key,
+            "seatRole": finding.seat_role,
+            "managerRole": owner.role,
+            "managerAgentId": owner.agent_id,
+            "deliveryState": delivery_state,
+        },
+    )
+    return SupervisorActionResult("signal-manager", finding, delivery_state)
+
+
+_FindingAction = Callable[..., SupervisorActionResult]
+
+# One predicate kind -> the one act-phase handler that answers it. A finding kind with no entry
+# here is reported as unhandled rather than silently doing nothing, so adding a predicate without
+# its handler is visible in the sweep result instead of being lost.
+_FINDING_ACTIONS: dict[str, _FindingAction] = {
+    "inbox-redeliverable": _redeliver,
+    "inbox-ladder-terminal": _resolve_ladder_terminal,
+    "expectation-overdue": _auto_nudge,
+    "turn-report-stale": _auto_nudge,
+    "escalation-due": _escalate_rung,
+    "dead-upstream": _signal_dead_upstream,
+    "seat-liveness": _signal_emit,
+}
+
+
+def act_on_finding(
+    ctx: SupervisorContext,
+    finding: SupervisorFinding,
+    *,
+    now: datetime,
+    sweep: _SweepState | None = None,
+) -> SupervisorActionResult:
+    if sweep is None:
+        current = ctx.inbox_store.current()
+        sweep = _SweepState(inbox_current=current, redeliver_budget=ctx.redeliver_budget)
+    action = _FINDING_ACTIONS.get(finding.kind)
+    if action is None:
+        return SupervisorActionResult("none", finding, "skipped", "unhandled finding kind")
+    return action(ctx, finding, now=now, sweep=sweep)

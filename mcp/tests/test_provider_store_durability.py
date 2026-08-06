@@ -677,7 +677,7 @@ class ProviderOwnershipTests(_TempRootTest):
         self.assertEqual(
             provider_reclaim_call_sites(),
             {
-                "ProviderMetricsStore": ["serving/app.py::_metrics_loop"],
+                "ProviderMetricsStore": ["serving/_app_lifespan.py::_metrics_loop"],
                 "ProviderDegradationStore": [
                     "providers/degradation.py::evaluate_provider_degradation"
                 ],

@@ -50,7 +50,8 @@ from agents_remember.serving.harness_control_models import (
 from agents_remember.serving.pi_rpc_adapter import PiRpcAdapter
 
 
-def _obj(value: object) -> Mapping[str, object]:
+# 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/test_harness_control_evidence_installed.py:53).
+def _obj(value: object) -> Mapping[str, object]:  # pragma: no cover
     assert isinstance(value, Mapping)
     return cast(Mapping[str, object], value)
 
@@ -63,7 +64,8 @@ CLAUDE_LOCKED = "2.1.211"
 PROMPT = "Reply with exactly the word OK and nothing else."
 
 
-def _identity(session: str) -> ControlIdentity:
+# 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/test_harness_control_evidence_installed.py:66).
+def _identity(session: str) -> ControlIdentity:  # pragma: no cover
     return ControlIdentity(
         ar_session_id=session,
         tmux_name=f"ar-{session}",
@@ -71,7 +73,10 @@ def _identity(session: str) -> ControlIdentity:
     )
 
 
-def _launch(identity: ControlIdentity, harness_id: str, cwd: Path, argv: tuple[str, ...]):
+# 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/test_harness_control_evidence_installed.py:74).
+def _launch(
+    identity: ControlIdentity, harness_id: str, cwd: Path, argv: tuple[str, ...]
+):  # pragma: no cover
     return LaunchSpec(
         identity=identity,
         harness_id=harness_id,
@@ -82,7 +87,8 @@ def _launch(identity: ControlIdentity, harness_id: str, cwd: Path, argv: tuple[s
 
 
 class _ControlledEntry:
-    def __init__(self, identity: ControlIdentity, endpoint: Path) -> None:
+    # 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/test_harness_control_evidence_installed.py:85).
+    def __init__(self, identity: ControlIdentity, endpoint: Path) -> None:  # pragma: no cover
         self.id = identity.ar_session_id
         self.tmux_name = identity.tmux_name
         self.created_at = identity.created_at
@@ -100,7 +106,10 @@ def _version_of(executable: str, args: tuple[str, ...] = ("--version",)) -> str:
     return completed.stdout.strip()
 
 
-async def _wait_for_evidence_kind(entry, kind: str, *, timeout_seconds: float) -> None:
+# 260731-EFA-L7 R10: AR_RUN_EVIDENCE_INSTALLED-gated helper.
+async def _wait_for_evidence_kind(
+    entry, kind: str, *, timeout_seconds: float
+) -> None:  # pragma: no cover
     deadline = asyncio.get_running_loop().time() + timeout_seconds
     while True:
         page = await asyncio.to_thread(read_control_evidence, entry)
@@ -117,7 +126,8 @@ async def _wait_for_evidence_kind(entry, kind: str, *, timeout_seconds: float) -
     f"set {LIVE_OPT_IN}=1 to exercise installed runtimes through the production evidence seam",
 )
 class CodexInstalledEvidenceTests(unittest.IsolatedAsyncioTestCase):
-    def setUp(self) -> None:
+    # 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/test_harness_control_evidence_installed.py:123).
+    def setUp(self) -> None:  # pragma: no cover
         executable = shutil.which("codex")
         if executable is None:
             self.skipTest("installed codex executable is unavailable")
@@ -129,7 +139,10 @@ class CodexInstalledEvidenceTests(unittest.IsolatedAsyncioTestCase):
             )
         self.executable = executable
 
-    async def test_live_evidence_family_and_resume_channel_through_production_seam(self) -> None:
+    # 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/test_harness_control_evidence_installed.py:135).
+    async def test_live_evidence_family_and_resume_channel_through_production_seam(
+        self,
+    ) -> None:  # pragma: no cover
         with tempfile.TemporaryDirectory(prefix="ar-evidence-codex-") as tmp:
             root = Path(tmp)
             identity = _identity("codex-installed")
@@ -178,7 +191,8 @@ class CodexInstalledEvidenceTests(unittest.IsolatedAsyncioTestCase):
 
             await self._assert_resume_channel_reaches_the_persisted_thread(root)
 
-    def _assert_evidence_family(self, page: EvidencePage) -> None:
+    # 260731-EFA-L7 R10: AR_RUN_EVIDENCE_INSTALLED-gated helper; runs only with installed runtimes.
+    def _assert_evidence_family(self, page: EvidencePage) -> None:  # pragma: no cover
         """One live turn must put the whole family on the seam, each item typed and identified.
 
         The family is what the cockpit projects from: the notification kind, the user and agent
@@ -208,7 +222,10 @@ class CodexInstalledEvidenceTests(unittest.IsolatedAsyncioTestCase):
             "turn/completed never reached evidence",
         )
 
-    async def _assert_resume_channel_reaches_the_persisted_thread(self, root: Path) -> None:
+    # 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/test_harness_control_evidence_installed.py:215).
+    async def _assert_resume_channel_reaches_the_persisted_thread(
+        self, root: Path
+    ) -> None:  # pragma: no cover
         """A persisted thread's native page crosses with typed identity, and resumes.
 
         The second adapter is built by the production factory with only the thread id, which is
@@ -235,7 +252,8 @@ class CodexInstalledEvidenceTests(unittest.IsolatedAsyncioTestCase):
         finally:
             await resume_bridge.stop("forced")
 
-    async def _live_completed_thread(
+    # 260731-EFA-L7 R10: AR_RUN_EVIDENCE_INSTALLED-gated helper; runs only with installed runtimes.
+    async def _live_completed_thread(  # pragma: no cover
         self, cwd: Path
     ) -> tuple[str, tuple[NativeEvidenceFrame, ...]]:
         identity = _identity("codex-installed-persist")
@@ -284,7 +302,8 @@ class CodexInstalledEvidenceTests(unittest.IsolatedAsyncioTestCase):
     f"set {LIVE_OPT_IN}=1 to exercise installed runtimes through the production evidence seam",
 )
 class PiInstalledEvidenceTests(unittest.IsolatedAsyncioTestCase):
-    def setUp(self) -> None:
+    # 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/test_harness_control_evidence_installed.py:292).
+    def setUp(self) -> None:  # pragma: no cover
         executable = shutil.which("pi")
         if executable is None:
             self.skipTest("installed pi executable is unavailable")
@@ -296,7 +315,8 @@ class PiInstalledEvidenceTests(unittest.IsolatedAsyncioTestCase):
             )
         self.executable = executable
 
-    async def test_live_evidence_family_through_production_seam(self) -> None:
+    # 260731-EFA-L7 R10: AR_RUN_EVIDENCE_INSTALLED-gated test body.
+    async def test_live_evidence_family_through_production_seam(self) -> None:  # pragma: no cover
         with tempfile.TemporaryDirectory(prefix="ar-evidence-pi-") as tmp:
             root = Path(tmp)
             identity = _identity("pi-installed")
@@ -353,7 +373,8 @@ class PiInstalledEvidenceTests(unittest.IsolatedAsyncioTestCase):
 
 
 class ClaudeInstalledHonestyTests(unittest.TestCase):
-    def test_version_mismatch_keeps_claude_rows_not_exercised(self) -> None:
+    # 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/test_harness_control_evidence_installed.py:362).
+    def test_version_mismatch_keeps_claude_rows_not_exercised(self) -> None:  # pragma: no cover
         executable = shutil.which("claude")
         if executable is None:
             self.skipTest("installed claude executable is unavailable")

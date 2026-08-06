@@ -3,7 +3,7 @@
 // store, only rendering is suppressed). A large thinking body uses content-visibility so it stays
 // sequentially readable/navigable without one enormous forced-layout DOM node.
 
-import { css } from "../../../../styled-system/css";
+import { css, cx } from "../../../../styled-system/css";
 import { useHideThinking } from "../../../data/conversation/thinkingPreference";
 import type { ConversationContentBlock, ConversationItem } from "../../../data/conversation/types";
 import { MarkdownBlock } from "./MarkdownBlock";
@@ -25,6 +25,11 @@ const label = css({
   fontStyle: "normal",
 });
 const hiddenMarker = css({ fontSize: "0.64rem", color: "dormant", fontStyle: "italic" });
+// The live in-progress indicator uses the cockpit's shared calm opacity pulse (260715-FEUI-L2,
+// pulseSlow, 2.4s ease-in-out — NEVER on/off blinking; frozen by html[data-effects="off"]).
+const liveIndicator = css({
+  animation: "pulseSlow 2.4s ease-in-out infinite",
+});
 
 function thinkingText(block: ConversationContentBlock): string | null {
   if (block.type === "thinking" || block.type === "markdown") return block.markdown;
@@ -32,7 +37,7 @@ function thinkingText(block: ConversationContentBlock): string | null {
   return null;
 }
 
-export function ThinkingItem({ item }: { item: ConversationItem }) {
+export function ThinkingItem({ item, animated = false }: { item: ConversationItem; animated?: boolean }) {
   const hidden = useHideThinking();
   if (hidden) {
     return (
@@ -42,9 +47,12 @@ export function ThinkingItem({ item }: { item: ConversationItem }) {
     );
   }
   return (
-    <div className={wrap} data-testid="conversation-thinking">
+    <div
+      className={cx(wrap, animated && liveIndicator)}
+      data-testid={animated ? "live-thinking-indicator" : "conversation-thinking"}
+    >
       <span className={label}>
-        <span aria-hidden="true">✻</span> thinking
+        <span aria-hidden="true">✻</span> {animated ? "thinking…" : "thinking"}
       </span>
       {item.blocks.map((block) => {
         const text = thinkingText(block);

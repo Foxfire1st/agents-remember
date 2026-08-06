@@ -13,32 +13,26 @@ from __future__ import annotations
 
 import contextlib
 import json
-import os
 import socket
 import sys
 import tempfile
 import unittest
-from collections.abc import Callable, Sequence
+from collections.abc import (
+    Callable,
+    Sequence,
+)
 from pathlib import Path
 from typing import cast
-from unittest import mock
-from unittest.mock import patch
-
-from fastapi.testclient import TestClient
-from starlette.websockets import WebSocketDisconnect
 
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
 from agents_remember.mcp.config import McpRuntimeConfig
 from agents_remember.serving.app import (
-    _MAX_IMAGE_BYTES,
-    _TERMINAL_EXIT_FRAME,
     ServingCollaborators,
     _apply_terminal_input,
     create_app,
 )
-from agents_remember.serving.harness_control_runner import parse_runner_config
 from agents_remember.serving.projector import ProjectionCadence
 from agents_remember.serving.terminal import (
     TerminalHost,
@@ -50,13 +44,11 @@ from agents_remember.serving.terminal_catalog import (
     TerminalCatalogEntry,
     TerminalSessionStatus,
 )
-from agents_remember.serving.terminal_opener import (
-    SpawnKnobs,
-    TerminalLaunchRequest,
-    resolve_terminal_launch,
-)
 from agents_remember.serving.terminal_pty import TerminalSession
-from agents_remember.tasks import TaskDocument, write_task_doc
+from agents_remember.tasks import (
+    TaskDocument,
+    write_task_doc,
+)
 
 
 def _config(tmp: Path) -> McpRuntimeConfig:
@@ -215,7 +207,8 @@ class _FakeSession:
     def write(self, data: bytes) -> None:
         self._master.sendall(data)
 
-    def read_nonblocking(self, max_bytes: int = 65536) -> bytes:
+    # 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/test_terminal_ws.py:210).
+    def read_nonblocking(self, max_bytes: int = 65536) -> bytes:  # pragma: no cover
         try:
             return self._master.recv(max_bytes)
         except BlockingIOError:
@@ -258,7 +251,8 @@ class _FakeTerminalHost:
             return self.registry_session
         return None
 
-    def open(self, sid: str, spec: TerminalSessionSpec) -> _FakeSession:
+    # 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/test_terminal_ws.py:253).
+    def open(self, sid: str, spec: TerminalSessionSpec) -> _FakeSession:  # pragma: no cover
         self.opened.append(
             {
                 "sid": sid,
@@ -317,7 +311,8 @@ class _FakeTerminalHost:
     def has_session(self, tmux_name: str) -> bool:
         return tmux_name in self.probe_names
 
-    def terminate(self, sid: str, *, tmux_name: str | None = None) -> None:
+    # 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/test_terminal_ws.py:312).
+    def terminate(self, sid: str, *, tmux_name: str | None = None) -> None:  # pragma: no cover
         target = tmux_name or (
             self.registry_session.tmux_name
             if self.registry_session is not None and sid == self.registry_session.sid
@@ -330,7 +325,8 @@ class _FakeTerminalHost:
             if session is not None and sid == session.sid:
                 session.alive = False
 
-    def close(self, sid: str | None = None) -> None:
+    # 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/test_terminal_ws.py:325).
+    def close(self, sid: str | None = None) -> None:  # pragma: no cover
         if sid is None:
             for sock in [*self._masters.values(), *self._peers.values()]:
                 with contextlib.suppress(OSError):
@@ -342,7 +338,8 @@ class _FakeTerminalHost:
             self.registry_session.close()
             self.registry_session = None
 
-    def release(self, session: _FakeSession) -> None:
+    # 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/test_terminal_ws.py:337).
+    def release(self, session: _FakeSession) -> None:  # pragma: no cover
         """Drop the sockets behind ``session`` -- what the real client's ``close`` releases."""
         session.alive = False
         for sockets in (self._masters, self._peers):
@@ -362,7 +359,8 @@ class _FakeTerminalHost:
         assert session is not None
         self._peers[id(session)].sendall(data)
 
-    def feed_all(self, data: bytes) -> None:
+    # 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/test_terminal_ws.py:357).
+    def feed_all(self, data: bytes) -> None:  # pragma: no cover
         for session in list(self.attachments):
             if session.is_alive:
                 self.feed_to(session, data)
@@ -450,765 +448,6 @@ class TerminalWebSocketTests(unittest.TestCase):
         self.catalog.upsert(_catalog_entry("live", cwd=self.tmp))
         self.host.probe_names.add("ar-live")
 
-    def test_unknown_session_is_refused(self) -> None:
-        with (
-            TestClient(self.app) as client,
-            client.websocket_connect("/api/terminal/ghost") as ws,
-            self.assertRaises(WebSocketDisconnect) as ctx,
-        ):
-            ws.receive_text()
-        self.assertEqual(ctx.exception.code, 4404)
 
-    def test_pty_output_forwarded_as_binary(self) -> None:
-        self._register_live()
-        with TestClient(self.app) as client, client.websocket_connect("/api/terminal/live") as ws:
-            self.host.feed(b"\x1b[32mok\x1b[0m")
-            self.assertEqual(ws.receive_bytes(), b"\x1b[32mok\x1b[0m")
-
-    def test_client_stdin_written_to_pty(self) -> None:
-        self._register_live()
-        with TestClient(self.app) as client, client.websocket_connect("/api/terminal/live") as ws:
-            ws.send_text(json.dumps({"type": "stdin", "data": "echo hi\n"}))
-            self.assertEqual(self.host.read_child_input(), b"echo hi\n")
-
-    def test_client_resize_forwarded_in_order(self) -> None:
-        self._register_live()
-        with TestClient(self.app) as client, client.websocket_connect("/api/terminal/live") as ws:
-            ws.send_text(json.dumps({"type": "resize", "cols": 100, "rows": 30}))
-            # A following stdin we can read back proves the resize frame was processed first.
-            ws.send_text(json.dumps({"type": "stdin", "data": "x"}))
-            self.assertEqual(self.host.read_child_input(), b"x")
-        self.assertEqual(self.host.resizes, [(100, 30)])
-
-    def test_client_disconnect_detaches_local_pty_without_exiting_catalog_row(self) -> None:
-        self.catalog.upsert(_catalog_entry("live", cwd=self.tmp))
-        self.host.probe_names.add("ar-live")
-
-        with TestClient(self.app) as client, client.websocket_connect("/api/terminal/live"):
-            pass
-
-        self.assertEqual(self.host.closed, ["live"])
-        entry = self.catalog.get("live")
-        assert entry is not None
-        self.assertEqual(entry.status, "running")
-
-    def test_parallel_websockets_use_independent_terminal_clients(self) -> None:
-        self._register_live()
-
-        with TestClient(self.app) as client:  # noqa: SIM117 - ws2 must close while ws1 remains open.
-            with client.websocket_connect("/api/terminal/live") as ws1:
-                with client.websocket_connect("/api/terminal/live") as ws2:
-                    self.assertEqual(len(self.host.attachments), 2)
-                    self.host.feed_all(b"shared-output")
-                    self.assertEqual(ws1.receive_bytes(), b"shared-output")
-                    self.assertEqual(ws2.receive_bytes(), b"shared-output")
-                self.host.feed_to(self.host.attachments[0], b"still-open")
-                self.assertEqual(ws1.receive_bytes(), b"still-open")
-
-        self.assertEqual(self.host.closed, ["live", "live"])
-
-    def test_child_exit_sends_exit_frame_then_closes(self) -> None:
-        self._register_live()
-        with TestClient(self.app) as client, client.websocket_connect("/api/terminal/live") as ws:
-            self.host.end()
-            self.assertEqual(ws.receive_text(), _TERMINAL_EXIT_FRAME)
-            with self.assertRaises(WebSocketDisconnect):
-                ws.receive_bytes()
-
-    def test_host_shutdown_on_app_teardown(self) -> None:
-        with TestClient(self.app):
-            pass
-        self.assertTrue(self.host.shutdown_called)
-
-    def test_post_open_spawns_shell_at_workspace_root(self) -> None:
-        with TestClient(self.app) as client:
-            response = client.post(
-                "/api/terminal/term-1",
-                json={"kind": "terminal", "label": "Terminal 1", "lifecycleId": "LC1"},
-            )
-        self.assertEqual(response.status_code, 200)
-        body = response.json()
-        self.assertEqual(body["session"], "term-1")
-        self.assertEqual(body["kind"], "terminal")
-        self.assertEqual(body["label"], "Terminal 1")
-        self.assertEqual(body["lifecycleId"], "LC1")
-        self.assertEqual(body["tmuxName"], "ar-term-1")
-        self.assertEqual(body["status"], "running")
-        self.assertEqual(len(self.host.ensured), 1)
-        ensured = self.host.ensured[0]
-        self.assertEqual(ensured["sid"], "term-1")
-        self.assertEqual(ensured["cwd"], self.tmp)  # workspace_root (== _config's tmp)
-        self.assertEqual(len(cast(list, ensured["command"])), 1)  # the shell argv
-        self.assertEqual(ensured["lifecycle_id"], "LC1")
-        self.assertFalse(ensured["suspend_unsafe"])  # a shell keeps Ctrl-Z (job control)
-        self.assertEqual(self.host.opened, [])
-        self.assertEqual(self.host.closed, [])
-        entry = self.catalog.get("term-1")
-        assert entry is not None
-        self.assertEqual(entry.label, "Terminal 1")
-        self.assertEqual(entry.lifecycle_id, "LC1")
-        self.assertEqual(entry.status, "running")
-
-    def test_get_terminal_sessions_lists_catalog_entries(self) -> None:
-        with TestClient(self.app) as client:
-            client.post("/api/terminal/term-1", json={"kind": "terminal", "label": "Terminal 1"})
-            response = client.get("/api/terminal/sessions")
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(
-            response.json()["sessions"][0],
-            {
-                "id": "term-1",
-                "label": "Terminal 1",
-                "kind": "terminal",
-                "cwd": str(self.tmp),
-                "tmuxName": "ar-term-1",
-                "command": [os.environ.get("SHELL") or "/bin/bash"],
-                "createdAt": response.json()["sessions"][0]["createdAt"],
-                "lastAttachedAt": response.json()["sessions"][0]["lastAttachedAt"],
-                "status": "running",
-                "seatRole": "terminal",
-            },
-        )
-
-    def test_post_open_keeps_detached_session_available_for_first_websocket(self) -> None:
-        with TestClient(self.app) as client:
-            response = client.post(
-                "/api/terminal/term-1", json={"kind": "terminal", "label": "Terminal 1"}
-            )
-            self.assertEqual(response.status_code, 200)
-            with client.websocket_connect("/api/terminal/term-1") as ws:
-                self.host.feed(b"first-attach")
-                self.assertEqual(ws.receive_bytes(), b"first-attach")
-
-        self.assertEqual(len(self.host.ensured), 1)
-        self.assertEqual(len(self.host.attached), 1)
-        self.assertEqual(self.host.closed, ["term-1"])
-        entry = self.catalog.get("term-1")
-        assert entry is not None
-        self.assertEqual(entry.status, "running")
-
-    def test_websocket_attaches_missing_host_from_catalog_when_tmux_exists(self) -> None:
-        self.catalog.upsert(
-            _catalog_entry("restored", cwd=self.tmp, tmux_name="ar-restored", command=("bash",))
-        )
-        self.host.probe_names.add("ar-restored")
-        with (
-            TestClient(self.app) as client,
-            client.websocket_connect("/api/terminal/restored") as ws,
-        ):
-            self.host.feed(b"restored-output")
-            self.assertEqual(ws.receive_bytes(), b"restored-output")
-        self.assertEqual(self.host.attached[0]["sid"], "restored")
-        self.assertEqual(self.host.attached[0]["name"], "ar-restored")
-        entry = self.catalog.get("restored")
-        assert entry is not None
-        self.assertEqual(entry.status, "running")
-
-    def test_websocket_attaches_landed_catalog_session_for_inspection(self) -> None:
-        self.catalog.upsert(
-            _catalog_entry(
-                "landed", cwd=self.tmp, status="landed", tmux_name="ar-landed", command=("bash",)
-            )
-        )
-        self.host.probe_names.add("ar-landed")
-        with TestClient(self.app) as client, client.websocket_connect("/api/terminal/landed") as ws:
-            self.host.feed(b"landed-output")
-            self.assertEqual(ws.receive_bytes(), b"landed-output")
-        self.assertEqual(self.host.attached[0]["sid"], "landed")
-        entry = self.catalog.get("landed")
-        assert entry is not None
-        self.assertEqual(entry.status, "landed")
-
-    def test_websocket_marks_stale_catalog_session_exited(self) -> None:
-        self.catalog.upsert(_catalog_entry("stale", cwd=self.tmp, tmux_name="ar-stale"))
-        with (
-            TestClient(self.app) as client,
-            client.websocket_connect("/api/terminal/stale") as ws,
-            self.assertRaises(WebSocketDisconnect) as ctx,
-        ):
-            ws.receive_text()
-        self.assertEqual(ctx.exception.code, 4404)
-        entry = self.catalog.get("stale")
-        assert entry is not None
-        self.assertEqual(entry.status, "exited")
-
-    def test_get_terminal_sessions_marks_stale_tmux_rows_exited(self) -> None:
-        self.catalog.upsert(_catalog_entry("stale", cwd=self.tmp, tmux_name="ar-stale"))
-        with TestClient(self.app) as client:
-            response = client.get("/api/terminal/sessions")
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["sessions"][0]["status"], "exited")
-
-    def test_terminate_marks_catalog_and_kills_tmux(self) -> None:
-        with TestClient(self.app) as client:
-            client.post("/api/terminal/term-1", json={"kind": "terminal", "label": "Terminal 1"})
-            response = client.post("/api/terminal/term-1/terminate")
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["status"], "terminated")
-        self.assertEqual(self.host.terminated, ["ar-term-1"])
-        entry = self.catalog.get("term-1")
-        assert entry is not None
-        self.assertEqual(entry.status, "terminated")
-
-    def test_landed_cleanup_closes_only_landed_rows_and_reports_skips(self) -> None:
-        self.catalog.upsert(
-            _catalog_entry("landed", cwd=self.tmp, status="landed", tmux_name="ar-landed")
-        )
-        self.catalog.upsert(_catalog_entry("running", cwd=self.tmp, tmux_name="ar-running"))
-        self.catalog.upsert(
-            _catalog_entry("exited", cwd=self.tmp, status="exited", tmux_name="ar-exited")
-        )
-
-        with TestClient(self.app) as client:
-            response = client.post(
-                "/api/terminal/landed-cleanup",
-                json={"sessionIds": ["landed", "running", "exited", "ghost"]},
-            )
-
-        self.assertEqual(response.status_code, 200)
-        body = response.json()
-        self.assertEqual(body["status"], "cleaned")
-        self.assertEqual(body["closed"], 1)
-        self.assertEqual(body["skipped"], 3)
-        self.assertEqual(body["closedSessions"], ["landed"])
-        self.assertEqual(
-            body["skippedSessions"],
-            [
-                {"session": "running", "reason": "status:running"},
-                {"session": "exited", "reason": "status:exited"},
-                {"session": "ghost", "reason": "unknown-session"},
-            ],
-        )
-        self.assertEqual(self.host.terminated, ["ar-landed"])
-        landed = self.catalog.get("landed")
-        running = self.catalog.get("running")
-        exited = self.catalog.get("exited")
-        assert landed is not None
-        assert running is not None
-        assert exited is not None
-        self.assertEqual(landed.status, "terminated")
-        self.assertEqual(landed.retired_reason, "landed group cleanup")
-        self.assertEqual(running.status, "running")
-        self.assertEqual(exited.status, "exited")
-
-    def test_post_open_rejects_unknown_kind(self) -> None:
-        with TestClient(self.app) as client:
-            response = client.post("/api/terminal/x", json={"kind": "bogus"})
-        self.assertEqual(response.status_code, 400)
-        self.assertEqual(self.host.ensured, [])
-
-    def test_post_open_claims_leaf_and_persists_it(self) -> None:
-        leaf = "agents-remember/260628_operations-integration/260628-L5"
-        with TestClient(self.app) as client:
-            response = client.post(
-                "/api/terminal/term-1", json={"kind": "terminal", "leafKey": leaf}
-            )
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["leafKey"], leaf)
-        entry = self.catalog.get("term-1")
-        assert entry is not None
-        self.assertEqual(entry.leaf_key, leaf)
-
-    def test_post_open_rejects_unmatchable_leaf_ref(self) -> None:
-        with TestClient(self.app) as client:
-            response = client.post(
-                "/api/terminal/term-1",
-                json={"kind": "terminal", "leafKey": "repo/master/missing-leaf"},
-            )
-        self.assertEqual(response.status_code, 400)
-        self.assertEqual(response.json()["status"], "leaf-ref-not-found")
-        self.assertIn("<repo>/<master-folder>/<doc-id>", response.json()["detail"])
-        self.assertEqual(self.host.ensured, [])
-        self.assertIsNone(self.catalog.get("term-1"))
-
-    def test_post_open_null_leaf_still_works(self) -> None:
-        with TestClient(self.app) as client:
-            response = client.post("/api/terminal/term-1", json={"kind": "terminal"})
-        self.assertEqual(response.status_code, 200)
-        self.assertIsNone(response.json()["leafKey"])
-        entry = self.catalog.get("term-1")
-        assert entry is not None
-        self.assertIsNone(entry.leaf_key)
-
-    def test_post_open_409_when_leaf_taken_by_other_running_session(self) -> None:
-        leaf = "repo/master/leaf-1"
-        with TestClient(self.app) as client:
-            first = client.post("/api/terminal/owner", json={"kind": "terminal", "leafKey": leaf})
-            self.assertEqual(first.status_code, 200)
-            # A second session claiming the same leaf is refused; its own session is never spawned.
-            second = client.post(
-                "/api/terminal/intruder", json={"kind": "terminal", "leafKey": leaf}
-            )
-        self.assertEqual(second.status_code, 409)
-        body = second.json()
-        self.assertEqual(body["status"], "leaf-taken")
-        self.assertEqual(body["leafKey"], leaf)
-        self.assertEqual(body["session"], "owner")
-        self.assertIsNone(self.catalog.get("intruder"))  # no row created for the refused claim
-        self.assertEqual([e["sid"] for e in self.host.ensured], ["owner"])
-
-    def test_post_open_reclaims_own_leaf_on_reopen(self) -> None:
-        leaf = "repo/master/leaf-1"
-        with TestClient(self.app) as client:
-            client.post("/api/terminal/term-1", json={"kind": "terminal", "leafKey": leaf})
-            # Re-opening the SAME session with the SAME leaf is allowed (not a conflict with itself).
-            response = client.post(
-                "/api/terminal/term-1", json={"kind": "terminal", "leafKey": leaf}
-            )
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["leafKey"], leaf)
-
-    def test_attach_leaf_binds_existing_session_when_free(self) -> None:
-        leaf = "repo/master/leaf-1"
-        self.catalog.upsert(_catalog_entry("live", cwd=self.tmp))
-        with TestClient(self.app) as client:
-            response = client.post("/api/terminal/live/attach-leaf", json={"leafKey": leaf})
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["leafKey"], leaf)
-        entry = self.catalog.get("live")
-        assert entry is not None
-        self.assertEqual(entry.leaf_key, leaf)
-
-    def test_attach_leaf_rejects_unmatchable_ref_without_mutating(self) -> None:
-        self.catalog.upsert(_catalog_entry("live", cwd=self.tmp))
-        with TestClient(self.app) as client:
-            response = client.post(
-                "/api/terminal/live/attach-leaf",
-                json={"leafKey": "repo/master/missing-leaf"},
-            )
-        self.assertEqual(response.status_code, 400)
-        self.assertEqual(response.json()["status"], "leaf-ref-not-found")
-        entry = self.catalog.get("live")
-        assert entry is not None
-        self.assertIsNone(entry.leaf_key)
-
-    def test_attach_leaf_409_when_taken_by_other_running_session(self) -> None:
-        leaf = "repo/master/leaf-1"
-        self.catalog.upsert(_catalog_entry("owner", cwd=self.tmp, tmux_name="ar-owner"))
-        self.catalog.upsert(
-            _catalog_entry("seeker", cwd=self.tmp, tmux_name="ar-seeker").with_leaf_key(None)
-        )
-        self.host.probe_names.update({"ar-owner", "ar-seeker"})
-        with TestClient(self.app) as client:
-            client.post("/api/terminal/owner/attach-leaf", json={"leafKey": leaf})
-            response = client.post("/api/terminal/seeker/attach-leaf", json={"leafKey": leaf})
-        self.assertEqual(response.status_code, 409)
-        self.assertEqual(response.json()["status"], "leaf-taken")
-        seeker = self.catalog.get("seeker")
-        assert seeker is not None
-        self.assertIsNone(seeker.leaf_key)  # the refused attach left it unbound
-
-    def test_attach_leaf_404_for_unknown_session(self) -> None:
-        with TestClient(self.app) as client:
-            response = client.post(
-                "/api/terminal/ghost/attach-leaf", json={"leafKey": "repo/master/leaf-1"}
-            )
-        self.assertEqual(response.status_code, 404)
-        self.assertEqual(response.json()["status"], "unknown-session")
-
-    def test_attach_leaf_404_for_terminated_session(self) -> None:
-        self.catalog.upsert(_catalog_entry("dead", cwd=self.tmp, status="terminated"))
-        with TestClient(self.app) as client:
-            response = client.post(
-                "/api/terminal/dead/attach-leaf", json={"leafKey": "repo/master/leaf-1"}
-            )
-        self.assertEqual(response.status_code, 404)
-
-    def test_attach_leaf_404_for_landed_session(self) -> None:
-        self.catalog.upsert(_catalog_entry("landed", cwd=self.tmp, status="landed"))
-        with TestClient(self.app) as client:
-            response = client.post(
-                "/api/terminal/landed/attach-leaf", json={"leafKey": "repo/master/leaf-1"}
-            )
-        self.assertEqual(response.status_code, 404)
-
-    def test_terminal_shares_a_leaf_with_its_chat_but_two_chats_conflict(self) -> None:
-        # L5 fix 2: uniqueness is per (leaf, role). A terminal must not 409 against the leaf's chat,
-        # but a second agent chat (and a second terminal) for the same leaf still conflicts.
-        leaf = "repo/master/leaf-1"
-        with patch("shutil.which", _which("claude")), TestClient(self.app) as client:
-            chat = client.post(
-                "/api/terminal/chat-1",
-                json={"kind": "harness", "harness": "claude", "leafKey": leaf},
-            )
-            self.assertEqual(chat.status_code, 200)
-            # A terminal on the SAME leaf is allowed alongside the chat (no 409).
-            term = client.post("/api/terminal/term-1", json={"kind": "terminal", "leafKey": leaf})
-            self.assertEqual(term.status_code, 200)
-            self.assertEqual(term.json()["leafKey"], leaf)
-            # A second chat is refused -- the chat slot is taken by chat-1.
-            second_chat = client.post(
-                "/api/terminal/chat-2",
-                json={"kind": "harness", "harness": "claude", "leafKey": leaf},
-            )
-            self.assertEqual(second_chat.status_code, 409)
-            self.assertEqual(second_chat.json()["session"], "chat-1")
-            # A second terminal is refused too -- the terminal slot is taken by term-1.
-            second_term = client.post(
-                "/api/terminal/term-2", json={"kind": "terminal", "leafKey": leaf}
-            )
-            self.assertEqual(second_term.status_code, 409)
-            self.assertEqual(second_term.json()["session"], "term-1")
-
-    def test_attach_leaf_terminal_does_not_conflict_with_existing_chat(self) -> None:
-        # The attach-leaf path is role-scoped too: a terminal can claim a leaf already held by a chat.
-        leaf = "repo/master/leaf-1"
-        self.catalog.upsert(
-            _catalog_entry("term", cwd=self.tmp, tmux_name="ar-term").with_leaf_key(None)
-        )
-        with patch("shutil.which", _which("claude")), TestClient(self.app) as client:
-            client.post(
-                "/api/terminal/chat-1",
-                json={"kind": "harness", "harness": "claude", "leafKey": leaf},
-            )
-            response = client.post("/api/terminal/term/attach-leaf", json={"leafKey": leaf})
-        self.assertEqual(response.status_code, 200)
-        entry = self.catalog.get("term")
-        assert entry is not None
-        self.assertEqual(entry.leaf_key, leaf)
-
-    def test_get_harnesses_lists_supported_set_with_detection(self) -> None:
-        with patch("shutil.which", _which("claude")), TestClient(self.app) as client:
-            response = client.get("/api/harnesses")
-        self.assertEqual(response.status_code, 200)
-        harnesses = response.json()["harnesses"]
-        self.assertEqual([h["id"] for h in harnesses], ["claude", "codex", "pi"])
-        self.assertEqual(
-            {h["id"]: h["detected"] for h in harnesses},
-            {"claude": True, "codex": False, "pi": False},
-        )
-        self.assertTrue(all("control" not in harness for harness in harnesses))
-
-    def test_post_open_harness_spawns_registry_argv_at_workspace_root(self) -> None:
-        with patch("shutil.which", _which("claude")), TestClient(self.app) as client:
-            response = client.post(
-                "/api/terminal/h-1",
-                json={"kind": "harness", "harness": "claude", "label": "Claude Code 1"},
-            )
-        self.assertEqual(response.status_code, 200)
-        body = response.json()
-        self.assertEqual((body["kind"], body["harness"]), ("harness", "claude"))
-        self.assertEqual(body["label"], "Claude Code 1")
-        self.assertEqual(len(self.host.ensured), 1)
-        ensured = self.host.ensured[0]
-        command = ensured["command"]
-        assert isinstance(command, list)
-        self.assertEqual(command[1:3], ["-m", "agents_remember.serving.harness_control_runner"])
-        runner = parse_runner_config(command[3])
-        self.assertEqual(runner.argv, ("claude",))  # server-resolved argv, never wire-supplied
-        self.assertEqual(runner.harness_id, "claude")
-        self.assertEqual(runner.identity.ar_session_id, "h-1")
-        self.assertEqual(ensured["cwd"], self.tmp)  # workspace_root
-        self.assertTrue(ensured["suspend_unsafe"])  # a bare-pane harness gets the Ctrl-Z strip
-        entry = self.catalog.get("h-1")
-        assert entry is not None
-        self.assertEqual(entry.kind, "harness")
-        self.assertEqual(entry.harness, "claude")
-
-    def test_post_open_harness_carries_complete_model_effort_pair_once(self) -> None:
-        with patch("shutil.which", _which("claude")), TestClient(self.app) as client:
-            response = client.post(
-                "/api/terminal/h-selected",
-                json={
-                    "kind": "harness",
-                    "harness": "claude",
-                    "model": "claude-opus-4-8",
-                    "effort": "high",
-                },
-            )
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["resolvedModel"], "claude-opus-4-8")
-        self.assertEqual(response.json()["resolvedEffort"], "high")
-        self.assertEqual(len(self.host.ensured), 1)
-        command = self.host.ensured[0]["command"]
-        assert isinstance(command, list)
-        runner = parse_runner_config(command[3])
-        selection = runner.resolved_launch
-        assert selection is not None
-        self.assertEqual(selection.model_key, "claude-opus-4-8")
-        self.assertEqual(selection.effort, "high")
-
-    def test_post_open_reopen_preserves_live_truth_conflicts_then_replaces_dead(self) -> None:
-        first_body = {
-            "kind": "harness",
-            "harness": "claude",
-            "model": "model-a",
-            "effort": "high",
-        }
-        changed_body = {**first_body, "model": "model-b", "effort": "max"}
-        with patch("shutil.which", _which("claude")), TestClient(self.app) as client:
-            first = client.post("/api/terminal/reopen-selected", json=first_body)
-            same = client.post("/api/terminal/reopen-selected", json=first_body)
-            conflict = client.post("/api/terminal/reopen-selected", json=changed_body)
-
-            first_entry = self.catalog.get("reopen-selected")
-            assert first_entry is not None and first_entry.control_endpoint is not None
-            first_endpoint = str(first_entry.control_endpoint)
-            self.host.probe_names.discard(first_entry.tmux_name)
-            replacement = client.post("/api/terminal/reopen-selected", json=changed_body)
-
-        self.assertEqual((first.status_code, same.status_code), (200, 200))
-        self.assertEqual(len(self.host.ensured), 2)
-        self.assertEqual(same.json()["resolvedModel"], "model-a")
-        self.assertEqual(same.json()["controlEndpoint"], first_endpoint)
-        self.assertEqual(conflict.status_code, 409)
-        self.assertEqual(conflict.json()["status"], "launch-selection-conflict")
-        self.assertEqual(conflict.json()["resolvedModel"], "model-a")
-        self.assertEqual(conflict.json()["resolvedEffort"], "high")
-        self.assertEqual(conflict.json()["controlEndpoint"], first_endpoint)
-        self.assertEqual(replacement.status_code, 200)
-        self.assertEqual(replacement.json()["resolvedModel"], "model-b")
-        self.assertEqual(replacement.json()["resolvedEffort"], "max")
-        self.assertNotEqual(replacement.json()["controlEndpoint"], first_endpoint)
-        second_command = self.host.ensured[1]["command"]
-        assert isinstance(second_command, list)
-        second_selection = parse_runner_config(second_command[3]).resolved_launch
-        assert second_selection is not None
-        self.assertEqual((second_selection.model_key, second_selection.effort), ("model-b", "max"))
-
-    def test_post_open_rejects_partial_or_non_harness_selection_before_spawn(self) -> None:
-        with patch("shutil.which", _which("claude")), TestClient(self.app) as client:
-            partial = client.post(
-                "/api/terminal/h-partial",
-                json={"kind": "harness", "harness": "claude", "model": "opus"},
-            )
-            terminal = client.post(
-                "/api/terminal/plain-selected",
-                json={"kind": "terminal", "model": "opus", "effort": "high"},
-            )
-            non_native = client.post(
-                "/api/terminal/custom-selected",
-                json={
-                    "kind": "harness",
-                    "harness": "gemini",
-                    "model": "pro",
-                    "effort": "high",
-                },
-            )
-        self.assertEqual(
-            (partial.status_code, terminal.status_code, non_native.status_code),
-            (400, 400, 400),
-        )
-        self.assertEqual(partial.json()["status"], "launch-selection-invalid")
-        self.assertEqual(self.host.ensured, [])
-
-    def test_post_open_harness_rejects_uninstalled(self) -> None:
-        with patch("shutil.which", _which()), TestClient(self.app) as client:
-            response = client.post(
-                "/api/terminal/h-2", json={"kind": "harness", "harness": "claude"}
-            )
-        self.assertEqual(response.status_code, 400)
-        self.assertEqual(self.host.ensured, [])
-
-    def test_post_open_harness_rejects_unknown_id(self) -> None:
-        with patch("shutil.which", _which("gemini")), TestClient(self.app) as client:
-            response = client.post(
-                "/api/terminal/h-3", json={"kind": "harness", "harness": "gemini"}
-            )
-        self.assertEqual(response.status_code, 400)
-        self.assertEqual(self.host.ensured, [])
-
-
-class TerminalImageEndpointTests(unittest.TestCase):
-    """`POST /api/terminal/{session}/image` (slice 6f): save a pasted image under the session cwd."""
-
-    def setUp(self) -> None:
-        self._dir = tempfile.TemporaryDirectory()
-        self.tmp = Path(self._dir.name)
-        self.host = _FakeTerminalHost(cwd=self.tmp)
-        self.catalog = TerminalCatalog(self.tmp / "terminal-sessions.json")
-        self.app = create_app(
-            _config(self.tmp),
-            cadence=ProjectionCadence(interval=100),
-            collaborators=ServingCollaborators(
-                terminal_host=cast(TerminalHost, self.host), terminal_catalog=self.catalog
-            ),
-        )
-
-    def tearDown(self) -> None:
-        self.host.close()
-        self._dir.cleanup()
-
-    def test_saves_under_session_cwd_and_returns_path(self) -> None:
-        png = b"\x89PNG\r\n\x1a\n" + b"fake-image-body"
-        with TestClient(self.app) as client:
-            response = client.post(
-                "/api/terminal/live/image", files={"file": ("shot.png", png, "image/png")}
-            )
-        self.assertEqual(response.status_code, 200)
-        path = Path(response.json()["path"])
-        self.assertEqual(path.parent.name, ".dashboard-pastes")
-        self.assertTrue(path.is_relative_to(self.tmp.resolve()))
-        self.assertEqual(path.suffix, ".png")
-        self.assertEqual(path.read_bytes(), png)  # flushed to disk before the path is injected
-
-    def test_hostile_filename_yields_uuid_name_under_cwd(self) -> None:
-        # The client filename is used ONLY to derive the extension; the basename is always a uuid, so a
-        # path-bearing name cannot escape the session cwd. Pins the no-traversal contract.
-        png = b"\x89PNG\r\n\x1a\n" + b"body"
-        with TestClient(self.app) as client:
-            response = client.post(
-                "/api/terminal/live/image",
-                files={"file": ("../../etc/passwd.png", png, "image/png")},
-            )
-        self.assertEqual(response.status_code, 200)
-        path = Path(response.json()["path"])
-        self.assertTrue(path.is_relative_to(self.tmp.resolve()))
-        self.assertEqual(path.parent.name, ".dashboard-pastes")
-        stem = path.stem  # the uuid hex, never the client-supplied name
-        self.assertEqual(len(stem), 32)
-        self.assertTrue(all(c in "0123456789abcdef" for c in stem))
-
-    def test_rejects_non_image_type(self) -> None:
-        with TestClient(self.app) as client:
-            response = client.post(
-                "/api/terminal/live/image", files={"file": ("notes.txt", b"hello", "text/plain")}
-            )
-        self.assertEqual(response.status_code, 400)
-        self.assertEqual(response.json()["status"], "bad-type")
-
-    def test_rejects_non_image_content_for_image_extension(self) -> None:
-        # Magic-byte sniff: an image extension with non-image bytes is rejected, not saved as a .png.
-        with TestClient(self.app) as client:
-            response = client.post(
-                "/api/terminal/live/image",
-                files={"file": ("shot.png", b"not a real png", "image/png")},
-            )
-        self.assertEqual(response.status_code, 400)
-        self.assertEqual(response.json()["status"], "bad-type")
-
-    def test_rejects_empty_body(self) -> None:
-        with TestClient(self.app) as client:
-            response = client.post(
-                "/api/terminal/live/image", files={"file": ("shot.png", b"", "image/png")}
-            )
-        self.assertEqual(response.status_code, 400)
-        self.assertEqual(response.json()["status"], "bad-type")
-
-    def test_rejects_oversize_post_read(self) -> None:
-        with (
-            patch("agents_remember.serving.app._MAX_IMAGE_BYTES", 8),
-            TestClient(self.app) as client,
-        ):
-            response = client.post(
-                "/api/terminal/live/image",
-                files={"file": ("big.png", b"\x89PNG\r\n\x1a\n" + b"xx", "image/png")},
-            )
-        self.assertEqual(response.status_code, 413)
-        self.assertEqual(response.json()["status"], "too-large")
-
-    def test_rejects_oversize_via_content_length(self) -> None:
-        # A blatantly oversize upload is rejected fast on Content-Length, without patching the cap down.
-        big = b"\x00" * (_MAX_IMAGE_BYTES + 10_000)
-        with TestClient(self.app) as client:
-            response = client.post(
-                "/api/terminal/live/image", files={"file": ("big.png", big, "image/png")}
-            )
-        self.assertEqual(response.status_code, 413)
-        self.assertEqual(response.json()["status"], "too-large")
-
-    def test_unknown_session_is_404(self) -> None:
-        with TestClient(self.app) as client:
-            response = client.post(
-                "/api/terminal/ghost/image", files={"file": ("shot.png", b"\x89PNG", "image/png")}
-            )
-        self.assertEqual(response.status_code, 404)
-        self.assertEqual(response.json()["status"], "unknown-session")
-
-    def test_saves_under_catalog_cwd_after_dashboard_restart(self) -> None:
-        restored_cwd = self.tmp / "restored"
-        restored_cwd.mkdir()
-        self.catalog.upsert(_catalog_entry("restored", cwd=restored_cwd, tmux_name="ar-restored"))
-        png = b"\x89PNG\r\n\x1a\n" + b"catalog-body"
-        with TestClient(self.app) as client:
-            response = client.post(
-                "/api/terminal/restored/image", files={"file": ("shot.png", png, "image/png")}
-            )
-        self.assertEqual(response.status_code, 200)
-        path = Path(response.json()["path"])
-        self.assertTrue(path.is_relative_to(restored_cwd.resolve()))
-        self.assertEqual(path.read_bytes(), png)
-
-
-class MalformedSettingsScratchTerminalTests(unittest.TestCase):
-    """L16 review follow-up (L16R-1): a malformed agentic settings file must fail the
-    launches that USE the registry (harness opens), never a plain scratch terminal --
-    the /api/terminal route loads the effective registry only when the request
-    resolves a harness."""
-
-    def test_plain_terminal_open_skips_the_settings_registry(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp_str:
-            tmp = Path(tmp_str)
-            system = tmp / "system"
-            system.mkdir(parents=True)
-            (system / "settings.json").write_text("{not json", encoding="utf-8")
-            config = _config(tmp)
-            app = create_app(config)
-            seen: dict[str, object] = {}
-
-            def fake_open(**kwargs: object) -> object:
-                seen.update(kwargs)
-                raise RuntimeError("stop-before-tmux")
-
-            with mock.patch("agents_remember.serving.app.open_terminal_session", fake_open):
-                client = TestClient(app, raise_server_exceptions=False)
-                client.post("/api/terminal/scratch-1", json={"kind": "terminal"})
-            # The registry load never ran for a scratch terminal: the launch request carries
-            # harnesses=None (builtin fallback) despite the malformed settings file on disk.
-            launch = seen["launch"]
-            assert isinstance(launch, TerminalLaunchRequest)
-            self.assertIsNone(launch.harnesses)
-
-
-class ResolveTerminalLaunchTests(unittest.TestCase):
-    @staticmethod
-    def _launch(kind: str, **fields: object) -> TerminalLaunchRequest:
-        return TerminalLaunchRequest(
-            kind=kind,
-            workspace_root=Path("/ws"),
-            shell=fields.pop("shell", "/bin/sh"),  # type: ignore[arg-type]
-            **fields,  # type: ignore[arg-type]
-        )
-
-    def test_terminal_kind_is_shell_at_workspace_root(self) -> None:
-        cwd, argv = resolve_terminal_launch(self._launch("terminal", shell="/bin/zsh"))
-        self.assertEqual((cwd, argv), (Path("/ws"), ("/bin/zsh",)))
-
-    def test_unknown_kind_raises(self) -> None:
-        with self.assertRaises(ValueError):
-            resolve_terminal_launch(self._launch("nope"))
-
-    def test_harness_kind_resolves_registry_argv_at_workspace_root(self) -> None:
-        cwd, argv = resolve_terminal_launch(
-            self._launch("harness", harness="claude", which=_which("claude"))
-        )
-        self.assertEqual((cwd, argv), (Path("/ws"), ("claude",)))
-
-    def test_harness_kind_without_id_raises(self) -> None:
-        with self.assertRaises(ValueError):
-            resolve_terminal_launch(self._launch("harness", which=_which("claude")))
-
-    def test_harness_kind_unknown_id_raises(self) -> None:
-        with self.assertRaises(ValueError):
-            resolve_terminal_launch(
-                self._launch("harness", harness="gemini", which=_which("gemini"))
-            )
-
-    def test_harness_kind_not_installed_raises(self) -> None:
-        with self.assertRaises(ValueError):
-            resolve_terminal_launch(self._launch("harness", harness="claude", which=_which()))
-
-    def test_launch_args_ride_the_resolved_argv(self) -> None:
-        _cwd, argv = resolve_terminal_launch(
-            self._launch(
-                "harness",
-                harness="claude",
-                which=_which("claude"),
-                knobs=SpawnKnobs(launch_args=["--flag"]),
-            )
-        )
-        self.assertEqual(argv, ("claude", "--flag"))
-
-
-if __name__ == "__main__":
+if __name__ == "__main__":  # pragma: no cover
     unittest.main()

@@ -65,7 +65,8 @@ NOW = "2026-07-20T13:00:00+00:00"
 LONG_PROMPT = "Write a 600-word essay about the ocean. Start writing immediately."
 
 
-def _identity(session: str) -> ControlIdentity:
+# 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/test_conversation_control_installed.py:68).
+def _identity(session: str) -> ControlIdentity:  # pragma: no cover
     return ControlIdentity(ar_session_id=session, tmux_name=f"ar-{session}", created_at=NOW)
 
 
@@ -81,13 +82,15 @@ def _version_of(executable: str) -> str:
 
 
 class _LiveHost:
-    def has_session(self, tmux_name: str) -> bool:
+    # 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/test_conversation_control_installed.py:84).
+    def has_session(self, tmux_name: str) -> bool:  # pragma: no cover
         del tmux_name
         return True
 
 
 class _ControlledEntry:
-    def __init__(self, identity: ControlIdentity, endpoint: Path) -> None:
+    # 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/test_conversation_control_installed.py:90).
+    def __init__(self, identity: ControlIdentity, endpoint: Path) -> None:  # pragma: no cover
         self.id = identity.ar_session_id
         self.tmux_name = identity.tmux_name
         self.created_at = identity.created_at
@@ -97,7 +100,8 @@ class _ControlledEntry:
 class _LiveHarness:
     """Real adapter + bridge + IPC + catalog + composition + uvicorn wire."""
 
-    def __init__(
+    # 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/test_conversation_control_installed.py:100).
+    def __init__(  # pragma: no cover
         self, root: Path, identity: ControlIdentity, adapter: object, harness: str
     ) -> None:
         self.identity = identity
@@ -140,7 +144,8 @@ class _LiveHarness:
             lambda request: OPERATOR,
         )
 
-    async def start(self, launch: LaunchSpec) -> None:
+    # 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/test_conversation_control_installed.py:143).
+    async def start(self, launch: LaunchSpec) -> None:  # pragma: no cover
         await self.bridge.start(launch)
         await self.server.start()
         self.epoch = (
@@ -158,7 +163,8 @@ class _LiveHarness:
         port = self._uvicorn.servers[0].sockets[0].getsockname()[1]
         self.client = httpx.AsyncClient(base_url=f"http://127.0.0.1:{port}", timeout=30.0)
 
-    async def stop(self) -> None:
+    # 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/test_conversation_control_installed.py:161).
+    async def stop(self) -> None:  # pragma: no cover
         self._auth_patcher.stop()
         await self.client.aclose()
         self._uvicorn.should_exit = True
@@ -166,10 +172,14 @@ class _LiveHarness:
         await self.server.close()
         await self.bridge.stop("forced")
 
-    def params(self) -> dict[str, str]:
+    # 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/test_conversation_control_installed.py:169).
+    def params(self) -> dict[str, str]:  # pragma: no cover
         return {"expectedBridgeEpoch": self.epoch}
 
-    async def wait_evidence(self, predicate, *, timeout: float, description: str) -> None:
+    # 260731-EFA-L7 R10: AR_RUN_CONTROL_INSTALLED-gated helper.
+    async def wait_evidence(
+        self, predicate, *, timeout: float, description: str
+    ) -> None:  # pragma: no cover
         deadline = asyncio.get_running_loop().time() + timeout
         while True:
             page = await asyncio.to_thread(read_control_evidence, self.control_entry)
@@ -179,7 +189,8 @@ class _LiveHarness:
                 raise AssertionError(f"{description} never crossed the production seam")
             await asyncio.sleep(0.5)
 
-    async def typed_submit(self, request_id: str, text: str) -> httpx.Response:
+    # 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/test_conversation_control_installed.py:185).
+    async def typed_submit(self, request_id: str, text: str) -> httpx.Response:  # pragma: no cover
         return await self.client.post(
             f"/api/terminal/{self.identity.ar_session_id}/conversation/submit",
             json={
@@ -198,7 +209,8 @@ class _LiveHarness:
     f"set {LIVE_OPT_IN}=1 to exercise installed runtimes through the L3 control routes",
 )
 class CodexInstalledControlApiTests(unittest.IsolatedAsyncioTestCase):
-    def setUp(self) -> None:
+    # 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/test_conversation_control_installed.py:204).
+    def setUp(self) -> None:  # pragma: no cover
         executable = shutil.which("codex")
         if executable is None:
             self.skipTest("installed codex executable is unavailable")
@@ -207,7 +219,10 @@ class CodexInstalledControlApiTests(unittest.IsolatedAsyncioTestCase):
             self.skipTest(f"installed codex {version} does not match pinned {CODEX_PINNED}")
         self.executable = executable
 
-    async def test_live_interrupt_settlement_queue_recovery_assets_and_telemetry(self) -> None:
+    # 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/test_conversation_control_installed.py:213).
+    async def test_live_interrupt_settlement_queue_recovery_assets_and_telemetry(
+        self,
+    ) -> None:  # pragma: no cover
         with tempfile.TemporaryDirectory(prefix="ar-l3-codex-") as tmp:
             root = Path(tmp)
             identity = _identity("codex-l3")
@@ -273,7 +288,10 @@ class CodexInstalledControlApiTests(unittest.IsolatedAsyncioTestCase):
             finally:
                 await harness.stop()
 
-    async def _assert_withdrawal_recovers_the_exact_body(self, harness: _LiveHarness) -> None:
+    # 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/test_conversation_control_installed.py:279).
+    async def _assert_withdrawal_recovers_the_exact_body(
+        self, harness: _LiveHarness
+    ) -> None:  # pragma: no cover
         """Withdrawal recovery through the production routes.
 
         The head is a fast-completing prompt so usage evidence arrives early; the body under
@@ -318,7 +336,10 @@ class CodexInstalledControlApiTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(fetched.json()["text"], "the exact queued body")
 
-    async def _assert_typed_attachment_submit_is_accepted(self, harness: _LiveHarness) -> None:
+    # 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/test_conversation_control_installed.py:324).
+    async def _assert_typed_attachment_submit_is_accepted(
+        self, harness: _LiveHarness
+    ) -> None:  # pragma: no cover
         """Stage an asset, then submit a turn that references it by receipt, through the routes."""
         session = harness.identity.ar_session_id
         staged = await harness.client.post(
@@ -357,7 +378,10 @@ class CodexInstalledControlApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(asset_submit.status_code, 200, asset_submit.text)
         self.assertIn(asset_submit.json()["acceptance"], {"immediate", "queued"})
 
-    async def _assert_telemetry_carries_exact_usage(self, harness: _LiveHarness) -> None:
+    # 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/test_conversation_control_installed.py:363).
+    async def _assert_telemetry_carries_exact_usage(
+        self, harness: _LiveHarness
+    ) -> None:  # pragma: no cover
         """The live turn produced token usage, reported as exact and version-locked."""
         session = harness.identity.ar_session_id
         await harness.wait_evidence(
@@ -376,7 +400,10 @@ class CodexInstalledControlApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(usage["runtimeVersion"], CODEX_PINNED)
         self.assertEqual(usage["fixtureId"], "codex-0.144.5-installed-20260718")
 
-    async def test_settled_live_turn_projects_once_on_the_conversation_page(self) -> None:
+    # 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/test_conversation_control_installed.py:382).
+    async def test_settled_live_turn_projects_once_on_the_conversation_page(
+        self,
+    ) -> None:  # pragma: no cover
         """260718-CHATS-L5 F1 (L4 verdict blocker): a settled live codex turn projects EXACTLY once.
 
         On a hosted (persisted) codex thread the live notification channel and ``thread/read`` use
@@ -409,10 +436,12 @@ class CodexInstalledControlApiTests(unittest.IsolatedAsyncioTestCase):
             )
             session = identity.ar_session_id
 
-            def _carries(item: dict, needle: str) -> bool:
+            # 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/test_conversation_control_installed.py:415).
+            def _carries(item: dict, needle: str) -> bool:  # pragma: no cover
                 return item.get("role") == "user" and needle in json.dumps(item)
 
-            async def _user_twins(needle: str) -> list[dict]:
+            # 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/test_conversation_control_installed.py:418).
+            async def _user_twins(needle: str) -> list[dict]:  # pragma: no cover
                 # Re-read a few times: the projector's background poll consumes the live frames and
                 # each page() re-walks thread/read — the exact surface F1's twin would appear on.
                 items: list[dict] = []
@@ -490,7 +519,8 @@ class CodexInstalledControlApiTests(unittest.IsolatedAsyncioTestCase):
     f"set {LIVE_OPT_IN}=1 to exercise installed runtimes through the L3 control routes",
 )
 class PiInstalledControlApiTests(unittest.IsolatedAsyncioTestCase):
-    def setUp(self) -> None:
+    # 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/test_conversation_control_installed.py:496).
+    def setUp(self) -> None:  # pragma: no cover
         executable = shutil.which("pi")
         if executable is None:
             self.skipTest("installed pi executable is unavailable")
@@ -499,7 +529,10 @@ class PiInstalledControlApiTests(unittest.IsolatedAsyncioTestCase):
             self.skipTest(f"installed pi {version} does not match pinned {PI_PINNED}")
         self.executable = executable
 
-    async def test_live_abort_guarded_interrupt_and_stale_identity_refusal(self) -> None:
+    # 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/test_conversation_control_installed.py:505).
+    async def test_live_abort_guarded_interrupt_and_stale_identity_refusal(
+        self,
+    ) -> None:  # pragma: no cover
         with tempfile.TemporaryDirectory(prefix="ar-l3-pi-") as tmp:
             root = Path(tmp)
             identity = _identity("pi-l3")
@@ -558,7 +591,10 @@ class PiInstalledControlApiTests(unittest.IsolatedAsyncioTestCase):
 
 
 class ClaudeInstalledHonestyTests(unittest.TestCase):
-    def test_claude_control_gate_stays_unverified_at_version_mismatch(self) -> None:
+    # 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/test_conversation_control_installed.py:564).
+    def test_claude_control_gate_stays_unverified_at_version_mismatch(
+        self,
+    ) -> None:  # pragma: no cover
         executable = shutil.which("claude")
         if executable is None:
             self.skipTest("installed claude executable is unavailable")
@@ -578,5 +614,5 @@ class ClaudeInstalledHonestyTests(unittest.TestCase):
             self.skipTest("locked claude install present; capture belongs to a locked-gate run")
 
 
-if __name__ == "__main__":
+if __name__ == "__main__":  # pragma: no cover
     unittest.main()

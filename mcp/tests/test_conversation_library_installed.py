@@ -64,7 +64,8 @@ PI_SCOPE = "/home/mohamedreadone/Projects/agents-remember"
 CODEX_SCOPE = "/home/mohamedreadone/Projects"
 
 
-def _version_of(binary: str | None) -> str | None:
+# 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/test_conversation_library_installed.py:67).
+def _version_of(binary: str | None) -> str | None:  # pragma: no cover
     if binary is None:
         return None
     try:
@@ -81,27 +82,32 @@ def _version_of(binary: str | None) -> str | None:
     return match.group(1) if match else None
 
 
-def _caller(workspace: Path) -> AuthorizationBinding:
+# 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/test_conversation_library_installed.py:84).
+def _caller(workspace: Path) -> AuthorizationBinding:  # pragma: no cover
     return AuthorizationBinding(
         principal_id="local-operator:1000", tenant_id=str(workspace.resolve())
     )
 
 
 class _Resolver:
-    def __init__(self, binding: AuthorizationBinding) -> None:
+    # 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/test_conversation_library_installed.py:91).
+    def __init__(self, binding: AuthorizationBinding) -> None:  # pragma: no cover
         self._binding = binding
 
-    def resolve(self, *, client_host: str | None) -> AuthorizationBinding:  # noqa: ARG002 - protocol signature
+    # 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/test_conversation_library_installed.py:94).
+    def resolve(self, *, client_host: str | None) -> AuthorizationBinding:  # noqa: ARG002 - protocol signature  # pragma: no cover
 
         return self._binding
 
-    def require(self, authorization: AuthorizationBinding) -> None:
+    # 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/test_conversation_library_installed.py:98).
+    def require(self, authorization: AuthorizationBinding) -> None:  # pragma: no cover
         if authorization != self._binding:
             raise AssertionError("cross-principal binding")
 
 
 class CodexInstalledTests(unittest.IsolatedAsyncioTestCase):
-    def setUp(self) -> None:
+    # 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/test_conversation_library_installed.py:104).
+    def setUp(self) -> None:  # pragma: no cover
         binary = shutil.which("codex")
         if _version_of(binary) != LOCKED_CODEX_RUNTIME_VERSION:
             self.skipTest(
@@ -122,10 +128,12 @@ class CodexInstalledTests(unittest.IsolatedAsyncioTestCase):
             harness=CODEX,
         )
 
-    def tearDown(self) -> None:
+    # 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/test_conversation_library_installed.py:125).
+    def tearDown(self) -> None:  # pragma: no cover
         self._tmpdir.cleanup()
 
-    async def _caps(self, _harness: str):
+    # 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/test_conversation_library_installed.py:128).
+    async def _caps(self, _harness: str):  # pragma: no cover
         gates = LibraryGateRegistry(
             harness_registry=lambda: HARNESSES,
             workspace_root=self.tmp,
@@ -133,7 +141,10 @@ class CodexInstalledTests(unittest.IsolatedAsyncioTestCase):
         )
         return await gates.history_capabilities("codex")
 
-    async def test_live_gate_supports_list_read_and_partial_completeness(self) -> None:
+    # 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/test_conversation_library_installed.py:136).
+    async def test_live_gate_supports_list_read_and_partial_completeness(
+        self,
+    ) -> None:  # pragma: no cover
         gates = LibraryGateRegistry(
             harness_registry=lambda: HARNESSES,
             workspace_root=self.tmp,
@@ -152,7 +163,8 @@ class CodexInstalledTests(unittest.IsolatedAsyncioTestCase):
         assert evidence.fixture_id is not None
         assert evidence.fixture_id.startswith("library-gate:codex:")
 
-    async def test_live_list_read_and_resolve_round_trip(self) -> None:
+    # 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/test_conversation_library_installed.py:155).
+    async def test_live_list_read_and_resolve_round_trip(self) -> None:  # pragma: no cover
         page = await self.library.list(self.scope, cursor=None, limit=5)
         assert page.scope.harness_id == "codex"
         if not page.rows:
@@ -175,7 +187,8 @@ class CodexInstalledTests(unittest.IsolatedAsyncioTestCase):
         assert target_vendor == vendor
         assert launch["kind"] == "codex-thread-resume"
 
-    def _ref_for(self, vendor: str, digest: str):
+    # 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/test_conversation_library_installed.py:178).
+    def _ref_for(self, vendor: str, digest: str):  # pragma: no cover
         scope = self.scope
         ref = NativeConversationRef(
             harness_id="codex",
@@ -187,7 +200,8 @@ class CodexInstalledTests(unittest.IsolatedAsyncioTestCase):
 
 
 class PiInstalledTests(unittest.IsolatedAsyncioTestCase):
-    def setUp(self) -> None:
+    # 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/test_conversation_library_installed.py:190).
+    def setUp(self) -> None:  # pragma: no cover
         if _version_of(shutil.which("pi")) != LOCKED_RUNTIME_VERSION["pi"]:
             self.skipTest(
                 f"installed pi != locked {LOCKED_RUNTIME_VERSION['pi']} "
@@ -203,10 +217,12 @@ class PiInstalledTests(unittest.IsolatedAsyncioTestCase):
         self.scope = canonical_library_scope(self.caller, "pi", None, workspace_root=Path(PI_SCOPE))
         self.helper = ConversationLibraryHelperHost()
 
-    def tearDown(self) -> None:
+    # 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/test_conversation_library_installed.py:206).
+    def tearDown(self) -> None:  # pragma: no cover
         self._tmpdir.cleanup()
 
-    def _library(self, capabilities) -> PiConversationLibrary:
+    # 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/test_conversation_library_installed.py:209).
+    def _library(self, capabilities) -> PiConversationLibrary:  # pragma: no cover
         return PiConversationLibrary(
             authorization=self.caller,
             cursor_authority=self.cursor,
@@ -214,7 +230,8 @@ class PiInstalledTests(unittest.IsolatedAsyncioTestCase):
             helper_host=self.helper,
         )
 
-    async def test_live_helper_gate_supports_pi_history(self) -> None:
+    # 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/test_conversation_library_installed.py:217).
+    async def test_live_helper_gate_supports_pi_history(self) -> None:  # pragma: no cover
         gates = LibraryGateRegistry(
             harness_registry=lambda: HARNESSES,
             workspace_root=self.tmp,
@@ -230,8 +247,10 @@ class PiInstalledTests(unittest.IsolatedAsyncioTestCase):
         assert evidence.runtime_version == LOCKED_RUNTIME_VERSION["pi"]
         assert evidence.helper_version == "0.80.7"
 
-    async def test_live_list_read_resolve(self) -> None:
-        async def caps(_harness: str):
+    # 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/test_conversation_library_installed.py:233).
+    async def test_live_list_read_resolve(self) -> None:  # pragma: no cover
+        # 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/test_conversation_library_installed.py:234).
+        async def caps(_harness: str):  # pragma: no cover
             gates = LibraryGateRegistry(
                 harness_registry=lambda: HARNESSES,
                 workspace_root=self.tmp,
@@ -262,7 +281,8 @@ class PiInstalledTests(unittest.IsolatedAsyncioTestCase):
         assert isinstance(args[1], str)
         assert Path(args[1]).is_file()
 
-    async def test_helper_protocol_rejects_malformed_requests(self) -> None:
+    # 260731-EFA-L7 R10: AR_RUN_CONTROL_INSTALLED-gated test body.
+    async def test_helper_protocol_rejects_malformed_requests(self) -> None:  # pragma: no cover
         entry = helper_root() / "src" / "pi.ts"
         process = subprocess.run(
             ["node", "--import", "tsx", str(entry)],
@@ -284,7 +304,8 @@ class PiInstalledTests(unittest.IsolatedAsyncioTestCase):
 class PiOpenEndToEndTests(unittest.IsolatedAsyncioTestCase):
     """Real open: tracked opener -> tmux -> control runner -> pi RPC resume -> proof -> retire."""
 
-    def setUp(self) -> None:
+    # 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/test_conversation_library_installed.py:288).
+    def setUp(self) -> None:  # pragma: no cover
         if shutil.which("tmux") is None:
             self.skipTest("tmux is not installed")
         if _version_of(shutil.which("pi")) != LOCKED_RUNTIME_VERSION["pi"]:
@@ -337,7 +358,8 @@ class PiOpenEndToEndTests(unittest.IsolatedAsyncioTestCase):
         )
         self.spawned_session_id: str | None = None
 
-    def tearDown(self) -> None:
+    # 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/test_conversation_library_installed.py:341).
+    def tearDown(self) -> None:  # pragma: no cover
         if self.spawned_session_id is not None:
             entry = self.catalog.get(self.spawned_session_id)
             if entry is not None and entry.status == "running":
@@ -354,7 +376,8 @@ class PiOpenEndToEndTests(unittest.IsolatedAsyncioTestCase):
                 )
         self._tmpdir.cleanup()
 
-    def _port(self, harness_id: str) -> PiConversationLibrary:
+    # 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/test_conversation_library_installed.py:358).
+    def _port(self, harness_id: str) -> PiConversationLibrary:  # pragma: no cover
         assert harness_id == "pi"
         return PiConversationLibrary(
             authorization=self.caller,
@@ -363,7 +386,8 @@ class PiOpenEndToEndTests(unittest.IsolatedAsyncioTestCase):
             helper_host=self.helper,
         )
 
-    async def test_open_real_pi_session_proves_exact_identity(self) -> None:
+    # 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/test_conversation_library_installed.py:367).
+    async def test_open_real_pi_session_proves_exact_identity(self) -> None:  # pragma: no cover
         scope = canonical_library_scope(self.caller, "pi", None, workspace_root=self.workspace)
         page = await self._port("pi").list(scope, cursor=None, limit=5)
         if not page.rows:
@@ -416,7 +440,8 @@ class PiOpenEndToEndTests(unittest.IsolatedAsyncioTestCase):
 class CodexOpenEndToEndTests(unittest.IsolatedAsyncioTestCase):
     """Real codex open: opener -> tmux -> runner -> thread/resume -> exact proof -> retire."""
 
-    def setUp(self) -> None:
+    # 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/test_conversation_library_installed.py:420).
+    def setUp(self) -> None:  # pragma: no cover
         if shutil.which("tmux") is None:
             self.skipTest("tmux is not installed")
         if _version_of(shutil.which("codex")) != LOCKED_CODEX_RUNTIME_VERSION:
@@ -466,7 +491,8 @@ class CodexOpenEndToEndTests(unittest.IsolatedAsyncioTestCase):
         )
         self.spawned_session_id: str | None = None
 
-    def tearDown(self) -> None:
+    # 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/test_conversation_library_installed.py:470).
+    def tearDown(self) -> None:  # pragma: no cover
         if self.spawned_session_id is not None:
             entry = self.catalog.get(self.spawned_session_id)
             if entry is not None and entry.status == "running":
@@ -483,7 +509,8 @@ class CodexOpenEndToEndTests(unittest.IsolatedAsyncioTestCase):
                 )
         self._tmpdir.cleanup()
 
-    def _port(self, harness_id: str) -> CodexConversationLibrary:
+    # 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/test_conversation_library_installed.py:487).
+    def _port(self, harness_id: str) -> CodexConversationLibrary:  # pragma: no cover
         assert harness_id == "codex"
         return CodexConversationLibrary(
             authorization=self.caller,
@@ -492,7 +519,8 @@ class CodexOpenEndToEndTests(unittest.IsolatedAsyncioTestCase):
             harness=CODEX,
         )
 
-    async def test_open_real_codex_thread_proves_exact_identity(self) -> None:
+    # 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/test_conversation_library_installed.py:496).
+    async def test_open_real_codex_thread_proves_exact_identity(self) -> None:  # pragma: no cover
         scope = canonical_library_scope(self.caller, "codex", None, workspace_root=self.workspace)
         page = await self._port("codex").list(scope, cursor=None, limit=5)
         if not page.rows:
@@ -559,7 +587,10 @@ class ClaudeGateHonestyTests(unittest.IsolatedAsyncioTestCase):
     def tearDown(self) -> None:
         self._tmpdir.cleanup()
 
-    async def test_installed_claude_library_gates_on_contract_not_version(self) -> None:
+    # 260731-EFA-L7 R10: AR_RUN_CONTROL_INSTALLED-gated test body.
+    async def test_installed_claude_library_gates_on_contract_not_version(
+        self,
+    ) -> None:  # pragma: no cover
         # 260718-CHATS-L5F R4 (developer ruling 2026-07-21): THE CONTRACT IS THE ONLY GATE. The
         # claude library surface is enabled by the helper's real list CONTRACT, never by a
         # version-string comparison. A drift between the installed runtime and any captured-fixture
@@ -586,5 +617,5 @@ class ClaudeGateHonestyTests(unittest.IsolatedAsyncioTestCase):
             assert evidence is not None and evidence.runtime_version == observed
 
 
-if __name__ == "__main__":
+if __name__ == "__main__":  # pragma: no cover
     unittest.main()

@@ -39,8 +39,9 @@ import {
 import { css, cx } from "../../../../styled-system/css";
 import type { ConversationScrollMemory } from "../../../data/conversation/store";
 import type { ConversationItem } from "../../../data/conversation/types";
-import { groupUnknownVendorRuns, type DisplayRow } from "./collapse";
+import { groupDisplayRows, type DisplayRow } from "./collapse";
 import { ConversationItemView, itemAccessibleName } from "./ConversationItemView";
+import { ThinkingItem } from "./ThinkingItem";
 
 const BOTTOM_FOLLOW_PX = 120;
 // A moderate transcript is cheaper to measure during initial settling than to let estimates surface
@@ -354,7 +355,7 @@ export function ConversationTimeline({
   measurementCacheId,
 }: ConversationTimelineProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
-  const rows = useMemo<DisplayRow[]>(() => groupUnknownVendorRuns(items), [items]);
+  const rows = useMemo<DisplayRow[]>(() => groupDisplayRows(items), [items]);
   // TanStack 3.17 can round-trip measured rows through initialMeasurementsCache. Persisting this
   // disposable UI geometry is the only way a browser refresh can know offscreen DOM heights
   // without rendering those rows again. sessionStorage keeps it tab-local; a window-width mismatch
@@ -1206,7 +1207,9 @@ export function ConversationTimeline({
             const label =
               row.kind === "item"
                 ? itemAccessibleName(row.item)
-                : `${row.items.length} identical unknown vendor events`;
+                : row.kind === "live-thinking"
+                  ? "thinking in progress"
+                  : `${row.items.length} identical unknown vendor events`;
             const tabbable =
               focusedKey === row.key || (focusedKey === null && virtualRow.index === rows.length - 1);
             return (
@@ -1227,6 +1230,8 @@ export function ConversationTimeline({
               >
                 {row.kind === "item" ? (
                   <ConversationItemView item={row.item} />
+                ) : row.kind === "live-thinking" ? (
+                  <ThinkingItem item={row.item} animated />
                 ) : (
                   <UnknownVendorRun row={row} expanded={expandedRuns.has(row.key)} onToggle={() => toggleRun(row.key)} />
                 )}

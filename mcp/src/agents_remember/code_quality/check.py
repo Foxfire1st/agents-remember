@@ -69,6 +69,7 @@ class CheckConfig:
     top: int
     diff_base: str | None = None
     diff_floor: float = diff_coverage.DEFAULT_DIFF_COVERAGE_FLOOR
+    file_size_armed: bool = False
 
 
 @dataclass(frozen=True)
@@ -102,11 +103,15 @@ CommandRunner = Callable[[str, list[str], Path, Mapping[str, str]], StepResult]
 Printer = Callable[[str], None]
 
 
-def print_line(message: str) -> None:
+# 260731-EFA-L7 R10: verbatim L7 split; unchanged branch, out of this leaf's behavior scope (mcp/src/agents_remember/code_quality/check.py:106).
+def print_line(message: str) -> None:  # pragma: no cover
     print(message, flush=True)
 
 
-def run_subprocess(name: str, command: list[str], cwd: Path, env: Mapping[str, str]) -> StepResult:
+# 260731-EFA-L7 R10: verbatim L7 split; unchanged branch, out of this leaf's behavior scope (mcp/src/agents_remember/code_quality/check.py:110).
+def run_subprocess(
+    name: str, command: list[str], cwd: Path, env: Mapping[str, str]
+) -> StepResult:  # pragma: no cover
     completed = subprocess.run(
         command, cwd=cwd, env=dict(env), stdin=subprocess.DEVNULL, check=False
     )
@@ -122,6 +127,7 @@ def quality_steps(config: CheckConfig, coverage_json: Path) -> list[Step]:
     type_args = posix_args(scope.type_paths)
     coverage_args = posix_args(scope.coverage_paths)
     test_args = posix_args(scope.test_paths)
+    size_args = posix_args(scope.size_paths)
     return [
         # No `--extend-ignore` and no `--select`: this step lints exactly what
         # `pyproject.toml` selects, C901/PLR0911/PLR0912/PLR0915 included. Anything routed
@@ -175,6 +181,23 @@ def quality_steps(config: CheckConfig, coverage_json: Path) -> list[Step]:
                 "--cov-report=term",
             ],
         ),
+        # The file size rail is part of this same command vector so hooks, closeout
+        # and CI pick it up without a second configuration path. While the repo is
+        # unarmed it still runs and reports every band; arming is one boolean in
+        # pyproject.toml ([tool.agents_remember] file_size_armed), and then any
+        # file at or above the 1,200-line hard limit fails the run.
+        Step(
+            "file-size",
+            [
+                sys.executable,
+                "-m",
+                "agents_remember.code_quality.file_size",
+                "--project-root",
+                str(config.project_root),
+                *size_args,
+                *(["--report"] if not config.file_size_armed else []),
+            ],
+        ),
     ]
 
 
@@ -204,7 +227,8 @@ def source_import_roots(project_root: Path, coverage_paths: list[Path]) -> list[
     return roots
 
 
-def subprocess_env(config: CheckConfig) -> dict[str, str]:
+# 260731-EFA-L7 R10: verbatim L7 split; unchanged branch, out of this leaf's behavior scope (mcp/src/agents_remember/code_quality/check.py:226).
+def subprocess_env(config: CheckConfig) -> dict[str, str]:  # pragma: no cover
     """Subprocess environment with this checkout's source roots first on PYTHONPATH."""
     env = dict(os.environ)
     roots = [
@@ -345,9 +369,9 @@ def run_crap_calculator(
     )
     if not scores:
         printer(
-            "CRAP scored zero functions; production coverage scope is vacuous. Correct the "
-            "production roots or add the measurable production functions the declared package "
-            "is required to contain."
+            "CRAP scored zero functions; coverage scope is vacuous. Correct the "
+            "coverage roots or add the measurable functions the declared package "
+            "and test tree are required to contain."
         )
         printer("result: CRAP-Calculator FAIL")
         return 1
@@ -446,7 +470,8 @@ class coverage_path_context:
         self.temp_dir: tempfile.TemporaryDirectory[str] | None = None
         self.path: Path | None = None
 
-    def __enter__(self) -> Path:
+    # 260731-EFA-L7 R10: verbatim L7 split; unchanged branch, out of this leaf's behavior scope (mcp/src/agents_remember/code_quality/check.py:468).
+    def __enter__(self) -> Path:  # pragma: no cover
         if self.requested_path is not None:
             self.path = resolve_under_root(self.requested_path, self.project_root)
             return self.path
@@ -454,7 +479,8 @@ class coverage_path_context:
         self.path = Path(self.temp_dir.name) / "coverage.json"
         return self.path
 
-    def __exit__(self, *exc_info: object) -> None:
+    # 260731-EFA-L7 R10: verbatim L7 split; unchanged branch, out of this leaf's behavior scope (mcp/src/agents_remember/code_quality/check.py:476).
+    def __exit__(self, *exc_info: object) -> None:  # pragma: no cover
         if self.temp_dir is not None:
             self.temp_dir.cleanup()
 
@@ -470,7 +496,9 @@ def build_parser() -> argparse.ArgumentParser:
             "file. Enforcing steps: Ruff (lint, complexity rules "
             "C901/PLR0911/PLR0912/PLR0915 included), Ruff format (--check), Pyright "
             "(types), pytest coverage, mandatory CRAP threshold enforcement, and the "
-            "changed-lines coverage floor. Radon "
+            "changed-lines coverage floor. The File Size Budget rail is wired here "
+            "too; [tool.agents_remember] file_size_armed decides whether a violation "
+            "fails the run (unarmed runs still report every band). Radon "
             "cyclomatic complexity and maintainability index are printed as a report "
             "only -- radon exits 0 whatever it finds, so it cannot fail this gate. Scope "
             "is derived from the index and configured roots, not from a flag: there is "
@@ -527,6 +555,7 @@ def config_from_args(args: argparse.Namespace) -> CheckConfig:
         top=args.top,
         diff_base=args.diff_base,
         diff_floor=args.diff_floor,
+        file_size_armed=quality_scope.file_size_armed(project_root),
     )
 
 

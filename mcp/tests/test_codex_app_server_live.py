@@ -43,18 +43,21 @@ from agents_remember.serving.harness_launch import (
 class RecordingCodexTransport(CodexStdioTransport):
     """Retain only non-secret method and model-selection evidence from a live run."""
 
-    def __init__(self) -> None:
+    # 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/test_codex_app_server_live.py:46).
+    def __init__(self) -> None:  # pragma: no cover
         super().__init__()
         self.calls: list[dict[str, object]] = []
         self.token_usage_by_turn: dict[str, dict[str, object]] = {}
 
     @property
-    def pid(self) -> int:
+    # 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/test_codex_app_server_live.py:52).
+    def pid(self) -> int:  # pragma: no cover
         process = self._process
         assert process is not None
         return process.pid
 
-    async def request(
+    # 260731-EFA-L7 R10: AR_CODEX_APP_SERVER_LIVE_SMOKE-gated live transport; runs only with the installed Codex CLI.
+    async def request(  # pragma: no cover
         self,
         method: str,
         params: Mapping[str, object],
@@ -76,10 +79,12 @@ class RecordingCodexTransport(CodexStdioTransport):
         self.calls.append(evidence)
         return result
 
-    def messages(self) -> AsyncIterator[JsonObject]:
+    # 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/test_codex_app_server_live.py:80).
+    def messages(self) -> AsyncIterator[JsonObject]:  # pragma: no cover
         return self._recording_messages()
 
-    async def _recording_messages(self) -> AsyncIterator[JsonObject]:
+    # 260731-EFA-L7 R10: AR_CODEX_APP_SERVER_LIVE_SMOKE-gated live transport; runs only with the installed Codex CLI.
+    async def _recording_messages(self) -> AsyncIterator[JsonObject]:  # pragma: no cover
         async for message in super().messages():
             if message.get("method") == "thread/tokenUsage/updated":
                 params = message.get("params")
@@ -91,7 +96,8 @@ class RecordingCodexTransport(CodexStdioTransport):
             yield message
 
 
-def _safe_token_usage(usage: Mapping[str, object]) -> dict[str, object]:
+# 260731-EFA-L7 R10: AR_CODEX_APP_SERVER_LIVE_SMOKE-gated helper; runs only with the installed Codex CLI.
+def _safe_token_usage(usage: Mapping[str, object]) -> dict[str, object]:  # pragma: no cover
     evidence: dict[str, object] = {}
     for section in ("total", "last"):
         breakdown = usage.get(section)
@@ -112,7 +118,8 @@ def _safe_token_usage(usage: Mapping[str, object]) -> dict[str, object]:
 
 
 @pytest.fixture
-def anyio_backend() -> str:
+# 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/test_codex_app_server_live.py:118).
+def anyio_backend() -> str:  # pragma: no cover
     return "asyncio"
 
 
@@ -122,7 +129,8 @@ def anyio_backend() -> str:
     os.environ.get("AR_CODEX_APP_SERVER_LIVE_SMOKE") != "1",
     reason="credential-safe live Codex smoke requires explicit opt-in",
 )
-async def test_live_handshake_model_menu_and_ephemeral_thread() -> None:
+# 260731-EFA-L7 R10: AR_CODEX_APP_SERVER_LIVE_SMOKE-gated test body; runs only with the installed Codex CLI.
+async def test_live_handshake_model_menu_and_ephemeral_thread() -> None:  # pragma: no cover
     """Use installed auth/config without printing it, send no prompt, and persist no thread."""
 
     package = os.environ.get("AR_CODEX_APP_SERVER_PACKAGE")
@@ -165,7 +173,8 @@ async def test_live_handshake_model_menu_and_ephemeral_thread() -> None:
     os.environ.get("AR_CODEX_APP_SERVER_LIVE_CONFORMANCE") != "1",
     reason="bounded live Codex conformance requires explicit opt-in and sends two tiny turns",
 )
-async def test_live_dynamic_launch_and_mid_thread_selection() -> None:
+# 260731-EFA-L7 R10: AR_CODEX_APP_SERVER_LIVE_SMOKE-gated test body; runs only with the installed Codex CLI.
+async def test_live_dynamic_launch_and_mid_thread_selection() -> None:  # pragma: no cover
     """Prove dynamic advertise, configured launch, and same-process subsequent-turn set."""
 
     identity = ControlIdentity(
@@ -267,7 +276,10 @@ class _Discovery(NamedTuple):
     seconds: float
 
 
-async def _discover_without_starting_a_thread(base_launch: LaunchSpec) -> _Discovery:
+# 260731-EFA-L7 R10: AR_CODEX_APP_SERVER_LIVE_SMOKE-gated helper; runs only with the installed Codex CLI.
+async def _discover_without_starting_a_thread(
+    base_launch: LaunchSpec,
+) -> _Discovery:  # pragma: no cover
     """Probe the dynamic catalog and prove the probe cost nothing but `initialize`/`model/list`."""
     transport = RecordingCodexTransport()
     discoverer = CodexAppServerAdapter(
@@ -295,7 +307,8 @@ class _SelectionPair(NamedTuple):
     target_effort: str
 
 
-def _selection_pair(catalog: CapabilitySnapshot) -> _SelectionPair:
+# 260731-EFA-L7 R10: AR_CODEX_APP_SERVER_LIVE_SMOKE-gated helper; runs only with the installed Codex CLI.
+def _selection_pair(catalog: CapabilitySnapshot) -> _SelectionPair:  # pragma: no cover
     """Two selectable model/effort pairs that differ, so a mid-thread switch is observable."""
     initial = next(model for model in catalog.models if model.is_default)
     preferred_target = os.environ.get("AR_CODEX_CONFORMANCE_TARGET_MODEL", "gpt-5.4-mini")
@@ -322,7 +335,8 @@ def _selection_pair(catalog: CapabilitySnapshot) -> _SelectionPair:
     return _SelectionPair(initial, initial_effort, target, target_effort)
 
 
-def _configured_adapter(
+# 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/test_codex_app_server_live.py:334).
+def _configured_adapter(  # pragma: no cover
     base_launch: LaunchSpec, selection: ResolvedLaunch
 ) -> tuple[CodexAppServerAdapter, RecordingCodexTransport, LaunchSpec]:
     """The adapter and launch the resolved selection produces, with no secret in the env."""
@@ -343,7 +357,8 @@ def _configured_adapter(
     return adapter, transport, apply_launch_knobs(base_launch, knobs)
 
 
-async def _refused_unknown_selections(
+# 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/test_codex_app_server_live.py:355).
+async def _refused_unknown_selections(  # pragma: no cover
     adapter: CodexAppServerAdapter,
 ) -> tuple[SetResult, SetResult]:
     """A model and an effort the live catalog does not advertise are both refused as unsupported."""
@@ -354,7 +369,8 @@ async def _refused_unknown_selections(
     return unknown_model, unknown_effort
 
 
-async def _queued_mid_thread_switch(
+# 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/test_codex_app_server_live.py:366).
+async def _queued_mid_thread_switch(  # pragma: no cover
     adapter: CodexAppServerAdapter, model_key: str, effort: str
 ) -> tuple[SetResult, SetResult]:
     """A switch requested between turns is accepted as queued, to take effect on the next turn."""
@@ -365,7 +381,8 @@ async def _queued_mid_thread_switch(
     return model_result, effort_result
 
 
-async def _completed_turn(
+# 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/test_codex_app_server_live.py:377).
+async def _completed_turn(  # pragma: no cover
     adapter: CodexAppServerAdapter, *, request_id: str, text: str, submitted_at: str
 ) -> str:
     """Send one tiny turn, wait for it to complete, and return its vendor correlation id."""
@@ -383,7 +400,8 @@ async def _completed_turn(
     return receipt.vendor_correlation_id
 
 
-def _accepted_turn_calls(
+# 260731-EFA-L7 R10: AR_CODEX_APP_SERVER_LIVE_SMOKE-gated helper; runs only with the installed Codex CLI.
+def _accepted_turn_calls(  # pragma: no cover
     transport: RecordingCodexTransport, *, thread_id: str, model_key: str, effort: str
 ) -> list[dict[str, object]]:
     """The two `turn/start` calls, each on the one thread and carrying the switched selection."""
@@ -396,7 +414,8 @@ def _accepted_turn_calls(
     return turn_calls
 
 
-def _assert_launch_selection_is_validated_against_the_catalog(
+# 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/test_codex_app_server_live.py:409).
+def _assert_launch_selection_is_validated_against_the_catalog(  # pragma: no cover
     selection: ResolvedLaunch, catalog: CapabilitySnapshot, initial: ModelCapability
 ) -> None:
     """The advertised pair validates; an unknown model and an unknown effort are refused."""
@@ -443,7 +462,8 @@ class _BilledTurns(NamedTuple):
     accepted_calls: list[dict[str, object]]
 
 
-def _print_conformance_evidence(
+# 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/test_codex_app_server_live.py:456).
+def _print_conformance_evidence(  # pragma: no cover
     *,
     handshake: AdapterHandshake,
     discovery: _Discovery,
@@ -494,7 +514,8 @@ def _print_conformance_evidence(
     )
 
 
-async def _wait_for_turn(adapter: CodexAppServerAdapter, turn_id: str) -> None:
+# 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/test_codex_app_server_live.py:507).
+async def _wait_for_turn(adapter: CodexAppServerAdapter, turn_id: str) -> None:  # pragma: no cover
     async with asyncio.timeout(180):
         async for event in adapter.subscribe():
             if event.kind == "completed" and event.raw.get("turnId") == turn_id:

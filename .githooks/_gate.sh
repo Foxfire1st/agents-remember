@@ -163,7 +163,7 @@ run_fast_checks() {
 run_full_checks() {
   report_wrapper_tier || return 1
   generated_copy_checks || return 1
-  echo "[$label] running quality wrapper (ruff + format + Pyright + pytest + CRAP + diff coverage)..."
+  echo "[$label] running quality wrapper (ruff + format + Pyright + pytest + CRAP + diff coverage + file-size)..."
   if "$py" -m agents_remember.code_quality.check; then
     echo "[$label] result: full quality wrapper PASS"
     return 0
