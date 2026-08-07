@@ -9,16 +9,23 @@ import {
   useEffect,
   useRef,
   useState,
+  type RefObject,
   type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
 
 import { css, cx } from "../../../styled-system/css";
-import type { CommandContext, CommandRegistry, PalettePage } from "../../data/commands";
+import type {
+  Command as PaletteCommand,
+  CommandContext,
+  CommandRegistry,
+  PalettePage,
+} from "../../data/commands";
 import {
   bindingFor,
   keymapCommandIsActive,
   setComposerProfile,
   useEffectiveKeymap,
+  type EffectiveKeymap,
 } from "../../data/keymap/preferences";
 import { PTY_RESERVED } from "../../data/keymap/reserved";
 
@@ -154,6 +161,221 @@ function paletteFilter(value: string, search: string, keywords?: string[]): numb
   return query.split(/\s+/).every((term) => haystack.includes(term)) ? 1 : 0;
 }
 
+function cyclePaletteFocus(
+  event: ReactKeyboardEvent<HTMLDivElement>,
+  dialogRef: RefObject<HTMLDivElement | null>,
+): void {
+  const candidates = Array.from(
+    dialogRef.current?.querySelectorAll<HTMLElement>(
+      "input:not([disabled]), button:not([disabled]), [tabindex]:not([tabindex='-1'])",
+    ) ?? [],
+  ).filter((element) => !element.hasAttribute("disabled"));
+  if (candidates.length === 0) return;
+  const first = candidates[0];
+  const last = candidates[candidates.length - 1];
+  if (event.shiftKey && document.activeElement === first) {
+    event.preventDefault();
+    last.focus();
+  } else if (!event.shiftKey && document.activeElement === last) {
+    event.preventDefault();
+    first.focus();
+  }
+}
+
+function handlePaletteKey(
+  event: ReactKeyboardEvent<HTMLDivElement>,
+  dialogRef: RefObject<HTMLDivElement | null>,
+  query: string,
+  page: PalettePage,
+  onClose: () => void,
+  onPage: (page: PalettePage) => void,
+): void {
+  if (event.key === "Escape") {
+    event.preventDefault();
+    event.stopPropagation();
+    onClose();
+    return;
+  }
+  if (event.key === "Tab") {
+    cyclePaletteFocus(event, dialogRef);
+    return;
+  }
+  // The page pattern's back gesture: Backspace on an empty query leaves a sub-page.
+  if (event.key === "Backspace" && query === "" && page !== "commands") {
+    event.preventDefault();
+    onPage("commands");
+  }
+}
+
+function paletteCommandChord(
+  keymap: EffectiveKeymap,
+  cmdId: string,
+  cmd: PaletteCommand,
+): string | undefined {
+  return keymapCommandIsActive(keymap, cmdId)
+    ? (bindingFor(keymap, cmdId)?.label ?? cmd.chord)
+    : undefined;
+}
+
+function PaletteCommandList({
+  commands,
+  keymap,
+  onRun,
+}: {
+  commands: PaletteCommand[];
+  keymap: EffectiveKeymap;
+  onRun: (id: string) => void;
+}) {
+  return (
+    <>
+      <Command.Empty>no matching command</Command.Empty>
+      {commands.map((cmd) => {
+        const chord = paletteCommandChord(keymap, cmd.id, cmd);
+        return (
+          <Command.Item
+            key={cmd.id}
+            value={cmd.id}
+            keywords={[cmd.title, ...(cmd.keywords ?? [])]}
+            onSelect={() => onRun(cmd.id)}
+            data-testid={`palette-cmd-${cmd.id}`}
+          >
+            <span>{cmd.title}</span>
+            {chord ? <span className={chordTag}>{chord}</span> : null}
+          </Command.Item>
+        );
+      })}
+    </>
+  );
+}
+
+function PaletteKeysList({
+  keymap,
+  onToggleProfile,
+}: {
+  keymap: EffectiveKeymap;
+  onToggleProfile: () => void;
+}) {
+  return (
+    <>
+      <Command.Group heading="Chrome — the shell around the panes">
+        {keymap.bindings.filter((entry) => entry.zones.includes("chrome")).map((entry) => (
+          <Command.Item key={`chrome-${entry.chord}`} value={`chrome-${entry.chord}`} disabled>
+            <span>{entry.commandId}</span>
+            <span className={chordTag}>{entry.label}</span>
+          </Command.Item>
+        ))}
+      </Command.Group>
+      <Command.Group heading="Composer — the editor owns its keys">
+        {keymap.bindings
+          .filter(
+            (entry) =>
+              entry.zones.includes("composer") &&
+              keymapCommandIsActive(keymap, entry.commandId),
+          )
+          .map((entry) => (
+            <Command.Item key={`composer-${entry.chord}`} value={`composer-${entry.chord}`} disabled>
+              <span>{entry.commandId}</span>
+              <span className={chordTag}>{entry.label}</span>
+            </Command.Item>
+          ))}
+      </Command.Group>
+      <div className={profileRow} data-testid="composer-profile-control">
+        <span>
+          composer profile: {keymap.composerProfile} · vim Esc changes mode; F6 exits
+        </span>
+        <button
+          type="button"
+          className={profileButton}
+          aria-pressed={keymap.composerProfile === "vim"}
+          onClick={onToggleProfile}
+          data-testid="composer-profile-toggle"
+        >
+          use {keymap.composerProfile === "vim" ? "emacs" : "vim"}
+        </button>
+      </div>
+      {keymap.issues.length > 0 ? (
+        <div className={validationNote} role="status" data-testid="keymap-validation">
+          {keymap.issues.join(" · ")}
+        </div>
+      ) : null}
+      <Command.Group heading="Terminal — everything passes through except exactly">
+        {PTY_RESERVED.map((entry) => (
+          <Command.Item key={`pty-${entry.chord}`} value={`pty-${entry.chord}`} disabled>
+            <span>
+              {entry.action}
+              {entry.bound ? "" : " (reserved, unbound)"}
+            </span>
+            <span className={chordTag}>{entry.chord}</span>
+          </Command.Item>
+        ))}
+      </Command.Group>
+    </>
+  );
+}
+
+function PaletteDialog({
+  dialogRef,
+  paletteInputRef,
+  page,
+  query,
+  setQuery,
+  keymap,
+  commands,
+  onKeyDown,
+  onRun,
+  onToggleProfile,
+}: {
+  dialogRef: RefObject<HTMLDivElement | null>;
+  paletteInputRef: RefObject<HTMLInputElement | null>;
+  page: PalettePage;
+  query: string;
+  setQuery: (query: string) => void;
+  keymap: EffectiveKeymap;
+  commands: PaletteCommand[];
+  onKeyDown: (event: ReactKeyboardEvent<HTMLDivElement>) => void;
+  onRun: (id: string) => void;
+  onToggleProfile: () => void;
+}) {
+  return (
+    <div
+      ref={dialogRef}
+      role="dialog"
+      aria-modal="true"
+      aria-label="Command palette"
+      className={cx(box, "sessions__palette")}
+    >
+      <Command
+        label="Command palette"
+        onKeyDown={onKeyDown}
+        onClick={(event) => event.stopPropagation()}
+        shouldFilter={page === "commands"}
+        filter={paletteFilter}
+      >
+        <Command.Input
+          ref={paletteInputRef}
+          aria-label="Command search"
+          value={query}
+          onValueChange={setQuery}
+          placeholder={page === "keys" ? "keyboard reference — backspace to go back" : "type a command…"}
+          data-testid="sessions-palette-input"
+        />
+        <Command.List>
+          {page === "commands" ? (
+            <PaletteCommandList commands={commands} keymap={keymap} onRun={onRun} />
+          ) : (
+            <PaletteKeysList keymap={keymap} onToggleProfile={onToggleProfile} />
+          )}
+        </Command.List>
+        <div className={pageHint}>
+          {page === "keys"
+            ? "esc closes · backspace returns to commands · Esc is NEVER intercepted over the terminal"
+            : "enter runs · esc closes · ? opens the keyboard reference"}
+        </div>
+      </Command>
+    </div>
+  );
+}
+
 export function CommandPalette({
   open,
   page,
@@ -173,11 +395,15 @@ export function CommandPalette({
 }) {
   const [query, setQuery] = useState("");
   const dialogRef = useRef<HTMLDivElement>(null);
+  const paletteInputRef = useRef<HTMLInputElement>(null);
   const keymap = useEffectiveKeymap();
   // A fresh query per open — slash-to-palette can seed "/", otherwise it starts empty.
   useEffect(() => {
     if (open) setQuery(initialQuery ?? "");
   }, [initialQuery, open]);
+  useEffect(() => {
+    if (open) paletteInputRef.current?.focus();
+  }, [open]);
 
   if (!open) return null;
 
@@ -192,151 +418,32 @@ export function CommandPalette({
     if (command?.keepsPaletteOpen) setQuery("");
   };
 
-  const onKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
-    if (event.key === "Escape") {
-      event.preventDefault();
-      event.stopPropagation();
-      onClose();
-      return;
-    }
-    if (event.key === "Tab") {
-      const candidates = Array.from(
-        dialogRef.current?.querySelectorAll<HTMLElement>(
-          "input:not([disabled]), button:not([disabled]), [tabindex]:not([tabindex='-1'])",
-        ) ?? [],
-      ).filter((element) => !element.hasAttribute("disabled"));
-      if (candidates.length === 0) return;
-      const first = candidates[0];
-      const last = candidates[candidates.length - 1];
-      if (event.shiftKey && document.activeElement === first) {
-        event.preventDefault();
-        last.focus();
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault();
-        first.focus();
-      }
-    }
-    // The page pattern's back gesture: Backspace on an empty query leaves a sub-page.
-    if (event.key === "Backspace" && query === "" && page !== "commands") {
-      event.preventDefault();
-      onPage("commands");
-    }
-  };
+  const onKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) =>
+    handlePaletteKey(event, dialogRef, query, page, onClose, onPage);
 
   const commands = registry.list(getContext());
 
   return (
-    <div className={overlay} data-testid="sessions-palette" onClick={onClose}>
-      <div
-        ref={dialogRef}
-        role="dialog"
-        aria-modal="true"
-        aria-label="Command palette"
-        className={cx(box, "sessions__palette")}
-        onClick={(event) => event.stopPropagation()}
-      >
-        <Command
-          label="Command palette"
-          onKeyDown={onKeyDown}
-          shouldFilter={page === "commands"}
-          filter={paletteFilter}
-        >
-          <Command.Input
-            autoFocus
-            aria-label="Command search"
-            value={query}
-            onValueChange={setQuery}
-            placeholder={page === "keys" ? "keyboard reference — backspace to go back" : "type a command…"}
-            data-testid="sessions-palette-input"
-          />
-          <Command.List>
-            {page === "commands" ? (
-              <>
-                <Command.Empty>no matching command</Command.Empty>
-                {commands.map((cmd) => {
-                  const chord = keymapCommandIsActive(keymap, cmd.id)
-                    ? (bindingFor(keymap, cmd.id)?.label ?? cmd.chord)
-                    : undefined;
-                  return (
-                    <Command.Item
-                      key={cmd.id}
-                      value={cmd.id}
-                      keywords={[cmd.title, ...(cmd.keywords ?? [])]}
-                      onSelect={() => runItem(cmd.id)}
-                      data-testid={`palette-cmd-${cmd.id}`}
-                    >
-                      <span>{cmd.title}</span>
-                      {chord ? <span className={chordTag}>{chord}</span> : null}
-                    </Command.Item>
-                  );
-                })}
-              </>
-            ) : (
-              <>
-                <Command.Group heading="Chrome — the shell around the panes">
-                  {keymap.bindings.filter((entry) => entry.zones.includes("chrome")).map((entry) => (
-                    <Command.Item key={`chrome-${entry.chord}`} value={`chrome-${entry.chord}`} disabled>
-                      <span>{entry.commandId}</span>
-                      <span className={chordTag}>{entry.label}</span>
-                    </Command.Item>
-                  ))}
-                </Command.Group>
-                <Command.Group heading="Composer — the editor owns its keys">
-                  {keymap.bindings
-                    .filter(
-                      (entry) =>
-                        entry.zones.includes("composer") &&
-                        keymapCommandIsActive(keymap, entry.commandId),
-                    )
-                    .map((entry) => (
-                      <Command.Item key={`composer-${entry.chord}`} value={`composer-${entry.chord}`} disabled>
-                        <span>{entry.commandId}</span>
-                        <span className={chordTag}>{entry.label}</span>
-                      </Command.Item>
-                    ))}
-                </Command.Group>
-                <div className={profileRow} data-testid="composer-profile-control">
-                  <span>
-                    composer profile: {keymap.composerProfile} · vim Esc changes mode; F6 exits
-                  </span>
-                  <button
-                    type="button"
-                    className={profileButton}
-                    aria-pressed={keymap.composerProfile === "vim"}
-                    onClick={() =>
-                      setComposerProfile(keymap.composerProfile === "vim" ? "emacs" : "vim")
-                    }
-                    data-testid="composer-profile-toggle"
-                  >
-                    use {keymap.composerProfile === "vim" ? "emacs" : "vim"}
-                  </button>
-                </div>
-                {keymap.issues.length > 0 ? (
-                  <div className={validationNote} role="status" data-testid="keymap-validation">
-                    {keymap.issues.join(" · ")}
-                  </div>
-                ) : null}
-                <Command.Group heading="Terminal — everything passes through except exactly">
-                  {PTY_RESERVED.map((entry) => (
-                    <Command.Item key={`pty-${entry.chord}`} value={`pty-${entry.chord}`} disabled>
-                      <span>
-                        {entry.action}
-                        {entry.bound ? "" : " (reserved, unbound)"}
-                      </span>
-                      <span className={chordTag}>{entry.chord}</span>
-                    </Command.Item>
-                  ))}
-                </Command.Group>
-              </>
-            )}
-          </Command.List>
-          <div className={pageHint}>
-            {page === "keys"
-              ? "esc closes · backspace returns to commands · Esc is NEVER intercepted over the terminal"
-              : "enter runs · esc closes · ? opens the keyboard reference"}
-          </div>
-        </Command>
-      </div>
+    <div
+      className={overlay}
+      role="presentation"
+      data-testid="sessions-palette"
+      onClick={onClose}
+    >
+      <PaletteDialog
+        dialogRef={dialogRef}
+        paletteInputRef={paletteInputRef}
+        page={page}
+        query={query}
+        setQuery={setQuery}
+        keymap={keymap}
+        commands={commands}
+        onKeyDown={onKeyDown}
+        onRun={runItem}
+        onToggleProfile={() =>
+          setComposerProfile(keymap.composerProfile === "vim" ? "emacs" : "vim")
+        }
+      />
     </div>
   );
 }

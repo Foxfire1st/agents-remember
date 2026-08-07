@@ -5,7 +5,7 @@ import { useElementVisible } from "./engine-room/useElementVisible";
 import { useShouldAnimate } from "./engine-room/useShouldAnimate";
 
 // A faint, effects-gated boomerang-video backdrop for empty-state canvases — mirrors the engine-room
-// G6 backdrop (`engineRoomStyles` `backdrop`/`backdropVideo`). The clip is a pre-rendered
+// G6 backdrop (`engine-room/styles` `backdrop`/`backdropVideo`). The clip is a pre-rendered
 // forward+reverse boomerang, so `loop` is seamless (first frame == last). Absent under calm-cockpit /
 // `prefers-reduced-motion` (useShouldAnimate) — the empty text then stands alone. aria-hidden +
 // pointer-events:none: pure atmosphere, never state. Host container must be a flex column so the

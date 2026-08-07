@@ -85,6 +85,21 @@ function PickupRow({
         {sender} → {owner}
       </span>
       <span className={messageKind}>{pickup.messageKind}</span>
+      <PickupMeta pickup={pickup} age={age} />
+      {replyable ? (
+        <BusDeveloperReply
+          pickup={pickup}
+          state={replyState}
+          updateState={updateReplyState}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+function PickupMeta({ pickup, age }: { pickup: AgentPickupNode; age: number | undefined }) {
+  return (
+    <>
       <span className={meta}>
         delivery {pickup.deliveryState} · state {pickup.state}
       </span>
@@ -102,14 +117,122 @@ function PickupRow({
         {pickup.escalatedAt ?? "—"}
       </span>
       {pickup.artifactPath ? <span className={meta}>artifact {pickup.artifactPath}</span> : null}
-      {replyable ? (
-        <BusDeveloperReply
-          pickup={pickup}
-          state={replyState}
-          updateState={updateReplyState}
+    </>
+  );
+}
+
+function BusPickupSection({
+  session,
+  pickups,
+  visible,
+  focusedFilterActive,
+  nowMs,
+  replyStateByEntry,
+  onToggleFilter,
+  updateReplyState,
+}: {
+  session: OpenSession | undefined;
+  pickups: readonly AgentPickupNode[];
+  visible: readonly AgentPickupNode[];
+  focusedFilterActive: boolean;
+  nowMs: number;
+  replyStateByEntry: Record<string, BusReplyState>;
+  onToggleFilter: () => void;
+  updateReplyState: (entryId: string, update: (current: BusReplyState) => BusReplyState) => void;
+}) {
+  return (
+    <InspectorSection title="Pending pickup projection">
+      <div className={controls}>
+        <button
+          type="button"
+          className={inspectorAction}
+          aria-pressed={focusedFilterActive}
+          disabled={!session}
+          onClick={onToggleFilter}
+          data-testid="bus-focused-filter"
+        >
+          {focusedFilterActive ? "show fleet-global bus" : "filter to focused seat"}
+        </button>
+        <span>
+          {visible.length} shown / {pickups.length} projected pending
+        </span>
+      </div>
+      {visible.length > 0 ? (
+        <VirtualizedInspectorList
+          rows={visible}
+          rowKey={(pickup) => pickup.id}
+          renderRow={(pickup) => (
+            <PickupRow
+              pickup={pickup}
+              nowMs={nowMs}
+              replyState={replyStateByEntry[pickup.entryId] ?? EMPTY_BUS_REPLY_STATE}
+              updateReplyState={(update) => updateReplyState(pickup.entryId, update)}
+            />
+          )}
+          label={
+            focusedFilterActive
+              ? "Focused-seat pending pickup projection"
+              : "Fleet pending pickup projection"
+          }
+          testId="bus-pickup-list"
         />
-      ) : null}
-    </div>
+      ) : focusedFilterActive ? (
+        <InspectorNote testId="bus-focused-empty">
+          No projected pickup matches this focused seat's exact ids. The fleet-global bus still
+          has {pickups.length} projected pending row{pickups.length === 1 ? "" : "s"}; this empty
+          filter is not a bus-health verdict.
+        </InspectorNote>
+      ) : (
+        <InspectorNote testId="bus-global-empty">
+          No pending pickup rows are projected. Full history is unavailable, so this is not a
+          bus-health verdict.
+        </InspectorNote>
+      )}
+    </InspectorSection>
+  );
+}
+
+function HeartbeatSection({ heartbeat }: { heartbeat: SupervisorHeartbeat | null }) {
+  return (
+    <InspectorSection title="Supervisor heartbeat" testId="bus-heartbeat">
+      {heartbeat ? (
+        <>
+          <InspectorFact
+            label="state"
+            value={
+              heartbeat.lastTickAt === null
+                ? "never ticked"
+                : heartbeat.stale
+                  ? "stale"
+                  : "active"
+            }
+            testId="bus-heartbeat-state"
+          />
+          <InspectorFact label="last tick" value={heartbeat.lastTickAt ?? "—"} />
+          <InspectorFact
+            label="age / cutoff"
+            value={`${seconds(heartbeat.ageSeconds ?? undefined)} / ${seconds(heartbeat.staleCutoffSeconds)}`}
+          />
+          <InspectorFact
+            label="pending / redeliverable"
+            value={`${heartbeat.pendingInboxCount} / ${heartbeat.redeliverableInboxCount}`}
+            testId="bus-heartbeat-counts"
+          />
+          <InspectorFact
+            label="last sweep"
+            value={
+              heartbeat.lastSweepDurationSeconds === null
+                ? "—"
+                : seconds(heartbeat.lastSweepDurationSeconds)
+            }
+          />
+        </>
+      ) : (
+        <InspectorNote>
+          Supervisor heartbeat is not projected; no liveness or health claim is available.
+        </InspectorNote>
+      )}
+    </InspectorSection>
   );
 }
 
@@ -174,94 +297,17 @@ export function BusPane({
 
   return (
     <div className={inspectorPane} data-testid="bus-pane">
-      <InspectorSection title="Pending pickup projection">
-        <div className={controls}>
-          <button
-            type="button"
-            className={inspectorAction}
-            aria-pressed={focusedFilterActive}
-            disabled={!session}
-            onClick={() => setFocusedOnly((current) => !current)}
-            data-testid="bus-focused-filter"
-          >
-            {focusedFilterActive ? "show fleet-global bus" : "filter to focused seat"}
-          </button>
-          <span>
-            {visible.length} shown / {pickups.length} projected pending
-          </span>
-        </div>
-        {visible.length > 0 ? (
-          <VirtualizedInspectorList
-            rows={visible}
-            rowKey={(pickup) => pickup.id}
-            renderRow={(pickup) => (
-              <PickupRow
-                pickup={pickup}
-                nowMs={nowMs}
-                replyState={replyStateByEntry[pickup.entryId] ?? EMPTY_BUS_REPLY_STATE}
-                updateReplyState={(update) => updateReplyState(pickup.entryId, update)}
-              />
-            )}
-            label={
-              focusedFilterActive
-                ? "Focused-seat pending pickup projection"
-                : "Fleet pending pickup projection"
-            }
-            testId="bus-pickup-list"
-          />
-        ) : focusedFilterActive ? (
-          <InspectorNote testId="bus-focused-empty">
-            No projected pickup matches this focused seat's exact ids. The fleet-global bus still
-            has {pickups.length} projected pending row{pickups.length === 1 ? "" : "s"}; this empty
-            filter is not a bus-health verdict.
-          </InspectorNote>
-        ) : (
-          <InspectorNote testId="bus-global-empty">
-            No pending pickup rows are projected. Full history is unavailable, so this is not a
-            bus-health verdict.
-          </InspectorNote>
-        )}
-      </InspectorSection>
-
-      <InspectorSection title="Supervisor heartbeat" testId="bus-heartbeat">
-        {heartbeat ? (
-          <>
-            <InspectorFact
-              label="state"
-              value={
-                heartbeat.lastTickAt === null
-                  ? "never ticked"
-                  : heartbeat.stale
-                    ? "stale"
-                    : "active"
-              }
-              testId="bus-heartbeat-state"
-            />
-            <InspectorFact label="last tick" value={heartbeat.lastTickAt ?? "—"} />
-            <InspectorFact
-              label="age / cutoff"
-              value={`${seconds(heartbeat.ageSeconds ?? undefined)} / ${seconds(heartbeat.staleCutoffSeconds)}`}
-            />
-            <InspectorFact
-              label="pending / redeliverable"
-              value={`${heartbeat.pendingInboxCount} / ${heartbeat.redeliverableInboxCount}`}
-              testId="bus-heartbeat-counts"
-            />
-            <InspectorFact
-              label="last sweep"
-              value={
-                heartbeat.lastSweepDurationSeconds === null
-                  ? "—"
-                  : seconds(heartbeat.lastSweepDurationSeconds)
-              }
-            />
-          </>
-        ) : (
-          <InspectorNote>
-            Supervisor heartbeat is not projected; no liveness or health claim is available.
-          </InspectorNote>
-        )}
-      </InspectorSection>
+      <BusPickupSection
+        session={session}
+        pickups={pickups}
+        visible={visible}
+        focusedFilterActive={focusedFilterActive}
+        nowMs={nowMs}
+        replyStateByEntry={replyStateByEntry}
+        onToggleFilter={() => setFocusedOnly((current) => !current)}
+        updateReplyState={updateReplyState}
+      />
+      <HeartbeatSection heartbeat={heartbeat} />
 
       <InspectorSection title="Projection limits (UA-3)">
         <InspectorNote testId="bus-limits-copy">

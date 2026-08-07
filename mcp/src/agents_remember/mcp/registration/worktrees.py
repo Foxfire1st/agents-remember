@@ -32,6 +32,7 @@ def _register_worktree_start_tools(server: FastMCP, config: McpRuntimeConfig) ->
         worktree_name: str,
         leaf_id: str | None = None,
         parent_task: str | None = None,
+        *,
         workflow_kind: str = "light-task",
         source_branch: str | None = None,
         work_branch: str | None = None,
@@ -96,6 +97,7 @@ def _register_worktree_working_tools(server: FastMCP, config: McpRuntimeConfig) 
         contract_path: str | None = None,
         leaf_id: str | None = None,
         parent_task: str | None = None,
+        *,
         on_unsaved: str | None = None,
     ) -> dict[str, Any]:
         """Re-attach to an existing task contract without mutating git, resuming its lifecycle.

@@ -98,20 +98,18 @@ export type SeatStateInput = Pick<
  * wait, then live turn-state, then control lifecycle. Server truth mirrored — an unclassified
  * row renders as unclassified, never a fabricated state.
  */
-export function seatVisualState(input: SeatStateInput): SeatVisualState {
-  if (input.status === "landed") return VISUALS.landed;
-  if (input.status === "terminated") return VISUALS.retired;
-  if (input.status === "exited") return VISUALS.exited;
-  if (input.controlState === "failed") return VISUALS.failed;
+function waitingVisual(reason: string): SeatVisualState {
+  const base = VISUALS.waiting;
+  return { ...base, word: `waiting(${reason})`, chip: `waiting: ${reason}` };
+}
+
+function blockedOnHuman(input: SeatStateInput): boolean {
   // A multiplexed sub-agent approval counts as pending too:
   // a seat blocked SOLELY on an agent approval is awaiting input, never dark.
-  if (sessionHasPendingInteraction(input) || input.turnState === "awaiting-input") {
-    return VISUALS["awaiting-input"];
-  }
-  if (input.waitingReason !== undefined) {
-    const base = VISUALS.waiting;
-    return { ...base, word: `waiting(${input.waitingReason})`, chip: `waiting: ${input.waitingReason}` };
-  }
+  return sessionHasPendingInteraction(input) || input.turnState === "awaiting-input";
+}
+
+function turnVisual(input: SeatStateInput): SeatVisualState {
   // 260718-CHATS-L5F R9: the projection's fresher live turn signal wins over the lagging catalog
   // turn-state (a streaming turn must never read settled-green `turn-ended`) — but only AFTER the
   // terminal/fault/blocked/wait guards above, so it can never fake liveness over a real end state.
@@ -122,4 +120,14 @@ export function seatVisualState(input: SeatStateInput): SeatVisualState {
   if (input.controlState === "starting") return VISUALS.starting;
   if (input.controlState === "ready") return VISUALS.ready;
   return VISUALS.unclassified;
+}
+
+export function seatVisualState(input: SeatStateInput): SeatVisualState {
+  if (input.status === "landed") return VISUALS.landed;
+  if (input.status === "terminated") return VISUALS.retired;
+  if (input.status === "exited") return VISUALS.exited;
+  if (input.controlState === "failed") return VISUALS.failed;
+  if (blockedOnHuman(input)) return VISUALS["awaiting-input"];
+  if (input.waitingReason !== undefined) return waitingVisual(input.waitingReason);
+  return turnVisual(input);
 }

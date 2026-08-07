@@ -125,6 +125,42 @@ export interface ChatSessionActionsProps {
   onBrowseHistory: () => void;
 }
 
+function pickerContextMasterOf(
+  contextMaster: string | undefined,
+  selectedLeafKey: string | undefined,
+): string | undefined {
+  return contextMaster ??
+    (selectedLeafKey ? selectedLeafKey.split("/").filter(Boolean)[1] : undefined);
+}
+
+function focusedSessionRunning(focused: OpenSession | undefined): boolean {
+  return focused !== undefined && (focused.status ?? "running") === "running";
+}
+
+function attachLeafError(result: string, seatRole: string): string {
+  return result === "leaf-taken"
+    ? `leaf already has a ${seatRole} seat`
+    : "could not attach to leaf";
+}
+
+function historyEnabled(focused: OpenSession | undefined, running: boolean): boolean {
+  return Boolean(focused && running && focused.harness);
+}
+
+function historyTitle(focused: OpenSession | undefined, running: boolean): string {
+  return focused && running && focused.harness
+    ? "Browse this harness's prior conversations and open one as a new chat"
+    : "Browse history needs a running harness chat focused";
+}
+
+function pickerVisible(
+  focused: OpenSession | undefined,
+  running: boolean,
+  leafTreeLength: number,
+): boolean {
+  return Boolean(focused && running && leafTreeLength > 0);
+}
+
 /**
  * Actions whose object is the focused session. Keeping them in the stage header makes ownership
  * explicit: the rail chooses a session; this cluster inspects or routes that selected session.
@@ -138,9 +174,8 @@ export function ChatSessionActions({
 }: ChatSessionActionsProps) {
   const [leafAttachError, setLeafAttachError] = useState<string | null>(null);
   const leafTree = useMemo(() => buildTaskTree(taskDocuments), [taskDocuments]);
-  const pickerContextMaster =
-    contextMaster ?? (selectedLeafKey ? selectedLeafKey.split("/").filter(Boolean)[1] : undefined);
-  const running = focused !== undefined && (focused.status ?? "running") === "running";
+  const pickerContextMaster = pickerContextMasterOf(contextMaster, selectedLeafKey);
+  const running = focusedSessionRunning(focused);
 
   const attachLeaf = async (leafKey: string, seatRole: string) => {
     if (!focused || !running || !leafKey || focused.leafKey === leafKey) return;
@@ -151,11 +186,7 @@ export function ChatSessionActions({
       notifySessionCatalogChanged("leaf", focused.id);
       return;
     }
-    setLeafAttachError(
-      result === "leaf-taken"
-        ? `leaf already has a ${seatRole} seat`
-        : "could not attach to leaf",
-    );
+    setLeafAttachError(attachLeafError(result, seatRole));
   };
 
   return (
@@ -170,17 +201,13 @@ export function ChatSessionActions({
         type="button"
         className={action}
         onClick={onBrowseHistory}
-        disabled={!(focused && running && focused.harness)}
+        disabled={!historyEnabled(focused, running)}
         data-testid="chats-browse-history"
-        title={
-          focused && running && focused.harness
-            ? "Browse this harness's prior conversations and open one as a new chat"
-            : "Browse history needs a running harness chat focused"
-        }
+        title={historyTitle(focused, running)}
       >
         Browse history
       </button>
-      {focused && running && leafTree.length > 0 ? (
+      {pickerVisible(focused, running, leafTree.length) && focused !== undefined ? (
         <LeafAttachPicker
           tree={leafTree}
           contextMaster={pickerContextMaster}

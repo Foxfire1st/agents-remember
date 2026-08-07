@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 
 import { css } from "../../../styled-system/css";
 import { matchReservedChord } from "../../data/keymap/reserved";
@@ -133,6 +133,204 @@ function isInspectable(status: string | undefined): boolean {
   return (status ?? "running") === "running" || status === "landed";
 }
 
+function usePtyMounts(
+  focusedId: string | undefined,
+  sessions: OpenSession[],
+): readonly string[] {
+  const [mountedIds, setMountedIds] = useState<readonly string[]>([]);
+  useEffect(() => {
+    if (!focusedId) return;
+    setMountedIds((current) =>
+      current.includes(focusedId) ? current : [...current, focusedId],
+    );
+  }, [focusedId]);
+  const inspectableIds = useMemo(
+    () =>
+      new Set(
+        sessions
+          .filter((session) => isInspectable(session.status))
+          .map((session) => session.id),
+      ),
+    [sessions],
+  );
+  useEffect(() => {
+    // Prune tombstones so a terminated seat's pane (and its WS) is torn down, not hidden forever.
+    setMountedIds((current) => {
+      const keep = current.filter((id) => inspectableIds.has(id));
+      return keep.length === current.length ? current : keep;
+    });
+  }, [inspectableIds]); // inspectableIds derives from sessions
+  return mountedIds.filter((id) => inspectableIds.has(id));
+}
+
+function focusTerminalHost(
+  event: React.FocusEvent<HTMLDivElement>,
+  hidden: boolean,
+  focusedInspectable: boolean,
+): void {
+  if (hidden || !focusedInspectable || event.target !== event.currentTarget) return;
+  event.currentTarget
+    .querySelector<HTMLElement>(
+      '[data-pty-visible="true"] [data-testid="terminal-host"]',
+    )
+    ?.focus();
+}
+
+function PtyStageChrome({
+  hidden,
+  focused,
+  focusedInspectable,
+  screenReaderMode,
+  setScreenReaderMode,
+}: {
+  hidden: boolean;
+  focused: OpenSession | undefined;
+  focusedInspectable: boolean;
+  screenReaderMode: boolean;
+  setScreenReaderMode: (value: boolean) => void;
+}) {
+  return (
+    <>
+      {/* Declutter: the pane-chrome BAR is gone — the
+          archetype fact lives in the Inspector + pane tooltip, and the screen-reader toggle
+          floats as a corner chip inside the pane so the bar's height returns to the terminal. */}
+      {focused && focusedInspectable ? (
+        <button
+          type="button"
+          className={srToggle}
+          data-on={screenReaderMode ? "true" : "false"}
+          aria-pressed={screenReaderMode}
+          title={`${SCREEN_READER_MODE_NOTE} · ${paneArchetypeCopy(focused)}`}
+          onClick={() => setScreenReaderMode(!screenReaderMode)}
+          data-testid="pty-screen-reader-toggle"
+        >
+          screen reader: {screenReaderMode ? "on" : "off"}
+        </button>
+      ) : null}
+      {/* The ended state carries a data-focus-target — render it only while the layer is
+          visible; a hidden layer must stay out of the stage's focus contract. */}
+      {!hidden && focused && !focusedInspectable ? (
+        <EndedSessionState session={focused} />
+      ) : null}
+      {!focused ? (
+        <div
+          className={noFocusedSession}
+          data-kbzone={hidden ? undefined : "pty"}
+          data-testid="sessions-pty-placeholder"
+          tabIndex={-1}
+          aria-label="Terminal placeholder"
+        >
+          no focused chat — the terminal renders here once a seat is focused;
+          every key passes to the harness except the reserved set (? lists
+          it); F6 exits to chrome
+        </div>
+      ) : null}
+    </>
+  );
+}
+
+function PtyPane({
+  session,
+  visible,
+  readOnly,
+  screenReaderMode,
+  onVisibleCols,
+  lastStampRef,
+}: {
+  session: OpenSession;
+  visible: boolean;
+  readOnly: boolean;
+  screenReaderMode: boolean;
+  onVisibleCols?: (cols: number | null) => void;
+  lastStampRef: React.MutableRefObject<Record<string, number>>;
+}) {
+  const controlled = isControlledSession(session);
+  const cockpit = sessionCockpitStore.getState();
+  const harvest = ptyHarvestStore.getState();
+  return (
+    <div
+      key={session.id}
+      className={layer}
+      style={{ display: visible ? "flex" : "none" }}
+      aria-hidden={!visible}
+      data-pty-visible={visible ? "true" : undefined}
+      data-pty-archetype={controlled ? "controlled" : "legacy-raw"}
+      data-testid={`pty-layer-${session.id}`}
+    >
+      <Suspense fallback={<div className={loading}>opening terminal…</div>}>
+        <Terminal
+          sessionId={session.id}
+          readOnly={readOnly || session.status === "landed"}
+          renderer={PTY_RENDERER}
+          screenReaderMode={screenReaderMode}
+          ariaLabel={paneAccessibleName(session)}
+          keyEventFilter={reservedChordFilter}
+          plainTextSelection={session.kind === "terminal" || session.harness === "codex"}
+          onSocketState={(state) => cockpit.setPtyWs(session.id, state)}
+          onOutput={() => {
+            const now = Date.now();
+            if (
+              now - (lastStampRef.current[session.id] ?? 0) <
+              OUTPUT_STAMP_INTERVAL_MS
+            ) {
+              return;
+            }
+            lastStampRef.current[session.id] = now;
+            sessionCockpitStore.getState().recordPtyOutput(session.id, now);
+          }}
+          onResizeCols={visible ? (cols) => onVisibleCols?.(cols) : undefined}
+          hooks={
+            controlled
+              ? undefined
+              : {
+                  onBell: () => {
+                    harvest.recordBell(session.id, Date.now());
+                  },
+                  onTitle: (title) => harvest.recordTitle(session.id, title),
+                  onOsc133: (data) => {
+                    const hint = parseOsc133(data, Date.now());
+                    if (hint) harvest.recordTurnHint(session.id, hint);
+                  },
+                  onOsc9: (data) => {
+                    const hint = parseOsc94(data, Date.now());
+                    if (hint) harvest.recordTurnHint(session.id, hint);
+                  },
+                }
+          }
+        />
+      </Suspense>
+    </div>
+  );
+}
+
+function focusedState(focused: OpenSession | undefined): {
+  focusedId: string | undefined;
+  focusedStatus: string | undefined;
+  focusedInspectable: boolean;
+  focusedLanded: boolean;
+} {
+  const focusedId = focused?.id;
+  const focusedStatus = focused?.status;
+  return {
+    focusedId,
+    focusedStatus,
+    focusedInspectable: focused ? isInspectable(focusedStatus) : false,
+    focusedLanded: focusedStatus === "landed",
+  };
+}
+
+function ptyZoneMarker(hidden: boolean, focusedInspectable: boolean): string | undefined {
+  return !hidden && focusedInspectable ? "pty" : undefined;
+}
+
+function ptyFocusTarget(
+  hidden: boolean,
+  focusedLanded: boolean,
+  focusedInspectable: boolean,
+): "true" | undefined {
+  return !hidden && (focusedLanded || !focusedInspectable) ? "true" : undefined;
+}
+
 export function PtySurface({
   focused,
   onVisibleCols,
@@ -162,35 +360,13 @@ export function PtySurface({
     SCREEN_READER_MODE_KEY,
     false,
   );
-  const focusedId = focused?.id;
-  const focusedStatus = focused?.status;
-  const focusedInspectable = focused ? isInspectable(focusedStatus) : false;
-  const focusedLanded = focusedStatus === "landed";
+  const { focusedId, focusedStatus, focusedInspectable, focusedLanded } = focusedState(focused);
 
   // Keep-alive: every session focused in this cockpit stays mounted (hidden) while it remains
   // inspectable — switching back must not lose scrollback (Chats' mountedSessionIds pattern). The
   // owner itself stays mounted while a removed focused row is awaiting smart handoff; otherwise
   // that one transient no-focus render would dispose every unrelated visited terminal and socket.
-  const [mountedIds, setMountedIds] = useState<readonly string[]>([]);
-  useEffect(() => {
-    if (!focusedId) return;
-    setMountedIds((current) =>
-      current.includes(focusedId) ? current : [...current, focusedId],
-    );
-  }, [focusedId]);
-  const inspectableIds = new Set(
-    sessions
-      .filter((session) => isInspectable(session.status))
-      .map((session) => session.id),
-  );
-  const mounted = mountedIds.filter((id) => inspectableIds.has(id));
-  useEffect(() => {
-    // Prune tombstones so a terminated seat's pane (and its WS) is torn down, not hidden forever.
-    setMountedIds((current) => {
-      const keep = current.filter((id) => inspectableIds.has(id));
-      return keep.length === current.length ? current : keep;
-    });
-  }, [sessions]); // inspectableIds derives from sessions
+  const mounted = usePtyMounts(focusedId, sessions);
 
   // Focusing a seat acknowledges its bell marker (the marker exists to pull attention here).
   useEffect(() => {
@@ -206,130 +382,39 @@ export function PtySurface({
 
   const lastStampRef = useRef<Record<string, number>>({});
 
-  const paneFor = (session: OpenSession) => {
-    const visible = session.id === focusedId;
-    const controlled = isControlledSession(session);
-    const cockpit = sessionCockpitStore.getState();
-    const harvest = ptyHarvestStore.getState();
-    return (
-      <div
-        key={session.id}
-        className={layer}
-        style={{ display: visible ? "flex" : "none" }}
-        aria-hidden={!visible}
-        data-pty-visible={visible ? "true" : undefined}
-        data-pty-archetype={controlled ? "controlled" : "legacy-raw"}
-        data-testid={`pty-layer-${session.id}`}
-      >
-        <Suspense fallback={<div className={loading}>opening terminal…</div>}>
-          <Terminal
-            sessionId={session.id}
-            readOnly={readOnly || session.status === "landed"}
-            renderer={PTY_RENDERER}
-            screenReaderMode={screenReaderMode}
-            ariaLabel={paneAccessibleName(session)}
-            keyEventFilter={reservedChordFilter}
-            // Codex and generic shell seats request no useful in-app drag gestures; tmux's outer
-            // mouse mode otherwise steals each drag into its private copy buffer and immediately
-            // cancels the highlight. Harnesses with their own mouse protocol keep native ownership.
-            plainTextSelection={session.kind === "terminal" || session.harness === "codex"}
-            onSocketState={(state) => cockpit.setPtyWs(session.id, state)}
-            onOutput={() => {
-              const now = Date.now();
-              if (
-                now - (lastStampRef.current[session.id] ?? 0) <
-                OUTPUT_STAMP_INTERVAL_MS
-              )
-                return;
-              lastStampRef.current[session.id] = now;
-              sessionCockpitStore.getState().recordPtyOutput(session.id, now);
-            }}
-            onResizeCols={visible ? (cols) => onVisibleCols?.(cols) : undefined}
-            // Byte-stream harvesting: LEGACY RAW panes only — the vendor TUI is the only
-            // signal source those panes have. Controlled panes get none of this.
-            hooks={
-              controlled
-                ? undefined
-                : {
-                    onBell: () => {
-                      harvest.recordBell(session.id, Date.now());
-                    },
-                    onTitle: (title) => harvest.recordTitle(session.id, title),
-                    onOsc133: (data) => {
-                      const hint = parseOsc133(data, Date.now());
-                      if (hint) harvest.recordTurnHint(session.id, hint);
-                    },
-                    onOsc9: (data) => {
-                      const hint = parseOsc94(data, Date.now());
-                      if (hint) harvest.recordTurnHint(session.id, hint);
-                    },
-                  }
-            }
-          />
-        </Suspense>
-      </div>
-    );
-  };
-
   return (
     <div
       className={surface}
-      data-kbzone={!hidden && focusedInspectable ? "pty" : undefined}
-      data-focus-target={
-        !hidden && (focusedLanded || !focusedInspectable) ? "true" : undefined
-      }
+      data-kbzone={ptyZoneMarker(hidden, focusedInspectable)}
+      data-focus-target={ptyFocusTarget(hidden, focusedLanded, focusedInspectable)}
       data-testid="pty-surface"
       tabIndex={-1}
       // The focus-terminal command targets `[data-kbzone="pty"]`; hand focus to the VISIBLE
       // pane's terminal host (which delegates into xterm's textarea). A hidden layer never
       // delegates — it carries no zone marker either, so no command can land here.
-      onFocus={(event) => {
-        if (hidden || !focusedInspectable || event.target !== event.currentTarget) return;
-        event.currentTarget
-          .querySelector<HTMLElement>(
-            '[data-pty-visible="true"] [data-testid="terminal-host"]',
-          )
-          ?.focus();
-      }}
+      onFocus={(event) => focusTerminalHost(event, hidden, focusedInspectable)}
     >
-      {/* Declutter: the pane-chrome BAR is gone — the
-          archetype fact lives in the Inspector + pane tooltip, and the screen-reader toggle
-          floats as a corner chip inside the pane so the bar's height returns to the terminal. */}
       <div className={layers}>
-        {focused && focusedInspectable ? (
-          <button
-            type="button"
-            className={srToggle}
-            data-on={screenReaderMode ? "true" : "false"}
-            aria-pressed={screenReaderMode}
-            title={`${SCREEN_READER_MODE_NOTE} · ${paneArchetypeCopy(focused)}`}
-            onClick={() => setScreenReaderMode(!screenReaderMode)}
-            data-testid="pty-screen-reader-toggle"
-          >
-            screen reader: {screenReaderMode ? "on" : "off"}
-          </button>
-        ) : null}
+        <PtyStageChrome
+          hidden={hidden}
+          focused={focused}
+          focusedInspectable={focusedInspectable}
+          screenReaderMode={screenReaderMode}
+          setScreenReaderMode={setScreenReaderMode}
+        />
         {sessions
           .filter((session) => mounted.includes(session.id))
-          .map(paneFor)}
-        {/* The ended state carries a data-focus-target — render it only while the layer is
-            visible; a hidden layer must stay out of the stage's focus contract. */}
-        {!hidden && focused && !focusedInspectable ? (
-          <EndedSessionState session={focused} />
-        ) : null}
-        {!focused ? (
-          <div
-            className={noFocusedSession}
-            data-kbzone={hidden ? undefined : "pty"}
-            data-testid="sessions-pty-placeholder"
-            tabIndex={-1}
-            aria-label="Terminal placeholder"
-          >
-            no focused chat — the terminal renders here once a seat is focused;
-            every key passes to the harness except the reserved set (? lists
-            it); F6 exits to chrome
-          </div>
-        ) : null}
+          .map((session) => (
+            <PtyPane
+              key={session.id}
+              session={session}
+              visible={session.id === focusedId}
+              readOnly={readOnly}
+              screenReaderMode={screenReaderMode}
+              onVisibleCols={onVisibleCols}
+              lastStampRef={lastStampRef}
+            />
+          ))}
       </div>
     </div>
   );

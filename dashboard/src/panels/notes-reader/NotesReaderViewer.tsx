@@ -134,6 +134,71 @@ function dualPaneProps(note: NoteContent): { code: FileContent | null; sidecar: 
     : { code: noteAsFileContent(note), sidecar: { state: "empty" } };
 }
 
+function NotesRail({
+  notes,
+  truncated,
+  activePath,
+  onSelectNote,
+}: {
+  notes: NotesListing["notes"];
+  truncated: boolean;
+  activePath: string;
+  onSelectNote: (path: string) => void;
+}) {
+  return (
+    <div className={railCol}>
+      <div className={railScroll} data-testid="notes-rail">
+        <div className={railHead}>notes ({notes.length})</div>
+        {notes.map((entry, index) => (
+          <button
+            key={entry.path}
+            type="button"
+            className={railRow}
+            data-active={entry.path === activePath}
+            data-testid={`note-rail-${index + 1}`}
+            onClick={() => onSelectNote(entry.path)}
+          >
+            <span className={railPath}>{entry.path}</span>
+            <span className={railSize}>{entry.size.toLocaleString()} B</span>
+          </button>
+        ))}
+        {truncated ? (
+          <div className={railHint}>deeper subfolders exist but are beyond the list cap</div>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function NotePane({ failed, note }: { failed: boolean; note: NoteContent | null }) {
+  if (failed) {
+    return (
+      <div className={placeholder} data-testid="note-status">
+        Could not load this note.
+      </div>
+    );
+  }
+  if (note === null) {
+    return (
+      <div className={placeholder} data-testid="note-status">
+        Loading…
+      </div>
+    );
+  }
+  return (
+    <div className={paneFill}>
+      {note.truncated && note.language === "markdown" ? (
+        <div className={truncBanner} data-testid="notes-trunc-banner">
+          Showing the first 2 MiB of {note.size.toLocaleString()} bytes
+        </div>
+      ) : null}
+      <div className={paneBody}>
+        <DualPane {...dualPaneProps(note)} split={false} />
+      </div>
+    </div>
+  );
+}
+
 function NotesReaderViewerImpl({
   repo,
   master,
@@ -187,50 +252,16 @@ function NotesReaderViewerImpl({
       </header>
       <PanelGroup direction="horizontal" autoSaveId="notesreader.outer" className={css({ flex: "1", minHeight: "0" })}>
         <Panel defaultSize={26} minSize={16}>
-          <div className={railCol}>
-            <div className={railScroll} data-testid="notes-rail">
-              <div className={railHead}>notes ({notes.length})</div>
-              {notes.map((entry, index) => (
-                <button
-                  key={entry.path}
-                  type="button"
-                  className={railRow}
-                  data-active={entry.path === path}
-                  data-testid={`note-rail-${index + 1}`}
-                  onClick={() => onSelectNote(entry.path)}
-                >
-                  <span className={railPath}>{entry.path}</span>
-                  <span className={railSize}>{entry.size.toLocaleString()} B</span>
-                </button>
-              ))}
-              {listing?.truncated ? (
-                <div className={railHint}>deeper subfolders exist but are beyond the list cap</div>
-              ) : null}
-            </div>
-          </div>
+          <NotesRail
+            notes={notes}
+            truncated={listing?.truncated === true}
+            activePath={path}
+            onSelectNote={onSelectNote}
+          />
         </Panel>
         <PanelResizeHandle className={handle} />
         <Panel minSize={30}>
-          {failed ? (
-            <div className={placeholder} data-testid="note-status">
-              Could not load this note.
-            </div>
-          ) : note === null ? (
-            <div className={placeholder} data-testid="note-status">
-              Loading…
-            </div>
-          ) : (
-            <div className={paneFill}>
-              {note.truncated && note.language === "markdown" ? (
-                <div className={truncBanner} data-testid="notes-trunc-banner">
-                  Showing the first 2 MiB of {note.size.toLocaleString()} bytes
-                </div>
-              ) : null}
-              <div className={paneBody}>
-                <DualPane {...dualPaneProps(note)} split={false} />
-              </div>
-            </div>
-          )}
+          <NotePane failed={failed} note={note} />
         </Panel>
       </PanelGroup>
     </div>

@@ -81,13 +81,20 @@ function touch(order: string[], sessionId: string): string[] {
   return [sessionId, ...order.filter((id) => id !== sessionId)];
 }
 
-export const activeConversationStore = createStore<ActiveConversationState>((set) => ({
-  bySession: {},
-  errorBySession: {},
-  agentFocusBySession: {},
-  agentHistoryBySession: {},
-  touchOrder: [],
+type ConversationStoreSet = (
+  partial:
+    | ActiveConversationState
+    | Partial<ActiveConversationState>
+    | ((state: ActiveConversationState) => Partial<ActiveConversationState>),
+) => void;
 
+function projectionControls(
+  set: ConversationStoreSet,
+): Pick<
+  ActiveConversationState,
+  "applyPage" | "ingestEvent" | "setStreamPhase" | "setAgentFocus"
+> {
+  return {
   applyPage: (sessionId, page, mode) =>
     set((state) => {
       const current = state.bySession[sessionId] ?? emptyProjection(page.identity);
@@ -129,7 +136,13 @@ export const activeConversationStore = createStore<ActiveConversationState>((set
       else agentFocusBySession[sessionId] = agentId;
       return { agentFocusBySession };
     }),
+  };
+}
 
+function agentHistoryControls(
+  set: ConversationStoreSet,
+): Pick<ActiveConversationState, "setAgentHistoryState" | "failStream" | "evict" | "reset"> {
+  return {
   setAgentHistoryState: (sessionId, agentId, next) =>
     set((state) => {
       const sessionState = { ...(state.agentHistoryBySession[sessionId] ?? {}) };
@@ -188,6 +201,17 @@ export const activeConversationStore = createStore<ActiveConversationState>((set
       touchOrder: [],
     });
   },
+  };
+}
+
+export const activeConversationStore = createStore<ActiveConversationState>((set) => ({
+  bySession: {},
+  errorBySession: {},
+  agentFocusBySession: {},
+  agentHistoryBySession: {},
+  touchOrder: [],
+  ...projectionControls(set),
+  ...agentHistoryControls(set),
 }));
 
 export const useActiveConversation = <T>(selector: (state: ActiveConversationState) => T): T =>
@@ -285,6 +309,36 @@ function isTransientBootFailure(error: { httpStatus: number } | null): boolean {
   return error.httpStatus === 0 || error.httpStatus >= 500;
 }
 
+function runtimeIsStale(
+  signal: AbortSignal,
+  sessionId: string,
+  runtime: SessionRuntime,
+  generation: number,
+): boolean {
+  return (
+    signal.aborted ||
+    runtime.disposed ||
+    runtime.generation !== generation ||
+    !runtimeCanStream(sessionId, runtime)
+  );
+}
+
+function disposedOrUnfocused(signal: AbortSignal, sessionId: string, runtime: SessionRuntime): boolean {
+  return signal.aborted || !runtimeCanStream(sessionId, runtime);
+}
+
+function shouldRetryBoot(page: Extract<PageResult, { ok: false }>, elapsed: number): boolean {
+  return isTransientBootFailure(page.error) && elapsed < INITIAL_CONNECT_WINDOW_MS;
+}
+
+function bootRetryDelayMs(attempt: number, elapsed: number): number {
+  return Math.min(
+    INITIAL_CONNECT_RETRY_MS * 2 ** (attempt - 1),
+    INITIAL_CONNECT_RETRY_MAX_MS,
+    INITIAL_CONNECT_WINDOW_MS - elapsed,
+  );
+}
+
 // Fetch a native page, tolerating a TRANSIENT boot-race (a 503 while the bridge composes, or a bare
 // connection-refused) by retrying quietly across the bounded boot window with exponential backoff.
 // Shared by the initial hydrate AND the dead-stream re-page so a recomposing bridge gets the
@@ -299,7 +353,7 @@ async function fetchPageAcrossBootWindow(
 ): Promise<PageResult | null> {
   const startedAt = Date.now();
   for (let attempt = 1; ; attempt += 1) {
-    if (signal.aborted || !runtimeCanStream(sessionId, runtime)) return null;
+    if (disposedOrUnfocused(signal, sessionId, runtime)) return null;
     const page = await fetchConversationPage(
       sessionId,
       runtime.epoch,
@@ -308,26 +362,12 @@ async function fetchPageAcrossBootWindow(
       runtime.fetchImpl,
       signal,
     );
-    if (
-      signal.aborted ||
-      runtime.disposed ||
-      runtime.generation !== generation ||
-      !runtimeCanStream(sessionId, runtime)
-    ) {
-      return null;
-    }
+    if (runtimeIsStale(signal, sessionId, runtime, generation)) return null;
     if (page.ok) return page;
     const elapsed = Date.now() - startedAt;
-    if (!isTransientBootFailure(page.error) || elapsed >= INITIAL_CONNECT_WINDOW_MS) return page;
+    if (!shouldRetryBoot(page, elapsed)) return page;
     // Transient boot race: give the bridge time to come up, then retry from the same window.
-    const completed = await abortableDelay(
-      Math.min(
-          INITIAL_CONNECT_RETRY_MS * 2 ** (attempt - 1),
-          INITIAL_CONNECT_RETRY_MAX_MS,
-          INITIAL_CONNECT_WINDOW_MS - elapsed,
-        ),
-      signal,
-    );
+    const completed = await abortableDelay(bootRetryDelayMs(attempt, elapsed), signal);
     if (!completed || runtime.disposed || runtime.generation !== generation) return null;
   }
 }
@@ -446,19 +486,24 @@ async function handleRecovery(
 // NOT burn a recovery; only a genuinely terminal (4xx) answer or an exhausted window is a FAILED
 // recovery attempt — it counts toward the same MAX_DEAD_STREAM_RECOVERIES cap the never-opened path
 // uses, and only at the cap does the honest loud banner land (never a silent, endless re-page).
-async function repageAndResume(
+function applyRecoveredPage(sessionId: string, page: Extract<PageResult, { ok: true }>): void {
+  // applyInitialPage clears the recovery + fault and re-establishes the resume cursor; then resume.
+  activeConversationStore.getState().applyPage(sessionId, page.page, "initial");
+  const cleared = activeConversationStore.getState().bySession[sessionId];
+  if (cleared !== undefined) {
+    activeConversationStore.setState((state) => ({
+      bySession: { ...state.bySession, [sessionId]: clearRecovery(cleared) },
+    }));
+  }
+}
+
+async function attemptRepageLoop(
   sessionId: string,
   runtime: SessionRuntime,
-  limit?: number,
-): Promise<void> {
-  if (runtime.pageInFlight) return;
-  runtime.pendingPageKind = "repage";
-  const pageAbortController = new AbortController();
-  runtime.pageAbortController = pageAbortController;
-  runtime.pageInFlight = true;
-  runtime.controller?.stop();
-  runtime.controller = null;
-  const generation = runtime.generation;
+  limit: number | undefined,
+  generation: number,
+  pageAbortController: AbortController,
+): Promise<{ recovered: boolean; cancelled: boolean }> {
   let recovered = false;
   let cancelled = false;
   for (;;) {
@@ -474,14 +519,7 @@ async function repageAndResume(
       break;
     }
     if (page.ok) {
-      // applyInitialPage clears the recovery + fault and re-establishes the resume cursor; then resume.
-      activeConversationStore.getState().applyPage(sessionId, page.page, "initial");
-      const cleared = activeConversationStore.getState().bySession[sessionId];
-      if (cleared !== undefined) {
-        activeConversationStore.setState((state) => ({
-          bySession: { ...state.bySession, [sessionId]: clearRecovery(cleared) },
-        }));
-      }
+      applyRecoveredPage(sessionId, page);
       recovered = true;
       break;
     }
@@ -489,12 +527,31 @@ async function repageAndResume(
     // fail loud with the server's reason; else count it and re-attempt (matching the never-opened
     // escalation's bound). A transient boot 503 was already retried inside the helper and never
     // reaches here, so it can never burn the budget.
-    if (runtime.streamRecoveries >= MAX_DEAD_STREAM_RECOVERIES) {
-      activeConversationStore.getState().failStream(sessionId, page.error);
-      break;
-    }
-    runtime.streamRecoveries += 1;
+    if (escalateRepageFailure(runtime, sessionId, page)) break;
   }
+  return { recovered, cancelled };
+}
+
+async function repageAndResume(
+  sessionId: string,
+  runtime: SessionRuntime,
+  limit?: number,
+): Promise<void> {
+  if (runtime.pageInFlight) return;
+  runtime.pendingPageKind = "repage";
+  const pageAbortController = new AbortController();
+  runtime.pageAbortController = pageAbortController;
+  runtime.pageInFlight = true;
+  runtime.controller?.stop();
+  runtime.controller = null;
+  const generation = runtime.generation;
+  const { recovered, cancelled } = await attemptRepageLoop(
+    sessionId,
+    runtime,
+    limit,
+    generation,
+    pageAbortController,
+  );
   if (runtime.pageAbortController === pageAbortController) {
     runtime.pageAbortController = null;
     runtime.pageInFlight = false;
@@ -505,6 +562,19 @@ async function repageAndResume(
   }
   if (!cancelled) runtime.pendingPageKind = null;
   if (recovered && runtimeCanStream(sessionId, runtime)) startStream(sessionId, runtime);
+}
+
+function escalateRepageFailure(
+  runtime: SessionRuntime,
+  sessionId: string,
+  page: Extract<PageResult, { ok: false }>,
+): boolean {
+  if (runtime.streamRecoveries < MAX_DEAD_STREAM_RECOVERIES) {
+    runtime.streamRecoveries += 1;
+    return false;
+  }
+  activeConversationStore.getState().failStream(sessionId, page.error);
+  return true;
 }
 
 function runtimeCanStream(sessionId: string, runtime: SessionRuntime): boolean {
@@ -652,6 +722,75 @@ export function touchConversation(sessionId: string): void {
   focusConversation(sessionId);
 }
 
+function markAgentHistoryHydrated(runtime: SessionRuntime, agentId: string): void {
+  runtime.agentHistoryHydrated.delete(agentId);
+  runtime.agentHistoryHydrated.set(agentId, true);
+  if (runtime.agentHistoryHydrated.size > AGENT_HISTORY_CHILD_LIMIT) {
+    const oldest = runtime.agentHistoryHydrated.keys().next().value;
+    if (oldest !== undefined) runtime.agentHistoryHydrated.delete(oldest);
+  }
+}
+
+function agentHistoryFailureExtra(
+  result: Extract<AgentHistoryResult, { ok: true }>,
+): Record<string, unknown> {
+  return result.outcome.code !== undefined ? { code: result.outcome.code } : {};
+}
+
+async function requestAgentHistoryWithState(
+  sessionId: string,
+  agentId: string,
+  runtime: SessionRuntime,
+): Promise<AgentHistoryResult> {
+  try {
+      const result = await requestAgentHistory(
+        sessionId,
+        runtime.epoch,
+        agentId,
+        runtime.base,
+        runtime.fetchImpl,
+      );
+      if (runtime.disposed || runtimeBySession.get(sessionId) !== runtime) return result;
+      if (
+        result.ok &&
+        (result.outcome.status === "hydrated" ||
+          result.outcome.status === "already-hydrated")
+      ) {
+        markAgentHistoryHydrated(runtime, agentId);
+        activeConversationStore
+          .getState()
+          .setAgentHistoryState(sessionId, agentId, {
+            phase: "ready",
+            outcome: result.outcome,
+          });
+      } else if (result.ok) {
+        activeConversationStore
+          .getState()
+          .setAgentHistoryState(sessionId, agentId, {
+            phase: "failed",
+            error: {
+              status: result.outcome.status,
+              detail:
+                result.outcome.detail ??
+                "selected child history is unavailable; retry the child to try again",
+              httpStatus: 200,
+            },
+            ...agentHistoryFailureExtra(result),
+          });
+      } else {
+        activeConversationStore
+          .getState()
+          .setAgentHistoryState(sessionId, agentId, {
+            phase: "failed",
+            error: result.error,
+          });
+      }
+      return result;
+  } finally {
+    runtime.agentHistoryInFlight.delete(agentId);
+  }
+}
+
 /** Trigger selected/on-demand child history without replacing the parent page or live stream. */
 export async function hydrateAgentConversation(
   sessionId: string,
@@ -689,60 +828,7 @@ export async function hydrateAgentConversation(
   activeConversationStore
     .getState()
     .setAgentHistoryState(sessionId, agentId, { phase: "loading" });
-  const request = (async (): Promise<AgentHistoryResult> => {
-    try {
-      const result = await requestAgentHistory(
-        sessionId,
-        runtime.epoch,
-        agentId,
-        runtime.base,
-        runtime.fetchImpl,
-      );
-      if (runtime.disposed || runtimeBySession.get(sessionId) !== runtime) return result;
-      if (
-        result.ok &&
-        (result.outcome.status === "hydrated" ||
-          result.outcome.status === "already-hydrated")
-      ) {
-        runtime.agentHistoryHydrated.delete(agentId);
-        runtime.agentHistoryHydrated.set(agentId, true);
-        if (runtime.agentHistoryHydrated.size > AGENT_HISTORY_CHILD_LIMIT) {
-          const oldest = runtime.agentHistoryHydrated.keys().next().value;
-          if (oldest !== undefined) runtime.agentHistoryHydrated.delete(oldest);
-        }
-        activeConversationStore
-          .getState()
-          .setAgentHistoryState(sessionId, agentId, {
-            phase: "ready",
-            outcome: result.outcome,
-          });
-      } else if (result.ok) {
-        activeConversationStore
-          .getState()
-          .setAgentHistoryState(sessionId, agentId, {
-            phase: "failed",
-            error: {
-              status: result.outcome.status,
-              detail:
-                result.outcome.detail ??
-                "selected child history is unavailable; retry the child to try again",
-              httpStatus: 200,
-            },
-            ...(result.outcome.code !== undefined ? { code: result.outcome.code } : {}),
-          });
-      } else {
-        activeConversationStore
-          .getState()
-          .setAgentHistoryState(sessionId, agentId, {
-            phase: "failed",
-            error: result.error,
-          });
-      }
-      return result;
-    } finally {
-      runtime.agentHistoryInFlight.delete(agentId);
-    }
-  })();
+  const request = requestAgentHistoryWithState(sessionId, agentId, runtime);
   runtime.agentHistoryInFlight.set(agentId, request);
   return request;
 }

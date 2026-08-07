@@ -41,6 +41,7 @@ def _register_grepai_tools(server: FastMCP, config: McpRuntimeConfig) -> None:
         all_repos: bool = True,
         limit: int = 10,
         output_format: str = "json",
+        *,
         dry_run: bool = False,
         timeout: int | None = None,
         worktree: str | None = None,
@@ -64,6 +65,7 @@ def _register_grepai_tools(server: FastMCP, config: McpRuntimeConfig) -> None:
         repo_ids: list[str] | None = None,
         all_repos: bool = True,
         depth: int | None = None,
+        *,
         output_format: str = "json",
         dry_run: bool = False,
         timeout: int | None = None,
@@ -115,6 +117,7 @@ def _register_cgc_lookup_tools(server: FastMCP, config: McpRuntimeConfig) -> Non
         file: str | None = None,
         dry_run: bool = False,
         timeout: int | None = None,
+        *,
         worktree: str | None = None,
     ) -> dict[str, Any]:
         """List the callers of a function from the CodeGraphContext graph. Read-only; needs the cgc
@@ -192,6 +195,7 @@ def _register_cgc_analysis_tools(server: FastMCP, config: McpRuntimeConfig) -> N
         context: str | None = None,
         dry_run: bool = False,
         timeout: int | None = None,
+        *,
         worktree: str | None = None,
     ) -> dict[str, Any]:
         """Produce a CodeGraphContext graph visualization (serves a browser view on `port`). Needs

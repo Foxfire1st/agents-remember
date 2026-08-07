@@ -21,7 +21,12 @@ import {
   terminateTerminalSession,
   type HarnessInfo,
 } from "../data/terminal";
-import { buildTaskTree, leafIdFromKey, qualifiedLeafKey } from "../data/taskIdentity";
+import {
+  buildTaskTree,
+  leafIdFromKey,
+  qualifiedLeafKey,
+  type TaskTreeNode,
+} from "../data/taskIdentity";
 import type { EngineProcessNode, TaskDocNode, TaskStepNode } from "../types/projection";
 import { LeafAttachPicker } from "./LeafAttachPicker";
 import { SessionComposer } from "./SessionComposer";
@@ -229,21 +234,16 @@ function buildLeafContextPackage({
     `Status: ${doc.status}`,
     `Leaf key: ${leafKey}`,
     `Task document: ${doc.docPath}`,
-    doc.lifecycleId ? `Lifecycle: ${doc.lifecycleId}` : null,
-    process?.worktreeGroup ? `Worktree group: ${process.worktreeGroup}` : null,
-    process?.codeWorktree.path ? `Code worktree: ${process.codeWorktree.path}` : null,
-    process?.memoryWorktree?.path ? `Memory worktree: ${process.memoryWorktree.path}` : null,
+    ...leafContextOptionalLines(doc, process),
     "",
     "Objective",
-    doc.objective || "(none projected)",
+    leafContextObjective(doc),
     "",
     "Requirements",
-    ...(doc.requirements.length > 0
-      ? doc.requirements.map((item) => `- ${item}`)
-      : ["- (none projected)"]),
+    ...leafContextBullets(doc.requirements),
     "",
     "Top-level steps",
-    ...(doc.steps.length > 0 ? doc.steps.flatMap(stepLines) : ["- (none projected)"]),
+    ...leafContextStepLines(doc.steps),
     "",
     "Instruction",
     "Attach yourself to this lifecycle/leaf before working. Use this task document as the scope anchor.",
@@ -251,43 +251,40 @@ function buildLeafContextPackage({
   return lines.filter((line): line is string => line !== null).join("\n");
 }
 
-function RailChatImpl({
-  leafKey,
-  selectedLifecycleId,
-  taskDocuments = [],
-  engineProcesses = [],
-  contextMaster,
-}: {
-  leafKey?: string;
-  selectedLifecycleId?: string;
-  taskDocuments?: TaskDocNode[];
-  engineProcesses?: EngineProcessNode[];
-  contextMaster?: string;
-}) {
+function leafContextOptionalLines(
+  doc: TaskDocNode,
+  process: EngineProcessNode | undefined,
+): Array<string | null> {
+  return [
+    doc.lifecycleId ? `Lifecycle: ${doc.lifecycleId}` : null,
+    process?.worktreeGroup ? `Worktree group: ${process.worktreeGroup}` : null,
+    process?.codeWorktree.path ? `Code worktree: ${process.codeWorktree.path}` : null,
+    process?.memoryWorktree?.path ? `Memory worktree: ${process.memoryWorktree.path}` : null,
+  ];
+}
+
+function leafContextObjective(doc: TaskDocNode): string {
+  return doc.objective || "(none projected)";
+}
+
+function leafContextBullets(items: readonly string[]): string[] {
+  return items.length > 0 ? items.map((item) => `- ${item}`) : ["- (none projected)"];
+}
+
+function leafContextStepLines(steps: TaskDocNode["steps"]): string[] {
+  return steps.length > 0 ? steps.flatMap(stepLines) : ["- (none projected)"];
+}
+
+function useRailChatSessions(
+  leafKey: string | undefined,
+): {
+  sessions: OpenSession[];
+  chatSession: OpenSession | undefined;
+  terminalSession: OpenSession | undefined;
+  freeChat: OpenSession | undefined;
+  mountedSessionIds: Set<string>;
+} {
   const sessions = useSessions((state) => state.sessions);
-  const [harnesses, setHarnesses] = useState<HarnessInfo[]>([]);
-  // A transient note for a refused leaf attach (the server's 409 leaf-taken).
-  const [leafAttachError, setLeafAttachError] = useState<string | null>(null);
-  const [leafContextNote, setLeafContextNote] = useState<string | null>(null);
-  const [sessionOpenError, setSessionOpenError] = useState<string | null>(null);
-
-  // Detection-driven: the server reports which supported harnesses are installed; "start chat" offers
-  // one button per detected harness (Claude Code / Codex / Pi.dev). `[]` (no backend) leaves only the
-  // "open terminal" affordance — the same posture as the Chats cockpit.
-  useEffect(() => {
-    let active = true;
-    void fetchHarnesses().then((list) => {
-      if (active) setHarnesses(list);
-    });
-    return () => {
-      active = false;
-    };
-  }, []);
-
-  // The session shown in each role: when a leaf is being viewed, that leaf's session; otherwise the most
-  // recent UNATTACHED (free) session of that role — so a chat created off-leaf still surfaces here and can
-  // be attached to a leaf afterwards (create-from-anywhere). Most-recent (reverse) so a just-created chat
-  // shows immediately.
   const matches = (session: OpenSession, role: SessionRole): boolean =>
     isRunning(session) &&
     sessionRole(session) === role &&
@@ -296,12 +293,7 @@ function RailChatImpl({
     [...sessions].reverse().find((session) => matches(session, role));
   const chatSession = currentSession("chat");
   const terminalSession = currentSession("terminal");
-  // A free chat (no leaf) is the one that can be moved onto a leaf via the picker.
   const freeChat = chatSession && !chatSession.leafKey ? chatSession : undefined;
-
-  // Mounted-but-hidden keep-alive (mirror the Chats cockpit): once a chat/terminal has been surfaced here,
-  // keep it mounted while hidden so switching leaves — or attaching a free chat onto a leaf — does not
-  // tear down its xterm buffer / live WebSocket.
   const [mountedSessionIds, setMountedSessionIds] = useState<Set<string>>(() => new Set());
   useEffect(() => {
     setMountedSessionIds((current) => {
@@ -313,9 +305,23 @@ function RailChatImpl({
       return next;
     });
   }, [chatSession, terminalSession, sessions]);
+  return { sessions, chatSession, terminalSession, freeChat, mountedSessionIds };
+}
 
-  const detected = harnesses.filter((harness) => harness.detected);
-
+function useRailChatSubmissions(
+  leafKey: string | undefined,
+  selectedLifecycleId: string | undefined,
+  taskDocuments: TaskDocNode[],
+  engineProcesses: EngineProcessNode[],
+): {
+  leafContextNote: string | null;
+  sessionOpenError: string | null;
+  startChat: (harness: HarnessInfo) => void;
+  openTerminal: () => void;
+  deliverLeafContext: (sessionId: string, lk: string) => Promise<void>;
+} {
+  const [leafContextNote, setLeafContextNote] = useState<string | null>(null);
+  const [sessionOpenError, setSessionOpenError] = useState<string | null>(null);
   const deliverLeafContext = async (sessionId: string, lk: string) => {
     setLeafContextNote(null);
     const packet = buildLeafContextPackage({ leafKey: lk, taskDocuments, engineProcesses });
@@ -341,8 +347,6 @@ function RailChatImpl({
       setLeafContextNote(record.detail ?? `leaf context submit ${record.phase}`);
     }
   };
-
-  // Start is NEVER gated on a leaf: pass the viewed leaf (may be undefined → an unattached/free chat).
   const startChat = (harness: HarnessInfo) => {
     void (async () => {
       setSessionOpenError(null);
@@ -375,16 +379,18 @@ function RailChatImpl({
       }
     })();
   };
-  const terminate = async (id: string) => {
-    if (await terminateTerminalSession(id)) {
-      sessionStore.getState().setStatus(id, "terminated");
-      sessionStore.getState().close(id);
-      notifySessionCatalogChanged("terminate", id);
-    }
-  };
+  return { leafContextNote, sessionOpenError, startChat, openTerminal, deliverLeafContext };
+}
 
-  // The master→…→leaf tree the attach picker drills (nested masters supported). The server is the
-  // uniqueness arbiter; a 409 surfaces a note instead of a bind.
+function useRailChatAttach(
+  taskDocuments: TaskDocNode[],
+  onAttached: (sessionId: string, lk: string) => Promise<void>,
+): {
+  leafAttachError: string | null;
+  leafTree: TaskTreeNode[];
+  attachChatToLeaf: (sessionId: string, lk: string, seatRole: string) => Promise<void>;
+} {
+  const [leafAttachError, setLeafAttachError] = useState<string | null>(null);
   const leafTree = buildTaskTree(taskDocuments);
   const attachChatToLeaf = async (sessionId: string, lk: string, seatRole: string) => {
     if (!lk) return;
@@ -395,51 +401,165 @@ function RailChatImpl({
     if (result === "ok") {
       sessionStore.getState().applyLeafAssignment(sessionId, lk, seatRole);
       notifySessionCatalogChanged("leaf", sessionId);
-      await deliverLeafContext(sessionId, lk);
+      await onAttached(sessionId, lk);
     } else if (result === "leaf-taken") {
       setLeafAttachError(`leaf already has a ${seatRole} seat`);
     } else {
       setLeafAttachError("could not attach to leaf");
     }
   };
+  return { leafAttachError, leafTree, attachChatToLeaf };
+}
 
-  const startChatAffordance =
-    detected.length > 0 ? (
-      <div className={startRow} data-testid="rail-start-chat">
-        {detected.map((harness) => (
-          <button
-            key={harness.id}
-            type="button"
-            className={startButton}
-            onClick={() => startChat(harness)}
-            data-testid={`rail-start-chat-${harness.id}`}
-          >
-            ＋ {harness.name}
-          </button>
-        ))}
-      </div>
-    ) : (
-      <span data-testid="rail-no-harness">No agent detected on PATH.</span>
-    );
-  const openTerminalAffordance = (
-    <button
-      type="button"
-      className={startButton}
-      onClick={openTerminal}
-      data-testid="rail-open-terminal"
-    >
-      ＋ Terminal
-    </button>
+function RailChatImpl({
+  leafKey,
+  selectedLifecycleId,
+  taskDocuments = [],
+  engineProcesses = [],
+  contextMaster,
+}: {
+  leafKey?: string;
+  selectedLifecycleId?: string;
+  taskDocuments?: TaskDocNode[];
+  engineProcesses?: EngineProcessNode[];
+  contextMaster?: string;
+}) {
+  const { sessions, chatSession, terminalSession, freeChat, mountedSessionIds } =
+    useRailChatSessions(leafKey);
+  const { leafContextNote, sessionOpenError, startChat, openTerminal, deliverLeafContext } =
+    useRailChatSubmissions(leafKey, selectedLifecycleId, taskDocuments, engineProcesses);
+  const { leafAttachError, leafTree, attachChatToLeaf } = useRailChatAttach(
+    taskDocuments,
+    (sessionId, lk) => deliverLeafContext(sessionId, lk),
   );
-  const visibleIds = new Set(
-    [chatSession?.id, terminalSession?.id].filter((id): id is string => Boolean(id)),
-  );
-  const keepAlive = sessions.filter(
-    (session) => mountedSessionIds.has(session.id) && !visibleIds.has(session.id) && isRunning(session),
-  );
+  const [harnesses, setHarnesses] = useState<HarnessInfo[]>([]);
 
+  // Detection-driven: the server reports which supported harnesses are installed; "start chat" offers
+  // one button per detected harness (Claude Code / Codex / Pi.dev). `[]` (no backend) leaves only the
+  // "open terminal" affordance — the same posture as the Chats cockpit.
+  useEffect(() => {
+    let active = true;
+    void fetchHarnesses().then((list) => {
+      if (active) setHarnesses(list);
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const detected = harnesses.filter((harness) => harness.detected);
+  const terminate = async (id: string) => {
+    if (await terminateTerminalSession(id)) {
+      sessionStore.getState().setStatus(id, "terminated");
+      sessionStore.getState().close(id);
+      notifySessionCatalogChanged("terminate", id);
+    }
+  };
+  return (
+    <RailChatBody
+      leafKey={leafKey}
+      contextMaster={contextMaster}
+      sessions={sessions}
+      chatSession={chatSession}
+      terminalSession={terminalSession}
+      freeChat={freeChat}
+      mountedSessionIds={mountedSessionIds}
+      detected={detected}
+      leafContextNote={leafContextNote}
+      sessionOpenError={sessionOpenError}
+      leafAttachError={leafAttachError}
+      leafTree={leafTree}
+      onStartChat={startChat}
+      onOpenTerminal={openTerminal}
+      onTerminate={terminate}
+      onAttach={attachChatToLeaf}
+    />
+  );
+}
+
+function RailChatBody({
+  leafKey,
+  contextMaster,
+  sessions,
+  chatSession,
+  terminalSession,
+  freeChat,
+  mountedSessionIds,
+  detected,
+  leafContextNote,
+  sessionOpenError,
+  leafAttachError,
+  leafTree,
+  onStartChat,
+  onOpenTerminal,
+  onTerminate,
+  onAttach,
+}: {
+  leafKey: string | undefined;
+  contextMaster: string | undefined;
+  sessions: OpenSession[];
+  chatSession: OpenSession | undefined;
+  terminalSession: OpenSession | undefined;
+  freeChat: OpenSession | undefined;
+  mountedSessionIds: Set<string>;
+  detected: HarnessInfo[];
+  leafContextNote: string | null;
+  sessionOpenError: string | null;
+  leafAttachError: string | null;
+  leafTree: TaskTreeNode[];
+  onStartChat: (harness: HarnessInfo) => void;
+  onOpenTerminal: () => void;
+  onTerminate: (id: string) => void;
+  onAttach: (sessionId: string, lk: string, seatRole: string) => Promise<void>;
+}) {
   return (
     <section className={wrap} data-testid="rail-chat">
+      <RailChatNotes
+        leafKey={leafKey}
+        leafContextNote={leafContextNote}
+        sessionOpenError={sessionOpenError}
+      />
+      <div className={terminalArea}>
+        {!chatSession && !terminalSession ? (
+          <RailChatEmpty
+            leafKey={leafKey}
+            detected={detected}
+            onStartChat={onStartChat}
+            onOpenTerminal={onOpenTerminal}
+          />
+        ) : (
+          <RailChatOccupied
+            sessions={sessions}
+            mountedSessionIds={mountedSessionIds}
+            chatSession={chatSession}
+            terminalSession={terminalSession}
+            freeChat={freeChat}
+            detected={detected}
+            leafTree={leafTree}
+            contextMaster={contextMaster}
+            leafAttachError={leafAttachError}
+            onStartChat={onStartChat}
+            onOpenTerminal={onOpenTerminal}
+            onTerminate={onTerminate}
+            onAttach={onAttach}
+          />
+        )}
+      </div>
+    </section>
+  );
+}
+
+function RailChatNotes({
+  leafKey,
+  leafContextNote,
+  sessionOpenError,
+}: {
+  leafKey: string | undefined;
+  leafContextNote: string | null;
+  sessionOpenError: string | null;
+}) {
+  return (
+    <>
       <header className={heading} data-testid="rail-chat-heading">
         {leafKey ? `Chat · ${leafIdFromKey(leafKey)}` : "Chat"}
       </header>
@@ -453,68 +573,241 @@ function RailChatImpl({
           {sessionOpenError}
         </span>
       ) : null}
-      <div className={terminalArea}>
-        {!chatSession && !terminalSession ? (
-          <div className={empty} data-testid="rail-chat-empty">
-            <span>
-              {leafKey
-                ? "No chat is attached to this leaf yet."
-                : "Start a chat anywhere — attach it to a leaf any time."}
-            </span>
-            {startChatAffordance}
-            {openTerminalAffordance}
-          </div>
-        ) : (
-          <>
-            {chatSession && leafTree.length > 0 ? (
-              <div className={slotBar} data-testid="rail-attach-row">
-                {freeChat ? <span>Free chat —</span> : null}
-                <LeafAttachPicker
-                  tree={leafTree}
-                  contextMaster={contextMaster}
-                  onPick={(lk, seatRole) => void attachChatToLeaf(chatSession.id, lk, seatRole)}
-                  testId="rail-attach-leaf-picker"
-                  label={chatSession.leafKey ? "Move leaf" : "Attach to leaf"}
-                  align="right"
-                  seatRole={attachSeatRole(chatSession)}
-                />
-                {leafAttachError ? (
-                  <span className={attachError} data-testid="rail-leaf-attach-error">
-                    {leafAttachError}
-                  </span>
-                ) : null}
-              </div>
-            ) : null}
-            {chatSession ? (
-              <Pane role="chat" session={chatSession} onTerminate={terminate} />
-            ) : (
-              <div className={slotBar}>{startChatAffordance}</div>
-            )}
-            {terminalSession ? (
-              <Pane role="terminal" session={terminalSession} onTerminate={terminate} />
-            ) : (
-              <div className={slotBar}>{openTerminalAffordance}</div>
-            )}
-            {keepAlive.map((session) => (
-              <div
-                key={session.id}
-                style={{ display: "none" }}
-                aria-hidden
-                data-testid={`rail-chat-keepalive-${session.id}`}
-              >
-                <Suspense fallback={null}>
-                  <Terminal
-                    sessionId={session.id}
-                    ariaLabel={`terminal: ${session.label}`}
-                    onConnection={(conn) => registerConnection(session.id, conn)}
-                  />
-                </Suspense>
-              </div>
-            ))}
-          </>
-        )}
-      </div>
-    </section>
+    </>
+  );
+}
+
+function RailChatOccupied({
+  sessions,
+  mountedSessionIds,
+  chatSession,
+  terminalSession,
+  freeChat,
+  detected,
+  leafTree,
+  contextMaster,
+  leafAttachError,
+  onStartChat,
+  onOpenTerminal,
+  onTerminate,
+  onAttach,
+}: {
+  sessions: OpenSession[];
+  mountedSessionIds: Set<string>;
+  chatSession: OpenSession | undefined;
+  terminalSession: OpenSession | undefined;
+  freeChat: OpenSession | undefined;
+  detected: HarnessInfo[];
+  leafTree: TaskTreeNode[];
+  contextMaster: string | undefined;
+  leafAttachError: string | null;
+  onStartChat: (harness: HarnessInfo) => void;
+  onOpenTerminal: () => void;
+  onTerminate: (id: string) => void;
+  onAttach: (sessionId: string, lk: string, seatRole: string) => Promise<void>;
+}) {
+  return (
+    <>
+      {chatSession && leafTree.length > 0 ? (
+        <AttachRow
+          chatSession={chatSession}
+          freeChat={freeChat}
+          leafTree={leafTree}
+          contextMaster={contextMaster}
+          leafAttachError={leafAttachError}
+          onAttach={onAttach}
+        />
+      ) : null}
+      <RailChatSlots
+        chatSession={chatSession}
+        terminalSession={terminalSession}
+        detected={detected}
+        onStartChat={onStartChat}
+        onOpenTerminal={onOpenTerminal}
+        onTerminate={onTerminate}
+      />
+      <KeepAlivePanes
+        sessions={sessions}
+        mountedSessionIds={mountedSessionIds}
+        chatSession={chatSession}
+        terminalSession={terminalSession}
+      />
+    </>
+  );
+}
+
+function RailChatEmpty({
+  leafKey,
+  detected,
+  onStartChat,
+  onOpenTerminal,
+}: {
+  leafKey: string | undefined;
+  detected: HarnessInfo[];
+  onStartChat: (harness: HarnessInfo) => void;
+  onOpenTerminal: () => void;
+}) {
+  return (
+    <div className={empty} data-testid="rail-chat-empty">
+      <span>
+        {leafKey
+          ? "No chat is attached to this leaf yet."
+          : "Start a chat anywhere — attach it to a leaf any time."}
+      </span>
+      <StartChatAffordance detected={detected} onStartChat={onStartChat} />
+      <TerminalAffordance onOpen={onOpenTerminal} />
+    </div>
+  );
+}
+
+function RailChatSlots({
+  chatSession,
+  terminalSession,
+  detected,
+  onStartChat,
+  onOpenTerminal,
+  onTerminate,
+}: {
+  chatSession: OpenSession | undefined;
+  terminalSession: OpenSession | undefined;
+  detected: HarnessInfo[];
+  onStartChat: (harness: HarnessInfo) => void;
+  onOpenTerminal: () => void;
+  onTerminate: (id: string) => void;
+}) {
+  return (
+    <>
+      {chatSession ? (
+        <Pane paneRole="chat" session={chatSession} onTerminate={onTerminate} />
+      ) : (
+        <div className={slotBar}>
+          <StartChatAffordance detected={detected} onStartChat={onStartChat} />
+        </div>
+      )}
+      {terminalSession ? (
+        <Pane paneRole="terminal" session={terminalSession} onTerminate={onTerminate} />
+      ) : (
+        <div className={slotBar}>
+          <TerminalAffordance onOpen={onOpenTerminal} />
+        </div>
+      )}
+    </>
+  );
+}
+
+function StartChatAffordance({
+  detected,
+  onStartChat,
+}: {
+  detected: HarnessInfo[];
+  onStartChat: (harness: HarnessInfo) => void;
+}) {
+  if (detected.length === 0) {
+    return <span data-testid="rail-no-harness">No agent detected on PATH.</span>;
+  }
+  return (
+    <div className={startRow} data-testid="rail-start-chat">
+      {detected.map((harness) => (
+        <button
+          key={harness.id}
+          type="button"
+          className={startButton}
+          onClick={() => onStartChat(harness)}
+          data-testid={`rail-start-chat-${harness.id}`}
+        >
+          ＋ {harness.name}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function TerminalAffordance({ onOpen }: { onOpen: () => void }) {
+  return (
+    <button
+      type="button"
+      className={startButton}
+      onClick={onOpen}
+      data-testid="rail-open-terminal"
+    >
+      ＋ Terminal
+    </button>
+  );
+}
+
+function AttachRow({
+  chatSession,
+  freeChat,
+  leafTree,
+  contextMaster,
+  leafAttachError,
+  onAttach,
+}: {
+  chatSession: OpenSession;
+  freeChat: OpenSession | undefined;
+  leafTree: TaskTreeNode[];
+  contextMaster: string | undefined;
+  leafAttachError: string | null;
+  onAttach: (sessionId: string, lk: string, seatRole: string) => Promise<void>;
+}) {
+  return (
+    <div className={slotBar} data-testid="rail-attach-row">
+      {freeChat ? <span>Free chat —</span> : null}
+      <LeafAttachPicker
+        tree={leafTree}
+        contextMaster={contextMaster}
+        onPick={(lk, seatRole) => void onAttach(chatSession.id, lk, seatRole)}
+        testId="rail-attach-leaf-picker"
+        label={chatSession.leafKey ? "Move leaf" : "Attach to leaf"}
+        align="right"
+        seatRole={attachSeatRole(chatSession)}
+      />
+      {leafAttachError ? (
+        <span className={attachError} data-testid="rail-leaf-attach-error">
+          {leafAttachError}
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
+function KeepAlivePanes({
+  sessions,
+  mountedSessionIds,
+  chatSession,
+  terminalSession,
+}: {
+  sessions: OpenSession[];
+  mountedSessionIds: Set<string>;
+  chatSession: OpenSession | undefined;
+  terminalSession: OpenSession | undefined;
+}) {
+  const visibleIds = new Set(
+    [chatSession?.id, terminalSession?.id].filter((id): id is string => Boolean(id)),
+  );
+  const keepAlive = sessions.filter(
+    (session) =>
+      mountedSessionIds.has(session.id) && !visibleIds.has(session.id) && isRunning(session),
+  );
+  return (
+    <>
+      {keepAlive.map((session) => (
+        <div
+          key={session.id}
+          style={{ display: "none" }}
+          aria-hidden
+          data-testid={`rail-chat-keepalive-${session.id}`}
+        >
+          <Suspense fallback={null}>
+            <Terminal
+              sessionId={session.id}
+              ariaLabel={`terminal: ${session.label}`}
+              onConnection={(conn) => registerConnection(session.id, conn)}
+            />
+          </Suspense>
+        </div>
+      ))}
+    </>
   );
 }
 
@@ -526,17 +819,17 @@ export const RailChat = memo(RailChatImpl);
 // One pane (chat or terminal): a truncating header with a hover-revealed full name and a
 // terminate control, the live terminal, and its composer.
 function Pane({
-  role,
+  paneRole,
   session,
   onTerminate,
 }: {
-  role: SessionRole;
+  paneRole: SessionRole;
   session: OpenSession;
   onTerminate: (id: string) => void;
 }) {
   const seatRole = sessionSeatRole(session);
   return (
-    <div className={pane} data-testid={`rail-pane-${role}`}>
+    <div className={pane} data-testid={`rail-pane-${paneRole}`}>
       <div className={paneHeader}>
         <span className={paneTitle} title={`${seatRole} · ${session.label}`}>
           {seatRole} · {session.label}
@@ -546,13 +839,13 @@ function Pane({
           className={terminateButton}
           onClick={() => onTerminate(session.id)}
           aria-label={`Terminate ${session.label}`}
-          data-testid={`rail-terminate-${role}`}
+          data-testid={`rail-terminate-${paneRole}`}
         >
           End
         </button>
       </div>
       <div className={terminalLayer}>
-        <Suspense fallback={<div className={empty}>Opening {role}…</div>}>
+        <Suspense fallback={<div className={empty}>Opening {paneRole}…</div>}>
           <Terminal
             sessionId={session.id}
             ariaLabel={`terminal: ${session.label}`}

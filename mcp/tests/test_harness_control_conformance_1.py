@@ -100,8 +100,9 @@ class HarnessControlConformanceTests1(unittest.IsolatedAsyncioTestCase):
             setter.cancel()
             with self.assertRaises(asyncio.CancelledError):
                 await setter
-            adapter.release_set.set()
 
+            # The cancelled setter's shielded adapter call still holds the active slot
+            # (release_set is unset), so the prompt receipt is "queued" by construction.
             receipt = await asyncio.wait_for(
                 bridge.submissions().submit(
                     bridge.prompt(
@@ -113,6 +114,8 @@ class HarnessControlConformanceTests1(unittest.IsolatedAsyncioTestCase):
                 timeout=1.0,
             )
             self.assertEqual(receipt.acceptance, "queued")
+
+            adapter.release_set.set()
             await _settle_events()
             self.assertEqual(adapter.control_log[-1], ("prompt", "after-cancel"))
             self.assertEqual(bridge.snapshot().control, "ready")

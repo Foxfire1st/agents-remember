@@ -36,9 +36,9 @@ vi.mock("../panels/EngineRoom", async (importOriginal) => {
   return { ...mod, EngineRoom: Counted };
 });
 
-vi.mock("../panels/DetailPanel", async (importOriginal) => {
+vi.mock("../panels/detail-panel/DetailPanel", async (importOriginal) => {
   const { memo } = await import("react");
-  const mod = await importOriginal<typeof import("../panels/DetailPanel")>();
+  const mod = await importOriginal<typeof import("../panels/detail-panel/DetailPanel")>();
   const Real = mod.DetailPanel;
   const Counted = memo(function CountedDetailPanel(props: ComponentProps<typeof Real>) {
     counts.detailPanel += 1;
@@ -47,9 +47,9 @@ vi.mock("../panels/DetailPanel", async (importOriginal) => {
   return { ...mod, DetailPanel: Counted };
 });
 
-vi.mock("../panels/session-cockpit/SessionsView", async (importOriginal) => {
+vi.mock("../panels/session-cockpit/sessions-view/SessionsView", async (importOriginal) => {
   const { memo } = await import("react");
-  const mod = await importOriginal<typeof import("../panels/session-cockpit/SessionsView")>();
+  const mod = await importOriginal<typeof import("../panels/session-cockpit/sessions-view/SessionsView")>();
   const Real = mod.SessionsView;
   const Counted = memo(function CountedSessionsView(props: ComponentProps<typeof Real>) {
     counts.sessionsView += 1;
@@ -80,9 +80,9 @@ vi.mock("../panels/AttentionQueue", async (importOriginal) => {
   return { ...mod, AttentionQueue: Counted };
 });
 
-vi.mock("../panels/LifecycleList", async (importOriginal) => {
+vi.mock("../panels/lifecycle-list/LifecycleList", async (importOriginal) => {
   const { memo } = await import("react");
-  const mod = await importOriginal<typeof import("../panels/LifecycleList")>();
+  const mod = await importOriginal<typeof import("../panels/lifecycle-list/LifecycleList")>();
   const Real = mod.LifecycleList;
   const Counted = memo(function CountedLifecycleList(props: ComponentProps<typeof Real>) {
     counts.lifecycleList += 1;

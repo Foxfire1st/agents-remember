@@ -57,6 +57,58 @@ const tab = css({
 });
 const panel = css({ minWidth: "0" });
 
+function moveInspectorTab(
+  event: KeyboardEvent<HTMLButtonElement>,
+  current: number,
+  setActive: (tab: InspectorTab) => void,
+): void {
+  let next: number | null = null;
+  if (event.key === "ArrowRight") next = (current + 1) % TABS.length;
+  else if (event.key === "ArrowLeft") next = (current - 1 + TABS.length) % TABS.length;
+  else if (event.key === "Home") next = 0;
+  else if (event.key === "End") next = TABS.length - 1;
+  if (next === null) return;
+  event.preventDefault();
+  setActive(TABS[next].id);
+  const tabs = event.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>(
+    '[role="tab"]',
+  );
+  tabs?.[next]?.focus();
+}
+
+function InspectorTabList({
+  uid,
+  active,
+  setActive,
+}: {
+  uid: string;
+  active: InspectorTab;
+  setActive: (tab: InspectorTab) => void;
+}) {
+  return (
+    <div className={tabList} role="tablist" aria-label="Inspector evidence domains">
+      {TABS.map((item, index) => (
+        <button
+          key={item.id}
+          id={`${uid}-${item.id}-tab`}
+          type="button"
+          role="tab"
+          className={tab}
+          aria-selected={active === item.id}
+          aria-controls={`${uid}-${item.id}-panel`}
+          tabIndex={active === item.id ? 0 : -1}
+          onClick={() => setActive(item.id)}
+          onKeyDown={(event) => moveInspectorTab(event, index, setActive)}
+          data-testid={`inspector-tab-${item.id}`}
+          title={item.label}
+        >
+          {item.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 export function SeatInspector({
   session,
   cockpit,
@@ -73,43 +125,9 @@ export function SeatInspector({
   const [active, setActive] = useState<InspectorTab>("evidence");
   const uid = useId();
 
-  const moveTab = (event: KeyboardEvent<HTMLButtonElement>, current: number) => {
-    let next: number | null = null;
-    if (event.key === "ArrowRight") next = (current + 1) % TABS.length;
-    else if (event.key === "ArrowLeft") next = (current - 1 + TABS.length) % TABS.length;
-    else if (event.key === "Home") next = 0;
-    else if (event.key === "End") next = TABS.length - 1;
-    if (next === null) return;
-    event.preventDefault();
-    setActive(TABS[next].id);
-    const tabs = event.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>(
-      '[role="tab"]',
-    );
-    tabs?.[next]?.focus();
-  };
-
   return (
     <div data-testid="seat-inspector">
-      <div className={tabList} role="tablist" aria-label="Inspector evidence domains">
-        {TABS.map((item, index) => (
-          <button
-            key={item.id}
-            id={`${uid}-${item.id}-tab`}
-            type="button"
-            role="tab"
-            className={tab}
-            aria-selected={active === item.id}
-            aria-controls={`${uid}-${item.id}-panel`}
-            tabIndex={active === item.id ? 0 : -1}
-            onClick={() => setActive(item.id)}
-            onKeyDown={(event) => moveTab(event, index)}
-            data-testid={`inspector-tab-${item.id}`}
-            title={item.label}
-          >
-            {item.label}
-          </button>
-        ))}
-      </div>
+      <InspectorTabList uid={uid} active={active} setActive={setActive} />
       <div
         id={`${uid}-evidence-panel`}
         className={panel}

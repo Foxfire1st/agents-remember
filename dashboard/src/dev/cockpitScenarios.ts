@@ -21,7 +21,11 @@ import {
   effortOption,
   modelRow,
 } from "../test/fixtures/capabilityEnvelopes";
-import { FLEET, catalogRow } from "../test/fixtures/catalogRows";
+import {
+  FLEET,
+  RAW_TERMINAL_ROW,
+  catalogRow,
+} from "../test/fixtures/catalogRows";
 import {
   FAILED_LAUNCH_ROWS,
   LAUNCH_CONFLICT,
@@ -52,6 +56,7 @@ export type CockpitScenarioKind =
   | "interaction-answer"
   | "fleet-12"
   | "ended-presentation"
+  | "terminal-focus"
   | "pty-dropped"
   | "catalog-stale";
 
@@ -185,6 +190,14 @@ export const COCKPIT_SCENARIOS: readonly CockpitScenarioDefinition[] = [
     caption: "retired overview versus landed read-only terminal inspection",
     kind: "ended-presentation",
     rows: [ENDED_RETIRED, LANDED_TRANSCRIPT],
+    socket: "live",
+  },
+  {
+    name: "sessions-terminal-focus",
+    label: "Chats · raw terminal focus",
+    caption: "legacy-raw seat: interactive PTY, keyboard path, and cleanup continuity",
+    kind: "terminal-focus",
+    rows: [RAW_TERMINAL_ROW, LANDED_TRANSCRIPT],
     socket: "live",
   },
   {
@@ -377,18 +390,198 @@ function failedRowForStarting(row: TerminalCatalogRow): TerminalCatalogRow {
   };
 }
 
-/** Install the scenario's deterministic in-browser HTTP authority. Returns the restore callback. */
-export function installCockpitScenarioFetch(
+interface ScenarioAuthority {
+  definition: CockpitScenarioDefinition;
+  rows: TerminalCatalogRow[];
+  submitLost: boolean;
+  launchFailuresReleased: boolean;
+  setTurnEndedReleased: boolean;
+  deferNextOpen: boolean;
+  releaseOpen: (() => void) | null;
+  probe: CockpitBenchProbe;
+}
+
+type ScenarioRoute = (
+  authority: ScenarioAuthority,
+  path: string,
+  method: string,
+  init?: RequestInit,
+) => Promise<Response | null>;
+
+async function sessionsRoute(
+  authority: ScenarioAuthority,
+  path: string,
+  method: string,
+): Promise<Response | null> {
+  if (path !== "/api/terminal/sessions" || method !== "GET") return null;
+  if (authority.definition.kind === "catalog-stale") {
+    return json({ status: "unavailable" }, 503);
+  }
+  if (authority.definition.kind === "failed-harnesses" && authority.launchFailuresReleased) {
+    authority.rows = authority.rows.map((row) =>
+      row.controlState === "starting" ? failedRowForStarting(row) : row,
+    );
+  }
+  if (authority.definition.kind === "set-promotion" && authority.setTurnEndedReleased) {
+    authority.rows = authority.rows.map((row) =>
+      row.id === SET_PROMOTION.id
+        ? { ...row, turnState: "turn-ended" }
+        : row,
+    );
+  }
+  return json({ sessions: authority.rows });
+}
+
+async function landedCleanupRoute(
+  authority: ScenarioAuthority,
+  path: string,
+  method: string,
+  init?: RequestInit,
+): Promise<Response | null> {
+  if (
+    (authority.definition.kind !== "fleet-12" &&
+      authority.definition.kind !== "terminal-focus") ||
+    path !== "/api/terminal/landed-cleanup" ||
+    method !== "POST"
+  ) {
+    return null;
+  }
+  const body = JSON.parse(String(init?.body)) as { sessionIds: string[] };
+  const requested = new Set(body.sessionIds);
+  const closedSessions = authority.rows
+    .filter((row) => requested.has(row.id) && row.status === "landed")
+    .map((row) => row.id);
+  const closed = new Set(closedSessions);
+  authority.rows = authority.rows.filter((row) => !closed.has(row.id));
+  return json({
+    closed: closedSessions.length,
+    skipped: body.sessionIds.length - closedSessions.length,
+    closedSessions,
+    skippedSessions: body.sessionIds
+      .filter((id) => !closed.has(id))
+      .map((session) => ({ session, reason: "status:not-landed" })),
+  });
+}
+
+async function harnessesRoute(
+  _authority: ScenarioAuthority,
+  path: string,
+  method: string,
+): Promise<Response | null> {
+  if (path !== "/api/harnesses" || method !== "GET") return null;
+  // `satisfies` rather than a bare literal: `HarnessInfo` lives in `data/harnessCatalog.ts`,
+  // which carries no mirror marker and so is NOT in `wireFixtureGuard.ts`'s vocabulary. Nothing
+  // else in the tree would notice an invented field here — a `control` was live on these three
+  // rows, and the server's `DetectedHarness` is `extra="forbid"` over exactly the three below.
+  return json({
+    harnesses: [
+      { id: "claude", name: "Claude", detected: true },
+      { id: "codex", name: "Codex", detected: true },
+      { id: "pi", name: "Pi", detected: true },
+    ] satisfies HarnessInfo[],
+  });
+}
+
+async function harnessCapabilitiesRoute(
+  authority: ScenarioAuthority,
+  path: string,
+  method: string,
+): Promise<Response | null> {
+  const preSession = path.match(/^\/api\/harnesses\/([^/]+)\/capabilities$/);
+  if (!preSession || method !== "GET") return null;
+  const harness = decodeURIComponent(preSession[1]) as "claude" | "codex" | "pi";
+  return json(
+    authority.definition.kind === "failed-harnesses"
+      ? failedLaunchCapabilities(harness)
+      : capabilityEnvelope(harness, "hit"),
+  );
+}
+
+async function sessionCapabilitiesRoute(
+  authority: ScenarioAuthority,
+  path: string,
+  method: string,
+): Promise<Response | null> {
+  const sessionCapabilities = path.match(/^\/api\/terminal\/([^/]+)\/capabilities$/);
+  if (!sessionCapabilities || method !== "GET") return null;
+  const selectedEffort =
+    authority.definition.kind === "set-promotion" && !authority.setTurnEndedReleased
+      ? "high"
+      : "max";
+  return json({ ...CLAUDE_FRESH_SESSION_SNAPSHOT, selectedEffort });
+}
+
+async function setEffortRoute(
+  authority: ScenarioAuthority,
+  path: string,
+  method: string,
+): Promise<Response | null> {
+  if (
+    path !== `/api/terminal/${SET_PROMOTION.id}/set-effort` ||
+    method !== "POST" ||
+    authority.definition.kind !== "set-promotion"
+  ) {
+    return null;
+  }
+  return json({
+    ok: true,
+    acceptance: "queued",
+    requestedValue: "max",
+    effectiveValue: null,
+    detail: "applies when the next accepted turn starts",
+  });
+}
+
+function openedString(body: Record<string, unknown>, key: string, fallback: string | null): string | null {
+  return typeof body[key] === "string" ? (body[key] as string) : fallback;
+}
+
+function openedLabel(body: Record<string, unknown>): string {
+  return typeof body.label === "string" ? (body.label as string) : "claude";
+}
+
+function openedHarness(body: Record<string, unknown>, kind: "terminal" | "harness"): string | null {
+  return kind === "harness" && typeof body.harness === "string" ? (body.harness as string) : null;
+}
+
+function openedResolved(
+  body: Record<string, unknown>,
+  kind: "terminal" | "harness",
+  key: string,
+): string | null {
+  return kind === "harness" && typeof body[key] === "string" ? (body[key] as string) : null;
+}
+
+function openedSessionBody(
+  id: string,
+  body: Record<string, unknown>,
+): TerminalOpenSuccessBody {
+  const kind = body.kind === "terminal" ? "terminal" : "harness";
+  const harness = openedHarness(body, kind);
+  return {
+    ...OPENED_STARTING,
+    session: id,
+    label: openedLabel(body),
+    kind,
+    harness,
+    lifecycleId: openedString(body, "lifecycleId", null),
+    leafKey: openedString(body, "leafKey", null),
+    seatRole: kind === "harness" ? "chat" : null,
+    controlState: kind === "harness" ? "starting" : null,
+    resolvedModel: openedResolved(body, kind, "model"),
+    resolvedEffort: openedResolved(body, kind, "effort"),
+    tmuxName: `ar-${id}`,
+    controlEndpoint:
+      kind === "harness" ? `/workspace/.agents-remember-control/${id}.sock` : null,
+    controlProtocol: kind === "harness" ? OPENED_STARTING.controlProtocol : null,
+  };
+}
+
+function buildScenarioProbe(
   definition: CockpitScenarioDefinition,
-): () => void {
-  const original = window.fetch;
-  let rows = definition.rows.map((row) => ({ ...row }));
-  let submitLost = false;
-  let launchFailuresReleased = false;
-  let setTurnEndedReleased = false;
-  let deferNextOpen = false;
-  let releaseOpen: (() => void) | null = null;
-  const probe: CockpitBenchProbe = {
+  authority: ScenarioAuthority,
+): CockpitBenchProbe {
+  return {
     scenario: definition.name,
     requestCounts: {},
     totalRequests: 0,
@@ -396,16 +589,171 @@ export function installCockpitScenarioFetch(
     launchedSessionIds: [],
     snapshot: cockpitStateSnapshot,
     advance: (transition) => {
-      if (transition === "launch-failures") launchFailuresReleased = true;
-      if (transition === "set-turn-ended") setTurnEndedReleased = true;
-      if (transition === "defer-next-open") deferNextOpen = true;
+      if (transition === "launch-failures") authority.launchFailuresReleased = true;
+      if (transition === "set-turn-ended") authority.setTurnEndedReleased = true;
+      if (transition === "defer-next-open") authority.deferNextOpen = true;
       if (transition === "release-open") {
-        releaseOpen?.();
-        releaseOpen = null;
+        authority.releaseOpen?.();
+        authority.releaseOpen = null;
       }
     },
   };
-  window.__cockpitBench = probe;
+}
+
+function openedCatalogRow(opened: TerminalOpenSuccessBody): TerminalCatalogRow {
+  return catalogRow({
+    id: opened.session,
+    label: String(opened.label),
+    kind: opened.kind,
+    harness: opened.harness ?? undefined,
+    lifecycleId: opened.lifecycleId ?? undefined,
+    leafKey: opened.leafKey ?? undefined,
+    seatRole: opened.seatRole ?? undefined,
+    command:
+      opened.kind === "harness"
+        ? [opened.harness ?? "claude"]
+        : ["/bin/sh"],
+    controlState: opened.controlState ?? undefined,
+    resolvedModel: opened.resolvedModel ?? undefined,
+    resolvedEffort: opened.resolvedEffort ?? undefined,
+  });
+}
+
+async function openSessionRoute(
+  authority: ScenarioAuthority,
+  path: string,
+  method: string,
+  init?: RequestInit,
+): Promise<Response | null> {
+  const open = path.match(/^\/api\/terminal\/([^/]+)$/);
+  if (!open || method !== "POST") return null;
+  if (authority.deferNextOpen) {
+    authority.deferNextOpen = false;
+    await new Promise<void>((resolve) => {
+      authority.releaseOpen = resolve;
+    });
+    authority.releaseOpen = null;
+  }
+  const id = decodeURIComponent(open[1]);
+  if (authority.definition.kind === "launch-conflict") return json(LAUNCH_CONFLICT, 409);
+  const body = init?.body
+    ? (JSON.parse(String(init.body)) as Record<string, unknown>)
+    : {};
+  const opened = openedSessionBody(id, body);
+  authority.probe.launchedSessionIds.push(id);
+  authority.rows = [...authority.rows, openedCatalogRow(opened)];
+  return json(opened);
+}
+
+async function submissionAuthorityRoute(
+  _authority: ScenarioAuthority,
+  path: string,
+  method: string,
+): Promise<Response | null> {
+  if (!path.endsWith("/submission-authority") || method !== "GET") return null;
+  return json({ bridgeEpoch: L5_BRIDGE_EPOCH });
+}
+
+async function submitRoute(
+  authority: ScenarioAuthority,
+  path: string,
+  method: string,
+  init?: RequestInit,
+): Promise<Response | null> {
+  if (!path.endsWith("/submit") || method !== "POST") return null;
+  if (authority.definition.kind === "submit-reconcile" && !authority.submitLost) {
+    authority.submitLost = true;
+    throw new TypeError("scenario: browser lost the submit response");
+  }
+  const body = JSON.parse(String(init?.body)) as { requestId: string };
+  return json({
+    requestId: body.requestId,
+    acceptance: "immediate",
+    submittedAt: "2026-07-18T00:00:00Z",
+    vendorCorrelationId: "scenario-vendor",
+    acceptedAt: "2026-07-18T00:00:01Z",
+    detail: null,
+    bridgeEpoch: L5_BRIDGE_EPOCH,
+  });
+}
+
+async function reconcileRoute(
+  _authority: ScenarioAuthority,
+  path: string,
+  method: string,
+  init?: RequestInit,
+): Promise<Response | null> {
+  if (!path.endsWith("/reconcile") || method !== "POST") return null;
+  const body = JSON.parse(String(init?.body)) as { requestId: string };
+  return json({
+    requestId: body.requestId,
+    state: "accepted",
+    reconciledAt: "2026-07-18T00:00:02Z",
+    vendorCorrelationId: "scenario-vendor",
+    detail: null,
+    bridgeEpoch: L5_BRIDGE_EPOCH,
+    submissionState: "delivered",
+  });
+}
+
+async function approveRoute(
+  _authority: ScenarioAuthority,
+  path: string,
+  method: string,
+): Promise<Response | null> {
+  if (path !== "/api/actions/approve" || method !== "POST") return null;
+  return new Response("", { status: 202 });
+}
+
+async function submissionStatusRoute(
+  _authority: ScenarioAuthority,
+  path: string,
+  method: string,
+  init?: RequestInit,
+): Promise<Response | null> {
+  if (!path.endsWith("/submission-status") || method !== "POST") return null;
+  const body = JSON.parse(String(init?.body)) as { requestIds?: string[] };
+  return json({
+    bridgeEpoch: L5_BRIDGE_EPOCH,
+    submissions: (body.requestIds ?? []).map((requestId) => ({
+      requestId,
+      outcome: "not-found",
+    })),
+  });
+}
+
+const SCENARIO_ROUTES: ScenarioRoute[] = [
+  sessionsRoute,
+  landedCleanupRoute,
+  harnessesRoute,
+  harnessCapabilitiesRoute,
+  sessionCapabilitiesRoute,
+  setEffortRoute,
+  openSessionRoute,
+  submissionAuthorityRoute,
+  submitRoute,
+  reconcileRoute,
+  approveRoute,
+  submissionStatusRoute,
+];
+
+/** Install the scenario's deterministic in-browser HTTP authority. Returns the restore callback. */
+export function installCockpitScenarioFetch(
+  definition: CockpitScenarioDefinition,
+): () => void {
+  const original = window.fetch;
+  const authority: ScenarioAuthority = {
+    definition,
+    rows: definition.rows.map((row) => ({ ...row })),
+    submitLost: false,
+    launchFailuresReleased: false,
+    setTurnEndedReleased: false,
+    deferNextOpen: false,
+    releaseOpen: null,
+    probe: null as unknown as CockpitBenchProbe, // assigned below; the probe's advance mutates this state
+  };
+  authority.probe = buildScenarioProbe(definition, authority);
+  window.__cockpitBench = authority.probe;
 
   window.fetch = async (
     input: RequestInfo | URL,
@@ -413,206 +761,10 @@ export function installCockpitScenarioFetch(
   ): Promise<Response> => {
     const path = requestPath(input);
     const method = requestMethod(input, init);
-    count(probe, method, path, init);
-
-    if (path === "/api/terminal/sessions" && method === "GET") {
-      if (definition.kind === "catalog-stale")
-        return json({ status: "unavailable" }, 503);
-      if (definition.kind === "failed-harnesses" && launchFailuresReleased) {
-        rows = rows.map((row) =>
-          row.controlState === "starting" ? failedRowForStarting(row) : row,
-        );
-      }
-      if (definition.kind === "set-promotion" && setTurnEndedReleased) {
-        rows = rows.map((row) =>
-          row.id === SET_PROMOTION.id
-            ? { ...row, turnState: "turn-ended" }
-            : row,
-        );
-      }
-      return json({ sessions: rows });
-    }
-    if (
-      definition.kind === "fleet-12" &&
-      path === "/api/terminal/landed-cleanup" &&
-      method === "POST"
-    ) {
-      const body = JSON.parse(String(init?.body)) as { sessionIds: string[] };
-      const requested = new Set(body.sessionIds);
-      const closedSessions = rows
-        .filter((row) => requested.has(row.id) && row.status === "landed")
-        .map((row) => row.id);
-      const closed = new Set(closedSessions);
-      rows = rows.filter((row) => !closed.has(row.id));
-      return json({
-        closed: closedSessions.length,
-        skipped: body.sessionIds.length - closedSessions.length,
-        closedSessions,
-        skippedSessions: body.sessionIds
-          .filter((id) => !closed.has(id))
-          .map((session) => ({ session, reason: "status:not-landed" })),
-      });
-    }
-    if (path === "/api/harnesses" && method === "GET") {
-      // `satisfies` rather than a bare literal: `HarnessInfo` lives in `data/harnessCatalog.ts`,
-      // which carries no mirror marker and so is NOT in `wireFixtureGuard.ts`'s vocabulary. Nothing
-      // else in the tree would notice an invented field here — a `control` was live on these three
-      // rows, and the server's `DetectedHarness` is `extra="forbid"` over exactly the three below.
-      return json({
-        harnesses: [
-          { id: "claude", name: "Claude", detected: true },
-          { id: "codex", name: "Codex", detected: true },
-          { id: "pi", name: "Pi", detected: true },
-        ] satisfies HarnessInfo[],
-      });
-    }
-    const preSession = path.match(/^\/api\/harnesses\/([^/]+)\/capabilities$/);
-    if (preSession && method === "GET") {
-      const harness = decodeURIComponent(preSession[1]) as
-        | "claude"
-        | "codex"
-        | "pi";
-      return json(
-        definition.kind === "failed-harnesses"
-          ? failedLaunchCapabilities(harness)
-          : capabilityEnvelope(harness, "hit"),
-      );
-    }
-    const sessionCapabilities = path.match(
-      /^\/api\/terminal\/([^/]+)\/capabilities$/,
-    );
-    if (sessionCapabilities && method === "GET") {
-      const selectedEffort =
-        definition.kind === "set-promotion" && !setTurnEndedReleased
-          ? "high"
-          : "max";
-      return json({ ...CLAUDE_FRESH_SESSION_SNAPSHOT, selectedEffort });
-    }
-    if (
-      path === `/api/terminal/${SET_PROMOTION.id}/set-effort` &&
-      method === "POST" &&
-      definition.kind === "set-promotion"
-    ) {
-      return json({
-        ok: true,
-        acceptance: "queued",
-        requestedValue: "max",
-        effectiveValue: null,
-        detail: "applies when the next accepted turn starts",
-      });
-    }
-    const open = path.match(/^\/api\/terminal\/([^/]+)$/);
-    if (open && method === "POST") {
-      if (deferNextOpen) {
-        deferNextOpen = false;
-        await new Promise<void>((resolve) => {
-          releaseOpen = resolve;
-        });
-        releaseOpen = null;
-      }
-      const id = decodeURIComponent(open[1]);
-      if (definition.kind === "launch-conflict")
-        return json(LAUNCH_CONFLICT, 409);
-      const body = init?.body
-        ? (JSON.parse(String(init.body)) as Record<string, unknown>)
-        : {};
-      const kind = body.kind === "terminal" ? "terminal" : "harness";
-      const harness =
-        kind === "harness" && typeof body.harness === "string"
-          ? body.harness
-          : null;
-      const opened: TerminalOpenSuccessBody = {
-        ...OPENED_STARTING,
-        session: id,
-        label: typeof body.label === "string" ? body.label : "claude",
-        kind,
-        harness,
-        lifecycleId:
-          typeof body.lifecycleId === "string" ? body.lifecycleId : null,
-        leafKey: typeof body.leafKey === "string" ? body.leafKey : null,
-        seatRole: kind === "harness" ? "chat" : null,
-        controlState: kind === "harness" ? "starting" : null,
-        resolvedModel:
-          kind === "harness" && typeof body.model === "string"
-            ? body.model
-            : null,
-        resolvedEffort:
-          kind === "harness" && typeof body.effort === "string"
-            ? body.effort
-            : null,
-        tmuxName: `ar-${id}`,
-        controlEndpoint:
-          kind === "harness"
-            ? `/workspace/.agents-remember-control/${id}.sock`
-            : null,
-        controlProtocol:
-          kind === "harness" ? OPENED_STARTING.controlProtocol : null,
-      };
-      probe.launchedSessionIds.push(id);
-      rows = [
-        ...rows,
-        catalogRow({
-          id,
-          label: String(opened.label),
-          kind: opened.kind,
-          harness: opened.harness ?? undefined,
-          lifecycleId: opened.lifecycleId ?? undefined,
-          leafKey: opened.leafKey ?? undefined,
-          seatRole: opened.seatRole ?? undefined,
-          command:
-            opened.kind === "harness"
-              ? [opened.harness ?? "claude"]
-              : ["/bin/sh"],
-          controlState: opened.controlState ?? undefined,
-          resolvedModel: opened.resolvedModel ?? undefined,
-          resolvedEffort: opened.resolvedEffort ?? undefined,
-        }),
-      ];
-      return json(opened);
-    }
-    if (path.endsWith("/submission-authority") && method === "GET") {
-      return json({ bridgeEpoch: L5_BRIDGE_EPOCH });
-    }
-    if (path.endsWith("/submit") && method === "POST") {
-      if (definition.kind === "submit-reconcile" && !submitLost) {
-        submitLost = true;
-        throw new TypeError("scenario: browser lost the submit response");
-      }
-      const body = JSON.parse(String(init?.body)) as { requestId: string };
-      return json({
-        requestId: body.requestId,
-        acceptance: "immediate",
-        submittedAt: "2026-07-18T00:00:00Z",
-        vendorCorrelationId: "scenario-vendor",
-        acceptedAt: "2026-07-18T00:00:01Z",
-        detail: null,
-        bridgeEpoch: L5_BRIDGE_EPOCH,
-      });
-    }
-    if (path.endsWith("/reconcile") && method === "POST") {
-      const body = JSON.parse(String(init?.body)) as { requestId: string };
-      return json({
-        requestId: body.requestId,
-        state: "accepted",
-        reconciledAt: "2026-07-18T00:00:02Z",
-        vendorCorrelationId: "scenario-vendor",
-        detail: null,
-        bridgeEpoch: L5_BRIDGE_EPOCH,
-        submissionState: "delivered",
-      });
-    }
-    if (path === "/api/actions/approve" && method === "POST") {
-      return new Response("", { status: 202 });
-    }
-    if (path.endsWith("/submission-status") && method === "POST") {
-      const body = JSON.parse(String(init?.body)) as { requestIds?: string[] };
-      return json({
-        bridgeEpoch: L5_BRIDGE_EPOCH,
-        submissions: (body.requestIds ?? []).map((requestId) => ({
-          requestId,
-          outcome: "not-found",
-        })),
-      });
+    count(authority.probe, method, path, init);
+    for (const route of SCENARIO_ROUTES) {
+      const response = await route(authority, path, method, init);
+      if (response !== null) return response;
     }
     return json(
       { status: "scenario-route-missing", detail: `${method} ${path}` },

@@ -4,7 +4,7 @@ import type {
   ModelCapabilityWire,
 } from "../types/harnessCapabilities";
 import type { HarnessControlState, TerminalOpenKind } from "../types/terminalCatalog";
-import { openTerminalSession } from "./terminal";
+import { openTerminalSession, type OpenedTerminalSession } from "./terminal";
 
 // The launch-flow state machines (260715-FEUI-L3 R4/R5), pure so vitest tables can be
 // exhaustive. LAUNCH RULES encoded here:
@@ -127,6 +127,57 @@ export type OpenOutcome =
 
 const text = (value: unknown): string | null => (typeof value === "string" ? value : null);
 
+function openedOutcome(record: Record<string, unknown>): OpenOutcome {
+  return {
+    path: "opened",
+    session: record.session as string,
+    label: text(record.label),
+    kind: text(record.kind) as TerminalOpenKind | null,
+    harness: text(record.harness),
+    leafKey: text(record.leafKey),
+    controlState: text(record.controlState) as HarnessControlState | null,
+    resolvedModel: text(record.resolvedModel),
+    resolvedEffort: text(record.resolvedEffort),
+  };
+}
+
+function badRequestOutcome(record: Record<string, unknown>, status: string | null): OpenOutcome {
+  const detail = text(record.detail) ?? "HTTP 400";
+  if (status === "launch-selection-invalid") return { path: "launch-selection-invalid", detail };
+  return { path: "open-refused", status: status ?? "bad-request", detail };
+}
+
+function conflictOutcome(record: Record<string, unknown>, status: string | null): OpenOutcome {
+  if (status === "leaf-taken") {
+    return {
+      path: "leaf-taken",
+      leafKey: text(record.leafKey),
+      ownerSession: text(record.session),
+    };
+  }
+  if (status === "launch-selection-conflict" && typeof record.session === "string") {
+    return {
+      path: "launch-selection-conflict",
+      session: record.session,
+      detail: text(record.detail),
+      liveModel: text(record.resolvedModel),
+      liveEffort: text(record.resolvedEffort),
+      controlState: text(record.controlState) as HarnessControlState | null,
+    };
+  }
+  return {
+    path: "outcome-unknown",
+    detail: `unrecognized open response (HTTP 409${status ? `, status ${status}` : ""})`,
+  };
+}
+
+function unknownOutcome(httpStatus: number | null, status: string | null): OpenOutcome {
+  return {
+    path: "outcome-unknown",
+    detail: `unrecognized open response (HTTP ${httpStatus ?? "?"}${status ? `, status ${status}` : ""})`,
+  };
+}
+
 /** httpStatus null = the fetch itself threw (network loss). Pure — exhaustively table-tested. */
 export function classifyOpenResponse(httpStatus: number | null, body: unknown): OpenOutcome {
   if (httpStatus === null) {
@@ -136,46 +187,11 @@ export function classifyOpenResponse(httpStatus: number | null, body: unknown): 
     typeof body === "object" && body !== null ? (body as Record<string, unknown>) : {};
   const status = text(record.status);
   if (httpStatus === 200 && typeof record.session === "string") {
-    return {
-      path: "opened",
-      session: record.session,
-      label: text(record.label),
-      kind: text(record.kind) as TerminalOpenKind | null,
-      harness: text(record.harness),
-      leafKey: text(record.leafKey),
-      controlState: text(record.controlState) as HarnessControlState | null,
-      resolvedModel: text(record.resolvedModel),
-      resolvedEffort: text(record.resolvedEffort),
-    };
+    return openedOutcome(record);
   }
-  if (httpStatus === 400) {
-    const detail = text(record.detail) ?? "HTTP 400";
-    if (status === "launch-selection-invalid") return { path: "launch-selection-invalid", detail };
-    return { path: "open-refused", status: status ?? "bad-request", detail };
-  }
-  if (httpStatus === 409) {
-    if (status === "leaf-taken") {
-      return {
-        path: "leaf-taken",
-        leafKey: text(record.leafKey),
-        ownerSession: text(record.session),
-      };
-    }
-    if (status === "launch-selection-conflict" && typeof record.session === "string") {
-      return {
-        path: "launch-selection-conflict",
-        session: record.session,
-        detail: text(record.detail),
-        liveModel: text(record.resolvedModel),
-        liveEffort: text(record.resolvedEffort),
-        controlState: text(record.controlState) as HarnessControlState | null,
-      };
-    }
-  }
-  return {
-    path: "outcome-unknown",
-    detail: `unrecognized open response (HTTP ${httpStatus}${status ? `, status ${status}` : ""})`,
-  };
+  if (httpStatus === 400) return badRequestOutcome(record, status);
+  if (httpStatus === 409) return conflictOutcome(record, status);
+  return unknownOutcome(httpStatus, status);
 }
 
 export interface OpenHostedSessionRequest {
@@ -184,6 +200,29 @@ export interface OpenHostedSessionRequest {
   label?: string;
   leafKey?: string;
   lifecycleId?: string;
+}
+
+function hostedSessionBody(request: OpenHostedSessionRequest): Record<string, unknown> {
+  return {
+    ...launchSelectionBody(request.selection),
+    ...(request.label ? { label: request.label } : {}),
+    ...(request.leafKey ? { leafKey: request.leafKey } : {}),
+    ...(request.lifecycleId ? { lifecycleId: request.lifecycleId } : {}),
+  };
+}
+
+function openedOutcomeFromSession(session: OpenedTerminalSession): OpenOutcome {
+  return {
+    path: "opened",
+    session: session.id,
+    label: session.label,
+    kind: session.kind,
+    harness: session.harness ?? null,
+    leafKey: session.leafKey ?? null,
+    controlState: session.controlState ?? null,
+    resolvedModel: session.resolvedModel ?? null,
+    resolvedEffort: session.resolvedEffort ?? null,
+  };
 }
 
 /**
@@ -195,26 +234,11 @@ export async function openHostedSession(
   request: OpenHostedSessionRequest,
   base = "",
 ): Promise<OpenOutcome> {
-  const selection = launchSelectionBody(request.selection);
   const result = await openTerminalSession(sessionId, "harness", base, request.harness, {
-    ...selection,
-    ...(request.label ? { label: request.label } : {}),
-    ...(request.leafKey ? { leafKey: request.leafKey } : {}),
-    ...(request.lifecycleId ? { lifecycleId: request.lifecycleId } : {}),
+    ...hostedSessionBody(request),
   });
   if (result.outcome === "opened") {
-    const session = result.session;
-    return {
-      path: "opened",
-      session: session.id,
-      label: session.label,
-      kind: session.kind,
-      harness: session.harness ?? null,
-      leafKey: session.leafKey ?? null,
-      controlState: session.controlState ?? null,
-      resolvedModel: session.resolvedModel ?? null,
-      resolvedEffort: session.resolvedEffort ?? null,
-    };
+    return openedOutcomeFromSession(result.session);
   }
   if (
     (result.failure === "http" || result.failure === "harness") &&

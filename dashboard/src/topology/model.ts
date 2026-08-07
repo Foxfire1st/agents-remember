@@ -114,6 +114,72 @@ export function activeTopologyInputs(
   return { lifecycles: liveLifecycles, enclosures: liveEnclosures };
 }
 
+function collectRepoKeys(
+  enclosures: EnclosureNode[],
+  providers: ProviderNode[],
+): string[] {
+  // Source checkouts (repo ring): every repo with an active enclosure, plus repos a
+  // non-worktree provider covers (the official line still shows even with no active worktree).
+  // Lifecycles no longer contribute repo keys of their own — they live on their enclosure.
+  return [
+    ...new Set([
+      ...enclosures.map((e) => e.repoName),
+      ...providers
+        .filter((provider) => provider.scope !== "worktree")
+        .map((provider) => provider.repoId)
+        .filter((repo): repo is string => Boolean(repo)),
+    ]),
+  ].sort();
+}
+
+function lifecyclesByEnclosure(
+  lifecycles: LifecycleProjection[],
+): Map<string, LifecycleProjection> {
+  // Each active enclosure binds 1:1 to its lifecycle (EnclosureNode.lifecycleId ↔
+  // LifecycleProjection.enclosure), so the enclosure node IS the selectable leaf — it folds in
+  // the lifecycle's id (click-through), status, and phase·state. No separate task rim.
+  const lcByEnclosure = new Map<string, LifecycleProjection>();
+  for (const lifecycle of lifecycles) {
+    if (lifecycle.enclosure) lcByEnclosure.set(lifecycle.enclosure, lifecycle);
+  }
+  return lcByEnclosure;
+}
+
+function groupEnclosuresByRepo(enclosures: EnclosureNode[]): Map<string, EnclosureNode[]> {
+  // Active worktree enclosures spread within their checkout's angular span.
+  const enclByRepo = new Map<string, EnclosureNode[]>();
+  for (const enclosure of [...enclosures].sort((a, b) => a.enclosure.localeCompare(b.enclosure))) {
+    const list = enclByRepo.get(enclosure.repoName) ?? [];
+    list.push(enclosure);
+    enclByRepo.set(enclosure.repoName, list);
+  }
+  return enclByRepo;
+}
+
+function worktreeStatus(
+  lifecycle: LifecycleProjection | undefined,
+  enclosure: EnclosureNode,
+): ConstelStatus {
+  return lifecycle
+    ? lifecycleStatus(lifecycle)
+    : enclosure.cleanup === "pending"
+      ? "warn"
+      : "ok";
+}
+
+function providerParent(
+  provider: ProviderNode,
+  wtIdxByGroup: Map<string, number>,
+  repoIdx: Map<string, number>,
+  ws: number,
+): number {
+  return provider.worktreeGroup
+    ? (wtIdxByGroup.get(groupKey(provider.worktreeGroup)) ?? ws)
+    : provider.repoId
+      ? (repoIdx.get(provider.repoId) ?? ws)
+      : ws;
+}
+
 export function buildTopology(
   lifecycles: LifecycleProjection[],
   enclosures: EnclosureNode[],
@@ -125,19 +191,7 @@ export function buildTopology(
     return nodes.length - 1;
   };
 
-  // Source checkouts (repo ring): every repo with an active enclosure, plus repos a
-  // non-worktree provider covers (the official line still shows even with no active worktree).
-  // Lifecycles no longer contribute repo keys of their own — they live on their enclosure.
-  const repoKeys = [
-    ...new Set([
-      ...enclosures.map((e) => e.repoName),
-      ...providers
-        .filter((provider) => provider.scope !== "worktree")
-        .map((provider) => provider.repoId)
-        .filter((repo): repo is string => Boolean(repo)),
-    ]),
-  ].sort();
-
+  const repoKeys = collectRepoKeys(enclosures, providers);
   const ws = add({
     kind: "ws",
     parent: -1,
@@ -158,23 +212,10 @@ export function buildTopology(
     repoIdx.set(repo, add({ kind: "repo", parent: ws, rf: RF.repo, ang, poff: 0, base: 4.6, status: "ok", label: repo, sub: "checkout", id: null }));
   });
 
-  // Each active enclosure binds 1:1 to its lifecycle (EnclosureNode.lifecycleId ↔
-  // LifecycleProjection.enclosure), so the enclosure node IS the selectable leaf — it folds in
-  // the lifecycle's id (click-through), status, and phase·state. No separate task rim.
-  const lcByEnclosure = new Map<string, LifecycleProjection>();
-  for (const lifecycle of lifecycles) {
-    if (lifecycle.enclosure) lcByEnclosure.set(lifecycle.enclosure, lifecycle);
-  }
-
-  // Active worktree enclosures spread within their checkout's angular span.
+  const lcByEnclosure = lifecyclesByEnclosure(lifecycles);
   const wtIdxByGroup = new Map<string, number>();
   const span = (TAU / nRepos) * 0.74;
-  const enclByRepo = new Map<string, EnclosureNode[]>();
-  for (const enclosure of [...enclosures].sort((a, b) => a.enclosure.localeCompare(b.enclosure))) {
-    const list = enclByRepo.get(enclosure.repoName) ?? [];
-    list.push(enclosure);
-    enclByRepo.set(enclosure.repoName, list);
-  }
+  const enclByRepo = groupEnclosuresByRepo(enclosures);
   for (const [repo, encls] of enclByRepo) {
     const parent = repoIdx.get(repo);
     if (parent == null) continue;
@@ -182,11 +223,7 @@ export function buildTopology(
     encls.forEach((enclosure, wi) => {
       const a = repoAng + (encls.length > 1 ? (wi / (encls.length - 1) - 0.5) * span : 0);
       const lifecycle = lcByEnclosure.get(enclosure.enclosure);
-      const status: ConstelStatus = lifecycle
-        ? lifecycleStatus(lifecycle)
-        : enclosure.cleanup === "pending"
-          ? "warn"
-          : "ok";
+      const status = worktreeStatus(lifecycle, enclosure);
       const wtIdx = add({
         kind: "wt",
         parent,
@@ -209,11 +246,7 @@ export function buildTopology(
   providers.forEach((provider, pi) => {
     const engine = engineState(provider);
     const status: ConstelStatus = engine === "down" ? "crit" : engine === "indexing" ? "idle" : "ok";
-    const parent = provider.worktreeGroup
-      ? (wtIdxByGroup.get(groupKey(provider.worktreeGroup)) ?? ws)
-      : provider.repoId
-        ? (repoIdx.get(provider.repoId) ?? ws)
-        : ws;
+    const parent = providerParent(provider, wtIdxByGroup, repoIdx, ws);
     add({ kind: "prov", parent, rf: 0, ang: 0, poff: (pi / Math.max(providers.length, 1)) * TAU, base: 1.5, status, label: provider.id, sub: `provider · ${provider.state}`, id: null });
   });
 

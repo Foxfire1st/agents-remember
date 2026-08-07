@@ -32,6 +32,8 @@ export type DisplayRow =
       item: ConversationItem;
     };
 
+type LiveThinkingRow = Extract<DisplayRow, { kind: "live-thinking" }>;
+
 export function unknownVendorSummary(item: ConversationItem): string {
   for (const block of item.blocks) {
     if (block.type === "unknown-vendor") return `${block.vendorType}: ${block.safeSummary}`;
@@ -61,87 +63,130 @@ function liveThinkingKey(item: ConversationItem): string {
   return `${turn}|${agent}`;
 }
 
+function liveKeyFor(item: ConversationItem): string | null {
+  if (item.kind === "thinking" || item.kind === "turn-result") return liveThinkingKey(item);
+  return null;
+}
+
+function handleLiveOpen(
+  item: ConversationItem,
+  liveKey: string,
+  openLiveThinking: Set<string>,
+  openLiveRow: Map<string, LiveThinkingRow>,
+  rows: DisplayRow[],
+): boolean {
+  if (!(item.kind === "thinking" && isLiveEmptyThinking(item))) return false;
+  if (!openLiveThinking.has(liveKey)) {
+    openLiveThinking.add(liveKey);
+    const liveRow: LiveThinkingRow = {
+      kind: "live-thinking",
+      key: `live-thinking:${liveKey}`,
+      ordinal: item.globalOrdinal,
+      turnId: item.turnId ?? null,
+      agentId: item.agent?.agentId ?? null,
+      item,
+    };
+    rows.push(liveRow);
+    openLiveRow.set(liveKey, liveRow);
+  }
+  return true;
+}
+
+function handleLiveUpdate(
+  item: ConversationItem,
+  liveKey: string,
+  openLiveThinking: Set<string>,
+  openLiveRow: Map<string, LiveThinkingRow>,
+): boolean {
+  if (
+    !(
+      item.kind === "thinking" &&
+      LIVE_THINKING_PHASES.has(item.phase) &&
+      !isLiveEmptyThinking(item) &&
+      openLiveThinking.has(liveKey)
+    )
+  ) {
+    return false;
+  }
+  const liveRow = openLiveRow.get(liveKey);
+  if (liveRow !== undefined) {
+    liveRow.item = item;
+    liveRow.ordinal = item.globalOrdinal;
+  }
+  return true;
+}
+
+function handleLiveFinalize(
+  item: ConversationItem,
+  liveKey: string,
+  openLiveThinking: Set<string>,
+  openLiveRow: Map<string, LiveThinkingRow>,
+  rows: DisplayRow[],
+): void {
+  if (
+    item.kind !== "turn-result" &&
+    !(item.kind === "thinking" && !LIVE_THINKING_PHASES.has(item.phase))
+  ) {
+    return;
+  }
+  openLiveThinking.delete(liveKey);
+  const liveRow = openLiveRow.get(liveKey);
+  if (liveRow !== undefined) {
+    const rowIndex = rows.indexOf(liveRow);
+    if (rowIndex !== -1) {
+      rows.splice(rowIndex, 1);
+    }
+    openLiveRow.delete(liveKey);
+  }
+}
+
+function unknownRunFor(
+  source: readonly ConversationItem[],
+  index: number,
+): { end: number; items: ConversationItem[]; summary: string } | null {
+  const first = source[index];
+  if (first.kind !== "unknown-vendor") return null;
+  const summary = unknownVendorSummary(first);
+  let end = index + 1;
+  while (
+    end < source.length &&
+    source[end].kind === "unknown-vendor" &&
+    unknownVendorSummary(source[end]) === summary
+  ) {
+    end += 1;
+  }
+  const run = source.slice(index, end);
+  if (run.length < MIN_RUN) return null;
+  return { end, items: run, summary };
+}
+
 export function groupDisplayRows(items: readonly ConversationItem[]): DisplayRow[] {
   const rows: DisplayRow[] = [];
   const openLiveThinking = new Set<string>();
-  const openLiveRowIndex = new Map<string, number>();
-  let index = 0;
-  while (index < items.length) {
+  // Stable row-object references, not array indices: finalizing an earlier live row splices
+  // the array and shifts later rows, so an index would silently point at the wrong row.
+  const openLiveRow = new Map<string, LiveThinkingRow>();
+  for (let index = 0; index < items.length; index += 1) {
     const item = items[index];
-    const liveKey =
-      item.kind === "thinking" || item.kind === "turn-result" ? liveThinkingKey(item) : null;
-    if (liveKey !== null && item.kind === "thinking" && isLiveEmptyThinking(item)) {
-      if (!openLiveThinking.has(liveKey)) {
-        openLiveThinking.add(liveKey);
-        openLiveRowIndex.set(liveKey, rows.length);
-        rows.push({
-          kind: "live-thinking",
-          key: `live-thinking:${liveKey}`,
-          ordinal: item.globalOrdinal,
-          turnId: item.turnId ?? null,
-          agentId: item.agent?.agentId ?? null,
-          item,
-        });
-      }
-      index += 1;
+    const liveKey = liveKeyFor(item);
+    if (liveKey !== null) {
+      if (handleLiveOpen(item, liveKey, openLiveThinking, openLiveRow, rows)) continue;
+      if (handleLiveUpdate(item, liveKey, openLiveThinking, openLiveRow)) continue;
+      handleLiveFinalize(item, liveKey, openLiveThinking, openLiveRow, rows);
+    }
+    const collapsed = unknownRunFor(items, index);
+    if (collapsed !== null) {
+      rows.push({
+        kind: "unknown-run",
+        key: `unknown-run-${collapsed.items[0].itemId}`,
+        items: collapsed.items,
+        summary: collapsed.summary,
+        ordinal: collapsed.items[0].globalOrdinal,
+      });
+      index = collapsed.end - 1;
       continue;
     }
-    if (liveKey !== null) {
-      // A live-phase reasoning item carrying real content is still the active turn's thinking:
-      // it updates the already-open live row in place (one stable animated row, R15) rather than
-      // rendering as a normal row next to the still-open indicator (two rows, one turn -- F3).
-      if (
-        item.kind === "thinking" &&
-        LIVE_THINKING_PHASES.has(item.phase) &&
-        !isLiveEmptyThinking(item) &&
-        openLiveThinking.has(liveKey)
-      ) {
-        const rowIndex = openLiveRowIndex.get(liveKey);
-        const liveRow = rowIndex !== undefined ? rows[rowIndex] : undefined;
-        if (liveRow !== undefined && liveRow.kind === "live-thinking") {
-          liveRow.item = item;
-          liveRow.ordinal = item.globalOrdinal;
-        }
-        index += 1;
-        continue;
-      }
-      // A completed/failed/interrupted reasoning item, or the turn's result, finalizes the
-      // live indicator exactly once -- the ephemeral indicator row is REMOVED, while the
-      // substantive reasoning item itself still renders as ordinary transcript content.
-      if (item.kind === "turn-result" || (item.kind === "thinking" && !LIVE_THINKING_PHASES.has(item.phase))) {
-        openLiveThinking.delete(liveKey);
-        const rowIndex = openLiveRowIndex.get(liveKey);
-        if (rowIndex !== undefined) {
-          rows.splice(rowIndex, 1);
-          openLiveRowIndex.delete(liveKey);
-        }
-      }
-    }
-    if (item.kind === "unknown-vendor") {
-      const summary = unknownVendorSummary(item);
-      let end = index + 1;
-      while (
-        end < items.length &&
-        items[end].kind === "unknown-vendor" &&
-        unknownVendorSummary(items[end]) === summary
-      ) {
-        end += 1;
-      }
-      const run = items.slice(index, end);
-      if (run.length >= MIN_RUN) {
-        rows.push({
-          kind: "unknown-run",
-          key: `unknown-run-${run[0].itemId}`,
-          items: run,
-          summary,
-          ordinal: run[0].globalOrdinal,
-        });
-        index = end;
-        continue;
-      }
-    }
     rows.push({ kind: "item", key: item.itemId, item });
-    index += 1;
   }
   return rows;
 }

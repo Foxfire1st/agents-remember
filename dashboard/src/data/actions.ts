@@ -46,6 +46,29 @@ export interface GateDecisionDetailedResult {
   detail?: string;
 }
 
+function gateDecisionBody(options: GateDecisionOptions): Record<string, string> {
+  const body: Record<string, string> = {};
+  if (options.gateId) body.gateId = options.gateId;
+  if (options.note) body.note = options.note;
+  return body;
+}
+
+function classifyGateConflict(raw: string): {
+  status: "stale-gate" | "no-open-gate";
+  detail: string;
+} {
+  let payload: { status?: string } | null = null;
+  try {
+    payload = JSON.parse(raw) as { status?: string };
+  } catch {
+    payload = null;
+  }
+  return {
+    status: payload?.status === "stale-gate" ? "stale-gate" : "no-open-gate",
+    detail: raw,
+  };
+}
+
 export async function postGateDecisionDetailed(
   lifecycleId: string | null | undefined,
   verb: string,
@@ -54,8 +77,7 @@ export async function postGateDecisionDetailed(
   try {
     const body: Record<string, string> = {};
     if (lifecycleId) body.target = lifecycleId;
-    if (options.gateId) body.gateId = options.gateId;
-    if (options.note) body.note = options.note;
+    Object.assign(body, gateDecisionBody(options));
     const res = await fetch(`/api/actions/${verb}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -64,15 +86,10 @@ export async function postGateDecisionDetailed(
     if (res.status === 202) return { status: "recorded" };
     const raw = await res.text().catch(() => "");
     if (res.status === 409) {
-      let payload: { status?: string } | null = null;
-      try {
-        payload = JSON.parse(raw) as { status?: string };
-      } catch {
-        payload = null;
-      }
+      const conflict = classifyGateConflict(raw);
       return {
-        status: payload?.status === "stale-gate" ? "stale-gate" : "no-open-gate",
-        detail: raw || `HTTP ${res.status}`,
+        status: conflict.status,
+        detail: conflict.detail || `HTTP ${res.status}`,
       };
     }
     return { status: "error", detail: raw || `HTTP ${res.status}` };

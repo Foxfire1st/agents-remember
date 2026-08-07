@@ -37,7 +37,7 @@ import {
   roomStage,
   roomZone,
   sectionLabel,
-} from "./engine-room/engineRoomStyles";
+} from "./engine-room/styles";
 
 const sizing = css({ flex: "1" });
 const engineChip = css({ display: "flex", alignItems: "center", gap: "0.35rem" });

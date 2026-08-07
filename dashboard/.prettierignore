@@ -1,0 +1,6 @@
+dist
+node_modules
+styled-system
+styled-system-studio
+coverage
+package-lock.json

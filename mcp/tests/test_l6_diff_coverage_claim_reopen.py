@@ -21,6 +21,7 @@ from agents_remember.memory_quality.style.citations.claim_reopen import (
     SourceViews,
     anchor_change,
     dependency_changes,
+    local_changes,
 )
 
 
@@ -137,6 +138,50 @@ class TestAnchorChange:
         )
         assert surfaced == [] and invalid == []
         assert changed and "changed structurally" in changed[0]
+
+
+class TestLocalChangesNewFile:
+    """Whole-new-file sources follow the same currency rule as added constructs."""
+
+    def test_new_file_once_resolving_in_range_surfaces_report_only(self) -> None:
+        changed, surfaced, invalid = local_changes(
+            (model.Anchor(kind=model.SYMBOL, text="later"),),
+            [_source(current=["def later():\n", "    return 1\n"], historical=None)],
+            cast(SourceViews, FakeViews([], [_candidate("new")])),
+            dependency_sources=False,
+        )
+        assert changed == [] and invalid == []
+        assert surfaced and "did not exist" in surfaced[0]
+
+    def test_new_file_once_resolving_out_of_range_is_enforced(self) -> None:
+        changed, surfaced, invalid = local_changes(
+            (model.Anchor(kind=model.SYMBOL, text="later"),),
+            [_source(current=["def later():\n", "    return 1\n"], historical=None)],
+            cast(SourceViews, FakeViews([], [_candidate("new", start=5)])),
+            dependency_sources=False,
+        )
+        assert surfaced == [] and invalid == []
+        assert changed and "did not exist" in changed[0]
+
+    def test_new_file_ambiguous_now_is_invalid(self) -> None:
+        changed, surfaced, invalid = local_changes(
+            (model.Anchor(kind=model.SYMBOL, text="later"),),
+            [_source(current=["later = 1\n", "def later():\n"], historical=None)],
+            cast(SourceViews, FakeViews([], [_candidate("a"), _candidate("b", start=2)])),
+            dependency_sources=False,
+        )
+        assert changed == [] and surfaced == []
+        assert invalid and "no exact candidate is unique" in invalid[0]
+
+    def test_new_file_absent_from_the_working_tree_is_enforced(self) -> None:
+        changed, surfaced, invalid = local_changes(
+            (model.Anchor(kind=model.SYMBOL, text="later"),),
+            [_source(current=None, historical=None)],
+            cast(SourceViews, FakeViews([], [])),
+            dependency_sources=False,
+        )
+        assert surfaced == [] and invalid == []
+        assert changed and "does not exist in the working tree" in changed[0]
 
 
 class TestDependencyChanges:

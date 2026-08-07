@@ -520,14 +520,36 @@ def dashboard_scope_line(project_root: Path, step: str) -> str:
     package_json = dashboard / "package.json"
     package = read_json_object(package_json, "dashboard package")
     scripts = package.get("scripts")
-    if not isinstance(scripts, dict) or step not in scripts:
+    script_step = {"coverage": "test:coverage", "diff-coverage": "coverage:diff"}.get(step, step)
+    if not isinstance(scripts, dict) or script_step not in scripts:
         raise ScopeReportingError(
-            f"dashboard package.json has no {step!r} script; restore the ordinary project command"
+            f"dashboard package.json has no {script_step!r} script; restore the ordinary project command"
         )
     if step == "lint":
         return dashboard_lint_scope_line(dashboard)
     if step == "test":
         return dashboard_test_scope_line(dashboard, frontend_files(dashboard))
+    if step in ("coverage", "diff-coverage"):
+        all_frontend = frontend_files(dashboard)
+        return scope_line(
+            f"dashboard-{step}",
+            (
+                "Vitest v8 coverage over the dashboard source tree; "
+                "diff-coverage intersects the changed-lines set with the coverage JSON"
+            ),
+            (
+                "dashboard/package.json test:coverage / coverage:diff + "
+                "vitest.config.ts coverage block"
+            ),
+            f"units={len(all_frontend)} frontend source files",
+        )
+    if step == "e2e":
+        return scope_line(
+            "dashboard-e2e",
+            "Playwright primary config against the built dashboard (/dev/bench fixture gallery)",
+            "dashboard/package.json e2e='playwright test' + playwright.config.ts",
+            "1 Playwright config; built dashboard via 'npm run build'",
+        )
     projects, inputs = tsconfig_inputs(dashboard)
     if step == "typecheck":
         return dashboard_typecheck_scope_line(projects, inputs)
@@ -552,7 +574,11 @@ def build_parser() -> argparse.ArgumentParser:
     generated.add_argument("--name", required=True)
     generated.add_argument("--script", type=Path, required=True)
     dashboard = subparsers.add_parser("dashboard")
-    dashboard.add_argument("--step", choices=("lint", "typecheck", "test", "build"), required=True)
+    dashboard.add_argument(
+        "--step",
+        choices=("lint", "typecheck", "test", "build", "coverage", "diff-coverage", "e2e"),
+        required=True,
+    )
     randomized = subparsers.add_parser("randomized-pytest")
     randomized.add_argument("--seed", required=True)
     subparsers.add_parser("untracked")

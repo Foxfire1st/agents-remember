@@ -238,7 +238,8 @@ class CodeProvenanceTests(ChangeDetectionCase):
         )
         self.assertEqual(result["findingCount"], 4)
 
-    def test_a_source_absent_at_the_stamp_is_invalid_provenance(self) -> None:
+    def test_a_new_source_surfaces_report_only_when_current(self) -> None:
+        """Whole new file added after the stamp: once-resolving-in-range is report-only."""
         self.tree.code_file("README.md", "baseline\n")
         baseline = self.tree.commit(self.tree.code, "baseline")
         self.tree.code_file("pkg/later.py", "def later():\n    return 1\n")
@@ -250,8 +251,64 @@ class CodeProvenanceTests(ChangeDetectionCase):
 
         result = self.tree.run()
 
-        self.assertEqual(self.codes(result), ["citation_provenance_invalid"])
+        self.assert_clean(result)
+        surfaced = result["surfacedFindings"][0]  # type: ignore[index]
+        self.assertEqual(surfaced["code"], "citation_claim_reopened")  # type: ignore[index]
+        self.assertEqual(surfaced["severity"], "warning")  # type: ignore[index]
+        self.assertIn("did not exist", surfaced["message"])  # type: ignore[index]
+
+    def test_a_new_source_is_enforced_when_stale(self) -> None:
+        """Whole new file whose anchor resolves once but outside the cited range: hard."""
+        self.tree.code_file("README.md", "baseline\n")
+        baseline = self.tree.commit(self.tree.code, "baseline")
+        self.tree.code_file("pkg/later.py", "def later():\n    return 1\n")
+        self.tree.card(
+            "pkg/later.py",
+            ["| Added later. | `later` | pkg/later.py:2-2 |"],
+            last_verified=baseline,
+        )
+
+        result = self.tree.run()
+
+        self.assertEqual(self.codes(result), ["citation_claim_reopened"])
         self.assertIn("did not exist", result["findings"][0]["message"])  # type: ignore[index]
+
+    def test_a_new_source_is_invalid_when_ambiguous(self) -> None:
+        """Whole new file whose anchor resolves more than once now: hard invalid."""
+        self.tree.code_file("README.md", "baseline\n")
+        baseline = self.tree.commit(self.tree.code, "baseline")
+        self.tree.code_file("pkg/later.py", "later = 1\n\n\ndef later():\n    return 2\n")
+        self.tree.card(
+            "pkg/later.py",
+            ["| Added later. | `later` | pkg/later.py:1-4 |"],
+            last_verified=baseline,
+        )
+
+        result = self.tree.run()
+
+        self.assertEqual(self.codes(result), ["citation_provenance_invalid"])
+        self.assertIn(
+            "no exact candidate is unique",
+            result["findings"][0]["message"],  # type: ignore[index]
+        )
+
+    def test_a_new_source_is_invalid_when_absent_from_the_working_tree(self) -> None:
+        """Whole new file that never existed at the stamp and is gone now: hard invalid."""
+        self.tree.code_file("README.md", "baseline\n")
+        baseline = self.tree.commit(self.tree.code, "baseline")
+        self.tree.card(
+            "pkg/later.py",
+            ["| Added later. | `later` | pkg/later.py:1-2 |"],
+            last_verified=baseline,
+        )
+
+        result = self.tree.run()
+
+        self.assertEqual(self.codes(result), ["citation_provenance_invalid"])
+        self.assertIn(
+            "cannot be compared with its verification provenance",
+            result["findings"][0]["message"],  # type: ignore[index]
+        )
 
     def test_a_construct_added_after_the_stamp_surfaces_when_current(self) -> None:
         """File existed at the stamp, construct added later: the absent-at-stamp change rule."""
@@ -994,7 +1051,15 @@ class ChangeRoutingTests(ChangeDetectionCase):
 
                 with mock.patch.object(claim_change_router, "run_git", new=observed):
                     result = self.tree.run()
-                self.assertEqual(self.codes(result), [claim_reopen.INVALID])
+                # The new-file rule (developer correction): an untracked/ignored source that
+                # did not exist at the stamp and resolves exactly once inside the cited range
+                # is the report-only surface -- never "proven unchanged", but not invalid.
+                self.assertEqual(self.codes(result), [])
+                surfaced = result["surfacedFindings"]
+                assert isinstance(surfaced, list)
+                self.assertEqual(len(surfaced), 1)
+                self.assertEqual(surfaced[0]["code"], claim_reopen.REOPENED)
+                self.assertIn("did not exist", surfaced[0]["message"])
                 routing = result["changeRouting"]
                 self.assertEqual(routing["localClaimsSemanticRequired"], 1)  # type: ignore[index]
                 self.assertEqual(routing["localClaimsProvenUnchanged"], 0)  # type: ignore[index]

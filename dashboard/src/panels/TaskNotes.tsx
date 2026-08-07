@@ -66,6 +66,79 @@ const noteRow = css({
 const noteMeta = css({ color: "muted", fontSize: "0.72rem" });
 const listCapHint = css({ color: "muted", fontSize: "0.72rem" });
 
+function ReferenceList({
+  references,
+  notePaths,
+  open,
+}: {
+  references: string[];
+  notePaths: string[];
+  open: (path: string) => void;
+}) {
+  return (
+    <section className={section}>
+      <h3 className={heading}>References</h3>
+      <ul className={bullets}>
+        {references.map((reference, index) => {
+          const target = resolveNoteReference(reference, notePaths);
+          return (
+            <li key={reference}>
+              {target ? (
+                <button
+                  type="button"
+                  className={refLink}
+                  onClick={() => open(target)}
+                  data-testid={`note-ref-${index + 1}`}
+                  title={`open notes/${target}`}
+                >
+                  <Markdown inline>{reference}</Markdown>
+                </button>
+              ) : (
+                <Markdown inline>{reference}</Markdown>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+    </section>
+  );
+}
+
+function SeriesNotesList({
+  notes,
+  truncated,
+  open,
+}: {
+  notes: NotesListing["notes"];
+  truncated: boolean;
+  open: (path: string) => void;
+}) {
+  return (
+    <section className={section}>
+      <h3 className={heading}>Series notes</h3>
+      <ul className={noteList}>
+        {notes.map((note, index) => (
+          <li key={note.path}>
+            <button
+              type="button"
+              className={noteRow}
+              onClick={() => open(note.path)}
+              data-testid={`note-open-${index + 1}`}
+              title={`open notes/${note.path}`}
+            >
+              <span>{note.path}</span>
+              <span className={noteMeta}>{note.size.toLocaleString()} B</span>
+            </button>
+          </li>
+        ))}
+      </ul>
+      {truncated ? (
+        <span className={listCapHint}>deeper subfolders exist but are beyond the list cap</span>
+      ) : null}
+    </section>
+  );
+}
+
 // The series' notes surface + the doc's reference list, sharing one notes listing so a resolved
 // reference and a list row both open the reader on the right note. An unreachable notes API (or a
 // series without a notes/ folder — the server answers an empty list) simply renders no notes section;
@@ -106,55 +179,10 @@ export function TaskNotes({
   return (
     <>
       {references.length > 0 ? (
-        <section className={section}>
-          <h3 className={heading}>References</h3>
-          <ul className={bullets}>
-            {references.map((reference, index) => {
-              const target = resolveNoteReference(reference, notePaths);
-              return (
-                <li key={reference}>
-                  {target ? (
-                    <button
-                      type="button"
-                      className={refLink}
-                      onClick={() => open(target)}
-                      data-testid={`note-ref-${index + 1}`}
-                      title={`open notes/${target}`}
-                    >
-                      <Markdown inline>{reference}</Markdown>
-                    </button>
-                  ) : (
-                    <Markdown inline>{reference}</Markdown>
-                  )}
-                </li>
-              );
-            })}
-          </ul>
-        </section>
+        <ReferenceList references={references} notePaths={notePaths} open={open} />
       ) : null}
       {notes.length > 0 ? (
-        <section className={section}>
-          <h3 className={heading}>Series notes</h3>
-          <ul className={noteList}>
-            {notes.map((note, index) => (
-              <li key={note.path}>
-                <button
-                  type="button"
-                  className={noteRow}
-                  onClick={() => open(note.path)}
-                  data-testid={`note-open-${index + 1}`}
-                  title={`open notes/${note.path}`}
-                >
-                  <span>{note.path}</span>
-                  <span className={noteMeta}>{note.size.toLocaleString()} B</span>
-                </button>
-              </li>
-            ))}
-          </ul>
-          {listing?.truncated ? (
-            <span className={listCapHint}>deeper subfolders exist but are beyond the list cap</span>
-          ) : null}
-        </section>
+        <SeriesNotesList notes={notes} truncated={listing?.truncated === true} open={open} />
       ) : null}
     </>
   );

@@ -23,6 +23,7 @@ def register_benchmark_tools(server: FastMCP, config: McpRuntimeConfig) -> None:
         benchmarks_root: str | None = None,
         dry_run: bool = True,
         force_clone: bool = False,
+        *,
         skill_exposure_mode: str = "copy",
         provider_timeout: int = 1800,
     ) -> dict[str, Any]:
@@ -49,6 +50,7 @@ def register_benchmark_tools(server: FastMCP, config: McpRuntimeConfig) -> None:
         benchmarks_root: str | None = None,
         prompt: str | None = None,
         variant: str | None = None,
+        *,
         repetitions: int | None = None,
         jobs: int | None = None,
         dry_run: bool = True,

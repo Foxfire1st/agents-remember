@@ -144,6 +144,7 @@ def _register_memory_carryover_tools(server: FastMCP, config: McpRuntimeConfig) 
         official_code_ref: str,
         source_code_ref: str,
         old_base: str,
+        *,
         replace_existing: bool = False,
     ) -> dict[str, Any]:
         """Plan (non-mutating) carrying richer onboarding from a source/feature branch into official
@@ -167,6 +168,7 @@ def _register_memory_carryover_tools(server: FastMCP, config: McpRuntimeConfig) 
         official_code_ref: str,
         source_code_ref: str,
         old_base: str,
+        *,
         intent_note: str,
         replace_existing: bool = False,
         include_review_required: list[str] | None = None,

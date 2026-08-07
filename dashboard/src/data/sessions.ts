@@ -268,96 +268,131 @@ function nextSessionLabel(prefix: string, sessions: OpenSession[]): string {
   return `${prefix} ${ordinal}`;
 }
 
-export const sessionStore = createStore<SessionState>((set) => ({
-  sessions: [],
-  activeId: null,
-  count: 0,
-  add: (prefix, id, lifecycleId) =>
-    set((state) => {
-      const next = {
-        id,
-        label: nextSessionLabel(prefix, state.sessions),
-        ...(lifecycleId ? { lifecycleId } : {}),
-      };
-      const sessions = [
-        ...state.sessions.map((session) =>
-          lifecycleId && session.lifecycleId === lifecycleId
-            ? clearLifecycle(session)
-            : session,
-        ),
-        next,
-      ];
-      return {
-        count: trackedOrdinal(sessions),
-        sessions,
-        activeId: id,
-      };
-    }),
-  upsert: (session, activate = true) =>
-    set((state) => {
-      const nextSessions = [
-        ...state.sessions
-          .filter((current) => current.id !== session.id)
-          .map((current) =>
-            session.lifecycleId && current.lifecycleId === session.lifecycleId
-              ? clearLifecycle(current)
-              : current,
-        ),
-        session,
-      ];
-      return {
-        sessions: nextSessions,
-        count: trackedOrdinal(nextSessions),
-        activeId: activate ? session.id : state.activeId,
-      };
-    }),
-  hydrate: (sessions, preferredActiveId) =>
-    set((state) => {
-      const live = sessions.filter(isLiveSession);
-      const preferred = preferredActiveId && live.some((session) => session.id === preferredActiveId);
-      const retainedActive = state.activeId && live.some((session) => session.id === state.activeId);
-      const activeId = preferred
-        ? preferredActiveId
-        : retainedActive
-          ? state.activeId
-          : (live[0]?.id ?? sessions[0]?.id ?? null);
-      // Reconcile against the current rows instead of replacing them wholesale. The
-      // 2500 ms catalog poll is authoritative but usually byte-identical between beats; the old
-      // wholesale swap gave every row a fresh reference each beat, so the always-mounted (hidden)
-      // SessionsView re-rendered per beat (~150–200 ms measured on the Operations view). Reusing
-      // the previous object for each content-identical row keeps selector/memo identity, and a
-      // beat that changed NOTHING returns the same state — zustand then notifies nobody and an
-      // unchanged payload produces zero UI work. Semantics are untouched: any row whose content
-      // actually diverged from the catalog (incl. an unconfirmed seat-event pre-apply) is still
-      // replaced on the very next beat.
-      let rowsChanged = state.sessions.length !== sessions.length;
-      const nextSessions = sessions.map((session, index) => {
-        const current = state.sessions[index];
-        if (current?.id === session.id && sameSessionRow(current, session)) {
-          return current;
-        }
-        rowsChanged = true;
-        return session;
-      });
-      const count = trackedOrdinal(nextSessions);
-      if (!rowsChanged && state.activeId === activeId && state.count === count) return state;
-      return {
-        sessions: nextSessions,
-        count,
-        activeId,
-      };
-    }),
-  close: (id) =>
-    set((state) => {
+type SessionStoreSet = (fn: (state: SessionState) => Partial<SessionState>) => void;
+
+function addSessionState(set: SessionStoreSet): Pick<SessionState, "add"> {
+  return {
+    add: (prefix, id, lifecycleId) =>
+      set((state) => {
+        const next = {
+          id,
+          label: nextSessionLabel(prefix, state.sessions),
+          ...(lifecycleId ? { lifecycleId } : {}),
+        };
+        const sessions = [
+          ...state.sessions.map((session) =>
+            lifecycleId && session.lifecycleId === lifecycleId
+              ? clearLifecycle(session)
+              : session,
+          ),
+          next,
+        ];
+        return {
+          count: trackedOrdinal(sessions),
+          sessions,
+          activeId: id,
+        };
+      }),
+  };
+}
+
+function upsertSessionState(set: SessionStoreSet): Pick<SessionState, "upsert"> {
+  return {
+    upsert: (session, activate = true) =>
+      set((state) => {
+        const nextSessions = [
+          ...state.sessions
+            .filter((current) => current.id !== session.id)
+            .map((current) =>
+              session.lifecycleId && current.lifecycleId === session.lifecycleId
+                ? clearLifecycle(current)
+                : current,
+            ),
+          session,
+        ];
+        return {
+          sessions: nextSessions,
+          count: trackedOrdinal(nextSessions),
+          activeId: activate ? session.id : state.activeId,
+        };
+      }),
+  };
+}
+
+function resolveHydratedActiveId(
+  live: OpenSession[],
+  sessions: OpenSession[],
+  preferredActiveId: string | null | undefined,
+  state: SessionState,
+): string | null {
+  if (preferredActiveId && live.some((session) => session.id === preferredActiveId)) {
+    return preferredActiveId;
+  }
+  if (state.activeId && live.some((session) => session.id === state.activeId)) {
+    return state.activeId;
+  }
+  return live[0]?.id ?? sessions[0]?.id ?? null;
+}
+
+// Reconcile against the current rows instead of replacing them wholesale. The
+// 2500 ms catalog poll is authoritative but usually byte-identical between beats; the old
+// wholesale swap gave every row a fresh reference each beat, so the always-mounted (hidden)
+// SessionsView re-rendered per beat (~150–200 ms measured on the Operations view). Reusing
+// the previous object for each content-identical row keeps selector/memo identity, and a
+// beat that changed NOTHING returns the same state — zustand then notifies nobody and an
+// unchanged payload produces zero UI work. Semantics are untouched: any row whose content
+// actually diverged from the catalog (incl. an unconfirmed seat-event pre-apply) is still
+// replaced on the very next beat.
+function reconcileHydrated(
+  state: SessionState,
+  sessions: OpenSession[],
+  preferredActiveId: string | null | undefined,
+): Partial<SessionState> {
+  const live = sessions.filter(isLiveSession);
+  const activeId = resolveHydratedActiveId(live, sessions, preferredActiveId, state);
+  let rowsChanged = state.sessions.length !== sessions.length;
+  const nextSessions = sessions.map((session, index) => {
+    const current = state.sessions[index];
+    if (current?.id === session.id && sameSessionRow(current, session)) {
+      return current;
+    }
+    rowsChanged = true;
+    return session;
+  });
+  const count = trackedOrdinal(nextSessions);
+  if (!rowsChanged && state.activeId === activeId && state.count === count) return state;
+  return {
+    sessions: nextSessions,
+    count,
+    activeId,
+  };
+}
+
+function hydrateSessionState(set: SessionStoreSet): Pick<SessionState, "hydrate"> {
+  return {
+    hydrate: (sessions, preferredActiveId) =>
+      set((state) => reconcileHydrated(state, sessions, preferredActiveId)),
+  };
+}
+
+function closeSessionState(set: SessionStoreSet): Pick<SessionState, "close"> {
+  return {
+    close: (id) =>
+      set((state) => {
       const sessions = state.sessions.filter((session) => session.id !== id);
       return {
         sessions,
         count: trackedOrdinal(sessions),
         activeId: state.activeId === id ? null : state.activeId,
       };
-    }),
-  setStatus: (id, status) =>
-    set((state) => {
+      }),
+  };
+}
+
+function statusSessionState(set: SessionStoreSet): Pick<SessionState, "setStatus"> {
+  return {
+    setStatus: (id, status) =>
+      set((state) => {
       const sessions = state.sessions.map((session) =>
         session.id === id ? { ...session, status } : session,
       );
@@ -369,26 +404,40 @@ export const sessionStore = createStore<SessionState>((set) => ({
             ? (state.sessions.find((session) => session.id !== id && isLiveSession(session))?.id ?? null)
             : state.activeId,
       };
-    }),
-  patch: (id, partial) =>
-    set((state) => ({
-      sessions: state.sessions.map((session) =>
-        session.id === id ? { ...session, ...partial } : session,
-      ),
-    })),
-  setActive: (id) => set({ activeId: id }),
-  setLifecycle: (id, lifecycleId) =>
-    set((state) => ({
-      sessions: state.sessions.map((session) => {
-        if (session.id === id) return lifecycleId ? { ...session, lifecycleId } : clearLifecycle(session);
-        if (lifecycleId && session.lifecycleId === lifecycleId) {
-          return clearLifecycle(session);
-        }
-        return session;
       }),
-    })),
-  setLeaf: (id, leafKey) =>
-    set((state) => {
+  };
+}
+
+function patchSessionState(set: SessionStoreSet): Pick<SessionState, "patch"> {
+  return {
+    patch: (id, partial) =>
+      set((state) => ({
+        sessions: state.sessions.map((session) =>
+          session.id === id ? { ...session, ...partial } : session,
+        ),
+      })),
+  };
+}
+
+function lifecycleSessionState(set: SessionStoreSet): Pick<SessionState, "setLifecycle"> {
+  return {
+    setLifecycle: (id, lifecycleId) =>
+      set((state) => ({
+        sessions: state.sessions.map((session) => {
+          if (session.id === id) return lifecycleId ? { ...session, lifecycleId } : clearLifecycle(session);
+          if (lifecycleId && session.lifecycleId === lifecycleId) {
+            return clearLifecycle(session);
+          }
+          return session;
+        }),
+      })),
+  };
+}
+
+function leafSessionState(set: SessionStoreSet): Pick<SessionState, "setLeaf"> {
+  return {
+    setLeaf: (id, leafKey) =>
+      set((state) => {
       if (leafKey) {
         // Advisory guard, scoped to the binding session's role (chat vs. terminal): a live session of
         // the SAME role already owning this leaf wins — the new bind is a no-op. A chat and a terminal
@@ -412,9 +461,14 @@ export const sessionStore = createStore<SessionState>((set) => ({
             : session,
         ),
       };
-    }),
-  applyLeafAssignment: (id, leafKey, seatRole) =>
-    set((state) => {
+      }),
+  };
+}
+
+function assignmentSessionState(set: SessionStoreSet): Pick<SessionState, "applyLeafAssignment"> {
+  return {
+    applyLeafAssignment: (id, leafKey, seatRole) =>
+      set((state) => {
       const target = state.sessions.find((session) => session.id === id);
       if (!target) return state;
       return {
@@ -433,7 +487,24 @@ export const sessionStore = createStore<SessionState>((set) => ({
           return session;
         }),
       };
-    }),
+      }),
+  };
+}
+
+export const sessionStore = createStore<SessionState>((set) => ({
+  sessions: [],
+  activeId: null,
+  count: 0,
+  ...addSessionState(set),
+  ...upsertSessionState(set),
+  ...hydrateSessionState(set),
+  ...closeSessionState(set),
+  ...statusSessionState(set),
+  ...patchSessionState(set),
+  setActive: (id) => set({ activeId: id }),
+  ...lifecycleSessionState(set),
+  ...leafSessionState(set),
+  ...assignmentSessionState(set),
 }));
 
 export const useSessions = <T>(selector: (state: SessionState) => T): T =>
@@ -485,53 +556,68 @@ export function findSessionForLeaf(leafKey: string, role?: SessionRole): OpenSes
     );
 }
 
+// The optional catalog→store field map: every field copied only when the server supplied it,
+// except the two counters that may legitimately be zero/empty and therefore use `!== undefined`.
+const OPTIONAL_SESSION_FIELDS: {
+  from: keyof TerminalSessionInfo;
+  to: keyof OpenSession;
+  keepWhenFalsy?: boolean;
+}[] = [
+  { from: "harness", to: "harness" },
+  { from: "lifecycleId", to: "lifecycleId" },
+  { from: "leafKey", to: "leafKey" },
+  { from: "spawnRole", to: "spawnRole" },
+  { from: "seatRole", to: "seatRole" },
+  { from: "createdAt", to: "createdAt" },
+  { from: "landedAt", to: "landedAt" },
+  { from: "landedReason", to: "landedReason" },
+  { from: "landedEdge", to: "landedEdge" },
+  { from: "retiredAt", to: "retiredAt" },
+  { from: "retiredBySession", to: "retiredBySession" },
+  { from: "retiredReason", to: "retiredReason" },
+  { from: "retiredEdge", to: "retiredEdge" },
+  { from: "spawnedBySession", to: "spawnedBySession" },
+  { from: "spawnedByLifecycle", to: "spawnedByLifecycle" },
+  { from: "spawnedLabel", to: "spawnedLabel" },
+  { from: "spawnLevel", to: "spawnLevel" },
+  { from: "spawnLevelSource", to: "spawnLevelSource" },
+  { from: "resolvedModel", to: "resolvedModel" },
+  { from: "resolvedEffort", to: "resolvedEffort" },
+  { from: "turnState", to: "turnState" },
+  { from: "turnStateChangedAt", to: "turnStateChangedAt" },
+  { from: "controlState", to: "controlState" },
+  { from: "controlProtocol", to: "controlProtocol" },
+  { from: "controlActivity", to: "controlActivity" },
+  { from: "controlAcceptance", to: "controlAcceptance" },
+  { from: "controlVendorSessionId", to: "controlVendorSessionId" },
+  { from: "controlPendingInteraction", to: "controlPendingInteraction" },
+  { from: "controlPendingInteractions", to: "controlPendingInteractions" },
+  { from: "controlLastEventSequence", to: "controlLastEventSequence", keepWhenFalsy: true },
+  { from: "controlRaw", to: "controlRaw" },
+  { from: "livenessFailures", to: "livenessFailures", keepWhenFalsy: true },
+  { from: "livenessFirstFailedAt", to: "livenessFirstFailedAt" },
+  { from: "livenessLastFailedAt", to: "livenessLastFailedAt" },
+  { from: "livenessEvidence", to: "livenessEvidence" },
+  { from: "exitEvidence", to: "exitEvidence" },
+];
+
+function optionalSessionFields(info: TerminalSessionInfo): Partial<OpenSession> {
+  const out: Partial<OpenSession> = {};
+  for (const { from, to, keepWhenFalsy } of OPTIONAL_SESSION_FIELDS) {
+    const value = info[from];
+    if (keepWhenFalsy ? value !== undefined : value) {
+      (out as Record<string, unknown>)[to] = value;
+    }
+  }
+  return out;
+}
+
 export function fromTerminalSessionInfo(info: TerminalSessionInfo): OpenSession {
   return {
     id: info.id,
     label: info.label,
     kind: info.kind,
-    ...(info.harness ? { harness: info.harness } : {}),
-    ...(info.lifecycleId ? { lifecycleId: info.lifecycleId } : {}),
-    ...(info.leafKey ? { leafKey: info.leafKey } : {}),
-    ...(info.spawnRole ? { spawnRole: info.spawnRole } : {}),
-    ...(info.seatRole ? { seatRole: info.seatRole } : {}),
-    ...(info.createdAt ? { createdAt: info.createdAt } : {}),
-    ...(info.landedAt ? { landedAt: info.landedAt } : {}),
-    ...(info.landedReason ? { landedReason: info.landedReason } : {}),
-    ...(info.landedEdge ? { landedEdge: info.landedEdge } : {}),
-    ...(info.retiredAt ? { retiredAt: info.retiredAt } : {}),
-    ...(info.retiredBySession ? { retiredBySession: info.retiredBySession } : {}),
-    ...(info.retiredReason ? { retiredReason: info.retiredReason } : {}),
-    ...(info.retiredEdge ? { retiredEdge: info.retiredEdge } : {}),
-    ...(info.spawnedBySession ? { spawnedBySession: info.spawnedBySession } : {}),
-    ...(info.spawnedByLifecycle ? { spawnedByLifecycle: info.spawnedByLifecycle } : {}),
-    ...(info.spawnedLabel ? { spawnedLabel: info.spawnedLabel } : {}),
-    ...(info.spawnLevel ? { spawnLevel: info.spawnLevel } : {}),
-    ...(info.spawnLevelSource ? { spawnLevelSource: info.spawnLevelSource } : {}),
-    ...(info.resolvedModel ? { resolvedModel: info.resolvedModel } : {}),
-    ...(info.resolvedEffort ? { resolvedEffort: info.resolvedEffort } : {}),
-    ...(info.turnState ? { turnState: info.turnState } : {}),
-    ...(info.turnStateChangedAt ? { turnStateChangedAt: info.turnStateChangedAt } : {}),
-    ...(info.controlState ? { controlState: info.controlState } : {}),
-    ...(info.controlProtocol ? { controlProtocol: info.controlProtocol } : {}),
-    ...(info.controlActivity ? { controlActivity: info.controlActivity } : {}),
-    ...(info.controlAcceptance ? { controlAcceptance: info.controlAcceptance } : {}),
-    ...(info.controlVendorSessionId ? { controlVendorSessionId: info.controlVendorSessionId } : {}),
-    ...(info.controlPendingInteraction
-      ? { controlPendingInteraction: info.controlPendingInteraction }
-      : {}),
-    ...(info.controlPendingInteractions
-      ? { controlPendingInteractions: info.controlPendingInteractions }
-      : {}),
-    ...(info.controlLastEventSequence !== undefined
-      ? { controlLastEventSequence: info.controlLastEventSequence }
-      : {}),
-    ...(info.controlRaw ? { controlRaw: info.controlRaw } : {}),
-    ...(info.livenessFailures !== undefined ? { livenessFailures: info.livenessFailures } : {}),
-    ...(info.livenessFirstFailedAt ? { livenessFirstFailedAt: info.livenessFirstFailedAt } : {}),
-    ...(info.livenessLastFailedAt ? { livenessLastFailedAt: info.livenessLastFailedAt } : {}),
-    ...(info.livenessEvidence ? { livenessEvidence: info.livenessEvidence } : {}),
-    ...(info.exitEvidence ? { exitEvidence: info.exitEvidence } : {}),
+    ...optionalSessionFields(info),
     status: info.status,
   };
 }

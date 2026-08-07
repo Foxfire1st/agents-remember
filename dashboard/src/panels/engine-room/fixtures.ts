@@ -23,7 +23,6 @@ export interface EngineRoomScenario {
 }
 
 const SOURCE_BRANCH = "feat/observable-lifecycle-dashboard";
-
 const wsEngine = (id: string, indexingState = "indexed"): ProviderNode => ({
   id,
   state: "ready",
@@ -138,6 +137,10 @@ interface EdgeStates {
   integration?: string;
 }
 
+function edgeState(state: string | undefined, fallback: string): string {
+  return state ?? fallback;
+}
+
 function edges(states: EdgeStates, external = true): EngineProcessEdge[] {
   const out: EngineProcessEdge[] = [
     {
@@ -145,7 +148,7 @@ function edges(states: EdgeStates, external = true): EngineProcessEdge[] {
       fromNode: "code-source",
       toNode: "code-worktree",
       kind: "worktree-add",
-      state: states.worktreeAdd ?? "complete",
+      state: edgeState(states.worktreeAdd, "complete"),
       label: "add code worktree",
     },
     {
@@ -153,7 +156,7 @@ function edges(states: EdgeStates, external = true): EngineProcessEdge[] {
       fromNode: "code-worktree",
       toNode: "cgc-engine",
       kind: "cgc-seed",
-      state: states.cgc ?? "complete",
+      state: edgeState(states.cgc, "complete"),
       label: "CGC seed",
     },
   ];
@@ -163,7 +166,7 @@ function edges(states: EdgeStates, external = true): EngineProcessEdge[] {
       fromNode: "memory-source",
       toNode: "memory-worktree",
       kind: "ledger-map",
-      state: states.ledger ?? "complete",
+      state: edgeState(states.ledger, "complete"),
       label: "ledger-map + memory worktree",
     });
     out.push({
@@ -171,7 +174,7 @@ function edges(states: EdgeStates, external = true): EngineProcessEdge[] {
       fromNode: "memory-worktree",
       toNode: "grepai-engine",
       kind: "grepai-clone",
-      state: states.grepai ?? "complete",
+      state: edgeState(states.grepai, "complete"),
       label: "GrepAI clone",
     });
   }
@@ -266,8 +269,6 @@ function engineProcess(
     ...over,
   };
 }
-
-// --- the boot-up step-through: one enclosure assembling after worktree_start --
 
 const BOOT_ID = "boot-demo";
 const bootBase = { id: BOOT_ID, taskName: "device-management", repoName: "agents-remember" } as const;
@@ -716,8 +717,6 @@ const liveSyncStages: EngineRoomScenario[] = [
     workspace: WORKSPACE,
   },
 ];
-
-// --- discrete state scenarios (05e §11) --------------------------------------
 
 export const ENGINE_ROOM_SCENARIOS: EngineRoomScenario[] = [
   {

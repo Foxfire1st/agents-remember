@@ -95,15 +95,13 @@ export interface LibraryDeps {
   setTimeoutImpl?: (fn: () => void, ms: number) => number;
 }
 
-export async function loadLibraryList(
+function listSeed(
   harnessId: HarnessId,
   query: ListQuery,
-  deps: LibraryDeps = {},
-): Promise<void> {
-  const store = conversationLibraryStore.getState();
-  const previous = store.list;
-  const appending = query.cursor != null && previous?.harnessId === harnessId;
-  store.setList({
+  previous: LibraryListView | undefined,
+  appending: boolean,
+): LibraryListView {
+  return {
     harnessId,
     cwd: query.cwd,
     rows: appending ? (previous?.rows ?? []) : [],
@@ -112,23 +110,35 @@ export async function loadLibraryList(
     agentsNote: previous?.agentsNote ?? null,
     loading: true,
     error: undefined,
-  });
-  const page = await fetchLibraryList(harnessId, query, deps.base ?? "", deps.fetchImpl ?? fetch);
-  const current = conversationLibraryStore.getState();
-  if (page === null) {
-    current.setList({
-      harnessId,
-      cwd: query.cwd,
-      rows: appending ? (previous?.rows ?? []) : [],
-      nextCursor: appending ? (previous?.nextCursor ?? null) : null,
-      agentsNote: previous?.agentsNote ?? null,
-      loading: false,
-      error: "history unavailable for this harness",
-    });
-    return;
-  }
+  };
+}
+
+function listFailure(
+  harnessId: HarnessId,
+  query: ListQuery,
+  previous: LibraryListView | undefined,
+  appending: boolean,
+): LibraryListView {
+  return {
+    harnessId,
+    cwd: query.cwd,
+    rows: appending ? (previous?.rows ?? []) : [],
+    nextCursor: appending ? (previous?.nextCursor ?? null) : null,
+    agentsNote: previous?.agentsNote ?? null,
+    loading: false,
+    error: "history unavailable for this harness",
+  };
+}
+
+function listSuccess(
+  harnessId: HarnessId,
+  query: ListQuery,
+  previous: LibraryListView | undefined,
+  page: NonNullable<Awaited<ReturnType<typeof fetchLibraryList>>>,
+  appending: boolean,
+): LibraryListView {
   const merged = appending ? [...(previous?.rows ?? []), ...page.rows] : [...page.rows];
-  current.setList({
+  return {
     harnessId,
     cwd: query.cwd,
     rows: merged,
@@ -137,7 +147,25 @@ export async function loadLibraryList(
     // The freshest page's note wins (it describes the query's current agent availability).
     agentsNote: page.agentsNote ?? null,
     loading: false,
-  });
+  };
+}
+
+export async function loadLibraryList(
+  harnessId: HarnessId,
+  query: ListQuery,
+  deps: LibraryDeps = {},
+): Promise<void> {
+  const store = conversationLibraryStore.getState();
+  const previous = store.list;
+  const appending = query.cursor != null && previous?.harnessId === harnessId;
+  store.setList(listSeed(harnessId, query, previous, appending));
+  const page = await fetchLibraryList(harnessId, query, deps.base ?? "", deps.fetchImpl ?? fetch);
+  const current = conversationLibraryStore.getState();
+  if (page === null) {
+    current.setList(listFailure(harnessId, query, previous, appending));
+    return;
+  }
+  current.setList(listSuccess(harnessId, query, previous, page, appending));
 }
 
 export async function loadLibraryPreview(
@@ -179,6 +207,18 @@ function applyOpen(tracker: OpenTracker, result: OpenResult): OpenTracker {
 function isTerminalOpen(operation: OpenConversationOperation): boolean {
   // pending / timeout-unknown keep polling under the SAME requestId; everything else is terminal.
   return operation.outcome !== "pending" && operation.outcome !== "timeout-unknown";
+}
+
+function openStillCurrent(requestId: string): boolean {
+  return conversationLibraryStore.getState().open?.requestId === requestId;
+}
+
+function shouldReconcile(reconcileFirst: boolean, polls: number): boolean {
+  return reconcileFirst ? polls === 1 || polls % 5 === 0 : polls % 5 === 0;
+}
+
+function pollBudgetSpent(result: OpenResult, polls: number): boolean {
+  return result.ok && !isTerminalOpen(result.operation) && polls >= OPEN_POLL_LIMIT;
 }
 
 /**
@@ -270,16 +310,16 @@ function runOpenPolls(
   let tracker = initial;
   let polls = 0;
   const poll = async (): Promise<void> => {
-    if (conversationLibraryStore.getState().open?.requestId !== requestId) return; // superseded
+    if (!openStillCurrent(requestId)) return; // superseded
     polls += 1;
     // Periodically escalate to reconcile for ambiguous outcomes (or immediately on a re-drive).
-    const reconcile = reconcileFirst ? polls === 1 || polls % 5 === 0 : polls % 5 === 0;
+    const reconcile = shouldReconcile(reconcileFirst, polls);
     const result = reconcile
       ? await openReconcile(harnessId, conversationKey, requestId, base, fetchImpl)
       : await openStatus(harnessId, conversationKey, requestId, base, fetchImpl);
-    if (conversationLibraryStore.getState().open?.requestId !== requestId) return;
+    if (!openStillCurrent(requestId)) return;
     tracker = applyOpen(tracker, result);
-    if (result.ok && !isTerminalOpen(result.operation) && polls >= OPEN_POLL_LIMIT) {
+    if (pollBudgetSpent(result, polls)) {
       // Poll budget spent while still non-terminal: stop and offer a manual reconcile (F6a).
       tracker = { ...tracker, pollsExhausted: true };
       conversationLibraryStore.getState().setOpen(tracker);

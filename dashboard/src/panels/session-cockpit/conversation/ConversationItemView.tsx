@@ -2,7 +2,7 @@
 // normalized item to its block-grammar renderer, and provides the stable accessible name the feed
 // article uses for aria-labelledby (§14.2).
 
-import { memo } from "react";
+import { memo, type ReactNode } from "react";
 
 import type { ConversationItem } from "../../../data/conversation/types";
 import { InteractionItem } from "./InteractionItem";
@@ -12,56 +12,54 @@ import { ToolItem } from "./ToolItem";
 import { TurnResultItem } from "./TurnResultItem";
 
 /** A stable, human-readable name for the feed article — text label, never color-only (§14.2). */
-export function itemAccessibleName(item: ConversationItem): string {
-  const ordinal = `#${item.globalOrdinal}`;
+const KIND_NAMES: Record<string, string> = {
+  thinking: "thinking",
+  plan: "plan",
+  interaction: "interaction",
+  error: "error",
+  notice: "notice",
+  telemetry: "telemetry",
+  "unknown-vendor": "unknown vendor event",
+};
+
+function accessibleKindLabel(item: ConversationItem): string {
   switch (item.kind) {
     case "message":
-      return `${ordinal} ${item.role} message`;
-    case "thinking":
-      return `${ordinal} thinking`;
-    case "plan":
-      return `${ordinal} plan`;
+      return `${item.role} message`;
     case "tool-call":
     case "tool-result":
-      return `${ordinal} tool ${item.phase}`;
+      return `tool ${item.phase}`;
     case "interaction":
-      return `${ordinal} interaction ${item.phase}`;
+      return `interaction ${item.phase}`;
     case "turn-result":
-      return `${ordinal} turn ${item.phase}`;
-    case "error":
-      return `${ordinal} error`;
-    case "notice":
-      return `${ordinal} notice`;
-    case "telemetry":
-      return `${ordinal} telemetry`;
-    case "unknown-vendor":
-      return `${ordinal} unknown vendor event`;
+      return `turn ${item.phase}`;
     default:
-      return `${ordinal} item`;
+      return KIND_NAMES[item.kind] ?? "item";
   }
 }
 
+export function itemAccessibleName(item: ConversationItem): string {
+  const ordinal = `#${item.globalOrdinal}`;
+  return `${ordinal} ${accessibleKindLabel(item)}`;
+}
+
+const ITEM_VIEWS: Record<string, (props: { item: ConversationItem }) => ReactNode> = {
+  message: MessageItem,
+  plan: MessageItem,
+  thinking: ThinkingItem,
+  "tool-call": ToolItem,
+  "tool-result": ToolItem,
+  interaction: InteractionItem,
+  "turn-result": TurnResultItem,
+  error: TurnResultItem,
+  notice: TurnResultItem,
+  telemetry: TurnResultItem,
+  "unknown-vendor": TurnResultItem,
+};
+
 function ConversationItemViewImpl({ item }: { item: ConversationItem }) {
-  switch (item.kind) {
-    case "message":
-    case "plan":
-      return <MessageItem item={item} />;
-    case "thinking":
-      return <ThinkingItem item={item} />;
-    case "tool-call":
-    case "tool-result":
-      return <ToolItem item={item} />;
-    case "interaction":
-      return <InteractionItem item={item} />;
-    case "turn-result":
-    case "error":
-    case "notice":
-    case "telemetry":
-    case "unknown-vendor":
-      return <TurnResultItem item={item} />;
-    default:
-      return <TurnResultItem item={item} />;
-  }
+  const View = ITEM_VIEWS[item.kind] ?? TurnResultItem;
+  return <View item={item} />;
 }
 
 // Re-render an item row only when its identity/revision changes — keeps 10k-item timelines cheap.

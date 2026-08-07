@@ -32,6 +32,19 @@ function DiffLine({ line }: { line: string }) {
   return <span>{line}</span>;
 }
 
+function diffClampState(total: number, expanded: boolean): { clampable: boolean; hiddenLines: number } {
+  const clampable = total > DIFF_THRESHOLD_LINES;
+  return {
+    clampable,
+    hiddenLines: clampable && !expanded ? Math.max(0, total - DIFF_THRESHOLD_LINES) : 0,
+  };
+}
+
+function visibleDiffLines(body: string, clampable: boolean, expanded: boolean): string[] {
+  const lines = body.length > 0 ? body.split("\n") : [];
+  return clampable && !expanded ? lines.slice(0, DIFF_THRESHOLD_LINES) : lines;
+}
+
 export function DiffBlock({
   path,
   unified,
@@ -46,11 +59,9 @@ export function DiffBlock({
   const { regionId } = useClampIds();
   const [expanded, setExpanded] = useState(false);
   const body = unified ?? synthesizeUnified(oldText, newText);
-  const lines = body.length > 0 ? body.split("\n") : [];
   const total = sourceLineCount(body);
-  const clampable = total > DIFF_THRESHOLD_LINES;
-  const hiddenLines = clampable && !expanded ? Math.max(0, total - DIFF_THRESHOLD_LINES) : 0;
-  const visibleLines = clampable && !expanded ? lines.slice(0, DIFF_THRESHOLD_LINES) : lines;
+  const { clampable, hiddenLines } = diffClampState(total, expanded);
+  const visibleLines = visibleDiffLines(body, clampable, expanded);
 
   return (
     <div className={wrap} data-testid="conversation-diff">

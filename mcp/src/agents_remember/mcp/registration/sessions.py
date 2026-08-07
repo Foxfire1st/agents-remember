@@ -61,6 +61,7 @@ def _register_session_spawn_tools(server: FastMCP, config: McpRuntimeConfig) -> 
         replacement_for_leaf: str | None = None,
         context: str | None = None,
         submit: bool = False,
+        *,
         label: str | None = None,
         model: str | None = None,
         effort: str | None = None,

@@ -9,11 +9,11 @@ import {
   ToggleButtonGroup,
 } from "react-aria-components";
 
-import { css, cva } from "../../styled-system/css";
-import { fmtWait, hasLiveWorktree, type Pivot } from "../data/selectors";
-import { servedAgeSeconds, useNowMs } from "../data/servedAges";
-import { type OpenSession, useSessions } from "../data/sessions";
-import { useDashboard } from "../data/store";
+import { css, cva } from "../../../styled-system/css";
+import { fmtWait, hasLiveWorktree, type Pivot } from "../../data/selectors";
+import { servedAgeSeconds, useNowMs } from "../../data/servedAges";
+import { type OpenSession, useSessions } from "../../data/sessions";
+import { useDashboard } from "../../data/store";
 import {
   isOrchestrationDoc,
   masterCommandNames,
@@ -22,7 +22,7 @@ import {
   pathStem,
   taskDocHierarchyLabel,
   taskDocParentKey,
-} from "../data/taskHierarchy";
+} from "../../data/taskHierarchy";
 import {
   findLifecycleEnclosure,
   groupEnclosuresByLifecycle,
@@ -32,10 +32,10 @@ import {
   seriesSelectionKey,
   taskDocSelectionKey,
   taskLabel,
-} from "../data/taskIdentity";
-import { Dot } from "../grammar/Dot";
-import { Panel } from "../grammar/Panel";
-import { RankBadge, type RankTier } from "../grammar/RankBadge";
+} from "../../data/taskIdentity";
+import { Dot } from "../../grammar/Dot";
+import { Panel } from "../../grammar/Panel";
+import { RankBadge, type RankTier } from "../../grammar/RankBadge";
 import type {
   AgentPickupNode,
   Analytics,
@@ -43,16 +43,16 @@ import type {
   LifecycleProjection,
   SeriesNode,
   TaskDocNode,
-} from "../types/projection";
-import { AgentPickupIndicator } from "./AgentPickupIndicator";
+} from "../../types/projection";
+import { AgentPickupIndicator } from "../AgentPickupIndicator";
 import {
   ChatActivityIndicator,
   summarizeChatActivity,
   type ChatActivityIdentity,
   type ChatActivitySummary,
-} from "./ChatActivityIndicator";
-import { TaskGroupDisclosure } from "./TaskGroupDisclosure";
-import { useCollapsedTaskGroups } from "./useCollapsedTaskGroups";
+} from "../ChatActivityIndicator";
+import { TaskGroupDisclosure } from "../TaskGroupDisclosure";
+import { useCollapsedTaskGroups } from "../useCollapsedTaskGroups";
 
 // The single unit list (note 01: the lifecycle is THE unit; note 06 IA). A BY REPO | BY PHASE pivot
 // (React Aria ToggleButtonGroup) over every lifecycle (fleeting + persistent), presented as a React
@@ -306,32 +306,18 @@ const LifecycleListRender = memo(
     const selectedSelection = parseTaskSelection(selectedId, lifecycles, analytics);
     const selectedKey = selectedSelection ? selectionKey(selectedSelection) : selectedId;
 
-    const head = (
-      <div className={headRow}>
-        <h2 className={headTitle}>Tasks · {rows.length}</h2>
-        <ToggleButtonGroup
-          className={pivotBar}
-          selectionMode="single"
-          disallowEmptySelection
-          selectedKeys={[pivot]}
-          onSelectionChange={(keys) => {
-            const next = [...keys][0];
-            if (next === "repo" || next === "phase") setPivot(next);
-          }}
-          aria-label="Group tasks by"
-        >
-          <ToggleButton id="repo" className={pivotBtn}>
-            BY REPO
-          </ToggleButton>
-          <ToggleButton id="phase" className={pivotBtn}>
-            BY PHASE
-          </ToggleButton>
-        </ToggleButtonGroup>
-      </div>
-    );
-
     return (
-      <Panel testid="lifecycle-list" head={head} className={sizing}>
+      <Panel
+        testid="lifecycle-list"
+        head={
+          <TaskPivotBar
+            count={rows.length}
+            pivot={pivot}
+            onPivot={setPivot}
+          />
+        }
+        className={sizing}
+      >
         {rows.length === 0 ? (
           <p className="muted">No tasks.</p>
         ) : (
@@ -345,69 +331,15 @@ const LifecycleListRender = memo(
               if (typeof id === "string") onSelect(id);
             }}
           >
-            {groups.map((group) => {
-              const descendantKeys = descendantBearingKeys(group.rows);
-              const visibleRows =
-                pivot === "repo" ? visibleHierarchyRows(group.rows, collapsedKeys) : group.rows;
-              return (
-                <ListBoxSection key={group.key} className={section}>
-                  <Header className={groupHeader}>{group.label}</Header>
-                  {visibleRows.map((item) => {
-                    const secondary = pivot === "repo" ? item.secondary : item.repo;
-                    const hasDescendants =
-                      pivot === "repo" &&
-                      item.secondary === "master" &&
-                      descendantKeys.has(item.key);
-                    const collapsed = collapsedKeys.has(item.key);
-                    return (
-                      <ListBoxItem
-                        key={item.key}
-                        id={item.key}
-                        textValue={item.label}
-                        className={row({
-                          fleeting: item.fleeting,
-                          // Tier rows carry the command treatment and indent by margin (below); non-tier
-                          // nesting keeps today's leaf look untouched (the flat-run regression rule).
-                          nested: item.depth > 0 && !item.tier,
-                          tier: item.tier,
-                        })}
-                        style={indentStyle(item)}
-                        data-depth={item.depth}
-                        data-parent-key={item.parentKey}
-                        data-tier={item.tier}
-                      >
-                        {hasDescendants ? (
-                          <TaskGroupDisclosure
-                            label={item.label}
-                            collapsed={collapsed}
-                            onToggle={() => toggleCollapsed(item.key)}
-                          />
-                        ) : null}
-                        <span
-                          aria-label={`Task progress: ${item.variant}; phase: ${item.phase}`}
-                          title={`Task progress: ${item.variant}; phase: ${item.phase}`}
-                          data-testid="task-state"
-                        >
-                          <Dot variant={item.variant} />
-                        </span>
-                        {item.tier ? <RankBadge tier={item.tier} size="row" /> : null}
-                        <span className={rowId} title={item.title}>
-                          {item.label}
-                        </span>
-                        <span className={rowSec}>{secondary}</span>
-                        <ChatActivityIndicator summary={item.chatActivity} />
-                        <AgentPickupIndicator pickup={item.pickup} />
-                        {item.gate ? <span className={rowGate}>{item.gate}</span> : null}
-                        <span className={rowMeta}>
-                          {item.meta}
-                          {item.inferred ? " · inf" : ""}
-                        </span>
-                      </ListBoxItem>
-                    );
-                  })}
-                </ListBoxSection>
-              );
-            })}
+            {groups.map((group) => (
+              <TaskGroupSection
+                key={group.key}
+                group={group}
+                pivot={pivot}
+                collapsedKeys={collapsedKeys}
+                onToggleCollapsed={toggleCollapsed}
+              />
+            ))}
           </ListBox>
         )}
       </Panel>
@@ -495,6 +427,54 @@ function operationRows(input: OperationRowsInput): OperationRow[] {
   const activeEnclosuresByLifecycle = groupEnclosuresByLifecycle(activeEnclosureList);
   const rows: OperationRow[] = [];
 
+  appendDocRows(
+    input,
+    rows,
+    representedLifecycleIds,
+    representedEnclosureIds,
+    activeEnclosureList,
+    enclosureList,
+    docPaths,
+    pickupsByLifecycle,
+  );
+  appendSeriesRows(
+    input,
+    rows,
+    representedLifecycleIds,
+    docPaths,
+    enclosureList,
+    pickupsByLifecycle,
+  );
+  appendLifecycleRows(
+    input,
+    rows,
+    representedLifecycleIds,
+    representedEnclosureIds,
+    docsByLifecycle,
+    pickupsByLifecycle,
+    activeEnclosures,
+    activeEnclosuresByLifecycle,
+    docPaths,
+  );
+
+  return rows
+    .map((item) => ({
+      ...item,
+      chatActivity: summarizeChatActivity(input.sessions, item.chatIdentity),
+    }))
+    .sort(compareRows);
+}
+
+function appendDocRows(
+  input: OperationRowsInput,
+  rows: OperationRow[],
+  representedLifecycleIds: Set<string>,
+  representedEnclosureIds: Set<string>,
+  activeEnclosureList: EnclosureNode[],
+  enclosureList: EnclosureNode[],
+  docPaths: Set<string>,
+  pickupsByLifecycle: ReturnType<typeof groupPickups>,
+): void {
   for (const doc of input.docs) {
     const enclosure = enclosureForDoc(doc, activeEnclosureList);
     if (!isRootTaskDoc(doc) && !enclosure) continue;
@@ -517,7 +497,16 @@ function operationRows(input: OperationRowsInput): OperationRow[] {
       ),
     );
   }
+}
 
+function appendSeriesRows(
+  input: OperationRowsInput,
+  rows: OperationRow[],
+  representedLifecycleIds: Set<string>,
+  docPaths: Set<string>,
+  enclosureList: EnclosureNode[],
+  pickupsByLifecycle: ReturnType<typeof groupPickups>,
+): void {
   for (const series of input.series) {
     if (docPaths.has(series.docPath)) continue;
     const lifecycle = runtimeForDoc(series, input.lifecycleById, enclosureList);
@@ -532,7 +521,19 @@ function operationRows(input: OperationRowsInput): OperationRow[] {
       ),
     );
   }
+}
 
+function appendLifecycleRows(
+  input: OperationRowsInput,
+  rows: OperationRow[],
+  representedLifecycleIds: Set<string>,
+  representedEnclosureIds: Set<string>,
+  docsByLifecycle: ReturnType<typeof groupDocs>,
+  pickupsByLifecycle: ReturnType<typeof groupPickups>,
+  activeEnclosures: Record<string, EnclosureNode>,
+  activeEnclosuresByLifecycle: Map<string, EnclosureNode>,
+  docPaths: Set<string>,
+): void {
   for (const lifecycle of input.lifecycles) {
     if (representedLifecycleIds.has(lifecycle.id)) continue;
     const docs = docsByLifecycle.get(lifecycle.id) ?? [];
@@ -557,13 +558,136 @@ function operationRows(input: OperationRowsInput): OperationRow[] {
       ),
     );
   }
+}
 
-  return rows
-    .map((item) => ({
-      ...item,
-      chatActivity: summarizeChatActivity(input.sessions, item.chatIdentity),
-    }))
-    .sort(compareRows);
+function TaskPivotBar({
+  count,
+  pivot,
+  onPivot,
+}: {
+  count: number;
+  pivot: Pivot;
+  onPivot: (pivot: Pivot) => void;
+}) {
+  return (
+    <div className={headRow}>
+      <h2 className={headTitle}>Tasks · {count}</h2>
+      <ToggleButtonGroup
+        className={pivotBar}
+        selectionMode="single"
+        disallowEmptySelection
+        selectedKeys={[pivot]}
+        onSelectionChange={(keys) => {
+          const next = [...keys][0];
+          if (next === "repo" || next === "phase") onPivot(next);
+        }}
+        aria-label="Group tasks by"
+      >
+        <ToggleButton id="repo" className={pivotBtn}>
+          BY REPO
+        </ToggleButton>
+        <ToggleButton id="phase" className={pivotBtn}>
+          BY PHASE
+        </ToggleButton>
+      </ToggleButtonGroup>
+    </div>
+  );
+}
+
+function TaskGroupSection({
+  group,
+  pivot,
+  collapsedKeys,
+  onToggleCollapsed,
+}: {
+  group: OperationGroup;
+  pivot: Pivot;
+  collapsedKeys: ReadonlySet<string>;
+  onToggleCollapsed: (key: string) => void;
+}) {
+  const descendantKeys = descendantBearingKeys(group.rows);
+  const visibleRows =
+    pivot === "repo" ? visibleHierarchyRows(group.rows, collapsedKeys) : group.rows;
+  return (
+    <ListBoxSection key={group.key} className={section}>
+      <Header className={groupHeader}>{group.label}</Header>
+      {visibleRows.map((item) => (
+        <TaskRow
+          key={item.key}
+          item={item}
+          pivot={pivot}
+          hasDescendants={Boolean(
+            pivot === "repo" &&
+              item.secondary === "master" &&
+              descendantKeys.has(item.key),
+          )}
+          collapsed={collapsedKeys.has(item.key)}
+          onToggleCollapsed={onToggleCollapsed}
+        />
+      ))}
+    </ListBoxSection>
+  );
+}
+
+function TaskRow({
+  item,
+  pivot,
+  hasDescendants,
+  collapsed,
+  onToggleCollapsed,
+}: {
+  item: OperationRow;
+  pivot: Pivot;
+  hasDescendants: boolean;
+  collapsed: boolean;
+  onToggleCollapsed: (key: string) => void;
+}) {
+  const secondary = pivot === "repo" ? item.secondary : item.repo;
+  return (
+    <ListBoxItem
+      key={item.key}
+      id={item.key}
+      textValue={item.label}
+      className={row({
+        fleeting: item.fleeting,
+        // Tier rows carry the command treatment and indent by margin (below); non-tier
+        // nesting keeps today's leaf look untouched (the flat-run regression rule).
+        nested: item.depth > 0 && !item.tier,
+        tier: item.tier,
+      })}
+      style={indentStyle(item)}
+      data-depth={item.depth}
+      data-parent-key={item.parentKey}
+      data-tier={item.tier}
+    >
+      {hasDescendants ? (
+        <TaskGroupDisclosure
+          label={item.label}
+          collapsed={collapsed}
+          onToggle={() => onToggleCollapsed(item.key)}
+        />
+      ) : null}
+      <span
+        aria-label={`Task progress: ${item.variant}; phase: ${item.phase}`}
+        title={`Task progress: ${item.variant}; phase: ${item.phase}`}
+        data-testid="task-state"
+      >
+        <Dot variant={item.variant} />
+      </span>
+      {item.tier ? <RankBadge tier={item.tier} size="row" /> : null}
+      <span className={rowId} title={item.title}>
+        {item.label}
+      </span>
+      <span className={rowSec}>{secondary}</span>
+      <ChatActivityIndicator summary={item.chatActivity} />
+      <AgentPickupIndicator pickup={item.pickup} />
+      {item.gate ? <span className={rowGate}>{item.gate}</span> : null}
+      <span className={rowMeta}>
+        {item.meta}
+        {item.inferred ? " · inf" : ""}
+      </span>
+    </ListBoxItem>
+  );
 }
 
 // The command facts for a master-shaped row: an orchestration doc IS the gold tier; a master
@@ -579,6 +703,38 @@ function commandFacts(
   return commander ? { tier: "management", parentKey: commander } : {};
 }
 
+function taskRepo(doc: TaskDocNode, lifecycle: LifecycleProjection | undefined): string {
+  return doc.repository || lifecycle?.repoId || "—";
+}
+
+function taskPhase(
+  doc: TaskDocNode,
+  lifecycle: LifecycleProjection | undefined,
+): string {
+  return lifecycle?.phase ?? doc.status;
+}
+
+function taskVariant(
+  doc: TaskDocNode,
+  lifecycle: LifecycleProjection | undefined,
+): string {
+  return lifecycle?.state ?? statusVariant(doc.status);
+}
+
+function taskGate(lifecycle: LifecycleProjection | undefined): string {
+  return gateHint(lifecycle?.gate?.kind);
+}
+
+function taskChatIdentity(
+  doc: TaskDocNode,
+  lifecycle: LifecycleProjection | undefined,
+): { leafKey: string | undefined; lifecycleId?: string } {
+  return {
+    leafKey: qualifiedLeafKey(doc),
+    ...(lifecycle ? { lifecycleId: lifecycle.id } : {}),
+  };
+}
+
 function docRow(
   doc: TaskDocNode,
   lifecycle: LifecycleProjection | undefined,
@@ -590,10 +746,10 @@ function docRow(
 ): OperationRow {
   const progress = doc.kind === "master" ? subTaskProgress(doc.subTasks) : taskStepProgress(doc);
   const label = taskDocHierarchyLabel(doc, seriesList);
-  const repo = doc.repository || lifecycle?.repoId || "—";
-  const phase = lifecycle?.phase ?? doc.status;
-  const variant = lifecycle?.state ?? statusVariant(doc.status);
-  const gate = gateHint(lifecycle?.gate?.kind);
+  const repo = taskRepo(doc, lifecycle);
+  const phase = taskPhase(doc, lifecycle);
+  const variant = taskVariant(doc, lifecycle);
+  const gate = taskGate(lifecycle);
   const command = commandFacts(doc, allDocs);
   return {
     key: taskDocSelectionKey(doc.docPath),
@@ -618,10 +774,7 @@ function docRow(
     ),
     gate,
     pickup,
-    chatIdentity: {
-      leafKey: qualifiedLeafKey(doc),
-      ...(lifecycle ? { lifecycleId: lifecycle.id } : {}),
-    },
+    chatIdentity: taskChatIdentity(doc, lifecycle),
     createdAt: doc.createdAt,
     fallbackOrder: doc.docPath,
     parentKey: command.parentKey ?? taskDocParentKey(doc, seriesList, masterDocPaths),
@@ -639,20 +792,14 @@ function seriesRow(
   allDocs: TaskDocNode[],
   nowMs: number,
 ): OperationRow {
-  const repo = series.repository || lifecycle?.repoId || "—";
+  const repo = series.repository ?? lifecycle?.repoId ?? "—";
   const phase = lifecycle?.phase ?? series.status;
   const variant = lifecycle?.state ?? statusVariant(series.status);
-  const gate = gateHint(lifecycle?.gate?.kind);
+  const gate = taskGate(lifecycle);
+  const flags = lifecycleFlags(lifecycle);
   // A folder-keyed series fallback row is still a master seat: it answers to its seriesId (the
   // task folder), its title, or its doc folder when an orchestration doc names it.
-  const commander = orchestratorParentKey(
-    [
-      series.seriesId,
-      series.title,
-      pathDir(series.docPath).split("/").filter(Boolean).pop() ?? "",
-    ].filter(Boolean),
-    allDocs,
-  );
+  const commander = seriesCommanderParent(series, allDocs);
   return {
     key: seriesSelectionKey(series.seriesId),
     label: series.title,
@@ -675,15 +822,44 @@ function seriesRow(
     ),
     gate,
     pickup,
-    chatIdentity: lifecycle ? { lifecycleId: lifecycle.id } : {},
+    chatIdentity: seriesChatIdentity(lifecycle),
     createdAt: series.createdAt,
     fallbackOrder: series.docPath,
     parentKey: commander,
     depth: 0,
     tier: commander ? "management" : undefined,
+    fleeting: flags.fleeting,
+    inferred: flags.inferred,
+  };
+}
+
+function seriesCommanderParent(
+  series: SeriesNode,
+  allDocs: TaskDocNode[],
+): string | undefined {
+  return orchestratorParentKey(
+    [
+      series.seriesId,
+      series.title,
+      pathDir(series.docPath).split("/").filter(Boolean).pop() ?? "",
+    ].filter(Boolean),
+    allDocs,
+  );
+}
+
+function lifecycleFlags(
+  lifecycle: LifecycleProjection | undefined,
+): { fleeting: boolean; inferred: boolean } {
+  return {
     fleeting: lifecycle?.fleeting ?? false,
     inferred: lifecycle?.inferred ?? false,
   };
+}
+
+function seriesChatIdentity(
+  lifecycle: LifecycleProjection | undefined,
+): { lifecycleId?: string } {
+  return lifecycle ? { lifecycleId: lifecycle.id } : {};
 }
 
 function lifecycleRow(

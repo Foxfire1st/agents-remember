@@ -118,12 +118,13 @@ export interface TaskTreeNode {
 const masterFolderOf = (doc: Pick<TaskDocNode, "docPath">): string =>
   doc.docPath.split("/").slice(0, -1).filter(Boolean).pop() ?? "";
 
-// Build the recursive master→…→leaf tree the picker drills. Masters nest under their parent master via
-// `masterLifecycleId` (the cross-series parent link); leaves attach to the master in their own folder (or,
-// failing that, their `masterLifecycleId` parent). Top-level masters and any orphan leaves are the roots.
-// This scales to arbitrary nesting — "a master that is the leaf of another master" is just a master node
-// sitting inside another master node.
-export function buildTaskTree(taskDocuments: TaskDocNode[]): TaskTreeNode[] {
+function indexMasters(
+  taskDocuments: TaskDocNode[],
+): {
+  masterByFolder: Map<string, TaskTreeNode>;
+  masterByLifecycle: Map<string, TaskTreeNode>;
+  masterDocByFolder: Map<string, TaskDocNode>;
+} {
   const masterByFolder = new Map<string, TaskTreeNode>();
   const masterByLifecycle = new Map<string, TaskTreeNode>();
   const masterDocByFolder = new Map<string, TaskDocNode>();
@@ -136,7 +137,14 @@ export function buildTaskTree(taskDocuments: TaskDocNode[]): TaskTreeNode[] {
     masterDocByFolder.set(folder, doc);
     if (doc.lifecycleId) masterByLifecycle.set(doc.lifecycleId, node);
   }
+  return { masterByFolder, masterByLifecycle, masterDocByFolder };
+}
 
+function nestMasters(
+  masterByFolder: Map<string, TaskTreeNode>,
+  masterByLifecycle: Map<string, TaskTreeNode>,
+  masterDocByFolder: Map<string, TaskDocNode>,
+): Set<TaskTreeNode> {
   const nestedMasters = new Set<TaskTreeNode>();
   for (const [folder, node] of masterByFolder) {
     const parentLifecycle = masterDocByFolder.get(folder)?.masterLifecycleId;
@@ -146,7 +154,14 @@ export function buildTaskTree(taskDocuments: TaskDocNode[]): TaskTreeNode[] {
       nestedMasters.add(node);
     }
   }
+  return nestedMasters;
+}
 
+function attachLeaves(
+  taskDocuments: TaskDocNode[],
+  masterByFolder: Map<string, TaskTreeNode>,
+  masterByLifecycle: Map<string, TaskTreeNode>,
+): TaskTreeNode[] {
   const orphanLeaves: TaskTreeNode[] = [];
   for (const doc of taskDocuments) {
     if (doc.kind !== "subTask") continue;
@@ -159,7 +174,18 @@ export function buildTaskTree(taskDocuments: TaskDocNode[]): TaskTreeNode[] {
     if (parent) parent.children.push(leaf);
     else orphanLeaves.push(leaf);
   }
+  return orphanLeaves;
+}
 
+// Build the recursive master→…→leaf tree the picker drills. Masters nest under their parent master via
+// `masterLifecycleId` (the cross-series parent link); leaves attach to the master in their own folder (or,
+// failing that, their `masterLifecycleId` parent). Top-level masters and any orphan leaves are the roots.
+// This scales to arbitrary nesting — "a master that is the leaf of another master" is just a master node
+// sitting inside another master node.
+export function buildTaskTree(taskDocuments: TaskDocNode[]): TaskTreeNode[] {
+  const { masterByFolder, masterByLifecycle, masterDocByFolder } = indexMasters(taskDocuments);
+  const nestedMasters = nestMasters(masterByFolder, masterByLifecycle, masterDocByFolder);
+  const orphanLeaves = attachLeaves(taskDocuments, masterByFolder, masterByLifecycle);
   const rootMasters = [...masterByFolder.values()].filter((node) => !nestedMasters.has(node));
   return [...rootMasters, ...orphanLeaves];
 }

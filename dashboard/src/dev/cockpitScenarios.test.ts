@@ -14,10 +14,10 @@ import {
 } from "../data/sessions";
 import {
   readSubmissionAuthority,
-  withdrawLastQueuedSubmission,
   type SubmissionLifecycleTransport,
   type WithdrawalResultWire,
 } from "../data/submissionLifecycleClient";
+import { withdrawLastQueuedSubmission } from "../data/submissionWithdrawal";
 import { startSubmitRecord } from "../data/submitMachine";
 import { catalogRow } from "../test/fixtures/catalogRows";
 import {
