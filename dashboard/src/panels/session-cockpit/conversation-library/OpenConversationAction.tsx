@@ -13,6 +13,7 @@ import {
   reconcileOpen,
   useConversationLibrary,
   type LibraryDeps,
+  type OpenTracker,
 } from "../../../data/conversation-library/store";
 import type { ConversationLibraryRow } from "../../../data/conversation-library/types";
 
@@ -90,23 +91,14 @@ export function OpenConversationAction({
   const active = open?.conversationKey === row.conversationKey ? open : undefined;
   const activeForThisRow = active !== undefined;
   // busy from dispatch through non-terminal polling, but NOT while exhausted/errored (reconcilable).
-  const busy =
-    activeForThisRow &&
-    (active?.dispatching === true ||
-      (active?.operation !== undefined &&
-        !active.openedForFocus &&
-        !isTerminal(active.operation.outcome) &&
-        !active.pollsExhausted));
+  const busy = openBusy(activeForThisRow, active);
   // A transport failure or a spent poll budget leaves a re-drivable state under the SAME requestId.
-  const reconcilable =
-    activeForThisRow && !busy && (active?.error !== undefined || active?.pollsExhausted === true);
+  const reconcilable = openReconcilable(activeForThisRow, busy, active);
 
-  const label = useMemo(() => {
-    if (resumeUnavailable) return "Open as new chat — unavailable";
-    if (busy) return "opening…";
-    if (reconcilable) return "Reconcile open";
-    return "Open as new chat";
-  }, [busy, reconcilable, resumeUnavailable]);
+  const label = useMemo(
+    () => actionLabel(resumeUnavailable, busy, reconcilable),
+    [busy, reconcilable, resumeUnavailable],
+  );
 
   // Focus the new session ONLY after exact opened catalog proof (§9.4 step 6, R4).
   useEffect(() => {
@@ -148,20 +140,7 @@ export function OpenConversationAction({
       >
         {label}
       </button>
-      {activeForThisRow && active?.pollsExhausted ? (
-        <span className={status} role="status" data-testid="open-exhausted">
-          outcome unknown — reconcile under the same request
-        </span>
-      ) : activeForThisRow && open?.operation !== undefined ? (
-        <span className={status} role="status" data-testid="open-status">
-          {outcomeCopy(open.operation.outcome)}
-        </span>
-      ) : null}
-      {activeForThisRow && open?.error !== undefined ? (
-        <span className={status} role="alert" data-testid="open-error">
-          {open.error.detail}
-        </span>
-      ) : null}
+      <OpenStatusRow active={active} activeForThisRow={activeForThisRow} />
       {activeForThisRow &&
       open?.operation !== undefined &&
       open.operation.rollback !== "not-needed" ? (
@@ -171,6 +150,69 @@ export function OpenConversationAction({
       ) : null}
     </div>
   );
+}
+
+function openBusy(activeForThisRow: boolean, active: OpenTracker | undefined): boolean {
+  return Boolean(
+    activeForThisRow &&
+      (active?.dispatching === true ||
+        (active?.operation !== undefined &&
+          !active.openedForFocus &&
+          !isTerminal(active.operation.outcome) &&
+          !active.pollsExhausted)),
+  );
+}
+
+function openReconcilable(
+  activeForThisRow: boolean,
+  busy: boolean,
+  active: OpenTracker | undefined,
+): boolean {
+  return Boolean(
+    activeForThisRow && !busy && (active?.error !== undefined || active?.pollsExhausted === true),
+  );
+}
+
+function actionLabel(
+  resumeUnavailable: boolean,
+  busy: boolean,
+  reconcilable: boolean,
+): string {
+  if (resumeUnavailable) return "Open as new chat — unavailable";
+  if (busy) return "opening…";
+  if (reconcilable) return "Reconcile open";
+  return "Open as new chat";
+}
+
+function OpenStatusRow({
+  active,
+  activeForThisRow,
+}: {
+  active: OpenTracker | undefined;
+  activeForThisRow: boolean;
+}) {
+  if (activeForThisRow && active?.pollsExhausted) {
+    return (
+      <span className={status} role="status" data-testid="open-exhausted">
+        outcome unknown — reconcile under the same request
+      </span>
+    );
+  }
+  if (activeForThisRow && active?.operation !== undefined) {
+    return (
+      <span className={status} role="status" data-testid="open-status">
+        {outcomeCopy(active.operation.outcome)}
+      </span>
+    );
+  }
+  if (activeForThisRow && active?.error !== undefined) {
+    return (
+      <span className={status} role="alert" data-testid="open-error">
+        {active.error.detail}
+      </span>
+    );
+  }
+  return null;
 }
 
 function isTerminal(outcome: string): boolean {

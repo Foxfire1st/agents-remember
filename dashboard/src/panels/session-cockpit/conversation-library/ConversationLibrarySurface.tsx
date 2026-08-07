@@ -14,7 +14,14 @@ import {
   loadLibraryPreview,
   useConversationLibrary,
   type LibraryDeps,
+  type LibraryPreview,
+  type LibraryListView,
 } from "../../../data/conversation-library/store";
+import type {
+  ConversationLibraryRow,
+  LibraryConversationKey,
+  LibraryListCursor,
+} from "../../../data/conversation-library/types";
 import { ConversationHistoryPreview } from "./ConversationHistoryPreview";
 import { ConversationLibraryList } from "./ConversationLibraryList";
 import { OpenConversationAction } from "./OpenConversationAction";
@@ -100,26 +107,17 @@ export function ConversationLibrarySurface({
   }, [harnessId, cwd, deps]);
 
   const selectedRow = list?.rows.find((row) => row.conversationKey === selectedKey);
+  const listView = listViewOf(list);
+  const previewView = previewViewOf(preview);
 
   // §4.4 return paths: Escape (when not typing) returns to the current chat, consuming the focus
   // token via onBack (F16). The Back button and the palette return command share the same onBack.
-  const onKeyDown = (event: React.KeyboardEvent<HTMLDivElement>): void => {
-    if (event.key !== "Escape") return;
-    const target = event.target as HTMLElement;
-    if (
-      target.tagName === "INPUT" ||
-      target.tagName === "TEXTAREA" ||
-      target.isContentEditable
-    ) {
-      return;
-    }
-    event.preventDefault();
-    onBack();
-  };
+  const onKeyDown = libraryEscapeHandler(onBack);
 
   return (
     <div
       className={surface}
+      role="presentation"
       data-testid="conversation-library-surface"
       data-region="stage"
       onKeyDown={onKeyDown}
@@ -132,39 +130,131 @@ export function ConversationLibrarySurface({
           ← back to current chat
         </button>
       </div>
-      <div className={columns}>
-        <div className={listCol}>
-          <ConversationLibraryList
+      <LibraryColumns
+        harnessId={harnessId}
+        cwd={cwd}
+        launchContext={launchContext}
+        listView={listView}
+        previewView={previewView}
+        selectedKey={selectedKey}
+        selectedRow={selectedRow}
+        deps={deps}
+        onOpened={onOpened}
+      />
+    </div>
+  );
+}
+
+function libraryEscapeHandler(
+  onBack: () => void,
+): (event: React.KeyboardEvent<HTMLDivElement>) => void {
+  return (event) => {
+    if (event.key !== "Escape") return;
+    const target = event.target as HTMLElement;
+    if (
+      target.tagName === "INPUT" ||
+      target.tagName === "TEXTAREA" ||
+      target.isContentEditable
+    ) {
+      return;
+    }
+    event.preventDefault();
+    onBack();
+  };
+}
+
+function listViewOf(list: LibraryListView | undefined): {
+  rows: readonly ConversationLibraryRow[];
+  nextCursor: LibraryListCursor | null;
+  loading: boolean;
+  error: string | undefined;
+  agentsNote: string | null | undefined;
+} {
+  return {
+    rows: list?.rows ?? [],
+    nextCursor: list?.nextCursor ?? null,
+    loading: list?.loading ?? false,
+    error: list?.error,
+    agentsNote: list?.agentsNote,
+  };
+}
+
+function previewViewOf(preview: LibraryPreview | undefined): {
+  page: LibraryPreview["page"];
+  loading: boolean;
+  error: string | undefined;
+} {
+  return {
+    page: preview?.page,
+    loading: preview?.loading ?? false,
+    error: preview?.error,
+  };
+}
+
+function LibraryColumns({
+  harnessId,
+  cwd,
+  launchContext,
+  listView,
+  previewView,
+  selectedKey,
+  selectedRow,
+  deps,
+  onOpened,
+}: {
+  harnessId: HarnessId;
+  cwd?: string;
+  launchContext?: { leafKey?: string; seatRole?: string };
+  listView: {
+    rows: readonly ConversationLibraryRow[];
+    nextCursor: LibraryListCursor | null;
+    loading: boolean;
+    error: string | undefined;
+    agentsNote: string | null | undefined;
+  };
+  previewView: {
+    page: LibraryPreview["page"];
+    loading: boolean;
+    error: string | undefined;
+  };
+  selectedKey: LibraryConversationKey | null;
+  selectedRow: ConversationLibraryRow | undefined;
+  deps?: LibraryDeps;
+  onOpened: (arSessionId: string) => void;
+}) {
+  return (
+    <div className={columns}>
+      <div className={listCol}>
+        <ConversationLibraryList
+          harnessId={harnessId}
+          rows={listView.rows}
+          selectedKey={selectedKey}
+          nextCursor={listView.nextCursor}
+          loading={listView.loading}
+          error={listView.error}
+          agentsNote={listView.agentsNote}
+          onSelect={(row) => void loadLibraryPreview(harnessId, row.conversationKey, deps)}
+          onLoadMore={() =>
+            void loadLibraryList(harnessId, { cwd, cursor: listView.nextCursor ?? undefined }, deps)
+          }
+        />
+      </div>
+      <div className={previewCol}>
+        <ConversationHistoryPreview
+          page={previewView.page}
+          loading={previewView.loading}
+          error={previewView.error}
+        />
+        {selectedRow !== undefined ? (
+          <OpenConversationAction
             harnessId={harnessId}
-            rows={list?.rows ?? []}
-            selectedKey={selectedKey}
-            nextCursor={list?.nextCursor ?? null}
-            loading={list?.loading ?? false}
-            error={list?.error}
-            agentsNote={list?.agentsNote}
-            onSelect={(row) => void loadLibraryPreview(harnessId, row.conversationKey, deps)}
-            onLoadMore={() =>
-              void loadLibraryList(harnessId, { cwd, cursor: list?.nextCursor ?? undefined }, deps)
-            }
+            row={selectedRow}
+            cwd={cwd}
+            launchContext={launchContext}
+            deps={deps}
+            onOpened={onOpened}
           />
-        </div>
-        <div className={previewCol}>
-          <ConversationHistoryPreview
-            page={preview?.page}
-            loading={preview?.loading ?? false}
-            error={preview?.error}
-          />
-          {selectedRow !== undefined ? (
-            <OpenConversationAction
-              harnessId={harnessId}
-              row={selectedRow}
-              cwd={cwd}
-              launchContext={launchContext}
-              deps={deps}
-              onOpened={onOpened}
-            />
-          ) : null}
-        </div>
+        ) : null}
       </div>
     </div>
   );

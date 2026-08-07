@@ -11,8 +11,11 @@ from __future__ import annotations
 
 import sys
 import tempfile
+import threading
 import time
 import unittest
+from collections.abc import Callable
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -20,12 +23,18 @@ from typing import Any
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
-from agents_remember.observer.ambient import AmbientLifecycle, AmbientTiming, build_ask
+from agents_remember.observer.ambient import (
+    AmbientLifecycle,
+    AmbientTiming,
+    _default_ticker_wait,
+    build_ask,
+)
 from agents_remember.observer.events import Event
 from agents_remember.observer.lifecycle_state import (
     TERMINAL_STATES,
     GuardedStartError,
     LifecycleError,
+    coerce_end_outcome,
     coerce_phase,
 )
 from agents_remember.observer.save_gate import (
@@ -298,19 +307,72 @@ class TtlSweepTests(_AmbientCase):
         self.assertTrue(self._exists(lc.id))
 
 
+class _GatedTickerWait:
+    """Test-only ticker seam: each call is one tick step the test grants.
+
+    The fake never parks on a Condition/Event handoff; it polls its grant
+    counter with tiny bounded sleeps, so the ticker thread's progress is fully
+    under the test's control and a set stop flag is observed within
+    milliseconds.
+    """
+
+    def __init__(self) -> None:
+        self.calls = 0
+        self.stop_seen = 0
+        self.allowed = 0
+        self._lock = threading.Lock()
+
+    def __call__(self, stop: threading.Event, _interval: float) -> bool:
+        with self._lock:
+            self.calls += 1
+            call_no = self.calls
+            if stop.is_set():
+                self.stop_seen += 1
+                return True
+        while True:
+            with self._lock:
+                if stop.is_set():
+                    self.stop_seen += 1
+                    return True
+                if call_no <= self.allowed:
+                    return False
+            time.sleep(0.001)
+
+    def allow(self, count: int) -> None:
+        """Grant ``count`` more tick steps to the ticker thread."""
+        with self._lock:
+            self.allowed += count
+
+
 class HeartbeatTests(unittest.TestCase):
     def test_ticker_emits_heartbeats_until_stopped(self) -> None:
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         store = EventStore(Path(tmp.name))
+        waiter = _GatedTickerWait()
         amb = AmbientLifecycle(store, timing=AmbientTiming(heartbeat_seconds=0.02))
         self.addCleanup(amb.shutdown)
-        lc = amb.start()
-        time.sleep(0.2)
+        lc = amb.start(ticker_wait=waiter)
+        ticker = amb._ticker
+        assert ticker is not None
+
+        # Deterministic through the seam: granted ticks run, ungranted ones park
+        # on the test gate, so no real-time Event wait decides the outcome.
+        waiter.allow(3)
+        deadline = time.monotonic() + 5.0
+        while store.read_heartbeat(lc.id) is None and time.monotonic() < deadline:
+            time.sleep(0.001)
+        self.assertIsNotNone(store.read_heartbeat(lc.id), "ticker never emitted a heartbeat")
+
         amb.shutdown()
-        time.sleep(0.05)  # let the ticker observe the stop and exit before reading
-        kinds = [event.kind for event in store.read(lc.id)]
-        self.assertIn("lifecycle.heartbeat", kinds)
+        deadline = time.monotonic() + 5.0
+        while waiter.stop_seen == 0 and time.monotonic() < deadline:
+            time.sleep(0.001)
+        self.assertGreaterEqual(waiter.stop_seen, 1)
+        deadline = time.monotonic() + 5.0
+        while ticker.is_alive() and time.monotonic() < deadline:
+            time.sleep(0.001)
+        self.assertFalse(ticker.is_alive(), "ticker thread wedged after stop was set")
 
     def test_inactive_seconds_tracks_real_activity_not_heartbeats(self) -> None:
         tmp = tempfile.TemporaryDirectory()
@@ -347,28 +409,170 @@ class HeartbeatTests(unittest.TestCase):
         self.addCleanup(tmp.cleanup)
         store = EventStore(Path(tmp.name))
         clock = [datetime(2026, 1, 1, tzinfo=UTC)]
+        waiter = _GatedTickerWait()
         amb = AmbientLifecycle(
             store,
             timing=AmbientTiming(heartbeat_seconds=0.02, inactivity_cutoff_seconds=5.0),
             clock=lambda: clock[0],
         )
         self.addCleanup(amb.shutdown)
-        lc = amb.start()
+        lc = amb.start(ticker_wait=waiter)
+        ticker = amb._ticker
+        assert ticker is not None
 
         def heartbeat_ts() -> str | None:
             heartbeat = store.read_heartbeat(lc.id)
             return heartbeat.ts if heartbeat is not None else None
 
-        time.sleep(0.15)
-        self.assertIsNotNone(heartbeat_ts())  # beats while active (age 0 < cutoff)
+        def wait_until(
+            predicate: Callable[[], bool],
+            *,
+            what: str,
+            timeout: float = 5.0,
+            interval: float = 0.001,
+        ) -> None:
+            deadline = time.monotonic() + timeout
+            while time.monotonic() < deadline:
+                if predicate():
+                    return
+                time.sleep(interval)
+            self.fail(f"timed out after {timeout:.1f}s waiting for {what}")
+
+        # Grant the first tick step: the first beat lands because activity age 0
+        # is inside the cutoff. The seam gates every further step, so no tick
+        # can race the clock jump below.
+        waiter.allow(1)
+        wait_until(lambda: heartbeat_ts() is not None, what="the first heartbeat")
+        first = heartbeat_ts()
+        assert first is not None
+
         clock[0] = clock[0] + timedelta(seconds=60)  # jump past the 5s inactivity cutoff
-        time.sleep(0.1)
-        quiet = heartbeat_ts()
-        time.sleep(0.15)
-        self.assertEqual(heartbeat_ts(), quiet)  # no new beats while idle
+        # Let several ticks run after the jump: each sees the age past the
+        # cutoff and must stay quiet, leaving the last heartbeat unchanged.
+        calls_before = waiter.calls
+        waiter.allow(5)
+        wait_until(
+            lambda: waiter.calls >= calls_before + 5,
+            what="the post-jump idle ticks",
+        )
+        self.assertEqual(heartbeat_ts(), first)
+
         amb.emit_tool("ping", {"tokens": 1, "ok": True})  # real activity resets the clock
-        time.sleep(0.15)
-        self.assertGreater(heartbeat_ts() or "", quiet or "")  # the ticker resumes
+        waiter.allow(1)
+        wait_until(
+            lambda: (heartbeat_ts() or "") > (first or ""),
+            what="the ticker to resume after activity",
+        )
+        resumed = heartbeat_ts()
+        assert resumed is not None
+
+        # Stop must be observed on the next wake; the loop then exits without a
+        # wedged park, and no beat can land after the stop flag is set.
+        amb.shutdown()
+        wait_until(lambda: waiter.stop_seen >= 1, what="the ticker to observe the stop flag")
+        wait_until(lambda: not ticker.is_alive(), what="the ticker thread to exit")
+        self.assertEqual(heartbeat_ts(), resumed)
+
+    def test_heartbeat_loop_cannot_wedge_and_honors_stop(self) -> None:
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        store = EventStore(Path(tmp.name))
+        waiter = _GatedTickerWait()
+        amb = AmbientLifecycle(
+            store,
+            timing=AmbientTiming(heartbeat_seconds=0.02),
+        )
+        self.addCleanup(amb.shutdown)
+        lc = amb.start(ticker_wait=waiter)
+        ticker = amb._ticker
+        assert ticker is not None
+
+        waiter.allow(1)
+        deadline = time.monotonic() + 5.0
+        while store.read_heartbeat(lc.id) is None and time.monotonic() < deadline:
+            time.sleep(0.001)
+        self.assertIsNotNone(store.read_heartbeat(lc.id), "ticker never beat through the seam")
+
+        amb.shutdown()
+        deadline = time.monotonic() + 5.0
+        while waiter.stop_seen == 0 and time.monotonic() < deadline:
+            time.sleep(0.001)
+        self.assertGreaterEqual(waiter.stop_seen, 1)
+        deadline = time.monotonic() + 5.0
+        while ticker.is_alive() and time.monotonic() < deadline:
+            time.sleep(0.001)
+        self.assertFalse(ticker.is_alive(), "ticker thread wedged after stop was set")
+
+    def test_default_ticker_wait_returns_after_the_interval(self) -> None:
+        stop = threading.Event()
+        started = time.monotonic()
+        self.assertFalse(_default_ticker_wait(stop, 0.02))
+        elapsed = time.monotonic() - started
+        self.assertGreaterEqual(elapsed, 0.01)
+        self.assertLess(elapsed, 1.0)
+
+    def test_default_ticker_wait_rechecks_stop_on_every_wake(self) -> None:
+        stop = threading.Event()
+        results: list[bool | None] = [None]
+
+        def run() -> None:
+            results[0] = _default_ticker_wait(stop, 60.0)
+
+        thread = threading.Thread(target=run)
+        thread.start()
+        time.sleep(0.03)  # park well inside the long interval
+        stop.set()
+        thread.join(timeout=2.0)
+        self.assertFalse(thread.is_alive(), "default ticker wait wedged past its stop recheck")
+        self.assertIs(results[0], True)
+
+    def test_heartbeat_tick_returns_false_without_an_active_lifecycle(self) -> None:
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        store = EventStore(Path(tmp.name))
+        amb = AmbientLifecycle(store, timing=AmbientTiming(heartbeat_seconds=3600))
+        self.addCleanup(amb.shutdown)
+        self.assertFalse(amb._heartbeat_tick())  # never started -> current is None
+
+    def test_heartbeat_tick_returns_false_for_a_terminal_lifecycle(self) -> None:
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        store = EventStore(Path(tmp.name))
+        amb = AmbientLifecycle(store, timing=AmbientTiming(heartbeat_seconds=3600))
+        self.addCleanup(amb.shutdown)
+        started = amb.start()
+        terminal = replace(started, state=coerce_end_outcome("completed"))
+        with amb._lock:
+            amb.current = terminal
+        self.assertFalse(amb._heartbeat_tick())
+
+    def test_heartbeat_loop_exits_when_tick_reports_the_lifecycle_is_gone(self) -> None:
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        store = EventStore(Path(tmp.name))
+        waiter = _GatedTickerWait()
+        amb = AmbientLifecycle(store, timing=AmbientTiming(heartbeat_seconds=0.02))
+        self.addCleanup(amb.shutdown)
+        lc = amb.start(ticker_wait=waiter)
+        ticker = amb._ticker
+        assert ticker is not None
+
+        waiter.allow(1)
+        deadline = time.monotonic() + 5.0
+        while store.read_heartbeat(lc.id) is None and time.monotonic() < deadline:
+            time.sleep(0.001)
+        self.assertIsNotNone(store.read_heartbeat(lc.id), "ticker never beat through the seam")
+
+        # Clear the ambient without setting the stop flag: the next granted tick
+        # reports the lifecycle is gone and the loop must exit through its
+        # explicit return rather than wedge in the wait.
+        with amb._lock:
+            amb.current = None
+        waiter.allow(1)
+        deadline = time.monotonic() + 5.0
+        while ticker.is_alive() and time.monotonic() < deadline:
+            time.sleep(0.001)
+        self.assertFalse(ticker.is_alive(), "loop did not exit when tick reported no lifecycle")
 
 
 class AskTests(unittest.TestCase):

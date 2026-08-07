@@ -1,4 +1,12 @@
-import { memo, useEffect, useRef, useState } from "react";
+import {
+  memo,
+  useEffect,
+  useRef,
+  useState,
+  type MutableRefObject,
+  type RefObject,
+  type ReactNode,
+} from "react";
 import {
   Button,
   Dialog,
@@ -10,13 +18,14 @@ import {
 } from "react-aria-components";
 
 import { css, cx } from "../../styled-system/css";
-import { useSelectionCapture } from "../data/selection";
+import { useSelectionCapture, type SelectionContext as HighlightSelection } from "../data/selection";
 import {
   createSession,
   findSessionForLeaf,
   sessionStore,
   terminalOpenFailureMessage,
   useSessions,
+  type OpenSession,
 } from "../data/sessions";
 import {
   keepWaitingForSubmit,
@@ -241,17 +250,26 @@ function successful(record: SubmitRecord): boolean {
   return record.phase === "accepted" || record.phase === "queued";
 }
 
-function HighlightComposerImpl({
-  selectedLifecycleId,
-  viewedLeafKey,
-  leafChatActive = false,
-  onSent,
-}: {
-  selectedLifecycleId?: string;
-  viewedLeafKey?: string;
-  leafChatActive?: boolean;
-  onSent?: (sessionId: string) => void;
-}) {
+function useHighlightComposerState(): {
+  selection: HighlightSelection | null;
+  sessions: OpenSession[];
+  activeId: string | null;
+  harnesses: HarnessInfo[];
+  mode: "pill" | "composer";
+  message: string;
+  targetKey: string | null;
+  status: HighlightStatus;
+  anchorRef: RefObject<HTMLSpanElement | null>;
+  sendingRef: MutableRefObject<boolean>;
+  deliveryRef: MutableRefObject<{ id: string } | null>;
+  lastRecordRef: MutableRefObject<SubmitRecord | null>;
+  messageInputRef: RefObject<HTMLTextAreaElement | null>;
+  clear: () => void;
+  setMode: (mode: "pill" | "composer") => void;
+  setMessage: (message: string) => void;
+  setTargetKey: (key: string | null) => void;
+  setStatus: (status: HighlightStatus) => void;
+} {
   const { selection, clear } = useSelectionCapture();
   const sessions = useSessions((state) => state.sessions);
   const activeId = useSessions((state) => state.activeId);
@@ -264,6 +282,7 @@ function HighlightComposerImpl({
   const sendingRef = useRef(false);
   const deliveryRef = useRef<{ id: string } | null>(null);
   const lastRecordRef = useRef<SubmitRecord | null>(null);
+  const messageInputRef = useRef<HTMLTextAreaElement | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -284,22 +303,100 @@ function HighlightComposerImpl({
     lastRecordRef.current = null;
   }, [selection]);
 
-  const foundDirectLeafChat =
+  useEffect(() => {
+    if (mode === "composer") messageInputRef.current?.focus();
+  }, [mode]);
+
+  return {
+    selection,
+    sessions,
+    activeId,
+    harnesses,
+    mode,
+    message,
+    targetKey,
+    status,
+    anchorRef,
+    sendingRef,
+    deliveryRef,
+    lastRecordRef,
+    messageInputRef,
+    clear,
+    setMode,
+    setMessage,
+    setTargetKey,
+    setStatus,
+  };
+}
+
+function useHighlightTargets({
+  selection,
+  sessions,
+  activeId,
+  harnesses,
+  targetKey,
+  selectedLifecycleId,
+  leafChatActive,
+  viewedLeafKey,
+}: {
+  selection: HighlightSelection | null;
+  sessions: OpenSession[];
+  activeId: string | null;
+  harnesses: HarnessInfo[];
+  targetKey: string | null;
+  selectedLifecycleId: string | undefined;
+  leafChatActive: boolean;
+  viewedLeafKey: string | undefined;
+}): {
+  directLeafChat: OpenSession | undefined;
+  targets: Target[];
+  selectedKey: string | null;
+  selected: Target | null;
+} {
+  if (!selection) {
+    return { directLeafChat: undefined, targets: [], selectedKey: null, selected: null };
+  }
+  const directLeafChat = directLeafChatFor(
+    selection,
+    leafChatActive,
+    viewedLeafKey,
+  );
+  const routedSessions = routedSessionsFor(sessions, selectedLifecycleId);
+  const targets: Target[] = [
+    ...sessionTargets(routedSessions),
+    ...createTargets(harnesses),
+  ];
+  const defaultKey =
+    highlightDefaultKey(activeId, routedSessions, targets);
+  const selectedKey = targets.find((target) => target.key === targetKey)
+    ? targetKey
+    : defaultKey;
+  const selected = targets.find((target) => target.key === selectedKey) ?? null;
+  return { directLeafChat, targets, selectedKey, selected };
+}
+
+function directLeafChatFor(
+  selection: HighlightSelection | null,
+  leafChatActive: boolean,
+  viewedLeafKey: string | undefined,
+): OpenSession | undefined {
+  const found =
     selection &&
     leafChatActive &&
     viewedLeafKey &&
     selection.leafKey === viewedLeafKey
       ? findSessionForLeaf(viewedLeafKey, "chat")
       : undefined;
-  const directLeafChat =
-    foundDirectLeafChat?.kind === "harness" &&
-    (foundDirectLeafChat.status ?? "running") === "running"
-      ? foundDirectLeafChat
-      : undefined;
+  return found?.kind === "harness" && (found.status ?? "running") === "running"
+    ? found
+    : undefined;
+}
 
-  if (!selection) return null;
-
-  const routedSessions = (
+function routedSessionsFor(
+  sessions: OpenSession[],
+  selectedLifecycleId: string | undefined,
+): OpenSession[] {
+  return (
     selectedLifecycleId
       ? sessions.filter(
           (session) => session.lifecycleId === selectedLifecycleId,
@@ -309,44 +406,72 @@ function HighlightComposerImpl({
     (session) =>
       session.kind === "harness" && (session.status ?? "running") === "running",
   );
-  const targets: Target[] = [
-    ...routedSessions.map(
-      (session): Target => ({
-        key: `s:${session.id}`,
-        kind: "session",
-        id: session.id,
-        label: session.label,
+}
+
+function sessionTargets(sessions: OpenSession[]): Target[] {
+  return sessions.map(
+    (session): Target => ({
+      key: `s:${session.id}`,
+      kind: "session",
+      id: session.id,
+      label: session.label,
+    }),
+  );
+}
+
+function createTargets(harnesses: HarnessInfo[]): Target[] {
+  return harnesses
+    .filter((harness) => harness.detected)
+    .map(
+      (harness): Target => ({
+        key: `c:${harness.id}`,
+        kind: "create",
+        harnessId: harness.id,
+        prefix: harness.name,
+        label: `＋ ${harness.name}`,
       }),
-    ),
-    ...harnesses
-      .filter((harness) => harness.detected)
-      .map(
-        (harness): Target => ({
-          key: `c:${harness.id}`,
-          kind: "create",
-          harnessId: harness.id,
-          prefix: harness.name,
-          label: `＋ ${harness.name}`,
-        }),
-      ),
-  ];
-  const defaultKey =
+    );
+}
+
+function highlightDefaultKey(
+  activeId: string | null,
+  routedSessions: OpenSession[],
+  targets: Target[],
+): string | null {
+  return (
     (activeId &&
       routedSessions.some((session) => session.id === activeId) &&
       `s:${activeId}`) ||
     (routedSessions[0] && `s:${routedSessions[0].id}`) ||
     targets.find((target) => target.kind === "create")?.key ||
-    null;
-  const selectedKey = targets.find((target) => target.key === targetKey)
-    ? targetKey
-    : defaultKey;
-  const selected = targets.find((target) => target.key === selectedKey) ?? null;
+    null
+  );
+}
 
+function useHighlightSettle({
+  onSent,
+  deliveryRef,
+  lastRecordRef,
+  sendingRef,
+  setStatus,
+  setMode,
+  clear,
+}: {
+  onSent?: (sessionId: string) => void;
+  deliveryRef: MutableRefObject<{ id: string } | null>;
+  lastRecordRef: MutableRefObject<SubmitRecord | null>;
+  sendingRef: MutableRefObject<boolean>;
+  setStatus: (status: HighlightStatus) => void;
+  setMode: (mode: "pill" | "composer") => void;
+  clear: () => void;
+}): {
+  dismiss: () => void;
+  showRecord: (record: SubmitRecord, notice?: string) => boolean;
+} {
   const dismiss = () => {
     clear();
     setMode("pill");
   };
-
   const finish = () => {
     const sessionId = deliveryRef.current?.id;
     deliveryRef.current = null;
@@ -354,14 +479,10 @@ function HighlightComposerImpl({
     sendingRef.current = false;
     dismiss();
     if (sessionId) {
-      // Route ownership moves only at the accepted/queued commit point. Selecting an existing
-      // target is provisional; rejected, blocked, route-error, and unresolved endgame attempts
-      // must leave the operator's current active chat untouched.
       sessionStore.getState().setActive(sessionId);
       onSent?.(sessionId);
     }
   };
-
   const showRecord = (record: SubmitRecord, notice?: string): boolean => {
     lastRecordRef.current = record;
     if (successful(record)) {
@@ -391,22 +512,31 @@ function HighlightComposerImpl({
     }
     return false;
   };
+  return { dismiss, showRecord };
+}
 
-  const submitTo = async (id: string, payload: string): Promise<boolean> => {
-    const prior = lastRecordRef.current;
-    if (prior?.phase === "route-error" && prior.requestId) {
-      const retried = await retryRouteFailure(id, prior.requestId, payload);
+function submitHighlightPayload(
+  id: string,
+  payload: string,
+  showRecord: (record: SubmitRecord, notice?: string) => boolean,
+  setStatus: (status: HighlightStatus) => void,
+  lastRecordRef: MutableRefObject<SubmitRecord | null>,
+): Promise<boolean> {
+  const prior = lastRecordRef.current;
+  if (prior?.phase === "route-error" && prior.requestId) {
+    return retryRouteFailure(id, prior.requestId, payload).then((retried) => {
       if (retried.record) return showRecord(retried.record, retried.notice);
       setStatus({
         phase: "error",
         detail: "the same-id retry is no longer available",
       });
       return false;
-    }
-    const outcome = await submitSessionText(id, payload, {
-      source: "highlight",
-      clearDraftOnAccept: false,
     });
+  }
+  return submitSessionText(id, payload, {
+    source: "highlight",
+    clearDraftOnAccept: false,
+  }).then((outcome) => {
     if (outcome.status === "blocked") {
       setStatus({ phase: "error", detail: outcome.reason });
       return false;
@@ -416,22 +546,86 @@ function HighlightComposerImpl({
       return false;
     }
     return showRecord(outcome.record);
-  };
+  });
+}
 
+function useHighlightReconcile({
+  lastRecordRef,
+  deliveryRef,
+  sendingRef,
+  setStatus,
+  showRecord,
+}: {
+  lastRecordRef: MutableRefObject<SubmitRecord | null>;
+  deliveryRef: MutableRefObject<{ id: string } | null>;
+  sendingRef: MutableRefObject<boolean>;
+  setStatus: (status: HighlightStatus) => void;
+  showRecord: (record: SubmitRecord, notice?: string) => boolean;
+}): () => Promise<void> {
+  return async () => {
+    const record = lastRecordRef.current;
+    const context = deliveryRef.current;
+    if (!record || record.phase !== "endgame" || !context || sendingRef.current) return;
+    sendingRef.current = true;
+    setStatus({ phase: "sending", detail: "Reconciling the same requestId…" });
+    try {
+      const final = await keepWaitingForSubmit(context.id, record.requestId);
+      if (final) showRecord(final);
+      else setStatus({ phase: "error", detail: "this request is no longer waiting" });
+    } finally {
+      sendingRef.current = false;
+    }
+  };
+}
+
+interface HighlightSubmitProps {
+  selection: HighlightSelection | null;
+  message: string;
+  selected: Target | null;
+  selectedLifecycleId: string | undefined;
+  deliveryRef: MutableRefObject<{ id: string } | null>;
+  lastRecordRef: MutableRefObject<SubmitRecord | null>;
+  sendingRef: MutableRefObject<boolean>;
+  status: HighlightStatus;
+  setStatus: (status: HighlightStatus) => void;
+  setMode: (mode: "pill" | "composer") => void;
+  showRecord: (record: SubmitRecord, notice?: string) => boolean;
+}
+
+function useHighlightSubmit(props: HighlightSubmitProps): {
+  directSubmit: (targetId: string) => void;
+  send: () => Promise<void>;
+  keepWaiting: () => Promise<void>;
+} {
+  const {
+    selection,
+    message,
+    selected,
+    selectedLifecycleId,
+    deliveryRef,
+    lastRecordRef,
+    sendingRef,
+    status,
+    setStatus,
+    setMode,
+    showRecord,
+  } = props;
+  const submitTo = (id: string, payload: string) =>
+    submitHighlightPayload(id, payload, showRecord, setStatus, lastRecordRef);
   const directSubmit = (targetId: string) => {
-    if (sendingRef.current) return;
+    if (!selection || sendingRef.current) return;
     sendingRef.current = true;
     deliveryRef.current = { id: targetId };
     setStatus({ phase: "sending", detail: "Sending…" });
-    void submitTo(targetId, buildContextPackage(selection.text)).then(
+    void submitTo(targetId, buildContextPackage(selection?.text ?? "")).then(
       (sent) => {
         sendingRef.current = false;
         if (!sent) setMode("composer");
       },
     );
   };
-
   const send = async () => {
+    if (!selection) return;
     if (
       (!selected && !deliveryRef.current) ||
       sendingRef.current ||
@@ -444,41 +638,14 @@ function HighlightComposerImpl({
     try {
       let context = deliveryRef.current;
       if (!context) {
-        let id: string;
         if (!selected) return;
-        if (selected.kind === "session") {
-          id = selected.id;
-        } else {
-          const result = selectedLifecycleId
-            ? await createSession(
-                selected.prefix,
-                "harness",
-                selected.harnessId,
-                selectedLifecycleId,
-              )
-            : await createSession(
-                selected.prefix,
-                "harness",
-                selected.harnessId,
-              );
-          if (result.outcome === "failed") {
-            setStatus({
-              phase: "error",
-              detail: terminalOpenFailureMessage(result),
-            });
-            return;
-          }
-          id = result.session.id;
-          const gate = await waitForSubmissionReady(id);
-          if (!gate.ready) {
-            setStatus({
-              phase: "error",
-              detail: gate.reason ?? "native control did not become ready",
-            });
-            deliveryRef.current = { id };
-            return;
-          }
-        }
+        const id = await openHighlightSession(
+          selected,
+          selectedLifecycleId,
+          setStatus,
+          deliveryRef,
+        );
+        if (id === null) return;
         context = { id };
         deliveryRef.current = context;
       }
@@ -487,31 +654,191 @@ function HighlightComposerImpl({
       sendingRef.current = false;
     }
   };
+  const keepWaiting = useHighlightReconcile({
+    lastRecordRef,
+    deliveryRef,
+    sendingRef,
+    setStatus,
+    showRecord,
+  });
+  return { directSubmit, send, keepWaiting };
+}
 
-  const keepWaiting = async () => {
-    const record = lastRecordRef.current;
-    const context = deliveryRef.current;
-    if (!record || record.phase !== "endgame" || !context || sendingRef.current)
-      return;
-    sendingRef.current = true;
-    setStatus({ phase: "sending", detail: "Reconciling the same requestId…" });
-    try {
-      const final = await keepWaitingForSubmit(context.id, record.requestId);
-      if (final) showRecord(final);
-      else
-        setStatus({
-          phase: "error",
-          detail: "this request is no longer waiting",
-        });
-    } finally {
-      sendingRef.current = false;
-    }
+function useHighlightFormHandlers({
+  status,
+  setStatus,
+  setTargetKey,
+  deliveryRef,
+  lastRecordRef,
+}: {
+  status: HighlightStatus;
+  setStatus: (status: HighlightStatus) => void;
+  setTargetKey: (key: string) => void;
+  deliveryRef: MutableRefObject<{ id: string } | null>;
+  lastRecordRef: MutableRefObject<SubmitRecord | null>;
+}) {
+  const selectTarget = (key: string) => {
+    setTargetKey(key);
+    deliveryRef.current = null;
+    lastRecordRef.current = null;
+    setStatus(null);
   };
+  const copyFailed = (detail: string) => {
+    if (status?.phase === "endgame") setStatus({ ...status, detail });
+  };
+  const release = () => {
+    const context = deliveryRef.current;
+    if (!context) return;
+    releaseSubmitDraft(
+      context.id,
+      status?.phase === "endgame" ? status.requestId : "",
+    );
+    lastRecordRef.current = null;
+    setStatus({
+      phase: "error",
+      detail:
+        "unresolved request released; a new Send will use a new requestId",
+    });
+  };
+  return { selectTarget, copyFailed, release };
+}
+
+async function openHighlightSession(
+  selected: Target,
+  selectedLifecycleId: string | undefined,
+  setStatus: (status: HighlightStatus) => void,
+  deliveryRef: MutableRefObject<{ id: string } | null>,
+): Promise<string | null> {
+  if (selected.kind === "session") return selected.id;
+  const result = selectedLifecycleId
+    ? await createSession(
+        selected.prefix,
+        "harness",
+        selected.harnessId,
+        selectedLifecycleId,
+      )
+    : await createSession(
+        selected.prefix,
+        "harness",
+        selected.harnessId,
+      );
+  if (result.outcome === "failed") {
+    setStatus({
+      phase: "error",
+      detail: terminalOpenFailureMessage(result),
+    });
+    return null;
+  }
+  const id = result.session.id;
+  const gate = await waitForSubmissionReady(id);
+  if (!gate.ready) {
+    setStatus({
+      phase: "error",
+      detail: gate.reason ?? "native control did not become ready",
+    });
+    deliveryRef.current = { id };
+    return null;
+  }
+  return id;
+}
+
+function HighlightComposerImpl({
+  selectedLifecycleId,
+  viewedLeafKey,
+  leafChatActive = false,
+  onSent,
+}: {
+  selectedLifecycleId?: string;
+  viewedLeafKey?: string;
+  leafChatActive?: boolean;
+  onSent?: (sessionId: string) => void;
+}) {
+  const state = useHighlightComposerState();
+  const { directLeafChat, targets, selectedKey, selected } = useHighlightTargets({
+    selection: state.selection,
+    sessions: state.sessions,
+    activeId: state.activeId,
+    harnesses: state.harnesses,
+    targetKey: state.targetKey,
+    selectedLifecycleId,
+    leafChatActive,
+    viewedLeafKey,
+  });
+  const settle = useHighlightSettle({
+    onSent,
+    deliveryRef: state.deliveryRef,
+    lastRecordRef: state.lastRecordRef,
+    sendingRef: state.sendingRef,
+    setStatus: state.setStatus,
+    setMode: state.setMode,
+    clear: state.clear,
+  });
+  const actions = useHighlightSubmit({
+    selection: state.selection,
+    message: state.message,
+    selected,
+    selectedLifecycleId,
+    deliveryRef: state.deliveryRef,
+    lastRecordRef: state.lastRecordRef,
+    sendingRef: state.sendingRef,
+    status: state.status,
+    setStatus: state.setStatus,
+    setMode: state.setMode,
+    showRecord: settle.showRecord,
+  });
+  const formHandlers = useHighlightFormHandlers({
+    status: state.status,
+    setStatus: state.setStatus,
+    setTargetKey: state.setTargetKey,
+    deliveryRef: state.deliveryRef,
+    lastRecordRef: state.lastRecordRef,
+  });
+
+  if (!state.selection) return null;
+  const selection = state.selection;
+
+  return (
+    <HighlightComposerView
+      state={state}
+      selection={selection}
+      directLeafChat={directLeafChat}
+      targets={targets}
+      selectedKey={selectedKey}
+      selected={selected}
+      settle={settle}
+      actions={actions}
+      formHandlers={formHandlers}
+    />
+  );
+}
+
+function HighlightComposerView({
+  state,
+  selection,
+  directLeafChat,
+  targets,
+  selectedKey,
+  selected,
+  settle,
+  actions,
+  formHandlers,
+}: {
+  state: ReturnType<typeof useHighlightComposerState>;
+  selection: HighlightSelection;
+  directLeafChat: OpenSession | undefined;
+  targets: Target[];
+  selectedKey: string | null;
+  selected: Target | null;
+  settle: ReturnType<typeof useHighlightSettle>;
+  actions: ReturnType<typeof useHighlightSubmit>;
+  formHandlers: ReturnType<typeof useHighlightFormHandlers>;
+}) {
+  const { mode, status, message, setMessage, messageInputRef } = state;
 
   return (
     <>
       <span
-        ref={anchorRef}
+        ref={state.anchorRef}
         aria-hidden="true"
         style={{
           position: "fixed",
@@ -522,180 +849,330 @@ function HighlightComposerImpl({
           pointerEvents: "none",
         }}
       />
-      <Popover
-        triggerRef={anchorRef}
-        isOpen
-        onOpenChange={(isOpen) => {
-          if (!isOpen) dismiss();
-        }}
-        placement="top"
-        offset={8}
-        className={popover}
-      >
-        <Dialog
-          aria-label="Send selection to a session"
-          className={cx(dialog, mode === "pill" ? dialogPill : dialogComposer)}
-          data-highlight-composer=""
-          data-testid="highlight-composer"
-        >
-          {mode === "pill" ? (
-            <Button
-              className={addButton}
-              isDisabled={status?.phase === "sending"}
-              onPress={() =>
-                directLeafChat
-                  ? directSubmit(directLeafChat.id)
-                  : setMode("composer")
-              }
-              data-testid="highlight-add-to-chat"
-            >
-              <ChatIcon />
-              Add to chat
-            </Button>
-          ) : (
-            <>
-              <pre className={preview}>{selection.text}</pre>
-              <div className={targetRow}>
-                <span className={targetLabel}>Send to</span>
-                <ToggleButtonGroup
-                  className={toggleGroup}
-                  selectionMode="single"
-                  selectedKeys={selectedKey ? [selectedKey] : []}
-                  onSelectionChange={(keys) => {
-                    const key = [...keys][0];
-                    if (typeof key === "string") {
-                      setTargetKey(key);
-                      deliveryRef.current = null;
-                      lastRecordRef.current = null;
-                      setStatus(null);
-                    }
-                  }}
-                >
-                  {targets.map((target) => (
-                    <ToggleButton
-                      key={target.key}
-                      id={target.key}
-                      className={toggle}
-                      data-testid={`highlight-target-${target.key}`}
-                    >
-                      {target.label}
-                    </ToggleButton>
-                  ))}
-                </ToggleButtonGroup>
-              </div>
-              {targets.length === 0 ? (
-                <span className={statusNote} role="alert">
-                  no native-control chat is available; raw terminals accept
-                  typing only
-                </span>
-              ) : null}
-              <TextField
-                className={field}
-                aria-label="Message to send with the selection"
-                value={message}
-                onChange={setMessage}
-                autoFocus
-              >
-                <TextArea
-                  className={area}
-                  placeholder="Add a message…  (Ctrl+Enter sends · Enter = newline)"
-                  onKeyDown={(event) => {
-                    if (
-                      event.key === "Enter" &&
-                      event.ctrlKey &&
-                      !event.nativeEvent.isComposing
-                    ) {
-                      event.preventDefault();
-                      void send();
-                    }
-                  }}
-                />
-              </TextField>
-              <span className={scopeNote}>
-                text only · attachments unavailable
-              </span>
-              {status ? (
-                <span
-                  className={statusNote}
-                  role={
-                    status.phase === "error" || status.phase === "endgame"
-                      ? "alert"
-                      : "status"
-                  }
-                  data-testid="highlight-status"
-                >
-                  {status.detail}
-                </span>
-              ) : null}
-              {status?.phase === "endgame" ? (
-                <div className={statusActions}>
-                  <button
-                    type="button"
-                    className={secondaryButton}
-                    onClick={() => void keepWaiting()}
-                  >
-                    keep waiting
-                  </button>
-                  <button
-                    type="button"
-                    className={secondaryButton}
-                    onClick={() => {
-                      void navigator.clipboard
-                        .writeText(status.requestId)
-                        .catch(() =>
-                          setStatus({
-                            ...status,
-                            detail: "could not copy requestId",
-                          }),
-                        );
-                    }}
-                  >
-                    copy requestId
-                  </button>
-                  <button
-                    type="button"
-                    className={secondaryButton}
-                    onClick={() => {
-                      const context = deliveryRef.current;
-                      if (!context) return;
-                      releaseSubmitDraft(context.id, status.requestId);
-                      lastRecordRef.current = null;
-                      setStatus({
-                        phase: "error",
-                        detail:
-                          "unresolved request released; a new Send will use a new requestId",
-                      });
-                    }}
-                  >
-                    release draft
-                  </button>
-                </div>
-              ) : null}
-              <Button
-                className={sendButton}
-                onPress={() => void send()}
-                isDisabled={
-                  (!selected && !deliveryRef.current) ||
-                  status?.phase === "sending" ||
-                  status?.phase === "endgame"
-                }
-                data-testid="highlight-send"
-              >
-                {status?.phase === "sending"
-                  ? "Sending…"
-                  : lastRecordRef.current?.phase === "route-error"
-                    ? "Retry same id"
-                    : "Send"}
-              </Button>
-            </>
-          )}
-        </Dialog>
-      </Popover>
+      <HighlightComposerSurface
+        anchorRef={state.anchorRef}
+        mode={mode}
+        onDismiss={settle.dismiss}
+        pill={
+          <HighlightPill
+            status={status}
+            directLeafChat={directLeafChat}
+            onDirectSubmit={actions.directSubmit}
+            onCompose={() => state.setMode("composer")}
+          />
+        }
+        form={
+          <HighlightForm
+            selection={selection}
+            message={message}
+            setMessage={setMessage}
+            targets={targets}
+            selectedKey={selectedKey}
+            status={status}
+            messageInputRef={messageInputRef}
+            deliveryRef={state.deliveryRef}
+            lastRecordRef={state.lastRecordRef}
+            selected={selected}
+            onSelectTarget={formHandlers.selectTarget}
+            onCopyFailed={formHandlers.copyFailed}
+            onSend={() => void actions.send()}
+            onKeepWaiting={() => void actions.keepWaiting()}
+            onRelease={formHandlers.release}
+          />
+        }
+      />
     </>
   );
 }
 
-// Memoized (tab-switch CPU): mounted once under the shell — the shell re-renders on every
-// view switch with unchanged props, and the memo gate skips this subtree then; its own store
-// subscriptions still drive its updates.
+function HighlightPill({
+  status,
+  directLeafChat,
+  onDirectSubmit,
+  onCompose,
+}: {
+  status: HighlightStatus;
+  directLeafChat: OpenSession | undefined;
+  onDirectSubmit: (targetId: string) => void;
+  onCompose: () => void;
+}) {
+  return (
+    <Button
+      className={addButton}
+      isDisabled={status?.phase === "sending"}
+      onPress={() => (directLeafChat ? onDirectSubmit(directLeafChat.id) : onCompose())}
+      data-testid="highlight-add-to-chat"
+    >
+      <ChatIcon />
+      Add to chat
+    </Button>
+  );
+}
+
+function HighlightComposerSurface({
+  anchorRef,
+  mode,
+  onDismiss,
+  pill,
+  form,
+}: {
+  anchorRef: RefObject<HTMLSpanElement | null>;
+  mode: "pill" | "composer";
+  onDismiss: () => void;
+  pill: ReactNode;
+  form: ReactNode;
+}) {
+  return (
+    <Popover
+      triggerRef={anchorRef}
+      isOpen
+      onOpenChange={(isOpen) => {
+        if (!isOpen) onDismiss();
+      }}
+      placement="top"
+      offset={8}
+      className={popover}
+    >
+      <Dialog
+        aria-label="Send selection to a session"
+        className={cx(dialog, mode === "pill" ? dialogPill : dialogComposer)}
+        data-highlight-composer=""
+        data-testid="highlight-composer"
+      >
+        {mode === "pill" ? pill : form}
+      </Dialog>
+    </Popover>
+  );
+}
+
+function HighlightForm({
+  selection,
+  message,
+  setMessage,
+  targets,
+  selectedKey,
+  status,
+  messageInputRef,
+  deliveryRef,
+  lastRecordRef,
+  selected,
+  onSelectTarget,
+  onSend,
+  onKeepWaiting,
+  onCopyFailed,
+  onRelease,
+}: {
+  selection: HighlightSelection;
+  message: string;
+  setMessage: (message: string) => void;
+  targets: Target[];
+  selectedKey: string | null;
+  status: HighlightStatus;
+  messageInputRef: RefObject<HTMLTextAreaElement | null>;
+  deliveryRef: MutableRefObject<{ id: string } | null>;
+  lastRecordRef: MutableRefObject<SubmitRecord | null>;
+  selected: Target | null;
+  onSelectTarget: (key: string) => void;
+  onSend: () => void;
+  onKeepWaiting: () => void;
+  onCopyFailed: (detail: string) => void;
+  onRelease: () => void;
+}) {
+  return (
+    <>
+      <pre className={preview}>{selection.text}</pre>
+      <TargetPicker
+        targets={targets}
+        selectedKey={selectedKey}
+        onSelectTarget={onSelectTarget}
+      />
+      {targets.length === 0 ? (
+        <span className={statusNote} role="alert">
+          no native-control chat is available; raw terminals accept
+          typing only
+        </span>
+      ) : null}
+      <MessageField
+        message={message}
+        setMessage={setMessage}
+        messageInputRef={messageInputRef}
+        onSend={onSend}
+      />
+      <span className={scopeNote}>
+        text only · attachments unavailable
+      </span>
+      <HighlightStatusRow status={status} />
+      {status?.phase === "endgame" ? (
+        <HighlightEndgameActions
+          status={status}
+          onKeepWaiting={onKeepWaiting}
+          onCopyFailed={onCopyFailed}
+          onRelease={onRelease}
+        />
+      ) : null}
+      <HighlightSendButton
+        selected={selected}
+        deliveryRef={deliveryRef}
+        lastRecordRef={lastRecordRef}
+        status={status}
+        onSend={onSend}
+      />
+    </>
+  );
+}
+
+function HighlightSendButton({
+  selected,
+  deliveryRef,
+  lastRecordRef,
+  status,
+  onSend,
+}: {
+  selected: Target | null;
+  deliveryRef: MutableRefObject<{ id: string } | null>;
+  lastRecordRef: MutableRefObject<SubmitRecord | null>;
+  status: HighlightStatus;
+  onSend: () => void;
+}) {
+  return (
+    <Button
+      className={sendButton}
+      onPress={onSend}
+      isDisabled={
+        (!selected && !deliveryRef.current) ||
+        status?.phase === "sending" ||
+        status?.phase === "endgame"
+      }
+      data-testid="highlight-send"
+    >
+      {status?.phase === "sending"
+        ? "Sending…"
+        : lastRecordRef.current?.phase === "route-error"
+          ? "Retry same id"
+          : "Send"}
+    </Button>
+  );
+}
+
+function TargetPicker({
+  targets,
+  selectedKey,
+  onSelectTarget,
+}: {
+  targets: Target[];
+  selectedKey: string | null;
+  onSelectTarget: (key: string) => void;
+}) {
+  return (
+    <div className={targetRow}>
+      <span className={targetLabel}>Send to</span>
+      <ToggleButtonGroup
+        className={toggleGroup}
+        selectionMode="single"
+        selectedKeys={selectedKey ? [selectedKey] : []}
+        onSelectionChange={(keys) => {
+          const key = [...keys][0];
+          if (typeof key === "string") onSelectTarget(key);
+        }}
+      >
+        {targets.map((target) => (
+          <ToggleButton
+            key={target.key}
+            id={target.key}
+            className={toggle}
+            data-testid={`highlight-target-${target.key}`}
+          >
+            {target.label}
+          </ToggleButton>
+        ))}
+      </ToggleButtonGroup>
+    </div>
+  );
+}
+
+function MessageField({
+  message,
+  setMessage,
+  messageInputRef,
+  onSend,
+}: {
+  message: string;
+  setMessage: (message: string) => void;
+  messageInputRef: RefObject<HTMLTextAreaElement | null>;
+  onSend: () => void;
+}) {
+  return (
+    <TextField
+      className={field}
+      aria-label="Message to send with the selection"
+      value={message}
+      onChange={setMessage}
+    >
+      <TextArea
+        ref={messageInputRef}
+        className={area}
+        placeholder="Add a message…  (Ctrl+Enter sends · Enter = newline)"
+        onKeyDown={(event) => {
+          if (
+            event.key === "Enter" &&
+            event.ctrlKey &&
+            !event.nativeEvent.isComposing
+          ) {
+            event.preventDefault();
+            onSend();
+          }
+        }}
+      />
+    </TextField>
+  );
+}
+
+function HighlightStatusRow({ status }: { status: HighlightStatus }) {
+  if (!status) return null;
+  return (
+    <span
+      className={statusNote}
+      role={status.phase === "error" || status.phase === "endgame" ? "alert" : "status"}
+      data-testid="highlight-status"
+    >
+      {status.detail}
+    </span>
+  );
+}
+
+function HighlightEndgameActions({
+  status,
+  onKeepWaiting,
+  onCopyFailed,
+  onRelease,
+}: {
+  status: Extract<HighlightStatus, { phase: "endgame" }>;
+  onKeepWaiting: () => void;
+  onCopyFailed: (detail: string) => void;
+  onRelease: () => void;
+}) {
+  return (
+    <div className={statusActions}>
+      <button type="button" className={secondaryButton} onClick={onKeepWaiting}>
+        keep waiting
+      </button>
+      <button
+        type="button"
+        className={secondaryButton}
+        onClick={() => {
+          void navigator.clipboard
+            .writeText(status.requestId)
+            .catch(() => onCopyFailed("could not copy requestId"));
+        }}
+      >
+        copy requestId
+      </button>
+      <button type="button" className={secondaryButton} onClick={onRelease}>
+        release draft
+      </button>
+    </div>
+  );
+}
+
+
 export const HighlightComposer = memo(HighlightComposerImpl);

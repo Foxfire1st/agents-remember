@@ -30,6 +30,45 @@ import {
 import type { RuntimeState } from "./geometry";
 import type { CommitRefNode } from "../../types/projection";
 
+function branchFlags(refNode: CommitRefNode): string {
+  return `${refNode.dirty ? " · dirty" : ""}${
+    refNode.behindSource ? ` · ${refNode.behindSource} behind` : ""
+  }`;
+}
+
+function branchFullLabel(
+  label: string,
+  branch: string,
+  refNode: CommitRefNode,
+  flags: string,
+): string {
+  return `${label}: ${branch}${refNode.commit ? ` @ ${refNode.commit}` : ""}${flags}`;
+}
+
+function branchEnterTransform(
+  animate: boolean,
+  landingIn: boolean,
+  enter: ReturnType<typeof branchEnter>,
+): boolean | { opacity: number; x: number; y: number } {
+  return animate ? { opacity: landingIn ? 0 : enter.opacity, x: enter.dx, y: landingIn ? -7 : 0 } : false;
+}
+
+function branchExit(animate: boolean): { opacity: number; y?: number } {
+  return animate ? { opacity: 0, y: -7 } : { opacity: 0 };
+}
+
+function branchSlide(detaching: boolean, opacity: number, dx: number): number {
+  return detaching && opacity === 0 ? 64 : dx;
+}
+
+function branchText(branch: string | undefined): string {
+  return branch ?? "—";
+}
+
+function branchDetachDelay(animate: boolean, detaching: boolean, opacity: number): number {
+  return animate && detaching && opacity === 0 ? 0.4 : 0;
+}
+
 export function BranchNode({ pos, label, refNode, landingIn = false, detaching = false, pruned = false }: {
   pos: { x: number; y: number; w: number };
   label: string;
@@ -42,26 +81,26 @@ export function BranchNode({ pos, label, refNode, landingIn = false, detaching =
   const enter = branchEnter(refNode.factState);
   // a DETACHING worktree (cleanup de-materialise) drifts OUT to the right as it fades — not in from main
   // (which is the build-up branch-copy direction). Same fade; only the slide direction flips.
-  const dx = detaching && enter.opacity === 0 ? 64 : enter.dx;
+  const dx = branchSlide(detaching, enter.opacity, enter.dx);
   const cx = pos.x + pos.w / 2;
-  const branch = refNode.branch ?? "—";
+  const branch = branchText(refNode.branch);
   // truncate to the box width (~7.4px/char at 14px); the full string is in the <title> (hover).
   const maxChars = Math.max(8, Math.floor((pos.w - 20) / 7.4));
-  const flags = `${refNode.dirty ? " · dirty" : ""}${refNode.behindSource ? ` · ${refNode.behindSource} behind` : ""}`;
-  const full = `${label}: ${branch}${refNode.commit ? ` @ ${refNode.commit}` : ""}${flags}`;
+  const flags = branchFlags(refNode);
+  const full = branchFullLabel(label, branch, refNode, flags);
   // Motion owns the materialise/de-materialise (opacity + slide) + the landing-tier mount fade+lift;
   // GSAP/CSS never touch this group. A detaching worktree node drifts out on a slight delay so the
   // de-materialise reads engines → nodes → border. Under !animate it mounts at the end-state (initial=false),
   // so the count/presence tests stay synchronous; `landingIn` enters from above; `exit` lets a feat-tier
   // node leave (inside AnimatePresence) instead of blinking.
-  const detachDelay = animate && detaching && enter.opacity === 0 ? 0.4 : 0;
+  const detachDelay = branchDetachDelay(animate, detaching, enter.opacity);
   return (
     <motion.g
       data-testid="branch-node"
       data-fact={refNode.factState}
-      initial={animate ? { opacity: landingIn ? 0 : enter.opacity, x: dx, y: landingIn ? -7 : 0 } : false}
+      initial={branchEnterTransform(animate, landingIn, enter)}
       animate={{ opacity: enter.opacity, x: dx, y: 0 }}
-      exit={animate ? { opacity: 0, y: -7 } : { opacity: 0 }}
+      exit={branchExit(animate)}
       transition={{ duration: animate ? 0.5 : 0, ease: [0.2, 0.7, 0.2, 1], delay: detachDelay }}
     >
       <title>{full}</title>
@@ -142,68 +181,100 @@ export function EngineGauge({ at, label, runtime, reindex, present = true }: {
       animate={{ opacity: present ? 1 : 0 }}
       transition={{ duration: animate ? 0.45 : 0 }}
     >
-      <rect
-        className={reindex ? engineReindexOut : engineGaugeOut({ runtimeState: runtime })}
-        data-fx={!reindex && runtime === "down" ? "fault" : undefined}
-        x={0}
-        y={0}
-        width={ENGINE.w}
-        height={ENGINE.h}
-        rx={5}
+      <EngineGaugeFrame runtime={runtime} reindex={reindex} />
+      <EngineCharge
+        runtime={runtime}
+        reindex={reindex}
+        animate={animate}
+        booting={booting}
+        onBootComplete={() => setBooting(false)}
       />
-      {reindex ? (
-        <rect
-          className={engineReindexCharge}
-          visibility={animate ? "hidden" : undefined}
-          x={2}
-          y={2}
-          width={ENGINE.w - 4}
-          height={ENGINE.h - 4}
-          rx={3}
-        />
-      ) : (
-        <motion.rect
-          className={engineCharge({ runtimeState: runtime })}
-          x={2}
-          y={2}
-          width={ENGINE.w - 4}
-          height={ENGINE.h - 4}
-          rx={3}
-          initial={animate ? { scaleY: 0, opacity: 0 } : false}
-          // Fill is ALWAYS owned by the engineCharge class (cyan `indexing` → mint `nominal`), so it is
-          // correct on every scenario cycle and can never get stuck. Motion owns ONLY scaleY (the
-          // center-out boot-fill) + opacity. The indexing→nominal "powerup" is a one-shot Motion opacity
-          // pulse (0.85 → 1 → 0.55): a brightness surge as the engine goes green, NOT a fill animation —
-          // the instant cyan→mint comes from the class flip (Motion 12 cannot interpolate oklch fill). A
-          // CSS @keyframes can't live here: Motion's per-frame scaleY style writes restart it every frame
-          // so it never completes, and its `forwards` fill-lock then permanently overrode the class —
-          // that was the "second cycle stays green / never goes cyan" bug. booting only shapes the pulse;
-          // if it ever fails to reset, the rect just holds the pulse's final 0.55 (already the nominal
-          // rest opacity) with class-correct fill, so nothing breaks.
-          animate={booting ? { scaleY: 1, opacity: [0.85, 1, 0.55] } : chargeMotion(runtime)}
-          transition={
-            booting
-              ? { duration: animate ? 0.7 : 0, times: [0, 0.35, 1], ease: "easeOut" }
-              : { duration: animate ? 0.6 : 0, ease: [0.4, 0, 0.2, 1] }
-          }
-          // Motion's own lifecycle callback (reliable, unlike the native animationend) ends the flash.
-          onAnimationComplete={() => setBooting(false)}
-        />
-      )}
+      <EngineDecorations runtime={runtime} label={label} />
+    </motion.g>
+  );
+}
+
+function EngineGaugeFrame({
+  runtime,
+  reindex,
+}: {
+  runtime: RuntimeState;
+  reindex: boolean | undefined;
+}) {
+  return (
+    <rect
+      className={reindex ? engineReindexOut : engineGaugeOut({ runtimeState: runtime })}
+      data-fx={!reindex && runtime === "down" ? "fault" : undefined}
+      x={0}
+      y={0}
+      width={ENGINE.w}
+      height={ENGINE.h}
+      rx={5}
+    />
+  );
+}
+
+function EngineCharge({
+  runtime,
+  reindex,
+  animate,
+  booting,
+  onBootComplete,
+}: {
+  runtime: RuntimeState;
+  reindex: boolean | undefined;
+  animate: boolean;
+  booting: boolean;
+  onBootComplete: () => void;
+}) {
+  if (reindex) {
+    return (
+      <rect
+        className={engineReindexCharge}
+        visibility={animate ? "hidden" : undefined}
+        x={2}
+        y={2}
+        width={ENGINE.w - 4}
+        height={ENGINE.h - 4}
+        rx={3}
+      />
+    );
+  }
+  return (
+    <motion.rect
+      className={engineCharge({ runtimeState: runtime })}
+      x={2}
+      y={2}
+      width={ENGINE.w - 4}
+      height={ENGINE.h - 4}
+      rx={3}
+      initial={animate ? { scaleY: 0, opacity: 0 } : false}
+      animate={booting ? { scaleY: 1, opacity: [0.85, 1, 0.55] } : chargeMotion(runtime)}
+      transition={
+        booting
+          ? { duration: animate ? 0.7 : 0, times: [0, 0.35, 1], ease: "easeOut" }
+          : { duration: animate ? 0.6 : 0, ease: [0.4, 0, 0.2, 1] }
+      }
+      onAnimationComplete={onBootComplete}
+    />
+  );
+}
+
+function EngineDecorations({ runtime, label }: { runtime: RuntimeState; label: string }) {
+  return (
+    <>
       {[14, 26, 38, 50, 62, 74, 86].map((y) => (
         <line className={engineDiv} key={y} x1={0} y1={y} x2={ENGINE.w} y2={y} />
       ))}
-      {/* podstage .e-spine + .e-petal: a faint centre spine + fanned flank petals (runtime-coloured). */}
       <line className={engineSpine} x1={ENGINE.w / 2} y1={4} x2={ENGINE.w / 2} y2={ENGINE.h - 4} />
       {[
-        // left flank + right flank mirror each other across the gauge centre (both fan toward the gauge)
         [-8, 26, -2, 22], [-8, 48, -2, 48], [-8, 70, -2, 74],
         [ENGINE.w + 2, 22, ENGINE.w + 8, 26], [ENGINE.w + 2, 48, ENGINE.w + 8, 48], [ENGINE.w + 2, 74, ENGINE.w + 8, 70],
       ].map(([x1, y1, x2, y2], i) => (
         <line className={enginePetal({ runtimeState: runtime })} key={i} x1={x1} y1={y1} x2={x2} y2={y2} />
       ))}
       <text className={engineGaugeLabel} x={ENGINE.w / 2} y={ENGINE.h + 18} textAnchor="middle">{label}</text>
-    </motion.g>
+    </>
   );
 }
 

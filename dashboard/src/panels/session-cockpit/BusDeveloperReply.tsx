@@ -86,21 +86,6 @@ export function BusDeveloperReply({
   const formId = `bus-reply-form-${pickup.entryId}`;
   const statusId = `bus-reply-status-${pickup.entryId}`;
 
-  const submit = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    const response = state.draft.trim();
-    if (!response || state.status === "sending") return;
-    const request = developerReplyRequest(pickup, response);
-    if (!request) return;
-    updateState((current) => ({ ...current, status: "sending" }));
-    const result = await postOperatorInbox(request);
-    updateState((current) => ({
-      ...current,
-      draft: result === "posted" ? "" : current.draft,
-      status: result === "posted" ? "posted" : "error",
-    }));
-  };
-
   if (!canAddress) {
     return (
       <span className={meta} data-testid={`bus-reply-unavailable-${pickup.entryId}`}>
@@ -122,75 +107,135 @@ export function BusDeveloperReply({
         {decision ? "record decision" : "reply to escalation"}
       </button>
       {state.open ? (
-        <form
-          id={formId}
-          className={form}
-          aria-busy={state.status === "sending"}
-          onSubmit={(event) => void submit(event)}
-        >
-          <label htmlFor={`bus-reply-${pickup.entryId}`}>
-            {decision ? "Developer decision" : "Developer reply"} to the projected sender
-          </label>
-          <textarea
-            id={`bus-reply-${pickup.entryId}`}
-            name={decision ? "developerDecision" : "developerReply"}
-            autoComplete="off"
-            className={textarea}
-            value={state.draft}
-            disabled={state.status === "sending"}
-            aria-describedby={state.status === "idle" ? undefined : statusId}
-            onChange={(event) => {
-              const draft = event.currentTarget.value;
-              updateState((current) => ({ ...current, draft, status: "idle" }));
-            }}
-            data-testid={`bus-reply-input-${pickup.entryId}`}
-          />
-          <button
-            type="submit"
-            className={inspectorAction}
-            disabled={state.draft.trim().length === 0 || state.status === "sending"}
-            data-testid={`bus-reply-submit-${pickup.entryId}`}
-          >
-            {state.status === "sending" ? "posting…" : "post to operator inbox"}
-          </button>
-          {state.status === "sending" ? (
-            <span
-              id={statusId}
-              className={meta}
-              role="status"
-              aria-live="polite"
-              aria-atomic="true"
-            >
-              posting to the operator inbox…
-            </span>
-          ) : null}
-          {state.status === "posted" ? (
-            <span
-              id={statusId}
-              className={meta}
-              role="status"
-              aria-live="polite"
-              aria-atomic="true"
-              data-testid={`bus-reply-status-${pickup.entryId}`}
-            >
-              posted — recipient acknowledgment remains MCP-only
-            </span>
-          ) : null}
-          {state.status === "error" ? (
-            <span
-              id={statusId}
-              className={errorMeta}
-              role="alert"
-              aria-live="assertive"
-              aria-atomic="true"
-              data-testid={`bus-reply-status-${pickup.entryId}`}
-            >
-              POST /api/operator-inbox failed; the draft is retained — check the connection and
-              retry
-            </span>
-          ) : null}
-        </form>
+        <BusReplyForm
+          pickup={pickup}
+          state={state}
+          formId={formId}
+          statusId={statusId}
+          decision={decision}
+          updateState={updateState}
+        />
       ) : null}
     </div>
   );
+}
+
+function BusReplyForm({
+  pickup,
+  state,
+  formId,
+  statusId,
+  decision,
+  updateState,
+}: {
+  pickup: AgentPickupNode;
+  state: BusReplyState;
+  formId: string;
+  statusId: string;
+  decision: boolean;
+  updateState: (update: (current: BusReplyState) => BusReplyState) => void;
+}) {
+  const submit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const response = state.draft.trim();
+    if (!response || state.status === "sending") return;
+    const request = developerReplyRequest(pickup, response);
+    if (!request) return;
+    updateState((current) => ({ ...current, status: "sending" }));
+    const result = await postOperatorInbox(request);
+    updateState((current) => ({
+      ...current,
+      draft: result === "posted" ? "" : current.draft,
+      status: result === "posted" ? "posted" : "error",
+    }));
+  };
+  return (
+    <form
+      id={formId}
+      className={form}
+      aria-busy={state.status === "sending"}
+      onSubmit={(event) => void submit(event)}
+    >
+      <label htmlFor={`bus-reply-${pickup.entryId}`}>
+        {decision ? "Developer decision" : "Developer reply"} to the projected sender
+      </label>
+      <textarea
+        id={`bus-reply-${pickup.entryId}`}
+        name={decision ? "developerDecision" : "developerReply"}
+        autoComplete="off"
+        className={textarea}
+        value={state.draft}
+        disabled={state.status === "sending"}
+        aria-describedby={state.status === "idle" ? undefined : statusId}
+        onChange={(event) => {
+          const draft = event.currentTarget.value;
+          updateState((current) => ({ ...current, draft, status: "idle" }));
+        }}
+        data-testid={`bus-reply-input-${pickup.entryId}`}
+      />
+      <button
+        type="submit"
+        className={inspectorAction}
+        disabled={state.draft.trim().length === 0 || state.status === "sending"}
+        data-testid={`bus-reply-submit-${pickup.entryId}`}
+      >
+        {state.status === "sending" ? "posting…" : "post to operator inbox"}
+      </button>
+      <ReplyStatusSpan pickup={pickup} state={state} statusId={statusId} />
+    </form>
+  );
+}
+
+function ReplyStatusSpan({
+  pickup,
+  state,
+  statusId,
+}: {
+  pickup: AgentPickupNode;
+  state: BusReplyState;
+  statusId: string;
+}) {
+  if (state.status === "sending") {
+    return (
+      <span
+        id={statusId}
+        className={meta}
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+      >
+        posting to the operator inbox…
+      </span>
+    );
+  }
+  if (state.status === "posted") {
+    return (
+      <span
+        id={statusId}
+        className={meta}
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+        data-testid={`bus-reply-status-${pickup.entryId}`}
+      >
+        posted — recipient acknowledgment remains MCP-only
+      </span>
+    );
+  }
+  if (state.status === "error") {
+    return (
+      <span
+        id={statusId}
+        className={errorMeta}
+        role="alert"
+        aria-live="assertive"
+        aria-atomic="true"
+        data-testid={`bus-reply-status-${pickup.entryId}`}
+      >
+        POST /api/operator-inbox failed; the draft is retained — check the connection and
+        retry
+      </span>
+    );
+  }
+  return null;
 }

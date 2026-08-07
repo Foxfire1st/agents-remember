@@ -81,6 +81,54 @@ export function enclosure(over: Partial<EnclosureNode> & Pick<EnclosureNode, "en
 }
 
 // A series projection: one lifecycle, a contract-paired master, and one authored slice doc.
+const SERIES_LIFECYCLE: LifecycleProjection = {
+  id: "LC-SER",
+  state: "running",
+  phase: "build",
+  fleeting: false,
+  tokens: 0,
+  startedAt: "2026-06-20T09:00:00+00:00",
+  lastEventTs: "2026-06-20T09:00:30+00:00",
+  stateEnteredAt: "2026-06-20T09:00:00+00:00",
+  inferred: false,
+  actions: [],
+  tokenSeries: [],
+};
+
+const SERIES_MASTER = seriesNode({
+  seriesId: "series",
+  title: "My Series",
+  objective: "Series objective text",
+  seriesTokenTotal: 1500,
+  docPath: "/t/series/task.json",
+  subTasks: [
+    {
+      number: "1",
+      name: "First slice",
+      file: "01_first.md",
+      status: "inProgress",
+      scope: "",
+      createdAt: "2026-06-20T09:00:00+00:00",
+    },
+    {
+      number: "2",
+      name: "Parallel series",
+      file: "../other/task.md",
+      status: "inProgress",
+      scope: "",
+      createdAt: "2026-06-21T09:00:00+00:00",
+    },
+  ],
+  sections: [
+    {
+      kind: "freeform",
+      heading: "Current State",
+      body: "Status is **strong**.\n\n| Slice | Status |\n| --- | --- |\n| 01 | done |",
+    },
+    { kind: "subTasks", heading: "Sub-tasks", body: "" },
+  ],
+});
+
 export function seedSeries(
   options: {
     lifecycleId?: string;
@@ -89,52 +137,8 @@ export function seedSeries(
     sliceDoc?: Partial<TaskDocNode>;
   } = {},
 ) {
-  const lc: LifecycleProjection = {
-    id: options.lifecycleId ?? "LC-SER",
-    state: "running",
-    phase: "build",
-    fleeting: false,
-    tokens: 0,
-    startedAt: "2026-06-20T09:00:00+00:00",
-    lastEventTs: "2026-06-20T09:00:30+00:00",
-    stateEnteredAt: "2026-06-20T09:00:00+00:00",
-    inferred: false,
-    actions: [],
-    tokenSeries: [],
-  };
-  const master = seriesNode({
-    seriesId: "series",
-    title: "My Series",
-    objective: "Series objective text",
-    seriesTokenTotal: 1500,
-    docPath: "/t/series/task.json",
-    subTasks: [
-      {
-        number: "1",
-        name: "First slice",
-        file: "01_first.md",
-        status: "inProgress",
-        scope: "",
-        createdAt: "2026-06-20T09:00:00+00:00",
-      },
-      {
-        number: "2",
-        name: "Parallel series",
-        file: "../other/task.md",
-        status: "inProgress",
-        scope: "",
-        createdAt: "2026-06-21T09:00:00+00:00",
-      },
-    ],
-    sections: [
-      {
-        kind: "freeform",
-        heading: "Current State",
-        body: "Status is **strong**.\n\n| Slice | Status |\n| --- | --- |\n| 01 | done |",
-      },
-      { kind: "subTasks", heading: "Sub-tasks", body: "" },
-    ],
-  });
+  const lc: LifecycleProjection = { ...SERIES_LIFECYCLE, id: options.lifecycleId ?? "LC-SER" };
+  const master = SERIES_MASTER;
   const slice = taskDoc({
     lifecycleId: options.lifecycleId ?? "LC-SER",
     kind: "subTask",
@@ -299,54 +303,78 @@ export function seedProjection(over: Partial<WorkspaceProjection>) {
   dashboardStore.getState().applySnapshot(projection);
 }
 
+const PROMOTED_LIFECYCLE: LifecycleProjection = {
+  id: "01KVW2FE8MQK6QCQQP0J4SEK3C",
+  state: "paused",
+  phase: "build",
+  fleeting: false,
+  enclosure: "/contracts/16",
+  repoId: "agents-remember",
+  tokens: 0,
+  startedAt: "2026-06-24T06:00:00+00:00",
+  lastEventTs: "2026-06-24T06:00:30+00:00",
+  stateEnteredAt: "2026-06-24T06:00:00+00:00",
+  inferred: false,
+  actions: [],
+  tokenSeries: [],
+};
+
+const PROMOTED_DOC = taskDoc({
+  lifecycleId: "260610_BROWSER-DASHBOARD",
+  kind: "subTask",
+  title: "Lifecycle Finalize Task",
+  docPath: "/tasks/260610_browser-dashboard/14_lifecycle-finalize-task.json",
+  objective: "Close out the lifecycle finalizer.",
+});
+
+const PROMOTED_MASTER = taskDoc({
+  lifecycleId: "260610_BROWSER-DASHBOARD",
+  kind: "master",
+  title: "Browser Dashboard Series",
+  docPath: "/tasks/260610_browser-dashboard/task.json",
+  objective: "Parent master content.",
+});
+
+const PROMOTED_LEAF = taskDoc({
+  lifecycleId: "01KVW2FE8MQK6QCQQP0J4SEK3C",
+  kind: "subTask",
+  title: "Engine Room Stack Entry Height",
+  status: "inProgress",
+  docPath: "/tasks/260610_browser-dashboard/16_engine-room-stack-entry-height.json",
+  objective: "Keep a single Engine Room enclosure entry visually bounded.",
+  requirements: ["Render the selected leaf task document, not the parent task or enclosure contract."],
+  stepsTotal: 1,
+  steps: [{ id: "S1", title: "Fix the stack entry height", status: "inProgress", substeps: [] }],
+  sections: [
+    {
+      kind: "freeform",
+      heading: "Notes",
+      body: "This is the authored leaf task document.",
+    },
+  ],
+});
+
+const PROMOTED_SERIES = seriesNode({
+  seriesId: "260610_browser-dashboard",
+  title: "Browser Dashboard Series",
+  docPath: "/tasks/260610_browser-dashboard/task.json",
+  subTasks: [
+    {
+      number: "16",
+      name: "Engine Room Stack Entry Height",
+      file: "16_engine-room-stack-entry-height.md",
+      status: "inProgress",
+      scope: "",
+      createdAt: "2026-06-24T06:00:00+00:00",
+    },
+  ],
+});
+
 export function seedPromotedLeaf() {
-  const lc: LifecycleProjection = {
-    id: "01KVW2FE8MQK6QCQQP0J4SEK3C",
-    state: "paused",
-    phase: "build",
-    fleeting: false,
-    enclosure: "/contracts/16",
-    repoId: "agents-remember",
-    tokens: 0,
-    startedAt: "2026-06-24T06:00:00+00:00",
-    lastEventTs: "2026-06-24T06:00:30+00:00",
-    stateEnteredAt: "2026-06-24T06:00:00+00:00",
-    inferred: false,
-    actions: [],
-    tokenSeries: [],
-  };
-  const doc = taskDoc({
-    lifecycleId: "260610_BROWSER-DASHBOARD",
-    kind: "subTask",
-    title: "Lifecycle Finalize Task",
-    docPath: "/tasks/260610_browser-dashboard/14_lifecycle-finalize-task.json",
-    objective: "Close out the lifecycle finalizer.",
-  });
-  const master = taskDoc({
-    lifecycleId: "260610_BROWSER-DASHBOARD",
-    kind: "master",
-    title: "Browser Dashboard Series",
-    docPath: "/tasks/260610_browser-dashboard/task.json",
-    objective: "Parent master content.",
-  });
-  const leaf = taskDoc({
-    lifecycleId: "01KVW2FE8MQK6QCQQP0J4SEK3C",
-    kind: "subTask",
-    title: "Engine Room Stack Entry Height",
-    status: "inProgress",
-    docPath: "/tasks/260610_browser-dashboard/16_engine-room-stack-entry-height.json",
-    objective: "Keep a single Engine Room enclosure entry visually bounded.",
-    requirements: ["Render the selected leaf task document, not the parent task or enclosure contract."],
-    stepsTotal: 1,
-    steps: [{ id: "S1", title: "Fix the stack entry height", status: "inProgress", substeps: [] }],
-    sections: [
-      {
-        kind: "freeform",
-        heading: "Notes",
-        body: "This is the authored leaf task document.",
-      },
-    ],
-  });
+  const lc = PROMOTED_LIFECYCLE;
+  const doc = PROMOTED_DOC;
+  const master = PROMOTED_MASTER;
+  const leaf = PROMOTED_LEAF;
   const projection: WorkspaceProjection = {
     version: 2,
     generatedAt: "2026-06-24T06:01:00+00:00",
@@ -370,23 +398,7 @@ export function seedPromotedLeaf() {
       toolReports: [],
       ledgers: [],
       taskDocuments: [master, doc, leaf],
-      series: [
-        seriesNode({
-          seriesId: "260610_browser-dashboard",
-          title: "Browser Dashboard Series",
-          docPath: "/tasks/260610_browser-dashboard/task.json",
-          subTasks: [
-            {
-              number: "16",
-              name: "Engine Room Stack Entry Height",
-              file: "16_engine-room-stack-entry-height.md",
-              status: "inProgress",
-              scope: "",
-              createdAt: "2026-06-24T06:00:00+00:00",
-            },
-          ],
-        }),
-      ],
+      series: [PROMOTED_SERIES],
       attentionQueue: [],
       engineProcesses: [],
       agentPickups: [],

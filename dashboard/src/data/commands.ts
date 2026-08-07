@@ -85,8 +85,7 @@ export function createCommandRegistry(): CommandRegistry {
  * composer actions route through context so the command surface and editor keymap share one
  * focused-session implementation. Returns the registry for chaining.
  */
-export function registerDefaultCommands(registry: CommandRegistry): CommandRegistry {
-  const defaults: Command[] = [
+const DEFAULT_COMMANDS: Command[] = [
     {
       id: "palette.open",
       title: "Open command palette",
@@ -185,7 +184,9 @@ export function registerDefaultCommands(registry: CommandRegistry): CommandRegis
       chord: "alt+↑",
       run: (ctx) => ctx.actions.popBackComposer(),
     },
-  ];
-  for (const command of defaults) registry.register(command);
+];
+
+export function registerDefaultCommands(registry: CommandRegistry): CommandRegistry {
+  for (const command of DEFAULT_COMMANDS) registry.register(command);
   return registry;
 }

@@ -235,6 +235,91 @@ export function MasterSection({
 
 // The clickable series index: one row per master `SubTaskRef`. A row whose slice has been authored
 // as a task document opens its reader; an un-migrated slice shows as a static index row.
+function SubTaskIndexRow({
+  ref,
+  position,
+  sliceDocs,
+  onOpen,
+  onJump,
+  testidPrefix,
+}: {
+  ref: SubTaskRow;
+  position: number;
+  sliceDocs: TaskDocNode[];
+  onOpen: (slug: string) => void;
+  onJump: (id: string) => void;
+  testidPrefix: string;
+}) {
+  const match = sliceForRef(sliceDocs, ref);
+  const { displayNumber, displayName } = subTaskDisplay(match, ref);
+  const label = `${displayNumber}. ${displayName}`;
+  const meta = subTaskMeta(match, ref);
+  // A row whose ref points at another master is a parallel/external series → jump lifecycles.
+  // Only a task-doc master's rows can cross-link: `SeriesSubTaskNode` has no such field, so
+  // this branch is structurally unreachable for a series rendered via `seriesAsMasterDoc`.
+  const linkedLifecycleId = "linkedLifecycleId" in ref ? ref.linkedLifecycleId : undefined;
+  if (linkedLifecycleId) {
+    return (
+      <li key={subTaskKey(ref, position - 1)}>
+        <button
+          type="button"
+          className={crossButton}
+          onClick={() => onJump(linkedLifecycleId)}
+          data-testid={`${testidPrefix}-link-${position}`}
+          title={`open the ${linkedLifecycleId} series`}
+        >
+          <span>→ {label}</span>
+          {meta}
+        </button>
+      </li>
+    );
+  }
+  return (
+    <li key={subTaskKey(ref, position - 1)}>
+      {match ? (
+        <button
+          type="button"
+          className={sliceButton}
+          onClick={() => onOpen(sliceSlug(match))}
+          data-testid={`${testidPrefix}-${position}`}
+        >
+          <span>{label}</span>
+          {meta}
+        </button>
+      ) : (
+        <div
+          className={slice}
+          data-testid={`${testidPrefix}-${position}`}
+          title="not authored as a task document yet"
+        >
+          <span>{label}</span>
+          {meta}
+        </div>
+      )}
+    </li>
+  );
+}
+
+function subTaskDisplay(
+  match: TaskDocNode | undefined,
+  ref: SubTaskRow,
+): { displayNumber: string; displayName: string } {
+  return {
+    displayNumber: match?.id || ref.number,
+    displayName: match?.title || ref.name,
+  };
+}
+
+function subTaskMeta(match: TaskDocNode | undefined, ref: SubTaskRow): ReactNode {
+  const progress = match ? taskStepProgress(match) : undefined;
+  return (
+    <span className={sliceMeta}>
+      {progress && progress.total > 0 ? `${progress.done}/${progress.total} · ` : ""}
+      {ref.status}
+    </span>
+  );
+}
+
 export function SubTaskIndex({
   refs,
   sliceDocs,
@@ -257,64 +342,17 @@ export function SubTaskIndex({
   // rows arrive already ordered by it from `snapshots.py::_series_subtask_nodes`.
   return (
     <ul className={slices}>
-      {refs.map((ref, index) => {
-        const position = index + 1;
-        const match = sliceForRef(sliceDocs, ref);
-        const displayNumber = match?.id || ref.number;
-        const displayName = match?.title || ref.name;
-        const label = `${displayNumber}. ${displayName}`;
-        const progress = match ? taskStepProgress(match) : undefined;
-        const meta = (
-          <span className={sliceMeta}>
-            {progress && progress.total > 0 ? `${progress.done}/${progress.total} · ` : ""}
-            {ref.status}
-          </span>
-        );
-        // A row whose ref points at another master is a parallel/external series → jump lifecycles.
-        // Only a task-doc master's rows can cross-link: `SeriesSubTaskNode` has no such field, so
-        // this branch is structurally unreachable for a series rendered via `seriesAsMasterDoc`.
-        const linkedLifecycleId = "linkedLifecycleId" in ref ? ref.linkedLifecycleId : undefined;
-        if (linkedLifecycleId) {
-          return (
-            <li key={subTaskKey(ref, index)}>
-              <button
-                type="button"
-                className={crossButton}
-                onClick={() => onJump(linkedLifecycleId)}
-                data-testid={`${testidPrefix}-link-${position}`}
-                title={`open the ${linkedLifecycleId} series`}
-              >
-                <span>→ {label}</span>
-                {meta}
-              </button>
-            </li>
-          );
-        }
-        return (
-          <li key={subTaskKey(ref, index)}>
-            {match ? (
-              <button
-                type="button"
-                className={sliceButton}
-                onClick={() => onOpen(sliceSlug(match))}
-                data-testid={`${testidPrefix}-${position}`}
-              >
-                <span>{label}</span>
-                {meta}
-              </button>
-            ) : (
-              <div
-                className={slice}
-                data-testid={`${testidPrefix}-${position}`}
-                title="not authored as a task document yet"
-              >
-                <span>{label}</span>
-                {meta}
-              </div>
-            )}
-          </li>
-        );
-      })}
+      {refs.map((ref, index) => (
+        <SubTaskIndexRow
+          key={subTaskKey(ref, index)}
+          ref={ref}
+          position={index + 1}
+          sliceDocs={sliceDocs}
+          onOpen={onOpen}
+          onJump={onJump}
+          testidPrefix={testidPrefix}
+        />
+      ))}
     </ul>
   );
 }
@@ -386,37 +424,17 @@ export function SpineLane({
   );
 }
 
-export function TaskReader({
+function TaskReaderSections({
   doc,
   bodyState,
-  onOpenChangeSet,
   onOpenNotes,
 }: {
   doc: TaskDocNode;
   bodyState: TaskDocumentBodyState | undefined;
-  onOpenChangeSet?: (target: ChangeSetTarget) => void;
   onOpenNotes?: (target: NotesReaderTarget) => void;
 }) {
-  const progress = taskStepProgress(doc);
-  const leafKey = qualifiedLeafKey(doc);
   return (
-    <div className={taskdoc} data-task-leaf-key={leafKey}>
-      <div className={taskdocHead}>
-        <span className={badge}>{doc.kind}</span>
-        <span className={taskdocTitle}>{doc.title}</span>
-        <span className={taskdocStatus}>{doc.status}</span>
-        <ProgressFill completed={progress.done} total={progress.total} label="steps done" />
-      </div>
-      <TaskBodyNotice state={bodyState} />
-      {bodyState !== "loading" ? (
-        <DocChangeSetBar
-          kind="leaf"
-          repo={doc.repository}
-          master={dirName(doc.docPath)}
-          leaf={doc.id}
-          onOpen={onOpenChangeSet}
-        />
-      ) : null}
+    <>
       {doc.objective ? (
         <Section title="Objective">
           <Markdown>{doc.objective}</Markdown>
@@ -469,6 +487,42 @@ export function TaskReader({
           onOpenNotes={onOpenNotes}
         />
       ) : null}
+    </>
+  );
+}
+
+export function TaskReader({
+  doc,
+  bodyState,
+  onOpenChangeSet,
+  onOpenNotes,
+}: {
+  doc: TaskDocNode;
+  bodyState: TaskDocumentBodyState | undefined;
+  onOpenChangeSet?: (target: ChangeSetTarget) => void;
+  onOpenNotes?: (target: NotesReaderTarget) => void;
+}) {
+  const progress = taskStepProgress(doc);
+  const leafKey = qualifiedLeafKey(doc);
+  return (
+    <div className={taskdoc} data-task-leaf-key={leafKey}>
+      <div className={taskdocHead}>
+        <span className={badge}>{doc.kind}</span>
+        <span className={taskdocTitle}>{doc.title}</span>
+        <span className={taskdocStatus}>{doc.status}</span>
+        <ProgressFill completed={progress.done} total={progress.total} label="steps done" />
+      </div>
+      <TaskBodyNotice state={bodyState} />
+      {bodyState !== "loading" ? (
+        <DocChangeSetBar
+          kind="leaf"
+          repo={doc.repository}
+          master={dirName(doc.docPath)}
+          leaf={doc.id}
+          onOpen={onOpenChangeSet}
+        />
+      ) : null}
+      <TaskReaderSections doc={doc} bodyState={bodyState} onOpenNotes={onOpenNotes} />
     </div>
   );
 }

@@ -86,6 +86,127 @@ function LedgerTable({ rows, total, currentCode }: {
   );
 }
 
+function WarpSurgeBands({ x, cy }: { x: number; cy: number }) {
+  return (
+    <>
+      <line className={warpSurge} data-dir="up" data-testid="warp-surge" x1={x} y1={cy - 26} x2={x} y2={cy - 4} />
+      <line className={warpSurge} data-dir="down" data-testid="warp-surge" x1={x} y1={cy + 26} x2={x} y2={cy + 4} />
+    </>
+  );
+}
+
+function LedgerLinkButton({
+  x,
+  cy,
+  triggerRef,
+  label,
+  ledgerRows,
+  total,
+  testid,
+  onToggle,
+}: {
+  x: number;
+  cy: number;
+  triggerRef: React.RefObject<SVGRectElement | null>;
+  label: string | undefined;
+  ledgerRows: LedgerRefNode[];
+  total: number;
+  testid: string;
+  onToggle: () => void;
+}) {
+  return (
+    <>
+      <rect
+        ref={triggerRef}
+        className={ledgerButton}
+        x={x + 20}
+        y={cy - 10}
+        width={140}
+        height={20}
+        rx={4}
+        role="button"
+        tabIndex={0}
+        aria-label={`open memory.md ledger — ${ledgerRows.length} of ${total} rows`}
+        data-testid={`${testid}-ledger`}
+        onClick={onToggle}
+        onKeyDown={(event) => {
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            onToggle();
+          }
+        }}
+      />
+      <text className={ledgerButtonLabel} x={x + 27} y={cy + 4}>{label ?? "ledger"} ▾</text>
+    </>
+  );
+}
+
+function couplerOpacity(visible: boolean, bound: boolean): number {
+  return visible ? (bound ? 1 : 0.3) : 0;
+}
+
+function LedgerPopover({
+  open,
+  onOpenChange,
+  anchorRef,
+  rows,
+  total,
+  currentCode,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  anchorRef: React.RefObject<SVGRectElement | null>;
+  rows: LedgerRefNode[];
+  total: number;
+  currentCode: string | undefined;
+}) {
+  return (
+    <Popover triggerRef={anchorRef} isOpen={open} onOpenChange={onOpenChange} placement="bottom" shouldFlip={false}>
+      <Dialog aria-label="memory.md ledger lookup table">
+        <LedgerTable rows={rows} total={total} currentCode={currentCode} />
+      </Dialog>
+    </Popover>
+  );
+}
+
+function CouplerLabel({
+  x,
+  cy,
+  hasLedger,
+  label,
+  triggerRef,
+  ledgerRows,
+  total,
+  testid,
+  onToggle,
+}: {
+  x: number;
+  cy: number;
+  hasLedger: boolean;
+  label: string | undefined;
+  triggerRef: React.RefObject<SVGRectElement | null>;
+  ledgerRows: LedgerRefNode[];
+  total: number;
+  testid: string;
+  onToggle: () => void;
+}) {
+  if (hasLedger) {
+    return (
+      <LedgerLinkButton
+        x={x}
+        cy={cy}
+        triggerRef={triggerRef}
+        label={label}
+        ledgerRows={ledgerRows}
+        total={total}
+        testid={testid}
+        onToggle={onToggle}
+      />
+    );
+  }
+  return label ? <text className={warpCouplerLabel} x={x + 13} y={cy + 4}>{label}</text> : null;
+}
+
 export function WarpCoupler({ x, bound, label, testid = "warp-coupler", rows, total = 0, currentCode, visible = true }: {
   x: number;
   bound: boolean;
@@ -109,28 +230,20 @@ export function WarpCoupler({ x, bound, label, testid = "warp-coupler", rows, to
   // Motion owns the coupler group's opacity: the bound dim (1 vs 0.3) AND the build-up `visible` gate (the
   // worktree coupler only appears once the memory worktree materialises) — one owner, no double-drive with
   // CSS. The warp-core surge bands are GSAP (data-fx='surge' + data-dir), driven by useEngineTimeline.
-  const couplerOpacity = visible ? (bound ? 1 : 0.3) : 0;
+  const opacity = couplerOpacity(visible, bound);
   return (
     <>
       <motion.g
         data-testid={testid}
         data-bound={bound}
-        initial={animate ? { opacity: couplerOpacity } : false}
-        animate={{ opacity: couplerOpacity }}
+        initial={animate ? { opacity } : false}
+        animate={{ opacity }}
         transition={{ duration: animate ? 0.45 : 0 }}
       >
         <line className={warpCouplerBar} x1={x} y1={312} x2={x} y2={372} />
         {/* invisible high anchor for the popover (upper position) — see anchorRef note above */}
         <rect ref={anchorRef} x={x + 90} y={58} width={1} height={1} fill="none" pointerEvents="none" aria-hidden="true" />
-        {bound ? (
-          <>
-            {/* the surge bands render at FULL geometry; useEngineTimeline scales them from the link
-                point (scaleY + svgOrigin — transforms composite; the old y1/y2 attr tween re-rastered
-                the SVG every frame). data-dir picks which side of the link each band sits. */}
-            <line className={warpSurge} data-dir="up" data-testid="warp-surge" x1={x} y1={cy - 26} x2={x} y2={cy - 4} />
-            <line className={warpSurge} data-dir="down" data-testid="warp-surge" x1={x} y1={cy + 26} x2={x} y2={cy + 4} />
-          </>
-        ) : null}
+        {bound ? <WarpSurgeBands x={x} cy={cy} /> : null}
         {/* the ledger link icon — a drawn chain-link (two interlocking rings), not the contract node */}
         <g className={warpLinkGlyph} aria-hidden="true" data-testid="warp-link">
           <ellipse cx={x} cy={cy - 3} rx={5} ry={4} />
@@ -139,43 +252,30 @@ export function WarpCoupler({ x, bound, label, testid = "warp-coupler", rows, to
         {/* the coupler label: a ledger-backed coupler renders it as a clickable BUTTON (rect + label + a ▾
             "open" caret) beside the link glyph, opening the memory.md popover; otherwise a plain label.
             A <button> can't live in svg, so the rect is the trigger and the label text sits on top. */}
-        {hasLedger ? (
-          <>
-            <rect
-              ref={triggerRef}
-              className={ledgerButton}
-              x={x + 20}
-              y={cy - 10}
-              width={140}
-              height={20}
-              rx={4}
-              role="button"
-              tabIndex={0}
-              aria-label={`open memory.md ledger — ${ledgerRows.length} of ${total} rows`}
-              data-testid={`${testid}-ledger`}
-              onClick={() => setOpen((value) => !value)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter" || event.key === " ") {
-                  event.preventDefault();
-                  setOpen((value) => !value);
-                }
-              }}
-            />
-            <text className={ledgerButtonLabel} x={x + 27} y={cy + 4}>{label ?? "ledger"} ▾</text>
-          </>
-        ) : label ? (
-          <text className={warpCouplerLabel} x={x + 13} y={cy + 4}>{label}</text>
-        ) : null}
+        <CouplerLabel
+          x={x}
+          cy={cy}
+          hasLedger={hasLedger}
+          label={label}
+          triggerRef={triggerRef}
+          ledgerRows={ledgerRows}
+          total={total}
+          testid={testid}
+          onToggle={() => setOpen((value) => !value)}
+        />
       </motion.g>
       {/* anchored to the high anchorRef (not the coupler) so it sits in its old upper position and grows
           DOWNWARD as it expands; shouldFlip=false keeps it from flipping up when the tall window meets the
           viewport edge (the inner scroll covers it) */}
       {hasLedger ? (
-        <Popover triggerRef={anchorRef} isOpen={open} onOpenChange={setOpen} placement="bottom" shouldFlip={false}>
-          <Dialog aria-label="memory.md ledger lookup table">
-            <LedgerTable rows={ledgerRows} total={total} currentCode={currentCode} />
-          </Dialog>
-        </Popover>
+        <LedgerPopover
+          open={open}
+          onOpenChange={setOpen}
+          anchorRef={anchorRef}
+          rows={ledgerRows}
+          total={total}
+          currentCode={currentCode}
+        />
       ) : null}
     </>
   );

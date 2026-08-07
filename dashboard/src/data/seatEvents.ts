@@ -32,6 +32,50 @@ function findSession(event: ObserverEvent): OpenSession | undefined {
   return sessionStore.getState().sessions.find((session) => session.id === id);
 }
 
+function applyRetired(store: ReturnType<typeof sessionStore.getState>, session: OpenSession, event: ObserverEvent): void {
+  // A terminal mark: never resurrect, never double-apply over poll truth.
+  if (session.status === "terminated" || session.status === "landed") return;
+  store.setStatus(session.id, "terminated");
+  store.patch(session.id, {
+    retiredAt: event.ts,
+    ...(dataString(event, "retiredReason") ? { retiredReason: dataString(event, "retiredReason") } : {}),
+    ...(dataString(event, "retiredEdge") ? { retiredEdge: dataString(event, "retiredEdge") } : {}),
+    ...(dataString(event, "retiredBySession")
+      ? { retiredBySession: dataString(event, "retiredBySession") }
+      : {}),
+  });
+}
+
+function applyLanded(store: ReturnType<typeof sessionStore.getState>, session: OpenSession, event: ObserverEvent): void {
+  if (session.status === "terminated" || session.status === "landed") return;
+  store.setStatus(session.id, "landed");
+  store.patch(session.id, {
+    landedAt: event.ts,
+    ...(dataString(event, "landedReason") ? { landedReason: dataString(event, "landedReason") } : {}),
+    ...(dataString(event, "landedEdge") ? { landedEdge: dataString(event, "landedEdge") } : {}),
+  });
+}
+
+function applyRenamed(store: ReturnType<typeof sessionStore.getState>, session: OpenSession, event: ObserverEvent): void {
+  const label = dataString(event, "label");
+  if (!label || label === session.label) return;
+  store.patch(session.id, {
+    label,
+    ...(dataString(event, "spawnedLabel") ? { spawnedLabel: dataString(event, "spawnedLabel") } : {}),
+  });
+}
+
+function applyTurnState(store: ReturnType<typeof sessionStore.getState>, session: OpenSession, event: ObserverEvent): void {
+  const turnState = dataString(event, "turnState");
+  if (!turnState || !TURN_STATES.has(turnState)) return;
+  // Dedup: the sweep's event timestamp must be strictly newer than the stored transition —
+  // the poll (which serves the same sweep's classification 4× as often) usually got here
+  // first, and an equal-or-older event must never regress the row.
+  if (session.turnStateChangedAt && event.ts <= session.turnStateChangedAt) return;
+  if (session.turnState === turnState) return;
+  store.patch(session.id, { turnState, turnStateChangedAt: event.ts });
+}
+
 /**
  * Apply one seat event against the session registry, deduplicating against poll truth: an event
  * that says nothing newer than the store is a no-op. Unknown sessions are ignored — the poll
@@ -44,50 +88,18 @@ export function applySeatEvent(event: ObserverEvent): void {
   const store = sessionStore.getState();
 
   switch (event.kind) {
-    case "seat.retired": {
-      // A terminal mark: never resurrect, never double-apply over poll truth.
-      if (session.status === "terminated" || session.status === "landed") return;
-      store.setStatus(session.id, "terminated");
-      store.patch(session.id, {
-        retiredAt: event.ts,
-        ...(dataString(event, "retiredReason") ? { retiredReason: dataString(event, "retiredReason") } : {}),
-        ...(dataString(event, "retiredEdge") ? { retiredEdge: dataString(event, "retiredEdge") } : {}),
-        ...(dataString(event, "retiredBySession")
-          ? { retiredBySession: dataString(event, "retiredBySession") }
-          : {}),
-      });
+    case "seat.retired":
+      applyRetired(store, session, event);
       return;
-    }
-    case "seat.landed": {
-      if (session.status === "terminated" || session.status === "landed") return;
-      store.setStatus(session.id, "landed");
-      store.patch(session.id, {
-        landedAt: event.ts,
-        ...(dataString(event, "landedReason") ? { landedReason: dataString(event, "landedReason") } : {}),
-        ...(dataString(event, "landedEdge") ? { landedEdge: dataString(event, "landedEdge") } : {}),
-      });
+    case "seat.landed":
+      applyLanded(store, session, event);
       return;
-    }
-    case "seat.renamed": {
-      const label = dataString(event, "label");
-      if (!label || label === session.label) return;
-      store.patch(session.id, {
-        label,
-        ...(dataString(event, "spawnedLabel") ? { spawnedLabel: dataString(event, "spawnedLabel") } : {}),
-      });
+    case "seat.renamed":
+      applyRenamed(store, session, event);
       return;
-    }
-    case "seat.turn-state-changed": {
-      const turnState = dataString(event, "turnState");
-      if (!turnState || !TURN_STATES.has(turnState)) return;
-      // Dedup: the sweep's event timestamp must be strictly newer than the stored transition —
-      // the poll (which serves the same sweep's classification 4× as often) usually got here
-      // first, and an equal-or-older event must never regress the row.
-      if (session.turnStateChangedAt && event.ts <= session.turnStateChangedAt) return;
-      if (session.turnState === turnState) return;
-      store.patch(session.id, { turnState, turnStateChangedAt: event.ts });
+    case "seat.turn-state-changed":
+      applyTurnState(store, session, event);
       return;
-    }
   }
 }
 

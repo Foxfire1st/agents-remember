@@ -129,7 +129,17 @@ export function projection(over: Partial<WorkspaceProjection>): WorkspaceProject
 
 export function collapsibleHierarchyProjection(): WorkspaceProjection {
   return projection({
-    enclosures: [
+    enclosures: collapsibleEnclosures(),
+    analytics: {
+      ...EMPTY_ANALYTICS,
+      taskDocuments: collapsibleTaskDocuments(),
+      series: collapsibleSeries(),
+    },
+  });
+}
+
+function collapsibleEnclosures(): ReturnType<typeof enclosure>[] {
+  return [
       enclosure({
         enclosure: "/contracts/a1",
         lifecycleId: "",
@@ -142,10 +152,11 @@ export function collapsibleHierarchyProjection(): WorkspaceProjection {
         leafId: "01_leaf-b1",
         taskRoot: "/tasks/master-b",
       }),
-    ],
-    analytics: {
-      ...EMPTY_ANALYTICS,
-      taskDocuments: [
+  ];
+}
+
+function collapsibleTaskDocuments(): ReturnType<typeof taskDoc>[] {
+  return [
         taskDoc({
           id: "SPRINT-02",
           kind: "master",
@@ -184,8 +195,11 @@ export function collapsibleHierarchyProjection(): WorkspaceProjection {
           docPath: "/tasks/master-b/01_leaf-b1.json",
           createdAt: "2026-06-21T09:00:00+00:00",
         }),
-      ],
-      series: [
+  ];
+}
+
+function collapsibleSeries(): ReturnType<typeof seriesNode>[] {
+  return [
         seriesNode({
           seriesId: "master-a",
           title: "Master A",
@@ -216,9 +230,7 @@ export function collapsibleHierarchyProjection(): WorkspaceProjection {
             },
           ],
         }),
-      ],
-    },
-  });
+  ];
 }
 
 export function installLifecycleListCleanup() {

@@ -152,48 +152,12 @@ export function ConversationLibraryList({
         </div>
       ) : null}
       {rows.map((entry) => (
-        <Fragment key={entry.conversationKey}>
-          <button
-            type="button"
-            className={row}
-            data-selected={entry.conversationKey === selectedKey ? "true" : "false"}
-            onClick={() => onSelect(entry)}
-            data-testid="library-row"
-          >
-            <span className={title} title={entry.title}>
-              {truncateMiddle(entry.title, 60)}
-            </span>
-            <span className={meta}>
-              <span className={badge}>{completenessLabel(entry)}</span>
-              {entry.safeNativeIdSuffix ? (
-                <span className={idSuffix}>…{entry.safeNativeIdSuffix}</span>
-              ) : null}
-              <span>{humanizeAge(entry.lastActivityAt)}</span>
-            </span>
-          </button>
-          {(entry.agents ?? []).map((agent) => (
-            <button
-              type="button"
-              key={agent.conversationKey}
-              className={`${row} ${agentChild}`}
-              data-selected={agent.conversationKey === selectedKey ? "true" : "false"}
-              onClick={() => onSelect(agentChildRow(entry, agent))}
-              data-testid="library-agent-row"
-            >
-              <span className={title} title={agent.title}>
-                {truncateMiddle(agent.title, 60)}
-              </span>
-              <span className={meta}>
-                <span className={badge}>agent</span>
-                {agent.role ? <span className={badge}>{agent.role}</span> : null}
-                {agent.safeNativeIdSuffix ? (
-                  <span className={idSuffix}>…{agent.safeNativeIdSuffix}</span>
-                ) : null}
-                <span>{humanizeAge(agent.lastActivityAt)}</span>
-              </span>
-            </button>
-          ))}
-        </Fragment>
+        <LibraryEntry
+          key={entry.conversationKey}
+          entry={entry}
+          selectedKey={selectedKey}
+          onSelect={onSelect}
+        />
       ))}
       {nextCursor !== null ? (
         <button type="button" className={more} onClick={onLoadMore} disabled={loading} data-testid="library-load-more">
@@ -201,5 +165,60 @@ export function ConversationLibraryList({
         </button>
       ) : null}
     </div>
+  );
+}
+
+function LibraryEntry({
+  entry,
+  selectedKey,
+  onSelect,
+}: {
+  entry: ConversationLibraryRow;
+  selectedKey: LibraryConversationKey | null;
+  onSelect: (row: ConversationLibraryRow) => void;
+}) {
+  return (
+    <Fragment>
+      <button
+        type="button"
+        className={row}
+        data-selected={entry.conversationKey === selectedKey ? "true" : "false"}
+        onClick={() => onSelect(entry)}
+        data-testid="library-row"
+      >
+        <span className={title} title={entry.title}>
+          {truncateMiddle(entry.title, 60)}
+        </span>
+        <span className={meta}>
+          <span className={badge}>{completenessLabel(entry)}</span>
+          {entry.safeNativeIdSuffix ? (
+            <span className={idSuffix}>…{entry.safeNativeIdSuffix}</span>
+          ) : null}
+          <span>{humanizeAge(entry.lastActivityAt)}</span>
+        </span>
+      </button>
+      {(entry.agents ?? []).map((agent) => (
+        <button
+          type="button"
+          key={agent.conversationKey}
+          className={`${row} ${agentChild}`}
+          data-selected={agent.conversationKey === selectedKey ? "true" : "false"}
+          onClick={() => onSelect(agentChildRow(entry, agent))}
+          data-testid="library-agent-row"
+        >
+          <span className={title} title={agent.title}>
+            {truncateMiddle(agent.title, 60)}
+          </span>
+          <span className={meta}>
+            <span className={badge}>agent</span>
+            {agent.role ? <span className={badge}>{agent.role}</span> : null}
+            {agent.safeNativeIdSuffix ? (
+              <span className={idSuffix}>…{agent.safeNativeIdSuffix}</span>
+            ) : null}
+            <span>{humanizeAge(agent.lastActivityAt)}</span>
+          </span>
+        </button>
+      ))}
+    </Fragment>
   );
 }

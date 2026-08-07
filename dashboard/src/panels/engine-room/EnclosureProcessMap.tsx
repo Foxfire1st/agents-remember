@@ -59,6 +59,11 @@ function CleanupRecord({ node }: { node: EngineProcessNode }) {
 // solidifies in place into the contract-anchored enclosure (T4 morph, S3) — never a teleport.
 // The ghost banner fades as the node promotes; `layout` carries the morph. Honest motion: under
 // data-effects=off / reduced-motion the shell is an instant swap (no tween).
+function teardownKind(phase: EngineProcessNode["phase"]): "abandon" | "cleanup" | null {
+  if (phase === "abandoned") return "abandon";
+  return phase === "cleanup-pending" ? "cleanup" : null;
+}
+
 export function EnclosureProcessMap({ node, gateNode, workspaceEngines = [], officialLedger }: {
   node: EngineProcessNode;
   gateNode?: GateNode;
@@ -81,8 +86,8 @@ export function EnclosureProcessMap({ node, gateNode, workspaceEngines = [], off
   // Teardown = the enclosure de-materialising (the `.dissolve` shell): t18 abandon (failure, no landing)
   // and cleanup (success, landed → retiring back into the official line). Both dim + desaturate; the
   // record + tone differ. data-abandoned is kept for the existing abandon test; data-teardown is the hook.
-  const abandoned = node.phase === "abandoned";
-  const teardown = abandoned ? "abandon" : node.phase === "cleanup-pending" ? "cleanup" : null;
+  const teardown = teardownKind(node.phase);
+  const abandoned = teardown === "abandon";
   return (
     <motion.div
       ref={wrapRef}
@@ -113,12 +118,12 @@ export function EnclosureProcessMap({ node, gateNode, workspaceEngines = [], off
       <div className={stageContent}>
         {/* a fleeting (born-blocked) enclosure now renders inside the canvas as the big red
             `FleetingEnclosure` box (podstage `.fbox`); the old HTML banner strip is gone. */}
-        {teardown === "abandon" ? <AbandonRecord node={node} /> : null}
+      {abandoned ? <AbandonRecord node={node} /> : null}
         {teardown === "cleanup" ? <CleanupRecord node={node} /> : null}
         {/* abandon dissolves the WHOLE enclosure (failure, nothing landed); a landed CLEANUP only
             de-materialises the WORKTREE side — main stays bright. That fade lives inside the canvas
             (the worktree refs go `planned`), so cleanup does NOT wrap in the full-dim dissolve shell. */}
-        {teardown === "abandon" ? (
+        {abandoned ? (
           <motion.div
             className={dissolveShell}
             data-testid="dissolve"

@@ -26,7 +26,7 @@ import {
 } from "../../../data/conversation/client";
 import type { ActiveConversationProjection } from "../../../data/conversation/reducer";
 import { useActiveConversation } from "../../../data/conversation/store";
-import type { InterruptOperation } from "../../../data/conversation/types";
+import type { ConversationCapabilities, InterruptOperation } from "../../../data/conversation/types";
 import {
   ariaKeyshortcuts,
   bindingFor,
@@ -58,23 +58,42 @@ const DEFAULT_STOP_CHORD = "Control+Shift+Period";
  * when the wire omits it during a working turn, correlate from the newest streaming/pending item's
  * `turnId` (falling back to the newest item that carries one). Returns null when genuinely unresolvable.
  */
-export function resolveWorkingTurnId(
+function canonicalTurnInfo(
+  status: ActiveConversationProjection["status"] | undefined,
+): { turnId: string | null; working: boolean } {
+  if (status === undefined) return { turnId: null, working: false };
+  return {
+    turnId: status.turn.turnId,
+    working: status.turn.state === "working",
+  };
+}
+
+function correlatedTurnId(
   projection: ActiveConversationProjection | undefined,
 ): string | null {
-  const status = projection?.status;
-  if (status === undefined) return null;
-  if (status.turn.turnId !== null && status.turn.turnId !== undefined) return status.turn.turnId;
-  if (status.turn.state !== "working") return null;
   const ids = projection?.orderedItemIds ?? [];
   let fallback: string | null = null;
   for (let index = ids.length - 1; index >= 0; index -= 1) {
     const item = projection?.itemsById[ids[index]];
     const turnId = item?.turnId;
     if (turnId === undefined) continue;
-    if (item?.phase === "streaming" || item?.phase === "pending") return turnId;
+    if (isActiveTurnPhase(item)) return turnId;
     if (fallback === null) fallback = turnId;
   }
   return fallback;
+}
+
+function isActiveTurnPhase(item: { phase?: string } | undefined): boolean {
+  return item?.phase === "streaming" || item?.phase === "pending";
+}
+
+export function resolveWorkingTurnId(
+  projection: ActiveConversationProjection | undefined,
+): string | null {
+  const info = canonicalTurnInfo(projection?.status);
+  if (info.turnId !== null && info.turnId !== undefined) return info.turnId;
+  if (!info.working) return null;
+  return correlatedTurnId(projection);
 }
 
 function newRequestId(): string {
@@ -83,6 +102,51 @@ function newRequestId(): string {
     return `interrupt-${cryptoObj.randomUUID()}`;
   }
   return `interrupt-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+function interruptReason(
+  available: boolean,
+  hardUnavailable: boolean,
+  refusedThisTurn: boolean,
+  unresolvable: boolean,
+  capability: ConversationCapabilities["controls"]["interrupt"] | undefined,
+  refusal: { turnId: string; reason: string } | null,
+): string | undefined {
+  if (available) return undefined;
+  if (hardUnavailable) return capability?.reason ?? "unavailable";
+  if (refusedThisTurn) return refusal?.reason;
+  if (unresolvable) return "turn identity unavailable on this wire";
+  return undefined;
+}
+
+function interruptControlState(input: {
+  working: boolean;
+  turnId: string | null;
+  hardUnavailable: boolean;
+  refusedThisTurn: boolean;
+  unresolvable: boolean;
+  capability: ConversationCapabilities["controls"]["interrupt"] | undefined;
+  refusal: { turnId: string; reason: string } | null;
+  pending: boolean;
+  onStop: (() => void) | undefined;
+  keyshortcut: string;
+}): ConversationInterrupt {
+  const available =
+    input.working && input.turnId !== null && !input.hardUnavailable && !input.refusedThisTurn;
+  return {
+    available,
+    reason: interruptReason(
+      available,
+      input.hardUnavailable,
+      input.refusedThisTurn,
+      input.unresolvable,
+      input.capability,
+      input.refusal,
+    ),
+    pending: input.pending,
+    onStop: available && !input.pending ? input.onStop : undefined,
+    keyshortcut: input.keyshortcut,
+  };
 }
 
 export function useConversationInterrupt(sessionId: string | undefined): ConversationInterrupt {
@@ -148,23 +212,22 @@ export function useConversationInterrupt(sessionId: string | undefined): Convers
     const hardUnavailable = capability?.state === "unavailable";
     const refusedThisTurn = refusal !== null && turnId !== null && refusal.turnId === turnId;
     const unresolvable = working && turnId === null;
-    const available = working && turnId !== null && !hardUnavailable && !refusedThisTurn;
     // Reason copy is ONLY the honest, current signal. The KNOWN-STALE L1 `unverified` reason
     // (`capability.reason` when the view is merely not-`supported`) is deliberately NEVER surfaced as
     // control copy (F24 / register L3.5): it once leaked onto the ENABLED control's tooltip and the
     // catalog-lag placeholder. An enabled control carries no reason (WorkingLine shows an action
     // tooltip instead); a not-working placeholder falls back to the honest pre-L4 constant.
-    let reason: string | undefined;
-    if (available) reason = undefined;
-    else if (hardUnavailable) reason = capability?.reason ?? "unavailable";
-    else if (refusedThisTurn) reason = refusal?.reason;
-    else if (unresolvable) reason = "turn identity unavailable on this wire";
-    return {
-      available,
-      reason,
+    return interruptControlState({
+      working,
+      turnId,
+      hardUnavailable,
+      refusedThisTurn,
+      unresolvable,
+      capability,
+      refusal,
       pending,
-      onStop: available && !pending ? onStop : undefined,
+      onStop,
       keyshortcut,
-    };
+    });
   }, [capability, keyshortcut, onStop, pending, refusal, turnId, turnState]);
 }

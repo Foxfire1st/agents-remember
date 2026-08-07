@@ -55,6 +55,6 @@ export default defineConfig({
     },
     // Vitest owns logic tests under src/; the e2e/ Playwright specs (which import
     // @playwright/test) are run by `npm run e2e`, never collected here.
-    include: ["src/**/*.{test,spec}.{ts,tsx}"],
+    include: ["src/**/*.{test,spec}.{ts,tsx}", "scripts/**/*.test.mjs"],
   },
 });

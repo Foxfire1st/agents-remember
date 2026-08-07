@@ -11,8 +11,10 @@ are hard findings -- the citation itself is broken. A construct that changed whi
 citation stays CURRENT (the anchor resolves exactly once and the cited range covers the
 current construct) is the report-only review surface: the pointer provably points at the new
 content, clearing needs no commit, and whether the prose still holds is the curator's review
-duty. Only a changed construct whose citation is not current -- or that never resolves
-uniquely -- is an enforced reopened claim.
+duty. A whole source file added after the stamp follows the same rule: if its anchor resolves
+exactly once inside a cited range it surfaces report-only; otherwise it stays hard. Only a
+changed construct whose citation is not current -- or that never resolves uniquely -- is an
+enforced reopened claim.
 
 Known limit -- dishonest stamp: if verification metadata is advanced without reviewing
 the changed construct, historical and current resolution see the same body. This check
@@ -330,14 +332,18 @@ def local_changes(
     changed: list[str] = []
     surfaced: list[str] = []
     invalid: list[str] = []
-    for source in sources:
-        if source.historical is None:
-            invalid.append(f"{source.citation.path} did not exist at {source.provenance_label}")
-    if invalid:
-        return changed, surfaced, invalid
     if any(source.current is None for source in sources):
-        missing = sorted({source.citation.path for source in sources if source.current is None})
-        return [f"{path} no longer exists in the working tree" for path in missing], [], invalid
+        missing = sorted(
+            (
+                f"{source.citation.path} did not exist at {source.provenance_label} "
+                "and does not exist in the working tree"
+                if source.historical is None
+                else f"{source.citation.path} no longer exists in the working tree"
+            )
+            for source in sources
+            if source.current is None
+        )
+        return missing, [], invalid
 
     for anchor in anchors:
         anchor_changed, anchor_surfaced, anchor_invalid = anchor_change(
@@ -372,8 +378,11 @@ def anchor_change(
                     "historical resolution must be unique"
                 )
             elif now:
-                # The file existed at the stamp but the construct did not: citing newly added
-                # content is a change like any other, judged by the same currency rule.
+                # The cited evidence did not exist at the stamp -- either a construct added to
+                # an existing file or a whole source file added after the stamp. Both are a
+                # change like any other, judged by the same currency rule: an exactly-once
+                # current resolution inside a cited range is the report-only surface; anything
+                # else is enforced.
                 if len(now) != 1:
                     invalid.append(
                         f"{anchor.written} resolves {len(now)} times now; no exact candidate is unique"

@@ -48,6 +48,132 @@ const body = css({ flex: "1", minHeight: "0" });
 // changed onboarding file reads exactly as nicely here as it does in the file reader.
 const mdScroll = css({ height: "100%", overflow: "auto", padding: "0.6rem 0.85rem", background: "bgPanel" });
 
+function ChangeSetToolbar({
+  isMarkdown,
+  rendered,
+  onRendered,
+  showRendered,
+  fullFile,
+  onFullFile,
+  plain,
+  inline,
+  onInline,
+  highlight,
+  onHighlight,
+  summary,
+}: {
+  isMarkdown: boolean;
+  rendered: boolean;
+  onRendered: (value: boolean) => void;
+  showRendered: boolean;
+  fullFile: boolean;
+  onFullFile: (value: boolean) => void;
+  plain: boolean;
+  inline: boolean;
+  onInline: (value: boolean) => void;
+  highlight: boolean;
+  onHighlight: (value: boolean) => void;
+  summary: string;
+}) {
+  return (
+    <div className={bar}>
+      {isMarkdown ? (
+        <ToggleButton
+          className={toggle}
+          isSelected={rendered}
+          onChange={onRendered}
+          data-selected={rendered}
+          data-testid="changeset-rendered-toggle"
+        >
+          rendered
+        </ToggleButton>
+      ) : null}
+      {!showRendered ? (
+        <>
+          <ToggleButton
+            className={toggle}
+            isSelected={fullFile}
+            onChange={onFullFile}
+            data-selected={fullFile}
+          >
+            {fullFile ? "full file" : "change-set"}
+          </ToggleButton>
+          {!plain ? (
+            <ToggleButton
+              className={toggle}
+              isSelected={inline}
+              onChange={onInline}
+              data-selected={inline}
+            >
+              {inline ? "inline" : "split"}
+            </ToggleButton>
+          ) : null}
+          {fullFile ? (
+            <ToggleButton
+              className={toggle}
+              isSelected={highlight}
+              onChange={onHighlight}
+              data-selected={highlight}
+            >
+              highlight
+            </ToggleButton>
+          ) : null}
+        </>
+      ) : null}
+      <span className={cx(css({ marginLeft: "auto", fontSize: "0.68rem", color: "muted" }))}>
+        {summary}
+      </span>
+    </div>
+  );
+}
+
+function diffContent(diff: FileDiff): { before: string; after: string } {
+  return {
+    before: diff.before?.content ?? "",
+    after: diff.after?.content ?? "",
+  };
+}
+
+function ChangeSetBody({
+  showRendered,
+  plain,
+  before,
+  after,
+  language,
+  inline,
+  fullFile,
+}: {
+  showRendered: boolean;
+  plain: boolean;
+  before: string;
+  after: string;
+  language: string;
+  inline: boolean;
+  fullFile: boolean;
+}) {
+  return (
+    <div className={body}>
+      {showRendered ? (
+        // The after-content rendered; a pure deletion (no after) falls back to the removed prose so
+        // the pane is never blank.
+        <div className={mdScroll} data-testid="changeset-rendered">
+          <Markdown>{after || before}</Markdown>
+        </div>
+      ) : plain ? (
+        <FilePane content={after} language={language} />
+      ) : (
+        <DiffPane
+          before={before}
+          after={after}
+          language={language}
+          mode={inline ? "inline" : "split"}
+          collapse={!fullFile}
+        />
+      )}
+    </div>
+  );
+}
+
 export function ChangeSetPane({ diff, keyPrefix }: { diff: FileDiff; keyPrefix: string }) {
   const [fullFile, setFullFile] = usePersistedFlag(`${keyPrefix}.fullfile`, false);
   const [inline, setInline] = usePersistedFlag(`${keyPrefix}.inline`, false);
@@ -59,79 +185,34 @@ export function ChangeSetPane({ diff, keyPrefix }: { diff: FileDiff; keyPrefix: 
   const [rendered, setRendered] = usePersistedFlag(`${keyPrefix}.rendered`, false);
   const showRendered = isMarkdown && rendered;
 
-  const before = diff.before?.content ?? "";
-  const after = diff.after?.content ?? "";
+  const { before, after } = diffContent(diff);
   const plain = fullFile && !highlight;
 
   return (
     <div className={col} data-testid="changeset-pane">
-      <div className={bar}>
-        {isMarkdown ? (
-          <ToggleButton
-            className={toggle}
-            isSelected={rendered}
-            onChange={setRendered}
-            data-selected={rendered}
-            data-testid="changeset-rendered-toggle"
-          >
-            rendered
-          </ToggleButton>
-        ) : null}
-        {!showRendered ? (
-          <>
-            <ToggleButton
-              className={toggle}
-              isSelected={fullFile}
-              onChange={setFullFile}
-              data-selected={fullFile}
-            >
-              {fullFile ? "full file" : "change-set"}
-            </ToggleButton>
-            {!plain ? (
-              <ToggleButton
-                className={toggle}
-                isSelected={inline}
-                onChange={setInline}
-                data-selected={inline}
-              >
-                {inline ? "inline" : "split"}
-              </ToggleButton>
-            ) : null}
-            {fullFile ? (
-              <ToggleButton
-                className={toggle}
-                isSelected={highlight}
-                onChange={setHighlight}
-                data-selected={highlight}
-              >
-                highlight
-              </ToggleButton>
-            ) : null}
-          </>
-        ) : null}
-        <span className={cx(css({ marginLeft: "auto", fontSize: "0.68rem", color: "muted" }))}>
-          {diff.kind} · {diff.path}
-        </span>
-      </div>
-      <div className={body}>
-        {showRendered ? (
-          // The after-content rendered; a pure deletion (no after) falls back to the removed prose so
-          // the pane is never blank.
-          <div className={mdScroll} data-testid="changeset-rendered">
-            <Markdown>{after || before}</Markdown>
-          </div>
-        ) : plain ? (
-          <FilePane content={after} language={diff.language} />
-        ) : (
-          <DiffPane
-            before={before}
-            after={after}
-            language={diff.language}
-            mode={inline ? "inline" : "split"}
-            collapse={!fullFile}
-          />
-        )}
-      </div>
+      <ChangeSetToolbar
+        isMarkdown={isMarkdown}
+        rendered={rendered}
+        onRendered={setRendered}
+        showRendered={showRendered}
+        fullFile={fullFile}
+        onFullFile={setFullFile}
+        plain={plain}
+        inline={inline}
+        onInline={setInline}
+        highlight={highlight}
+        onHighlight={setHighlight}
+        summary={`${diff.kind} · ${diff.path}`}
+      />
+      <ChangeSetBody
+        showRendered={showRendered}
+        plain={plain}
+        before={before}
+        after={after}
+        language={diff.language}
+        inline={inline}
+        fullFile={fullFile}
+      />
     </div>
   );
 }

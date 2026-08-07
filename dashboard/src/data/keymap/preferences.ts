@@ -82,9 +82,7 @@ function normalizeKey(token: string): string | null {
 }
 
 /** Parse the deliberately small tinykeys subset the cockpit supports. */
-export function normalizeBinding(value: string): string | null {
-  const rawTokens = value.split("+").map((token) => token.trim());
-  if (rawTokens.length === 0 || rawTokens.some((token) => token.length === 0)) return null;
+function collectBindingTokens(rawTokens: string[]): { modifiers: string[]; key: string } | null {
   const modifiers: string[] = [];
   let key: string | null = null;
   for (const token of rawTokens) {
@@ -98,7 +96,16 @@ export function normalizeBinding(value: string): string | null {
     if (!normalizedKey || key !== null) return null;
     key = normalizedKey;
   }
-  if (!key || (modifiers.includes("Shift") && modifiers.includes("[Shift]"))) return null;
+  return key === null ? null : { modifiers, key };
+}
+
+export function normalizeBinding(value: string): string | null {
+  const rawTokens = value.split("+").map((token) => token.trim());
+  if (rawTokens.length === 0 || rawTokens.some((token) => token.length === 0)) return null;
+  const collected = collectBindingTokens(rawTokens);
+  if (collected === null) return null;
+  const { modifiers, key } = collected;
+  if (modifiers.includes("Shift") && modifiers.includes("[Shift]")) return null;
   const order = ["Control", "Alt", "Meta", "Shift", "[Shift]"];
   modifiers.sort((a, b) => order.indexOf(a) - order.indexOf(b));
   return [...modifiers, key].join("+");
@@ -138,7 +145,7 @@ function readStoredObject(value: unknown): StoredKeymap | null {
   return record as unknown as StoredKeymap;
 }
 
-export function resolveKeymap(raw: string | null): EffectiveKeymap {
+function readRawKeymap(raw: string | null): { stored: StoredKeymap | null; issues: string[] } {
   const issues: string[] = [];
   let stored: StoredKeymap | null = null;
   if (raw !== null) {
@@ -149,14 +156,56 @@ export function resolveKeymap(raw: string | null): EffectiveKeymap {
       issues.push("stored keymap is not valid JSON; defaults restored");
     }
   }
+  return { stored, issues };
+}
 
+function resolveComposerProfile(stored: StoredKeymap | null, issues: string[]): ComposerProfile {
   let composerProfile: ComposerProfile = "emacs";
   if (stored?.composerProfile === "vim" || stored?.composerProfile === "emacs") {
     composerProfile = stored.composerProfile;
   } else if (stored?.composerProfile !== undefined) {
     issues.push("unknown composer profile; emacs restored");
   }
+  return composerProfile;
+}
 
+function normalizeOverride(
+  commandId: string,
+  candidate: unknown,
+  issues: string[],
+): string | null {
+  if (typeof candidate !== "string") {
+    issues.push(`${commandId}: binding must be text; default restored`);
+    return null;
+  }
+  const chord = normalizeBinding(candidate);
+  if (!chord) {
+    issues.push(`${commandId}: malformed binding; default restored`);
+    return null;
+  }
+  if (BROWSER_FORBIDDEN.includes(browserComparable(chord) as (typeof BROWSER_FORBIDDEN)[number])) {
+    issues.push(`${commandId}: browser-reserved ${bindingLabel(chord)} rejected; default restored`);
+    return null;
+  }
+  const defaultEntry = DEFAULT_BINDINGS.find((entry) => entry.commandId === commandId)!;
+  if (
+    commandId === IMMUTABLE_COMPOSER_ESCAPE_COMMAND &&
+    chord !== defaultEntry.chord
+  ) {
+    issues.push(`${commandId}: F6 is the fixed browser-safe composer escape; default restored`);
+    return null;
+  }
+  if (defaultEntry.zones.includes("composer") && isPrintableBinding(chord)) {
+    issues.push(`${commandId}: printable composer binding rejected; default restored`);
+    return null;
+  }
+  return chord;
+}
+
+function collectOverrides(
+  stored: StoredKeymap | null,
+  issues: string[],
+): Map<string, string> {
   const overrides = new Map<string, string>();
   if (stored?.bindings !== undefined) {
     if (typeof stored.bindings !== "object" || stored.bindings === null || Array.isArray(stored.bindings)) {
@@ -167,43 +216,18 @@ export function resolveKeymap(raw: string | null): EffectiveKeymap {
           issues.push(`${commandId}: unknown command ignored`);
           continue;
         }
-        if (typeof candidate !== "string") {
-          issues.push(`${commandId}: binding must be text; default restored`);
-          continue;
-        }
-        const chord = normalizeBinding(candidate);
-        if (!chord) {
-          issues.push(`${commandId}: malformed binding; default restored`);
-          continue;
-        }
-        if (BROWSER_FORBIDDEN.includes(browserComparable(chord) as (typeof BROWSER_FORBIDDEN)[number])) {
-          issues.push(`${commandId}: browser-reserved ${bindingLabel(chord)} rejected; default restored`);
-          continue;
-        }
-        const defaultEntry = DEFAULT_BINDINGS.find((entry) => entry.commandId === commandId)!;
-        if (
-          commandId === IMMUTABLE_COMPOSER_ESCAPE_COMMAND &&
-          chord !== defaultEntry.chord
-        ) {
-          issues.push(`${commandId}: F6 is the fixed browser-safe composer escape; default restored`);
-          continue;
-        }
-        if (defaultEntry.zones.includes("composer") && isPrintableBinding(chord)) {
-          issues.push(`${commandId}: printable composer binding rejected; default restored`);
-          continue;
-        }
-        overrides.set(commandId, chord);
+        const chord = normalizeOverride(commandId, candidate, issues);
+        if (chord !== null) overrides.set(commandId, chord);
       }
     }
   }
+  return overrides;
+}
 
-  const withCandidates = DEFAULT_BINDINGS.map((entry) => ({
-    ...entry,
-    chord: overrides.get(entry.commandId) ?? entry.chord,
-    label: overrides.has(entry.commandId)
-      ? bindingLabel(overrides.get(entry.commandId)!)
-      : entry.label,
-  }));
+function findCollisions(
+  withCandidates: ZoneChord[],
+  overrides: Map<string, string>,
+): Set<string> {
   const rejectedForCollision = new Set<string>();
   for (let left = 0; left < withCandidates.length; left += 1) {
     for (let right = left + 1; right < withCandidates.length; right += 1) {
@@ -214,6 +238,22 @@ export function resolveKeymap(raw: string | null): EffectiveKeymap {
       if (overrides.has(b.commandId)) rejectedForCollision.add(b.commandId);
     }
   }
+  return rejectedForCollision;
+}
+
+export function resolveKeymap(raw: string | null): EffectiveKeymap {
+  const { stored, issues } = readRawKeymap(raw);
+  const composerProfile = resolveComposerProfile(stored, issues);
+  const overrides = collectOverrides(stored, issues);
+
+  const withCandidates = DEFAULT_BINDINGS.map((entry) => ({
+    ...entry,
+    chord: overrides.get(entry.commandId) ?? entry.chord,
+    label: overrides.has(entry.commandId)
+      ? bindingLabel(overrides.get(entry.commandId)!)
+      : entry.label,
+  }));
+  const rejectedForCollision = findCollisions(withCandidates, overrides);
   for (const commandId of rejectedForCollision) {
     issues.push(`${commandId}: duplicate binding rejected; default restored`);
   }

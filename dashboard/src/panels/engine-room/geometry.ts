@@ -242,20 +242,27 @@ export function remoteTitle(ref: LandingRefNode): string {
 
 export type FlowState = "active" | "settled" | "hidden";
 
+function refResolved(refs: LandingRefNode[], kind: string): boolean {
+  const ref = refs.find((r) => r.kind === kind);
+  return ref !== undefined && ref.factState === "observed" && ref.state !== "planned";
+}
+
+function prMerged(refs: LandingRefNode[]): boolean {
+  const pr = refs.find((r) => r.kind === "pr");
+  return pr !== undefined && pr.factState === "observed" && pr.state === "merged";
+}
+
+function memPushed(refs: LandingRefNode[]): boolean {
+  const memory = refs.find((r) => r.kind === "origin-mem-main");
+  return memory !== undefined && memory.factState === "observed" && memory.state === "pushed";
+}
 
 export function landingFlowState(refs: LandingRefNode[], kind: string): FlowState {
-  const ref = (k: string) => refs.find((r) => r.kind === k);
-  const resolved = (k: string) => {
-    const r = ref(k);
-    return r ? r.factState === "observed" && r.state !== "planned" : false;
-  };
-  const pr = ref("pr");
-  const memory = ref("origin-mem-main");
-  const prMerged = pr?.factState === "observed" && pr.state === "merged";
-  const memPushed = memory?.factState === "observed" && memory.state === "pushed";
-  if (kind === "push") return !resolved("origin-feat") ? "hidden" : prMerged ? "settled" : "active";
-  if (kind === "pull") return !prMerged ? "hidden" : memPushed ? "settled" : "active";
-  return memPushed ? "active" : "hidden"; // carry + push-mem: the carryover frontier
+  if (kind === "push") {
+    return !refResolved(refs, "origin-feat") ? "hidden" : prMerged(refs) ? "settled" : "active";
+  }
+  if (kind === "pull") return !prMerged(refs) ? "hidden" : memPushed(refs) ? "settled" : "active";
+  return memPushed(refs) ? "active" : "hidden"; // carry + push-mem: the carryover frontier
 }
 
 export function chargeMotion(runtime: RuntimeState): { scaleY: number; opacity: number } {

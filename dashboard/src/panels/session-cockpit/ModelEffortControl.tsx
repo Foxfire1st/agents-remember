@@ -7,8 +7,9 @@ import {
   effectiveSelection,
   visibleModelRows,
 } from "../../data/sessionCapabilities";
-import type { PerSessionCockpit } from "../../data/sessionCockpitStore";
+import type { PerSessionCockpit, SnapshotErrorInfo } from "../../data/sessionCockpitStore";
 import type { OpenSession } from "../../data/sessions";
+import type { CapabilitySnapshotWire } from "../../types/harnessCapabilities";
 import {
   acknowledgeSetAttention,
   refreshSessionSnapshot,
@@ -146,6 +147,491 @@ function isLive(session: OpenSession): boolean {
   return (session.status ?? "running") === "running";
 }
 
+function applyStagedPair(
+  sessionId: string,
+  stagedModel: string | null,
+  stagedEffort: string | null,
+  modelChanged: boolean,
+  effortChanged: boolean,
+  setOpen: (open: boolean) => void,
+): void {
+  if (modelChanged && effortChanged && stagedModel && stagedEffort) {
+    startPairChangeFlow(sessionId, stagedModel, stagedEffort);
+  } else if (modelChanged && stagedModel) {
+    void sendSet(sessionId, "model", stagedModel);
+  } else if (effortChanged && stagedEffort) {
+    void sendSet(sessionId, "effort", stagedEffort);
+  }
+  setOpen(false);
+}
+
+function modelEffortWords(
+  effective: ReturnType<typeof effectiveSelection>,
+  session: OpenSession,
+): { modelWord: string; effortWord: string | null } {
+  return {
+    modelWord: effective.modelKey ?? session.resolvedModel ?? "model —",
+    effortWord: effective.effort ?? session.resolvedEffort ?? null,
+  };
+}
+
+function menuModelKeyFor(
+  stagedModel: string | null,
+  snapshot: CapabilitySnapshotWire | undefined,
+): string | null {
+  return stagedModel ?? snapshot?.selectedModelKey ?? null;
+}
+
+function stagedEffortChanged(
+  stagedEffort: string | null,
+  modelChanged: boolean,
+  effectiveEffort: string | null,
+): boolean {
+  return stagedEffort !== null && (modelChanged || stagedEffort !== effectiveEffort);
+}
+
+function useModelEffortDerived(
+  session: OpenSession,
+  cockpit: PerSessionCockpit | undefined,
+  stagedModel: string | null,
+  stagedEffort: string | null,
+): {
+  live: boolean;
+  effective: ReturnType<typeof effectiveSelection>;
+  snapshot: CapabilitySnapshotWire | undefined;
+  snapshotError: SnapshotErrorInfo | undefined;
+  modelWord: string;
+  effortWord: string | null;
+  sourceWord: string;
+  menuModelKey: string | null;
+  menu: ReturnType<typeof deriveEffortMenu> | null;
+  modelChanged: boolean;
+  effortChanged: boolean;
+} {
+  const live = isLive(session);
+  const effective = effectiveSelection(cockpit);
+  const snapshot = cockpit?.liveSnapshot?.payload;
+  const snapshotError = cockpit?.snapshotError;
+  const { modelWord, effortWord } = modelEffortWords(effective, session);
+  const sourceWord =
+    effective.modelSource === "none"
+      ? "requested at launch — no readback yet"
+      : `source: ${effective.modelSource}`;
+  const menuModelKey = menuModelKeyFor(stagedModel, snapshot);
+  const menu = snapshot ? deriveEffortMenu(snapshot, menuModelKey) : null;
+  const modelChanged = stagedModel !== null && stagedModel !== effective.modelKey;
+  const effortChanged = stagedEffortChanged(stagedEffort, modelChanged, effective.effort);
+  return {
+    live,
+    effective,
+    snapshot,
+    snapshotError,
+    modelWord,
+    effortWord,
+    sourceWord,
+    menuModelKey,
+    menu,
+    modelChanged,
+    effortChanged,
+  };
+}
+
+function useModelEffortPopover(
+  isOpen: boolean,
+  sessionId: string,
+  setStagedModel: (model: string | null) => void,
+  setStagedEffort: (effort: string | null) => void,
+): void {
+  // Staged REQUESTS (never markers): reset per popover open and per session.
+  useEffect(() => {
+    setStagedModel(null);
+    setStagedEffort(null);
+  }, [isOpen, sessionId, setStagedModel, setStagedEffort]);
+
+  // Popover open re-GETs the exact-session snapshot — the ONLY options source.
+  useEffect(() => {
+    if (isOpen) void refreshSessionSnapshot(sessionId);
+  }, [isOpen, sessionId]);
+}
+
+function ModelEffortTrigger({
+  modelWord,
+  effortWord,
+  sourceWord,
+  effective,
+}: {
+  modelWord: string;
+  effortWord: string | null;
+  sourceWord: string;
+  effective: ReturnType<typeof effectiveSelection>;
+}) {
+  return (
+    <Button
+      className={trigger}
+      data-testid="model-effort-trigger"
+      aria-label={`model and effort control — ${modelWord}${effortWord ? ` · ${effortWord}` : ""}`}
+      aria-description={sourceWord}
+      data-effective-source={effective.modelSource}
+    >
+      <span aria-hidden="true">⚙</span>
+      <span data-testid="model-effort-trigger-model">{modelWord}</span>
+      {effortWord ? (
+        <>
+          <span aria-hidden="true">·</span>
+          <span data-testid="model-effort-trigger-effort">{effortWord}</span>
+        </>
+      ) : null}
+    </Button>
+  );
+}
+
+function SnapshotErrorBlock({
+  snapshotError,
+  session,
+}: {
+  snapshotError: SnapshotErrorInfo;
+  session: OpenSession;
+}) {
+  return (
+    <>
+      <span className={heading}>control unavailable</span>
+      <span className={errorLine} data-testid="model-effort-error">
+        {snapshotErrorCopy(snapshotError)}
+      </span>
+      <span>
+        <Button
+          className={quietButton}
+          onPress={() => void refreshSessionSnapshot(session.id)}
+          data-testid="model-effort-retry"
+        >
+          retry
+        </Button>
+      </span>
+    </>
+  );
+}
+
+function ModelOptions({
+  snapshot,
+  effective,
+  stagedModel,
+  setStagedModel,
+  setStagedEffort,
+}: {
+  snapshot: CapabilitySnapshotWire;
+  effective: ReturnType<typeof effectiveSelection>;
+  stagedModel: string | null;
+  setStagedModel: (model: string | null) => void;
+  setStagedEffort: (effort: string | null) => void;
+}) {
+  return (
+    <>
+      <span className={heading}>model</span>
+      {snapshot.selectedModelKey === null ? (
+        <span className={noteLine} data-testid="model-effort-no-selected-model">
+          {NO_SELECTED_MODEL_COPY}
+        </span>
+      ) : null}
+      <div className={optionList} data-testid="model-effort-models">
+        {visibleModelRows(snapshot).map((row) => (
+          <Button
+            key={row.key}
+            className={optionButton}
+            aria-pressed={stagedModel === row.key}
+            data-effective={effective.modelKey === row.key ? "true" : undefined}
+            data-testid={`model-option-${row.key}`}
+            onPress={() => {
+              setStagedModel(row.key === effective.modelKey ? null : row.key);
+              // Re-gate: a staged effort from another row's menu never survives.
+              setStagedEffort(null);
+            }}
+          >
+            {row.displayName}
+            {effective.modelKey === row.key ? " ●" : ""}
+          </Button>
+        ))}
+      </div>
+    </>
+  );
+}
+
+function EffortOptions({
+  menu,
+  session,
+  effective,
+  menuModelKey,
+  stagedEffort,
+  setStagedEffort,
+  modelChanged,
+}: {
+  menu: ReturnType<typeof deriveEffortMenu> | null;
+  session: OpenSession;
+  effective: ReturnType<typeof effectiveSelection>;
+  menuModelKey: string | null;
+  stagedEffort: string | null;
+  setStagedEffort: (effort: string | null) => void;
+  modelChanged: boolean;
+}) {
+  if (!menu || menu.kind === "no-selected-model") {
+    return (
+      <span className={noteLine} data-testid="effort-menu-no-model">
+        {NO_SELECTED_MODEL_COPY}
+      </span>
+    );
+  }
+  if (menu.kind === "no-effort-control") {
+    return (
+      <span className={noteLine} data-testid="effort-menu-none">
+        {NO_EFFORT_CONTROL_COPY}
+      </span>
+    );
+  }
+  return (
+    <div className={optionList} data-testid="model-effort-efforts">
+      {menu.options.map((option) => {
+        const isEffective =
+          menuModelKey === effective.modelKey &&
+          (effective.effort ?? session.resolvedEffort) === option.key;
+        return (
+          <Button
+            key={option.key}
+            className={optionButton}
+            aria-pressed={stagedEffort === option.key}
+            data-effective={isEffective ? "true" : undefined}
+            data-prehighlight={
+              modelChanged && stagedEffort === null && menu.defaultEffort === option.key
+                ? "true"
+                : undefined
+            }
+            data-testid={`effort-option-${option.key}`}
+            onPress={() => setStagedEffort(stagedEffort === option.key ? null : option.key)}
+          >
+            {option.displayName}
+            {isEffective ? " ●" : ""}
+          </Button>
+        );
+      })}
+    </div>
+  );
+}
+
+function ApplyFooter({
+  modelChanged,
+  effortChanged,
+  onApply,
+  onCancel,
+  snapshotLoading,
+}: {
+  modelChanged: boolean;
+  effortChanged: boolean;
+  onApply: () => void;
+  onCancel: () => void;
+  snapshotLoading: boolean | undefined;
+}) {
+  return (
+    <div className={footerRow}>
+      <Button
+        className={applyButton}
+        isDisabled={!modelChanged && !effortChanged}
+        onPress={onApply}
+        data-testid="model-effort-apply"
+      >
+        {modelChanged && effortChanged
+          ? "apply model + effort (serialized)"
+          : modelChanged
+            ? "apply model"
+            : effortChanged
+              ? "apply effort"
+              : "apply"}
+      </Button>
+      <Button className={quietButton} onPress={onCancel} data-testid="model-effort-cancel">
+        cancel
+      </Button>
+      {snapshotLoading ? (
+        <span className={noteLine} data-testid="model-effort-refreshing">
+          refreshing snapshot…
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
+function ChipsRow({
+  session,
+  cockpit,
+  chips,
+}: {
+  session: OpenSession;
+  cockpit: PerSessionCockpit | undefined;
+  chips: ReturnType<typeof deriveSetChips>;
+}) {
+  return (
+    <span className={chipsRow} data-testid="model-effort-chips">
+      {chips.map((chip) => (
+        <AcceptanceChip
+          key={chip.id}
+          chip={chip}
+          onAcknowledge={
+            chip.demandsAck ? () => acknowledgeSetAttention(session.id) : undefined
+          }
+          onRetry={
+            chip.retryable && cockpit?.setRouteError
+              ? () => {
+                  const error = cockpit.setRouteError;
+                  if (error) void sendSet(session.id, error.kind, error.requestedValue);
+                }
+              : undefined
+          }
+        />
+      ))}
+    </span>
+  );
+}
+
+function ModelEffortSurface({
+  isOpen,
+  setOpen,
+  session,
+  cockpit,
+  stagedModel,
+  setStagedModel,
+  stagedEffort,
+  setStagedEffort,
+  chips,
+  derived,
+  apply,
+}: {
+  isOpen: boolean;
+  setOpen: (open: boolean) => void;
+  session: OpenSession;
+  cockpit: PerSessionCockpit | undefined;
+  stagedModel: string | null;
+  setStagedModel: (model: string | null) => void;
+  stagedEffort: string | null;
+  setStagedEffort: (effort: string | null) => void;
+  chips: ReturnType<typeof deriveSetChips>;
+  derived: ReturnType<typeof useModelEffortDerived>;
+  apply: () => void;
+}) {
+  const {
+    effective,
+    snapshot,
+    snapshotError,
+    modelWord,
+    effortWord,
+    sourceWord,
+    menuModelKey,
+    menu,
+    modelChanged,
+    effortChanged,
+  } = derived;
+  return (
+    <>
+      <DialogTrigger isOpen={isOpen} onOpenChange={setOpen}>
+        <ModelEffortTrigger
+          modelWord={modelWord}
+          effortWord={effortWord}
+          sourceWord={sourceWord}
+          effective={effective}
+        />
+        <ModelEffortDialog
+          snapshotError={snapshotError}
+          snapshot={snapshot}
+          session={session}
+          effective={effective}
+          stagedModel={stagedModel}
+          setStagedModel={setStagedModel}
+          setStagedEffort={setStagedEffort}
+          menu={menu}
+          menuModelKey={menuModelKey}
+          stagedEffort={stagedEffort}
+          modelChanged={modelChanged}
+          effortChanged={effortChanged}
+          onApply={apply}
+          onCancel={() => setOpen(false)}
+          snapshotLoading={cockpit?.snapshotLoading}
+        />
+      </DialogTrigger>
+      <ChipsRow session={session} cockpit={cockpit} chips={chips} />
+    </>
+  );
+}
+
+function ModelEffortDialog({
+  snapshotError,
+  snapshot,
+  session,
+  effective,
+  stagedModel,
+  setStagedModel,
+  setStagedEffort,
+  menu,
+  menuModelKey,
+  stagedEffort,
+  modelChanged,
+  effortChanged,
+  onApply,
+  onCancel,
+  snapshotLoading,
+}: {
+  snapshotError: SnapshotErrorInfo | undefined;
+  snapshot: CapabilitySnapshotWire | undefined;
+  session: OpenSession;
+  effective: ReturnType<typeof effectiveSelection>;
+  stagedModel: string | null;
+  setStagedModel: (model: string | null) => void;
+  setStagedEffort: (effort: string | null) => void;
+  menu: ReturnType<typeof deriveEffortMenu> | null;
+  menuModelKey: string | null;
+  stagedEffort: string | null;
+  modelChanged: boolean;
+  effortChanged: boolean;
+  onApply: () => void;
+  onCancel: () => void;
+  snapshotLoading: boolean | undefined;
+}) {
+  return (
+    <Popover className={popover} placement="bottom start">
+      <Dialog className={dialogBody} aria-label="Model and effort control">
+        {snapshotError ? (
+          <SnapshotErrorBlock snapshotError={snapshotError} session={session} />
+        ) : !snapshot ? (
+          <span className={noteLine} data-testid="model-effort-loading">
+            loading exact-session capabilities…
+          </span>
+        ) : (
+          <>
+            <ModelOptions
+              snapshot={snapshot}
+              effective={effective}
+              stagedModel={stagedModel}
+              setStagedModel={setStagedModel}
+              setStagedEffort={setStagedEffort}
+            />
+            <span className={heading}>effort</span>
+            <EffortOptions
+              menu={menu}
+              session={session}
+              effective={effective}
+              menuModelKey={menuModelKey}
+              stagedEffort={stagedEffort}
+              setStagedEffort={setStagedEffort}
+              modelChanged={modelChanged}
+            />
+            <ApplyFooter
+              modelChanged={modelChanged}
+              effortChanged={effortChanged}
+              onApply={onApply}
+              onCancel={onCancel}
+              snapshotLoading={snapshotLoading}
+            />
+          </>
+        )}
+      </Dialog>
+    </Popover>
+  );
+}
+
 export function ModelEffortControl({
   session,
   cockpit,
@@ -164,216 +650,55 @@ export function ModelEffortControl({
     setInternalOpen(next);
     onOpenChange?.(next);
   };
-  // Staged REQUESTS (never markers): reset per popover open and per session.
   const [stagedModel, setStagedModel] = useState<string | null>(null);
   const [stagedEffort, setStagedEffort] = useState<string | null>(null);
-  useEffect(() => {
-    setStagedModel(null);
-    setStagedEffort(null);
-  }, [isOpen, session.id]);
-
-  // Popover open re-GETs the exact-session snapshot — the ONLY options source.
-  useEffect(() => {
-    if (isOpen) void refreshSessionSnapshot(session.id);
-  }, [isOpen, session.id]);
-
-  const live = isLive(session);
-  const effective = effectiveSelection(cockpit);
-  const snapshot = cockpit?.liveSnapshot?.payload;
-  const snapshotError = cockpit?.snapshotError;
+  useModelEffortPopover(isOpen, session.id, setStagedModel, setStagedEffort);
   const chips = deriveSetChips(cockpit);
+  const {
+    live,
+    effective,
+    snapshot,
+    snapshotError,
+    modelWord,
+    effortWord,
+    sourceWord,
+    menuModelKey,
+    menu,
+    modelChanged,
+    effortChanged,
+  } = useModelEffortDerived(session, cockpit, stagedModel, stagedEffort);
 
   if (!session.harness || !live) return null;
-
-  const modelWord = effective.modelKey ?? session.resolvedModel ?? "model —";
-  // The running effort: freshest server evidence first, launch-resolved value otherwise. When
-  // neither exists the segment disappears — never a sentinel in the trigger.
-  const effortWord = effective.effort ?? session.resolvedEffort ?? null;
-  const sourceWord =
-    effective.modelSource === "none" ? "requested at launch — no readback yet" : `source: ${effective.modelSource}`;
-
-  // Menus derive from the STAGED row when one is staged (re-gating).
-  const menuModelKey = stagedModel ?? snapshot?.selectedModelKey ?? null;
-  const menu = snapshot ? deriveEffortMenu(snapshot, menuModelKey) : null;
-
-  const modelChanged = stagedModel !== null && stagedModel !== effective.modelKey;
-  // An explicit effort belongs to the STAGED model row. When the model changes there is no
-  // echoed effort for that row yet, so comparing against the OLD model's effective effort would
-  // silently collapse an explicit pair request to model-only.
-  const effortChanged =
-    stagedEffort !== null && (modelChanged || stagedEffort !== effective.effort);
-
-  const apply = () => {
-    if (modelChanged && effortChanged && stagedModel && stagedEffort) {
-      startPairChangeFlow(session.id, stagedModel, stagedEffort);
-    } else if (modelChanged && stagedModel) {
-      void sendSet(session.id, "model", stagedModel);
-    } else if (effortChanged && stagedEffort) {
-      void sendSet(session.id, "effort", stagedEffort);
-    }
-    setOpen(false);
-  };
+  const apply = () =>
+    applyStagedPair(session.id, stagedModel, stagedEffort, modelChanged, effortChanged, setOpen);
 
   return (
     <span className={slotRow} data-testid="model-effort-control">
-      <DialogTrigger isOpen={isOpen} onOpenChange={setOpen}>
-        <Button
-          className={trigger}
-          data-testid="model-effort-trigger"
-          aria-label={`model and effort control — ${modelWord}${effortWord ? ` · ${effortWord}` : ""}`}
-          aria-description={sourceWord}
-          data-effective-source={effective.modelSource}
-        >
-          <span aria-hidden="true">⚙</span>
-          <span data-testid="model-effort-trigger-model">{modelWord}</span>
-          {effortWord ? (
-            <>
-              <span aria-hidden="true">·</span>
-              <span data-testid="model-effort-trigger-effort">{effortWord}</span>
-            </>
-          ) : null}
-        </Button>
-        <Popover className={popover} placement="bottom start">
-          <Dialog className={dialogBody} aria-label="Model and effort control">
-            {snapshotError ? (
-              // Fetch failure ⇒ control disabled with the VERBATIM error + retry — never
-              // an empty menu (the 409 reason doubles as the no-native-control disable).
-              <>
-                <span className={heading}>control unavailable</span>
-                <span className={errorLine} data-testid="model-effort-error">
-                  {snapshotErrorCopy(snapshotError)}
-                </span>
-                <span>
-                  <Button
-                    className={quietButton}
-                    onPress={() => void refreshSessionSnapshot(session.id)}
-                    data-testid="model-effort-retry"
-                  >
-                    retry
-                  </Button>
-                </span>
-              </>
-            ) : !snapshot ? (
-              <span className={noteLine} data-testid="model-effort-loading">
-                loading exact-session capabilities…
-              </span>
-            ) : (
-              <>
-                <span className={heading}>model</span>
-                {snapshot.selectedModelKey === null ? (
-                  <span className={noteLine} data-testid="model-effort-no-selected-model">
-                    {NO_SELECTED_MODEL_COPY}
-                  </span>
-                ) : null}
-                <div className={optionList} data-testid="model-effort-models">
-                  {visibleModelRows(snapshot).map((row) => (
-                    <Button
-                      key={row.key}
-                      className={optionButton}
-                      aria-pressed={stagedModel === row.key}
-                      data-effective={effective.modelKey === row.key ? "true" : undefined}
-                      data-testid={`model-option-${row.key}`}
-                      onPress={() => {
-                        setStagedModel(row.key === effective.modelKey ? null : row.key);
-                        // Re-gate: a staged effort from another row's menu never survives.
-                        setStagedEffort(null);
-                      }}
-                    >
-                      {row.displayName}
-                      {effective.modelKey === row.key ? " ●" : ""}
-                    </Button>
-                  ))}
-                </div>
-                <span className={heading}>effort</span>
-                {!menu || menu.kind === "no-selected-model" ? (
-                  <span className={noteLine} data-testid="effort-menu-no-model">
-                    {NO_SELECTED_MODEL_COPY}
-                  </span>
-                ) : menu.kind === "no-effort-control" ? (
-                  <span className={noteLine} data-testid="effort-menu-none">
-                    {NO_EFFORT_CONTROL_COPY}
-                  </span>
-                ) : (
-                  <>
-                    <div className={optionList} data-testid="model-effort-efforts">
-                      {menu.options.map((option) => {
-                        const isEffective =
-                          menuModelKey === effective.modelKey &&
-                          (effective.effort ?? session.resolvedEffort) === option.key;
-                        return (
-                          <Button
-                            key={option.key}
-                            className={optionButton}
-                            aria-pressed={stagedEffort === option.key}
-                            data-effective={isEffective ? "true" : undefined}
-                            // A NEWLY staged model pre-highlights ITS advertised default —
-                            // a visible suggestion, never an auto-staged request.
-                            data-prehighlight={
-                              modelChanged && stagedEffort === null && menu.defaultEffort === option.key
-                                ? "true"
-                                : undefined
-                            }
-                            data-testid={`effort-option-${option.key}`}
-                            onPress={() =>
-                              setStagedEffort(stagedEffort === option.key ? null : option.key)
-                            }
-                          >
-                            {option.displayName}
-                            {isEffective ? " ●" : ""}
-                          </Button>
-                        );
-                      })}
-                    </div>
-                  </>
-                )}
-                <div className={footerRow}>
-                  <Button
-                    className={applyButton}
-                    isDisabled={!modelChanged && !effortChanged}
-                    onPress={apply}
-                    data-testid="model-effort-apply"
-                  >
-                    {modelChanged && effortChanged
-                      ? "apply model + effort (serialized)"
-                      : modelChanged
-                        ? "apply model"
-                        : effortChanged
-                          ? "apply effort"
-                          : "apply"}
-                  </Button>
-                  <Button className={quietButton} onPress={() => setOpen(false)} data-testid="model-effort-cancel">
-                    cancel
-                  </Button>
-                  {cockpit?.snapshotLoading ? (
-                    <span className={noteLine} data-testid="model-effort-refreshing">
-                      refreshing snapshot…
-                    </span>
-                  ) : null}
-                </div>
-              </>
-            )}
-          </Dialog>
-        </Popover>
-      </DialogTrigger>
-      <span className={chipsRow} data-testid="model-effort-chips">
-        {chips.map((chip) => (
-          <AcceptanceChip
-            key={chip.id}
-            chip={chip}
-            onAcknowledge={
-              chip.demandsAck ? () => acknowledgeSetAttention(session.id) : undefined
-            }
-            onRetry={
-              chip.retryable && cockpit?.setRouteError
-                ? () => {
-                    const error = cockpit.setRouteError;
-                    if (error) void sendSet(session.id, error.kind, error.requestedValue);
-                  }
-                : undefined
-            }
-          />
-        ))}
-      </span>
+      <ModelEffortSurface
+        isOpen={isOpen}
+        setOpen={setOpen}
+        session={session}
+        cockpit={cockpit}
+        stagedModel={stagedModel}
+        setStagedModel={setStagedModel}
+        stagedEffort={stagedEffort}
+        setStagedEffort={setStagedEffort}
+        chips={chips}
+        derived={{
+          live,
+          effective,
+          snapshot,
+          snapshotError,
+          modelWord,
+          effortWord,
+          sourceWord,
+          menuModelKey,
+          menu,
+          modelChanged,
+          effortChanged,
+        }}
+        apply={apply}
+      />
     </span>
   );
 }

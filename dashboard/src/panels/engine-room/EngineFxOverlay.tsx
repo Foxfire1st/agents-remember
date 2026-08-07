@@ -25,6 +25,98 @@ type EngineFxOverlayProps = {
 
 const SURGE_CENTER_Y = 342;
 
+function SurgeLines({ xs }: { xs: readonly number[] }) {
+  return (
+    <>
+      {xs.flatMap((x) => [
+        <line
+          key={`${x}-up`}
+          className={warpSurge}
+          data-fx="surge"
+          data-dir="up"
+          data-testid="warp-surge-fx"
+          x1={x}
+          y1={SURGE_CENTER_Y - 26}
+          x2={x}
+          y2={SURGE_CENTER_Y - 4}
+        />,
+        <line
+          key={`${x}-down`}
+          className={warpSurge}
+          data-fx="surge"
+          data-dir="down"
+          data-testid="warp-surge-fx"
+          x1={x}
+          y1={SURGE_CENTER_Y + 26}
+          x2={x}
+          y2={SURGE_CENTER_Y + 4}
+        />,
+      ])}
+    </>
+  );
+}
+
+function ReindexGroup({
+  at,
+  engineWidth,
+  engineHeight,
+}: {
+  at: { x: number; y: number };
+  engineWidth: number;
+  engineHeight: number;
+}) {
+  return (
+    <g transform={`translate(${at.x},${at.y})`}>
+      <rect
+        className={engineReindexCharge}
+        data-fx="reindex"
+        data-testid="engine-reindex-fx"
+        x={2}
+        y={2}
+        width={engineWidth - 4}
+        height={engineHeight - 4}
+        rx={3}
+      />
+      {[14, 26, 38, 50, 62, 74, 86].map((y) => (
+        <line
+          className={engineDiv}
+          key={y}
+          x1={0}
+          y1={y}
+          x2={engineWidth}
+          y2={y}
+        />
+      ))}
+      <line
+        className={engineSpine}
+        x1={engineWidth / 2}
+        y1={4}
+        x2={engineWidth / 2}
+        y2={engineHeight - 4}
+      />
+    </g>
+  );
+}
+
+function AttentionGroup() {
+  return (
+    <g data-testid="attention-breath-fx">
+      <rect
+        className={attnBadge}
+        data-fx="breath"
+        x={958}
+        y={10}
+        width={172}
+        height={24}
+        rx={5}
+      />
+      <text className={attnText} x={1044} y={26} textAnchor="middle">
+        ⚠ ATTENTION
+      </text>
+    </g>
+  );
+}
+
 /**
  * Repeating decorative effects isolated from the structural Engine Room SVG.
  *
@@ -46,79 +138,11 @@ export const EngineFxOverlay = forwardRef<SVGSVGElement, EngineFxOverlayProps>(
         aria-hidden="true"
         data-testid="engine-fx-overlay"
       >
-        {surgeXs.flatMap((x) => [
-          <line
-            key={`${x}-up`}
-            className={warpSurge}
-            data-fx="surge"
-            data-dir="up"
-            data-testid="warp-surge-fx"
-            x1={x}
-            y1={SURGE_CENTER_Y - 26}
-            x2={x}
-            y2={SURGE_CENTER_Y - 4}
-          />,
-          <line
-            key={`${x}-down`}
-            className={warpSurge}
-            data-fx="surge"
-            data-dir="down"
-            data-testid="warp-surge-fx"
-            x1={x}
-            y1={SURGE_CENTER_Y + 26}
-            x2={x}
-            y2={SURGE_CENTER_Y + 4}
-          />,
-        ])}
-
+        <SurgeLines xs={surgeXs} />
         {reindexAt ? (
-          <g transform={`translate(${reindexAt.x},${reindexAt.y})`}>
-            <rect
-              className={engineReindexCharge}
-              data-fx="reindex"
-              data-testid="engine-reindex-fx"
-              x={2}
-              y={2}
-              width={engineWidth - 4}
-              height={engineHeight - 4}
-              rx={3}
-            />
-            {[14, 26, 38, 50, 62, 74, 86].map((y) => (
-              <line
-                className={engineDiv}
-                key={y}
-                x1={0}
-                y1={y}
-                x2={engineWidth}
-                y2={y}
-              />
-            ))}
-            <line
-              className={engineSpine}
-              x1={engineWidth / 2}
-              y1={4}
-              x2={engineWidth / 2}
-              y2={engineHeight - 4}
-            />
-          </g>
+          <ReindexGroup at={reindexAt} engineWidth={engineWidth} engineHeight={engineHeight} />
         ) : null}
-
-        {attention ? (
-          <g data-testid="attention-breath-fx">
-            <rect
-              className={attnBadge}
-              data-fx="breath"
-              x={958}
-              y={10}
-              width={172}
-              height={24}
-              rx={5}
-            />
-            <text className={attnText} x={1044} y={26} textAnchor="middle">
-              ⚠ ATTENTION
-            </text>
-          </g>
-        ) : null}
+        {attention ? <AttentionGroup /> : null}
       </svg>
     );
   },

@@ -99,7 +99,9 @@ jobs:
       - name: Coverage thresholds + changed-lines floor
         working-directory: dashboard
         run: |
+          PYTHONPATH=../mcp/src python3 -m agents_remember.code_quality.scope_reporting --project-root .. dashboard --step coverage
           if npm run test:coverage; then echo "result: dashboard-coverage PASS"; else echo "result: dashboard-coverage FAIL"; exit 1; fi
+          PYTHONPATH=../mcp/src python3 -m agents_remember.code_quality.scope_reporting --project-root .. dashboard --step diff-coverage
           if npm run coverage:diff; then echo "result: dashboard-diff-coverage PASS"; else echo "result: dashboard-diff-coverage FAIL"; exit 1; fi
 
       # The primary Playwright config drives the real app against the fixture gallery
@@ -108,7 +110,8 @@ jobs:
         working-directory: dashboard
         run: |
           npx playwright install --with-deps chromium
-          if npm run e2e; then echo "result: dashboard-e2e PASS"; else echo "result: dashboard-e2e FAIL"; exit 1; fi
+          PYTHONPATH=../mcp/src python3 -m agents_remember.code_quality.scope_reporting --project-root .. dashboard --step e2e
+          if npm run e2e; then echo "result: dashboard-playwright PASS"; else echo "result: dashboard-playwright FAIL"; exit 1; fi
 
       # Require the generated frontend bundle to build successfully.
       - name: Build

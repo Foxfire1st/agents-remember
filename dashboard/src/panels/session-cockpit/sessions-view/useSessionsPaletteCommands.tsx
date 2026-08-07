@@ -28,42 +28,10 @@ import { endLanded } from "../SessionRail";
 import { type LaunchPrefill } from "../LaunchFlow";
 import { useConversationInterrupt } from "../conversation/useConversationControls";
 
-export function useSessionsPaletteCommands({
-  registry,
-  focused,
-  setLaunch,
-  setControlPopoverOpen,
-  openChatsLibrary,
-  closeChatsLibrary,
-  toggleChatsDiagnostics,
-  chatsInterruptRef,
-  chatsLibraryOpenRef,
-  chatsDiagnosticsOpenRef,
-  treeView,
-  rollup,
-  sessions,
-  model,
-  focusSession,
-  rootRef,
-}: {
-  registry: CommandRegistry;
-  focused: (OpenSession & { liveTurnWorking?: boolean }) | undefined;
-  setLaunch: Dispatch<SetStateAction<{ open: boolean; prefill?: LaunchPrefill }>>;
-  setControlPopoverOpen: Dispatch<SetStateAction<boolean>>;
-  openChatsLibrary: () => void;
-  closeChatsLibrary: () => void;
-  toggleChatsDiagnostics: (open: boolean) => void;
-  chatsInterruptRef: RefObject<ReturnType<typeof useConversationInterrupt>>;
-  chatsLibraryOpenRef: RefObject<boolean>;
-  chatsDiagnosticsOpenRef: RefObject<boolean>;
-  treeView: boolean;
-  rollup: ReturnType<typeof attentionRollup>;
-  sessions: OpenSession[];
-  model: ReturnType<typeof buildRailModel>;
-  focusSession: (id: string | null) => void;
-  rootRef: RefObject<HTMLDivElement | null>;
-}) {
-
+function useLaunchPaletteCommand(
+  registry: CommandRegistry,
+  setLaunch: (launch: { open: boolean; prefill?: LaunchPrefill }) => void,
+): void {
   // The launch command — the palette is the flow's entry point (design §7.1).
   useEffect(() => {
     return registry.register({
@@ -72,8 +40,14 @@ export function useSessionsPaletteCommands({
       keywords: ["launch", "new", "open", "harness", "model", "effort"],
       run: () => setLaunch({ open: true }),
     });
-  }, [registry]);
+  }, [registry, setLaunch]);
+}
 
+function useModelEffortPaletteCommands(
+  registry: CommandRegistry,
+  focused: (OpenSession & { liveTurnWorking?: boolean }) | undefined,
+  setControlPopoverOpen: (open: boolean) => void,
+): void {
   // The ModelEffortControl's palette surface — the SAME popover the header trigger opens.
   useEffect(() => {
     const controlAvailable = () =>
@@ -99,8 +73,21 @@ export function useSessionsPaletteCommands({
     return () => {
       for (const dispose of disposers) dispose();
     };
-  }, [registry, focused]);
+  }, [registry, focused, setControlPopoverOpen]);
+}
 
+function useChatsStagePaletteCommands(
+  registry: CommandRegistry,
+  focused: (OpenSession & { liveTurnWorking?: boolean }) | undefined,
+  deps: {
+    openChatsLibrary: () => void;
+    closeChatsLibrary: () => void;
+    toggleChatsDiagnostics: (open: boolean) => void;
+    chatsInterruptRef: RefObject<ReturnType<typeof useConversationInterrupt>>;
+    chatsLibraryOpenRef: RefObject<boolean>;
+    chatsDiagnosticsOpenRef: RefObject<boolean>;
+  },
+): void {
   // The structured-Chats stage toggles are discoverable palette commands (design
   // §12.6) — browse native history in-stage, and the default-off terminal-diagnostics drawer. Both
   // gate on a focused controlled session.
@@ -115,22 +102,22 @@ export function useSessionsPaletteCommands({
         title: "Browse conversation history…",
         keywords: ["history", "browse", "prior", "resume", "open", "library"],
         when: controlled,
-        run: () => openChatsLibrary(),
+        run: () => deps.openChatsLibrary(),
       }),
       registry.register({
         id: "conversation.terminalDiagnostics",
         title: "Toggle terminal diagnostics",
         keywords: ["terminal", "diagnostics", "runner", "log", "pty"],
         when: controlled,
-        run: () => toggleChatsDiagnostics(!chatsDiagnosticsOpenRef.current),
+        run: () => deps.toggleChatsDiagnostics(!deps.chatsDiagnosticsOpenRef.current),
       }),
       // §4.4 return path: a palette return command consuming the same library focus token.
       registry.register({
         id: "conversation.backToChat",
         title: "Back to current chat",
         keywords: ["back", "return", "close history", "current chat"],
-        when: () => chatsLibraryOpenRef.current,
-        run: () => closeChatsLibrary(),
+        when: () => deps.chatsLibraryOpenRef.current,
+        run: () => deps.closeChatsLibrary(),
       }),
       // §9.5: the exact-turn interrupt — palette command + the Control+Shift+. chord both dispatch
       // this. `when` gates it to an interruptible working turn, so it never offers a dead stop.
@@ -139,15 +126,62 @@ export function useSessionsPaletteCommands({
         title: "Stop turn",
         keywords: ["stop", "interrupt", "cancel", "turn", "abort"],
         chord: "ctrl+shift+.",
-        when: () => chatsInterruptRef.current.available,
-        run: () => chatsInterruptRef.current.onStop?.(),
+        when: () => deps.chatsInterruptRef.current.available,
+        run: () => deps.chatsInterruptRef.current.onStop?.(),
       }),
     ];
     return () => {
       for (const dispose of disposers) dispose();
     };
-  }, [closeChatsLibrary, openChatsLibrary, registry, focused, toggleChatsDiagnostics]);
+  }, [registry, focused, deps]);
+}
 
+function registerTriageCommands(
+  registry: CommandRegistry,
+  disposers: Array<() => void>,
+  sessions: OpenSession[],
+  focusSession: (id: string | null) => void,
+  rootRef: RefObject<HTMLDivElement | null>,
+): void {
+  for (const seat of waitingSeats(sessions)) {
+      // Parent's singular slot first, else the first sub-agent entry; the title names WHO
+      // asks when the payload carries the adapter-bound agent label.
+      const payload = sessionPendingInteractionPayload(seat);
+      const rawPreview = interactionPromptPreview(payload, 60);
+      const asker = pendingInteractionAgentLabel(payload);
+      const preview =
+        rawPreview !== undefined && asker !== undefined ? `${asker}: ${rawPreview}` : rawPreview;
+      disposers.push(
+        registry.register({
+          id: `triage.${seat.id}`,
+          title: `Answer pending question — ${seat.label}${preview ? `: “${preview}”` : ""}`,
+          keywords: ["answer", "question", "pending", "input"],
+          // Answering was the user's explicit intent — focus the seat's InteractionBar
+          // (the palette invoked it; this is the invoked action, not a focus steal).
+          run: () => {
+            focusSession(seat.id);
+            window.requestAnimationFrame(() =>
+              rootRef.current
+                ?.querySelector<HTMLElement>(
+                  '[data-testid="interaction-bar"] button',
+                )
+                ?.focus(),
+            );
+          },
+        }),
+      );
+  }
+}
+
+function useRailPaletteCommands(
+  registry: CommandRegistry,
+  treeView: boolean,
+  rollup: ReturnType<typeof attentionRollup>,
+  sessions: OpenSession[],
+  model: ReturnType<typeof buildRailModel>,
+  focusSession: (id: string | null) => void,
+  rootRef: RefObject<HTMLDivElement | null>,
+): void {
   // Palette commands (dynamic titles carry the HONEST preview counts + names): the tree
   // toggle, jump-to-attention, bulk end at sprint + master level, and question triage.
   useEffect(() => {
@@ -197,36 +231,75 @@ export function useSessionsPaletteCommands({
         }),
       );
     }
-    for (const seat of waitingSeats(sessions)) {
-      // Parent's singular slot first, else the first sub-agent entry; the title names WHO
-      // asks when the payload carries the adapter-bound agent label.
-      const payload = sessionPendingInteractionPayload(seat);
-      const rawPreview = interactionPromptPreview(payload, 60);
-      const asker = pendingInteractionAgentLabel(payload);
-      const preview =
-        rawPreview !== undefined && asker !== undefined ? `${asker}: ${rawPreview}` : rawPreview;
-      disposers.push(
-        registry.register({
-          id: `triage.${seat.id}`,
-          title: `Answer pending question — ${seat.label}${preview ? `: “${preview}”` : ""}`,
-          keywords: ["answer", "question", "pending", "input"],
-          // Answering was the user's explicit intent — focus the seat's InteractionBar
-          // (the palette invoked it; this is the invoked action, not a focus steal).
-          run: () => {
-            focusSession(seat.id);
-            window.requestAnimationFrame(() =>
-              rootRef.current
-                ?.querySelector<HTMLElement>(
-                  '[data-testid="interaction-bar"] button',
-                )
-                ?.focus(),
-            );
-          },
-        }),
-      );
-    }
+    registerTriageCommands(registry, disposers, sessions, focusSession, rootRef);
     return () => {
       for (const dispose of disposers) dispose();
     };
-  }, [registry, model, rollup, sessions, treeView, focused, focusSession]);
+  }, [registry, model, rollup, sessions, treeView, focusSession, rootRef]);
+}
+
+export function useSessionsPaletteCommands({
+  registry,
+  focused,
+  setLaunch,
+  setControlPopoverOpen,
+  openChatsLibrary,
+  closeChatsLibrary,
+  toggleChatsDiagnostics,
+  chatsInterruptRef,
+  chatsLibraryOpenRef,
+  chatsDiagnosticsOpenRef,
+  treeView,
+  rollup,
+  sessions,
+  model,
+  focusSession,
+  rootRef,
+}: {
+  registry: CommandRegistry;
+  focused: (OpenSession & { liveTurnWorking?: boolean }) | undefined;
+  setLaunch: Dispatch<SetStateAction<{ open: boolean; prefill?: LaunchPrefill }>>;
+  setControlPopoverOpen: Dispatch<SetStateAction<boolean>>;
+  openChatsLibrary: () => void;
+  closeChatsLibrary: () => void;
+  toggleChatsDiagnostics: (open: boolean) => void;
+  chatsInterruptRef: RefObject<ReturnType<typeof useConversationInterrupt>>;
+  chatsLibraryOpenRef: RefObject<boolean>;
+  chatsDiagnosticsOpenRef: RefObject<boolean>;
+  treeView: boolean;
+  rollup: ReturnType<typeof attentionRollup>;
+  sessions: OpenSession[];
+  model: ReturnType<typeof buildRailModel>;
+  focusSession: (id: string | null) => void;
+  rootRef: RefObject<HTMLDivElement | null>;
+}) {
+  // The launch command — the palette is the flow's entry point (design §7.1).
+  useLaunchPaletteCommand(registry, setLaunch);
+
+  // The ModelEffortControl's palette surface — the SAME popover the header trigger opens.
+  useModelEffortPaletteCommands(registry, focused, setControlPopoverOpen);
+
+  // The structured-Chats stage toggles are discoverable palette commands (design
+  // §12.6) — browse native history in-stage, and the default-off terminal-diagnostics drawer. Both
+  // gate on a focused controlled session.
+  useChatsStagePaletteCommands(registry, focused, {
+    openChatsLibrary,
+    closeChatsLibrary,
+    toggleChatsDiagnostics,
+    chatsInterruptRef,
+    chatsLibraryOpenRef,
+    chatsDiagnosticsOpenRef,
+  });
+
+  // Palette commands (dynamic titles carry the HONEST preview counts + names): the tree
+  // toggle, jump-to-attention, bulk end at sprint + master level, and question triage.
+  useRailPaletteCommands(
+    registry,
+    treeView,
+    rollup,
+    sessions,
+    model,
+    focusSession,
+    rootRef,
+  );
 }

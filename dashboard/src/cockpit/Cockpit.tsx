@@ -5,6 +5,7 @@ import {
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
   type PointerEvent as ReactPointerEvent,
+  type ReactNode,
 } from "react";
 import { motion } from "motion/react";
 
@@ -297,9 +298,12 @@ const RailResizeHandle = memo(function RailResizeHandle({
   };
   return (
     <div
-      role="separator"
+      role="slider"
       aria-orientation="vertical"
       aria-label={`Resize ${side} rail`}
+      aria-valuenow={width}
+      aria-valuemin={RAIL_MIN}
+      aria-valuemax={RAIL_MAX}
       tabIndex={0}
       className={railHandle({ side })}
       onPointerDown={onPointerDown}
@@ -382,6 +386,467 @@ export function Cockpit() {
   return <CockpitShell />;
 }
 
+interface CockpitShellState {
+  view: CockpitView;
+  selectedId: string | null;
+  changeSet: ChangeSetTarget | null;
+  notes: NotesReaderTarget | null;
+  notesOpen: boolean;
+  railView: "river" | "chat";
+  leftRailWidth: number;
+  rightRailWidth: number;
+  animate: boolean;
+  selectedLifecycleId: string | undefined;
+  viewedLeafKey: string | undefined;
+  taskDocuments: TaskDocNode[];
+  engineProcesses: EngineProcessNode[];
+  contextMaster: string | undefined;
+  fullBleed: boolean;
+  takeover: boolean;
+  railEnter: Record<string, unknown>;
+  setView: (view: CockpitView) => void;
+  setSelectedId: (id: string | null) => void;
+  setChangeSet: (target: ChangeSetTarget | null) => void;
+  setNotes: (
+    target:
+      | NotesReaderTarget
+      | null
+      | ((cur: NotesReaderTarget | null) => NotesReaderTarget | null),
+  ) => void;
+  setNotesOpen: (open: boolean) => void;
+  setChatRail: (value: boolean) => void;
+  setLeftRailWidth: (width: number) => void;
+  setRightRailWidth: (width: number) => void;
+  setViewedLeafKey: (key: string | undefined) => void;
+}
+
+function useCockpitShellState(initialView: CockpitView): CockpitShellState {
+  const [view, setView] = useState<CockpitView>(initialView);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [changeSet, setChangeSet] = useState<ChangeSetTarget | null>(null);
+  const [notes, setNotes] = useState<NotesReaderTarget | null>(null);
+  const [notesOpen, setNotesOpen] = useState(false);
+  const [chatRail, setChatRail] = usePersistedFlag("cockpit.rail-chat", false);
+  const railView: "river" | "chat" = chatRail ? "chat" : "river";
+  const [leftRailWidth, setLeftRailWidth] = usePersistedNumber("cockpit.rail-left-w", 340);
+  const [rightRailWidth, setRightRailWidth] = usePersistedNumber("cockpit.rail-right-w", 300);
+  const animate = useShouldAnimate();
+  const selectedLifecycleId = useDashboard((s) =>
+    lifecycleIdForSelection(selectedId, s.lifecycles, s.analytics),
+  );
+  const [viewedLeafKey, setViewedLeafKey] = useState<string | undefined>(undefined);
+  const taskDocuments = useDashboard((s) => s.analytics?.taskDocuments ?? EMPTY_TASK_DOCS);
+  const engineProcesses = useDashboard((s) => s.analytics?.engineProcesses ?? EMPTY_ENGINE_PROCESSES);
+  const contextMaster = useDashboard((s) =>
+    masterFolderForSelection(selectedId, s.lifecycles, s.analytics),
+  );
+  const fullBleed =
+    view === "files" ||
+    view === "engine" ||
+    view === "topology" ||
+    view === "chats";
+  const takeover = Boolean(changeSet) || notesOpen;
+  const railEnter = animate ? RAIL_ENTER : RAIL_ENTER_STILL;
+  return {
+    view,
+    selectedId,
+    changeSet,
+    notes,
+    notesOpen,
+    railView,
+    leftRailWidth,
+    rightRailWidth,
+    animate,
+    selectedLifecycleId,
+    viewedLeafKey,
+    taskDocuments,
+    engineProcesses,
+    contextMaster,
+    fullBleed,
+    takeover,
+    railEnter,
+    setView,
+    setSelectedId,
+    setChangeSet,
+    setNotes,
+    setNotesOpen,
+    setChatRail,
+    setLeftRailWidth,
+    setRightRailWidth,
+    setViewedLeafKey,
+  };
+}
+
+function useCockpitShellActions(
+  setChatRail: (value: boolean) => void,
+  setChangeSet: (target: ChangeSetTarget | null) => void,
+  setNotes: (
+    target:
+      | NotesReaderTarget
+      | null
+      | ((cur: NotesReaderTarget | null) => NotesReaderTarget | null),
+  ) => void,
+  setNotesOpen: (open: boolean) => void,
+  setView: (view: CockpitView) => void,
+  setSelectedId: (id: string | null) => void,
+): {
+  setRailView: (next: "river" | "chat") => void;
+  open: (id: string) => void;
+  changeView: (next: CockpitView) => void;
+  openChangeSet: (target: ChangeSetTarget) => void;
+  openNotes: (target: NotesReaderTarget) => void;
+  closeChangeSet: () => void;
+  closeNotes: () => void;
+  selectNote: (path: string) => void;
+  showSentSession: (sessionId: string) => void;
+} {
+  const setRailView = useCallback(
+    (next: "river" | "chat") => setChatRail(next === "chat"),
+    [setChatRail],
+  );
+  const open = useCallback((id: string) => {
+    setChangeSet(null);
+    setNotesOpen(false);
+    setSelectedId(
+      id.startsWith("taskdoc:") || id.startsWith("series:") || id.startsWith("lifecycle:")
+        ? id
+        : lifecycleSelectionKey(id),
+    );
+    setView("operations");
+  }, [setChangeSet, setNotesOpen, setSelectedId, setView]);
+  const changeView = useCallback((next: CockpitView) => {
+    setChangeSet(null);
+    setNotesOpen(false);
+    setView(next);
+  }, [setChangeSet, setNotesOpen, setView]);
+  const openChangeSet = useCallback((target: ChangeSetTarget) => {
+    setNotesOpen(false);
+    setChangeSet(target);
+  }, [setChangeSet, setNotesOpen]);
+  const openNotes = useCallback((target: NotesReaderTarget) => {
+    setChangeSet(null);
+    setNotes(target);
+    setNotesOpen(true);
+  }, [setChangeSet, setNotes, setNotesOpen]);
+  const closeChangeSet = useCallback(() => setChangeSet(null), [setChangeSet]);
+  const closeNotes = useCallback(() => setNotesOpen(false), [setNotesOpen]);
+  const selectNote = useCallback(
+    (path: string) => setNotes((cur) => (cur ? { ...cur, path } : cur)),
+    [setNotes],
+  );
+  const showSentSession = useCallback((sessionId: string) => {
+    preferLiveSession(sessionId);
+    sessionCockpitStore.getState().setFocusedSession(sessionId);
+    setView("chats");
+  }, [setView]);
+  return {
+    setRailView,
+    open,
+    changeView,
+    openChangeSet,
+    openNotes,
+    closeChangeSet,
+    closeNotes,
+    selectNote,
+    showSentSession,
+  };
+}
+
+function ChangeSetTakeover({
+  target,
+  onBack,
+}: {
+  target: ChangeSetTarget;
+  onBack: () => void;
+}) {
+  return (
+    <div className={cx(bodyGrid({ bleed: true }), "shell__body")} data-fullbleed={true}>
+      <main className={cx(viewport, "viewport")} data-view="changeset">
+        <ChangeSetViewer {...target} onBack={onBack} />
+      </main>
+    </div>
+  );
+}
+
+function NotesTakeover({
+  target,
+  hidden,
+  onSelectNote,
+  onBack,
+}: {
+  target: NotesReaderTarget;
+  hidden: boolean;
+  onSelectNote: (path: string) => void;
+  onBack: () => void;
+}) {
+  return (
+    <div
+      className={cx(bodyGrid({ bleed: true }), "shell__body")}
+      data-fullbleed={true}
+      style={hidden ? { display: "none" } : undefined}
+      aria-hidden={hidden ? true : undefined}
+    >
+      <main className={cx(viewport, "viewport")} data-view="notes-reader">
+        <NotesReaderViewer
+          repo={target.repo}
+          master={target.master}
+          path={target.path}
+          onSelectNote={onSelectNote}
+          onBack={onBack}
+        />
+      </main>
+    </div>
+  );
+}
+
+function LeftRail({
+  fullBleed,
+  takeover,
+  railEnter,
+  leftRailWidth,
+  selectedId,
+  onSelect,
+  onResize,
+}: {
+  fullBleed: boolean;
+  takeover: boolean;
+  railEnter: Record<string, unknown>;
+  leftRailWidth: number;
+  selectedId: string | null;
+  onSelect: (id: string) => void;
+  onResize: (width: number) => void;
+}) {
+  return (
+    <motion.aside
+      key="rail-left"
+      className={cx(rail, "rail rail--left")}
+      transition={RAIL_TRANSITION}
+      style={{ display: fullBleed ? "none" : "flex" }}
+      aria-hidden={fullBleed}
+      {...railEnter}
+    >
+      {/* These two panels are the reason grammar/Dot.tsx cannot lean on colour alone. They are
+          SIBLINGS in one always-visible rail — severities above, lifecycle states below — so a
+          developer reads both grammars in one glance, and an amber dot up here says nothing
+          about an amber dot down there (the reducer builds no attention row for an
+          `awaiting-developer` lifecycle). Cockpit.test.tsx renders this rail and pins the two
+          dots apart. */}
+      <AttentionQueue onSelect={onSelect} active={!fullBleed && !takeover} />
+      <LifecycleList selectedId={selectedId} onSelect={onSelect} active={!fullBleed && !takeover} />
+      <RailResizeHandle side="left" width={leftRailWidth} onResize={onResize} />
+    </motion.aside>
+  );
+}
+
+function RightRail({
+  fullBleed,
+  railEnter,
+  railView,
+  rightRailWidth,
+  setRailView,
+  viewedLeafKey,
+  selectedLifecycleId,
+  taskDocuments,
+  engineProcesses,
+  contextMaster,
+  onResize,
+}: {
+  fullBleed: boolean;
+  railEnter: Record<string, unknown>;
+  railView: "river" | "chat";
+  rightRailWidth: number;
+  setRailView: (next: "river" | "chat") => void;
+  viewedLeafKey: string | undefined;
+  selectedLifecycleId: string | undefined;
+  taskDocuments: TaskDocNode[];
+  engineProcesses: EngineProcessNode[];
+  contextMaster: string | undefined;
+  onResize: (width: number) => void;
+}) {
+  return (
+    <motion.aside
+      key="rail-right"
+      className={cx(rail, "rail rail--right")}
+      transition={RAIL_TRANSITION}
+      style={{ display: fullBleed ? "none" : "flex" }}
+      aria-hidden={fullBleed}
+      {...railEnter}
+    >
+      <RailResizeHandle side="right" width={rightRailWidth} onResize={onResize} />
+      <RailToggle value={railView} onChange={setRailView} />
+      {railView === "river" ? (
+        <EventRiver />
+      ) : (
+        <RailChat
+          leafKey={viewedLeafKey}
+          selectedLifecycleId={selectedLifecycleId}
+          taskDocuments={taskDocuments}
+          engineProcesses={engineProcesses}
+          contextMaster={contextMaster}
+        />
+      )}
+    </motion.aside>
+  );
+}
+
+function ViewLayer({
+  visible,
+  className,
+  children,
+}: {
+  visible: boolean;
+  className: string;
+  children: ReactNode;
+}) {
+  return (
+    <div
+      className={className}
+      style={{ display: visible ? "flex" : "none" }}
+      aria-hidden={!visible}
+    >
+      {children}
+    </div>
+  );
+}
+
+function MainLayers({
+  view,
+  takeover,
+  selectedId,
+  viewedLeafKey,
+  selectedLifecycleId,
+  taskDocuments,
+  contextMaster,
+  onOpen,
+  onOpenChangeSet,
+  onOpenNotes,
+  onViewLeaf,
+}: {
+  view: CockpitView;
+  takeover: boolean;
+  selectedId: string | null;
+  viewedLeafKey: string | undefined;
+  selectedLifecycleId: string | undefined;
+  taskDocuments: TaskDocNode[];
+  contextMaster: string | undefined;
+  onOpen: (id: string) => void;
+  onOpenChangeSet: (target: ChangeSetTarget) => void;
+  onOpenNotes: (target: NotesReaderTarget) => void;
+  onViewLeaf: (key: string | undefined) => void;
+}) {
+  return (
+    <main className={cx(viewport, "viewport")} data-view={view}>
+      {/* Memory / Topology / Hangar render transiently; Operations, File Viewer, Engine Room,
+          and Chats are persistent hidden layers below so their in-panel state survives a switch
+          (and the Engine Room's 578-node SVG + GSAP substrate is not rebuilt per entry). */}
+      {view !== "chats" && view !== "files" && view !== "operations" && view !== "engine" && (
+        <ViewBody view={view} onOpen={onOpen} />
+      )}
+      {/* The Engine Room is never unmounted — only hidden — so a tab switch back is instant
+          instead of a full remount (see `engineLayer`). Its off-screen cost is gated to ~0 by
+          the room's own visibility gates (GSAP paused, backdrop video paused). */}
+      <ViewLayer visible={view === "engine"} className={engineLayer}>
+        <EngineRoom />
+      </ViewLayer>
+      {/* Operations' DetailPanel is never unmounted — only hidden — so the drilled-open sub-task
+          survives a view switch instead of resetting to the master overview (see `operationsLayer`). */}
+      <ViewLayer visible={view === "operations"} className={operationsLayer}>
+        <DetailPanel
+          selectedId={selectedId}
+          onOpenLifecycle={onOpen}
+          onOpenChangeSet={onOpenChangeSet}
+          onOpenNotes={onOpenNotes}
+          onViewLeaf={onViewLeaf}
+        />
+      </ViewLayer>
+      {/* The File Viewer is never unmounted — only hidden — so its repo/scope selection, open
+          file, expanded trees, and view-mode survive a view switch instead of resetting. Its
+          boot catalog read is deferred to the first actual showing (`active`). */}
+      <ViewLayer visible={view === "files"} className={filesLayer}>
+        <FileViewer active={view === "files"} />
+      </ViewLayer>
+      {/* The sole product-facing Chats cockpit is never unmounted — only hidden — so its PTY
+          buffers, WebSockets, focus, drafts, and inspector state survive a view switch. The
+          display:none hiding DESTROYS the timeline's DOM scroll offset, so `active` also
+          reports the takeover cover: the timeline restores its remembered per-session scroll
+          position on every re-show. */}
+      <ViewLayer visible={view === "chats"} className={chatsLayer}>
+        <SessionsView
+          active={view === "chats" && !takeover}
+          selectedLifecycleId={selectedLifecycleId}
+          selectedLeafKey={viewedLeafKey}
+          taskDocuments={taskDocuments}
+          contextMaster={contextMaster}
+        />
+      </ViewLayer>
+    </main>
+  );
+}
+
+function RailedBody({
+  state,
+  actions,
+}: {
+  state: CockpitShellState;
+  actions: ReturnType<typeof useCockpitShellActions>;
+}) {
+  return (
+    <div
+      className={cx(bodyGrid({ bleed: state.fullBleed }), "shell__body")}
+      data-fullbleed={state.fullBleed}
+      style={{
+        ...(state.takeover ? { display: "none" } : {}),
+        // The railed grid uses the persisted rail widths; full-bleed keeps the cva's single column.
+        ...(state.fullBleed
+          ? {}
+          : { gridTemplateColumns: `${state.leftRailWidth}px minmax(380px, 1fr) ${state.rightRailWidth}px` }),
+      }}
+      aria-hidden={state.takeover ? true : undefined}
+    >
+      {/* The rails are never unmounted on a full-bleed view — only hidden — so re-entering a
+          railed view is instant instead of a fresh AttentionQueue + LifecycleList mount, and rail
+          state (scroll, collapsed groups) survives the switch (same keep-alive pattern
+          as the engine/files/chats layers below). display:none drops them from the grid, so the
+          full-bleed single column is unaffected. */}
+      <LeftRail
+        fullBleed={state.fullBleed}
+        takeover={state.takeover}
+        railEnter={state.railEnter}
+        leftRailWidth={state.leftRailWidth}
+        selectedId={state.selectedId}
+        onSelect={actions.open}
+        onResize={state.setLeftRailWidth}
+      />
+      <MainLayers
+        view={state.view}
+        takeover={state.takeover}
+        selectedId={state.selectedId}
+        viewedLeafKey={state.viewedLeafKey}
+        selectedLifecycleId={state.selectedLifecycleId}
+        taskDocuments={state.taskDocuments}
+        contextMaster={state.contextMaster}
+        onOpen={actions.open}
+        onOpenChangeSet={actions.openChangeSet}
+        onOpenNotes={actions.openNotes}
+        onViewLeaf={state.setViewedLeafKey}
+      />
+      <RightRail
+        fullBleed={state.fullBleed}
+        railEnter={state.railEnter}
+        railView={state.railView}
+        rightRailWidth={state.rightRailWidth}
+        setRailView={actions.setRailView}
+        viewedLeafKey={state.viewedLeafKey}
+        selectedLifecycleId={state.selectedLifecycleId}
+        taskDocuments={state.taskDocuments}
+        engineProcesses={state.engineProcesses}
+        contextMaster={state.contextMaster}
+        onResize={state.setRightRailWidth}
+      />
+    </div>
+  );
+}
+
 export function CockpitShell({ initialView = "operations" }: { initialView?: CockpitView } = {}) {
   // Catalog ownership is shell-lifetime and view-independent. CockpitShell is also the exact dev
   // scenario surface, so keeping both drivers here preserves deterministic poll transitions there.
@@ -391,275 +856,44 @@ export function CockpitShell({ initialView = "operations" }: { initialView?: Coc
   // display-required request video playback uses) so watching agents work counts as activity
   // against OS idle/lock timers. Auto-releases while the tab is hidden.
   useEffect(() => startScreenWakeLock(), []);
-  const [view, setView] = useState<CockpitView>(initialView);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  // The Change-Set Viewer is a task-scoped TAKEOVER: when set, it replaces the railed body
-  // full-bleed; the screen's back link clears it, restoring the rails + Operations. A mode-bar
-  // switch or an open() also clears it (the takeover is transient, not a standing tab).
-  const [changeSet, setChangeSet] = useState<ChangeSetTarget | null>(null);
-  // The Notes Reader is a task-scoped TAKEOVER like the Change-Set Viewer, but it PERSISTS its
-  // selection like the File Viewer: `notes` (the open note) is retained once opened so the reader stays
-  // mounted (hidden) — selection survives back/forward — and `notesOpen` toggles the takeover's visibility.
-  // Back + mode-bar/node switches hide it (retaining `notes`); a fresh entry point re-shows it on the note.
-  const [notes, setNotes] = useState<NotesReaderTarget | null>(null);
-  const [notesOpen, setNotesOpen] = useState(false);
-  // The right rail toggles between the Event River (default) and the single-instance leaf chat.
-  // Persisted to localStorage (same pattern as the effects toggle) so the choice survives a window refresh.
-  const [chatRail, setChatRail] = usePersistedFlag("cockpit.rail-chat", false);
-  const railView: "river" | "chat" = chatRail ? "chat" : "river";
-  // Every callback handed to a memoized layer is useCallback-stable (see the memoization contract
-  // above): a fresh closure per shell render would defeat the memo gate it is passed to.
-  const setRailView = useCallback(
-    (next: "river" | "chat") => setChatRail(next === "chat"),
-    [setChatRail],
+  const state = useCockpitShellState(initialView);
+  const actions = useCockpitShellActions(
+    state.setChatRail,
+    state.setChangeSet,
+    state.setNotes,
+    state.setNotesOpen,
+    state.setView,
+    state.setSelectedId,
   );
-  // Operations rail widths (px), draggable + persisted. They drive the railed grid's outer columns; the
-  // centre takes the rest. Defaults roughly match the old fixed fr layout.
-  const [leftRailWidth, setLeftRailWidth] = usePersistedNumber("cockpit.rail-left-w", 340);
-  const [rightRailWidth, setRightRailWidth] = usePersistedNumber("cockpit.rail-right-w", 300);
-  const animate = useShouldAnimate();
-  const selectedLifecycleId = useDashboard((s) =>
-    lifecycleIdForSelection(selectedId, s.lifecycles, s.analytics),
-  );
-  // The leaf the detail panel is actually SHOWING (a drilled sub-task or a directly-opened leaf doc),
-  // reported up from DetailPanel — its durable QUALIFIED LEAF ID, so the rail chat + "attach to leaf"
-  // key by the real leaf, not the master/series. Lifted here so it survives DetailPanel
-  // unmount (a full-bleed view switch) and reaches both RailChat and the Chats cockpit.
-  const [viewedLeafKey, setViewedLeafKey] = useState<string | undefined>(undefined);
-  const taskDocuments = useDashboard((s) => s.analytics?.taskDocuments ?? EMPTY_TASK_DOCS);
-  const engineProcesses = useDashboard((s) => s.analytics?.engineProcesses ?? EMPTY_ENGINE_PROCESSES);
-  // The master folder of the current selection — pre-drills the leaf-attach picker to the task in context.
-  const contextMaster = useDashboard((s) =>
-    masterFolderForSelection(selectedId, s.lifecycles, s.analytics),
-  );
-
-  // The machine-map views + canonical Chats cockpit span full width: the shell rails hide and the
-  // view's own rail/stage layout breathes.
-  const fullBleed =
-    view === "files" ||
-    view === "engine" ||
-    view === "topology" ||
-    view === "chats";
-  // A takeover (Change-Set Viewer or the Notes Reader) replaces the railed body full-bleed.
-  const takeover = Boolean(changeSet) || notesOpen;
-
-  // Open a node AND surface it in Operations: the attention queue / topology / hangar all jump
-  // into the detail view, so a cross-view click lands where you can inspect it.
-  const open = useCallback((id: string) => {
-    setChangeSet(null); // leaving the change-set takeover for a selected node
-    setNotesOpen(false); // and the notes reader takeover (selection retained)
-    setSelectedId(
-      id.startsWith("taskdoc:") || id.startsWith("series:") || id.startsWith("lifecycle:")
-        ? id
-        : lifecycleSelectionKey(id),
-    );
-    setView("operations");
-  }, []);
-
-  // Mode-bar switches exit the takeover too (it is not one of the standing views).
-  const changeView = useCallback((next: CockpitView) => {
-    setChangeSet(null);
-    setNotesOpen(false); // exit the notes reader takeover too (selection retained)
-    setView(next);
-  }, []);
-
-  // The Change-Set and Notes takeovers are mutually exclusive full-bleed screens: opening one hides the
-  // other. `openNotes` retains `notes` after back (the reader stays mounted, so selection survives).
-  const openChangeSet = useCallback((target: ChangeSetTarget) => {
-    setNotesOpen(false);
-    setChangeSet(target);
-  }, []);
-  const openNotes = useCallback((target: NotesReaderTarget) => {
-    setChangeSet(null);
-    setNotes(target);
-    setNotesOpen(true);
-  }, []);
-  const closeChangeSet = useCallback(() => setChangeSet(null), []);
-  const closeNotes = useCallback(() => setNotesOpen(false), []);
-  const selectNote = useCallback(
-    (path: string) => setNotes((cur) => (cur ? { ...cur, path } : cur)),
-    [],
-  );
-  // HighlightComposer → Chats handoff: show the operator the sent context package landing.
-  const showSentSession = useCallback((sessionId: string) => {
-    preferLiveSession(sessionId);
-    sessionCockpitStore.getState().setFocusedSession(sessionId);
-    setView("chats");
-  }, []);
-
-  // Gated fade-in on the rails' first mount (reduced-motion / data-effects=off → no tween). The
-  // asides then stay mounted across view switches (hidden via display on a full-bleed view — see
-  // below), so returning to a railed view is instant rather than a re-animation.
-  const railEnter = animate ? RAIL_ENTER : RAIL_ENTER_STILL;
 
   return (
     <div className={cx(shell, "cockpit--shell")}>
       <div className="crt-overlay" aria-hidden="true" />
       <TopBar />
-      {changeSet ? (
-        <div className={cx(bodyGrid({ bleed: true }), "shell__body")} data-fullbleed={true}>
-          <main className={cx(viewport, "viewport")} data-view="changeset">
-            <ChangeSetViewer {...changeSet} onBack={closeChangeSet} />
-          </main>
-        </div>
+      {state.changeSet ? (
+        <ChangeSetTakeover target={state.changeSet} onBack={actions.closeChangeSet} />
       ) : null}
       {/* The Notes Reader takeover: mounted once opened and kept mounted (hidden via display) even
           after Back — like the File Viewer — so its listing + open note survive back/forward. Its own
           `notesOpen` toggles visibility; a change-set takeover (if both were somehow set) wins the screen. */}
-      {notes ? (
-        <div
-          className={cx(bodyGrid({ bleed: true }), "shell__body")}
-          data-fullbleed={true}
-          style={changeSet || !notesOpen ? { display: "none" } : undefined}
-          aria-hidden={changeSet || !notesOpen ? true : undefined}
-        >
-          <main className={cx(viewport, "viewport")} data-view="notes-reader">
-            <NotesReaderViewer
-              repo={notes.repo}
-              master={notes.master}
-              path={notes.path}
-              onSelectNote={selectNote}
-              onBack={closeNotes}
-            />
-          </main>
-        </div>
+      {state.notes ? (
+        <NotesTakeover
+          target={state.notes}
+          hidden={Boolean(state.changeSet) || !state.notesOpen}
+          onSelectNote={actions.selectNote}
+          onBack={actions.closeNotes}
+        />
       ) : null}
-      {/* The railed body is never UNMOUNTED while the change-set takeover shows — only hidden — so the
-          DetailPanel's drill state (which leaf you were reading) survives. The viewer's back link then
-          returns you exactly where you opened it from (a drilled leaf, not a reset to the master
-          overview). Same hidden-not-unmounted pattern as the File Viewer + Chats layers below. */}
-      <div
-        className={cx(bodyGrid({ bleed: fullBleed }), "shell__body")}
-        data-fullbleed={fullBleed}
-        style={{
-          ...(takeover ? { display: "none" } : {}),
-          // The railed grid uses the persisted rail widths; full-bleed keeps the cva's single column.
-          ...(fullBleed
-            ? {}
-            : { gridTemplateColumns: `${leftRailWidth}px minmax(380px, 1fr) ${rightRailWidth}px` }),
-        }}
-        aria-hidden={takeover ? true : undefined}
-      >
-        {/* The rails are never unmounted on a full-bleed view — only hidden — so re-entering a
-            railed view is instant instead of a fresh AttentionQueue + LifecycleList mount, and rail
-            state (scroll, collapsed groups) survives the switch (same keep-alive pattern
-            as the engine/files/chats layers below). display:none drops them from the grid, so the
-            full-bleed single column is unaffected. */}
-        <motion.aside
-          key="rail-left"
-          className={cx(rail, "rail rail--left")}
-          transition={RAIL_TRANSITION}
-          style={{ display: fullBleed ? "none" : "flex" }}
-          aria-hidden={fullBleed}
-          {...railEnter}
-        >
-          {/* These two panels are the reason grammar/Dot.tsx cannot lean on colour alone. They are
-              SIBLINGS in one always-visible rail — severities above, lifecycle states below — so a
-              developer reads both grammars in one glance, and an amber dot up here says nothing
-              about an amber dot down there (the reducer builds no attention row for an
-              `awaiting-developer` lifecycle). Cockpit.test.tsx renders this rail and pins the two
-              dots apart. */}
-          <AttentionQueue onSelect={open} active={!fullBleed && !takeover} />
-          <LifecycleList
-            selectedId={selectedId}
-            onSelect={open}
-            active={!fullBleed && !takeover}
-          />
-          <RailResizeHandle side="left" width={leftRailWidth} onResize={setLeftRailWidth} />
-        </motion.aside>
-        <main className={cx(viewport, "viewport")} data-view={view}>
-          {/* Memory / Topology / Hangar render transiently; Operations, File Viewer, Engine Room,
-              and Chats are persistent hidden layers below so their in-panel state survives a switch
-              (and the Engine Room's 578-node SVG + GSAP substrate is not rebuilt per entry). */}
-          {view !== "chats" && view !== "files" && view !== "operations" && view !== "engine" && (
-            <ViewBody view={view} onOpen={open} />
-          )}
-          {/* The Engine Room is never unmounted — only hidden — so a tab switch back is instant
-              instead of a full remount (see `engineLayer`). Its off-screen cost is gated to ~0 by
-              the room's own visibility gates (GSAP paused, backdrop video paused). */}
-          <div
-            className={engineLayer}
-            style={{ display: view === "engine" ? "flex" : "none" }}
-            aria-hidden={view !== "engine"}
-          >
-            <EngineRoom />
-          </div>
-          {/* Operations' DetailPanel is never unmounted — only hidden — so the drilled-open sub-task
-              survives a view switch instead of resetting to the master overview (see `operationsLayer`). */}
-          <div
-            className={operationsLayer}
-            style={{ display: view === "operations" ? "flex" : "none" }}
-            aria-hidden={view !== "operations"}
-          >
-            <DetailPanel
-              selectedId={selectedId}
-              onOpenLifecycle={open}
-              onOpenChangeSet={openChangeSet}
-              onOpenNotes={openNotes}
-              onViewLeaf={setViewedLeafKey}
-            />
-          </div>
-          {/* The File Viewer is never unmounted — only hidden — so its repo/scope selection, open
-              file, expanded trees, and view-mode survive a view switch instead of resetting. Its
-              boot catalog read is deferred to the first actual showing (`active`). */}
-          <div
-            className={filesLayer}
-            style={{ display: view === "files" ? "flex" : "none" }}
-            aria-hidden={view !== "files"}
-          >
-            <FileViewer active={view === "files"} />
-          </div>
-          {/* The sole product-facing Chats cockpit is never unmounted — only hidden — so its PTY
-              buffers, WebSockets, focus, drafts, and inspector state survive a view switch. The
-              display:none hiding DESTROYS the timeline's DOM scroll offset, so `active` also
-              reports the takeover cover: the timeline restores its remembered per-session scroll
-              position on every re-show. */}
-          <div
-            className={chatsLayer}
-            style={{ display: view === "chats" ? "flex" : "none" }}
-            aria-hidden={view !== "chats"}
-          >
-            <SessionsView
-              active={view === "chats" && !takeover}
-              selectedLifecycleId={selectedLifecycleId}
-              selectedLeafKey={viewedLeafKey}
-              taskDocuments={taskDocuments}
-              contextMaster={contextMaster}
-            />
-          </div>
-        </main>
-        <motion.aside
-          key="rail-right"
-          className={cx(rail, "rail rail--right")}
-          transition={RAIL_TRANSITION}
-          style={{ display: fullBleed ? "none" : "flex" }}
-          aria-hidden={fullBleed}
-          {...railEnter}
-        >
-          <RailResizeHandle side="right" width={rightRailWidth} onResize={setRightRailWidth} />
-          <RailToggle value={railView} onChange={setRailView} />
-          {railView === "river" ? (
-            <EventRiver />
-          ) : (
-            <RailChat
-              leafKey={viewedLeafKey}
-              selectedLifecycleId={selectedLifecycleId}
-              taskDocuments={taskDocuments}
-              engineProcesses={engineProcesses}
-              contextMaster={contextMaster}
-            />
-          )}
-        </motion.aside>
-      </div>
-      <ModeBar items={VIEWS} value={view} onChange={changeView} label="Views" />
+      <RailedBody state={state} actions={actions} />
+      <ModeBar items={VIEWS} value={state.view} onChange={actions.changeView} label="Views" />
       {/* A cockpit-wide composer that a text selection raises — send the selection (+ a
           message) to a chat session as a context package. Mounted once here so it works on every view;
           renders nothing until there is a selection. `onSent` flips to Chats so the operator sees it land. */}
       <HighlightComposer
-        selectedLifecycleId={selectedLifecycleId}
-        viewedLeafKey={viewedLeafKey}
-        leafChatActive={!fullBleed && railView === "chat"}
-        onSent={showSentSession}
+        selectedLifecycleId={state.selectedLifecycleId}
+        viewedLeafKey={state.viewedLeafKey}
+        leafChatActive={!state.fullBleed && state.railView === "chat"}
+        onSent={actions.showSentSession}
       />
     </div>
   );

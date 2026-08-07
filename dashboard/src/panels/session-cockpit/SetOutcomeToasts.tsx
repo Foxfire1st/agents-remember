@@ -1,7 +1,10 @@
 import { Button } from "react-aria-components";
 
 import { css } from "../../../styled-system/css";
-import { useSessionCockpit } from "../../data/sessionCockpitStore";
+import {
+  useSessionCockpit,
+  type PerSessionCockpit,
+} from "../../data/sessionCockpitStore";
 import type { OpenSession } from "../../data/sessions";
 import { acknowledgeSetAttention } from "../../data/setClient";
 import { deriveSetChips, hasUnackedSetAttention } from "../../data/setChips";
@@ -55,6 +58,86 @@ const toastButton = css({
   _focusVisible: { outline: "1px solid token(colors.amber)", outlineOffset: "1px" },
 });
 
+function AttentionToast({
+  session,
+  perSession,
+  onFocusSession,
+}: {
+  session: OpenSession;
+  perSession: Record<string, PerSessionCockpit>;
+  onFocusSession: (id: string) => void;
+}) {
+  return (
+    <div key={session.id} className={toast} role="status" data-testid={`set-toast-${session.id}`}>
+      <div className={headRow}>
+        <span className={label}>{session.label} — set outcome needs attention</span>
+        <Button
+          className={toastButton}
+          onPress={() => onFocusSession(session.id)}
+          data-testid={`set-toast-view-${session.id}`}
+        >
+          view
+        </Button>
+        <Button
+          className={toastButton}
+          onPress={() => acknowledgeSetAttention(session.id)}
+          aria-label={`mark set outcomes seen for ${session.label}`}
+          data-testid={`set-toast-mark-seen-${session.id}`}
+        >
+          mark seen
+        </Button>
+      </div>
+      <div className={chipsColumn}>
+        {deriveSetChips(perSession[session.id])
+          .filter((chip) => chip.demandsAck)
+          .map((chip) => (
+            <AcceptanceChip key={chip.id} chip={chip} />
+          ))}
+      </div>
+    </div>
+  );
+}
+
+function CollapsedToast({
+  sessions,
+  onFocusSession,
+}: {
+  sessions: OpenSession[];
+  onFocusSession: (id: string) => void;
+}) {
+  return (
+    <div className={toast} role="status" data-testid="set-toast-collapsed">
+      <div className={headRow}>
+        <span className={label}>
+          {sessions.length} sessions with unacknowledged set outcomes
+        </span>
+      </div>
+      <div className={chipsColumn}>
+        {sessions.map((session) => (
+          <div key={session.id} className={headRow}>
+            <span className={label}>{session.label}</span>
+            <Button
+              className={toastButton}
+              onPress={() => onFocusSession(session.id)}
+              data-testid={`set-toast-view-${session.id}`}
+            >
+              view
+            </Button>
+            <Button
+              className={toastButton}
+              onPress={() => acknowledgeSetAttention(session.id)}
+              aria-label={`mark set outcomes seen for ${session.label}`}
+              data-testid={`set-toast-mark-seen-${session.id}`}
+            >
+              mark seen
+            </Button>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export function SetOutcomeToasts({
   sessions,
   focusedSessionId,
@@ -77,65 +160,19 @@ export function SetOutcomeToasts({
     <div className={stack} data-testid="set-outcome-toasts">
       {withAttention.length === 1 ? (
         withAttention.map((session) => (
-          <div key={session.id} className={toast} role="status" data-testid={`set-toast-${session.id}`}>
-            <div className={headRow}>
-              <span className={label}>{session.label} — set outcome needs attention</span>
-              <Button
-                className={toastButton}
-                onPress={() => onFocusSession(session.id)}
-                data-testid={`set-toast-view-${session.id}`}
-              >
-                view
-              </Button>
-              <Button
-                className={toastButton}
-                onPress={() => acknowledgeSetAttention(session.id)}
-                aria-label={`mark set outcomes seen for ${session.label}`}
-                data-testid={`set-toast-mark-seen-${session.id}`}
-              >
-                mark seen
-              </Button>
-            </div>
-            <div className={chipsColumn}>
-              {deriveSetChips(perSession[session.id])
-                .filter((chip) => chip.demandsAck)
-                .map((chip) => (
-                  <AcceptanceChip key={chip.id} chip={chip} />
-                ))}
-            </div>
-          </div>
+          <AttentionToast
+            key={session.id}
+            session={session}
+            perSession={perSession}
+            onFocusSession={onFocusSession}
+          />
         ))
       ) : (
         // Toast discipline (§9.8): several background outcomes collapse into ONE stack.
-        <div className={toast} role="status" data-testid="set-toast-collapsed">
-          <div className={headRow}>
-            <span className={label}>
-              {withAttention.length} sessions with unacknowledged set outcomes
-            </span>
-          </div>
-          <div className={chipsColumn}>
-            {withAttention.map((session) => (
-              <div key={session.id} className={headRow}>
-                <span className={label}>{session.label}</span>
-                <Button
-                  className={toastButton}
-                  onPress={() => onFocusSession(session.id)}
-                  data-testid={`set-toast-view-${session.id}`}
-                >
-                  view
-                </Button>
-                <Button
-                  className={toastButton}
-                  onPress={() => acknowledgeSetAttention(session.id)}
-                  aria-label={`mark set outcomes seen for ${session.label}`}
-                  data-testid={`set-toast-mark-seen-${session.id}`}
-                >
-                  mark seen
-                </Button>
-              </div>
-            ))}
-          </div>
-        </div>
+        <CollapsedToast
+          sessions={withAttention}
+          onFocusSession={onFocusSession}
+        />
       )}
     </div>
   );

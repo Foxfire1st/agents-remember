@@ -33,6 +33,59 @@ export const sliceForRef = (sliceDocs: TaskDocNode[], ref: SubTaskRow): TaskDocN
 export const seriesSliceDocs = (sliceDocs: TaskDocNode[], seriesDocPath: string): TaskDocNode[] =>
   sliceDocs.filter((doc) => pathDir(doc.docPath) === pathDir(seriesDocPath));
 
+function seriesSliceDoc(
+  allDocs: TaskDocNode[],
+  seriesDocPath: string,
+  openSlug: string | null,
+): TaskDocNode | undefined {
+  const seriesSlices = seriesSliceDocs(allDocs, seriesDocPath);
+  return openSlug ? sliceForSlug(seriesSlices, openSlug) : undefined;
+}
+
+function overviewDocOrLeaf(
+  docs: TaskDocNode[],
+  masterPreferred: boolean,
+  selectedSeriesDoc: TaskDocNode | undefined,
+  master: TaskDocNode | undefined,
+  selectedSeries: SeriesNode | undefined,
+): TaskDocNode | undefined {
+  if (masterPreferred) {
+    if (selectedSeriesDoc) return selectedSeriesDoc;
+    if (master) return master;
+  } else if (selectedSeries || master) {
+    return undefined; // a master / series overview shows no single leaf
+  }
+  const nonMaster = docs.filter((doc) => doc.kind !== "master");
+  return nonMaster.length === 1 ? nonMaster[0] : undefined;
+}
+
+// The live-lifecycle resolution shared by both reader variants: the enclosing master's slice
+// set (or the non-master docs), an opened slug's slice, and the master/series overview doc.
+function lifecycleReaderDoc(
+  allDocs: TaskDocNode[],
+  selectedTaskDoc: TaskDocNode | undefined,
+  lifecycle: LifecycleProjection,
+  selectedSeries: SeriesNode | undefined,
+  openSlug: string | null,
+  masterPreferred: boolean,
+): TaskDocNode | undefined {
+  const docs =
+    selectedTaskDoc?.lifecycleId === lifecycle.id
+      ? [selectedTaskDoc]
+      : taskDocsForLifecycle(lifecycle, allDocs);
+  const master = docs.find((doc) => doc.kind === "master");
+  const slices = master
+    ? seriesSliceDocs(allDocs, master.docPath)
+    : docs.filter((doc) => doc.kind !== "master");
+  const contentSlices = selectedSeries ? seriesSliceDocs(allDocs, selectedSeries.docPath) : slices;
+  const openDoc = openSlug ? sliceForSlug(contentSlices, openSlug) : undefined;
+  if (openDoc) return openDoc;
+  const selectedSeriesDoc = selectedSeries
+    ? allDocs.find((doc) => doc.docPath === selectedSeries.docPath)
+    : undefined;
+  return overviewDocOrLeaf(docs, masterPreferred, selectedSeriesDoc, master, selectedSeries);
+}
+
 export function displayedReaderDoc({
   allDocs,
   selectedTaskDoc,
@@ -61,24 +114,7 @@ export function displayedReaderDoc({
       : allDocs.find((doc) => doc.docPath === selectedSeries.docPath);
   }
   if (!lifecycle) return undefined;
-  const docs =
-    selectedTaskDoc?.lifecycleId === lifecycle.id
-      ? [selectedTaskDoc]
-      : taskDocsForLifecycle(lifecycle, allDocs);
-  const master = docs.find((doc) => doc.kind === "master");
-  const slices = master
-    ? seriesSliceDocs(allDocs, master.docPath)
-    : docs.filter((doc) => doc.kind !== "master");
-  const selectedSeriesDoc = selectedSeries
-    ? allDocs.find((doc) => doc.docPath === selectedSeries.docPath)
-    : undefined;
-  const contentSlices = selectedSeries ? seriesSliceDocs(allDocs, selectedSeries.docPath) : slices;
-  const openDoc = openSlug ? sliceForSlug(contentSlices, openSlug) : undefined;
-  if (openDoc) return openDoc;
-  if (selectedSeriesDoc) return selectedSeriesDoc;
-  if (master) return master;
-  const nonMaster = docs.filter((doc) => doc.kind !== "master");
-  return nonMaster.length === 1 ? nonMaster[0] : undefined;
+  return lifecycleReaderDoc(allDocs, selectedTaskDoc, lifecycle, selectedSeries, openSlug, true);
 }
 
 // The leaf doc the panel renders a full reader for — the single source of the viewed-leaf key.
@@ -101,8 +137,7 @@ export function displayedLeafDoc({
   // Branch 1: a task-doc selection with no live lifecycle.
   if (selectedTaskDoc && !lifecycle) {
     if (selectedTaskDoc.kind === "master") {
-      const sliceDocs = seriesSliceDocs(allDocs, selectedTaskDoc.docPath);
-      return openSlug ? sliceForSlug(sliceDocs, openSlug) : undefined;
+      return seriesSliceDoc(allDocs, selectedTaskDoc.docPath, openSlug);
     }
     return selectedTaskDoc;
   }
@@ -110,27 +145,11 @@ export function displayedLeafDoc({
   if (!lifecycle && !selectedSeries) return undefined;
   // Branch 3: a master-less series selection.
   if (!lifecycle && selectedSeries) {
-    const seriesSlices = seriesSliceDocs(allDocs, selectedSeries.docPath);
-    return openSlug ? sliceForSlug(seriesSlices, openSlug) : undefined;
+    return seriesSliceDoc(allDocs, selectedSeries.docPath, openSlug);
   }
   // Branch 4: a live lifecycle.
   if (!lifecycle) return undefined;
-  const docs =
-    selectedTaskDoc?.lifecycleId === lifecycle.id
-      ? [selectedTaskDoc]
-      : taskDocsForLifecycle(lifecycle, allDocs);
-  const master = docs.find((doc) => doc.kind === "master");
-  const slices = master
-    ? seriesSliceDocs(allDocs, master.docPath)
-    : docs.filter((doc) => doc.kind !== "master");
-  const contentSlices = selectedSeries
-    ? seriesSliceDocs(allDocs, selectedSeries.docPath)
-    : slices;
-  const openDoc = openSlug ? sliceForSlug(contentSlices, openSlug) : undefined;
-  if (openDoc) return openDoc;
-  if (selectedSeries || master) return undefined; // a master / series overview shows no single leaf
-  const nonMaster = docs.filter((doc) => doc.kind !== "master");
-  return nonMaster.length === 1 ? nonMaster[0] : undefined;
+  return lifecycleReaderDoc(allDocs, selectedTaskDoc, lifecycle, selectedSeries, openSlug, false);
 }
 
 export const taskStepProgress = (doc: TaskDocNode): { done: number; total: number } => ({

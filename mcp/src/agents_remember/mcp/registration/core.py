@@ -93,6 +93,7 @@ def _register_orientation_tools(server: FastMCP, config: McpRuntimeConfig) -> No
         parent_task: str | None = None,
         leaf_id: str | None = None,
         contract_path: str | None = None,
+        *,
         worktree_name: str | None = None,
         topology: str | None = None,
     ) -> dict[str, Any]:

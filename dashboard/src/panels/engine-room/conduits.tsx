@@ -19,6 +19,54 @@ import {
 import type { FlowState } from "./geometry";
 import type { EngineProcessEdge, LandingRefNode } from "../../types/projection";
 
+function isReplayLane(edge: EngineProcessEdge, strategy: string | undefined): boolean {
+  return (edge.kind === "integration" || edge.kind === "integration-mem") && strategy === "replay";
+}
+
+function isCloneArc(edge: EngineProcessEdge): boolean {
+  return edge.kind === "cgc-seed" || edge.kind === "grepai-clone";
+}
+
+function conduitOpacity(edge: EngineProcessEdge, retiring: boolean, cloneArc: boolean): number {
+  return retiring
+    ? 0
+    : cloneArc
+      ? (edge.state === "running" ? 1 : 0)
+      : edge.state === "planned"
+        ? 0
+        : 1;
+}
+
+function conduitTitle(edge: EngineProcessEdge, replay: boolean): string {
+  return `${edge.label}${edge.detail ? ` — ${edge.detail}` : ""}${
+    replay ? " — replay (rebased onto moved main)" : ""
+  }`;
+}
+
+function conduitTransitionDelay(animate: boolean, cloneArc: boolean, opacity: number): number {
+  return animate && cloneArc && opacity === 0 ? 0.45 : 0;
+}
+
+function conduitDraw(edge: EngineProcessEdge): "on" | undefined {
+  return edge.state === "running" ? "on" : undefined;
+}
+
+function conduitMarker(edge: EngineProcessEdge): string | undefined {
+  return edge.state === "running" ? "url(#er-chev)" : undefined;
+}
+
+function conduitPacketVisible(edge: EngineProcessEdge, animate: boolean): boolean {
+  return edge.state === "running" && animate;
+}
+
+function ghostLaneClass(ghosted: boolean): string {
+  return ghosted ? ghostedLane : "";
+}
+
+function initialConduitOpacity(animate: boolean, opacity: number): boolean | { opacity: number } {
+  return animate ? { opacity } : false;
+}
+
 export function Conduit({ edge, strategy, retiring = false, ghosted = false }: { edge: EngineProcessEdge; strategy?: string; retiring?: boolean; ghosted?: boolean }) {
   // The conduit draw-on (strokeDashoffset 100 → 0) is owned by the GSAP timeline (useEngineTimeline),
   // which selects every running lane via [data-draw='on'] and staggers them. Motion owns this
@@ -34,16 +82,16 @@ export function Conduit({ edge, strategy, retiring = false, ghosted = false }: {
   // vs a clean `ff-only` is NOT encodable as a line shape: a bent/bowed return lane read as an unexplained
   // triangle, never "around parallel work". The replay fact is recorded as data-strategy (for a future text
   // chip / glyph in the panel) but the path itself stays straight.
-  const isReplay = (edge.kind === "integration" || edge.kind === "integration-mem") && strategy === "replay";
+  const isReplay = isReplayLane(edge, strategy);
   // The provider-clone arrows sweep across the whole stage from the official engine to the worktree
   // engine — CGC bows OVER the top, GrepAI UNDER the bottom (the "copies + rewrites index" / "clones
   // vector DB" beat). Transient: shown only while running, gone at idle (see the opacity below).
-  const cloneArc = edge.kind === "cgc-seed" || edge.kind === "grepai-clone";
+  const cloneArc = isCloneArc(edge);
   const d = conduitPathD(edge) ?? `M${x1} ${y1} L ${x2} ${y2}`; // straight lane, or the clone BOW (shared helper)
   // At cleanup the worktree side de-materialises; fade every worktree conduit to 0 so the yellow
   // connector lines retract with the enclosure instead of dangling to the disposed nodes (the official line
   // keeps its own `officialWire` conduits, which are not in `node.edges`).
-  const opacity = retiring ? 0 : cloneArc ? (edge.state === "running" ? 1 : 0) : edge.state === "planned" ? 0 : 1;
+  const opacity = conduitOpacity(edge, retiring, cloneArc);
   return (
     <motion.g
       data-testid="conduit"
@@ -57,24 +105,24 @@ export function Conduit({ edge, strategy, retiring = false, ghosted = false }: {
       // RETRACT VISIBILITY — clone arcs fade their GROUP to 0 when done; delay that fade so the GSAP
       // tail-to-tip retract (0.45s) completes before the group turns transparent (mirrors spec's 0.32s
       // opacity delay on .flow-g.off: retract runs first, then opacity clears).
-      initial={animate ? { opacity } : false}
+      initial={initialConduitOpacity(animate, opacity)}
       animate={{ opacity }}
-      transition={{ duration: animate ? 0.45 : 0, delay: animate && cloneArc && opacity === 0 ? 0.45 : 0 }}
+      transition={{ duration: animate ? 0.45 : 0, delay: conduitTransitionDelay(animate, cloneArc, opacity) }}
     >
       <path
         // A gated memory lane is GHOSTED (dim + desaturate) on the inner <path>, NOT the motion.g, so
         // the ghost never fights Motion's group opacity (a className opacity loses on a static frame).
-        className={cx(flowConduit({ state: conduitState(edge.state) }), ghosted && ghostedLane)}
+        className={cx(flowConduit({ state: conduitState(edge.state) }), ghostLaneClass(ghosted))}
         d={d}
         // GSAP DrawSVG draws this on when it goes running (data-draw='on'); the running conduit has no
         // CSS dash (solid), so DrawSVG owns the stroke reveal. No pathLength: DrawSVG measures real length.
-        data-draw={edge.state === "running" ? "on" : undefined}
+        data-draw={conduitDraw(edge)}
         // arrow tip only on an ACTION (running flow); a nominal/static line is just a connection
-        markerEnd={edge.state === "running" ? "url(#er-chev)" : undefined}
+        markerEnd={conduitMarker(edge)}
       >
-        <title>{edge.label}{edge.detail ? ` — ${edge.detail}` : ""}{isReplay ? " — replay (rebased onto moved main)" : ""}</title>
+        <title>{conduitTitle(edge, isReplay)}</title>
       </path>
-      {edge.state === "running" && animate ? (
+      {conduitPacketVisible(edge, animate) ? (
         <circle
           className={flowPacket}
           r={4}
@@ -118,19 +166,27 @@ function LandingFlow({ d, state, kind }: { d: string; state: FlowState; kind: st
 // Which single flow is the ACTIVE transaction, by the landing[] ref progression: push (feat→origin/feat) is
 // active while pushing / PR-open; once the PR merges it settles and pull (origin/main→main) is active; once
 // memory carries over (origin-mem-main pushed) pull settles and the carryover flows are active.
+function landingRefResolved(refs: LandingRefNode[], kind: string): boolean {
+  const ref = refs.find((r) => r.kind === kind);
+  return ref !== undefined && ref.factState === "observed" && ref.state !== "planned";
+}
+
+function landingPrMerged(refs: LandingRefNode[]): boolean {
+  const pr = refs.find((r) => r.kind === "pr");
+  return pr !== undefined && pr.factState === "observed" && pr.state === "merged";
+}
+
+function landingMemPushed(refs: LandingRefNode[]): boolean {
+  const memory = refs.find((r) => r.kind === "origin-mem-main");
+  return memory !== undefined && memory.factState === "observed" && memory.state === "pushed";
+}
+
 function landingFlowState(refs: LandingRefNode[], kind: string): FlowState {
-  const ref = (k: string) => refs.find((r) => r.kind === k);
-  const resolved = (k: string) => {
-    const r = ref(k);
-    return r ? r.factState === "observed" && r.state !== "planned" : false;
-  };
-  const pr = ref("pr");
-  const memory = ref("origin-mem-main");
-  const prMerged = pr?.factState === "observed" && pr.state === "merged";
-  const memPushed = memory?.factState === "observed" && memory.state === "pushed";
-  if (kind === "push") return !resolved("origin-feat") ? "hidden" : prMerged ? "settled" : "active";
-  if (kind === "pull") return !prMerged ? "hidden" : memPushed ? "settled" : "active";
-  return memPushed ? "active" : "hidden"; // carry + push-mem: the carryover frontier
+  if (kind === "push") {
+    return !landingRefResolved(refs, "origin-feat") ? "hidden" : landingPrMerged(refs) ? "settled" : "active";
+  }
+  if (kind === "pull") return !landingPrMerged(refs) ? "hidden" : landingMemPushed(refs) ? "settled" : "active";
+  return landingMemPushed(refs) ? "active" : "hidden"; // carry + push-mem: the carryover frontier
 }
 
 export function LandingFlows({ refs }: { refs: LandingRefNode[] }) {

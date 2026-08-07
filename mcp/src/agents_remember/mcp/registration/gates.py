@@ -25,6 +25,7 @@ def register_gate_tools(server: FastMCP, config: McpRuntimeConfig) -> None:
         lifecycle_id: str | None = None,
         enclosure: str | None = None,
         repo_id: str | None = None,
+        *,
         packet: dict[str, Any] | None = None,
         required_decision: list[str] | None = None,
         evidence_refs: list[dict[str, Any]] | None = None,
@@ -63,6 +64,7 @@ def register_gate_tools(server: FastMCP, config: McpRuntimeConfig) -> None:
         lifecycle_id: str | None = None,
         note: str | None = None,
         deciding_role: str | None = None,
+        *,
         evidence_refs: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         """Record a decision on an open gate (decision: approve | reject | request-revision

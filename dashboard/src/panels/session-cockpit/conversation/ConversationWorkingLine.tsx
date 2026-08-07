@@ -44,6 +44,21 @@ const staleMarker = css({ color: "amber", flex: "none" });
 /** The turn states the canonical projection maps onto seat "working" (status.py seat_turn_state_for). */
 const WORKING_TURN_STATES = new Set(["working", "settling", "retrying", "compacting"]);
 
+function isWorkingTurn(stream: string | undefined, turnState: string | undefined): boolean {
+  return stream === "live" && turnState !== undefined && WORKING_TURN_STATES.has(turnState);
+}
+
+function parseStateSince(stateSince: string | null | undefined): number | null {
+  return stateSince == null ? null : Date.parse(stateSince);
+}
+
+function projectedTurn<T extends { turn: { state?: string } }>(
+  projection: { status?: T } | undefined,
+): { status: T | undefined; turnState: string | undefined } {
+  const status = projection?.status;
+  return { status, turnState: status?.turn.state };
+}
+
 export function ConversationWorkingLine({
   sessionId,
   now,
@@ -53,12 +68,8 @@ export function ConversationWorkingLine({
   now?: number;
 }) {
   const projection = useActiveConversation((state) => state.bySession[sessionId]);
-  const status = projection?.status;
-  const turnState = status?.turn.state;
-  const working =
-    projection?.stream === "live" &&
-    turnState !== undefined &&
-    WORKING_TURN_STATES.has(turnState);
+  const { status, turnState } = projectedTurn(projection);
+  const working = isWorkingTurn(projection?.stream, turnState);
   const [tick, setTick] = useState(() => Date.now());
   useEffect(() => {
     if (!working || now !== undefined) return undefined;
@@ -68,8 +79,7 @@ export function ConversationWorkingLine({
   if (!working || status === undefined) return null;
 
   const at = now ?? tick;
-  const stateSince = status.turn.stateSince;
-  const since = stateSince === null ? null : Date.parse(stateSince);
+  const since = parseStateSince(status?.turn.stateSince);
 
   return (
     <div className={line} data-testid="working-line">

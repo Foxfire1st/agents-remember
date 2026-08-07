@@ -14,7 +14,11 @@ import {
   fetchSessionCapabilities,
   type SessionSnapshotOutcome,
 } from "./sessionCapabilities";
-import { sessionCockpitStore, type SetRouteErrorInfo } from "./sessionCockpitStore";
+import {
+  sessionCockpitStore,
+  type PerSessionCockpit,
+  type SetRouteErrorInfo,
+} from "./sessionCockpitStore";
 import { sessionStore, type OpenSession } from "./sessions";
 import {
   classifySetResponse,
@@ -115,6 +119,33 @@ export function refreshSessionSnapshot(
 }
 
 /** Resolve queued/unknown pendings (and a readback-held pair step) against one snapshot. */
+function applyReadbackResolution(
+  sessionId: string,
+  resolution: ReturnType<typeof resolvePendingsByReadback>[number],
+  state: ReturnType<typeof store.getState>,
+  base: string,
+): void {
+  state.clearPendingSet(sessionId, resolution.kind);
+  if (resolution.fromPhase === "unknown-verifying" && resolution.resolution === "confirmed") {
+    // The uncertainty resolved as APPLIED — its unknown ledger entry no longer needs
+    // attention (a not-applied verdict stays unacknowledged and keeps the marker).
+    state.acknowledgeMatchingOutcomes(sessionId, resolution.kind, resolution.requestedValue);
+  }
+  if (isFocused(sessionId)) {
+    announcePolite(
+      resolution.resolution === "confirmed"
+        ? promotionAnnouncement(resolution.kind, resolution.requestedValue)
+        : readbackKeptPriorAnnouncement(resolution.kind, resolution.requestedValue),
+    );
+  }
+  // A readback-held pair step resolves by the SAME verdict (pairChange.ts).
+  const pair = store.getState().perSession[sessionId]?.pairChange;
+  if (pair && pair.phase === "awaiting-readback" && pair.step === resolution.kind) {
+    const directive = applyPairReadback(pair, resolution.resolution === "confirmed");
+    commitPairDirective(sessionId, directive.state, directive.sendEffort, base);
+  }
+}
+
 export function applySnapshotReadback(
   sessionId: string,
   snapshot: CapabilitySnapshotWire,
@@ -125,29 +156,69 @@ export function applySnapshotReadback(
   if (!cockpit) return;
   const resolutions = resolvePendingsByReadback(cockpit.pendingSets, snapshot);
   for (const resolution of resolutions) {
-    state.clearPendingSet(sessionId, resolution.kind);
-    if (resolution.fromPhase === "unknown-verifying" && resolution.resolution === "confirmed") {
-      // The uncertainty resolved as APPLIED — its unknown ledger entry no longer needs
-      // attention (a not-applied verdict stays unacknowledged and keeps the marker).
-      state.acknowledgeMatchingOutcomes(sessionId, resolution.kind, resolution.requestedValue);
-    }
-    if (isFocused(sessionId)) {
-      announcePolite(
-        resolution.resolution === "confirmed"
-          ? promotionAnnouncement(resolution.kind, resolution.requestedValue)
-          : readbackKeptPriorAnnouncement(resolution.kind, resolution.requestedValue),
-      );
-    }
-    // A readback-held pair step resolves by the SAME verdict (pairChange.ts).
-    const pair = store.getState().perSession[sessionId]?.pairChange;
-    if (pair && pair.phase === "awaiting-readback" && pair.step === resolution.kind) {
-      const directive = applyPairReadback(pair, resolution.resolution === "confirmed");
-      commitPairDirective(sessionId, directive.state, directive.sendEffort, base);
-    }
+    applyReadbackResolution(sessionId, resolution, state, base);
   }
 }
 
 // ── set-model / set-effort (R2/R3) ─────────────────────────────────────────────────────────────
+
+function setRouteFailureInfo(
+  kind: SetKind,
+  value: string,
+  outcome: Exclude<SetRouteOutcome, { kind: "result" }>,
+): SetRouteErrorInfo {
+  return {
+    kind,
+    requestedValue: value,
+    httpStatus:
+      outcome.kind === "session-gone"
+        ? 404
+        : outcome.kind === "no-native-control"
+          ? 409
+          : outcome.kind === "outage"
+            ? 503
+            : null,
+    status:
+      outcome.kind === "session-gone"
+        ? "unknown-session"
+        : outcome.kind === "no-native-control"
+          ? "unsupported"
+          : outcome.kind === "outage"
+            ? "control-unavailable"
+            : "transport",
+    detail: outcome.kind === "session-gone" ? "unknown-session" : outcome.detail,
+    retryable: outcome.kind === "outage",
+    at: Date.now(),
+  };
+}
+
+async function readSetResponse(response: Response): Promise<unknown> {
+  try {
+    return await response.json();
+  } catch {
+    return undefined;
+  }
+}
+
+function endPairStepOnRouteFailure(
+  sessionId: string,
+  kind: SetKind,
+  value: string,
+  routeError: SetRouteErrorInfo,
+  base: string,
+): void {
+  // A route failure produced no SetResult for the pair machine to consume. End the matching
+  // pair step explicitly: the route chip tells the HTTP story, while the pair outcome replaces
+  // the otherwise-eternal progress spinner with aborted/partial truth.
+  const pair = store.getState().perSession[sessionId]?.pairChange;
+  if (pair && !pair.outcome && pair.step === kind) {
+    const expected = kind === "model" ? pair.modelKey : pair.effort;
+    if (expected === value) {
+      const directive = applyPairRouteError(pair, kind, setRouteErrorCopy(routeError));
+      commitPairDirective(sessionId, directive.state, directive.sendEffort, base);
+    }
+  }
+}
 
 /**
  * POST one set and mirror the classified outcome. A 200 SetResult — including unknown and
@@ -179,12 +250,7 @@ export async function sendSet(
         body: JSON.stringify(body),
       },
     );
-    let parsed: unknown;
-    try {
-      parsed = await response.json();
-    } catch {
-      parsed = undefined;
-    }
+    const parsed = await readSetResponse(response);
     outcome = classifySetResponse(response.status, parsed);
   } catch (error) {
     outcome = classifySetResponse(null, undefined);
@@ -200,58 +266,21 @@ export async function sendSet(
     if (current?.pendingSets[kind]?.requestedValue === value) {
       store.getState().clearPendingSet(sessionId, kind);
     }
-    const routeError: SetRouteErrorInfo = {
-      kind,
-      requestedValue: value,
-      httpStatus:
-        outcome.kind === "session-gone"
-          ? 404
-          : outcome.kind === "no-native-control"
-            ? 409
-            : outcome.kind === "outage"
-              ? 503
-              : null,
-      status:
-        outcome.kind === "session-gone"
-          ? "unknown-session"
-          : outcome.kind === "no-native-control"
-            ? "unsupported"
-            : outcome.kind === "outage"
-              ? "control-unavailable"
-              : "transport",
-      detail:
-        outcome.kind === "session-gone"
-          ? "unknown-session"
-          : outcome.detail,
-      retryable: outcome.kind === "outage",
-      at: Date.now(),
-    };
+    const routeError = setRouteFailureInfo(kind, value, outcome);
     store.getState().setSetRouteError(sessionId, routeError);
-
-    // A route failure produced no SetResult for the pair machine to consume. End the matching
-    // pair step explicitly: the route chip tells the HTTP story, while the pair outcome replaces
-    // the otherwise-eternal progress spinner with aborted/partial truth.
-    const pair = store.getState().perSession[sessionId]?.pairChange;
-    if (pair && !pair.outcome && pair.step === kind) {
-      const expected = kind === "model" ? pair.modelKey : pair.effort;
-      if (expected === value) {
-        const directive = applyPairRouteError(pair, kind, setRouteErrorCopy(routeError));
-        commitPairDirective(sessionId, directive.state, directive.sendEffort, base);
-      }
-    }
+    endPairStepOnRouteFailure(sessionId, kind, value, routeError, base);
   }
   return outcome;
 }
 
 /** Mirror one SetResult into the store via the pure reducer (the honesty table, R2). */
-export function applySetResult(
+function applyLedgerAndPending(
+  state: ReturnType<typeof store.getState>,
   sessionId: string,
   kind: SetKind,
   result: SetResultWire,
-  base = "",
+  reduction: ReturnType<typeof reduceSetResult>,
 ): void {
-  const reduction = reduceSetResult(result);
-  const state = store.getState();
   state.appendSetLedger(sessionId, {
     at: Date.now(),
     kind,
@@ -275,6 +304,34 @@ export function applySetResult(
       });
     }
   }
+}
+
+function advancePairFromResult(
+  sessionId: string,
+  kind: SetKind,
+  result: SetResultWire,
+  base: string,
+): void {
+  // Pair-change advancement (R5): the machine consumes the SAME evidence.
+  const pair = store.getState().perSession[sessionId]?.pairChange;
+  if (pair && !pair.outcome && pair.step === kind) {
+    const expected = kind === "model" ? pair.modelKey : pair.effort;
+    if (expected === result.requestedValue) {
+      const directive = applyPairStepResult(pair, kind, result);
+      commitPairDirective(sessionId, directive.state, directive.sendEffort, base);
+    }
+  }
+}
+
+export function applySetResult(
+  sessionId: string,
+  kind: SetKind,
+  result: SetResultWire,
+  base = "",
+): void {
+  const reduction = reduceSetResult(result);
+  const state = store.getState();
+  applyLedgerAndPending(state, sessionId, kind, result, reduction);
   if (reduction.echoEffective !== null) {
     // Server-proved effective value — the only set path that moves the marker.
     state.recordEchoEvidence(sessionId, kind, {
@@ -287,16 +344,7 @@ export function applySetResult(
     void refreshSessionSnapshot(sessionId, base);
   }
   if (isFocused(sessionId)) announcePolite(setResultAnnouncement(kind, result));
-
-  // Pair-change advancement (R5): the machine consumes the SAME evidence.
-  const pair = store.getState().perSession[sessionId]?.pairChange;
-  if (pair && !pair.outcome && pair.step === kind) {
-    const expected = kind === "model" ? pair.modelKey : pair.effort;
-    if (expected === result.requestedValue) {
-      const directive = applyPairStepResult(pair, kind, result);
-      commitPairDirective(sessionId, directive.state, directive.sendEffort, base);
-    }
-  }
+  advancePairFromResult(sessionId, kind, result, base);
 }
 
 // ── The serialized pair change (R5) ────────────────────────────────────────────────────────────
@@ -349,6 +397,11 @@ export function acknowledgeSetAttention(sessionId: string): void {
  * Requires a live snapshot for the menu: without one, this kicks the fetch and announces why
  * nothing was set (never an invented menu, never a blind set).
  */
+function requestedEffortValue(cockpit: PerSessionCockpit | undefined): string | null {
+  const requested = cockpit?.pendingSets.effort?.requestedValue;
+  return requested ?? effectiveSelection(cockpit).effort;
+}
+
 export function cycleEffortRequested(sessionId: string, direction: 1 | -1, base = ""): void {
   const cockpit = store.getState().perSession[sessionId];
   const snapshot = cockpit?.liveSnapshot?.payload;
@@ -366,8 +419,7 @@ export function cycleEffortRequested(sessionId: string, direction: 1 | -1, base 
     announcePolite(cycleNoControlAnnouncement());
     return;
   }
-  const current =
-    cockpit?.pendingSets.effort?.requestedValue ?? effectiveSelection(cockpit).effort;
+  const current = requestedEffortValue(cockpit);
   const next = cycleEffortTarget(menu.options, current, direction);
   if (next === null) return;
   void sendSet(sessionId, "effort", next, base);

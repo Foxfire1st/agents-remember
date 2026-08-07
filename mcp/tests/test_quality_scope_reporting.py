@@ -473,6 +473,15 @@ class UntrackedExposureTests(unittest.TestCase):
                 encoding="utf-8",
             )
             fake_python.chmod(0o755)
+            # The dashboard rail is fail-closed on a missing install: give the temp repo a real
+            # node_modules and a stub npm so the sequencer contract test exercises the hook's
+            # untracked-scope behavior without invoking a frontend toolchain that is not installed.
+            (root / "dashboard/node_modules").mkdir(parents=True, exist_ok=True)
+            shim_dir = Path(tmp).parent / "l8-sequencer-bin"
+            shim_dir.mkdir(parents=True, exist_ok=True)
+            shim = shim_dir / "npm"
+            shim.write_text("#!/usr/bin/env sh\nexit 0\n", encoding="utf-8")
+            shim.chmod(0o755)
             untracked = root / "pkg/untracked module.py"
             untracked.write_text("VALUE = 2\n", encoding="utf-8")
             git_dir = Path(run_git(root, "rev-parse", "--git-dir").stdout.strip())
@@ -490,6 +499,7 @@ class UntrackedExposureTests(unittest.TestCase):
             before_stash = digest_text(run_git(root, "stash", "list").stdout)
             environment = dict(os.environ)
             environment["PYTHONPATH"] = str(MCP_SRC)
+            environment["PATH"] = f"{shim_dir}:{environment.get('PATH', '')}"
 
             completed = subprocess.run(
                 [hook.as_posix(), "fast"],
@@ -630,7 +640,7 @@ class CallerProvenanceTests(unittest.TestCase):
         self.assertIn("Panda include [./src/**/*.{ts,tsx}]", line)
         self.assertIn("bundled module graph intentionally uncounted", line)
         self.assertIn(
-            "units=1 Panda source glob; 3 TypeScript projects; 349 TypeScript inputs", line
+            "units=1 Panda source glob; 3 TypeScript projects; 425 TypeScript inputs", line
         )
         self.assertIn("9 explicit Vite inputs", line)
         for name in (
@@ -676,7 +686,7 @@ class CallerProvenanceTests(unittest.TestCase):
             encoding="utf-8"
         )
 
-        for step in ("lint", "typecheck", "test", "build"):
+        for step in ("lint", "typecheck", "test", "build", "coverage", "diff-coverage"):
             with self.subTest(step=step):
                 line = scope_reporting.dashboard_scope_line(REPOSITORY_ROOT, step)
                 self.assertIn(f"scope: dashboard-{step}", line)
@@ -685,6 +695,14 @@ class CallerProvenanceTests(unittest.TestCase):
                 self.assertRegex(line, r"units=.*[1-9][0-9]*")
                 self.assertIn(f"dashboard --step {step}", workflow)
                 self.assertIn(f"result: dashboard-{step} PASS", workflow)
+
+        e2e_line = scope_reporting.dashboard_scope_line(REPOSITORY_ROOT, "e2e")
+        self.assertIn("scope: dashboard-e2e", e2e_line)
+        self.assertIn(" | input=", e2e_line)
+        self.assertIn(" | config=", e2e_line)
+        self.assertRegex(e2e_line, r"units=.*[1-9][0-9]*")
+        self.assertIn("dashboard --step e2e", workflow)
+        self.assertIn("result: dashboard-playwright PASS", workflow)
 
         gate = (REPOSITORY_ROOT / ".githooks/_gate.sh").read_text(encoding="utf-8")
         self.assertIn("agents_remember.code_quality.scope_reporting", gate)

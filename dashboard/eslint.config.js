@@ -52,7 +52,7 @@ export default tseslint.config(
     },
   },
   {
-    files: ["*.config.ts", "*.config.cjs", "e2e/**/*.ts"],
+    files: ["*.config.ts", "*.config.cjs", "e2e/**/*.ts", "scripts/**/*.mjs"],
     languageOptions: { ecmaVersion: 2022, globals: globals.node },
   },
   {
