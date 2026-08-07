@@ -50,9 +50,10 @@ jobs:
           git config --global user.name "Agents Remember CI"
 
       # Enforce Ruff (including C901/PLR0911/PLR0912/PLR0915), Ruff format, Pyright,
-      # full pytest, CRAP, and changed-lines coverage without baselines or allowlists.
-      # Radon CC/MI remain labelled reports. The wrapper prints its selected diff base.
-      - name: Run quality wrapper (ruff + format + Pyright + pytest + CRAP + diff coverage)
+      # full pytest, CRAP, changed-lines coverage, and the File Size Budget rail without
+      # baselines or allowlists. Radon CC/MI remain labelled reports. The wrapper prints
+      # its selected diff base.
+      - name: Run quality wrapper (ruff + format + Pyright + pytest + CRAP + diff coverage + file-size)
         env:
           AR_QUALITY_INVOCATION: ci
         run: python -m agents_remember.code_quality.check

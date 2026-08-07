@@ -54,7 +54,9 @@ def line_count(path: Path) -> int:
 
 
 def band_for(line_count: int) -> str:
-    """The standard's band label for a file at or above the hard limit."""
+    """The standard's band label for a file; under-limit is the healthy case."""
+    if line_count < FILE_SIZE_HARD_LIMIT:
+        return "under-limit"
     if line_count >= FILE_SIZE_EMERGENCY_CLEANUP:
         return "emergency-cleanup"
     if line_count >= FILE_SIZE_ARCHITECTURAL_FAILURE:

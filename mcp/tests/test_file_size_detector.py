@@ -23,7 +23,7 @@ from test_code_quality_check import REPOSITORY_ROOT, sample_config
 
 class FileSizeBandsTests(unittest.TestCase):
     def test_bands_follow_the_written_standard(self) -> None:
-        self.assertEqual(file_size.band_for(1199), "hard-limit-exceeded")
+        self.assertEqual(file_size.band_for(1199), "under-limit")
         self.assertEqual(file_size.band_for(1200), "hard-limit-exceeded")
         self.assertEqual(file_size.band_for(1999), "hard-limit-exceeded")
         self.assertEqual(file_size.band_for(2000), "architectural-failure")

@@ -157,4 +157,50 @@ describe("groupDisplayRows — live thinking coalescing (260731-EFA-L7 R15)", ()
     const rows = groupDisplayRows(items);
     expect(rows.map((r) => r.kind)).toEqual(["item"]);
   });
+
+  it("interleaved: earlier-turn finalize then later-turn content-bearing streaming update keeps ONE live row with the latest item", () => {
+    const items: ConversationItem[] = [
+      liveThinking("r1", 1, "turn-1", "streaming"),
+      liveThinking("r2", 2, "turn-2", "streaming"),
+      {
+        ...liveThinking("r3", 3, "turn-1", "completed"),
+        blocks: [{ blockId: "r3-b", type: "thinking", markdown: "turn-1 reasoning" }],
+      },
+      {
+        ...liveThinking("r4", 4, "turn-2", "streaming"),
+        blocks: [{ blockId: "r4-b", type: "thinking", markdown: "turn-2 live reasoning" }],
+      },
+    ];
+    const rows = groupDisplayRows(items);
+    // Finalizing the earlier turn's indicator must not invalidate the later turn's open row:
+    // the content-bearing streaming update lands on the ONE live row (latest item), and the
+    // completed reasoning still renders as an ordinary row.
+    const liveRows = rows.filter((r) => r.kind === "live-thinking");
+    expect(liveRows).toHaveLength(1);
+    expect(liveRows[0].kind === "live-thinking" && liveRows[0].item.itemId).toBe("r4");
+    expect(liveRows[0].kind === "live-thinking" && liveRows[0].ordinal).toBe(4);
+    const completed = rows.find((r) => r.kind === "item");
+    expect(completed && completed.kind === "item" && completed.item.itemId).toBe("r3");
+  });
+
+  it("interleaved: earlier-turn finalize then later-turn completion leaves ZERO live rows and no reasoning row deleted", () => {
+    const items: ConversationItem[] = [
+      liveThinking("r1", 1, "turn-1", "streaming"),
+      liveThinking("r2", 2, "turn-2", "streaming"),
+      {
+        ...liveThinking("r3", 3, "turn-1", "completed"),
+        blocks: [{ blockId: "r3-b", type: "thinking", markdown: "turn-1 reasoning" }],
+      },
+      {
+        ...liveThinking("r4", 4, "turn-2", "completed"),
+        blocks: [{ blockId: "r4-b", type: "thinking", markdown: "turn-2 reasoning" }],
+      },
+    ];
+    const rows = groupDisplayRows(items);
+    // Both turns' completed reasoning items render as ordinary rows; the later finalize must
+    // remove its own live row without deleting the earlier turn's already-rendered row.
+    expect(rows.filter((r) => r.kind === "live-thinking")).toHaveLength(0);
+    expect(rows.map((r) => r.kind)).toEqual(["item", "item"]);
+    expect(rows.map((r) => r.kind === "item" && r.item.itemId)).toEqual(["r3", "r4"]);
+  });
 });
