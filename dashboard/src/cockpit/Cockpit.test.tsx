@@ -6,15 +6,15 @@ import { sessionStore } from "../data/sessions";
 import { dashboardStore } from "../data/store";
 import { GALLERY } from "../dev/fixtures";
 import { AttentionQueue } from "../panels/AttentionQueue";
-import { DetailPanel } from "../panels/DetailPanel";
+import { DetailPanel } from "../panels/detail-panel/DetailPanel";
 import { EngineRoom } from "../panels/EngineRoom";
 import { EventRiver } from "../panels/EventRiver";
 import { FileViewer } from "../panels/file-viewer/FileViewer";
 import { HighlightComposer } from "../panels/HighlightComposer";
-import { LifecycleList } from "../panels/LifecycleList";
+import { LifecycleList } from "../panels/lifecycle-list/LifecycleList";
 import { NotesReaderViewer } from "../panels/notes-reader/NotesReaderViewer";
 import { RailChat } from "../panels/RailChat";
-import { SessionsView } from "../panels/session-cockpit/SessionsView";
+import { SessionsView } from "../panels/session-cockpit/sessions-view/SessionsView";
 import { taskDoc as wireTaskDoc } from "../test/fixtures/wire";
 import { metricsFor } from "../types/projection";
 import type {

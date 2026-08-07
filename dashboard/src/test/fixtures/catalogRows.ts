@@ -171,6 +171,17 @@ export const FLEET: TerminalCatalogRow[] = [
   }),
 ];
 
+// A legacy-raw terminal seat for the e2e PTY-focus/scrollback scenarios: no controlState (so
+// isControlledSession is false), kind "terminal" so the Chats stage renders the interactive PTY
+// layer instead of the structured conversation surface.
+export const RAW_TERMINAL_ROW: TerminalCatalogRow = catalogRow({
+  id: "raw-terminal",
+  label: "raw-terminal-shell",
+  kind: "terminal",
+  harness: "codex",
+  status: "running",
+});
+
 // ── Extra fixture pack — APPENDED, never reshaping FLEET ─────────────────────────────────────
 // The two archetypes + interaction kinds + stop residuals, as separate exports so FLEET-order-
 // dependent tests stay byte-identical.

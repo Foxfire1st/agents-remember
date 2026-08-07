@@ -69,6 +69,13 @@ executionEnvironments = [
 # refuses JSON whose ``meta.branch_coverage`` is not true; keep branch measurement enabled.
 branch = true
 
+[tool.agents_remember]
+# S4 (260731-EFA-L7): armed at full scope after L16 landed and worktree_sync completed
+# (manager signal 01KZAMC4CWQXF2ZVTW2N9PC7AG). Arming is not a threshold change and carries
+# no baseline, allowlist, or per-file exemption. Any file at or above the 1,200-line hard
+# limit in the detector's scope fails the wrapper.
+file_size_armed = true
+
 [tool.radon]
 # Show only functions/classes that are at least mildly complex.
 # A = 1-5, B = 6-10, C = 11-20, D = 21-30, E = 31-40, F = 41+

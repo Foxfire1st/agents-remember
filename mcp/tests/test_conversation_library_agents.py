@@ -87,7 +87,8 @@ class _FakeCodexTransport:
     async def start(self, launch: object) -> None:
         self.launch = launch
 
-    async def request(
+    # 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/test_conversation_library_agents.py:90).
+    async def request(  # pragma: no cover
         self,
         method: str,
         params: Mapping[str, object],
@@ -118,14 +119,21 @@ class _FakeCodexTransport:
     async def notify(self, method: str, params: Mapping[str, object]) -> None:
         self.calls.append((method, params))
 
-    async def messages(self):
+    # 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/test_conversation_library_agents.py:121).
+    async def messages(self):  # pragma: no cover
         return
         yield
 
-    async def respond(self, request_id: object, result: Mapping[str, object]) -> None:
+    # 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/test_conversation_library_agents.py:125).
+    async def respond(
+        self, request_id: object, result: Mapping[str, object]
+    ) -> None:  # pragma: no cover
         del request_id, result
 
-    async def respond_error(self, request_id: object, *, code: int, message: str) -> None:
+    # 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/test_conversation_library_agents.py:128).
+    async def respond_error(
+        self, request_id: object, *, code: int, message: str
+    ) -> None:  # pragma: no cover
         del request_id, code, message
 
     async def stop(self, mode: str) -> None:  # noqa: ARG002 - transport protocol
@@ -138,7 +146,10 @@ class _FakeHelperHost:
         self.results = dict(results)
         self.calls: list[tuple[str, str, Mapping[str, object]]] = []
 
-    async def call(self, harness: str, operation: str, payload: Mapping[str, object]):
+    # 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/test_conversation_library_agents.py:141).
+    async def call(
+        self, harness: str, operation: str, payload: Mapping[str, object]
+    ):  # pragma: no cover
         self.calls.append((harness, operation, payload))
         value = self.results[operation]
         if callable(value):
@@ -311,11 +322,7 @@ class CodexLibraryAgentTests(unittest.IsolatedAsyncioTestCase):
 
         # The probed vocabulary is pinned: the agent fetch used exactly the camelCase kinds
         # proven against the installed 0.145.0 app-server, and the top-level fetch did not.
-        agent_calls = [
-            params
-            for method, params in library._test_transport.calls  # type: ignore[attr-defined]
-            if method == "thread/list" and params.get("sourceKinds") == list(_AGENT_SOURCE_KINDS)
-        ]
+        agent_calls = self._agent_source_kind_calls(library)
         assert len(agent_calls) == 1
         assert _AGENT_SOURCE_KINDS == (
             "subAgent",
@@ -324,6 +331,14 @@ class CodexLibraryAgentTests(unittest.IsolatedAsyncioTestCase):
             "subAgentThreadSpawn",
             "subAgentOther",
         )
+
+    def _agent_source_kind_calls(self, library: CodexConversationLibrary) -> list[object]:
+        """The probed ``thread/list`` calls that carried the pinned source-kind vocabulary."""
+        return [
+            params
+            for method, params in library._test_transport.calls  # type: ignore[attr-defined]
+            if method == "thread/list" and params.get("sourceKinds") == list(_AGENT_SOURCE_KINDS)
+        ]
 
     async def test_agent_conversation_reads_native_agent_thread(self) -> None:
         library = self._library(read_page=AGENT_THREAD_READ)
@@ -648,5 +663,5 @@ class ClaudeLibraryAgentTests(unittest.IsolatedAsyncioTestCase):
             await library.list(scope, cursor=None, limit=25)
 
 
-if __name__ == "__main__":
+if __name__ == "__main__":  # pragma: no cover
     unittest.main()

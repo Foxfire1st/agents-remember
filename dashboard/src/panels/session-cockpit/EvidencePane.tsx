@@ -47,30 +47,30 @@ function optional(value: string | number | null | undefined): string {
 }
 
 /** Full, field-named receipt/reconciliation details; used by rendering and assertion tests. */
-export function submitEvidenceLines(entry: SubmitRecord): string[] {
-  const lines = [
-    `phase ${entry.phase} · source ${entry.source} · expected bridge ${entry.expectedBridgeEpoch}`,
-    `started ${entry.startedAt} · updated ${entry.updatedAt} · lifecycle observation ${entry.lifecycleObservationVersion}`,
-  ];
-  if (entry.serverLifecycleState) lines.push(`server lifecycle ${entry.serverLifecycleState}`);
-  if (entry.receipt) {
-    lines.push(
-      `receipt ${entry.receipt.acceptance} · vendor correlation ${optional(entry.receipt.vendorCorrelationId)}`,
-      `submitted ${entry.receipt.submittedAt} · accepted ${optional(entry.receipt.acceptedAt)} · bridge ${entry.receipt.bridgeEpoch}`,
-    );
-    if (entry.receipt.detail) lines.push(`receipt detail ${entry.receipt.detail}`);
-  } else {
+function receiptEvidenceLines(entry: SubmitRecord, lines: string[]): void {
+  if (!entry.receipt) {
     lines.push("receipt —");
+    return;
   }
-  if (entry.reconciliation) {
-    lines.push(
-      `reconciliation ${entry.reconciliation.state} · submission ${optional(entry.reconciliation.submissionState)}`,
-      `reconciled ${entry.reconciliation.reconciledAt} · vendor correlation ${optional(entry.reconciliation.vendorCorrelationId)} · bridge ${entry.reconciliation.bridgeEpoch}`,
-    );
-    if (entry.reconciliation.detail) {
-      lines.push(`reconciliation detail ${entry.reconciliation.detail}`);
-    }
+  lines.push(
+    `receipt ${entry.receipt.acceptance} · vendor correlation ${optional(entry.receipt.vendorCorrelationId)}`,
+    `submitted ${entry.receipt.submittedAt} · accepted ${optional(entry.receipt.acceptedAt)} · bridge ${entry.receipt.bridgeEpoch}`,
+  );
+  if (entry.receipt.detail) lines.push(`receipt detail ${entry.receipt.detail}`);
+}
+
+function reconciliationEvidenceLines(entry: SubmitRecord, lines: string[]): void {
+  if (!entry.reconciliation) return;
+  lines.push(
+    `reconciliation ${entry.reconciliation.state} · submission ${optional(entry.reconciliation.submissionState)}`,
+    `reconciled ${entry.reconciliation.reconciledAt} · vendor correlation ${optional(entry.reconciliation.vendorCorrelationId)} · bridge ${entry.reconciliation.bridgeEpoch}`,
+  );
+  if (entry.reconciliation.detail) {
+    lines.push(`reconciliation detail ${entry.reconciliation.detail}`);
   }
+}
+
+function submitTailLines(entry: SubmitRecord, lines: string[]): void {
   if (entry.routeFailure) {
     lines.push(
       `route failure ${entry.routeFailure.status} · HTTP ${optional(entry.routeFailure.httpStatus)} · ${entry.routeFailure.detail}`,
@@ -81,7 +81,7 @@ export function submitEvidenceLines(entry: SubmitRecord): string[] {
       `reconcile attempts ${entry.reconcileAttempts} · window ${entry.reconcileWindowElapsedMs} ms`,
     );
   }
-  if (entry.detail && entry.detail !== entry.receipt?.detail && entry.detail !== entry.reconciliation?.detail) {
+  if (submitDetailDistinct(entry)) {
     lines.push(`detail ${entry.detail}`);
   }
   if (entry.releasedAt !== undefined) lines.push(`draft released ${entry.releasedAt}`);
@@ -89,6 +89,25 @@ export function submitEvidenceLines(entry: SubmitRecord): string[] {
   if (entry.recoveryDismissedAt !== undefined) {
     lines.push(`withdrawal recovery dismissed ${entry.recoveryDismissedAt}`);
   }
+}
+
+function submitDetailDistinct(entry: SubmitRecord): boolean {
+  return Boolean(
+    entry.detail &&
+      entry.detail !== entry.receipt?.detail &&
+      entry.detail !== entry.reconciliation?.detail,
+  );
+}
+
+export function submitEvidenceLines(entry: SubmitRecord): string[] {
+  const lines = [
+    `phase ${entry.phase} · source ${entry.source} · expected bridge ${entry.expectedBridgeEpoch}`,
+    `started ${entry.startedAt} · updated ${entry.updatedAt} · lifecycle observation ${entry.lifecycleObservationVersion}`,
+  ];
+  if (entry.serverLifecycleState) lines.push(`server lifecycle ${entry.serverLifecycleState}`);
+  receiptEvidenceLines(entry, lines);
+  reconciliationEvidenceLines(entry, lines);
+  submitTailLines(entry, lines);
   return lines;
 }
 
@@ -103,6 +122,225 @@ function SubmitEvidenceRow({ entry }: { entry: SubmitRecord }) {
       ))}
     </div>
   );
+}
+
+function EvidenceSeatSection({ session }: { session: OpenSession }) {
+  return (
+    <InspectorSection title="Seat">
+      <InspectorFact label="session" value={session.label} />
+      <InspectorFact
+        label="state"
+        value={seatVisualState(session).word}
+        testId="inspector-state"
+      />
+      <InspectorFact label="harness" value={session.harness} />
+      <InspectorFact
+        label="pane"
+        value={paneArchetypeCopy(session)}
+        testId="inspector-archetype"
+      />
+      <InspectorFact label="leaf" value={session.leafKey} testId="inspector-leaf" />
+    </InspectorSection>
+  );
+}
+
+function LaunchEvidenceSection({
+  session,
+  launch,
+}: {
+  session: OpenSession;
+  launch: PerSessionCockpit["launchEvidence"] | undefined;
+}) {
+  const tier = launchTier(session);
+  return (
+    <InspectorSection title="Launch evidence" testId="inspector-launch-evidence">
+      <InspectorFact
+        label="retained model"
+        value={launch?.retainedModel ?? session.resolvedModel}
+      />
+      <InspectorFact
+        label="retained effort"
+        value={launch?.retainedEffort ?? session.resolvedEffort}
+      />
+      <InspectorFact
+        label="tier"
+        value={
+          <span className={evidenceTier}>
+            <EvidenceBadge tier={tier} size="sm" />
+            <span>{tier}</span>
+          </span>
+        }
+        testId="inspector-launch-tier"
+      />
+      <InspectorFact label="spawn role" value={session.spawnRole} testId="inspector-spawn-role" />
+      <InspectorFact label="seat role" value={session.seatRole} />
+      <InspectorFact
+        label="level"
+        value={
+          session.spawnLevel
+            ? `${session.spawnLevel}${session.spawnLevelSource ? ` (${session.spawnLevelSource})` : ""}`
+            : undefined
+        }
+        testId="inspector-spawn-level"
+      />
+      <InspectorFact label="spawned by" value={session.spawnedBySession} testId="inspector-spawned-by" />
+      <InspectorFact label="original label" value={session.spawnedLabel} />
+    </InspectorSection>
+  );
+}
+
+function SetLedgerSection({
+  session,
+  ledger,
+  unacknowledged,
+}: {
+  session: OpenSession;
+  ledger: SetLedgerEntry[];
+  unacknowledged: number;
+}) {
+  return (
+    <InspectorSection title="SetResult ledger" testId="inspector-set-ledger-section">
+      <div className={sectionActions}>
+        <span>
+          {ledger.length} set change{ledger.length === 1 ? "" : "s"} · {unacknowledged}{" "}
+          unacknowledged
+        </span>
+        {unacknowledged > 0 ? (
+          <button
+            type="button"
+            className={inspectorAction}
+            onClick={() => acknowledgeSetAttention(session.id)}
+            data-testid="inspector-set-ledger-mark-seen"
+          >
+            mark seen
+          </button>
+        ) : null}
+      </div>
+      <VirtualizedInspectorList
+        rows={ledger}
+        rowKey={(entry, index) => `${entry.at}-${entry.kind}-${index}`}
+        renderRow={(entry) => setLedgerEntryLine(entry)}
+        label="SetResult ledger"
+        testId="inspector-set-ledger"
+      />
+    </InspectorSection>
+  );
+}
+
+function SubmitHistorySection({ submissions }: { submissions: SubmitRecord[] }) {
+  return (
+    <InspectorSection title="Submit receipts and reconciliation">
+      {submissions.length > 0 ? (
+        <VirtualizedInspectorList
+          rows={submissions}
+          rowKey={(entry) => entry.requestId}
+          renderRow={(entry) => <SubmitEvidenceRow entry={entry} />}
+          label="Submit receipt and reconciliation history"
+          testId="inspector-submit-history"
+        />
+      ) : (
+        <InspectorNote>No cockpit submit receipts recorded for this seat.</InspectorNote>
+      )}
+    </InspectorSection>
+  );
+}
+
+function BridgeDiagnosticsSection({
+  bridgeError,
+  paneDiagnostic,
+}: {
+  bridgeError: string | null;
+  paneDiagnostic: unknown;
+}) {
+  if (bridgeError === null && paneDiagnostic === undefined) return null;
+  return (
+    <InspectorSection title="Bridge and pane diagnostics">
+      {bridgeError !== null ? (
+        <InspectorFact
+          label="bridge error"
+          value={<InspectorRaw value={bridgeError} testId="inspector-bridge-error" />}
+        />
+      ) : null}
+      {paneDiagnostic !== undefined ? (
+        <InspectorFact
+          label="pane diagnostic"
+          value={<InspectorRaw value={paneDiagnostic} testId="inspector-pane-diagnostic" />}
+        />
+      ) : null}
+    </InspectorSection>
+  );
+}
+
+function OutcomeSection({
+  session,
+  stopNote,
+}: {
+  session: OpenSession;
+  stopNote: string | undefined;
+}) {
+  if (!session.landedReason && !session.retiredReason && !stopNote) return null;
+  return (
+    <InspectorSection title="Outcome">
+      <InspectorFact label="landed" value={session.landedReason} testId="inspector-landed-reason" />
+      <InspectorFact label="landed at" value={session.landedAt} />
+      <InspectorFact label="retired" value={session.retiredReason} testId="inspector-retired-reason" />
+      <InspectorFact label="retired by" value={session.retiredBySession} />
+      <InspectorFact label="stop note" value={stopNote} testId="inspector-retire-stop-note" />
+    </InspectorSection>
+  );
+}
+
+function PendingInteractionSection({ session }: { session: OpenSession }) {
+  if (!session.controlPendingInteraction) return null;
+  return (
+    <InspectorSection title="Pending interaction (raw)">
+      <InspectorRaw
+        value={session.controlPendingInteraction}
+        testId="inspector-pending-interaction-raw"
+      />
+    </InspectorSection>
+  );
+}
+
+function LivenessSection({ session }: { session: OpenSession }) {
+  if (!session.livenessEvidence && !session.exitEvidence) return null;
+  return (
+    <InspectorSection title="Liveness">
+      <InspectorFact label="evidence" value={session.livenessEvidence} testId="inspector-liveness" />
+      <InspectorFact label="exit evidence" value={session.exitEvidence} />
+      <InspectorFact label="first failed" value={session.livenessFirstFailedAt} />
+      <InspectorFact label="last failed" value={session.livenessLastFailedAt} />
+      <InspectorFact label="failure count" value={session.livenessFailures} />
+    </InspectorSection>
+  );
+}
+
+function evidenceDerived(
+  session: OpenSession,
+  cockpit: PerSessionCockpit | undefined,
+): {
+  launch: PerSessionCockpit["launchEvidence"] | undefined;
+  bridgeError: string | null;
+  paneDiagnostic: unknown;
+  stopNote: string | undefined;
+  ledger: SetLedgerEntry[];
+  unacknowledged: number;
+  submissions: SubmitRecord[];
+} {
+  const retireStopError = session.controlRaw?.retireControlStopError;
+  const ledger = [...(cockpit?.setLedger ?? [])].reverse();
+  return {
+    launch: cockpit?.launchEvidence,
+    bridgeError: verbatimBridgeError(session.controlRaw),
+    paneDiagnostic: session.controlRaw?.paneDiagnostic,
+    stopNote:
+      typeof retireStopError === "string"
+        ? retireResidualCopy(session.label, retireStopError)
+        : undefined,
+    ledger,
+    unacknowledged: ledger.filter((entry) => !entry.acknowledged).length,
+    submissions: [...(cockpit?.submitHistory ?? [])].reverse(),
+  };
 }
 
 function stopResidualCopy(residual: StopResidual): string {
@@ -188,174 +426,25 @@ export function EvidencePane({
     );
   }
 
-  const visual = seatVisualState(session);
-  const tier = launchTier(session);
-  const launch = cockpit?.launchEvidence;
-  const bridgeError = verbatimBridgeError(session.controlRaw);
-  const paneDiagnostic = session.controlRaw?.paneDiagnostic;
-  const retireStopError = session.controlRaw?.retireControlStopError;
-  const stopNote =
-    typeof retireStopError === "string"
-      ? retireResidualCopy(session.label, retireStopError)
-      : undefined;
-  const ledger = [...(cockpit?.setLedger ?? [])].reverse();
-  const unacknowledged = ledger.filter((entry) => !entry.acknowledged).length;
-  const submissions = [...(cockpit?.submitHistory ?? [])].reverse();
+  const { launch, bridgeError, paneDiagnostic, stopNote, ledger, unacknowledged, submissions } =
+    evidenceDerived(session, cockpit);
 
   return (
     <div className={inspectorPane} data-testid="evidence-pane">
-      <InspectorSection title="Seat">
-        <InspectorFact label="session" value={session.label} />
-        <InspectorFact label="state" value={visual.word} testId="inspector-state" />
-        <InspectorFact label="harness" value={session.harness} />
-        <InspectorFact
-          label="pane"
-          value={paneArchetypeCopy(session)}
-          testId="inspector-archetype"
-        />
-        <InspectorFact label="leaf" value={session.leafKey} testId="inspector-leaf" />
-      </InspectorSection>
-
-      <InspectorSection title="Launch evidence" testId="inspector-launch-evidence">
-        <InspectorFact label="retained model" value={launch?.retainedModel ?? session.resolvedModel} />
-        <InspectorFact label="retained effort" value={launch?.retainedEffort ?? session.resolvedEffort} />
-        <InspectorFact
-          label="tier"
-          value={
-            <span className={evidenceTier}>
-              <EvidenceBadge tier={tier} size="sm" />
-              <span>{tier}</span>
-            </span>
-          }
-          testId="inspector-launch-tier"
-        />
-        <InspectorFact label="spawn role" value={session.spawnRole} testId="inspector-spawn-role" />
-        <InspectorFact label="seat role" value={session.seatRole} />
-        <InspectorFact
-          label="level"
-          value={
-            session.spawnLevel
-              ? `${session.spawnLevel}${session.spawnLevelSource ? ` (${session.spawnLevelSource})` : ""}`
-              : undefined
-          }
-          testId="inspector-spawn-level"
-        />
-        <InspectorFact
-          label="spawned by"
-          value={session.spawnedBySession}
-          testId="inspector-spawned-by"
-        />
-        <InspectorFact label="original label" value={session.spawnedLabel} />
-      </InspectorSection>
-
+      <EvidenceSeatSection session={session} />
+      <LaunchEvidenceSection session={session} launch={launch} />
       {ledger.length > 0 ? (
-        <InspectorSection title="SetResult ledger" testId="inspector-set-ledger-section">
-          <div className={sectionActions}>
-            <span>
-              {ledger.length} set change{ledger.length === 1 ? "" : "s"} · {unacknowledged}{" "}
-              unacknowledged
-            </span>
-            {unacknowledged > 0 ? (
-              <button
-                type="button"
-                className={inspectorAction}
-                onClick={() => acknowledgeSetAttention(session.id)}
-                data-testid="inspector-set-ledger-mark-seen"
-              >
-                mark seen
-              </button>
-            ) : null}
-          </div>
-          <VirtualizedInspectorList
-            rows={ledger}
-            rowKey={(entry, index) => `${entry.at}-${entry.kind}-${index}`}
-            renderRow={(entry) => setLedgerEntryLine(entry)}
-            label="SetResult ledger"
-            testId="inspector-set-ledger"
-          />
-        </InspectorSection>
+        <SetLedgerSection session={session} ledger={ledger} unacknowledged={unacknowledged} />
       ) : (
         <InspectorSection title="SetResult ledger">
           <InspectorNote>No set outcomes recorded for this seat.</InspectorNote>
         </InspectorSection>
       )}
-
-      <InspectorSection title="Submit receipts and reconciliation">
-        {submissions.length > 0 ? (
-          <VirtualizedInspectorList
-            rows={submissions}
-            rowKey={(entry) => entry.requestId}
-            renderRow={(entry) => <SubmitEvidenceRow entry={entry} />}
-            label="Submit receipt and reconciliation history"
-            testId="inspector-submit-history"
-          />
-        ) : (
-          <InspectorNote>No cockpit submit receipts recorded for this seat.</InspectorNote>
-        )}
-      </InspectorSection>
-
-      {bridgeError !== null || paneDiagnostic !== undefined ? (
-        <InspectorSection title="Bridge and pane diagnostics">
-          {bridgeError !== null ? (
-            <InspectorFact
-              label="bridge error"
-              value={<InspectorRaw value={bridgeError} testId="inspector-bridge-error" />}
-            />
-          ) : null}
-          {paneDiagnostic !== undefined ? (
-            <InspectorFact
-              label="pane diagnostic"
-              value={<InspectorRaw value={paneDiagnostic} testId="inspector-pane-diagnostic" />}
-            />
-          ) : null}
-        </InspectorSection>
-      ) : null}
-
-      {session.landedReason || session.retiredReason || stopNote ? (
-        <InspectorSection title="Outcome">
-          <InspectorFact
-            label="landed"
-            value={session.landedReason}
-            testId="inspector-landed-reason"
-          />
-          <InspectorFact label="landed at" value={session.landedAt} />
-          <InspectorFact
-            label="retired"
-            value={session.retiredReason}
-            testId="inspector-retired-reason"
-          />
-          <InspectorFact label="retired by" value={session.retiredBySession} />
-          <InspectorFact
-            label="stop note"
-            value={stopNote}
-            testId="inspector-retire-stop-note"
-          />
-        </InspectorSection>
-      ) : null}
-
-      {session.controlPendingInteraction ? (
-        <InspectorSection title="Pending interaction (raw)">
-          <InspectorRaw
-            value={session.controlPendingInteraction}
-            testId="inspector-pending-interaction-raw"
-          />
-        </InspectorSection>
-      ) : null}
-
-      {session.livenessEvidence || session.exitEvidence ? (
-        <InspectorSection title="Liveness">
-          <InspectorFact
-            label="evidence"
-            value={session.livenessEvidence}
-            testId="inspector-liveness"
-          />
-          <InspectorFact label="exit evidence" value={session.exitEvidence} />
-          <InspectorFact label="first failed" value={session.livenessFirstFailedAt} />
-          <InspectorFact label="last failed" value={session.livenessLastFailedAt} />
-          <InspectorFact label="failure count" value={session.livenessFailures} />
-        </InspectorSection>
-      ) : null}
-
+      <SubmitHistorySection submissions={submissions} />
+      <BridgeDiagnosticsSection bridgeError={bridgeError} paneDiagnostic={paneDiagnostic} />
+      <OutcomeSection session={session} stopNote={stopNote} />
+      <PendingInteractionSection session={session} />
+      <LivenessSection session={session} />
       <RetainedStopResiduals />
 
       <InspectorSection title="Vocabulary mapping">

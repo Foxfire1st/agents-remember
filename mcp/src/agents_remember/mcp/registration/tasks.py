@@ -39,6 +39,7 @@ def _register_task_finalizer_tools(server: FastMCP, config: McpRuntimeConfig) ->
         master_doc_path: str | None = None,
         subtask_number: str = "",
         dry_run: bool = False,
+        *,
         teardown_providers: bool = True,
     ) -> dict[str, Any]:
         """Finalize one parent-child task lifecycle edge. The task's landed commit must be
@@ -74,6 +75,7 @@ def _register_task_document_tools(server: FastMCP, config: McpRuntimeConfig) -> 
         task_name: str | None = None,
         contract_path: str | None = None,
         slug: str | None = None,
+        *,
         fields: dict[str, Any] | None = None,
         step: dict[str, Any] | None = None,
         decision: dict[str, Any] | None = None,

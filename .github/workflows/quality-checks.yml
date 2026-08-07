@@ -50,9 +50,10 @@ jobs:
           git config --global user.name "Agents Remember CI"
 
       # Enforce Ruff (including C901/PLR0911/PLR0912/PLR0915), Ruff format, Pyright,
-      # full pytest, CRAP, and changed-lines coverage without baselines or allowlists.
-      # Radon CC/MI remain labelled reports. The wrapper prints its selected diff base.
-      - name: Run quality wrapper (ruff + format + Pyright + pytest + CRAP + diff coverage)
+      # full pytest, CRAP, changed-lines coverage, and the File Size Budget rail without
+      # baselines or allowlists. Radon CC/MI remain labelled reports. The wrapper prints
+      # its selected diff base.
+      - name: Run quality wrapper (ruff + format + Pyright + pytest + CRAP + diff coverage + file-size)
         env:
           AR_QUALITY_INVOCATION: ci
         run: python -m agents_remember.code_quality.check
@@ -93,6 +94,25 @@ jobs:
         run: |
           PYTHONPATH=../mcp/src python3 -m agents_remember.code_quality.scope_reporting --project-root .. dashboard --step test
           if npm run test; then echo "result: dashboard-test PASS"; else echo "result: dashboard-test FAIL"; exit 1; fi
+
+      # Coverage: global thresholds via the Vitest v8 provider, then the changed-lines floor
+      # (coverage:diff) against the merge base — the frontend mirror of the Python diff gate.
+      - name: Coverage thresholds + changed-lines floor
+        working-directory: dashboard
+        run: |
+          PYTHONPATH=../mcp/src python3 -m agents_remember.code_quality.scope_reporting --project-root .. dashboard --step coverage
+          if npm run test:coverage; then echo "result: dashboard-coverage PASS"; else echo "result: dashboard-coverage FAIL"; exit 1; fi
+          PYTHONPATH=../mcp/src python3 -m agents_remember.code_quality.scope_reporting --project-root .. dashboard --step diff-coverage
+          if npm run coverage:diff; then echo "result: dashboard-diff-coverage PASS"; else echo "result: dashboard-diff-coverage FAIL"; exit 1; fi
+
+      # The primary Playwright config drives the real app against the fixture gallery
+      # (/dev/bench) — no live server/sim needed — so it runs in CI on every push/PR.
+      - name: End-to-end (Playwright, primary config)
+        working-directory: dashboard
+        run: |
+          npx playwright install --with-deps chromium
+          PYTHONPATH=../mcp/src python3 -m agents_remember.code_quality.scope_reporting --project-root .. dashboard --step e2e
+          if npm run e2e; then echo "result: dashboard-playwright PASS"; else echo "result: dashboard-playwright FAIL"; exit 1; fi
 
       # Require the generated frontend bundle to build successfully.
       - name: Build

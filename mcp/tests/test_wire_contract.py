@@ -335,7 +335,10 @@ class SanctionedOwnerTests(unittest.TestCase):
         # exception list starts. The tail merges must be real call sites.
         merges = wire_contract.served_tail_merges(PACKAGE_ROOT)
         self.assertTrue(merges, "no module merges the declared serve-time tail")
-        self.assertEqual({offender.module for offender in merges}, {"serving/app.py"})
+        self.assertEqual(
+            {offender.module for offender in merges},
+            {"serving/_app_common.py", "serving/_app_routes.py"},
+        )
 
     def test_the_conformance_suite_that_holds_the_owner_shut_exists(self) -> None:
         held = Path(__file__).resolve().parent / "test_served_state_conformance.py"

@@ -148,6 +148,60 @@ function PickList({
   );
 }
 
+function openCodeEntry(
+  repo: string,
+  scope: Scope,
+  currentPath: string | undefined,
+  entry: DirEntry,
+  setError: (error: string | null) => void,
+  setCode: (content: FileContent | null) => void,
+  setSidecar: (view: SidecarView) => void,
+): void {
+  if (entry.kind !== "file" || entry.path === currentPath) return;
+  setError(null);
+  readFile(repo, scope, entry.path)
+    .then((f) => {
+      setCode(f);
+      return resolveForward(repo, scope, entry.path);
+    })
+    .then((p) =>
+      setSidecar(
+        p.status === "found" && p.body != null ? { state: "markdown", body: p.body } : { state: "missing" },
+      ),
+    )
+    .catch((e) => setError(describeError(e)));
+}
+
+function openSidecarEntry(
+  repo: string,
+  scope: Scope,
+  entry: DirEntry,
+  setError: (error: string | null) => void,
+  setCode: (content: FileContent | null) => void,
+  setSidecar: (view: SidecarView) => void,
+  openCode: (entry: DirEntry) => void,
+): void {
+  if (entry.kind !== "file") return;
+  setError(null);
+  resolveReverse(repo, scope, entry.path)
+    .then((p) => {
+      if (p.kind === "sidecar" && p.exists) {
+        openCode({ name: p.codePath.split("/").pop() ?? "", path: p.codePath, kind: "file" });
+      } else {
+        // An overview/entities/index doc has no code partner — render its OWN markdown instead of an
+        // empty placeholder (a route overview must be readable). Fall back to the placeholder only if
+        // the body could not be read (binary/unreadable) or there is genuinely no onboarding here.
+        setCode(null);
+        setSidecar(
+          p.kind === "overview" && p.body != null
+            ? { state: "markdown", body: p.body }
+            : { state: "overview" },
+        );
+      }
+    })
+    .catch((e) => setError(describeError(e)));
+}
+
 function FileViewerImpl({ active = true }: { active?: boolean }) {
   const [repos, setRepos] = useState<RepoCatalogEntry[]>([]);
   const [repo, setRepo] = useState<string>("");
@@ -202,43 +256,10 @@ function FileViewerImpl({ active = true }: { active?: boolean }) {
       ]
     : [{ id: "mainline", label: "mainline" }];
 
-  function openCode(entry: DirEntry) {
-    if (entry.kind !== "file" || entry.path === code?.path) return;
-    setError(null);
-    readFile(repo, scope, entry.path)
-      .then((f) => {
-        setCode(f);
-        return resolveForward(repo, scope, entry.path);
-      })
-      .then((p) =>
-        setSidecar(
-          p.status === "found" && p.body != null ? { state: "markdown", body: p.body } : { state: "missing" },
-        ),
-      )
-      .catch((e) => setError(describeError(e)));
-  }
-
-  function openSidecar(entry: DirEntry) {
-    if (entry.kind !== "file") return;
-    setError(null);
-    resolveReverse(repo, scope, entry.path)
-      .then((p) => {
-        if (p.kind === "sidecar" && p.exists) {
-          openCode({ name: p.codePath.split("/").pop() ?? "", path: p.codePath, kind: "file" });
-        } else {
-          // An overview/entities/index doc has no code partner — render its OWN markdown instead of an
-          // empty placeholder (a route overview must be readable). Fall back to the placeholder only if
-          // the body could not be read (binary/unreadable) or there is genuinely no onboarding here.
-          setCode(null);
-          setSidecar(
-            p.kind === "overview" && p.body != null
-              ? { state: "markdown", body: p.body }
-              : { state: "overview" },
-          );
-        }
-      })
-      .catch((e) => setError(describeError(e)));
-  }
+  const openCode = (entry: DirEntry) =>
+    openCodeEntry(repo, scope, code?.path, entry, setError, setCode, setSidecar);
+  const openSidecar = (entry: DirEntry) =>
+    openSidecarEntry(repo, scope, entry, setError, setCode, setSidecar, openCode);
 
   return (
     <div className={shell} data-testid="file-viewer">

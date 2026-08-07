@@ -94,8 +94,66 @@ export function FailedLaunchBanner({
     await hydrateTerminalSessionsFromCatalog(false);
   };
 
+  const correctedPrefill = (): LaunchPrefill | undefined =>
+    session.harness
+      ? {
+          harness: session.harness,
+          modelKey: session.resolvedModel ?? undefined,
+          effort: session.resolvedEffort ?? undefined,
+        }
+      : undefined;
+
   return (
     <div className={banner} role="alert" data-testid="failed-launch-banner">
+      <FailedLaunchSummary session={session} bridgeError={bridgeError} hasPair={hasPair} />
+      <div className={actionRow}>
+        <button
+          type="button"
+          className={actionButton}
+          data-testid="failed-launch-retire"
+          disabled={retiring}
+          onClick={() => setArming((current) => !current)}
+        >
+          retire…
+        </button>
+        <button
+          type="button"
+          className={actionButton}
+          data-testid="failed-launch-correct"
+          disabled={!session.harness}
+          onClick={() => {
+            const prefill = correctedPrefill();
+            if (prefill) onLaunchCorrected(prefill);
+          }}
+        >
+          launch corrected…
+        </button>
+        <span>the failed row stays visible until retired — the refusal is addressable evidence</span>
+      </div>
+      {arming ? (
+        <RetireConfirmation
+          session={session}
+          retiring={retiring}
+          retireError={retireError}
+          onRetire={() => void retire()}
+          onKeep={() => setArming(false)}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+function FailedLaunchSummary({
+  session,
+  bridgeError,
+  hasPair,
+}: {
+  session: OpenSession;
+  bridgeError: string | null;
+  hasPair: boolean;
+}) {
+  return (
+    <>
       <span className={headline}>
         <EvidenceBadge tier="refused" showWord />
         <span>launch failed — {session.harness ?? "harness"} refused the selection</span>
@@ -114,68 +172,54 @@ export function FailedLaunchBanner({
           <>no selection was sent (vendor defaults) — the failure is the runner's own refusal</>
         )}
       </span>
+    </>
+  );
+}
+
+function RetireConfirmation({
+  session,
+  retiring,
+  retireError,
+  onRetire,
+  onKeep,
+}: {
+  session: OpenSession;
+  retiring: boolean;
+  retireError: string | null;
+  onRetire: () => void;
+  onKeep: () => void;
+}) {
+  return (
+    <div className={confirmBox} data-testid="failed-launch-retire-confirm">
+      <span>
+        retire session “{session.label}”
+        {session.leafKey ? ` (leaf ${leafIdFromKey(session.leafKey)})` : ""}? This ends the
+        refused runner and removes the row from the live rail.
+      </span>
       <div className={actionRow}>
         <button
           type="button"
           className={actionButton}
-          data-testid="failed-launch-retire"
+          data-testid="failed-launch-retire-confirm-yes"
           disabled={retiring}
-          onClick={() => setArming((current) => !current)}
+          onClick={onRetire}
         >
-          retire…
+          {retiring ? "retiring…" : "retire"}
         </button>
         <button
           type="button"
           className={actionButton}
-          data-testid="failed-launch-correct"
-          disabled={!session.harness}
-          onClick={() =>
-            session.harness
-              ? onLaunchCorrected({
-                  harness: session.harness,
-                  modelKey: session.resolvedModel ?? undefined,
-                  effort: session.resolvedEffort ?? undefined,
-                })
-              : undefined
-          }
+          data-testid="failed-launch-retire-confirm-no"
+          disabled={retiring}
+          onClick={onKeep}
         >
-          launch corrected…
+          keep
         </button>
-        <span>the failed row stays visible until retired — the refusal is addressable evidence</span>
       </div>
-      {arming ? (
-        <div className={confirmBox} data-testid="failed-launch-retire-confirm">
-          <span>
-            retire session “{session.label}”
-            {session.leafKey ? ` (leaf ${leafIdFromKey(session.leafKey)})` : ""}? This ends the
-            refused runner and removes the row from the live rail.
-          </span>
-          <div className={actionRow}>
-            <button
-              type="button"
-              className={actionButton}
-              data-testid="failed-launch-retire-confirm-yes"
-              disabled={retiring}
-              onClick={() => void retire()}
-            >
-              {retiring ? "retiring…" : "retire"}
-            </button>
-            <button
-              type="button"
-              className={actionButton}
-              data-testid="failed-launch-retire-confirm-no"
-              disabled={retiring}
-              onClick={() => setArming(false)}
-            >
-              keep
-            </button>
-          </div>
-          {retireError ? (
-            <span role="alert" data-testid="failed-launch-retire-error">
-              {retireError}
-            </span>
-          ) : null}
-        </div>
+      {retireError ? (
+        <span role="alert" data-testid="failed-launch-retire-error">
+          {retireError}
+        </span>
       ) : null}
     </div>
   );

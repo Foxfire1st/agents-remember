@@ -92,6 +92,18 @@ function contextLines(source: Record<string, unknown> | undefined): string[] {
   return lines;
 }
 
+function gateHeaderLines(gateNode: GateNode | undefined, lines: string[]): void {
+  if (!gateNode) {
+    lines.push("Gate: Agent question");
+    return;
+  }
+  lines.push(`Gate: ${gateKindLabel(gateNode.kind)}`);
+  lines.push(`State: ${humanKey(gateNode.state)}`);
+  if (gateNode.decisions.length > 0) {
+    lines.push(`Decision options: ${gateNode.decisions.join(", ")}`);
+  }
+}
+
 export function requestText(
   gateNode: GateNode | undefined,
   ask: Record<string, unknown> | undefined,
@@ -102,15 +114,7 @@ export function requestText(
     pickString(packet, ["question", "prompt", "request", "message", "summary"]) ??
     askQuestion(ask);
 
-  if (gateNode) {
-    lines.push(`Gate: ${gateKindLabel(gateNode.kind)}`);
-    lines.push(`State: ${humanKey(gateNode.state)}`);
-    if (gateNode.decisions.length > 0) {
-      lines.push(`Decision options: ${gateNode.decisions.join(", ")}`);
-    }
-  } else {
-    lines.push("Gate: Agent question");
-  }
+  gateHeaderLines(gateNode, lines);
   if (subject) lines.push("", "Request:", subject);
 
   const packetContext = contextLines(packet);
@@ -150,32 +154,37 @@ export function packageResponse(
   ].join("\n");
 }
 
+type StatusCopy = (label: string | undefined, recorded: boolean) => string;
+
+const STATUS_COPY: Record<GateResponseStatus, StatusCopy> = {
+  idle: () => "",
+  recording: () => "Recording decision...",
+  sending: (_label, recorded) => (recorded ? "Notifying agent..." : "Sending..."),
+  delivered: (label, recorded) => {
+    const sent = label ? `sent to ${label}` : "sent";
+    return recorded ? `Decision recorded; ${sent}.` : label ? `Sent to ${label}.` : "Sent.";
+  },
+  inbox: (_label, recorded) =>
+    recorded ? "Decision recorded; queued agent notice." : "Queued in external inbox.",
+  unconfirmed: (_label, recorded) =>
+    recorded
+      ? "Decision recorded; couldn't confirm agent notice. Retry?"
+      : "Couldn't confirm delivery. Retry?",
+  "inbox-error": (_label, recorded) =>
+    recorded
+      ? "Decision recorded; couldn't queue agent notice. Retry?"
+      : "Couldn't queue external inbox response. Retry?",
+  "stale-gate": () => "This gate was replaced by a newer request.",
+  "no-open-gate": () => "No open gate exists for this task.",
+  "decision-error": () => "Couldn't record the decision. Retry?",
+};
+
 export function statusText(
   status: GateResponseStatus,
   label: string | undefined,
   recordedDecision: boolean,
 ): string {
-  if (status === "recording") return "Recording decision...";
-  if (status === "sending") return recordedDecision ? "Notifying agent..." : "Sending...";
-  if (status === "delivered") {
-    const sent = label ? `sent to ${label}` : "sent";
-    return recordedDecision ? `Decision recorded; ${sent}.` : label ? `Sent to ${label}.` : "Sent.";
-  }
-  if (status === "inbox") {
-    return recordedDecision ? "Decision recorded; queued agent notice." : "Queued in external inbox.";
-  }
-  if (status === "unconfirmed") {
-    return recordedDecision ? "Decision recorded; couldn't confirm agent notice. Retry?" : "Couldn't confirm delivery. Retry?";
-  }
-  if (status === "inbox-error") {
-    return recordedDecision
-      ? "Decision recorded; couldn't queue agent notice. Retry?"
-      : "Couldn't queue external inbox response. Retry?";
-  }
-  if (status === "stale-gate") return "This gate was replaced by a newer request.";
-  if (status === "no-open-gate") return "No open gate exists for this task.";
-  if (status === "decision-error") return "Couldn't record the decision. Retry?";
-  return "";
+  return STATUS_COPY[status]?.(label, recordedDecision) ?? "";
 }
 
 export function isWorktreeGateKind(kind: string): boolean {

@@ -85,6 +85,50 @@ const WS_WORDS: Record<PerSessionCockpit["freshness"]["ptyWs"], string> = {
   dropped: "ws dropped",
 };
 
+function harnessLabelVisible(session: OpenSession): boolean {
+  return Boolean(
+    session.harness && session.harness.toLowerCase() !== session.label.toLowerCase(),
+  );
+}
+
+function stateWord(visual: ReturnType<typeof seatVisualState>): string | null {
+  return visual.key === "unclassified" ? null : visual.word;
+}
+
+function leafContextLabel(session: OpenSession): string | null {
+  return session.leafKey ? `leaf ${leafIdFromKey(session.leafKey)}` : null;
+}
+
+function freshnessWords(
+  freshness: PerSessionCockpit["freshness"],
+  quiet: string | undefined,
+): string {
+  return [
+    freshness.ptyWs !== "none" ? WS_WORDS[freshness.ptyWs] : null,
+    quiet ? quiet : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+}
+
+function provenanceLabel(session: OpenSession): string | null {
+  if (!session.spawnLevel) return null;
+  return `${session.spawnLevel}${session.spawnLevelSource ? ` (${session.spawnLevelSource})` : ""}`;
+}
+
+function controlPopoverProps(
+  controlPopover: { open: boolean; onOpenChange: (open: boolean) => void } | undefined,
+): { open: boolean | undefined; onOpenChange: ((open: boolean) => void) | undefined } {
+  return {
+    open: controlPopover?.open,
+    onOpenChange: controlPopover?.onOpenChange,
+  };
+}
+
+function dotAriaLabel(visual: ReturnType<typeof seatVisualState>): string | undefined {
+  return visual.key === "unclassified" ? "state unavailable" : undefined;
+}
+
 export function HeaderStrip({
   session,
   cockpit,
@@ -100,6 +144,10 @@ export function HeaderStrip({
   const visual = seatVisualState(session);
   const freshness = cockpit?.freshness ?? { ptyWs: "none" as const, lastOutputAt: null };
   const quiet = quietFor(freshness.lastOutputAt, now);
+  const word = stateWord(visual);
+  const leaf = leafContextLabel(session);
+  const provenance = provenanceLabel(session);
+  const popoverProps = controlPopoverProps(controlPopover);
 
   return (
     <div className={strip} data-testid="header-strip">
@@ -107,8 +155,7 @@ export function HeaderStrip({
         <span className={sessionName}>{session.label}</span>
         {/* No `codex codex` stutter: the harness label is dropped when it merely repeats the
             session name (a raw terminal literally named after its harness). */}
-        {session.harness &&
-        session.harness.toLowerCase() !== session.label.toLowerCase() ? (
+        {harnessLabelVisible(session) ? (
           <span className={harnessName}>{session.harness}</span>
         ) : null}
       </span>
@@ -122,21 +169,21 @@ export function HeaderStrip({
         <ModelEffortControl
           session={session}
           cockpit={cockpit}
-          open={controlPopover?.open}
-          onOpenChange={controlPopover?.onOpenChange}
+          open={popoverProps.open}
+          onOpenChange={popoverProps.onOpenChange}
         />
       </span>
       <span className={stateCluster} data-header-segment="state" data-testid="header-state">
         <StateDot
           state={visual}
           testId="header-dot"
-          ariaLabel={visual.key === "unclassified" ? "state unavailable" : undefined}
+          ariaLabel={dotAriaLabel(visual)}
         />
-        {visual.key === "unclassified" ? null : <span>{visual.word}</span>}
+        {word !== null ? <span>{word}</span> : null}
       </span>
-      {session.leafKey ? (
+      {leaf !== null ? (
         <span className={leafContext} data-header-segment="leaf" data-testid="header-leaf">
-          leaf {leafIdFromKey(session.leafKey)}
+          {leaf}
         </span>
       ) : null}
       <span
@@ -148,19 +195,12 @@ export function HeaderStrip({
         {/* `ws —` on a seat with no pane is an em-dash placeholder: the ws word
             shows only when a pane actually reports a ws state; the last-output age still shows when
             known, and the provenance chips below carry the rest. */}
-        {[
-          freshness.ptyWs !== "none" ? WS_WORDS[freshness.ptyWs] : null,
-          quiet ? quiet : null,
-        ]
-          .filter(Boolean)
-          .join(" · ")}
+        {freshnessWords(freshness, quiet)}
         {/* No model/effort duplication here — the ModelEffortControl is the one
             header surface for the running pair; launch problems raise the FailedLaunchBanner. */}
-        {session.spawnLevel ? (
+        {provenance !== null ? (
           <span className={provenanceChip} data-testid="header-provenance-level">
-            {" "}
-            {session.spawnLevel}
-            {session.spawnLevelSource ? ` (${session.spawnLevelSource})` : ""}
+            {provenance}
           </span>
         ) : null}
       </span>

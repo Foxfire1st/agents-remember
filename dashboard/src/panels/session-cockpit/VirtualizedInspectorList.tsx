@@ -76,7 +76,6 @@ export function VirtualizedInspectorList<T>({
       <ul
         className={list}
         aria-label={label}
-        aria-setsize={rows.length}
         data-testid={testId}
         data-virtualized="true"
         style={{ height: `${virtualizer.getTotalSize()}px`, display: "block" }}

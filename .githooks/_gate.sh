@@ -123,6 +123,33 @@ report_untracked_scope() {
     --project-root "$root" untracked
 }
 
+# The frontend rail (L8): lint, typecheck, and the unit suite run from dashboard/ in BOTH hook
+# tiers, matching the dashboard CI job. A fresh checkout without node_modules fails with the
+# install instruction instead of skipping the gate.
+dashboard_checks() {
+  if [ ! -f "dashboard/package.json" ]; then
+    echo "[$label] dashboard/package.json missing; skipping the frontend rail." >&2
+    return 0
+  fi
+  if [ ! -d "dashboard/node_modules" ]; then
+    echo "[$label] dashboard/node_modules missing; run 'npm ci' in dashboard/ first." >&2
+    return 1
+  fi
+  if ! command -v npm >/dev/null 2>&1; then
+    echo "[$label] npm not found; cannot run the dashboard rail." >&2
+    return 1
+  fi
+  for step in lint typecheck test; do
+    echo "[$label] npm run $step (dashboard)..."
+    if ! npm --prefix dashboard run "$step" --silent; then
+      echo "[$label] result: dashboard-$step FAIL" >&2
+      return 1
+    fi
+    echo "[$label] result: dashboard-$step PASS"
+  done
+  return 0
+}
+
 run_fast_checks() {
   report_wrapper_tier || return 1
   if [ "${AR_QUALITY_INVOCATION:-}" = "pre-commit-sequencer" ]; then
@@ -156,6 +183,7 @@ run_fast_checks() {
     echo "[$label] result: pyright FAIL" >&2
     return 1
   fi
+  dashboard_checks || return 1
   echo "[$label] result: fast-tier PASS; the full suite (pytest + CRAP) runs on push."
   return 0
 }
@@ -181,13 +209,16 @@ run_targeted_checks() {
 run_full_checks() {
   report_wrapper_tier || return 1
   generated_copy_checks || return 1
-  echo "[$label] running full quality wrapper (ruff + format + Pyright + pytest + CRAP + diff coverage)..."
+  echo "[$label] running full quality wrapper (ruff + format + Pyright + pytest + CRAP + diff coverage + file-size)..."
   if "$py" -m agents_remember.code_quality.check; then
     echo "[$label] result: full quality wrapper PASS"
-    return 0
+  else
+    echo "[$label] result: full quality wrapper FAIL" >&2
+    return 1
   fi
-  echo "[$label] result: full quality wrapper FAIL" >&2
-  return 1
+  dashboard_checks || return 1
+  echo "[$label] result: full-tier PASS"
+  return 0
 }
 
 # --- staged-content isolation ------------------------------------------------

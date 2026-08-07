@@ -29,25 +29,34 @@ function formatTokens(value: number | undefined): string | null {
   return `${(value / 1_000_000).toFixed(1)}M`;
 }
 
+function usageChipList(usage: NonNullable<ConversationTelemetry["usage"]>["value"]): string[] {
+  const chips: string[] = [];
+  const input = formatTokens(usage.inputTokens);
+  const output = formatTokens(usage.outputTokens);
+  const cached = formatTokens(usage.cachedTokens);
+  if (input !== null) chips.push(`in ${input}`);
+  if (output !== null) chips.push(`out ${output}`);
+  if (cached !== null) chips.push(`cached ${cached}`);
+  return chips;
+}
+
+function contextChip(context: NonNullable<ConversationTelemetry["context"]>["value"]): string | null {
+  if (context === undefined || !Number.isFinite(context.percent)) return null;
+  return `ctx ${Math.round(context.percent)}%`;
+}
+
+function costChip(cost: NonNullable<ConversationTelemetry["cost"]>["value"]): string | null {
+  if (cost === undefined || !Number.isFinite(cost.amount)) return null;
+  return `${cost.amount} ${cost.currency}`;
+}
+
 function usageChips(telemetry: ConversationTelemetry): string {
-  const chips: (string | null)[] = [];
   const usage = telemetry.usage?.value;
-  if (usage !== undefined) {
-    const input = formatTokens(usage.inputTokens);
-    const output = formatTokens(usage.outputTokens);
-    const cached = formatTokens(usage.cachedTokens);
-    if (input !== null) chips.push(`in ${input}`);
-    if (output !== null) chips.push(`out ${output}`);
-    if (cached !== null) chips.push(`cached ${cached}`);
-  }
+  const chips: (string | null)[] = usage !== undefined ? usageChipList(usage) : [];
   const context = telemetry.context?.value;
-  if (context !== undefined && Number.isFinite(context.percent)) {
-    chips.push(`ctx ${Math.round(context.percent)}%`);
-  }
+  if (context !== undefined) chips.push(contextChip(context));
   const cost = telemetry.cost?.value;
-  if (cost !== undefined && Number.isFinite(cost.amount)) {
-    chips.push(`${cost.amount} ${cost.currency}`);
-  }
+  if (cost !== undefined) chips.push(costChip(cost));
   return joinChips(chips);
 }
 

@@ -194,6 +194,119 @@ export async function pasteAndConfirm(
  * reattach. The returned handle emits the `{type:stdin|resize}` text frames `_apply_terminal_input`
  * parses server-side and tears the socket down.
  */
+interface TerminalSocketState {
+  socket: WebSocket | null;
+  disposed: boolean;
+  terminalExited: boolean;
+  lastReattachIdentity: string | null;
+  // The latest requested winsize, replayed on open: the first fit() runs before the WS handshake
+  // completes, so its resize frame would be dropped (send requires OPEN) and the PTY/tmux would stay
+  // at the spawn-default size — the terminal renders small until something else triggers a resize.
+  pendingResize: { cols: number; rows: number } | null;
+  // Stdin queued before the socket opens — a create-then-send (slice 6f) injects into a brand-new
+  // session whose handshake hasn't completed, so the first package would be dropped. Replayed on open;
+  // normal typed keystrokes arrive after open and send directly.
+  pendingInput: string[];
+  // Output-readiness (slice 6f): track when PTY output last arrived so `whenReady` can wait for a
+  // booting harness to settle at its prompt before a package is injected.
+  lastOutputAt: number;
+  sawOutput: boolean;
+}
+
+function wireSocket(
+  state: TerminalSocketState,
+  current: WebSocket,
+  sink: TerminalSink,
+  options: ConnectTerminalOptions,
+): void {
+  let dropped = false;
+  const reportDropped = () => {
+    // A close from the superseded daemon must never overwrite the active replacement's state.
+    if (state.disposed || dropped || state.socket !== current) return;
+    dropped = true;
+    options.onSocketState?.("dropped");
+  };
+
+  current.onmessage = (event: MessageEvent) => {
+    if (state.socket !== current) return;
+    if (event.data instanceof ArrayBuffer) {
+      state.sawOutput = true;
+      state.lastOutputAt = Date.now();
+      sink.write(new Uint8Array(event.data));
+    } else if (typeof event.data === "string" && parseTerminalControl(event.data) === "exit") {
+      state.terminalExited = true;
+      reportDropped();
+      sink.onExit();
+    }
+  };
+  current.onclose = reportDropped;
+  // Flush the buffered size once the socket is OPEN so the PTY winsize syncs to the fitted xterm
+  // even though the first fit() fired mid-handshake. The same replay restores the exact viewport
+  // after a serving restart; input typed while disconnected follows only after the resize.
+  current.onopen = () => {
+    if (state.disposed || state.socket !== current) return;
+    options.onSocketState?.("connected");
+    if (state.pendingResize) {
+      sendFrame(state, { type: "resize", cols: state.pendingResize.cols, rows: state.pendingResize.rows });
+    }
+    for (const data of state.pendingInput) sendFrame(state, { type: "stdin", data });
+    state.pendingInput = [];
+  };
+}
+
+function sendFrame(state: TerminalSocketState, payload: Record<string, unknown>): void {
+  if (state.socket?.readyState === WS_OPEN) {
+    state.socket.send(JSON.stringify(payload));
+  }
+}
+
+function alreadyConnected(state: TerminalSocketState): boolean {
+  return Boolean(
+    state.socket &&
+      (state.socket.readyState === WS_CONNECTING || state.socket.readyState === WS_OPEN),
+  );
+}
+
+function openSocketSupersedes(
+  state: TerminalSocketState,
+  reattachOptions: { supersedeOpen?: boolean },
+): boolean {
+  return state.socket?.readyState === WS_OPEN && !reattachOptions.supersedeOpen;
+}
+
+function closeSuperseded(previous: WebSocket | null, current: WebSocket): void {
+  if (previous && previous !== current) previous.close();
+}
+
+function openTerminalSocket(
+  state: TerminalSocketState,
+  url: string,
+  factory: (url: string) => WebSocket,
+  sink: TerminalSink,
+  options: ConnectTerminalOptions,
+  reattachIdentity?: string,
+  reattachOptions: { supersedeOpen?: boolean } = {},
+): boolean {
+  if (state.disposed || state.terminalExited) return false;
+  if (reattachIdentity !== undefined) {
+    if (state.lastReattachIdentity === reattachIdentity) return false;
+    state.lastReattachIdentity = reattachIdentity;
+    if (openSocketSupersedes(state, reattachOptions)) return false;
+    options.onSocketState?.("reconnecting");
+  } else if (alreadyConnected(state)) {
+    return false;
+  }
+  const previous = state.socket;
+  const current = factory(url);
+  state.socket = current;
+  // A boot-owned replacement supersedes even a still-CONNECTING socket that belonged to the dead
+  // daemon. Set active identity first, then close it, so any synchronous stale callback is inert.
+  closeSuperseded(previous, current);
+  current.binaryType = "arraybuffer";
+  wireSocket(state, current, sink, options);
+  return true;
+}
+
 export function connectTerminal(
   sessionId: string,
   sink: TerminalSink,
@@ -201,96 +314,29 @@ export function connectTerminal(
 ): TerminalConnection {
   const factory = options.socketFactory ?? ((url) => new WebSocket(url));
   const url = options.url ?? terminalSocketUrl(sessionId);
-  let socket: WebSocket | null = null;
-  let disposed = false;
-  let terminalExited = false;
-  let lastReattachIdentity: string | null = null;
-  // The latest requested winsize, replayed on open: the first fit() runs before the WS handshake
-  // completes, so its resize frame would be dropped (send requires OPEN) and the PTY/tmux would stay
-  // at the spawn-default size — the terminal renders small until something else triggers a resize.
-  let pendingResize: { cols: number; rows: number } | null = null;
-  // Stdin queued before the socket opens — a create-then-send (slice 6f) injects into a brand-new
-  // session whose handshake hasn't completed, so the first package would be dropped. Replayed on open;
-  // normal typed keystrokes arrive after open and send directly.
-  let pendingInput: string[] = [];
-  // Output-readiness (slice 6f): track when PTY output last arrived so `whenReady` can wait for a
-  // booting harness to settle at its prompt before a package is injected.
-  let lastOutputAt = 0;
-  let sawOutput = false;
-  const send = (payload: Record<string, unknown>) => {
-    if (socket?.readyState === WS_OPEN) {
-      socket.send(JSON.stringify(payload));
-    }
+  const state: TerminalSocketState = {
+    socket: null,
+    disposed: false,
+    terminalExited: false,
+    lastReattachIdentity: null,
+    pendingResize: null,
+    pendingInput: [],
+    lastOutputAt: 0,
+    sawOutput: false,
   };
-
-  const openSocket = (
-    reattachIdentity?: string,
-    reattachOptions: { supersedeOpen?: boolean } = {},
-  ): boolean => {
-    if (disposed || terminalExited) return false;
-    if (reattachIdentity !== undefined) {
-      if (lastReattachIdentity === reattachIdentity) return false;
-      lastReattachIdentity = reattachIdentity;
-      if (socket?.readyState === WS_OPEN && !reattachOptions.supersedeOpen) return false;
-      options.onSocketState?.("reconnecting");
-    } else if (
-      socket &&
-      (socket.readyState === WS_CONNECTING || socket.readyState === WS_OPEN)
-    ) {
-      return false;
-    }
-    const superseded = socket;
-    const current = factory(url);
-    socket = current;
-    // A boot-owned replacement supersedes even a still-CONNECTING socket that belonged to the dead
-    // daemon. Set active identity first, then close it, so any synchronous stale callback is inert.
-    if (superseded && superseded !== current) superseded.close();
-    current.binaryType = "arraybuffer";
-    let dropped = false;
-    const reportDropped = () => {
-      // A close from the superseded daemon must never overwrite the active replacement's state.
-      if (disposed || dropped || socket !== current) return;
-      dropped = true;
-      options.onSocketState?.("dropped");
-    };
-
-    current.onmessage = (event: MessageEvent) => {
-      if (socket !== current) return;
-      if (event.data instanceof ArrayBuffer) {
-        sawOutput = true;
-        lastOutputAt = Date.now();
-        sink.write(new Uint8Array(event.data));
-      } else if (typeof event.data === "string" && parseTerminalControl(event.data) === "exit") {
-        terminalExited = true;
-        reportDropped();
-        sink.onExit();
-      }
-    };
-    current.onclose = reportDropped;
-    // Flush the buffered size once the socket is OPEN so the PTY winsize syncs to the fitted xterm
-    // even though the first fit() fired mid-handshake. The same replay restores the exact viewport
-    // after a serving restart; input typed while disconnected follows only after the resize.
-    current.onopen = () => {
-      if (disposed || socket !== current) return;
-      options.onSocketState?.("connected");
-      if (pendingResize) send({ type: "resize", cols: pendingResize.cols, rows: pendingResize.rows });
-      for (const data of pendingInput) send({ type: "stdin", data });
-      pendingInput = [];
-    };
-    return true;
-  };
-  openSocket();
+  openTerminalSocket(state, url, factory, sink, options);
 
   return {
     sendInput: (data) => {
-      if (socket?.readyState === WS_OPEN) send({ type: "stdin", data });
-      else pendingInput.push(data);
+      if (state.socket?.readyState === WS_OPEN) sendFrame(state, { type: "stdin", data });
+      else state.pendingInput.push(data);
     },
     sendResize: (cols, rows) => {
-      pendingResize = { cols, rows };
-      send({ type: "resize", cols, rows });
+      state.pendingResize = { cols, rows };
+      sendFrame(state, { type: "resize", cols, rows });
     },
-    reattach: (servingBootIdentity, options) => openSocket(servingBootIdentity, options),
+    reattach: (servingBootIdentity, reattachOptions) =>
+      openTerminalSocket(state, url, factory, sink, options, servingBootIdentity, reattachOptions),
     whenReady: () =>
       new Promise<void>((resolve) => {
         const IDLE_MS = 700; // output quiet this long ⇒ the harness has settled at its prompt
@@ -299,15 +345,15 @@ export function connectTerminal(
         const tick = () => {
           const now = Date.now();
           if (now - startedAt >= TIMEOUT_MS) return resolve();
-          if (sawOutput && now - lastOutputAt >= IDLE_MS) return resolve();
+          if (state.sawOutput && now - state.lastOutputAt >= IDLE_MS) return resolve();
           setTimeout(tick, 150);
         };
         tick();
       }),
-    lastOutputAt: () => lastOutputAt,
+    lastOutputAt: () => state.lastOutputAt,
     dispose: () => {
-      disposed = true; // an intentional teardown must not report a dropped live pane
-      socket?.close();
+      state.disposed = true; // an intentional teardown must not report a dropped live pane
+      state.socket?.close();
     },
   };
 }

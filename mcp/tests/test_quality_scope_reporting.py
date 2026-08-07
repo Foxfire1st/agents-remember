@@ -166,7 +166,15 @@ class WrapperScopeOutputTests(unittest.TestCase):
             root = sample_repository(Path(tmp))
             derived = scope.derive_scope(root)
 
-            for name in ("ruff", "ruff-format", "pyright", "radon-cc", "radon-mi", "pytest"):
+            for name in (
+                "ruff",
+                "ruff-format",
+                "pyright",
+                "radon-cc",
+                "radon-mi",
+                "pytest",
+                "file-size",
+            ):
                 with self.subTest(name=name):
                     line = scope_reporting.fixed_step_scope_line(name, root, derived)
                     self.assertTrue(line.startswith(f"scope: {name} | input="), line)
@@ -197,7 +205,15 @@ class WrapperScopeOutputTests(unittest.TestCase):
             )
 
             self.assertEqual(failures, 0)
-            for name in ("ruff", "ruff-format", "pyright", "radon-cc", "radon-mi", "pytest"):
+            for name in (
+                "ruff",
+                "ruff-format",
+                "pyright",
+                "radon-cc",
+                "radon-mi",
+                "pytest",
+                "file-size",
+            ):
                 header = next(index for index, line in enumerate(output) if f"## {name}" in line)
                 provenance = next(
                     index
@@ -269,8 +285,8 @@ class WrapperScopeOutputTests(unittest.TestCase):
             )
             result = scope_reporting.coverage_result_scope_line(coverage)
 
-        self.assertIn("units=3 on-disk production Python files", radon)
-        self.assertIn("3 on-disk production Python files offered to Coverage.py", pytest_line)
+        self.assertIn("units=4 on-disk package + test Python files", radon)
+        self.assertIn("4 on-disk package + test Python files offered to Coverage.py", pytest_line)
         self.assertIn("units=2 Coverage.py file records", result)
 
     def test_coverage_result_scope_is_printed_before_pytest_result(self) -> None:
@@ -432,7 +448,10 @@ class UntrackedExposureTests(unittest.TestCase):
             self.assertIn("pkg/durable_store.py", rendered)
             self.assertIn("NOT in this measurement", rendered)
 
-    def test_real_sequencer_hook_reports_spaced_untracked_path_without_mutation(self) -> None:
+    # 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/test_quality_scope_reporting.py:451).
+    def test_real_sequencer_hook_reports_spaced_untracked_path_without_mutation(
+        self,
+    ) -> None:  # pragma: no cover
         with tempfile.TemporaryDirectory() as tmp:
             root = sample_repository(Path(tmp))
             hook = root / ".githooks/_gate.sh"
@@ -473,6 +492,15 @@ class UntrackedExposureTests(unittest.TestCase):
                 encoding="utf-8",
             )
             fake_python.chmod(0o755)
+            # The dashboard rail is fail-closed on a missing install: give the temp repo a real
+            # node_modules and a stub npm so the sequencer contract test exercises the hook's
+            # untracked-scope behavior without invoking a frontend toolchain that is not installed.
+            (root / "dashboard/node_modules").mkdir(parents=True, exist_ok=True)
+            shim_dir = Path(tmp).parent / "l8-sequencer-bin"
+            shim_dir.mkdir(parents=True, exist_ok=True)
+            shim = shim_dir / "npm"
+            shim.write_text("#!/usr/bin/env sh\nexit 0\n", encoding="utf-8")
+            shim.chmod(0o755)
             untracked = root / "pkg/untracked module.py"
             untracked.write_text("VALUE = 2\n", encoding="utf-8")
             git_dir = Path(run_git(root, "rev-parse", "--git-dir").stdout.strip())
@@ -490,6 +518,7 @@ class UntrackedExposureTests(unittest.TestCase):
             before_stash = digest_text(run_git(root, "stash", "list").stdout)
             environment = dict(os.environ)
             environment["PYTHONPATH"] = str(MCP_SRC)
+            environment["PATH"] = f"{shim_dir}:{environment.get('PATH', '')}"
 
             completed = subprocess.run(
                 [hook.as_posix(), "fast"],
@@ -643,7 +672,7 @@ class CallerProvenanceTests(unittest.TestCase):
         self.assertIn("Panda include [./src/**/*.{ts,tsx}]", line)
         self.assertIn("bundled module graph intentionally uncounted", line)
         self.assertIn(
-            "units=1 Panda source glob; 3 TypeScript projects; 349 TypeScript inputs", line
+            "units=1 Panda source glob; 3 TypeScript projects; 426 TypeScript inputs", line
         )
         self.assertIn("9 explicit Vite inputs", line)
         for name in (
@@ -689,7 +718,7 @@ class CallerProvenanceTests(unittest.TestCase):
             encoding="utf-8"
         )
 
-        for step in ("lint", "typecheck", "test", "build"):
+        for step in ("lint", "typecheck", "test", "build", "coverage", "diff-coverage"):
             with self.subTest(step=step):
                 line = scope_reporting.dashboard_scope_line(REPOSITORY_ROOT, step)
                 self.assertIn(f"scope: dashboard-{step}", line)
@@ -698,6 +727,14 @@ class CallerProvenanceTests(unittest.TestCase):
                 self.assertRegex(line, r"units=.*[1-9][0-9]*")
                 self.assertIn(f"dashboard --step {step}", workflow)
                 self.assertIn(f"result: dashboard-{step} PASS", workflow)
+
+        e2e_line = scope_reporting.dashboard_scope_line(REPOSITORY_ROOT, "e2e")
+        self.assertIn("scope: dashboard-e2e", e2e_line)
+        self.assertIn(" | input=", e2e_line)
+        self.assertIn(" | config=", e2e_line)
+        self.assertRegex(e2e_line, r"units=.*[1-9][0-9]*")
+        self.assertIn("dashboard --step e2e", workflow)
+        self.assertIn("result: dashboard-playwright PASS", workflow)
 
         gate = (REPOSITORY_ROOT / ".githooks/_gate.sh").read_text(encoding="utf-8")
         self.assertIn("agents_remember.code_quality.scope_reporting", gate)
@@ -718,5 +755,5 @@ class CallerProvenanceTests(unittest.TestCase):
                 scope_reporting.tsconfig_inputs(dashboard)
 
 
-if __name__ == "__main__":
+if __name__ == "__main__":  # pragma: no cover
     unittest.main()

@@ -414,6 +414,31 @@ def _resolved_pair(resolved_launch: ResolvedLaunch | None) -> tuple[str | None, 
     return resolved_launch.model_key, resolved_launch.effort
 
 
+_DAEMON_IDENTITY_ENV_EXACT = frozenset({"CODEX_THREAD_ID", "CODEX_CI", "CLAUDE_DOC_FOCUS_PATHS"})
+
+
+def _scrub_daemon_identity_env(env: Mapping[str, str]) -> dict[str, str]:
+    """Strip the spawning session's own identity residue from a child spawn env.
+
+    A terminal opened from a daemon/agent session inherits that session's identity variables
+    (role/knob env, vendor thread ids, CI markers, game-data paths) whenever the caller forwards
+    its own environment. A role spawn carries its own explicit ``AR_SPAWN_*`` values -- signalled
+    by ``AR_SPAWN_ROLE`` -- so those survive; the vendor identity names are never explicit role
+    values and are always removed. Ordinary spawns never carried the role marker, so their env
+    is unchanged apart from the residue removal.
+    """
+    scrubbed = dict(env)
+    role_spawn = "AR_SPAWN_ROLE" in scrubbed
+    for key in list(scrubbed):
+        if (
+            key in _DAEMON_IDENTITY_ENV_EXACT
+            or key.startswith("GAME_DATA_")
+            or (key.startswith("AR_SPAWN_") and not role_spawn)
+        ):
+            del scrubbed[key]
+    return scrubbed
+
+
 def _runner_spawn_env(env: Mapping[str, str]) -> dict[str, str]:
     """Spawn env for a harness-control runner with the daemon's own package root on PYTHONPATH.
 
@@ -561,7 +586,7 @@ def _open_terminal_transaction(
         command=command,
         launch=launch,
     )
-    spawn_env = dict(launch.env or {})
+    spawn_env = _scrub_daemon_identity_env(launch.env or {})
     seat_role = migrated_seat_role(
         persisted=existing.seat_role if existing is not None else None,
         spawn_role=spawn_env.get("AR_SPAWN_ROLE") or (existing.spawn_role if existing else None),

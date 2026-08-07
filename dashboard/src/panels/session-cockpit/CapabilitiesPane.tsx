@@ -16,7 +16,11 @@ import type { OpenSession } from "../../data/sessions";
 import type { PerSessionCockpit } from "../../data/sessionCockpitStore";
 import { refreshSessionSnapshot } from "../../data/setClient";
 import { EFFORT_NOT_ECHOED_COPY } from "../../data/setControlsCopy";
-import type { ModelCapabilityWire } from "../../types/harnessCapabilities";
+import type {
+  CapabilityEnvelope,
+  CapabilitySnapshotWire,
+  ModelCapabilityWire,
+} from "../../types/harnessCapabilities";
 import {
   InspectorFact,
   InspectorNote,
@@ -104,137 +108,239 @@ export function CapabilitiesPane({
 
   return (
     <div className={inspectorPane} data-testid="capabilities-pane">
-      <InspectorSection title="Live exact-session snapshot">
-        <div className={actions}>
-          <button
-            type="button"
-            className={inspectorAction}
-            disabled={cockpit?.snapshotLoading ?? false}
-            onClick={() => void refreshSessionSnapshot(session.id)}
-            data-testid="capabilities-live-refresh"
-          >
-            {cockpit?.snapshotLoading ? "refreshing live snapshot…" : "refresh live snapshot"}
-          </button>
-          {cockpit?.liveSnapshot ? (
-            <span>fetched {cockpit.liveSnapshot.fetchedAt}</span>
-          ) : null}
-        </div>
-        {cockpit?.snapshotError ? (
-          <InspectorNote testId="capabilities-live-error">
-            {cockpit.snapshotError.status} · HTTP {cockpit.snapshotError.httpStatus ?? "—"} ·{" "}
-            {cockpit.snapshotError.detail}
-          </InspectorNote>
-        ) : null}
-        {snapshot ? (
-          <>
-            <InspectorFact
-              label="selected model"
-              value={`${selection.modelKey ?? "—"} (${selection.modelSource})`}
-              testId="capabilities-selected-model"
-            />
-            <InspectorFact
-              label="selected effort"
-              value={
-                effortNotEchoed
-                  ? `${EFFORT_NOT_ECHOED_COPY} — a live model-gated menu exists; no current effort was echoed`
-                  : `${selection.effort ?? "—"} (${selection.effortSource})`
-              }
-              testId="capabilities-selected-effort"
-            />
-            {effortMenu?.kind === "no-effort-control" ? (
-              <InspectorNote>No effort control for model {effortMenu.modelKey}.</InspectorNote>
-            ) : null}
-            {effortMenu?.kind === "no-selected-model" ? (
-              <InspectorNote>No selected model was echoed, so no effort menu can be gated.</InspectorNote>
-            ) : null}
-            {selectedModel ? (
-              <InspectorFact
-                label="current row"
-                value={`${selectedModel.displayName} · ${selectedModel.key}`}
-              />
-            ) : null}
-            <VirtualizedInspectorList
-              rows={snapshot.models}
-              rowKey={(model) => model.key}
-              renderRow={(model) => (
-                <CapabilityModelRow
-                  model={model}
-                  selected={model.key === snapshot.selectedModelKey}
-                />
-              )}
-              label="Live exact-session model capabilities"
-              testId="capabilities-live-models"
-            />
-          </>
-        ) : cockpit?.snapshotLoading ? (
-          <InspectorNote>Refreshing the exact-session snapshot.</InspectorNote>
-        ) : (
-          <InspectorNote>No exact-session capability snapshot has been read for this seat.</InspectorNote>
-        )}
-      </InspectorSection>
-
-      <InspectorSection title="Pre-session harness envelope">
-        {harness ? (
-          <>
-            <div className={actions}>
-              <button
-                type="button"
-                className={inspectorAction}
-                disabled={catalog.fetchState === "loading" || catalog.fetchState === "refreshing"}
-                onClick={() => void fetchHarnessCapabilities(harness, { refresh: true })}
-                data-testid="capabilities-catalog-refresh"
-              >
-                {catalog.fetchState === "loading" || catalog.fetchState === "refreshing"
-                  ? "refreshing pre-session catalog…"
-                  : "refresh pre-session catalog"}
-              </button>
-            </div>
-            <InspectorNote testId="capabilities-refresh-cost">
-              Refresh {capabilityCostNote(harness)}. No duration is assumed.
-            </InspectorNote>
-            {catalog.fetchState === "loading" || catalog.fetchState === "refreshing" ? (
-              <InspectorNote>
-                {capabilityLoadingCopy(
-                  harness,
-                  catalog.fetchState === "refreshing" ? "refresh" : "initial",
-                )}
-              </InspectorNote>
-            ) : null}
-            {catalog.error ? (
-              <InspectorNote testId="capabilities-catalog-error">
-                {catalog.error.status} · HTTP {catalog.error.httpStatus ?? "—"} ·{" "}
-                {catalog.error.detail}
-              </InspectorNote>
-            ) : null}
-            {preSession ? (
-              <>
-                <InspectorFact
-                  label="cache status"
-                  value={`${preSession.cacheStatus} — ${cacheStatusNote(preSession.cacheStatus)}`}
-                  testId="capabilities-cache-status"
-                />
-                <InspectorFact
-                  label="install fingerprint"
-                  value={preSession.installFingerprint}
-                  title={preSession.installFingerprint}
-                  testId="capabilities-install-fingerprint"
-                />
-                <InspectorFact
-                  label="models"
-                  value={preSession.capabilities.models.length}
-                />
-              </>
-            ) : catalog.fetchState === "idle" ? (
-              <InspectorNote>
-                No pre-session envelope is loaded for {harness}; explicit refresh runs native
-                discovery.
-              </InspectorNote>
-            ) : null}
-          </>
-        ) : (
-          <InspectorNote>This seat has no harness key, so no pre-session cache key exists.</InspectorNote>
-        )}
-      </InspectorSection>
+      <LiveSnapshotSection
+        session={session}
+        cockpit={cockpit}
+        snapshot={snapshot}
+        selection={selection}
+        effortMenu={effortMenu}
+        effortNotEchoed={effortNotEchoed}
+        selectedModel={selectedModel}
+      />
+      <PreSessionSection harness={harness} catalog={catalog} preSession={preSession} />
     </div>
   );
+}
+
+function LiveSnapshotSection({
+  session,
+  cockpit,
+  snapshot,
+  selection,
+  effortMenu,
+  effortNotEchoed,
+  selectedModel,
+}: {
+  session: OpenSession;
+  cockpit: PerSessionCockpit | undefined;
+  snapshot: CapabilitySnapshotWire | undefined;
+  selection: ReturnType<typeof effectiveSelection>;
+  effortMenu: ReturnType<typeof deriveEffortMenu> | undefined;
+  effortNotEchoed: boolean;
+  selectedModel: ReturnType<typeof modelRowByKey> | undefined;
+}) {
+  return (
+    <InspectorSection title="Live exact-session snapshot">
+      <SnapshotRefreshRow session={session} cockpit={cockpit} />
+      {cockpit?.snapshotError ? (
+        <InspectorNote testId="capabilities-live-error">
+          {cockpit.snapshotError.status} · HTTP {cockpit.snapshotError.httpStatus ?? "—"} ·{" "}
+          {cockpit.snapshotError.detail}
+        </InspectorNote>
+      ) : null}
+      {snapshot ? (
+        <SnapshotFacts
+          snapshot={snapshot}
+          selection={selection}
+          effortMenu={effortMenu}
+          effortNotEchoed={effortNotEchoed}
+          selectedModel={selectedModel}
+        />
+      ) : cockpit?.snapshotLoading ? (
+        <InspectorNote>Refreshing the exact-session snapshot.</InspectorNote>
+      ) : (
+        <InspectorNote>No exact-session capability snapshot has been read for this seat.</InspectorNote>
+      )}
+    </InspectorSection>
+  );
+}
+
+function PreSessionSection({
+  harness,
+  catalog,
+  preSession,
+}: {
+  harness: string | undefined;
+  catalog: PerHarnessCapabilities;
+  preSession: CapabilityEnvelope | undefined;
+}) {
+  return (
+    <InspectorSection title="Pre-session harness envelope">
+      {harness ? (
+        <>
+          <PreSessionRefreshRow harness={harness} catalog={catalog} />
+          <InspectorNote testId="capabilities-refresh-cost">
+            Refresh {capabilityCostNote(harness)}. No duration is assumed.
+          </InspectorNote>
+          <PreSessionNotes harness={harness} catalog={catalog} />
+          {preSession ? (
+            <>
+              <InspectorFact
+                label="cache status"
+                value={`${preSession.cacheStatus} — ${cacheStatusNote(preSession.cacheStatus)}`}
+                testId="capabilities-cache-status"
+              />
+              <InspectorFact
+                label="install fingerprint"
+                value={preSession.installFingerprint}
+                title={preSession.installFingerprint}
+                testId="capabilities-install-fingerprint"
+              />
+              <InspectorFact label="models" value={preSession.capabilities.models.length} />
+            </>
+          ) : catalog.fetchState === "idle" ? (
+            <InspectorNote>
+              No pre-session envelope is loaded for {harness}; explicit refresh runs native
+              discovery.
+            </InspectorNote>
+          ) : null}
+        </>
+      ) : (
+        <InspectorNote>This seat has no harness key, so no pre-session cache key exists.</InspectorNote>
+      )}
+    </InspectorSection>
+  );
+}
+
+function SnapshotRefreshRow({
+  session,
+  cockpit,
+}: {
+  session: OpenSession;
+  cockpit: PerSessionCockpit | undefined;
+}) {
+  return (
+    <div className={actions}>
+      <button
+        type="button"
+        className={inspectorAction}
+        disabled={cockpit?.snapshotLoading ?? false}
+        onClick={() => void refreshSessionSnapshot(session.id)}
+        data-testid="capabilities-live-refresh"
+      >
+        {cockpit?.snapshotLoading ? "refreshing live snapshot…" : "refresh live snapshot"}
+      </button>
+      {cockpit?.liveSnapshot ? (
+        <span>fetched {cockpit.liveSnapshot.fetchedAt}</span>
+      ) : null}
+    </div>
+  );
+}
+
+function SnapshotFacts({
+  snapshot,
+  selection,
+  effortMenu,
+  effortNotEchoed,
+  selectedModel,
+}: {
+  snapshot: CapabilitySnapshotWire;
+  selection: ReturnType<typeof effectiveSelection>;
+  effortMenu: ReturnType<typeof deriveEffortMenu> | undefined;
+  effortNotEchoed: boolean;
+  selectedModel: ModelCapabilityWire | undefined;
+}) {
+  return (
+    <>
+      <InspectorFact
+        label="selected model"
+        value={`${selection.modelKey ?? "—"} (${selection.modelSource})`}
+        testId="capabilities-selected-model"
+      />
+      <InspectorFact
+        label="selected effort"
+        value={
+          effortNotEchoed
+            ? `${EFFORT_NOT_ECHOED_COPY} — a live model-gated menu exists; no current effort was echoed`
+            : `${selection.effort ?? "—"} (${selection.effortSource})`
+        }
+        testId="capabilities-selected-effort"
+      />
+      {effortMenu?.kind === "no-effort-control" ? (
+        <InspectorNote>No effort control for model {effortMenu.modelKey}.</InspectorNote>
+      ) : null}
+      {effortMenu?.kind === "no-selected-model" ? (
+        <InspectorNote>No selected model was echoed, so no effort menu can be gated.</InspectorNote>
+      ) : null}
+      {selectedModel ? (
+        <InspectorFact
+          label="current row"
+          value={`${selectedModel.displayName} · ${selectedModel.key}`}
+        />
+      ) : null}
+      <VirtualizedInspectorList
+        rows={snapshot.models}
+        rowKey={(model) => model.key}
+        renderRow={(model) => (
+          <CapabilityModelRow
+            model={model}
+            selected={model.key === snapshot.selectedModelKey}
+          />
+        )}
+        label="Live exact-session model capabilities"
+        testId="capabilities-live-models"
+      />
+    </>
+  );
+}
+
+function PreSessionRefreshRow({
+  harness,
+  catalog,
+}: {
+  harness: string;
+  catalog: PerHarnessCapabilities;
+}) {
+  return (
+    <div className={actions}>
+      <button
+        type="button"
+        className={inspectorAction}
+        disabled={catalog.fetchState === "loading" || catalog.fetchState === "refreshing"}
+        onClick={() => void fetchHarnessCapabilities(harness, { refresh: true })}
+        data-testid="capabilities-catalog-refresh"
+      >
+        {catalog.fetchState === "loading" || catalog.fetchState === "refreshing"
+          ? "refreshing pre-session catalog…"
+          : "refresh pre-session catalog"}
+      </button>
+    </div>
+  );
+}
+
+function PreSessionNotes({
+  harness,
+  catalog,
+}: {
+  harness: string;
+  catalog: PerHarnessCapabilities;
+}) {
+  if (catalog.fetchState === "loading" || catalog.fetchState === "refreshing") {
+    return (
+      <InspectorNote>
+        {capabilityLoadingCopy(
+          harness,
+          catalog.fetchState === "refreshing" ? "refresh" : "initial",
+        )}
+      </InspectorNote>
+    );
+  }
+  if (catalog.error) {
+    return (
+      <InspectorNote testId="capabilities-catalog-error">
+        {catalog.error.status} · HTTP {catalog.error.httpStatus ?? "—"} · {catalog.error.detail}
+      </InspectorNote>
+    );
+  }
+  return null;
 }

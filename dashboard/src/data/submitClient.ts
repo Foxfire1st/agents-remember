@@ -1,7 +1,7 @@
 import type { OpenSession } from "./sessions";
 import { announcePolite } from "./announcer";
 import { sessionStore } from "./sessions";
-import { sessionCockpitStore } from "./sessionCockpitStore";
+import { sessionCockpitStore, type PerSessionCockpit } from "./sessionCockpitStore";
 import {
   BridgeEpochMismatchError,
   clearSubmissionAuthorityCache,
@@ -75,6 +75,27 @@ function optionalText(value: unknown): string | null | undefined {
   return value === null ? null : typeof value === "string" ? value : undefined;
 }
 
+function validReceiptShape(
+  raw: Record<string, unknown>,
+  requestId: string,
+  acceptance: unknown,
+  vendorCorrelationId: string | null | undefined,
+  acceptedAt: string | null | undefined,
+  detail: string | null | undefined,
+  bridgeEpoch: string | null | undefined,
+): boolean {
+  return (
+    raw.requestId === requestId &&
+    ["immediate", "queued", "rejected", "unknown", "unsupported"].includes(String(acceptance)) &&
+    typeof raw.submittedAt === "string" &&
+    vendorCorrelationId !== undefined &&
+    acceptedAt !== undefined &&
+    detail !== undefined &&
+    typeof bridgeEpoch === "string" &&
+    bridgeEpoch.length !== 0
+  );
+}
+
 function parseReceipt(value: unknown, requestId: string): SubmissionReceiptWire | null {
   if (typeof value !== "object" || value === null) return null;
   const raw = value as Record<string, unknown>;
@@ -83,29 +104,48 @@ function parseReceipt(value: unknown, requestId: string): SubmissionReceiptWire 
   const acceptedAt = optionalText(raw.acceptedAt);
   const detail = optionalText(raw.detail);
   const bridgeEpoch = optionalText(raw.bridgeEpoch);
-  if (
-    raw.requestId !== requestId ||
-    !["immediate", "queued", "rejected", "unknown", "unsupported"].includes(
-      String(acceptance),
-    ) ||
-    typeof raw.submittedAt !== "string" ||
-    vendorCorrelationId === undefined ||
-    acceptedAt === undefined ||
-    detail === undefined ||
-    typeof bridgeEpoch !== "string" ||
-    bridgeEpoch.length === 0
-  ) {
+  if (!validReceiptShape(raw, requestId, acceptance, vendorCorrelationId, acceptedAt, detail, bridgeEpoch)) {
     return null;
   }
   return {
     requestId,
     acceptance: acceptance as SubmissionReceiptWire["acceptance"],
-    submittedAt: raw.submittedAt,
-    vendorCorrelationId,
-    acceptedAt,
-    detail,
-    bridgeEpoch,
+    submittedAt: raw.submittedAt as string,
+    vendorCorrelationId: vendorCorrelationId as string | null,
+    acceptedAt: acceptedAt as string | null,
+    detail: detail as string | null,
+    bridgeEpoch: bridgeEpoch as string,
   };
+}
+
+function validReconciliationShape(
+  raw: Record<string, unknown>,
+  requestId: string,
+  state: unknown,
+  vendorCorrelationId: string | null | undefined,
+  detail: string | null | undefined,
+  bridgeEpoch: string | null | undefined,
+  submissionState: unknown,
+): boolean {
+  return (
+    raw.requestId === requestId &&
+    ["accepted", "rejected", "unresolved", "unsupported"].includes(String(state)) &&
+    typeof raw.reconciledAt === "string" &&
+    vendorCorrelationId !== undefined &&
+    detail !== undefined &&
+    typeof bridgeEpoch === "string" &&
+    bridgeEpoch.length !== 0 &&
+    (submissionState === null ||
+      [
+        "queued",
+        "dispatching",
+        "delivered",
+        "withdrawn",
+        "unknown",
+        "rejected",
+        "unsupported",
+      ].includes(String(submissionState)))
+  );
 }
 
 function parseReconciliation(value: unknown, requestId: string): ReconciliationResultWire | null {
@@ -116,36 +156,16 @@ function parseReconciliation(value: unknown, requestId: string): ReconciliationR
   const detail = optionalText(raw.detail);
   const bridgeEpoch = optionalText(raw.bridgeEpoch);
   const submissionState = raw.submissionState;
-  if (
-    raw.requestId !== requestId ||
-    !["accepted", "rejected", "unresolved", "unsupported"].includes(String(state)) ||
-    typeof raw.reconciledAt !== "string" ||
-    vendorCorrelationId === undefined ||
-    detail === undefined ||
-    typeof bridgeEpoch !== "string" ||
-    bridgeEpoch.length === 0 ||
-    !(
-      submissionState === null ||
-      [
-        "queued",
-        "dispatching",
-        "delivered",
-        "withdrawn",
-        "unknown",
-        "rejected",
-        "unsupported",
-      ].includes(String(submissionState))
-    )
-  ) {
+  if (!validReconciliationShape(raw, requestId, state, vendorCorrelationId, detail, bridgeEpoch, submissionState)) {
     return null;
   }
   return {
     requestId,
     state: state as ReconciliationResultWire["state"],
-    reconciledAt: raw.reconciledAt,
-    vendorCorrelationId,
-    detail,
-    bridgeEpoch,
+    reconciledAt: raw.reconciledAt as string,
+    vendorCorrelationId: vendorCorrelationId as string | null,
+    detail: detail as string | null,
+    bridgeEpoch: bridgeEpoch as string,
     submissionState: submissionState as ReconciliationResultWire["submissionState"],
   };
 }
@@ -167,31 +187,52 @@ async function routeFailure(
     };
     if (typeof body.status === "string" && body.status) status = body.status;
     if (typeof body.detail === "string" && body.detail) detail = body.detail;
-    if (
-      response.status === 409 &&
-      body.status === "bridge-epoch-mismatch" &&
-      typeof body.expectedBridgeEpoch === "string" &&
-      typeof body.actualBridgeEpoch === "string"
-    ) {
-      return new BridgeEpochMismatchError(
-        body.expectedBridgeEpoch,
-        body.actualBridgeEpoch,
-        detail,
-      );
-    }
-    if (
-      allowCertifiedPreDispatch &&
-      response.status === 503 &&
-      body.status === "pre-dispatch-failed" &&
-      body.retrySafe === true &&
-      body.stage === "control-ipc"
-    ) {
-      return new PreDispatchTransportError(detail);
-    }
+    const mismatch = epochMismatchFailure(response, body, detail);
+    if (mismatch !== null) return mismatch;
+    const certified = certifiedPreDispatchFailure(allowCertifiedPreDispatch, response, body, detail);
+    if (certified !== null) return certified;
   } catch {
     // The HTTP status is still definitive even when the error body is not JSON.
   }
   return new SubmitRouteError({ httpStatus: response.status, status, detail });
+}
+
+function epochMismatchFailure(
+  response: Response,
+  body: { status?: unknown; expectedBridgeEpoch?: unknown; actualBridgeEpoch?: unknown },
+  detail: string,
+): BridgeEpochMismatchError | null {
+  if (
+    response.status === 409 &&
+    body.status === "bridge-epoch-mismatch" &&
+    typeof body.expectedBridgeEpoch === "string" &&
+    typeof body.actualBridgeEpoch === "string"
+  ) {
+    return new BridgeEpochMismatchError(
+      body.expectedBridgeEpoch,
+      body.actualBridgeEpoch,
+      detail,
+    );
+  }
+  return null;
+}
+
+function certifiedPreDispatchFailure(
+  allowCertifiedPreDispatch: boolean,
+  response: Response,
+  body: { status?: unknown; retrySafe?: unknown; stage?: unknown },
+  detail: string,
+): PreDispatchTransportError | null {
+  if (
+    allowCertifiedPreDispatch &&
+    response.status === 503 &&
+    body.status === "pre-dispatch-failed" &&
+    body.retrySafe === true &&
+    body.stage === "control-ipc"
+  ) {
+    return new PreDispatchTransportError(detail);
+  }
+  return null;
 }
 
 export function createFetchSubmitTransport(fetchImpl: FetchLike = fetch): ReliableSubmitTransport {
@@ -307,19 +348,125 @@ interface ReconcileBounds {
   deadlineAt: number;
 }
 
+function reconcileBoundsFor(
+  options: SubmitExecutionOptions,
+  existingBounds: ReconcileBounds | undefined,
+  now: () => number,
+): ReconcileBounds {
+  const windowStartedAt = existingBounds?.windowStartedAt ?? now();
+  const deadlineAt =
+    existingBounds?.deadlineAt ??
+    windowStartedAt + (options.resolutionWindowMs ?? RECONCILE_WINDOW_MS);
+  return { windowStartedAt, deadlineAt };
+}
+
+function executionDeps(
+  options: SubmitExecutionOptions,
+): { transport: ReliableSubmitTransport; now: () => number; sleep: (ms: number) => Promise<void> } {
+  return {
+    transport: options.transport ?? createFetchSubmitTransport(),
+    now: options.now ?? Date.now,
+    sleep: options.sleep ?? wait,
+  };
+}
+
+async function applyLifecycleReconcile(
+  record: SubmitRecord,
+  sessionId: string,
+  options: SubmitExecutionOptions,
+  deadlineAt: number,
+  now: () => number,
+): Promise<{ record: SubmitRecord; resolved: boolean }> {
+  if (!options.lifecycleTransport) return { record, resolved: false };
+  const status = await boundedAttempt("reconcile", deadlineAt, now, (signal) =>
+    options.lifecycleTransport!.status(
+      sessionId,
+      record.expectedBridgeEpoch,
+      [record.requestId],
+      { signal },
+    ),
+  );
+  const lookup = status.submissions[0];
+  if (lookup?.outcome !== "found") return { record, resolved: false };
+  const projected = update(
+    projectSubmissionLifecycle(
+      record,
+      lookup.submission.state,
+      lookup.submission.detail,
+      now(),
+    ),
+    options,
+  );
+  return { record: projected, resolved: projected.phase !== "ambiguous" };
+}
+
+function reconcileCatchOutcome(
+  error: unknown,
+  record: SubmitRecord,
+  sessionId: string,
+  options: SubmitExecutionOptions,
+  now: () => number,
+  deadlineAt: number,
+): { record: SubmitRecord; done: boolean } {
+  if (error instanceof BridgeEpochMismatchError) {
+    clearSubmissionAuthorityCache(sessionId);
+    return {
+      done: true,
+      record: update(
+        {
+          ...record,
+          phase: "generation-lost",
+          serverLifecycleState: undefined,
+          detail: error.message,
+          updatedAt: now(),
+        },
+        options,
+      ),
+    };
+  }
+  if (error instanceof SubmitDeadlineError || now() >= deadlineAt) {
+    return {
+      done: true,
+      record: update(enterEndgame(refreshReconcileElapsed(record, now()), now()), options),
+    };
+  }
+  if (error instanceof SubmitRouteError && error.failure.httpStatus !== 503) {
+    return {
+      done: true,
+      record: update(
+        {
+          ...record,
+          phase: "route-error",
+          routeFailure: error.failure,
+          detail: error.failure.detail,
+          updatedAt: now(),
+        },
+        options,
+      ),
+    };
+  }
+  // A transient 503 or unclassified browser loss keeps the same-id reconcile loop alive.
+  return {
+    done: false,
+    record: update(
+      {
+        ...record,
+        detail: error instanceof Error ? error.message : String(error),
+        updatedAt: now(),
+      },
+      options,
+    ),
+  };
+}
+
 async function reconcileWindow(
   sessionId: string,
   initial: SubmitRecord,
   options: SubmitExecutionOptions,
   existingBounds?: ReconcileBounds,
 ): Promise<SubmitRecord> {
-  const transport = options.transport ?? createFetchSubmitTransport();
-  const now = options.now ?? Date.now;
-  const sleep = options.sleep ?? wait;
-  const windowStartedAt = existingBounds?.windowStartedAt ?? now();
-  const deadlineAt =
-    existingBounds?.deadlineAt ??
-    windowStartedAt + (options.resolutionWindowMs ?? RECONCILE_WINDOW_MS);
+  const { transport, now, sleep } = executionDeps(options);
+  const { windowStartedAt, deadlineAt } = reconcileBoundsFor(options, existingBounds, now);
   let record = update(enterReconcileWindow(initial, now(), windowStartedAt), options);
   for (;;) {
     const remainingMs = deadlineAt - now();
@@ -333,29 +480,9 @@ async function reconcileWindow(
     }
     record = update(recordReconcileDelay(record, delayMs, now()), options);
     try {
-      if (options.lifecycleTransport) {
-        const status = await boundedAttempt("reconcile", deadlineAt, now, (signal) =>
-          options.lifecycleTransport!.status(
-            sessionId,
-            record.expectedBridgeEpoch,
-            [record.requestId],
-            { signal },
-          ),
-        );
-        const lookup = status.submissions[0];
-        if (lookup?.outcome === "found") {
-          record = update(
-            projectSubmissionLifecycle(
-              record,
-              lookup.submission.state,
-              lookup.submission.detail,
-              now(),
-            ),
-            options,
-          );
-          if (record.phase !== "ambiguous") return record;
-        }
-      }
+      const lifecycle = await applyLifecycleReconcile(record, sessionId, options, deadlineAt, now);
+      record = lifecycle.record;
+      if (lifecycle.resolved) return record;
       const result = await boundedAttempt("reconcile", deadlineAt, now, (signal) =>
         transport.reconcile(
           sessionId,
@@ -367,45 +494,74 @@ async function reconcileWindow(
       record = update(reduceReconciliation(record, result, now()), options);
       if (record.phase !== "reconciling") return record;
     } catch (error) {
-      if (error instanceof BridgeEpochMismatchError) {
-        clearSubmissionAuthorityCache(sessionId);
-        return update(
-          {
-            ...record,
-            phase: "generation-lost",
-            serverLifecycleState: undefined,
-            detail: error.message,
-            updatedAt: now(),
-          },
-          options,
-        );
-      }
-      if (error instanceof SubmitDeadlineError || now() >= deadlineAt) {
-        return update(enterEndgame(refreshReconcileElapsed(record, now()), now()), options);
-      }
-      if (error instanceof SubmitRouteError && error.failure.httpStatus !== 503) {
-        return update(
-          {
-            ...record,
-            phase: "route-error",
-            routeFailure: error.failure,
-            detail: error.failure.detail,
-            updatedAt: now(),
-          },
-          options,
-        );
-      }
-      // A transient 503 or unclassified browser loss keeps the same-id reconcile loop alive.
-      record = update(
+      const outcome = reconcileCatchOutcome(error, record, sessionId, options, now, deadlineAt);
+      record = outcome.record;
+      if (outcome.done) return record;
+    }
+  }
+}
+
+function submitCatchOutcome(
+  error: unknown,
+  record: SubmitRecord,
+  preDispatchRetries: number,
+  sessionId: string,
+  options: SubmitExecutionOptions,
+  now: () => number,
+): { record: SubmitRecord; done: boolean; retry: boolean } {
+  if (error instanceof BridgeEpochMismatchError) {
+    clearSubmissionAuthorityCache(sessionId);
+    return {
+      done: true,
+      retry: false,
+      record: update(
         {
           ...record,
-          detail: error instanceof Error ? error.message : String(error),
+          phase: "generation-lost",
+          serverLifecycleState: undefined,
+          detail: error.message,
           updatedAt: now(),
         },
         options,
-      );
-    }
+      ),
+    };
   }
+  if (error instanceof PreDispatchTransportError && preDispatchRetries === 0) {
+    return { done: false, retry: true, record };
+  }
+  if (error instanceof SubmitRouteError || error instanceof PreDispatchTransportError) {
+    const failure =
+      error instanceof SubmitRouteError
+        ? error.failure
+        : { httpStatus: null, status: "pre-dispatch-failed", detail: error.message };
+    return {
+      done: true,
+      retry: false,
+      record: update(
+        {
+          ...record,
+          phase: "route-error",
+          routeFailure: failure,
+          detail: failure.detail,
+          updatedAt: now(),
+        },
+        options,
+      ),
+    };
+  }
+  return {
+    done: true,
+    retry: false,
+    record: update(
+      {
+        ...record,
+        phase: "ambiguous",
+        detail: error instanceof Error ? error.message : String(error),
+        updatedAt: now(),
+      },
+      options,
+    ),
+  };
 }
 
 export async function executeReliableSubmit(
@@ -413,8 +569,7 @@ export async function executeReliableSubmit(
   initial: SubmitRecord,
   options: SubmitExecutionOptions = {},
 ): Promise<SubmitRecord> {
-  const transport = options.transport ?? createFetchSubmitTransport();
-  const now = options.now ?? Date.now;
+  const { transport, now } = executionDeps(options);
   const windowStartedAt = now();
   const deadlineAt = windowStartedAt + (options.resolutionWindowMs ?? RECONCILE_WINDOW_MS);
   let record = update(initial, options);
@@ -435,49 +590,13 @@ export async function executeReliableSubmit(
       record = update(reduceReceipt(record, receipt, now()), options);
       break;
     } catch (error) {
-      if (error instanceof BridgeEpochMismatchError) {
-        clearSubmissionAuthorityCache(sessionId);
-        return update(
-          {
-            ...record,
-            phase: "generation-lost",
-            serverLifecycleState: undefined,
-            detail: error.message,
-            updatedAt: now(),
-          },
-          options,
-        );
-      }
-      if (error instanceof PreDispatchTransportError && preDispatchRetries === 0) {
+      const outcome = submitCatchOutcome(error, record, preDispatchRetries, sessionId, options, now);
+      record = outcome.record;
+      if (outcome.retry) {
         preDispatchRetries += 1;
         continue; // same id + immutable text; no request byte was dispatched
       }
-      if (error instanceof SubmitRouteError || error instanceof PreDispatchTransportError) {
-        const failure =
-          error instanceof SubmitRouteError
-            ? error.failure
-            : { httpStatus: null, status: "pre-dispatch-failed", detail: error.message };
-        return update(
-          {
-            ...record,
-            phase: "route-error",
-            routeFailure: failure,
-            detail: failure.detail,
-            updatedAt: now(),
-          },
-          options,
-        );
-      }
-      record = update(
-        {
-          ...record,
-          phase: "ambiguous",
-          detail: error instanceof Error ? error.message : String(error),
-          updatedAt: now(),
-        },
-        options,
-      );
-      break;
+      if (outcome.done) break;
     }
   }
   return record.phase === "ambiguous"
@@ -504,6 +623,14 @@ export interface SubmissionGate {
   reason?: string;
 }
 
+function controlGateReason(controlState: string | undefined): string {
+  return controlState === "failed"
+    ? "native control failed — inspect the session evidence"
+    : controlState === "disconnected"
+      ? "native control is disconnected"
+      : "native control is not ready yet";
+}
+
 export function submissionGate(session: OpenSession | undefined): SubmissionGate {
   if (!session) return { ready: false, editable: false, reason: "no session is focused" };
   if ((session.status ?? "running") !== "running") {
@@ -528,13 +655,7 @@ export function submissionGate(session: OpenSession | undefined): SubmissionGate
     if (session.controlState === "disconnected" && session.liveTurnWorking === true) {
       return { ready: true, editable: true };
     }
-    const reason =
-      session.controlState === "failed"
-        ? "native control failed — inspect the session evidence"
-        : session.controlState === "disconnected"
-          ? "native control is disconnected"
-          : "native control is not ready yet";
-    return { ready: false, editable: true, reason };
+    return { ready: false, editable: true, reason: controlGateReason(session.controlState) };
   }
   return { ready: true, editable: true };
 }
@@ -576,31 +697,42 @@ export function submissionReceiptAnnouncement(record: SubmitRecord): string | nu
   }
 }
 
-function settleStoredSubmission(
+function announceSubmissionReceipt(
+  cockpit: ReturnType<typeof sessionCockpitStore.getState>,
   sessionId: string,
   record: SubmitRecord,
-  lifecycleTransport?: SubmissionLifecycleTransport,
 ): void {
-  const cockpit = sessionCockpitStore.getState();
   const receiptAnnouncement = submissionReceiptAnnouncement(record);
   if (cockpit.focusedSessionId === sessionId && receiptAnnouncement) {
     announcePolite(receiptAnnouncement);
   }
-  if (record.source === "composer" && record.phase === "queued") {
-    const exists = cockpit.perSession[sessionId]?.queue.some(
-      (item) => item.requestId === record.requestId,
-    );
-    if (!exists) {
-      cockpit.enqueueSubmit(sessionId, {
-        requestId: record.requestId,
-        text: record.text,
-        preview: preview(record.text),
-        queuedAt: record.updatedAt,
-        expectedBridgeEpoch: record.expectedBridgeEpoch,
-        state: "queued",
-      });
-    }
-  }
+}
+
+function queueComposerSubmission(
+  cockpit: ReturnType<typeof sessionCockpitStore.getState>,
+  sessionId: string,
+  record: SubmitRecord,
+): void {
+  if (record.source !== "composer" || record.phase !== "queued") return;
+  const exists = cockpit.perSession[sessionId]?.queue.some(
+    (item) => item.requestId === record.requestId,
+  );
+  if (exists) return;
+  cockpit.enqueueSubmit(sessionId, {
+    requestId: record.requestId,
+    text: record.text,
+    preview: preview(record.text),
+    queuedAt: record.updatedAt,
+    expectedBridgeEpoch: record.expectedBridgeEpoch,
+    state: "queued",
+  });
+}
+
+function maybeStartLifecyclePolling(
+  sessionId: string,
+  record: SubmitRecord,
+  lifecycleTransport?: SubmissionLifecycleTransport,
+): void {
   // The queued path polls from enqueue; a record that exited the reconcile loop non-terminal
   // (delivering/unknown) is owed the same terminal word — keep the poller alive for it too, so
   // the composer settles on the server's word instead of "delivering…" forever.
@@ -611,6 +743,13 @@ function settleStoredSubmission(
   ) {
     ensureSubmissionLifecyclePolling(sessionId, lifecycleTransport);
   }
+}
+
+function maybeClearDraft(
+  cockpit: ReturnType<typeof sessionCockpitStore.getState>,
+  sessionId: string,
+  record: SubmitRecord,
+): void {
   if (
     record.source === "composer" &&
     record.clearDraftOnAccept &&
@@ -624,6 +763,68 @@ function settleStoredSubmission(
   }
 }
 
+function settleStoredSubmission(
+  sessionId: string,
+  record: SubmitRecord,
+  lifecycleTransport?: SubmissionLifecycleTransport,
+): void {
+  const cockpit = sessionCockpitStore.getState();
+  announceSubmissionReceipt(cockpit, sessionId, record);
+  queueComposerSubmission(cockpit, sessionId, record);
+  maybeStartLifecyclePolling(sessionId, record, lifecycleTransport);
+  maybeClearDraft(cockpit, sessionId, record);
+}
+
+function startSubmitRecordFor(
+  options: StartMessageOptions,
+  text: string,
+  expectedBridgeEpoch: string,
+  source: SubmitSource,
+  revision: number,
+  at: () => number,
+): SubmitRecord {
+  return startSubmitRecord({
+    requestId: options.requestId ?? crypto.randomUUID(),
+    text,
+    expectedBridgeEpoch,
+    source,
+    submittedRevision: revision,
+    clearDraftOnAccept: options.clearDraftOnAccept ?? source === "composer",
+    at: at(),
+  });
+}
+
+function settleTransportFor(
+  options: StartMessageOptions,
+  lifecycleTransport: SubmissionLifecycleTransport,
+): SubmissionLifecycleTransport | undefined {
+  return options.lifecycleTransport ?? (options.transport ? undefined : lifecycleTransport);
+}
+
+function submissionBlockReason(session: OpenSession | undefined): string | null {
+  const gate = submissionGate(session);
+  return gate.ready ? null : (gate.reason ?? "submission is unavailable");
+}
+
+function resolveSubmittedRevision(
+  options: StartMessageOptions,
+  perSession: PerSessionCockpit | undefined,
+): number {
+  return options.submittedRevision ?? perSession?.composer.draftRevision ?? 0;
+}
+
+function resolveLifecycleTransport(options: StartMessageOptions): SubmissionLifecycleTransport {
+  return options.lifecycleTransport ?? createFetchSubmissionLifecycleTransport();
+}
+
+function latestSubmitPending(perSession: PerSessionCockpit | undefined): boolean {
+  return Boolean(latestActiveSubmit(perSession?.submitHistory ?? []));
+}
+
+function atNow(options: StartMessageOptions): () => number {
+  return options.now ?? Date.now;
+}
+
 export async function submitSessionText(
   sessionId: string,
   text: string,
@@ -631,17 +832,16 @@ export async function submitSessionText(
 ): Promise<SubmitStartOutcome> {
   if (text.length === 0) return { status: "empty" };
   const session = sessionStore.getState().sessions.find((candidate) => candidate.id === sessionId);
-  const gate = submissionGate(session);
-  if (!gate.ready) return { status: "blocked", reason: gate.reason ?? "submission is unavailable" };
+  const blockReason = submissionBlockReason(session);
+  if (blockReason !== null) return { status: "blocked", reason: blockReason };
   const cockpit = sessionCockpitStore.getState();
   const perSession = cockpit.perSession[sessionId];
-  if (latestActiveSubmit(perSession?.submitHistory ?? [])) {
+  if (latestSubmitPending(perSession)) {
     return { status: "blocked", reason: "the previous submit is still resolving" };
   }
-  const revision = options.submittedRevision ?? perSession?.composer.draftRevision ?? 0;
+  const revision = resolveSubmittedRevision(options, perSession);
   const source = options.source ?? "background";
-  const lifecycleTransport =
-    options.lifecycleTransport ?? createFetchSubmissionLifecycleTransport();
+  const lifecycleTransport = resolveLifecycleTransport(options);
   let expectedBridgeEpoch = options.expectedBridgeEpoch;
   if (!expectedBridgeEpoch) {
     try {
@@ -655,15 +855,7 @@ export async function submitSessionText(
       };
     }
   }
-  const record = startSubmitRecord({
-    requestId: options.requestId ?? crypto.randomUUID(),
-    text,
-    expectedBridgeEpoch,
-    source,
-    submittedRevision: revision,
-    clearDraftOnAccept: options.clearDraftOnAccept ?? source === "composer",
-    at: (options.now ?? Date.now)(),
-  });
+  const record = startSubmitRecordFor(options, text, expectedBridgeEpoch, source, revision, atNow(options));
   const final = await executeReliableSubmit(sessionId, record, {
     ...options,
     lifecycleTransport,
@@ -675,7 +867,7 @@ export async function submitSessionText(
   settleStoredSubmission(
     sessionId,
     final,
-    options.lifecycleTransport ?? (options.transport ? undefined : lifecycleTransport),
+    settleTransportFor(options, lifecycleTransport),
   );
   return { status: "started", record: final };
 }

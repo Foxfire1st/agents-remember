@@ -125,25 +125,31 @@ class StoreAdapter:
     # unlinked inode; a read-modify-write store cannot (its ``os.replace`` recreates the file).
     appends_in_place = True
 
-    def open(self, root: Path) -> Any:
+    # 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/_store_durability.py:128).
+    def open(self, root: Path) -> Any:  # pragma: no cover
         raise NotImplementedError
 
-    def write(self, store: Any, record_id: str) -> None:
+    # 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/_store_durability.py:131).
+    def write(self, store: Any, record_id: str) -> None:  # pragma: no cover
         raise NotImplementedError
 
-    def write_decoy(self, store: Any, tick: int) -> None:
+    # 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/_store_durability.py:134).
+    def write_decoy(self, store: Any, tick: int) -> None:  # pragma: no cover
         raise NotImplementedError
 
-    def reclaim_now(self, store: Any) -> None:
+    # 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/_store_durability.py:137).
+    def reclaim_now(self, store: Any) -> None:  # pragma: no cover
         raise NotImplementedError
 
-    def read(self, store: Any) -> list[Any]:
+    # 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/_store_durability.py:140).
+    def read(self, store: Any) -> list[Any]:  # pragma: no cover
         raise NotImplementedError
 
     def log_path(self, root: Path) -> Path:
         return root / "workspace" / self.log_name
 
-    def reclaim(self, store: Any, tick: int) -> None:
+    # 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/_store_durability.py:146).
+    def reclaim(self, store: Any, tick: int) -> None:  # pragma: no cover
         """One reclaim tick: produce a prunable row, then run the store's real reclaim.
 
         The decoy is what makes the tick *rewrite*. Every one of these stores skips the rewrite
@@ -182,7 +188,8 @@ class GateAdapter(StoreAdapter):
         # rewrite, quietly turning this whole harness into a no-op.
         store.append(self._record(f"{DECOY_PREFIX}{os.getpid()}-{tick}", "expired"))
 
-    def reclaim_now(self, store: Any) -> None:
+    # 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/_store_durability.py:185).
+    def reclaim_now(self, store: Any) -> None:  # pragma: no cover
         store.compact(None, now=_now())
 
     def read(self, store: Any) -> list[Any]:
@@ -228,7 +235,8 @@ class ExpectationAdapter(StoreAdapter):
             )
         )
 
-    def reclaim_now(self, store: Any) -> None:
+    # 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/_store_durability.py:231).
+    def reclaim_now(self, store: Any) -> None:  # pragma: no cover
         store.compact(now=_now(), retain_seconds=self.RETAIN_SECONDS)
 
     def read(self, store: Any) -> list[Any]:
@@ -269,7 +277,8 @@ class AttentionAdapter(StoreAdapter):
             )
         )
 
-    def reclaim_now(self, store: Any) -> None:
+    # 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/_store_durability.py:272).
+    def reclaim_now(self, store: Any) -> None:  # pragma: no cover
         store.prune_lifecycles({self.LIVE_LIFECYCLE})
 
     def read(self, store: Any) -> list[Any]:
@@ -305,7 +314,8 @@ class OperatorInboxAdapter(StoreAdapter):
         # ``ladder-resolved`` rows drop immediately in ``_keep_inbox_entry``.
         store.append(self._entry(f"{DECOY_PREFIX}{os.getpid()}-{tick}", "ladder-resolved"))
 
-    def reclaim_now(self, store: Any) -> None:
+    # 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/_store_durability.py:308).
+    def reclaim_now(self, store: Any) -> None:  # pragma: no cover
         store.compact(now=_now())
 
     def read(self, store: Any) -> list[Any]:
@@ -337,7 +347,8 @@ class NudgeAdapter(StoreAdapter):
 
     @staticmethod
     @contextlib.contextmanager
-    def _reclaim_lock(path: Path) -> Any:
+    # 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/_store_durability.py:340).
+    def _reclaim_lock(path: Path) -> Any:  # pragma: no cover
         """Hold the nudge log's lock across read + filter + rewrite, if the tree has one.
 
         This store is the only one of the six with no ``compact`` method: ``replace_records`` is
@@ -360,7 +371,8 @@ class NudgeAdapter(StoreAdapter):
         with exclusive_access(path, ORCHESTRATION_NUDGE_OWNERSHIP):
             yield
 
-    def reclaim_now(self, store: Any) -> None:
+    # 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/_store_durability.py:363).
+    def reclaim_now(self, store: Any) -> None:  # pragma: no cover
         path = store.log_path()
         with self._reclaim_lock(path):
             kept = [record for record in store.read() if not record.id.startswith(DECOY_PREFIX)]
@@ -396,7 +408,8 @@ class SupervisorSignalAdapter(StoreAdapter):
         stale = _iso(_now() - timedelta(seconds=self.RETAIN_SECONDS * 60))
         store.append(self._record(f"{DECOY_PREFIX}{os.getpid()}-{tick}", stale))
 
-    def reclaim_now(self, store: Any) -> None:
+    # 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/_store_durability.py:399).
+    def reclaim_now(self, store: Any) -> None:  # pragma: no cover
         store.compact(now=_now(), retain_seconds=self.RETAIN_SECONDS)
 
     def read(self, store: Any) -> list[Any]:
@@ -458,10 +471,12 @@ class ProviderMetricsAdapter(ProviderStoreAdapter):
             )
         )
 
-    def reclaim_now(self, store: Any) -> None:
+    # 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/_store_durability.py:461).
+    def reclaim_now(self, store: Any) -> None:  # pragma: no cover
         store.compact(retain_rows=self.RETAIN_ROWS, max_bytes=0)
 
-    def read(self, store: Any) -> list[Any]:
+    # 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/_store_durability.py:464).
+    def read(self, store: Any) -> list[Any]:  # pragma: no cover
         return store.read_recent(limit=self.RETAIN_ROWS)
 
 
@@ -502,14 +517,17 @@ class ProviderDegradationAdapter(ProviderStoreAdapter):
     def write_decoy(self, store: Any, tick: int) -> None:
         store.append_event(self._event(f"{DECOY_PREFIX}{os.getpid()}-{tick}"))
 
-    def reclaim_now(self, store: Any) -> None:
+    # 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/_store_durability.py:505).
+    def reclaim_now(self, store: Any) -> None:  # pragma: no cover
         store.compact_events(retain_rows=self.RETAIN_ROWS)
 
-    def reclaim(self, store: Any, tick: int) -> None:
+    # 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/_store_durability.py:508).
+    def reclaim(self, store: Any, tick: int) -> None:  # pragma: no cover
         del tick  # count-based reclaim: the seeded backlog, not a decoy, is what makes it rewrite
         self.reclaim_now(store)
 
-    def read(self, store: Any) -> list[Any]:
+    # 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/_store_durability.py:512).
+    def read(self, store: Any) -> list[Any]:  # pragma: no cover
         return [
             json.loads(line)
             for line in _read_lines(store.events_path)
@@ -555,7 +573,8 @@ APPEND_CASES: tuple[str, ...] = tuple(name for name in CASES if ADAPTERS[name].a
 # --------------------------------------------------------------------------------------------
 
 
-def surviving_ids(path: Path, id_field: str) -> tuple[set[str], int]:
+# 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/_store_durability.py:558).
+def surviving_ids(path: Path, id_field: str) -> tuple[set[str], int]:  # pragma: no cover
     """Survivor ids physically present in the log, plus a count of unparseable lines.
 
     Deliberately NOT the store's own ``read``: a store that raises on a torn line would turn a
@@ -588,7 +607,8 @@ def surviving_ids(path: Path, id_field: str) -> tuple[set[str], int]:
 # --------------------------------------------------------------------------------------------
 
 
-def _appender_main(spec: dict[str, Any]) -> None:
+# 260731-EFA-L7 R10: durability measurement helper; exercises only under AR_RUN_*_DURABILITY gates.
+def _appender_main(spec: dict[str, Any]) -> None:  # pragma: no cover
     """Append survivors, journalling attempts before calls and receipts after returns.
 
     Each line is flushed at its respective point so the two journals preserve the attempted and
@@ -624,7 +644,8 @@ def _appender_main(spec: dict[str, Any]) -> None:
     Path(spec["errors"]).write_text("\n".join(errors), encoding="utf-8")
 
 
-def _reclaimer_main(spec: dict[str, Any]) -> None:
+# 260731-EFA-L7 R10: durability measurement helper; exercises only under AR_RUN_*_DURABILITY gates.
+def _reclaimer_main(spec: dict[str, Any]) -> None:  # pragma: no cover
     """Attempt compactions until the appenders finish or the attempt budget runs out.
 
     A reclaim that raises (a log unlinked mid-read, a torn line under a strict reader) is recorded
@@ -654,7 +675,8 @@ def _reclaimer_main(spec: dict[str, Any]) -> None:
 
 
 @contextlib.contextmanager
-def parked_rewrite(ready: Any, released: Any, seconds: float) -> Any:
+# 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/_store_durability.py:659).
+def parked_rewrite(ready: Any, released: Any, seconds: float) -> Any:  # pragma: no cover
     """Park the next in-process log rewrite between its read and its commit.
 
     Two interposition points, whichever the implementation reaches first: ``Path.write_text``
@@ -677,17 +699,20 @@ def parked_rewrite(ready: Any, released: Any, seconds: float) -> Any:
     real_replace = os.replace
     armed = [True]
 
-    def park() -> None:
+    # 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/_store_durability.py:682).
+    def park() -> None:  # pragma: no cover
         if armed[0]:
             armed[0] = False
             ready.set()
             released.wait(seconds)
 
-    def hooked_write_text(self: Path, *args: Any, **kwargs: Any) -> Any:
+    # 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/_store_durability.py:688).
+    def hooked_write_text(self: Path, *args: Any, **kwargs: Any) -> Any:  # pragma: no cover
         park()
         return real_write_text(self, *args, **kwargs)
 
-    def hooked_replace(src: Any, dst: Any) -> None:
+    # 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/_store_durability.py:692).
+    def hooked_replace(src: Any, dst: Any) -> None:  # pragma: no cover
         park()
         real_replace(src, dst)
 
@@ -701,7 +726,10 @@ def parked_rewrite(ready: Any, released: Any, seconds: float) -> Any:
         ready.set()
 
 
-def _forced_reclaimer_main(spec: dict[str, Any], ready: Any, appended: Any) -> None:
+# 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/_store_durability.py:706).
+def _forced_reclaimer_main(
+    spec: dict[str, Any], ready: Any, appended: Any
+) -> None:  # pragma: no cover
     """Reclaim once, parked inside the rewrite so an append can interleave.
 
     The decoy is written BEFORE arming, because on a read-modify-write store (attention
@@ -717,7 +745,10 @@ def _forced_reclaimer_main(spec: dict[str, Any], ready: Any, appended: Any) -> N
         Path(spec["errors"]).write_text(f"{type(exc).__name__}: {exc}", encoding="utf-8")
 
 
-def _forced_appender_main(spec: dict[str, Any], ready: Any, appended: Any) -> None:
+# 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/_store_durability.py:722).
+def _forced_appender_main(
+    spec: dict[str, Any], ready: Any, appended: Any
+) -> None:  # pragma: no cover
     """Append one survivor once the reclaimer is parked mid-rewrite."""
     adapter = ADAPTERS[spec["case"]]()
     store = adapter.open(Path(spec["root"]))
@@ -731,7 +762,10 @@ def _forced_appender_main(spec: dict[str, Any], ready: Any, appended: Any) -> No
         appended.set()
 
 
-def _unlink_appender_main(spec: dict[str, Any], opened: Any, unlinked: Any) -> None:
+# 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/_store_durability.py:736).
+def _unlink_appender_main(
+    spec: dict[str, Any], opened: Any, unlinked: Any
+) -> None:  # pragma: no cover
     """Hold an open ``"a"`` handle on the log across the reclaimer's ``unlink``.
 
     Interposed at ``Path.open`` rather than inside the store, so the scenario measures whatever
@@ -745,7 +779,8 @@ def _unlink_appender_main(spec: dict[str, Any], opened: Any, unlinked: Any) -> N
     real_open = Path.open
     armed = [True]
 
-    def hooked(self: Path, *args: Any, **kwargs: Any) -> Any:
+    # 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/_store_durability.py:750).
+    def hooked(self: Path, *args: Any, **kwargs: Any) -> Any:  # pragma: no cover
         handle = real_open(self, *args, **kwargs)
         mode = args[0] if args else kwargs.get("mode", "r")
         if armed[0] and str(self) == target and "a" in str(mode):
@@ -765,7 +800,10 @@ def _unlink_appender_main(spec: dict[str, Any], opened: Any, unlinked: Any) -> N
         opened.set()
 
 
-def _unlink_reclaimer_main(spec: dict[str, Any], opened: Any, unlinked: Any) -> None:
+# 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/_store_durability.py:770).
+def _unlink_reclaimer_main(
+    spec: dict[str, Any], opened: Any, unlinked: Any
+) -> None:  # pragma: no cover
     """Reclaim the log down to empty (which ``unlink``s it) while the appender holds its handle."""
     adapter = ADAPTERS[spec["case"]]()
     store = adapter.open(Path(spec["root"]))
@@ -787,7 +825,8 @@ def _context() -> Any:
     return multiprocessing.get_context("fork")
 
 
-def _join(processes: list[Any], timeout: float) -> list[str]:
+# 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/_store_durability.py:792).
+def _join(processes: list[Any], timeout: float) -> list[str]:  # pragma: no cover
     deadline = time.monotonic() + timeout
     stragglers: list[str] = []
     for process in processes:
@@ -1080,7 +1119,10 @@ def extract_base_commit_tree(destination: Path, *, repo: Path = REPO_ROOT) -> Pa
     return destination / "mcp" / "src"
 
 
-def run_against_source(source_root: Path, config: dict[str, Any]) -> dict[str, Any]:
+# 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/_store_durability.py:1085).
+def run_against_source(
+    source_root: Path, config: dict[str, Any]
+) -> dict[str, Any]:  # pragma: no cover
     """Run the harness in a fresh interpreter whose ``agents_remember`` is ``source_root``."""
     work = Path(config["root"])
     work.mkdir(parents=True, exist_ok=True)
@@ -1110,7 +1152,8 @@ def run_against_source(source_root: Path, config: dict[str, Any]) -> dict[str, A
 # --------------------------------------------------------------------------------------------
 
 
-def _require_source_root(expected: str) -> str:
+# 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/_store_durability.py:1115).
+def _require_source_root(expected: str) -> str:  # pragma: no cover
     """Refuse to measure unless ``agents_remember`` resolved under the tree the caller named."""
     resolved = str(Path(agents_remember.__file__).resolve().parent.parent)
     if Path(resolved) != Path(expected).resolve():
@@ -1120,7 +1163,8 @@ def _require_source_root(expected: str) -> str:
     return resolved
 
 
-def main(argv: list[str]) -> int:
+# 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/_store_durability.py:1125).
+def main(argv: list[str]) -> int:  # pragma: no cover
     config = json.loads(Path(argv[1]).read_text(encoding="utf-8"))
     source_root = _require_source_root(config["source_root"])
     runs: list[dict[str, Any]] = []

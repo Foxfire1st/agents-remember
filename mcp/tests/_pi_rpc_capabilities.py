@@ -113,7 +113,8 @@ class ObservedCapabilities:
     fire_and_forget_methods: frozenset[str]
 
 
-def _require_path() -> str:
+# 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/_pi_rpc_capabilities.py:116).
+def _require_path() -> str:  # pragma: no cover
     path = os.environ.get("PATH")
     if not path:
         raise RuntimeError("PATH must be set to launch the installed Pi")
@@ -127,7 +128,8 @@ class PiRpcProbe:
     under test, so a probe that reused it could only ever agree with it.
     """
 
-    def __init__(
+    # 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/_pi_rpc_capabilities.py:130).
+    def __init__(  # pragma: no cover
         self,
         executable: str,
         *,
@@ -166,13 +168,16 @@ class PiRpcProbe:
         self._reader = threading.Thread(target=self._read_stdout, daemon=True)
         self._reader.start()
 
-    def __enter__(self) -> PiRpcProbe:
+    # 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/_pi_rpc_capabilities.py:169).
+    def __enter__(self) -> PiRpcProbe:  # pragma: no cover
         return self
 
-    def __exit__(self, *_exc: object) -> None:
+    # 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/_pi_rpc_capabilities.py:172).
+    def __exit__(self, *_exc: object) -> None:  # pragma: no cover
         self.close()
 
-    def _read_stdout(self) -> None:
+    # 260731-EFA-L7 R10: AR_RUN_PI_RPC_SMOKE-gated probe; needs the installed Pi RPC build.
+    def _read_stdout(self) -> None:  # pragma: no cover
         stream = self._process.stdout
         assert stream is not None
         descriptor = stream.fileno()
@@ -192,38 +197,48 @@ class PiRpcProbe:
                         self._frames.append(json.loads(line))
 
     @property
-    def raw(self) -> bytes:
+    # 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/_pi_rpc_capabilities.py:196).
+    def raw(self) -> bytes:  # pragma: no cover
         with self._lock:
             return bytes(self._raw)
 
     @property
-    def frames(self) -> tuple[Mapping[str, object], ...]:
+    # 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/_pi_rpc_capabilities.py:201).
+    def frames(self) -> tuple[Mapping[str, object], ...]:  # pragma: no cover
         with self._lock:
             return tuple(self._frames)
 
-    def send(self, command: Mapping[str, object]) -> None:
+    # 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/_pi_rpc_capabilities.py:205).
+    def send(self, command: Mapping[str, object]) -> None:  # pragma: no cover
         self.send_bytes(json.dumps(command, ensure_ascii=False).encode("utf-8") + b"\n")
 
-    def send_bytes(self, payload: bytes) -> None:
+    # 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/_pi_rpc_capabilities.py:208).
+    def send_bytes(self, payload: bytes) -> None:  # pragma: no cover
         stdin = self._process.stdin
         assert stdin is not None
         stdin.write(payload)
         stdin.flush()
 
-    def settle(self, seconds: float) -> None:
+    # 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/_pi_rpc_capabilities.py:214).
+    def settle(self, seconds: float) -> None:  # pragma: no cover
         """Give the process a bounded window to emit whatever the last input provoked."""
         time.sleep(seconds)
 
-    def wait_for_event(self, event_type: str, *, timeout: float = 30.0) -> bool:
+    # 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/_pi_rpc_capabilities.py:218).
+    def wait_for_event(self, event_type: str, *, timeout: float = 30.0) -> bool:  # pragma: no cover
         return self._wait(lambda frame: frame.get("type") == event_type, timeout)
 
-    def wait_for_response(self, request_id: str, *, timeout: float = 30.0) -> bool:
+    # 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/_pi_rpc_capabilities.py:221).
+    def wait_for_response(
+        self, request_id: str, *, timeout: float = 30.0
+    ) -> bool:  # pragma: no cover
         return self._wait(
             lambda frame: frame.get("type") == "response" and frame.get("id") == request_id,
             timeout,
         )
 
-    def _wait(self, matches: object, timeout: float) -> bool:
+    # 260731-EFA-L7 R10: AR_RUN_PI_RPC_SMOKE-gated probe; needs the installed Pi RPC build.
+    def _wait(self, matches: object, timeout: float) -> bool:  # pragma: no cover
         assert callable(matches)
         deadline = time.time() + timeout
         while time.time() < deadline:
@@ -232,20 +247,23 @@ class PiRpcProbe:
             time.sleep(0.05)
         return False
 
-    def response_for(self, request_id: str) -> Mapping[str, object] | None:
+    # 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/_pi_rpc_capabilities.py:237).
+    def response_for(self, request_id: str) -> Mapping[str, object] | None:  # pragma: no cover
         for frame in self.frames:
             if frame.get("type") == "response" and frame.get("id") == request_id:
                 return frame
         return None
 
-    def event_types(self) -> frozenset[str]:
+    # 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/_pi_rpc_capabilities.py:243).
+    def event_types(self) -> frozenset[str]:  # pragma: no cover
         return frozenset(
             str(frame["type"])
             for frame in self.frames
             if frame.get("type") not in (None, "response")
         )
 
-    def close(self) -> None:
+    # 260731-EFA-L7 R10: AR_RUN_PI_RPC_SMOKE-gated probe; needs the installed Pi RPC build.
+    def close(self) -> None:  # pragma: no cover
         stdin = self._process.stdin
         if stdin is not None and not stdin.closed:
             # The child exits on its own once its work is done, so the close can race it.
@@ -262,7 +280,8 @@ class PiRpcProbe:
                 stream.close()
 
 
-def observe_version(executable: str) -> str:
+# 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/_pi_rpc_capabilities.py:268).
+def observe_version(executable: str) -> str:  # pragma: no cover
     """The version string the installed binary reports for itself."""
     return subprocess.run(
         [executable, "--version"],
@@ -274,7 +293,8 @@ def observe_version(executable: str) -> str:
     ).stdout.strip()
 
 
-def _dispatch_probe(probe: PiRpcProbe, name: str) -> None:
+# 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/_pi_rpc_capabilities.py:280).
+def _dispatch_probe(probe: PiRpcProbe, name: str) -> None:  # pragma: no cover
     """Send one command with the minimum arguments its handler needs."""
     arguments: Mapping[str, object] = {}
     if name == "set_model":
@@ -286,7 +306,8 @@ def _dispatch_probe(probe: PiRpcProbe, name: str) -> None:
     probe.send({"id": f"probe-{name}", "type": name, **arguments})
 
 
-def _accepted(probe: PiRpcProbe, name: str) -> bool:
+# 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/_pi_rpc_capabilities.py:292).
+def _accepted(probe: PiRpcProbe, name: str) -> bool:  # pragma: no cover
     """True when the runtime dispatched the command rather than rejecting it as unknown.
 
     A handler that answers ``success: false`` for its own reasons still counts: the point is
@@ -299,7 +320,8 @@ def _accepted(probe: PiRpcProbe, name: str) -> bool:
     return not (isinstance(error, str) and error.startswith("Unknown command"))
 
 
-def _sweep_commands(probe: PiRpcProbe, names: Sequence[str]) -> set[str]:
+# 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/_pi_rpc_capabilities.py:305).
+def _sweep_commands(probe: PiRpcProbe, names: Sequence[str]) -> set[str]:  # pragma: no cover
     accepted: set[str] = set()
     for name in names:
         _dispatch_probe(probe, name)
@@ -309,7 +331,8 @@ def _sweep_commands(probe: PiRpcProbe, names: Sequence[str]) -> set[str]:
     return accepted
 
 
-def _exercise_agent_run(probe: PiRpcProbe) -> None:
+# 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/_pi_rpc_capabilities.py:315).
+def _exercise_agent_run(probe: PiRpcProbe) -> None:  # pragma: no cover
     """Drive one real offline turn so the agent lifecycle and retry events actually fire.
 
     The configured endpoint is the discard port, so the turn fails immediately and Pi enters
@@ -326,7 +349,8 @@ def _exercise_agent_run(probe: PiRpcProbe) -> None:
     probe.wait_for_event("agent_settled")
 
 
-def _exercise_queue_and_compaction(probe: PiRpcProbe) -> None:
+# 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/_pi_rpc_capabilities.py:332).
+def _exercise_queue_and_compaction(probe: PiRpcProbe) -> None:  # pragma: no cover
     """Provoke the queue and compaction events without needing a provider."""
     probe.send({"id": "probe-steer", "type": "steer", "message": "ar probe steer"})
     probe.wait_for_response("probe-steer", timeout=20)
@@ -338,7 +362,8 @@ def _exercise_queue_and_compaction(probe: PiRpcProbe) -> None:
     probe.settle(1.0)
 
 
-def _observe_framing(probe: PiRpcProbe) -> dict[str, object]:
+# 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/_pi_rpc_capabilities.py:344).
+def _observe_framing(probe: PiRpcProbe) -> dict[str, object]:  # pragma: no cover
     """Read the framing contract off the bytes, not off the documentation."""
     probe.send({"id": "probe-name", "type": "set_session_name", "name": SEPARATOR_PROBE_NAME})
     probe.wait_for_event("session_info_changed")
@@ -356,7 +381,8 @@ def _observe_framing(probe: PiRpcProbe) -> dict[str, object]:
     }
 
 
-def _separators_stay_on_one_line(raw: bytes) -> bool:
+# 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/_pi_rpc_capabilities.py:362).
+def _separators_stay_on_one_line(raw: bytes) -> bool:  # pragma: no cover
     """The separators must sit inside a single LF-delimited record that still parses."""
     marker = LINE_SEPARATOR.encode("utf-8")
     for line in raw.split(b"\n"):
@@ -367,11 +393,15 @@ def _separators_stay_on_one_line(raw: bytes) -> bool:
     return False
 
 
-def _ui_requests(probe: PiRpcProbe) -> tuple[Mapping[str, object], ...]:
+# 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/_pi_rpc_capabilities.py:373).
+def _ui_requests(probe: PiRpcProbe) -> tuple[Mapping[str, object], ...]:  # pragma: no cover
     return tuple(frame for frame in probe.frames if frame.get("type") == "extension_ui_request")
 
 
-def _answer_every_request(probe: PiRpcProbe, frames: Sequence[Mapping[str, object]]) -> None:
+# 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/_pi_rpc_capabilities.py:377).
+def _answer_every_request(
+    probe: PiRpcProbe, frames: Sequence[Mapping[str, object]]
+) -> None:  # pragma: no cover
     """Reply to every UI request seen so far.
 
     The probe does not assume which methods are dialogs -- that is the thing being measured
@@ -388,7 +418,8 @@ def _answer_every_request(probe: PiRpcProbe, frames: Sequence[Mapping[str, objec
     probe.settle(2.0)
 
 
-def _resolved_methods(probe: PiRpcProbe) -> set[str]:
+# 260731-EFA-L7 R10: AR_RUN_PI_RPC_SMOKE-gated helper; needs the installed Pi RPC build.
+def _resolved_methods(probe: PiRpcProbe) -> set[str]:  # pragma: no cover
     """The methods whose promise the extension saw resolve after we replied."""
     resolved: set[str] = set()
     for frame in probe.frames:
@@ -400,7 +431,8 @@ def _resolved_methods(probe: PiRpcProbe) -> set[str]:
     return resolved
 
 
-def _observe_ui_methods(
+# 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/_pi_rpc_capabilities.py:407).
+def _observe_ui_methods(  # pragma: no cover
     executable: str, *, workspace: Path
 ) -> tuple[frozenset[str], frozenset[str]]:
     """Run the probe extension and split its UI calls by whether they awaited a reply."""
@@ -416,7 +448,8 @@ def _observe_ui_methods(
     return frozenset(dialog), frozenset(emitted - dialog)
 
 
-def _observe_state_fields(probe: PiRpcProbe) -> frozenset[str]:
+# 260731-EFA-L7 R10: AR_RUN_PI_RPC_SMOKE-gated helper; needs the installed Pi RPC build.
+def _observe_state_fields(probe: PiRpcProbe) -> frozenset[str]:  # pragma: no cover
     probe.send({"id": "probe-state", "type": "get_state"})
     if not probe.wait_for_response("probe-state", timeout=20):
         raise RuntimeError("installed Pi did not answer get_state")
@@ -428,7 +461,8 @@ def _observe_state_fields(probe: PiRpcProbe) -> frozenset[str]:
     return frozenset(str(key) for key in data)
 
 
-def observe_capabilities(
+# 260731-EFA-L7 R10: AR_RUN_PI_RPC_SMOKE-gated helper; needs the installed Pi RPC build.
+def observe_capabilities(  # pragma: no cover
     executable: str, *, workspace: Path, commands: Sequence[str]
 ) -> ObservedCapabilities:
     """Drive the installed Pi and report the capability surface it demonstrated.

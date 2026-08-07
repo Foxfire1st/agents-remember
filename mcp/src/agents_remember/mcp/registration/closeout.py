@@ -49,6 +49,7 @@ def register_closeout_tools(server: FastMCP, config: McpRuntimeConfig) -> None:
         code_commit_message: str,
         memory_commit_message: str = "",
         ledger_commit_message: str = "",
+        *,
         dry_run: bool = False,
     ) -> dict[str, Any]:
         """Apply an approved worktree closeout. When code would commit and the checkout

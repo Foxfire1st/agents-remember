@@ -55,15 +55,28 @@ function verbPhrase(item: ConversationItem): string {
   return item.kind === "tool-result" ? "tool result" : "tool call";
 }
 
+function outputClampState(
+  text: string,
+  expanded: boolean,
+): { clampable: boolean; hiddenLines: number; shown: string } {
+  const total = sourceLineCount(text);
+  const clampable = total > OUTPUT_THRESHOLD_LINES;
+  return {
+    clampable,
+    hiddenLines: clampable && !expanded ? Math.max(0, total - OUTPUT_THRESHOLD_LINES) : 0,
+    shown:
+      clampable && !expanded
+        ? text.split("\n").slice(0, OUTPUT_THRESHOLD_LINES).join("\n")
+        : text,
+  };
+}
+
 function OutputBlock({ block }: { block: ConversationContentBlock }) {
   const { regionId } = useClampIds();
   const [expanded, setExpanded] = useState(false);
   if (block.type !== "tool-output") return null;
   const text = block.text ?? "";
-  const total = sourceLineCount(text);
-  const clampable = total > OUTPUT_THRESHOLD_LINES;
-  const hiddenLines = clampable && !expanded ? Math.max(0, total - OUTPUT_THRESHOLD_LINES) : 0;
-  const shown = clampable && !expanded ? text.split("\n").slice(0, OUTPUT_THRESHOLD_LINES).join("\n") : text;
+  const { clampable, hiddenLines, shown } = outputClampState(text, expanded);
   if (text.length === 0) return null;
   return (
     <>

@@ -5,20 +5,22 @@ import {
   applySubmissionLifecycle,
   BridgeEpochMismatchError,
   createFetchSubmissionLifecycleTransport,
-  dismissWithdrawnRecovery,
   ensureSubmissionLifecyclePolling,
   HIDDEN_STATUS_POLL_MS,
   pollSubmissionLifecycleOnce,
   resetSubmissionLifecycleClientForDev,
-  restoreWithdrawnRecovery,
   STATUS_FAILURE_BACKOFF_MS,
   stopSubmissionLifecyclePolling,
   VISIBLE_STATUS_POLL_MS,
-  withdrawLastQueuedSubmission,
   type SubmissionLifecycleTransport,
   type SubmissionStatusBatchWire,
   type WithdrawalResultWire,
 } from "./submissionLifecycleClient";
+import {
+  dismissWithdrawnRecovery,
+  restoreWithdrawnRecovery,
+  withdrawLastQueuedSubmission,
+} from "./submissionWithdrawal";
 import { latestActiveSubmit, LIFECYCLE_WATCH_WINDOW_MS, startSubmitRecord } from "./submitMachine";
 import type { SubmissionLifecycleState } from "../types/harnessCapabilities";
 

@@ -133,6 +133,27 @@ function parseWireQuestions(payload: Record<string, unknown>): InteractionQuesti
  * as `questions` would strand the operator at a submit that can never complete, so the WHOLE
  * payload falls back instead — the prompt is surfaced in the reason, never silently dropped.
  */
+function optionlessReason(questions: InteractionQuestion[]): string {
+  return (
+    "a structured question here carries no options to choose from, so the harness's " +
+    "all-or-nothing answer (every question or none) can never be completed — this " +
+    "interaction cannot be answered from the cockpit (raw payload in the inspector). " +
+    `Unanswerable question${questions.length > 1 ? "s" : ""}: ${questions
+      .map((question) => `'${question.text}'`)
+      .join("; ")}`
+  );
+}
+
+function parseWireChoices(raw: Record<string, unknown>): string[] {
+  return Array.isArray(raw.choices)
+    ? raw.choices.filter((choice): choice is string => typeof choice === "string" && choice.length > 0)
+    : [];
+}
+
+function wireViewKind(raw: Record<string, unknown>): string {
+  return text(raw.kind) ?? "unknown";
+}
+
 export function representPendingInteraction(
   raw: Record<string, unknown> | undefined,
 ): InteractionRepresentation | null {
@@ -145,13 +166,11 @@ export function representPendingInteraction(
         "a pending interaction exists but carries no interactionId — it cannot be answered from here (raw payload in the inspector)",
     };
   }
-  const choices = Array.isArray(raw.choices)
-    ? raw.choices.filter((choice): choice is string => typeof choice === "string" && choice.length > 0)
-    : [];
+  const choices = parseWireChoices(raw);
   const questions = parseWireQuestions(raw);
   const view: PendingInteractionView = {
     interactionId,
-    kind: text(raw.kind) ?? "unknown",
+    kind: wireViewKind(raw),
     prompt: text(raw.prompt) ?? "",
     choices,
     questions,
@@ -164,16 +183,7 @@ export function representPendingInteraction(
     // it is not hidden, and keeping the raw payload inspectable exactly like the no-interactionId case.
     const optionless = questions.filter((question) => question.options.length === 0);
     if (optionless.length > 0) {
-      return {
-        mode: "unrepresentable",
-        reason:
-          "a structured question here carries no options to choose from, so the harness's " +
-          "all-or-nothing answer (every question or none) can never be completed — this " +
-          "interaction cannot be answered from the cockpit (raw payload in the inspector). " +
-          `Unanswerable question${optionless.length > 1 ? "s" : ""}: ${optionless
-            .map((question) => `'${question.text}'`)
-            .join("; ")}`,
-      };
+      return { mode: "unrepresentable", reason: optionlessReason(optionless) };
     }
     return { mode: "questions", view };
   }
@@ -341,6 +351,38 @@ type InteractionRouteResult =
   | { status: "accepted" }
   | { status: "error"; error: string; epochMismatch: boolean };
 
+function interactionRouteFailure(word: string, detail: string): InteractionRouteResult {
+  return {
+    status: "error",
+    epochMismatch: word === "bridge-epoch-mismatch",
+    error: detail
+      ? `interaction response POST failed (${word}): ${detail}`
+      : `interaction response POST failed (${word})`,
+  };
+}
+
+async function readJsonBody(response: Response): Promise<unknown> {
+  try {
+    return await response.json();
+  } catch {
+    return undefined;
+  }
+}
+
+function responseRecord(parsed: unknown): Record<string, unknown> | undefined {
+  return typeof parsed === "object" && parsed !== null
+    ? (parsed as Record<string, unknown>)
+    : undefined;
+}
+
+function responseStatusWord(record: Record<string, unknown> | undefined): string | undefined {
+  return typeof record?.status === "string" ? record.status : undefined;
+}
+
+function responseDetail(record: Record<string, unknown> | undefined): string {
+  return typeof record?.detail === "string" ? record.detail : "";
+}
+
 /**
  * POST the session-direct interaction-response route (NO lifecycle required).
  * Body is exactly one of {interactionId, expectedBridgeEpoch, answers} (AskUserQuestion) or
@@ -372,27 +414,13 @@ async function postInteractionResponse(
       }`,
     };
   }
-  let parsed: unknown;
-  try {
-    parsed = await response.json();
-  } catch {
-    parsed = undefined;
-  }
-  const record =
-    typeof parsed === "object" && parsed !== null
-      ? (parsed as Record<string, unknown>)
-      : undefined;
-  const statusWord = typeof record?.status === "string" ? record.status : undefined;
+  const parsed = await readJsonBody(response);
+  const record = responseRecord(parsed);
+  const statusWord = responseStatusWord(record);
   if (response.ok && statusWord === "accepted") return { status: "accepted" };
-  const detail = typeof record?.detail === "string" ? record.detail : "";
+  const detail = responseDetail(record);
   const word = statusWord ?? `HTTP ${response.status}`;
-  return {
-    status: "error",
-    epochMismatch: word === "bridge-epoch-mismatch",
-    error: detail
-      ? `interaction response POST failed (${word}): ${detail}`
-      : `interaction response POST failed (${word})`,
-  };
+  return interactionRouteFailure(word, detail);
 }
 
 /**
@@ -501,96 +529,81 @@ export function interactionAnswerIsLocked(sessionId: string, interactionId: stri
  * (the backend's all-or-nothing contract — a partial map is refused client-side first);
  * permission-kind → direct-route response; anything else → the legacy gate fallback.
  */
-export async function submitInteractionAnswer(args: {
-  session: OpenSession;
-  interactionId: string;
-  /** Single-string answer: a clicked choice, a permission response, or composer text. */
-  answer?: string;
-  /** Structured answers map keyed by EXACT question text (questions mode). */
-  answers?: Record<string, string>;
-  draftRevision?: number;
-}): Promise<InteractionAnswerDispatchOutcome> {
-  const answer = args.answer?.trim() ?? "";
-  if (!args.answers && !answer) return { status: "error", error: "the answer text is empty" };
-  const before = sessionCockpitStore.getState().perSession[args.session.id]?.interactionAnswer;
-  if (before?.interactionId === args.interactionId) {
-    if (before.inflight) return { status: "blocked", reason: "inflight" };
-    if (before.answeredAt !== undefined) return { status: "blocked", reason: "answered" };
-  }
-  // The retained single-string form: the answer itself, or an honest summary of the map (retry
-  // re-sends the MAP, never this summary).
-  const retained =
-    args.answers !== undefined ? Object.values(args.answers).join(" · ") : answer;
-  sessionCockpitStore.getState().setInteractionAnswer(args.session.id, {
-    interactionId: args.interactionId,
-    inflight: true,
-    answer: retained,
-    ...(args.answers ? { answers: args.answers } : {}),
-    draftRevision: args.draftRevision,
-  });
-  // Channel routing sees the multiplexed agent entries too —
-  // never only the parent's singular slot.
-  const representation = representSessionPendingInteraction(args.session, args.interactionId);
-  let outcome: InteractionAnswerOutcome;
-  if (args.answers) {
-    if (
-      representation?.mode !== "questions" ||
-      representation.view.interactionId !== args.interactionId
-    ) {
-      outcome = {
-        status: "error",
-        error:
-          "the pending questions changed or cleared before the answers could be sent — wait for the catalog poll",
-      };
-    } else {
-      const missing = representation.view.questions.filter(
-        (question) => args.answers?.[question.text] === undefined,
-      );
-      if (missing.length > 0) {
-        outcome = {
-          status: "error",
-          error: `${missing.length} question(s) still unanswered — the harness requires every question answered before anything is sent`,
-        };
-      } else {
-        // The body map carries EXACTLY the wire's question texts (the backend compares key sets).
-        const answers = Object.fromEntries(
-          representation.view.questions.map((question) => [
-            question.text,
-            args.answers?.[question.text] ?? "",
-          ]),
-        );
-        outcome = await answerViaInteractionRoute({
-          sessionId: args.session.id,
-          interactionId: args.interactionId,
-          payload: { answers },
-        });
-      }
-    }
-  } else if (
-    representation?.mode === "permission" &&
-    representation.view.interactionId === args.interactionId
+async function routeStructuredAnswers(
+  args: {
+    session: OpenSession;
+    interactionId: string;
+    answers?: Record<string, string>;
+  },
+  representation: InteractionRepresentation | null,
+): Promise<InteractionAnswerOutcome | null> {
+  if (
+    representation?.mode !== "questions" ||
+    representation.view.interactionId !== args.interactionId
   ) {
-    if (!PERMISSION_RESPONSES.has(answer)) {
-      outcome = {
-        status: "error",
-        error: "a permission answer must be exactly allow or deny",
-      };
-    } else {
-      outcome = await answerViaInteractionRoute({
-        sessionId: args.session.id,
-        interactionId: args.interactionId,
-        payload: { response: answer },
-      });
-    }
-  } else {
-    outcome = await answerPendingInteraction({
-      lifecycles: dashboardStore.getState().lifecycles,
-      sessionId: args.session.id,
-      sessionLifecycleId: args.session.lifecycleId,
-      interactionId: args.interactionId,
-      answer,
-    });
+    return null;
   }
+  const missing = representation.view.questions.filter(
+    (question) => args.answers?.[question.text] === undefined,
+  );
+  if (missing.length > 0) {
+    return {
+      status: "error",
+      error: `${missing.length} question(s) still unanswered — the harness requires every question answered before anything is sent`,
+    };
+  }
+  // The body map carries EXACTLY the wire's question texts (the backend compares key sets).
+  const answers = Object.fromEntries(
+    representation.view.questions.map((question) => [
+      question.text,
+      args.answers?.[question.text] ?? "",
+    ]),
+  );
+  return answerViaInteractionRoute({
+    sessionId: args.session.id,
+    interactionId: args.interactionId,
+    payload: { answers },
+  });
+}
+
+async function routePermissionAnswer(
+  args: {
+    session: OpenSession;
+    interactionId: string;
+  },
+  answer: string,
+  representation: InteractionRepresentation | null,
+): Promise<InteractionAnswerOutcome | null> {
+  if (
+    representation?.mode !== "permission" ||
+    representation.view.interactionId !== args.interactionId
+  ) {
+    return null;
+  }
+  if (!PERMISSION_RESPONSES.has(answer)) {
+    return {
+      status: "error",
+      error: "a permission answer must be exactly allow or deny",
+    };
+  }
+  return answerViaInteractionRoute({
+    sessionId: args.session.id,
+    interactionId: args.interactionId,
+    payload: { response: answer },
+  });
+}
+
+function settleInteractionAnswer(
+  args: {
+    session: OpenSession;
+    interactionId: string;
+    answer?: string;
+    answers?: Record<string, string>;
+    draftRevision?: number;
+  },
+  retained: string,
+  outcome: InteractionAnswerOutcome,
+): void {
   const store = sessionCockpitStore.getState();
   if (outcome.status === "answered") {
     store.setInteractionAnswer(args.session.id, {
@@ -614,6 +627,77 @@ export async function submitInteractionAnswer(args: {
       error: outcome.error,
     });
   }
+}
+
+function trimmedAnswer(args: { answer?: string }): string {
+  return args.answer?.trim() ?? "";
+}
+
+function pendingBlock(args: {
+  session: OpenSession;
+  interactionId: string;
+}): "inflight" | "answered" | null {
+  const before = sessionCockpitStore.getState().perSession[args.session.id]?.interactionAnswer;
+  if (before?.interactionId !== args.interactionId) return null;
+  if (before.inflight) return "inflight";
+  if (before.answeredAt !== undefined) return "answered";
+  return null;
+}
+
+function retainedAnswer(args: {
+  answer?: string;
+  answers?: Record<string, string>;
+}, answer: string): string {
+  return args.answers !== undefined ? Object.values(args.answers).join(" · ") : answer;
+}
+
+export async function submitInteractionAnswer(args: {
+  session: OpenSession;
+  interactionId: string;
+  /** Single-string answer: a clicked choice, a permission response, or composer text. */
+  answer?: string;
+  /** Structured answers map keyed by EXACT question text (questions mode). */
+  answers?: Record<string, string>;
+  draftRevision?: number;
+}): Promise<InteractionAnswerDispatchOutcome> {
+  const answer = trimmedAnswer(args);
+  if (!args.answers && !answer) return { status: "error", error: "the answer text is empty" };
+  const block = pendingBlock(args);
+  if (block !== null) return { status: "blocked", reason: block };
+  // The retained single-string form: the answer itself, or an honest summary of the map (retry
+  // re-sends the MAP, never this summary).
+  const retained = retainedAnswer(args, answer);
+  sessionCockpitStore.getState().setInteractionAnswer(args.session.id, {
+    interactionId: args.interactionId,
+    inflight: true,
+    answer: retained,
+    ...(args.answers ? { answers: args.answers } : {}),
+    draftRevision: args.draftRevision,
+  });
+  // Channel routing sees the multiplexed agent entries too —
+  // never only the parent's singular slot.
+  const representation = representSessionPendingInteraction(args.session, args.interactionId);
+  let outcome: InteractionAnswerOutcome;
+  if (args.answers) {
+    outcome =
+      (await routeStructuredAnswers(args, representation)) ?? {
+        status: "error",
+        error:
+          "the pending questions changed or cleared before the answers could be sent — wait for the catalog poll",
+      };
+  } else {
+    const permissionOutcome = await routePermissionAnswer(args, answer, representation);
+    outcome =
+      permissionOutcome ??
+      (await answerPendingInteraction({
+        lifecycles: dashboardStore.getState().lifecycles,
+        sessionId: args.session.id,
+        sessionLifecycleId: args.session.lifecycleId,
+        interactionId: args.interactionId,
+        answer,
+      }));
+  }
+  settleInteractionAnswer(args, retained, outcome);
   return outcome;
 }
 

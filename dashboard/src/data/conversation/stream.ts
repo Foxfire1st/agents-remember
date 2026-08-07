@@ -83,123 +83,154 @@ export interface ConversationStreamController {
   stop: () => void;
 }
 
+interface StreamRuntime {
+  sessionId: string;
+  epoch: string;
+  base: string;
+  getResumeCursor: () => ActiveEventCursor | null;
+  handlers: ConversationStreamOptions["handlers"];
+  eventSourceCtor: EventSourceCtor;
+  reconnectDelayMs: number;
+  bootReconnectDelayMs: number;
+  openDeadlineMs: number;
+  setTimeoutImpl: (fn: () => void, ms: number) => number;
+  clearTimeoutImpl: (handle: number) => void;
+  liveness?: StreamLivenessTuning;
+  source: EventSource | null;
+  timer: number | null;
+  openDeadlineTimer: number | null;
+  stopped: boolean;
+  everOpened: boolean;
+  openNow: boolean;
+  watchdog: ReturnType<typeof startStreamLivenessWatchdog> | null;
+}
+
+function clearStreamTimer(runtime: StreamRuntime): void {
+  if (runtime.timer !== null) {
+    runtime.clearTimeoutImpl(runtime.timer);
+    runtime.timer = null;
+  }
+}
+
+function clearOpenDeadline(runtime: StreamRuntime): void {
+  if (runtime.openDeadlineTimer !== null) {
+    runtime.clearTimeoutImpl(runtime.openDeadlineTimer);
+    runtime.openDeadlineTimer = null;
+  }
+}
+
+function closeStreamSource(runtime: StreamRuntime): void {
+  runtime.openNow = false;
+  if (runtime.source !== null) {
+    runtime.source.close();
+    runtime.source = null;
+  }
+}
+
+// The single dead-instance path, shared by a surfaced `error` and by the open-deadline.
+// The server closes the stream after a gap; the store will have set recovery and called stop().
+// Any other close is a transport drop: back off and reopen from the latest cursor. An instance
+// that never OPENED additionally reports onOpenFailure so the store can escalate a
+// rejected/dead resume to a re-page; if the store stops this controller inside the handler, the
+// scheduled reopen is a guarded no-op.
+function deadInstance(runtime: StreamRuntime, next: EventSource, openedThisInstance: boolean): void {
+  if (runtime.stopped || runtime.source !== next) return;
+  clearOpenDeadline(runtime);
+  closeStreamSource(runtime);
+  runtime.handlers.onDisconnect?.();
+  if (!openedThisInstance) runtime.handlers.onOpenFailure?.();
+  if (runtime.stopped) return;
+  clearStreamTimer(runtime);
+  // An instance that never opened is likely the boot-503 race — retry fast; an
+  // established stream that dropped keeps the measured 2 s backoff.
+  runtime.timer = runtime.setTimeoutImpl(
+    () => {
+      runtime.timer = null;
+      openStreamInstance(runtime);
+    },
+    runtime.everOpened ? runtime.reconnectDelayMs : runtime.bootReconnectDelayMs,
+  );
+}
+
+function openStreamInstance(runtime: StreamRuntime): void {
+  if (runtime.stopped) return;
+  closeStreamSource(runtime);
+  const url = conversationEventsUrl(
+    runtime.sessionId,
+    runtime.epoch,
+    runtime.getResumeCursor(),
+    runtime.base,
+  );
+  const next = new runtime.eventSourceCtor(url);
+  runtime.source = next;
+  let openedThisInstance = false;
+
+  next.addEventListener("open", () => {
+    if (runtime.stopped || runtime.source !== next) return;
+    openedThisInstance = true;
+    runtime.everOpened = true; // the boot window closes at the first successful open
+    runtime.openNow = true;
+    clearOpenDeadline(runtime); // it opened in time — the deadline no longer applies
+    // The open itself is a sign of life (the priming comment flushes headers at subscribe).
+    runtime.watchdog?.markAlive();
+    runtime.handlers.onOpen?.();
+  });
+  next.addEventListener("conversation", (event) => {
+    if (runtime.stopped || runtime.source !== next) return;
+    runtime.watchdog?.markAlive(); // any received frame proves the channel lives, even a malformed one
+    const message = event as MessageEvent<string>;
+    let envelope: ConversationEventEnvelope;
+    try {
+      envelope = JSON.parse(message.data) as ConversationEventEnvelope;
+    } catch {
+      return; // a malformed frame is ignored; the reducer only ever sees well-formed envelopes
+    }
+    runtime.handlers.onEnvelope(envelope);
+  });
+  next.addEventListener("error", () => deadInstance(runtime, next, openedThisInstance));
+
+  // Arm the open-deadline for THIS instance. A rejected request surfaces `error` and takes
+  // the path above; a socket that hangs in CONNECTING surfaces nothing, so only this deadline can
+  // turn the silent wedge into an honest disconnect + escalation. `deadInstance` is idempotent-safe
+  // — it no-ops once the instance is superseded (source !== next) or already opened (cleared).
+  clearOpenDeadline(runtime);
+  runtime.openDeadlineTimer = runtime.setTimeoutImpl(() => {
+    runtime.openDeadlineTimer = null;
+    deadInstance(runtime, next, openedThisInstance);
+  }, runtime.openDeadlineMs);
+}
+
+function cycleStream(runtime: StreamRuntime): void {
+  if (runtime.stopped) return;
+  clearStreamTimer(runtime);
+  openStreamInstance(runtime);
+}
+
 export function openConversationStream(
   options: ConversationStreamOptions,
 ): ConversationStreamController {
-  const {
-    sessionId,
-    epoch,
-    base = "",
-    getResumeCursor,
-    handlers,
-    eventSourceCtor = globalThis.EventSource as unknown as EventSourceCtor,
-    reconnectDelayMs = 2000,
-    bootReconnectDelayMs = 500,
-    openDeadlineMs = STREAM_OPEN_DEADLINE_MS,
-    setTimeoutImpl = (fn, ms) => globalThis.setTimeout(fn, ms) as unknown as number,
-    clearTimeoutImpl = (handle) => globalThis.clearTimeout(handle),
-    liveness,
-  } = options;
-
-  let source: EventSource | null = null;
-  let timer: number | null = null;
-  // The per-instance open-deadline — armed at each open, cleared the moment that instance
-  // opens or errors, and fired only if it does NEITHER (the CONNECTING wedge).
-  let openDeadlineTimer: number | null = null;
-  let stopped = false;
-  // The boot window is open until ANY instance reports its first successful open.
-  let everOpened = false;
-  // The watchdog only judges an OPEN channel: true while the current instance has opened.
-  let openNow = false;
-
-  const clearTimer = (): void => {
-    if (timer !== null) {
-      clearTimeoutImpl(timer);
-      timer = null;
-    }
-  };
-
-  const clearOpenDeadline = (): void => {
-    if (openDeadlineTimer !== null) {
-      clearTimeoutImpl(openDeadlineTimer);
-      openDeadlineTimer = null;
-    }
-  };
-
-  const closeSource = (): void => {
-    openNow = false;
-    if (source !== null) {
-      source.close();
-      source = null;
-    }
-  };
-
-  const open = (): void => {
-    if (stopped) return;
-    closeSource();
-    const url = conversationEventsUrl(sessionId, epoch, getResumeCursor(), base);
-    const next = new eventSourceCtor(url);
-    source = next;
-    let openedThisInstance = false;
-
-    // The single dead-instance path, shared by a surfaced `error` and by the open-deadline.
-    // The server closes the stream after a gap; the store will have set recovery and called stop().
-    // Any other close is a transport drop: back off and reopen from the latest cursor. An instance
-    // that never OPENED additionally reports onOpenFailure so the store can escalate a
-    // rejected/dead resume to a re-page; if the store stops this controller inside the handler, the
-    // scheduled reopen is a guarded no-op.
-    const onDead = (): void => {
-      if (stopped || source !== next) return;
-      clearOpenDeadline();
-      closeSource();
-      handlers.onDisconnect?.();
-      if (!openedThisInstance) handlers.onOpenFailure?.();
-      if (stopped) return;
-      clearTimer();
-      // An instance that never opened is likely the boot-503 race — retry fast; an
-      // established stream that dropped keeps the measured 2 s backoff.
-      timer = setTimeoutImpl(
-        () => {
-          timer = null;
-          open();
-        },
-        everOpened ? reconnectDelayMs : bootReconnectDelayMs,
-      );
-    };
-
-    next.addEventListener("open", () => {
-      if (stopped || source !== next) return;
-      openedThisInstance = true;
-      everOpened = true; // the boot window closes at the first successful open
-      openNow = true;
-      clearOpenDeadline(); // it opened in time — the deadline no longer applies
-      // The open itself is a sign of life (the priming comment flushes headers at subscribe).
-      watchdog.markAlive();
-      handlers.onOpen?.();
-    });
-    next.addEventListener("conversation", (event) => {
-      if (stopped || source !== next) return;
-      watchdog.markAlive(); // any received frame proves the channel lives, even a malformed one
-      const message = event as MessageEvent<string>;
-      let envelope: ConversationEventEnvelope;
-      try {
-        envelope = JSON.parse(message.data) as ConversationEventEnvelope;
-      } catch {
-        return; // a malformed frame is ignored; the reducer only ever sees well-formed envelopes
-      }
-      handlers.onEnvelope(envelope);
-    });
-    next.addEventListener("error", onDead);
-
-    // Arm the open-deadline for THIS instance. A rejected request surfaces `error` and takes
-    // the path above; a socket that hangs in CONNECTING surfaces nothing, so only this deadline can
-    // turn the silent wedge into an honest disconnect + escalation. `onDead` is idempotent-safe
-    // — it no-ops once the instance is superseded (source !== next) or already opened (cleared).
-    clearOpenDeadline();
-    openDeadlineTimer = setTimeoutImpl(() => {
-      openDeadlineTimer = null;
-      onDead();
-    }, openDeadlineMs);
+  const runtime: StreamRuntime = {
+    sessionId: options.sessionId,
+    epoch: options.epoch,
+    base: options.base ?? "",
+    getResumeCursor: options.getResumeCursor,
+    handlers: options.handlers,
+    eventSourceCtor: options.eventSourceCtor ?? (globalThis.EventSource as unknown as EventSourceCtor),
+    reconnectDelayMs: options.reconnectDelayMs ?? 2000,
+    bootReconnectDelayMs: options.bootReconnectDelayMs ?? 500,
+    openDeadlineMs: options.openDeadlineMs ?? STREAM_OPEN_DEADLINE_MS,
+    setTimeoutImpl: options.setTimeoutImpl ?? ((fn, ms) => globalThis.setTimeout(fn, ms) as unknown as number),
+    clearTimeoutImpl: options.clearTimeoutImpl ?? ((handle) => globalThis.clearTimeout(handle)),
+    liveness: options.liveness,
+    source: null,
+    timer: null,
+    openDeadlineTimer: null,
+    stopped: false,
+    // The boot window is open until ANY instance reports its first successful open.
+    everOpened: false,
+    // The watchdog only judges an OPEN channel: true while the current instance has opened.
+    openNow: false,
+    watchdog: null,
   };
 
   // Sleep/wake + half-open-wedge recovery: the OPEN stream stopped showing life (a wall-clock
@@ -211,32 +242,27 @@ export function openConversationStream(
   // exactly as for a transport drop, so a real outage still escalates honestly. `open()` arms
   // the open-deadline, so a cycled subscribe that never opens is ALSO escalated — the quiet cycle
   // can no longer strand the phase at a fabricated "live".
-  const cycle = (): void => {
-    if (stopped) return;
-    clearTimer();
-    open();
-  };
-
   const watchdog = startStreamLivenessWatchdog({
-    isOpen: () => openNow,
-    onDead: cycle,
-    ...liveness,
+    isOpen: () => runtime.openNow,
+    onDead: () => cycleStream(runtime),
+    ...options.liveness,
   });
+  runtime.watchdog = watchdog;
 
-  open();
+  openStreamInstance(runtime);
 
   return {
     reconnect: () => {
-      if (stopped) return;
-      clearTimer();
-      open();
+      if (runtime.stopped) return;
+      clearStreamTimer(runtime);
+      openStreamInstance(runtime);
     },
     stop: () => {
-      stopped = true;
+      runtime.stopped = true;
       watchdog.stop();
-      clearTimer();
-      clearOpenDeadline();
-      closeSource();
+      clearStreamTimer(runtime);
+      clearOpenDeadline(runtime);
+      closeStreamSource(runtime);
     },
   };
 }

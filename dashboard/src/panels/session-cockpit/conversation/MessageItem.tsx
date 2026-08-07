@@ -105,17 +105,16 @@ export function MessageItem({ item }: { item: ConversationItem }) {
   const { regionId } = useClampIds();
   const [expanded, setExpanded] = useState(false);
   const sourceText = combinedSourceText(item.blocks);
-  const totalLines = sourceLineCount(sourceText);
   const isAssistant = item.role === "assistant";
   const completed = item.phase === "completed";
-  const clampable = isAssistant && completed && totalLines > CLAMP_THRESHOLD_LINES;
-  const collapsed = clampable && !expanded;
+  const { clampable, collapsed, hiddenLines, collapsedText } = messageClampState(
+    sourceText,
+    isAssistant,
+    completed,
+    expanded,
+  );
   // Clamp by SLICING to the logical line threshold (F12), so the `+N lines` count is exactly what is
   // hidden — never a maxHeight visual clamp whose count diverges from the pixels hidden.
-  const hiddenLines = collapsed ? Math.max(0, totalLines - CLAMP_THRESHOLD_LINES) : 0;
-  const collapsedText = collapsed
-    ? sourceText.split("\n").slice(0, CLAMP_THRESHOLD_LINES).join("\n")
-    : "";
   const isUser = item.role === "user";
 
   return (
@@ -153,4 +152,23 @@ export function MessageItem({ item }: { item: ConversationItem }) {
       </div>
     </div>
   );
+}
+
+function messageClampState(
+  sourceText: string,
+  isAssistant: boolean,
+  completed: boolean,
+  expanded: boolean,
+): { clampable: boolean; collapsed: boolean; hiddenLines: number; collapsedText: string } {
+  const totalLines = sourceLineCount(sourceText);
+  const clampable = isAssistant && completed && totalLines > CLAMP_THRESHOLD_LINES;
+  const collapsed = clampable && !expanded;
+  return {
+    clampable,
+    collapsed,
+    hiddenLines: collapsed ? Math.max(0, totalLines - CLAMP_THRESHOLD_LINES) : 0,
+    collapsedText: collapsed
+      ? sourceText.split("\n").slice(0, CLAMP_THRESHOLD_LINES).join("\n")
+      : "",
+  };
 }

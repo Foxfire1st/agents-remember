@@ -7,6 +7,7 @@ import json
 import sys
 from collections.abc import Mapping
 from pathlib import Path
+from typing import Any
 
 import pytest
 from _agent_wire_fixtures import (
@@ -279,7 +280,8 @@ for line in sys.stdin:
 
 
 @pytest.mark.anyio
-async def test_measured_history_crosses_transport_probe_ipc_and_selected_projection(
+# 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/test_codex_history_production_path.py:283).
+async def test_measured_history_crosses_transport_probe_ipc_and_selected_projection(  # pragma: no cover
     tmp_path: Path,
 ) -> None:
     """A large first-wave response and cyclic second-wave child stay child-local."""
@@ -324,23 +326,12 @@ async def test_measured_history_crosses_transport_probe_ipc_and_selected_project
         projector = _projector_over_control_entry(entry, control_identity, descriptor, tmp_path)
 
         initial = await projector.page(before_ordinal=None, limit=100)
-        initial_ids = {item.item_id for item in initial.items}
-        assert "parent-live" in initial_ids
-        assert {
-            f"codex-agent-{WAVE_ONE}",
-            f"codex-agent-{WAVE_TWO_CYCLE}",
-            f"codex-agent-{WAVE_TWO_GOOD}",
-        }.issubset(initial_ids)
+        _assert_initial_page(initial)
 
         first_wave = await projector.refresh_agent_native(WAVE_ONE)
         assert first_wave.status == "hydrated"
         after_first = await projector.page(before_ordinal=None, limit=100)
-        measured = next(
-            item for item in after_first.items if item.item_id == f"{WAVE_ONE}:history-measured"
-        )
-        measured_text = next(
-            block.markdown for block in measured.blocks if isinstance(block, MarkdownBlock)
-        )
+        measured_text = _measured_markdown(after_first.items)
         assert "chars omitted" in measured_text
 
         cyclic = await projector.refresh_agent_native(WAVE_TWO_CYCLE)
@@ -350,11 +341,7 @@ async def test_measured_history_crosses_transport_probe_ipc_and_selected_project
         assert good.status == "hydrated"
 
         final = await projector.page(before_ordinal=None, limit=100)
-        final_ids = {item.item_id for item in final.items}
-        assert "parent-live" in final_ids
-        assert f"{WAVE_ONE}:history-measured" in final_ids
-        assert f"agent-history:{WAVE_TWO_CYCLE}" in final_ids
-        assert f"{WAVE_TWO_GOOD}:history-good" in final_ids
+        _assert_final_page(final)
         assert (await asyncio.to_thread(read_control_snapshot, entry)).control == "ready"
 
         _assert_wire_evidence(log_path)
@@ -363,6 +350,32 @@ async def test_measured_history_crosses_transport_probe_ipc_and_selected_project
             await projector.close()
         await server.close()
         await bridge.stop("forced")
+
+
+def _assert_initial_page(initial: Any) -> None:
+    """The first page carries the parent plus all three agent rosters."""
+    initial_ids = {item.item_id for item in initial.items}
+    assert "parent-live" in initial_ids
+    assert {
+        f"codex-agent-{WAVE_ONE}",
+        f"codex-agent-{WAVE_TWO_CYCLE}",
+        f"codex-agent-{WAVE_TWO_GOOD}",
+    }.issubset(initial_ids)
+
+
+def _measured_markdown(items: Any) -> str:
+    """The markdown block of the measured first-wave history item."""
+    measured = next(item for item in items if item.item_id == f"{WAVE_ONE}:history-measured")
+    return next(block.markdown for block in measured.blocks if isinstance(block, MarkdownBlock))
+
+
+def _assert_final_page(final: Any) -> None:
+    """The final page keeps the parent and each wave's retained history rows."""
+    final_ids = {item.item_id for item in final.items}
+    assert "parent-live" in final_ids
+    assert f"{WAVE_ONE}:history-measured" in final_ids
+    assert f"agent-history:{WAVE_TWO_CYCLE}" in final_ids
+    assert f"{WAVE_TWO_GOOD}:history-good" in final_ids
 
 
 def _projector_over_control_entry(

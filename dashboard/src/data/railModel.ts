@@ -128,12 +128,68 @@ export function masterLabels(taskDocuments: readonly TaskDocNode[]): Map<string,
   return labels;
 }
 
-export function buildRailModel(sessions: OpenSession[], labels: RailModelLabels = {}): RailModel {
-  interface MasterAccumulator {
-    managers: OpenSession[];
-    leaf: Map<string, OpenSession[]>;
-    completed: OpenSession[];
+interface MasterAccumulator {
+  managers: OpenSession[];
+  leaf: Map<string, OpenSession[]>;
+  completed: OpenSession[];
+}
+
+function pickupAging(pickup: AgentPickupNode): boolean {
+  return pickup.ageSeconds !== undefined && pickup.ttlSeconds > 0
+    ? pickup.ageSeconds >= pickup.ttlSeconds * 0.8
+    : false;
+}
+
+function pickupTargetSession(
+  pickup: AgentPickupNode,
+  sessions: readonly OpenSession[],
+): OpenSession | undefined {
+  return (
+    (pickup.deliveredToSession &&
+      sessions.find((session) => session.id === pickup.deliveredToSession)) ||
+    (pickup.lifecycleId &&
+      sessions.find((session) => session.lifecycleId === pickup.lifecycleId)) ||
+    undefined
+  );
+}
+
+function bucketSession(
+  session: OpenSession,
+  spine: OpenSession[],
+  unattached: OpenSession[],
+  completedUnattached: OpenSession[],
+  sectionFor: (masterKey: string) => MasterAccumulator,
+): void {
+  if (session.status === "terminated") return; // tombstones never render
+  const role = sessionSeatRole(session);
+  const masterKey = masterKeyOf(session);
+  if (session.status === "landed") {
+    // Completed folder per master (RULED, restores the regressed behavior) — command seats too:
+    // a landed seat is done regardless of rank.
+    if (masterKey) sectionFor(masterKey).completed.push(session);
+    else completedUnattached.push(session);
+    return;
   }
+  if (role === "manager") {
+    if (masterKey) sectionFor(masterKey).managers.push(session);
+    else spine.push(session); // a master-less manager still outranks the leaf level
+    return;
+  }
+  if (SPINE_ROLES.has(role)) {
+    spine.push(session);
+    return;
+  }
+  if (masterKey && session.leafKey) {
+    const section = sectionFor(masterKey);
+    const seats = section.leaf.get(session.leafKey);
+    if (seats) seats.push(session);
+    else section.leaf.set(session.leafKey, [session]);
+  } else {
+    unattached.push(session);
+  }
+}
+
+export function buildRailModel(sessions: OpenSession[], labels: RailModelLabels = {}): RailModel {
   const spine: OpenSession[] = [];
   const unattached: OpenSession[] = [];
   const completedUnattached: OpenSession[] = [];
@@ -148,33 +204,7 @@ export function buildRailModel(sessions: OpenSession[], labels: RailModelLabels 
   };
 
   for (const session of sessions) {
-    if (session.status === "terminated") continue; // tombstones never render
-    const role = sessionSeatRole(session);
-    const masterKey = masterKeyOf(session);
-    if (session.status === "landed") {
-      // Completed folder per master (RULED, restores the regressed behavior) — command seats too:
-      // a landed seat is done regardless of rank.
-      if (masterKey) sectionFor(masterKey).completed.push(session);
-      else completedUnattached.push(session);
-      continue;
-    }
-    if (role === "manager") {
-      if (masterKey) sectionFor(masterKey).managers.push(session);
-      else spine.push(session); // a master-less manager still outranks the leaf level
-      continue;
-    }
-    if (SPINE_ROLES.has(role)) {
-      spine.push(session);
-      continue;
-    }
-    if (masterKey && session.leafKey) {
-      const section = sectionFor(masterKey);
-      const seats = section.leaf.get(session.leafKey);
-      if (seats) seats.push(session);
-      else section.leaf.set(session.leafKey, [session]);
-      continue;
-    }
-    unattached.push(session);
+    bucketSession(session, spine, unattached, completedUnattached, sectionFor);
   }
 
   spine.sort(compareSpine);
@@ -402,12 +432,7 @@ export function briefPendingSessionIds(
   for (const pickup of pickups) {
     if (pickup.messageKind !== "dispatch-brief") continue;
     if (pickup.state !== "waiting-for-agent" && pickup.state !== "check-chat") continue;
-    const target =
-      (pickup.deliveredToSession &&
-        sessions.find((session) => session.id === pickup.deliveredToSession)) ||
-      (pickup.lifecycleId &&
-        sessions.find((session) => session.lifecycleId === pickup.lifecycleId)) ||
-      undefined;
+    const target = pickupTargetSession(pickup, sessions);
     if (target) pending.add(target.id);
   }
   return pending;
@@ -421,17 +446,9 @@ export function criticalBusSessionIds(
   const critical = new Set<string>();
   for (const pickup of pickups) {
     const escalated = pickup.state === "check-chat";
-    const aging =
-      pickup.ageSeconds !== undefined && pickup.ttlSeconds > 0
-        ? pickup.ageSeconds >= pickup.ttlSeconds * 0.8
-        : false;
+    const aging = pickupAging(pickup);
     if (!escalated && !aging) continue;
-    const target =
-      (pickup.deliveredToSession &&
-        sessions.find((session) => session.id === pickup.deliveredToSession)) ||
-      (pickup.lifecycleId &&
-        sessions.find((session) => session.lifecycleId === pickup.lifecycleId)) ||
-      undefined;
+    const target = pickupTargetSession(pickup, sessions);
     if (target) critical.add(target.id);
   }
   return critical;

@@ -225,6 +225,65 @@ class OpenTerminalSessionTests(unittest.TestCase):
         self.assertEqual(result.status, "opened")
         self.assertEqual(self.host.ensured[0]["env"], {"AR_SPAWN_ROLE": "worker"})
 
+    def test_spawn_env_scrubs_daemon_inherited_identity_residue(self) -> None:
+        result = self._open(
+            env={
+                "AR_SPAWN_MODEL": "opus",
+                "AR_SPAWN_EFFORT": "high",
+                "CODEX_THREAD_ID": "thread-9",
+                "CODEX_CI": "1",
+                "CLAUDE_DOC_FOCUS_PATHS": "/docs/a.md",
+                "GAME_DATA_SAVES": "/games/saves",
+                "KEEP_ME": "value",
+            }
+        )
+        self.assertEqual(result.status, "opened")
+        # No AR_SPAWN_ROLE marker: the AR_SPAWN_* knobs and every vendor identity var are the
+        # daemon session's residue, not this child's. Only unrelated env survives (+PYTHONPATH).
+        self.assertEqual(
+            self.host.ensured[0]["env"],
+            {"KEEP_ME": "value", "PYTHONPATH": _DAEMON_PACKAGE_ROOT},
+        )
+
+    def test_role_spawn_keeps_its_explicit_ar_spawn_values_but_not_vendor_identity(self) -> None:
+        result = self._open(
+            env={
+                "AR_SPAWN_ROLE": "worker",
+                "AR_SPAWN_MODEL": "opus",
+                "AR_SPAWN_EFFORT": "high",
+                "CODEX_THREAD_ID": "thread-9",
+                "CLAUDE_DOC_FOCUS_PATHS": "/docs/a.md",
+                "GAME_DATA_LEVEL": "7",
+            }
+        )
+        self.assertEqual(result.status, "opened")
+        # AR_SPAWN_ROLE marks an explicit role spawn: its AR_SPAWN_* values survive; the vendor
+        # identity names are still daemon residue and are scrubbed.
+        self.assertEqual(
+            self.host.ensured[0]["env"],
+            {
+                "AR_SPAWN_ROLE": "worker",
+                "AR_SPAWN_MODEL": "opus",
+                "AR_SPAWN_EFFORT": "high",
+                "PYTHONPATH": _DAEMON_PACKAGE_ROOT,
+            },
+        )
+
+    def test_plain_terminal_spawn_scrubs_daemon_identity_too(self) -> None:
+        result = self._open(
+            kind="terminal",
+            harness=None,
+            env={
+                "CODEX_THREAD_ID": "thread-9",
+                "CODEX_CI": "1",
+                "GAME_DATA_SAVES": "/games/saves",
+                "KEEP_ME": "value",
+            },
+        )
+        self.assertEqual(result.status, "opened")
+        # The scrub is not runner-specific: a plain shell spawn also drops daemon identity.
+        self.assertEqual(self.host.ensured[0]["env"], {"KEEP_ME": "value"})
+
     def test_future_bridge_endpoint_is_additive_control_metadata(self) -> None:
         endpoint = self.tmp / "control" / "worker.sock"
         self._open(control_endpoint=endpoint)
@@ -368,8 +427,6 @@ class KnobApplicationTests(unittest.TestCase):
         self.assertEqual(
             self.host.ensured[0]["env"],
             {
-                "AR_SPAWN_MODEL": "claude-fable-5",
-                "AR_SPAWN_EFFORT": "max",
                 "PYTHONPATH": _DAEMON_PACKAGE_ROOT,
             },
         )
@@ -555,8 +612,6 @@ class KnobApplicationTests(unittest.TestCase):
         self.assertEqual(
             self.host.ensured[0]["env"],
             {
-                "AR_SPAWN_MODEL": "gpt-5.6-sol",
-                "AR_SPAWN_EFFORT": "xhigh",
                 "PYTHONPATH": _DAEMON_PACKAGE_ROOT,
             },
         )

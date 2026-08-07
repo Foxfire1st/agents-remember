@@ -95,6 +95,41 @@ export function workingActivityForm(session: OpenSession): string | undefined {
   return undefined;
 }
 
+function StopControl({ interrupt }: { interrupt: ConversationInterrupt | undefined }) {
+  const reason = interrupt?.reason ?? STOP_TURN_DISABLED_REASON;
+  if (interrupt !== undefined && interrupt.available && interrupt.onStop !== undefined) {
+    return (
+      <button
+        type="button"
+        className={stopButtonEnabled}
+        onClick={interrupt.onStop}
+        disabled={interrupt.pending}
+        // Honest ACTION tooltip on the enabled control: the command action + its effective
+        // chord — never the known-stale capability reason (which the hook no longer emits here).
+        title={interrupt.pending ? "interrupt requested…" : `Stop the current turn · ${interrupt.keyshortcut}`}
+        aria-label="Stop turn"
+        aria-keyshortcuts={interrupt.keyshortcut}
+        data-testid="working-line-stop"
+      >
+        ⏹ stop
+      </button>
+    );
+  }
+  return (
+    <button
+      type="button"
+      className={stopButton}
+      disabled
+      title={reason}
+      aria-label={`Stop turn — ${reason}`}
+      data-disabled-reason={reason}
+      data-testid="working-line-stop"
+    >
+      ⏹ stop
+    </button>
+  );
+}
+
 export function WorkingLine({
   session,
   cockpit,
@@ -145,34 +180,7 @@ export function WorkingLine({
       {/* With no interrupt wired the line renders NO stop control —
           controlled seats host it in the composer beside send; only the raw-terminal path
           (which mounts no composer) still receives one here. */}
-      {interrupt === undefined ? null : interrupt.available && interrupt.onStop !== undefined ? (
-        <button
-          type="button"
-          className={stopButtonEnabled}
-          onClick={interrupt.onStop}
-          disabled={interrupt.pending}
-          // Honest ACTION tooltip on the enabled control: the command action + its effective
-          // chord — never the known-stale capability reason (which the hook no longer emits here).
-          title={interrupt.pending ? "interrupt requested…" : `Stop the current turn · ${interrupt.keyshortcut}`}
-          aria-label="Stop turn"
-          aria-keyshortcuts={interrupt.keyshortcut}
-          data-testid="working-line-stop"
-        >
-          ⏹ stop
-        </button>
-      ) : (
-        <button
-          type="button"
-          className={stopButton}
-          disabled
-          title={interrupt.reason ?? STOP_TURN_DISABLED_REASON}
-          aria-label={`Stop turn — ${interrupt.reason ?? STOP_TURN_DISABLED_REASON}`}
-          data-disabled-reason={interrupt.reason ?? STOP_TURN_DISABLED_REASON}
-          data-testid="working-line-stop"
-        >
-          ⏹ stop
-        </button>
-      )}
+      {interrupt === undefined ? null : <StopControl interrupt={interrupt} />}
     </div>
   );
 }

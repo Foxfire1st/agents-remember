@@ -12,7 +12,7 @@
 // color-only: every chip carries its word (§14.2). No transitions — a keyboard-driven open/focus
 // change must not animate.
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type RefObject } from "react";
 
 import { css, cx } from "../../../../styled-system/css";
 import type { ConversationAgentView } from "../../../data/conversation/agents";
@@ -187,6 +187,203 @@ export function AgentsArea({
   focusedAgentId: string | null;
   onFocusAgent: (agentId: string | null) => void;
 }) {
+  const {
+    open,
+    focusedAgent,
+    resolvedActiveId,
+    running,
+    lineRef,
+    menuRef,
+    onLineKeyDown,
+    onMenuKeyDown,
+    openMenu,
+    closeMenu,
+    selectAgent,
+  } = useAgentsMenu(agents, focusedAgentId, onFocusAgent);
+
+  return (
+    <div className={area} role="group" aria-label="sub-agents" data-testid="conversation-agents">
+      <div className={lineRow}>
+        {agents.length === 0 ? (
+          <span className={lineStatic} data-testid="conversation-agents-line">
+            {summaryText(agents)}
+          </span>
+        ) : (
+          <AgentsLine
+            lineRef={lineRef}
+            open={open}
+            running={running}
+            focusedAgent={focusedAgent}
+            summary={summaryText(agents)}
+            onToggle={() => (open ? closeMenu(true) : openMenu())}
+            onKeyDown={onLineKeyDown}
+          />
+        )}
+        {focusedAgentId !== null ? (
+          <button
+            type="button"
+            className={backToParent}
+            onClick={() => onFocusAgent(null)}
+            data-testid="conversation-back-to-parent"
+          >
+            ← back to parent conversation
+          </button>
+        ) : null}
+      </div>
+      {open && resolvedActiveId !== null ? (
+        <>
+          <AgentsMenu
+            agents={agents}
+            menuRef={menuRef}
+            resolvedActiveId={resolvedActiveId}
+            onBackdrop={() => closeMenu(true)}
+            onKeyDown={onMenuKeyDown}
+            onSelect={selectAgent}
+          />
+        </>
+      ) : null}
+    </div>
+  );
+}
+
+function AgentsLine({
+  lineRef,
+  open,
+  running,
+  focusedAgent,
+  summary,
+  onToggle,
+  onKeyDown,
+}: {
+  lineRef: RefObject<HTMLButtonElement | null>;
+  open: boolean;
+  running: number;
+  focusedAgent: ConversationAgentView | undefined;
+  summary: string;
+  onToggle: () => void;
+  onKeyDown: (event: React.KeyboardEvent<HTMLButtonElement>) => void;
+}) {
+  return (
+    <button
+      type="button"
+      ref={lineRef}
+      className={line}
+      aria-haspopup="listbox"
+      aria-expanded={open}
+      aria-controls={MENU_ID}
+      onClick={onToggle}
+      onKeyDown={onKeyDown}
+      data-agents-line=""
+      data-testid="conversation-agents-line"
+    >
+      <span
+        className={cx(countChip, running > 0 ? countTone.active : countTone.idle)}
+        data-testid="conversation-agents-count"
+      >
+        {summary}
+      </span>
+      {focusedAgent !== undefined ? (
+        <span className={viewing} data-testid="conversation-agent-focus-note">
+          viewing {focusedAgent.label}
+        </span>
+      ) : null}
+    </button>
+  );
+}
+
+function AgentsMenu({
+  agents,
+  menuRef,
+  resolvedActiveId,
+  onBackdrop,
+  onKeyDown,
+  onSelect,
+}: {
+  agents: readonly ConversationAgentView[];
+  menuRef: RefObject<HTMLDivElement | null>;
+  resolvedActiveId: string;
+  onBackdrop: () => void;
+  onKeyDown: (event: React.KeyboardEvent<HTMLDivElement>) => void;
+  onSelect: (agentId: string) => void;
+}) {
+  return (
+    <>
+      <div
+        className={backdrop}
+        role="presentation"
+        onClick={onBackdrop}
+        data-testid="conversation-agents-backdrop"
+      />
+      <div
+        role="listbox"
+        id={MENU_ID}
+        ref={menuRef}
+        className={menu}
+        aria-label="agents"
+        aria-activedescendant={optionId(resolvedActiveId)}
+        tabIndex={-1}
+        onKeyDown={onKeyDown}
+        data-testid="conversation-agents-menu"
+      >
+        {agents.map((agent) => (
+          <div
+            role="option"
+            key={agent.agentId}
+            id={optionId(agent.agentId)}
+            className={option}
+            tabIndex={-1}
+            aria-selected={resolvedActiveId === agent.agentId}
+            onClick={() => onSelect(agent.agentId)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" || event.key === " ") {
+                event.preventDefault();
+                onSelect(agent.agentId);
+              }
+            }}
+            data-testid="conversation-agent-option"
+          >
+            <span className={label} data-testid="conversation-agent-label">
+              {agent.label}
+            </span>
+            <span
+              className={cx(statusChip, statusTone[agent.status])}
+              data-testid="conversation-agent-status"
+            >
+              {agent.status}
+            </span>
+            {agent.finalMessage !== undefined ? (
+              <span
+                className={preview}
+                title={agent.finalMessage}
+                data-testid="conversation-agent-final"
+              >
+                {agent.finalMessage}
+              </span>
+            ) : null}
+          </div>
+        ))}
+      </div>
+    </>
+  );
+}
+
+function useAgentsMenu(
+  agents: readonly ConversationAgentView[],
+  focusedAgentId: string | null,
+  onFocusAgent: (agentId: string | null) => void,
+): {
+  open: boolean;
+  focusedAgent: ConversationAgentView | undefined;
+  resolvedActiveId: string | null;
+  running: number;
+  lineRef: RefObject<HTMLButtonElement | null>;
+  menuRef: RefObject<HTMLDivElement | null>;
+  onLineKeyDown: (event: React.KeyboardEvent<HTMLButtonElement>) => void;
+  onMenuKeyDown: (event: React.KeyboardEvent<HTMLDivElement>) => void;
+  openMenu: () => void;
+  closeMenu: (returnFocus: boolean) => void;
+  selectAgent: (agentId: string) => void;
+} {
   const [open, setOpen] = useState(false);
   const [activeId, setActiveId] = useState<string | null>(null);
   const lineRef = useRef<HTMLButtonElement>(null);
@@ -235,162 +432,107 @@ export function AgentsArea({
     if (open && agents.length === 0) setOpen(false);
   }, [open, agents.length]);
 
-  const onLineKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>) => {
-    if (event.key === "Enter" || event.key === " " || event.key === "ArrowDown") {
-      // preventDefault suppresses the native button-activation click — this toggle owns it.
-      event.preventDefault();
-      if (open) closeMenu(true);
-      else openMenu();
-      return;
-    }
-    if (event.key === "ArrowUp") {
-      // Symmetric with ArrowDown entering the line: ArrowUp from the line returns focus
-      // to the timeline's tabbable row (the menu owns ArrowUp while open — focus is on
-      // the listbox then, so this branch only fires on the closed line).
-      event.preventDefault();
-      lineRef.current
-        ?.closest("[data-testid='conversation-surface']")
-        ?.querySelector<HTMLElement>("[data-conversation-item][tabindex='0']")
-        ?.focus();
-      return;
-    }
-    if (event.key === "Escape") {
-      // The menu owns Esc while it is open; on the closed line, Esc in an agent view returns
-      // to the parent conversation (the surface's timeline-driven Esc stays untouched).
-      if (open || focusedAgentId === null) return;
-      event.preventDefault();
-      event.stopPropagation();
-      onFocusAgent(null);
-    }
-  };
+  const onLineKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>) =>
+    agentsLineKeyHandler(event, open, focusedAgentId, lineRef, onFocusAgent, openMenu, closeMenu);
 
   const onMenuKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
     const ids = agents.map((agent) => agent.agentId);
     const index = resolvedActiveId === null ? -1 : ids.indexOf(resolvedActiveId);
-    switch (event.key) {
-      case "ArrowDown":
-      case "ArrowUp": {
-        event.preventDefault();
-        event.stopPropagation();
-        const delta = event.key === "ArrowDown" ? 1 : -1;
-        const next = (((index + delta) % ids.length) + ids.length) % ids.length;
-        setActiveId(ids[next] ?? null);
-        break;
-      }
-      case "Enter":
-        event.preventDefault();
-        event.stopPropagation();
-        if (resolvedActiveId !== null) selectAgent(resolvedActiveId);
-        break;
-      case "Escape":
-        event.preventDefault();
-        event.stopPropagation();
-        closeMenu(true);
-        break;
-      case "Tab":
-        // Menus dismiss on Tab; focus moves on by the browser's own order.
-        closeMenu(false);
-        break;
-      default:
-        break;
-    }
+    handleAgentsMenuKey(event, ids, index, resolvedActiveId, setActiveId, selectAgent, closeMenu);
   };
+  return {
+    open,
+    focusedAgent,
+    resolvedActiveId,
+    running,
+    lineRef,
+    menuRef,
+    onLineKeyDown,
+    onMenuKeyDown,
+    openMenu,
+    closeMenu,
+    selectAgent,
+  };
+}
 
+function handleAgentsMenuKey(
+  event: React.KeyboardEvent<HTMLDivElement>,
+  ids: string[],
+  index: number,
+  resolvedActiveId: string | null,
+  setActiveId: (id: string | null) => void,
+  selectAgent: (agentId: string) => void,
+  closeMenu: (returnFocus: boolean) => void,
+): void {
+  switch (event.key) {
+    case "ArrowDown":
+    case "ArrowUp": {
+      event.preventDefault();
+      event.stopPropagation();
+      const delta = event.key === "ArrowDown" ? 1 : -1;
+      const next = (((index + delta) % ids.length) + ids.length) % ids.length;
+      setActiveId(ids[next] ?? null);
+      break;
+    }
+    case "Enter":
+      event.preventDefault();
+      event.stopPropagation();
+      if (resolvedActiveId !== null) selectAgent(resolvedActiveId);
+      break;
+    case "Escape":
+      event.preventDefault();
+      event.stopPropagation();
+      closeMenu(true);
+      break;
+    case "Tab":
+      // Menus dismiss on Tab; focus moves on by the browser's own order.
+      closeMenu(false);
+      break;
+    default:
+      break;
+  }
+}
+
+function timelineRowTarget(
+  lineRef: RefObject<HTMLButtonElement | null>,
+): HTMLElement | null {
   return (
-    <div className={area} role="group" aria-label="sub-agents" data-testid="conversation-agents">
-      <div className={lineRow}>
-        {agents.length === 0 ? (
-          <span className={lineStatic} data-testid="conversation-agents-line">
-            {summaryText(agents)}
-          </span>
-        ) : (
-          <button
-            type="button"
-            ref={lineRef}
-            className={line}
-            aria-haspopup="listbox"
-            aria-expanded={open}
-            aria-controls={MENU_ID}
-            onClick={() => (open ? closeMenu(true) : openMenu())}
-            onKeyDown={onLineKeyDown}
-            data-agents-line=""
-            data-testid="conversation-agents-line"
-          >
-            <span
-              className={cx(countChip, running > 0 ? countTone.active : countTone.idle)}
-              data-testid="conversation-agents-count"
-            >
-              {summaryText(agents)}
-            </span>
-            {focusedAgent !== undefined ? (
-              <span className={viewing} data-testid="conversation-agent-focus-note">
-                viewing {focusedAgent.label}
-              </span>
-            ) : null}
-          </button>
-        )}
-        {focusedAgentId !== null ? (
-          <button
-            type="button"
-            className={backToParent}
-            onClick={() => onFocusAgent(null)}
-            data-testid="conversation-back-to-parent"
-          >
-            ← back to parent conversation
-          </button>
-        ) : null}
-      </div>
-      {open && resolvedActiveId !== null ? (
-        <>
-          <div
-            className={backdrop}
-            onClick={() => closeMenu(true)}
-            data-testid="conversation-agents-backdrop"
-          />
-          <div
-            role="listbox"
-            id={MENU_ID}
-            ref={menuRef}
-            className={menu}
-            aria-label="agents"
-            aria-activedescendant={optionId(resolvedActiveId)}
-            tabIndex={-1}
-            onKeyDown={onMenuKeyDown}
-            data-testid="conversation-agents-menu"
-          >
-            {agents.map((agent) => (
-              <div
-                role="option"
-                key={agent.agentId}
-                id={optionId(agent.agentId)}
-                className={option}
-                aria-selected={resolvedActiveId === agent.agentId}
-                onClick={() => selectAgent(agent.agentId)}
-                data-testid="conversation-agent-option"
-              >
-                <span className={label} data-testid="conversation-agent-label">
-                  {agent.label}
-                </span>
-                <span
-                  className={cx(statusChip, statusTone[agent.status])}
-                  data-testid="conversation-agent-status"
-                >
-                  {agent.status}
-                </span>
-                {agent.finalMessage !== undefined ? (
-                  <span
-                    className={preview}
-                    title={agent.finalMessage}
-                    data-testid="conversation-agent-final"
-                  >
-                    {agent.finalMessage}
-                  </span>
-                ) : null}
-              </div>
-            ))}
-          </div>
-        </>
-      ) : null}
-    </div>
+    lineRef.current
+      ?.closest("[data-testid='conversation-surface']")
+      ?.querySelector<HTMLElement>("[data-conversation-item][tabindex='0']") ?? null
   );
+}
+
+function agentsLineKeyHandler(
+  event: React.KeyboardEvent<HTMLButtonElement>,
+  open: boolean,
+  focusedAgentId: string | null,
+  lineRef: RefObject<HTMLButtonElement | null>,
+  onFocusAgent: (id: string | null) => void,
+  openMenu: () => void,
+  closeMenu: (returnFocus: boolean) => void,
+): void {
+  if (event.key === "Enter" || event.key === " " || event.key === "ArrowDown") {
+    // preventDefault suppresses the native button-activation click — this toggle owns it.
+    event.preventDefault();
+    if (open) closeMenu(true);
+    else openMenu();
+    return;
+  }
+  if (event.key === "ArrowUp") {
+    // Symmetric with ArrowDown entering the line: ArrowUp from the line returns focus
+    // to the timeline's tabbable row (the menu owns ArrowUp while open — focus is on
+    // the listbox then, so this branch only fires on the closed line).
+    event.preventDefault();
+    timelineRowTarget(lineRef)?.focus();
+    return;
+  }
+  if (event.key === "Escape") {
+    // The menu owns Esc while it is open; on the closed line, Esc in an agent view returns
+    // to the parent conversation (the surface's timeline-driven Esc stays untouched).
+    if (open || focusedAgentId === null) return;
+    event.preventDefault();
+    event.stopPropagation();
+    onFocusAgent(null);
+  }
 }

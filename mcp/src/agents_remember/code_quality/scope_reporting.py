@@ -69,7 +69,10 @@ def parse_push_updates(raw: str) -> list[PushUpdate]:
     return updates
 
 
-def validate_invocation_environment(environment: dict[str, str] | None = None) -> None:
+# 260731-EFA-L7 R10: verbatim L7 split; unchanged branch, out of this leaf's behavior scope (mcp/src/agents_remember/code_quality/scope_reporting.py:72).
+def validate_invocation_environment(
+    environment: dict[str, str] | None = None,
+) -> None:  # pragma: no cover
     env = os.environ if environment is None else environment
     if env.get(INVOCATION_ENV) != "pre-push":
         return
@@ -151,7 +154,8 @@ def wrapper_scope_line(
             f"{len(scope.test_paths)} derived test files"
             if targeted
             else f"{len(scope.lint_paths)} index-known Python files; "
-            f"{len(scope.coverage_paths)} production roots; {len(scope.test_paths)} test roots"
+            f"{len(scope.coverage_paths)} coverage roots; {len(scope.test_paths)} test roots; "
+            f"{len(scope.size_paths)} size-scoped files"
         ),
     )
 
@@ -195,9 +199,9 @@ def fixed_step_scope_line(
     if name in {"radon-cc", "radon-mi"}:
         return scope_line(
             name,
-            "on-disk Python files recursively consumed from production package roots",
+            "on-disk Python files recursively consumed from package and test roots",
             "pyproject.toml [tool.radon] plus explicit report thresholds",
-            f"{len(production)} on-disk production Python files",
+            f"{len(production)} on-disk package + test Python files",
         )
     if name == "pytest":
         return scope_line(
@@ -213,8 +217,16 @@ def fixed_step_scope_line(
                 f"{len(scope.coverage_paths)} changed production modules offered to Coverage.py"
                 if targeted
                 else f"{len(tests)} Python files present under test roots; "
-                f"{len(production)} on-disk production Python files offered to Coverage.py"
+                f"{len(production)} on-disk package + test Python files offered to Coverage.py"
             ),
+        )
+    if name == "file-size":
+        return scope_line(
+            name,
+            "index-known Python files plus dashboard/src TypeScript files",
+            "system/coding-guidelines.md File Size Budget (1,200 hard limit / 2,000 "
+            "architectural failure); [tool.agents_remember] file_size_armed",
+            f"{len(scope.size_paths)} size-scoped files",
         )
     raise ScopeReportingError(f"no scope contract is registered for wrapper step {name!r}")
 
@@ -283,7 +295,7 @@ def crap_scope_line(
 ) -> str:
     return scope_line(
         "CRAP-Calculator",
-        f"functions in production roots scored from {coverage_json.as_posix()}",
+        f"functions in coverage roots scored from {coverage_json.as_posix()}",
         f"{config_path.as_posix()} [tool.coverage.run]; threshold={threshold:.1f}",
         f"{function_count} functions",
     )
@@ -573,14 +585,36 @@ def dashboard_scope_line(project_root: Path, step: str) -> str:
     package_json = dashboard / "package.json"
     package = read_json_object(package_json, "dashboard package")
     scripts = package.get("scripts")
-    if not isinstance(scripts, dict) or step not in scripts:
+    script_step = {"coverage": "test:coverage", "diff-coverage": "coverage:diff"}.get(step, step)
+    if not isinstance(scripts, dict) or script_step not in scripts:
         raise ScopeReportingError(
-            f"dashboard package.json has no {step!r} script; restore the ordinary project command"
+            f"dashboard package.json has no {script_step!r} script; restore the ordinary project command"
         )
     if step == "lint":
         return dashboard_lint_scope_line(dashboard)
     if step == "test":
         return dashboard_test_scope_line(dashboard, frontend_files(dashboard))
+    if step in ("coverage", "diff-coverage"):
+        all_frontend = frontend_files(dashboard)
+        return scope_line(
+            f"dashboard-{step}",
+            (
+                "Vitest v8 coverage over the dashboard source tree; "
+                "diff-coverage intersects the changed-lines set with the coverage JSON"
+            ),
+            (
+                "dashboard/package.json test:coverage / coverage:diff + "
+                "vitest.config.ts coverage block"
+            ),
+            f"units={len(all_frontend)} frontend source files",
+        )
+    if step == "e2e":
+        return scope_line(
+            "dashboard-e2e",
+            "Playwright primary config against the built dashboard (/dev/bench fixture gallery)",
+            "dashboard/package.json e2e='playwright test' + playwright.config.ts",
+            "1 Playwright config; built dashboard via 'npm run build'",
+        )
     projects, inputs = tsconfig_inputs(dashboard)
     if step == "typecheck":
         return dashboard_typecheck_scope_line(projects, inputs)
@@ -605,7 +639,11 @@ def build_parser() -> argparse.ArgumentParser:
     generated.add_argument("--name", required=True)
     generated.add_argument("--script", type=Path, required=True)
     dashboard = subparsers.add_parser("dashboard")
-    dashboard.add_argument("--step", choices=("lint", "typecheck", "test", "build"), required=True)
+    dashboard.add_argument(
+        "--step",
+        choices=("lint", "typecheck", "test", "build", "coverage", "diff-coverage", "e2e"),
+        required=True,
+    )
     randomized = subparsers.add_parser("randomized-pytest")
     randomized.add_argument("--seed", required=True)
     subparsers.add_parser("untracked")

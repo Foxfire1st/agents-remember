@@ -22,6 +22,7 @@ from __future__ import annotations
 import contextlib
 import shutil
 import threading
+import time
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
@@ -56,6 +57,7 @@ from agents_remember.observer.timeutil import (
 from agents_remember.observer.ulid import new_ulid
 
 IdFactory = Callable[[], str]
+TickerWait = Callable[[threading.Event, float], bool]
 
 # The fixed facts-only allowlist for a ``read.packet`` per-file entry. The
 # read-packet emitter projects every caller entry to exactly these keys, so no
@@ -73,6 +75,26 @@ _HEARTBEAT_KIND = "lifecycle.heartbeat"
 
 def _default_clock() -> datetime:
     return datetime.now(UTC)
+
+
+def _default_ticker_wait(stop: threading.Event, interval: float) -> bool:
+    """Wait up to ``interval`` for the stop flag, rechecking on every wake.
+
+    CPython's ``Event.wait``/``Condition.wait`` parks the caller on a waiter
+    lock, and the lock-handoff there can overrun the timeout and leave the
+    thread parked with no recheck or escape. The ticker must never silently
+    stop, so the production wait chunks ``time.sleep`` against a monotonic
+    deadline instead: every sleep returns, the stop flag is re-read, and the
+    interval expires deterministically. Returns True when stop was observed,
+    False when the interval elapsed.
+    """
+    deadline = time.monotonic() + interval
+    while not stop.is_set():
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return False
+        time.sleep(min(remaining, 0.01))
+    return True
 
 
 @dataclass(frozen=True)
@@ -113,6 +135,7 @@ class AmbientLifecycle:
         self._last_activity_iso: str | None = None
         self._clock = clock
         self._mint = id_factory
+        self._ticker_wait = _default_ticker_wait
         self._lock = threading.Lock()
         self._stop = threading.Event()
         self._ticker: threading.Thread | None = None
@@ -141,11 +164,19 @@ class AmbientLifecycle:
 
     # --- signals -----------------------------------------------------------
 
-    def start(self, *, fleeting: bool = True, phase: Phase = INITIAL_PHASE) -> LifecycleState:
+    def start(
+        self,
+        *,
+        fleeting: bool = True,
+        phase: Phase = INITIAL_PHASE,
+        ticker_wait: TickerWait | None = None,
+    ) -> LifecycleState:
         """Guarded start: mint a lifecycle and become ``running`` (§1.3)."""
         with self._lock:
             if self.current is not None:
                 raise GuardedStartError(self.current.id)
+            if ticker_wait is not None:
+                self._ticker_wait = ticker_wait
             current = LifecycleState(
                 id=self._mint(),
                 state="running",
@@ -530,23 +561,33 @@ class AmbientLifecycle:
         self._stop.set()
 
     def _heartbeat_loop(self, stop: threading.Event, interval: float) -> None:
-        while not stop.wait(interval):
-            with self._lock:
-                current = self.current
-                if current is None or current.is_terminal:
-                    return
-                if self._inactive_seconds_locked() > self._inactivity_cutoff_seconds:
-                    # Idle past the cutoff: stop the heartbeat theater so the log ages out
-                    # and becomes cleanable. The ticker keeps looping and resumes emitting
-                    # the moment a real event resets the activity clock.
-                    continue
-                self._emit_locked(
-                    "lifecycle.heartbeat",
-                    "observed",
-                    "system",
-                    state=current.state,
-                    phase=current.phase,
-                )
+        while not self._ticker_wait(stop, interval):
+            if not self._heartbeat_tick():
+                return
+
+    def _heartbeat_tick(self) -> bool:
+        """Run one beat: emit unless idle past the cutoff or the lifecycle is gone.
+
+        Returns False when the loop should exit (no active lifecycle or a
+        terminal one), True otherwise.
+        """
+        with self._lock:
+            current = self.current
+            if current is None or current.is_terminal:
+                return False
+            if self._inactive_seconds_locked() > self._inactivity_cutoff_seconds:
+                # Idle past the cutoff: stop the heartbeat theater so the log ages out
+                # and becomes cleanable. The ticker keeps looping and resumes emitting
+                # the moment a real event resets the activity clock.
+                return True
+            self._emit_locked(
+                "lifecycle.heartbeat",
+                "observed",
+                "system",
+                state=current.state,
+                phase=current.phase,
+            )
+            return True
 
     def _inactive_seconds_locked(self) -> float:
         """Seconds since the last real (non-heartbeat) event for the current lifecycle."""

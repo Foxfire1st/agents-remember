@@ -27,21 +27,28 @@ export const VOLATILE_AGE_FIELDS: ReadonlySet<string> = new Set([
  * redundant delta) is recognized as unchanged and keeps its existing object identity —
  * zero store write, zero downstream re-render, and the node keeps its original age anchor.
  */
-export function stableEquals(a: unknown, b: unknown): boolean {
-  if (Object.is(a, b)) return true;
-  if (Array.isArray(a) || Array.isArray(b)) {
-    if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false;
-    return a.every((item, index) => stableEquals(item, b[index]));
-  }
-  if (typeof a !== "object" || typeof b !== "object" || a === null || b === null) return false;
-  const left = a as Record<string, unknown>;
-  const right = b as Record<string, unknown>;
+function sameRecord(left: Record<string, unknown>, right: Record<string, unknown>): boolean {
   const leftKeys = Object.keys(left).filter((key) => !VOLATILE_AGE_FIELDS.has(key));
   const rightKeys = Object.keys(right).filter((key) => !VOLATILE_AGE_FIELDS.has(key));
   if (leftKeys.length !== rightKeys.length) return false;
   return leftKeys.every(
     (key) => Object.prototype.hasOwnProperty.call(right, key) && stableEquals(left[key], right[key]),
   );
+}
+
+function sameArray(left: unknown[], right: unknown[]): boolean {
+  if (left.length !== right.length) return false;
+  return left.every((item, index) => stableEquals(item, right[index]));
+}
+
+export function stableEquals(a: unknown, b: unknown): boolean {
+  if (Object.is(a, b)) return true;
+  if (Array.isArray(a) || Array.isArray(b)) {
+    if (!Array.isArray(a) || !Array.isArray(b)) return false;
+    return sameArray(a, b);
+  }
+  if (typeof a !== "object" || typeof b !== "object" || a === null || b === null) return false;
+  return sameRecord(a as Record<string, unknown>, b as Record<string, unknown>);
 }
 
 // Arrival anchors, keyed by node object identity. A WeakMap so anchors never retain nodes

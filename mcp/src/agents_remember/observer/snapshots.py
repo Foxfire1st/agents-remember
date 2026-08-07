@@ -9,81 +9,88 @@ route-index coverage (10), the tool-report feed (12), and memory-ledger currency
 (8). Every reader reuses the producing subsystem's own parser rather than
 re-parsing.
 
-These functions do the file I/O at the projection's call edge; the fold itself
+The provider readers and their container-inspection helpers live in this module;
+the runtime process readers (enclosures, gates, inbox, expectations, engine
+facts), the analytical readers, and the task-document readers live in
+responsibility-split sibling modules and are re-exported here so the projection's
+public import surface is unchanged. These functions do the file I/O at the
+projection's call edge; the fold itself
 (:mod:`agents_remember.observer.reducer`) stays pure.
 """
 
 from __future__ import annotations
 
-import contextlib
-import hashlib
 import json
-import logging
-import subprocess
-from dataclasses import dataclass, replace
-from datetime import UTC, datetime
+from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
-from pydantic import ValidationError
-
-from agents_remember.controlplane.expectation_rows import ExpectationRowStore
-from agents_remember.controlplane.interaction_retention import (
-    AGENT_PICKUP_TTL_SECONDS,
-    pickup_age_seconds,
-    pickup_state,
-)
-from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
-from agents_remember.controlplane.records import GateRecord
 from agents_remember.controlplane.stamps import age_seconds
-from agents_remember.controlplane.store import GateStore
-from agents_remember.kernel.git_command import run_git
-from agents_remember.kernel.memory_ledger import LedgerError, LedgerRow, load_ledger
 from agents_remember.mcp.config import McpRuntimeConfig
-from agents_remember.memory_quality.integrity.onboarding_drift_check.discovery import (
-    discover_onboarding_files,
-    parse_table_metadata,
-)
-from agents_remember.observer.contract_snapshot import (
-    ContractSnapshot,
-    build_contract_snapshot,
-)
-from agents_remember.observer.paths import (
-    DRIFT_SNAPSHOT_SCHEMA,
-    drift_snapshot_dir,
-    observer_logs_root,
-)
-from agents_remember.observer.projection import (
-    LEDGER_WINDOW,
-    AgentPickupNode,
-    DriftSnapshotNode,
-    EnclosureNode,
-    EngineProcessFacts,
-    ExpectationRowNode,
-    LedgerNode,
-    LedgerRefNode,
-    ProviderNode,
-    RouteCoverageNode,
-    SeriesNode,
-    SeriesSubTaskNode,
-    SetupProgressNode,
-    SetupSummaryNode,
-    SidecarStaleNode,
-    TaskCodeExampleNode,
-    TaskDecisionNode,
-    TaskDocNode,
-    TaskSectionNode,
-    TaskStepDispositionNode,
-    TaskStepNode,
-    TaskSubStepNode,
-    TaskSubTaskRefNode,
-    ToolReportNode,
-)
+from agents_remember.observer.projection import ProviderNode
 from agents_remember.observer.provider_nodes import (
     workspace_provider_nodes,
     worktree_provider_node,
 )
-from agents_remember.observer.task_document_cache import TaskDocumentPayloadCache
+from agents_remember.observer.snapshots_impl._analytics import (
+    _commit_meta_for,
+    _enrich_ledger_rows,
+    _git_commit_meta,
+    _ledger_window,
+    read_drift_snapshots,
+    read_ledger,
+    read_route_coverage,
+    read_setup_progress_nodes,
+    read_setup_summaries,
+    read_sidecar_staleness,
+    read_start_progress_entries,
+    read_tool_reports,
+)
+from agents_remember.observer.snapshots_impl._common import (
+    SERIES_DOCUMENT_SUMMARY_LIMIT,
+    STATUS_PAYLOAD_TTL_SECONDS,
+    TASK_DOCUMENT_SUMMARY_LIMIT,
+    _as_float,
+    _as_int,
+    _bounded_task_document_payloads,
+    _current_phase_text,
+    _file_age_seconds,
+    _iter_task_document_payloads,
+    _iter_task_json,
+    _read_json,
+    _report_label,
+    _stat_mtime_ns,
+    _status_payload_cache,
+    _task_doc_cache,
+    _TaskDocumentLifecycleMaps,
+    _text_or_none,
+)
+from agents_remember.observer.snapshots_impl._runtime import (
+    _cached_local_status,
+    _enclosure_from_contract,
+    _safe_status_payload,
+    logger,
+    read_agent_pickups,
+    read_enclosures,
+    read_engine_process_facts,
+    read_expectation_rows,
+    read_gates,
+    refresh_engine_process_landing,
+)
+from agents_remember.observer.snapshots_impl._task_documents import (
+    _doc_enclosure_lifecycle,
+    _ref_lifecycle,
+    _series_subtask_created_at,
+    _series_subtask_nodes,
+    _task_doc_body_revision,
+    _task_doc_lifecycle_id,
+    _task_doc_node,
+    _task_document_lifecycle_maps,
+    _task_step_nodes,
+    read_series_documents,
+    read_task_document_body,
+    read_task_documents,
+)
 from agents_remember.providers.context import ContextProviderError
 from agents_remember.providers.current_state import current_state_path
 from agents_remember.providers.lifecycle.command_runner import run_command
@@ -91,94 +98,66 @@ from agents_remember.providers.lifecycle.docker_runtime import (
     docker_command,
     docker_container_state_summary,
 )
-from agents_remember.providers.setup_progress import progress_status, read_setup_progress
-from agents_remember.tasks import (
-    TASK_DOCUMENT_SCHEMA,
-    TaskDocument,
-    current_step,
-    series_done,
-    series_total,
-    step_done,
-    step_total,
-)
-from agents_remember.worktrees.modules.guidance import (
-    contract_payload,
-    lifecycle_guidance,
-    projected_status_payload,
-)
-from agents_remember.worktrees.modules.landing import unobserved_landing_refs
-from agents_remember.worktrees.start_progress import read_start_progress
-from agents_remember.worktrees.task_resolver import (
-    ARCHIVE_DIR,
-    ENCLOSURES_DIR,
-)
-from agents_remember.worktrees.worktree_contract import WorktreeContract
-
-if TYPE_CHECKING:
-    from agents_remember.observer.landing_state import LandingStateReader
-
-logger = logging.getLogger(__name__)
+from agents_remember.tasks import TASK_DOCUMENT_SCHEMA
 
 WORKTREE_PROVIDER_STATE_SCHEMA = "ar-worktree-provider-state/v1"
 WORKTREE_PROVIDER_INSPECT_SECONDS = 5
 
-# Task and series readers share one stat-identity parse cache. Runtime-only
-# watcher changes still trigger a projection, but unchanged task JSON is never
-# reparsed merely because wall-clock time passed.
-TASK_DOCUMENT_SUMMARY_LIMIT = 250
-SERIES_DOCUMENT_SUMMARY_LIMIT = 250
-_task_doc_cache = TaskDocumentPayloadCache()
-
-# 260707-HFX2-L12 F11: status_payload() shells out to git per leaf; without a cache the projection
-# fires O(active-leaf) git subprocesses every tick. Git state changes slowly, so this TTL cache lets
-# each leaf's git probe run at most once per interval; the cache is pruned to the live leaf set each
-# tick so it cannot grow unbounded. Keyed by enclosure-contract path.
-STATUS_PAYLOAD_TTL_SECONDS = 8.0
-_status_payload_cache: dict[str, tuple[datetime, dict[str, Any] | None]] = {}
-
-
-@dataclass(frozen=True)
-class _TaskDocumentLifecycleMaps:
-    lifecycle_by_enclosure: dict[str, str]
-    lifecycle_by_dir: dict[Path, str]
-    lifecycle_by_root_doc: dict[Path, str]
-    lifecycle_by_leaf_doc: dict[tuple[Path, str], str]
-
-
-def _iter_task_document_payloads(
-    tasks_root: Path, *, now: datetime | None
-) -> list[tuple[Path, dict[str, object]]]:
-    """Shared ``(path, payload)`` list with per-file invalidation.
-
-    ``now=None`` preserves the standalone fresh-read contract. Projection
-    callers enumerate the live set each tick, reuse only unchanged stat
-    identities, parse changed/new files, and prune deleted paths.
-    """
-
-    paths = _iter_task_json(tasks_root)
-    docs = (
-        [(path, payload) for path in paths if (payload := _read_json(path)) is not None]
-        if now is None
-        else _task_doc_cache.payloads(tasks_root, paths, read_payload=_read_json)
-    )
-    return [
-        (path, payload) for path, payload in docs if payload.get("schema") == TASK_DOCUMENT_SCHEMA
-    ]
-
-
-def _bounded_task_document_payloads(
-    docs: list[tuple[Path, dict[str, object]]], *, limit: int
-) -> list[tuple[Path, dict[str, object]]]:
-    if len(docs) <= limit:
-        return docs
-    return sorted(docs, key=lambda item: (-_stat_mtime_ns(item[0]), item[0].as_posix()))[:limit]
-
-
-def _stat_mtime_ns(path: Path) -> int:
-    try:
-        return path.stat().st_mtime_ns
-    except OSError:
-        return 0
+__all__ = [
+    "SERIES_DOCUMENT_SUMMARY_LIMIT",
+    "STATUS_PAYLOAD_TTL_SECONDS",
+    "TASK_DOCUMENT_SCHEMA",
+    "TASK_DOCUMENT_SUMMARY_LIMIT",
+    "_TaskDocumentLifecycleMaps",
+    "_as_float",
+    "_as_int",
+    "_bounded_task_document_payloads",
+    "_cached_local_status",
+    "_commit_meta_for",
+    "_current_phase_text",
+    "_doc_enclosure_lifecycle",
+    "_enclosure_from_contract",
+    "_enrich_ledger_rows",
+    "_git_commit_meta",
+    "_inspect_containers",
+    "_inspect_containers_individually",
+    "_inspect_result_map",
+    "_iter_task_document_payloads",
+    "_iter_task_json",
+    "_ledger_window",
+    "_ref_lifecycle",
+    "_report_label",
+    "_safe_status_payload",
+    "_series_subtask_created_at",
+    "_series_subtask_nodes",
+    "_stat_mtime_ns",
+    "_status_payload_cache",
+    "_task_doc_body_revision",
+    "_task_doc_cache",
+    "_task_doc_lifecycle_id",
+    "_task_doc_node",
+    "_task_document_lifecycle_maps",
+    "_task_step_nodes",
+    "logger",
+    "read_agent_pickups",
+    "read_drift_snapshots",
+    "read_enclosures",
+    "read_engine_process_facts",
+    "read_expectation_rows",
+    "read_gates",
+    "read_ledger",
+    "read_providers",
+    "read_route_coverage",
+    "read_series_documents",
+    "read_setup_progress_nodes",
+    "read_setup_summaries",
+    "read_sidecar_staleness",
+    "read_start_progress_entries",
+    "read_task_document_body",
+    "read_task_documents",
+    "read_tool_reports",
+    "refresh_engine_process_landing",
+]
 
 
 def read_providers(
@@ -202,7 +181,10 @@ def read_providers(
     )
 
 
-def _workspace_providers(config: McpRuntimeConfig, *, now: datetime) -> list[ProviderNode]:
+# 260731-EFA-L7 R10: verbatim L7 split; unchanged branch, out of this leaf's behavior scope (mcp/src/agents_remember/observer/snapshots.py:128).
+def _workspace_providers(
+    config: McpRuntimeConfig, *, now: datetime
+) -> list[ProviderNode]:  # pragma: no cover
     payload = _read_json(current_state_path(config))
     if payload is None:
         return []
@@ -277,7 +259,8 @@ def _worktree_providers(
     return nodes
 
 
-def _worktree_provider_ids(payload: dict[str, Any]) -> list[str]:
+# 260731-EFA-L7 R10: verbatim L7 split; unchanged branch, out of this leaf's behavior scope (mcp/src/agents_remember/observer/snapshots.py:203).
+def _worktree_provider_ids(payload: dict[str, Any]) -> list[str]:  # pragma: no cover
     settings = payload.get("isolatedProviderSettings")
     providers = settings.get("providers") if isinstance(settings, dict) else None
     if not isinstance(providers, list):
@@ -291,7 +274,8 @@ def _worktree_settings_key(payload: dict[str, Any]) -> str | None:
     return raw_path if isinstance(raw_path, str) and raw_path else None
 
 
-def _worktree_provider_settings(
+# 260731-EFA-L7 R10: verbatim L7 split; unchanged branch, out of this leaf's behavior scope (mcp/src/agents_remember/observer/snapshots.py:217).
+def _worktree_provider_settings(  # pragma: no cover
     payload: dict[str, Any],
     cache: dict[str, dict[str, Any] | None],
 ) -> dict[str, Any] | None:
@@ -323,7 +307,8 @@ def _settings_providers(settings: dict[str, Any] | None) -> dict[str, Any]:
     return providers if isinstance(providers, dict) else {}
 
 
-def _cgc_runtime_spec(provider: dict[str, Any]) -> dict[str, list[str]]:
+# 260731-EFA-L7 R10: verbatim L7 split; unchanged branch, out of this leaf's behavior scope (mcp/src/agents_remember/observer/snapshots.py:249).
+def _cgc_runtime_spec(provider: dict[str, Any]) -> dict[str, list[str]]:  # pragma: no cover
     backend = provider.get("backend")
     runtime = provider.get("runtime")
     runner = runtime.get("runner") if isinstance(runtime, dict) else None
@@ -356,7 +341,8 @@ def _grepai_runtime_spec(provider: dict[str, Any]) -> dict[str, list[str]]:
     return {"watchers": _compact_strings([watcher]), "resources": resources}
 
 
-def _container_name(value: Any) -> str | None:
+# 260731-EFA-L7 R10: verbatim L7 split; unchanged branch, out of this leaf's behavior scope (mcp/src/agents_remember/observer/snapshots.py:282).
+def _container_name(value: Any) -> str | None:  # pragma: no cover
     if not isinstance(value, dict):
         return None
     name = value.get("containerName")
@@ -437,7 +423,8 @@ def _inspect_result_map(raw: Any) -> dict[str, dict[str, Any]]:
     return results
 
 
-def _worktree_runtime_summary(
+# 260731-EFA-L7 R10: verbatim L7 split; unchanged branch, out of this leaf's behavior scope (mcp/src/agents_remember/observer/snapshots.py:363).
+def _worktree_runtime_summary(  # pragma: no cover
     spec: dict[str, list[str]],
     inspected: dict[str, dict[str, Any] | None] | None,
 ) -> dict[str, Any] | None:
@@ -463,1089 +450,3 @@ def _worktree_runtime_summary(
         "watcherUp": watcher_up,
         "indexingState": "unknown",
     }
-
-
-def read_enclosures(
-    coordination_root: Path, *, contracts: ContractSnapshot | None = None
-) -> list[EnclosureNode]:
-    """Surfaces 5/6: every active leaf enclosure contract.
-
-    Leaf contracts live below ``enclosures/<leaf-id>/series-contract.md``. Root
-    series contracts describe integration branches and are not live worktree
-    processes. A malformed contract is skipped, never fatal to the projection.
-
-    260712-PTS-L2: the projection tick passes its shared per-tick
-    :class:`ContractSnapshot` so this reader adds ZERO contract parses; a
-    standalone call (``contracts=None``) builds a local snapshot, preserving the
-    public signature and the walk-and-skip behavior it had before.
-    """
-    snapshot = (
-        contracts if contracts is not None else build_contract_snapshot(coordination_root / "tasks")
-    )
-    return [_enclosure_from_contract(contract) for contract in snapshot.contracts.values()]
-
-
-def _enclosure_from_contract(contract: WorktreeContract) -> EnclosureNode:
-    return EnclosureNode(
-        enclosure=contract.contract_path.as_posix(),
-        enclosureId=contract.leaf_id or contract.contract_path.parent.name,
-        leafId=contract.leaf_id,
-        taskId=contract.task_id,
-        taskName=contract.task_name,
-        repoName=contract.repo_name,
-        taskRoot=contract.task_root.as_posix(),
-        lifecycleId=contract.lifecycle_id,
-        worktreeGroup=contract.worktree_group.as_posix(),
-        humanReviewStatus=contract.human_review_status,
-        closeoutStatus=contract.closeout_status,
-        integrationStatus=contract.integration_status,
-        cleanup=contract.cleanup,
-        # Worktree-existence truth (L11), stat'ed here at snapshot time exactly as
-        # worktree_status reports it: the tasks surface renders a leaf ONLY while a
-        # worktree physically exists, so this must never be inferred from cleanup state.
-        codeWorktreeExists=contract.code_worktree.exists(),
-        memoryWorktreeExists=(
-            contract.memory_worktree.exists() if contract.memory_worktree else False
-        ),
-    )
-
-
-def read_gates(coordination_root: Path, *, now: datetime | None = None) -> list[GateRecord]:
-    """Every lifecycle's current (folded) gate set + the workspace log (slice 6c).
-
-    Reads the gate logs co-located with the event store under ``observer_logs_root``
-    and folds each by id (last-wins), so the projection sees live gate state with no
-    event machinery. A malformed log is skipped, never fatal to the tick.
-
-    260707-HFX2-L12 F8/CS-6 D2: one directory scan + one read per gate log per tick.
-
-    260731-EFA-L5: this tick no longer rewrites anything. It used to physically prune every
-    gate log on a 30s cadence -- compaction running in the process that owns nothing here,
-    racing the MCP server's appends, which is where the measured record loss came from. The
-    projection output is unchanged (the same keep-filter is applied in memory by
-    ``projected_current``); on-disk reclamation is ``GateStore.compact`` in the gate log's
-    owner, the MCP process. The read is deliberately the TOLERANT one: a torn line must cost
-    the dashboard one row for one tick, never a crashed tick -- the STRICT read is what the
-    enforcement fold uses, and it still raises.
-
-    THE SUPPRESSION IS NAMED, NOT BROAD, for the reason
-    ``controlplane/gate_decisions.py::_reclaim_gate_log`` gives: ``ValidationError`` subclasses
-    ``ValueError``, so a ``suppress`` written for I/O silently swallows a malformed record too, and
-    this leaf narrowed that spelling there on principle. Two spellings of one decision is what the
-    principle is against. Here the narrowing removes a net rather than a catch:
-    ``projected_current`` is the TOLERANT read and already
-    skips an unreadable row per row, so no ``ValidationError`` can reach this line, and
-    ``age_seconds`` -- the only other thing in the fold that parses -- returns ``None`` on a stamp
-    it cannot read rather than raising. What is left to suppress is the I/O the suppress was
-    always for: a log removed or made unreadable between ``lifecycle_ids`` and the read.
-    """
-    store = GateStore(observer_logs_root(coordination_root))
-    gates: list[GateRecord] = []
-    for lifecycle_id in store.lifecycle_ids():
-        with contextlib.suppress(OSError):
-            gates.extend(store.projected_current(lifecycle_id, now=now).values())
-    return gates
-
-
-def read_agent_pickups(coordination_root: Path, *, now: datetime) -> list[AgentPickupNode]:
-    """Pending dashboard responses waiting for agent-side inbox consumption.
-
-    260731-EFA-L5: ``ValidationError`` by name, and unlike ``read_gates`` above it is genuinely
-    load-bearing here -- ``OperatorInboxStore._read_unlocked`` is STRICT on purpose (an inbox row
-    nobody can parse is an ack nobody can account for, and ``consume`` decides on that fold), so a
-    torn row really does raise out of both calls below and really must not crash the tick. Spelt
-    ``ValidationError`` rather than ``ValueError`` all the same: the wide net would also swallow
-    an unrelated ``ValueError`` from anywhere in the loop, which is the trap this leaf closed in
-    ``application/gate_tools.py``. ``DurableStoreError`` is a ``RuntimeError`` and still propagates.
-    """
-    store = OperatorInboxStore(observer_logs_root(coordination_root))
-    with contextlib.suppress(OSError, ValidationError):
-        store.compact(now=now)
-    pickups: list[AgentPickupNode] = []
-    with contextlib.suppress(OSError, ValidationError):
-        for entry in store.current().values():
-            if entry.state != "pending":
-                continue
-            pickups.append(
-                AgentPickupNode(
-                    id=f"pickup:{entry.id}",
-                    entryId=entry.id,
-                    lifecycleId=entry.lifecycleId,
-                    agentId=entry.agentId,
-                    senderAgentId=entry.senderAgentId,
-                    senderRole=entry.senderRole,
-                    recipientRole=entry.recipientRole,
-                    ownerRole=entry.ownerRole,
-                    ownerAgentId=entry.ownerAgentId,
-                    ownerLifecycleId=entry.ownerLifecycleId,
-                    gateId=entry.gateId,
-                    messageKind=entry.messageKind,
-                    artifactPath=entry.artifactPath,
-                    deliveryState=entry.deliveryState,
-                    deliveredToSession=entry.deliveredToSession,
-                    attemptCount=entry.attemptCount,
-                    lastAttemptAt=entry.lastAttemptAt,
-                    nextAttemptAt=entry.nextAttemptAt,
-                    escalatedAt=entry.escalatedAt,
-                    state=pickup_state(entry, now=now),
-                    ageSeconds=pickup_age_seconds(entry, now=now),
-                    ttlSeconds=AGENT_PICKUP_TTL_SECONDS,
-                )
-            )
-    return sorted(pickups, key=lambda item: item.ageSeconds or 0.0, reverse=True)
-
-
-def read_expectation_rows(coordination_root: Path, *, now: datetime) -> list[ExpectationRowNode]:
-    """Pending expectation (deadline) rows, for dashboard/architect observability (R5).
-
-    Surfacing only: an L2 predicate reads ``ExpectationRowStore`` directly and never this
-    projection (the #22 correctness half stays L2's rule; this is the visibility half).
-
-    260731-EFA-L5 R8: ``pending_for_projection`` and not ``pending``. The strict read raises
-    ``ValidationError``, which subclasses ``ValueError`` -- so the ``suppress`` below used to
-    swallow ONE torn line by discarding EVERY deadline in the file, and the dashboard showed an
-    operator nothing due. The tolerant read degrades per row instead, so the suppress is now
-    ``OSError`` only -- it is the I/O it was always for, and keeping ``ValueError`` beside a
-    tolerant read would leave the same wide net this leaf narrowed in ``application/gate_tools.py``. The
-    inner ``except ValueError`` below is a different question and stays: it is the per-row parse
-    of one ``dueAt``, and an unparseable deadline means "not overdue", not "drop every row".
-    """
-    store = ExpectationRowStore(observer_logs_root(coordination_root))
-    rows: list[ExpectationRowNode] = []
-    with contextlib.suppress(OSError):
-        for row in store.pending_for_projection():
-            try:
-                due_at = datetime.fromisoformat(row.dueAt)
-                overdue = now >= due_at
-            except ValueError:
-                overdue = False
-            rows.append(
-                ExpectationRowNode(
-                    id=row.id,
-                    kind=row.kind,
-                    state=row.state,
-                    sourceId=row.sourceId,
-                    subjectAgentId=row.subjectAgentId,
-                    subjectLifecycleId=row.subjectLifecycleId,
-                    leafKey=row.leafKey,
-                    dueAt=row.dueAt,
-                    overdue=overdue,
-                    note=row.note,
-                )
-            )
-    return sorted(rows, key=lambda item: item.dueAt)
-
-
-def read_engine_process_facts(
-    coordination_root: Path,
-    *,
-    active_worktree_groups: set[str] | None = None,
-    now: datetime | None = None,
-    landing_state: LandingStateReader | None = None,
-    contracts: ContractSnapshot | None = None,
-) -> list[EngineProcessFacts]:
-    """Slice 5e: gather one fact bundle per leaf enclosure for the Engine Room map.
-
-    Reads the same leaf enclosure contracts as :func:`read_enclosures` (via the shared
-    per-tick :class:`ContractSnapshot` when the projection passes one; a standalone call
-    builds a local snapshot), but enriches each with the status-guidance facts the
-    structural ``EnclosureNode`` omits (the code/memory branches, base commits, worktree
-    paths, existence/dirty flags, base freshness, and provider-boot status).
-    ``contract_payload`` and ``lifecycle_guidance`` are pure; only ``status_payload``
-    touches git, and it is best-effort so a contract pointing at absent or fake worktrees
-    degrades to ``status=None`` (rendered as missing/derived) instead of crashing the
-    projection tick. A malformed contract is skipped, never fatal.
-    """
-    snapshot = (
-        contracts if contracts is not None else build_contract_snapshot(coordination_root / "tasks")
-    )
-    facts: list[EngineProcessFacts] = []
-    seen_status_keys: set[str] = set()
-    for path, contract in snapshot.contracts.items():
-        if (
-            active_worktree_groups is not None
-            and contract.worktree_group.name not in active_worktree_groups
-        ):
-            continue
-        cp = contract_payload(contract)
-        ledger_rows, ledger_total = _ledger_window(
-            cp.get("ledger_path"),
-            code_root=cp.get("code_worktree"),
-            memory_root=cp.get("memory_worktree"),
-        )
-        status_key = str(path)
-        seen_status_keys.add(status_key)
-        facts.append(
-            EngineProcessFacts(
-                contract=cp,
-                # Widened at the boundary: `EngineProcessFacts` is the projection's untyped
-                # input carrier, and the reducer folds it by key name.
-                guidance=dict(lifecycle_guidance(contract)),
-                status=_safe_status_payload(
-                    contract,
-                    cache_key=status_key,
-                    now=now,
-                    landing_state=landing_state,
-                ),
-                ledger_rows=ledger_rows,
-                ledger_row_count=ledger_total,
-            )
-        )
-    # F11: keep the git-status cache bounded to the live leaf set (no unbounded growth over daemon life).
-    if now is not None:
-        for stale in [key for key in _status_payload_cache if key not in seen_status_keys]:
-            _status_payload_cache.pop(stale, None)
-    return facts
-
-
-def refresh_engine_process_landing(
-    facts: list[EngineProcessFacts],
-    *,
-    now: datetime,
-    landing_state: LandingStateReader | None,
-    contracts: ContractSnapshot,
-) -> list[EngineProcessFacts]:
-    """Refresh only the background-published landing tail of retained Engine Room facts.
-
-    A heartbeat changes landing ages and may publish a new remote observation, but it does
-    not change contract, guidance, local Git status, or ledger facts. Reusing those retained
-    inputs avoids rerunning the Git-backed full Engine Room reader on every heartbeat while
-    preserving the volatile landing truth on the same cadence.
-    """
-    contracts_by_path = {
-        path.as_posix(): contract for path, contract in contracts.contracts.items()
-    }
-    refreshed: list[EngineProcessFacts] = []
-    for fact in facts:
-        status = fact.status
-        contract_path = str(fact.contract.get("contract_path", ""))
-        contract = contracts_by_path.get(contract_path)
-        if status is None or contract is None:
-            refreshed.append(fact)
-            continue
-        try:
-            landing = (
-                landing_state.current(contract, now=now)
-                if landing_state is not None
-                else unobserved_landing_refs(contract)
-            )
-        except Exception:
-            logger.warning(
-                "landing snapshot merge failed for %s; using retained local status",
-                contract_path,
-                exc_info=True,
-            )
-            refreshed.append(fact)
-            continue
-        next_status = {key: value for key, value in status.items() if key != "landing"}
-        if landing is not None:
-            next_status["landing"] = landing
-        refreshed.append(replace(fact, status=next_status))
-    return refreshed
-
-
-def _safe_status_payload(
-    contract: Any,
-    *,
-    cache_key: str | None = None,
-    now: datetime | None = None,
-    landing_state: LandingStateReader | None = None,
-) -> dict[str, Any] | None:
-    """Read cached local status, then attach immutable landing facts without remote work.
-
-    The local git result remains TTL-cached. Landing facts are merged after that cache lookup so a
-    newly published background observation is visible on the next projection tick.
-    """
-    value = _cached_local_status(contract, cache_key=cache_key, now=now)
-    if value is None:
-        return None
-    moment = now or datetime.now(UTC)
-    try:
-        landing = (
-            landing_state.current(contract, now=moment)
-            if landing_state is not None
-            else unobserved_landing_refs(contract)
-        )
-    except Exception:
-        # The local status is already truthful. A malformed injected/immutable landing snapshot
-        # must sacrifice only this contract's landing detail, not freeze the whole projection tick.
-        logger.warning(
-            "landing snapshot merge failed for %s; using local status",
-            getattr(contract, "contract_path", "unknown-contract"),
-            exc_info=True,
-        )
-        return value
-    if landing is None:
-        return value
-    return {**value, "landing": landing}
-
-
-def _cached_local_status(
-    contract: Any, *, cache_key: str | None, now: datetime | None
-) -> dict[str, Any] | None:
-    if cache_key is not None and now is not None:
-        cached = _status_payload_cache.get(cache_key)
-        if (
-            cached is not None
-            and 0 <= (now - cached[0]).total_seconds() < STATUS_PAYLOAD_TTL_SECONDS
-        ):
-            return cached[1]
-    value: dict[str, Any] | None
-    try:
-        value = dict(projected_status_payload(contract, landing=None))
-    except Exception:  # local status for one broken worktree must not fail the whole projection
-        value = None
-    if cache_key is not None and now is not None:
-        _status_payload_cache[cache_key] = (now, value)
-    return value
-
-
-def _ledger_window(
-    ledger_path: Any, *, code_root: Any = None, memory_root: Any = None
-) -> tuple[list[LedgerRefNode], int]:
-    """The worktree memory.md ledger window for the coupler popover (5h).
-
-    Best-effort like ``status_payload``: a missing / invalid / unreadable ledger yields an empty
-    window so the projection tick never fails. Returns the newest ``LEDGER_WINDOW`` rows plus the
-    total row count (for the popover's "+N more in memory.md" footer). Each row is enriched with the
-    per-side commit message + date probed from ``code_root`` / ``memory_root`` (Tier 2); a row whose
-    commit is not in the local repo keeps only its hash.
-    """
-    if not isinstance(ledger_path, str) or not ledger_path:
-        return [], 0
-    try:
-        ledger = load_ledger(Path(ledger_path))
-    except (LedgerError, OSError):
-        return [], 0
-    rows = _enrich_ledger_rows(
-        ledger.rows[:LEDGER_WINDOW], code_root=code_root, memory_root=memory_root
-    )
-    return rows, len(ledger.rows)
-
-
-def _git_commit_meta(repo_root: Any, commits: list[str]) -> dict[str, tuple[str, str]]:
-    """Best-effort batched commit metadata for the ledger popover (5h Tier 2).
-
-    ONE ``git log`` per repo for the whole window (never one subprocess per commit): ``--no-walk``
-    shows only the named commits (no history traversal) and ``--ignore-missing`` drops any SHA that
-    is not in this local repo. Returns ``{full_hash: (committer_iso_date, subject)}`` for the commits
-    that resolved; ``{}`` on any failure (no repo path, git absent, non-zero exit) so the projection
-    tick never fails and the row honestly falls back to the hash alone. Metadata is never faked -- a
-    commit absent from the local repo simply has no entry (``--ignore-missing`` with an all-missing
-    set returns empty, never a HEAD fallback).
-    """
-    if not isinstance(repo_root, str) or not repo_root or not commits:
-        return {}
-    try:
-        result = run_git(
-            Path(repo_root),
-            ["log", "--no-walk", "--ignore-missing", "--format=%H%x1f%cI%x1f%s", *commits],
-        )
-    except (OSError, subprocess.SubprocessError):
-        # SubprocessError is not a subclass of OSError, and TimeoutExpired is one: this call
-        # moved onto a runner that has a timeout, so a wedged `git log` now raises something
-        # `except OSError` cannot see. It would escape through `_enrich_ledger_rows` and fail
-        # the projection tick, breaking the promise `_ledger_window` and `read_ledger` both
-        # make -- that an unreadable ledger degrades to hash-only rows, never to an exception.
-        return {}
-    if result.returncode != 0:
-        return {}
-    meta: dict[str, tuple[str, str]] = {}
-    for line in result.stdout.splitlines():
-        parts = line.split("\x1f")
-        if len(parts) == 3:
-            full_hash, iso_date, subject = parts
-            meta[full_hash] = (iso_date, subject)
-    return meta
-
-
-def _commit_meta_for(
-    commit: str, meta: dict[str, tuple[str, str]]
-) -> tuple[str | None, str | None]:
-    """Resolve a (possibly short) ledger SHA against the full-hash-keyed probe map (prefix-tolerant)."""
-    info = meta.get(commit)
-    if info is None:
-        info = next(
-            (value for full_hash, value in meta.items() if full_hash.startswith(commit)), None
-        )
-    if info is None:
-        return None, None
-    iso_date, subject = info
-    return iso_date, subject
-
-
-def _enrich_ledger_rows(
-    rows: list[LedgerRow], *, code_root: Any, memory_root: Any
-) -> list[LedgerRefNode]:
-    """Window rows -> served LedgerRefNodes, each carrying best-effort per-side commit meta (Tier 2).
-
-    One batched probe per side: code commits against ``code_root``, memory commits against
-    ``memory_root``. A row whose commit isn't in the local repo keeps its hash with no message/date.
-    """
-    code_meta = _git_commit_meta(code_root, [row.code_commit for row in rows])
-    memory_meta = _git_commit_meta(memory_root, [row.memory_commit for row in rows])
-    enriched: list[LedgerRefNode] = []
-    for row in rows:
-        code_date, code_subject = _commit_meta_for(row.code_commit, code_meta)
-        memory_date, memory_subject = _commit_meta_for(row.memory_commit, memory_meta)
-        enriched.append(
-            LedgerRefNode(
-                codeCommit=row.code_commit,
-                memoryCommit=row.memory_commit,
-                codeSubject=code_subject,
-                codeDate=code_date,
-                memorySubject=memory_subject,
-                memoryDate=memory_date,
-            )
-        )
-    return enriched
-
-
-def read_start_progress_entries(coordination_root: Path, *, now: datetime) -> list[dict[str, Any]]:
-    """Slice 5e §5.4: pre-contract worktree-start blocks (a start gated before its contract).
-
-    Reads the transient ``temp/worktree-start/<repo>/<worktree>.json`` files ``start.py`` writes
-    when a start blocks before writing its contract, stamping each with the heartbeat age. A start
-    that reached its contract has had this file cleared, so these are exactly the starts the
-    contract-keyed enclosure surface cannot see.
-    """
-    root = coordination_root / "temp" / "worktree-start"
-    if not root.is_dir():
-        return []
-    entries: list[dict[str, Any]] = []
-    for path in sorted(root.glob("*/*.json")):
-        payload = read_start_progress(path)
-        if payload is None:
-            continue
-        updated = payload.get("updatedAt")
-        entries.append(
-            {
-                **payload,
-                "sourceFile": path.as_posix(),
-                "ageSeconds": age_seconds(updated, now) if isinstance(updated, str) else None,
-            }
-        )
-    return entries
-
-
-# --- analytical surface readers (slice 3b) -----------------------------------
-
-
-def read_drift_snapshots(coordination_root: Path, *, now: datetime) -> list[DriftSnapshotNode]:
-    """Surface 9 (b1): the persisted drift snapshots the memory_quality run writes.
-
-    A cheap read with a staleness age -- the reducer never classifies drift itself
-    (git-per-sidecar). A snapshot whose schema does not match is skipped.
-    """
-    directory = drift_snapshot_dir(coordination_root)
-    if not directory.is_dir():
-        return []
-    nodes: list[DriftSnapshotNode] = []
-    for path in sorted(directory.glob("*.json")):
-        payload = _read_json(path)
-        if payload is None or payload.get("schema") != DRIFT_SNAPSHOT_SCHEMA:
-            continue
-        raw_counts = payload.get("counts")
-        counts = (
-            {str(key): _as_int(value) for key, value in raw_counts.items()}
-            if isinstance(raw_counts, dict)
-            else {}
-        )
-        checked = payload.get("checkedAt")
-        nodes.append(
-            DriftSnapshotNode(
-                repository=str(payload.get("repository", "")),
-                branch=str(payload.get("branch", "")),
-                counts=counts,
-                actionableCount=_as_int(payload.get("actionableCount")),
-                checkedAt=checked if isinstance(checked, str) else None,
-                sourceRoot=_text_or_none(payload.get("sourceRoot")),
-                memoryRoot=_text_or_none(payload.get("memoryRoot")),
-                reportPath=_text_or_none(payload.get("reportPath")),
-                snapshotStaleSeconds=age_seconds(checked, now)
-                if isinstance(checked, str)
-                else None,
-            )
-        )
-    return nodes
-
-
-def read_sidecar_staleness(
-    onboarding_root: Path, *, repository: str, now: datetime
-) -> list[SidecarStaleNode]:
-    """Surface 11 (git-free): each supported sidecar's verification age.
-
-    Reuses the drift package's discovery + table-metadata parse -- no git, no
-    classification, just the age of the ``lastVerifiedCommitDate`` stamp.
-    """
-    if not onboarding_root.is_dir():
-        return []
-    nodes: list[SidecarStaleNode] = []
-    for path in discover_onboarding_files(onboarding_root):
-        try:
-            metadata = parse_table_metadata(path)
-        except (OSError, UnicodeDecodeError):
-            continue
-        stamp = metadata.get("lastVerifiedCommitDate", "")
-        nodes.append(
-            SidecarStaleNode(
-                onboardingFile=path.relative_to(onboarding_root).as_posix(),
-                repository=repository,
-                lastVerifiedDate=stamp,
-                ageSeconds=age_seconds(stamp, now) if stamp else None,
-            )
-        )
-    return nodes
-
-
-def read_setup_summaries(coordination_root: Path, *, now: datetime) -> list[SetupSummaryNode]:
-    """Surface 2: the latest provider-setup summary per action.
-
-    Reads ``logs/providers/setup/last-<action>.json`` (the compact summary the
-    setup run writes); the ``-full`` debug copies are skipped.
-    """
-    directory = coordination_root / "logs" / "providers" / "setup"
-    if not directory.is_dir():
-        return []
-    nodes: list[SetupSummaryNode] = []
-    for path in sorted(directory.glob("last-*.json")):
-        if path.name.endswith("-full.json"):
-            continue
-        payload = _read_json(path)
-        if payload is None:
-            continue
-        generated = payload.get("generatedAt")
-        raw_counts = payload.get("resultCounts")
-        ok_value = payload.get("ok")
-        ready_value = payload.get("ready")
-        nodes.append(
-            SetupSummaryNode(
-                action=str(payload.get("action") or path.stem.removeprefix("last-")),
-                ok=ok_value if isinstance(ok_value, bool) else None,
-                ready=ready_value if isinstance(ready_value, bool) else None,
-                state=_text_or_none(payload.get("state")),
-                generatedAt=generated if isinstance(generated, str) else None,
-                snapshotStaleSeconds=age_seconds(generated, now)
-                if isinstance(generated, str)
-                else None,
-                resultCounts=(
-                    {str(key): _as_int(value) for key, value in raw_counts.items()}
-                    if isinstance(raw_counts, dict)
-                    else {}
-                ),
-            )
-        )
-    return nodes
-
-
-def read_setup_progress_nodes(
-    coordination_root: Path,
-    *,
-    now: datetime,
-    active_worktree_groups: set[str] | None = None,
-) -> list[SetupProgressNode]:
-    """Surface 3: each worktree group's live provider-setup progress.
-
-    Projected through the producer's own ``progress_status`` so a ``running`` group
-    whose heartbeat went stale reads ``stale`` -- the boot-sequence widget data.
-    """
-    worktrees_root = coordination_root / "worktrees"
-    if not worktrees_root.is_dir():
-        return []
-    nodes: list[SetupProgressNode] = []
-    for path in sorted(worktrees_root.glob("*/*/provider-runtime/setup-progress.json")):
-        group = path.parent.parent.name
-        if active_worktree_groups is not None and group not in active_worktree_groups:
-            continue
-        progress = read_setup_progress(path)
-        if progress is None:
-            continue
-        status = progress_status(progress, clock=lambda: now)
-        completed = progress.get("completedPhases")
-        nodes.append(
-            SetupProgressNode(
-                group=group,
-                state=str(status.get("state", "unknown")),
-                currentPhase=_current_phase_text(status.get("currentPhase")),
-                heartbeatAgeSeconds=_as_float(status.get("heartbeatAgeSeconds")),
-                completedCount=len(completed) if isinstance(completed, list) else 0,
-                failedPhases=[str(line) for line in status.get("failedPhases", []) or []],
-            )
-        )
-    return nodes
-
-
-def read_route_coverage(
-    onboarding_root: Path, *, repository: str | None = None
-) -> list[RouteCoverageNode]:
-    """Surface 10: per-route coverage from generated ``overview.index.json`` files."""
-    if not onboarding_root.is_dir():
-        return []
-    nodes: list[RouteCoverageNode] = []
-    for path in sorted(onboarding_root.rglob("overview.index.json")):
-        payload = _read_json(path)
-        if payload is None:
-            continue
-        raw_counts = payload.get("coverageCounts")
-        counts = raw_counts if isinstance(raw_counts, dict) else {}
-        nodes.append(
-            RouteCoverageNode(
-                repository=_text_or_none(payload.get("repository")) or repository,
-                route=str(payload.get("route", "")),
-                sourceFilesInScope=_as_int(counts.get("sourceFilesInScope")),
-                fileSidecars=_as_int(counts.get("fileSidecars")),
-                childRoutes=_as_int(counts.get("childRoutes")),
-            )
-        )
-    return nodes
-
-
-def read_tool_reports(coordination_root: Path, *, now: datetime) -> list[ToolReportNode]:
-    """Surface 12: the newest verbose tool-report per tool (``temp/tool-reports/<tool>/``)."""
-    root = coordination_root / "temp" / "tool-reports"
-    if not root.is_dir():
-        return []
-    nodes: list[ToolReportNode] = []
-    for tool_dir in sorted(root.iterdir()):
-        if not tool_dir.is_dir():
-            continue
-        reports = sorted(
-            tool_dir.glob("*.json"), reverse=True
-        )  # UTC-stamped names sort newest-first
-        if not reports:
-            continue
-        newest = reports[0]
-        nodes.append(
-            ToolReportNode(
-                tool=tool_dir.name,
-                path=newest.as_posix(),
-                label=_report_label(newest.name),
-                ageSeconds=_file_age_seconds(newest, now),
-            )
-        )
-    return nodes
-
-
-def read_ledger(memory_root: Path, code_root: Path | None = None) -> LedgerNode | None:
-    """Surface 8: a repo's memory-ledger currency (closeout count + last-verified commit).
-
-    Ledger rows carry no timestamps, so only the count + currency are surfaced --
-    never a frequency-over-time series. Missing/invalid ledgers are skipped. The windowed rows for
-    the OFFICIAL coupler popover are enriched with each side's commit message + date probed from
-    ``code_root`` (the repo checkout) and ``memory_root`` (Tier 2); best-effort, absent when not local.
-    """
-    try:
-        ledger = load_ledger(memory_root / "memory.md")
-    except (LedgerError, OSError):
-        return None
-    return LedgerNode(
-        repository=ledger.repo_name,
-        closeoutCount=len(ledger.rows),
-        lastVerifiedCodeCommit=ledger.last_verified_code_commit,
-        baseCodeCommit=ledger.base_code_commit,
-        # the newest window for the OFFICIAL coupler popover (5h); closeoutCount stays the full total
-        rows=_enrich_ledger_rows(
-            ledger.rows[:LEDGER_WINDOW],
-            code_root=code_root.as_posix() if code_root is not None else None,
-            memory_root=memory_root.as_posix(),
-        ),
-    )
-
-
-def read_task_documents(
-    coordination_root: Path, *, enclosures: list[EnclosureNode], now: datetime
-) -> list[TaskDocNode]:
-    """Surface 7 (slices 3c + 6g): active task-document summaries.
-
-    Reads each ``ar-task-document/v1`` JSON under ``tasks/<repo>/<task>/`` -- the
-    source of truth, never the rendered markdown. Full reader bodies are intentionally
-    omitted from this always-on projection and served by :func:`read_task_document_body`.
-    ``lifecycleId`` is optional
-    runtime context: a ``light``/``subTask`` doc uses its own lifecycle id or the
-    lifecycle of its matching leaf enclosure when present, but planning docs are
-    still projected before an enclosure exists. Master docs are projected here as
-    task documents and still projected on the series surface for compatibility.
-    """
-    tasks_root = coordination_root / "tasks"
-    if not tasks_root.is_dir():
-        return []
-    lifecycle_maps = _task_document_lifecycle_maps(enclosures)
-    nodes: list[TaskDocNode] = []
-    for path, payload in _bounded_task_document_payloads(
-        _iter_task_document_payloads(tasks_root, now=now),
-        limit=TASK_DOCUMENT_SUMMARY_LIMIT,
-    ):
-        try:
-            doc = TaskDocument.model_validate(payload)
-        except ValueError:
-            continue
-        nodes.append(_task_doc_node(doc, path, lifecycle_maps, now, include_body=False))
-    return nodes
-
-
-def read_task_document_body(
-    coordination_root: Path,
-    *,
-    doc_path: str,
-    enclosures: list[EnclosureNode],
-    now: datetime,
-) -> TaskDocNode | None:
-    """Read one full task-document body for the on-demand dashboard endpoint."""
-    tasks_root = (coordination_root / "tasks").resolve()
-    path = Path(doc_path)
-    candidates = [path] if path.is_absolute() else [coordination_root / path, tasks_root / path]
-    resolved: Path | None = None
-    for candidate in candidates:
-        try:
-            candidate_resolved = candidate.resolve()
-        except OSError:
-            continue
-        if candidate_resolved.is_file() and candidate_resolved.is_relative_to(tasks_root):
-            resolved = candidate_resolved
-            break
-    if resolved is None:
-        return None
-    payload = _read_json(resolved)
-    if payload is None or payload.get("schema") != TASK_DOCUMENT_SCHEMA:
-        return None
-    try:
-        doc = TaskDocument.model_validate(payload)
-    except ValueError:
-        return None
-    lifecycle_maps = _task_document_lifecycle_maps(enclosures)
-    return _task_doc_node(doc, resolved, lifecycle_maps, now, include_body=True)
-
-
-def _task_document_lifecycle_maps(enclosures: list[EnclosureNode]) -> _TaskDocumentLifecycleMaps:
-    lifecycle_by_enclosure = {
-        enclosure.enclosure: enclosure.lifecycleId
-        for enclosure in enclosures
-        if enclosure.lifecycleId
-    }
-    lifecycle_by_dir = {
-        Path(enclosure.taskRoot).resolve(): enclosure.lifecycleId
-        for enclosure in enclosures
-        if enclosure.lifecycleId and enclosure.taskRoot
-    }
-    lifecycle_by_root_doc = {
-        Path(enclosure.taskRoot).resolve(): enclosure.lifecycleId
-        for enclosure in enclosures
-        if enclosure.lifecycleId
-        and enclosure.taskRoot
-        and enclosure.lifecycleId in {enclosure.taskId, enclosure.taskName}
-    }
-    # Enclosure leaf ids are lowercase directory names (enclosures/260628-l7/) while doc ids are
-    # uppercase (260628-L7), and series leaf docs carry no enclosures[] refs in practice — so this
-    # join is keyed case-insensitively on the doc's own id (the durable, human-stable key), with the
-    # filename stem kept as a legacy alternative. Suffixed reopen enclosures (…-r1) deliberately do
-    # not bind here; the sidebar admits those through its lifecycle-guarded suffix rule.
-    lifecycle_by_leaf_doc = {
-        (Path(enclosure.taskRoot).resolve(), enclosure.leafId.lower()): enclosure.lifecycleId
-        for enclosure in enclosures
-        if enclosure.lifecycleId and enclosure.taskRoot and enclosure.leafId
-    }
-    return _TaskDocumentLifecycleMaps(
-        lifecycle_by_enclosure=lifecycle_by_enclosure,
-        lifecycle_by_dir=lifecycle_by_dir,
-        lifecycle_by_root_doc=lifecycle_by_root_doc,
-        lifecycle_by_leaf_doc=lifecycle_by_leaf_doc,
-    )
-
-
-def _task_doc_lifecycle_id(
-    doc: TaskDocument, path: Path, maps: _TaskDocumentLifecycleMaps
-) -> str | None:
-    if doc.kind == "master":
-        return maps.lifecycle_by_root_doc.get(path.parent.resolve())
-    return (
-        doc.lifecycleId
-        or _doc_enclosure_lifecycle(doc, maps.lifecycle_by_enclosure)
-        or maps.lifecycle_by_leaf_doc.get((path.parent.resolve(), doc.id.lower()))
-        or maps.lifecycle_by_leaf_doc.get((path.parent.resolve(), path.stem.lower()))
-    )
-
-
-def _doc_enclosure_lifecycle(
-    doc: TaskDocument, lifecycle_by_enclosure: dict[str, str]
-) -> str | None:
-    for enclosure in doc.enclosures:
-        lifecycle_id = lifecycle_by_enclosure.get(enclosure.enclosurePath)
-        if lifecycle_id:
-            return lifecycle_id
-    return None
-
-
-def read_series_documents(coordination_root: Path, *, now: datetime) -> list[SeriesNode]:
-    """Series surface (R1): per-master series progress, keyed by the task FOLDER.
-
-    Reads each ``ar-task-document/v1`` JSON with ``kind == "master"`` under
-    ``tasks/<repo>/<task>/``. Masters are also projected by :func:`read_task_documents`
-    so direct task-document selection can render them; this companion surface keeps the
-    folder-keyed series checklist where each subtask is one checkbox and ``doneCount``
-    counts the *declared* ``Completed`` subtasks, authoritative over a slice's own internal
-    steps.
-    """
-    tasks_root = coordination_root / "tasks"
-    if not tasks_root.is_dir():
-        return []
-    nodes: list[SeriesNode] = []
-    for path, payload in _bounded_task_document_payloads(
-        _iter_task_document_payloads(tasks_root, now=now),
-        limit=SERIES_DOCUMENT_SUMMARY_LIMIT,
-    ):
-        if payload.get("kind") != "master":
-            continue
-        try:
-            doc = TaskDocument.model_validate(payload)
-        except ValueError:
-            continue
-        nodes.append(
-            SeriesNode(
-                seriesId=path.parent.name,
-                repository=doc.repo,
-                title=doc.title,
-                status=doc.status,
-                createdAt=doc.createdAt,
-                objective="",
-                subTasks=_series_subtask_nodes(path, doc),
-                doneCount=series_done(doc),
-                totalCount=series_total(doc),
-                sections=[],
-                decisions=[],
-                docPath=path.as_posix(),
-                ageSeconds=_file_age_seconds(path, now),
-            )
-        )
-    return nodes
-
-
-def _series_subtask_nodes(path: Path, doc: TaskDocument) -> list[SeriesSubTaskNode]:
-    indexed = [
-        (index, sub, _series_subtask_created_at(path.parent, sub.file))
-        for index, sub in enumerate(doc.subTasks)
-    ]
-    if all(created_at for _, _, created_at in indexed):
-        indexed.sort(key=lambda item: (item[2] or "", item[0]))
-    return [
-        SeriesSubTaskNode(
-            number=sub.number,
-            name=sub.name,
-            file=sub.file,
-            status=sub.status,
-            scope=sub.scope,
-            createdAt=created_at,
-        )
-        for _, sub, created_at in indexed
-    ]
-
-
-def _series_subtask_created_at(base_dir: Path, ref_file: str) -> str | None:
-    if not ref_file:
-        return None
-    ref_path = (base_dir / ref_file).with_suffix(".json")
-    payload = _read_json(ref_path)
-    if payload is None or payload.get("schema") != TASK_DOCUMENT_SCHEMA:
-        return None
-    if payload.get("kind") == "master":
-        return None
-    try:
-        doc = TaskDocument.model_validate(payload)
-    except ValueError:
-        return None
-    return doc.createdAt
-
-
-def _iter_task_json(tasks_root: Path) -> list[Path]:
-    return [
-        path
-        for path in sorted(tasks_root.rglob("*.json"))
-        if ARCHIVE_DIR not in path.parts and ENCLOSURES_DIR not in path.parts
-    ]
-
-
-def _ref_lifecycle(
-    base_dir: Path, ref_file: str | None, lifecycle_by_dir: dict[Path, str]
-) -> str | None:
-    """A cross-folder ref (``../<task>/task.md``) resolves to that folder's contract-paired lifecycle;
-    a bare slug (a same-folder slice) or empty ref does not (slice 6g cross-master link)."""
-    if not ref_file or "/" not in ref_file:
-        return None
-    return lifecycle_by_dir.get((base_dir / ref_file).resolve().parent)
-
-
-def _task_step_nodes(doc: TaskDocument) -> list[TaskStepNode]:
-    return [
-        TaskStepNode(
-            id=step.id,
-            title=step.title,
-            status=step.status,
-            disposition=(
-                TaskStepDispositionNode.model_validate(step.disposition.model_dump())
-                if step.disposition is not None
-                else None
-            ),
-            substeps=[
-                TaskSubStepNode(
-                    id=sub.id,
-                    title=sub.title,
-                    status=sub.status,
-                    disposition=(
-                        TaskStepDispositionNode.model_validate(sub.disposition.model_dump())
-                        if sub.disposition is not None
-                        else None
-                    ),
-                )
-                for sub in step.substeps
-            ],
-        )
-        for step in doc.steps
-    ]
-
-
-def _task_doc_node(
-    doc: TaskDocument,
-    path: Path,
-    maps: _TaskDocumentLifecycleMaps,
-    now: datetime,
-    *,
-    include_body: bool,
-) -> TaskDocNode:
-    """Project one task document, carrying the resolved lifecycle id and (for a master) its index.
-
-    Cross-master links resolve here: a subTask whose ``file`` points at another master, and the doc's
-    own ``master`` parent ref, each resolve to the linked lifecycle (None when same-series/in-folder).
-    The lifecycle maps arrive whole: the doc's own id and the cross-folder link resolution are two
-    reads of the same index, and passing the id separately let them disagree.
-    """
-    lifecycle_id = _task_doc_lifecycle_id(doc, path, maps)
-    lifecycle_by_dir = maps.lifecycle_by_dir
-    base_dir = path.parent
-    parent_lifecycle = _ref_lifecycle(base_dir, doc.master, lifecycle_by_dir)
-    body_revision = _task_doc_body_revision(doc)
-    return TaskDocNode(
-        id=doc.id,
-        lifecycleId=lifecycle_id,
-        repository=doc.repo,
-        title=doc.title,
-        status=doc.status,
-        kind=doc.kind,
-        stepsDone=step_done(doc),
-        stepsTotal=step_total(doc),
-        currentStep=current_step(doc),
-        docPath=path.as_posix(),
-        bodyRevision=body_revision,
-        createdAt=doc.createdAt,
-        ageSeconds=_file_age_seconds(path, now),
-        steps=_task_step_nodes(doc),
-        objective=doc.objective if include_body else "",
-        requirements=list(doc.requirements) if include_body else [],
-        design=doc.design if include_body else None,
-        codeExamples=[
-            TaskCodeExampleNode(
-                id=example.id,
-                title=example.title,
-                distinctChange=example.distinctChange,
-                why=example.why,
-                language=example.language,
-                snippet=example.snippet,
-            )
-            for example in doc.codeExamples
-        ]
-        if include_body
-        else [],
-        decisions=[
-            TaskDecisionNode(at=item.at, decision=item.decision, rationale=item.rationale)
-            for item in doc.decisions
-        ]
-        if include_body
-        else [],
-        openQuestions=list(doc.openQuestions) if include_body else [],
-        references=list(doc.references) if include_body else [],
-        subTasks=[
-            TaskSubTaskRefNode(
-                number=ref.number,
-                name=ref.name,
-                file=ref.file,
-                status=ref.status,
-                scope=ref.scope,
-                linkedLifecycleId=_ref_lifecycle(base_dir, ref.file, lifecycle_by_dir),
-            )
-            for ref in doc.subTasks
-        ],
-        sections=[
-            TaskSectionNode(kind=section.kind, heading=section.heading, body=section.body)
-            for section in doc.sections
-        ]
-        if include_body
-        else [],
-        masterLifecycleId=parent_lifecycle,
-        orchestrates=list(doc.orchestrates),
-    )
-
-
-def _task_doc_body_revision(doc: TaskDocument) -> str:
-    payload = {
-        "objective": doc.objective,
-        "requirements": list(doc.requirements),
-        "design": doc.design,
-        "codeExamples": [example.model_dump(mode="json") for example in doc.codeExamples],
-        "decisions": [item.model_dump(mode="json") for item in doc.decisions],
-        "openQuestions": list(doc.openQuestions),
-        "references": list(doc.references),
-        "sections": [section.model_dump(mode="json") for section in doc.sections],
-    }
-    raw = json.dumps(payload, sort_keys=True, separators=(",", ":"))
-    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
-
-
-# --- shared helpers ----------------------------------------------------------
-
-
-def _read_json(path: Path) -> dict[str, object] | None:
-    try:
-        text = path.read_text(encoding="utf-8")
-    except OSError:
-        return None
-    try:
-        payload = json.loads(text)
-    except json.JSONDecodeError:
-        return None
-    return payload if isinstance(payload, dict) else None
-
-
-def _as_int(value: Any) -> int:
-    return value if isinstance(value, int) and not isinstance(value, bool) else 0
-
-
-def _as_float(value: Any) -> float | None:
-    if isinstance(value, bool):
-        return None
-    return float(value) if isinstance(value, (int, float)) else None
-
-
-def _text_or_none(value: Any) -> str | None:
-    return value if isinstance(value, str) and value else None
-
-
-def _report_label(name: str) -> str:
-    stem = name[:-5] if name.endswith(".json") else name
-    parts = stem.split("-", 1)
-    return parts[1] if len(parts) == 2 else stem
-
-
-def _file_age_seconds(path: Path, now: datetime) -> float | None:
-    try:
-        mtime = path.stat().st_mtime
-    except OSError:
-        return None
-    return now.timestamp() - mtime
-
-
-def _current_phase_text(current: Any) -> str | None:
-    if not isinstance(current, dict):
-        return None
-    provider = current.get("provider")
-    action = current.get("action")
-    if provider and action:
-        return f"{provider} {action}"
-    return str(provider or action) if (provider or action) else None

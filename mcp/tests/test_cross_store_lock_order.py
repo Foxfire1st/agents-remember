@@ -45,6 +45,7 @@ from agents_remember.controlplane.orchestration_nudges import OrchestrationNudge
 from agents_remember.controlplane.supervisor_signals import SupervisorSignalCooldownStore
 from agents_remember.errors import HarnessControlError
 from agents_remember.observer.store import EventStore
+from agents_remember.serving import _app_terminal_routes as terminal_routes_module
 from agents_remember.serving import app as app_module
 from agents_remember.serving.conversation.active.service import ActiveConversationService
 from agents_remember.serving.conversation.control.service import ConversationControlService
@@ -513,7 +514,7 @@ class CrossStoreLockOrderTests(unittest.TestCase):
         def catalog_get(_session_id: str) -> None:
             seen["catalog"] = threading.current_thread()
 
-        real_write = app_module._write_paste_image
+        real_write = terminal_routes_module._write_paste_image
 
         def spy_write(dest: Path, body: bytes) -> None:
             seen["write"] = threading.current_thread()
@@ -526,9 +527,9 @@ class CrossStoreLockOrderTests(unittest.TestCase):
         request = SimpleNamespace(headers={})
 
         upload = UploadFile(file=io.BytesIO(_PNG_BYTES), filename="shot.png")
-        with mock.patch.object(app_module, "_write_paste_image", spy_write):
+        with mock.patch.object(terminal_routes_module, "_write_paste_image", spy_write):
             response = asyncio.run(
-                app_module._terminal_image_response(
+                terminal_routes_module._terminal_image_response(
                     cast(app_module._ServingRuntime, runtime),
                     "sess-1",
                     cast(Request, request),

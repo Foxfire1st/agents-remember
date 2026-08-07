@@ -31,6 +31,7 @@ class GateScope:
     type_paths: list[Path]
     coverage_paths: list[Path]
     test_paths: list[Path]
+    size_paths: list[Path] = field(default_factory=list)
     scope_roots: list[Path] = field(default_factory=list)
     untracked_paths: list[Path] = field(default_factory=list)
 
@@ -114,6 +115,25 @@ def pytest_testpaths(project_root: Path) -> list[Path]:
             f"{pyproject}; the gate refuses to guess where the suite lives"
         )
     return [Path(str(entry)) for entry in testpaths]
+
+
+def file_size_armed(project_root: Path) -> bool:
+    """Whether the wrapper's file-size rail fails the run on a violation.
+
+    Read from ``[tool.agents_remember] file_size_armed``. The key is deliberately
+    explicit: the check is wired into the wrapper first, and a repo only starts
+    failing on it after the tree has been remediated and the owner flips the key.
+    Absent means unarmed, so the wrapper keeps working in repositories that have
+    not adopted the arming switch yet.
+    """
+    _path, data = read_pyproject(project_root)
+    section = toml_section(data, ("tool", "agents_remember"))
+    value = section.get("file_size_armed", False)
+    if not isinstance(value, bool):
+        raise ScopeError(
+            f"[tool.agents_remember] file_size_armed must be a boolean; got {type(value).__name__}"
+        )
+    return value
 
 
 def validate_quality_config(project_root: Path) -> None:
@@ -327,19 +347,27 @@ def derive_scope(project_root: Path) -> GateScope:
     tracked = git_ls_files(project_root, "*.py")
     if not tracked:
         raise ScopeError(f"git tracks no Python files under {project_root}")
-    coverage_paths = top_level_packages(tracked)
-    if not coverage_paths:
+    package_paths = top_level_packages(tracked)
+    if not package_paths:
         raise ScopeError(
             "no tracked top-level Python package (a directory holding __init__.py) under "
             f"{project_root}; coverage and CRAP would have nothing to measure"
         )
     test_paths = pytest_testpaths(project_root)
+    # 260731-EFA-L7 R8: the test tree joins the coverage measurement and the CRAP
+    # input. Test modules execute under pytest, so their coverage approaches 1.0
+    # and ``crap_score`` degenerates to raw cyclomatic complexity against the
+    # threshold; that gates over-complex test helpers. File size is not CRAP's job
+    # and stays the file-size rail's.
+    coverage_paths = list(dict.fromkeys([*package_paths, *test_paths]))
     roots = derive_scope_roots(project_root, tracked, coverage_paths, test_paths)
+    dashboard_ts = git_ls_files(project_root, "dashboard/src/*.ts", "dashboard/src/*.tsx")
     return GateScope(
         lint_paths=tracked,
         type_paths=tracked,
         coverage_paths=coverage_paths,
         test_paths=test_paths,
+        size_paths=sorted(set(tracked) | set(dashboard_ts)),
         scope_roots=roots,
         untracked_paths=git_untracked_files(project_root, roots),
     )

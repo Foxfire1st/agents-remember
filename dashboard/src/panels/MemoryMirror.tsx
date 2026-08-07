@@ -51,6 +51,14 @@ const SEG_BG: Record<string, string> = {
   unsupported: css({ background: "alarm" }),
 };
 
+function hasMemoryAnalytics(
+  drift: unknown[],
+  ledgers: unknown[],
+  stalest: unknown[],
+): boolean {
+  return drift.length === 0 && ledgers.length === 0 && stalest.length === 0;
+}
+
 export function MemoryMirror() {
   const analytics = useDashboard((s) => s.analytics);
   const nowMs = useNowMs();
@@ -58,7 +66,7 @@ export function MemoryMirror() {
   const ledgers = analytics?.ledgers ?? [];
   const stalest = analytics?.stalestSidecars ?? [];
 
-  if (drift.length === 0 && ledgers.length === 0 && stalest.length === 0) {
+  if (hasMemoryAnalytics(drift, ledgers, stalest)) {
     return (
       <Panel testid="memory-mirror" title="Memory mirror" className={sizing}>
         <p className="muted">No memory analytics yet.</p>
