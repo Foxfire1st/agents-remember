@@ -923,7 +923,7 @@ export function RailBody(props: RailBodyProps) {
           onCancelBulk={props.onCancelBulk}
         />
       )}
-      {/* To declutter, the rail bus footer is REMOVED — inbox counts and supervisor liveness
+      {/* To declutter, the rail bus footer is REMOVED — inbox counts and agent-notifier liveness
           already live in the top bar (one authority per fact); the anchored detail stays in the
           Inspector's BusPane. */}
     </div>

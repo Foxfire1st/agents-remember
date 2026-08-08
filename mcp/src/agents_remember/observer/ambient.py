@@ -158,7 +158,7 @@ class AmbientLifecycle:
         """The observer store root (``logs/observer``) this ambient lifecycle writes under.
 
         260707-HFX2-L2 R5: the MCP tool choke point (``_tool_payload``) reads this to check the
-        supervisor heartbeat opportunistically, without needing its own ``McpRuntimeConfig``.
+        agent-notifier heartbeat opportunistically, without needing its own ``McpRuntimeConfig``.
         """
         return self._store.root
 

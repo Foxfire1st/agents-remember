@@ -42,8 +42,44 @@ FACADES: list[tuple[str, str]] = [
         "agents_remember.serving.conversation.models",
         "mcp/src/agents_remember/serving/conversation/models.py",
     ),
-    ("agents_remember.serving.supervisor", "mcp/src/agents_remember/serving/supervisor.py"),
+    ("agents_remember.serving.agent_notifier", "mcp/src/agents_remember/serving/agent_notifier.py"),
 ]
+
+# 260713-TES-L1: renamed module paths at the pinned base commit (the base has the old name).
+BASE_PATH_RENAMES = {
+    "mcp/src/agents_remember/serving/agent_notifier.py": (
+        "mcp/src/agents_remember/serving/supervisor.py"
+    ),
+}
+
+# 260713-TES-L1 (supervisor -> agent-notifier): base names deliberately renamed. The pin
+# compares against the L16 base commit, so an expected-old-name hit is satisfied by its
+# rename target instead of failing; an entry here that stops matching (or a rename target
+# that disappears) fails the pin just like any other lost name.
+RENAMED_FACADE_NAMES: dict[str, dict[str, str]] = {
+    "agents_remember.serving.agent_notifier": {
+        "SupervisorContext": "AgentNotifierContext",
+        "SupervisorFinding": "AgentNotifierFinding",
+        "SupervisorActionResult": "AgentNotifierActionResult",
+        "SupervisorSweepResult": "AgentNotifierSweepResult",
+        "run_supervisor_sweep": "run_agent_notifier_sweep",
+    },
+    "agents_remember.serving.app": {
+        "_supervisor_context": "_agent_notifier_context",
+        "_supervisor_heartbeat_payload": "_agent_notifier_heartbeat_payload",
+        "_supervisor_loop": "_agent_notifier_loop",
+    },
+    "agents_remember.kernel.agentic_settings": {
+        "SupervisorSettings": "AgentNotifierSettings",
+        "KNOWN_SUPERVISOR_FIELDS": "KNOWN_AGENT_NOTIFIER_FIELDS",
+        "DEFAULT_SUPERVISOR_ESCALATION_BUDGET": "DEFAULT_AGENT_NOTIFIER_ESCALATION_BUDGET",
+        "DEFAULT_SUPERVISOR_INTERVAL_SECONDS": "DEFAULT_AGENT_NOTIFIER_INTERVAL_SECONDS",
+        "DEFAULT_SUPERVISOR_REDELIVER_BUDGET": "DEFAULT_AGENT_NOTIFIER_REDELIVER_BUDGET",
+        "DEFAULT_SUPERVISOR_STALE_CUTOFF_SECONDS": "DEFAULT_AGENT_NOTIFIER_STALE_CUTOFF_SECONDS",
+        "_parse_supervisor": "_parse_agent_notifier",
+        "_require_supervisor_floor_seconds": "_require_agent_notifier_floor_seconds",
+    },
+}
 
 
 def base_top_level_names(path: str, source: str | None = None) -> list[str]:
@@ -101,7 +137,15 @@ class FacadeSurfaceTests(unittest.TestCase):
     def test_every_base_top_level_name_is_importable_from_its_facade(self) -> None:
         for module, path in FACADES:
             facade = importlib.import_module(module)
-            missing = [name for name in base_top_level_names(path) if not hasattr(facade, name)]
+            renamed = RENAMED_FACADE_NAMES.get(module, {})
+            missing = []
+            for name in base_top_level_names(BASE_PATH_RENAMES.get(path, path)):
+                if hasattr(facade, name):
+                    continue
+                target = renamed.get(name)
+                if target is not None and hasattr(facade, target):
+                    continue
+                missing.append(name)
             with self.subTest(module=module):
                 self.assertEqual(missing, [], f"facade lost base top-level names: {missing}")
 

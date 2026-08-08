@@ -47,10 +47,10 @@ from agents_remember.controlplane.attention_dismissals import (
     AttentionDismissalStore,
 )
 from agents_remember.controlplane.durable_store import (
+    AGENT_NOTIFIER_SIGNAL_OWNERSHIP,
     DURABLE_STORE_CONTRACT,
     GATE_OWNERSHIP,
     ORCHESTRATION_NUDGE_OWNERSHIP,
-    SUPERVISOR_SIGNAL_OWNERSHIP,
     CompactionOwnerError,
     DurableStoreError,
     ProcessRole,
@@ -810,7 +810,7 @@ class ProcessRoleDeclarationTests(_TempRoot):
         self.assertEqual(declared_process_role(), "mcp")
         GATE_OWNERSHIP.check_declared_writer()
         with self.assertRaises(CompactionOwnerError):
-            SUPERVISOR_SIGNAL_OWNERSHIP.check_declared_writer()
+            AGENT_NOTIFIER_SIGNAL_OWNERSHIP.check_declared_writer()
 
 
 class ProcessRoleIsolationTests(unittest.TestCase):

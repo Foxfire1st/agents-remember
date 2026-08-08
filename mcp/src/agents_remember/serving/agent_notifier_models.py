@@ -1,4 +1,4 @@
-"""Typed state carried by one supervisor sweep."""
+"""Typed state carried by one agent-notifier sweep."""
 
 from __future__ import annotations
 
@@ -6,20 +6,20 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
 
+from agents_remember.controlplane.agent_notifier_signals import (
+    AgentNotifierSignalCooldownStore,
+    AgentNotifierSignalRecord,
+)
 from agents_remember.controlplane.expectation_rows import ExpectationRow, ExpectationRowStore
 from agents_remember.controlplane.operator_inbox_records import OperatorInboxEntry
 from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
 from agents_remember.controlplane.orchestration_nudges import OrchestrationNudgeStore
-from agents_remember.controlplane.supervisor_signals import (
-    SupervisorSignalCooldownStore,
-    SupervisorSignalRecord,
-)
 from agents_remember.observer.store import EventStore
+from agents_remember.serving.agent_notifier_heartbeat import AgentNotifierHeartbeatStore
 from agents_remember.serving.inbox_reclamation import (
     TmuxSessionNameSnapshotter,
     snapshot_tmux_session_names,
 )
-from agents_remember.serving.supervisor_heartbeat import SupervisorHeartbeatStore
 from agents_remember.serving.terminal import TerminalHost
 from agents_remember.serving.terminal_catalog import TerminalCatalog
 from agents_remember.serving.terminal_paste import TerminalPaster
@@ -48,7 +48,7 @@ DEFAULT_RESPAWN_AFTER_RUNG = 2
 
 
 @dataclass(frozen=True)
-class SupervisorFinding:
+class AgentNotifierFinding:
     """One predicate hit: what the sweep saw, read straight off a store."""
 
     kind: FindingKind
@@ -60,19 +60,19 @@ class SupervisorFinding:
 
 
 @dataclass(frozen=True)
-class SupervisorActionResult:
+class AgentNotifierActionResult:
     """One action the sweep took (or explicitly skipped) for a finding."""
 
     action: ActionKind
-    finding: SupervisorFinding
+    finding: AgentNotifierFinding
     outcome: str
     detail: str | None = None
 
 
 @dataclass(frozen=True)
-class SupervisorSweepResult:
-    findings: tuple[SupervisorFinding, ...]
-    actions: tuple[SupervisorActionResult, ...]
+class AgentNotifierSweepResult:
+    findings: tuple[AgentNotifierFinding, ...]
+    actions: tuple[AgentNotifierActionResult, ...]
     swept_at: str
     pending_inbox_count: int = 0
     redeliverable_inbox_count: int = 0
@@ -80,7 +80,7 @@ class SupervisorSweepResult:
 
 
 @dataclass(frozen=True)
-class SupervisorContext:
+class AgentNotifierContext:
     """Stores, delivery seams, and resolved settings required by one sweep."""
 
     catalog: TerminalCatalog
@@ -89,9 +89,9 @@ class SupervisorContext:
     inbox_store: OperatorInboxStore
     expectation_store: ExpectationRowStore
     nudge_store: OrchestrationNudgeStore
-    signal_cooldown_store: SupervisorSignalCooldownStore
+    signal_cooldown_store: AgentNotifierSignalCooldownStore
     event_store: EventStore
-    heartbeat_store: SupervisorHeartbeatStore
+    heartbeat_store: AgentNotifierHeartbeatStore
     coordination_root: Path
     stale_seat_seconds: float = 120.0
     redeliver_rate_limit_seconds: float | None = None
@@ -111,7 +111,7 @@ class SweepState:
     redeliver_budget: int
     pending_inbox_count: int = 0
     redeliverable_entries: list[OperatorInboxEntry] = field(default_factory=list)
-    signal_current: list[SupervisorSignalRecord] | None = None
+    signal_current: list[AgentNotifierSignalRecord] | None = None
     expectation_current: dict[str, ExpectationRow] | None = None
     escalated_entry_ids: set[str] = field(default_factory=set)
 
@@ -122,7 +122,7 @@ class SweepState:
     def remember(self, entry: OperatorInboxEntry) -> None:
         self.inbox_current[entry.id] = entry
 
-    def remember_signal(self, record: SupervisorSignalRecord) -> None:
+    def remember_signal(self, record: AgentNotifierSignalRecord) -> None:
         if self.signal_current is not None:
             self.signal_current.append(record)
 

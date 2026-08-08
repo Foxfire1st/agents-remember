@@ -73,7 +73,7 @@ already-dumped served body is to call this function; see the module docstring.""
 
 WIRE_DUMP_REMEDIATION = (
     "declare the key on the response model and set it on the MODEL before the dump "
-    "(the pattern mcp/tools/base.py uses for nextStep/supervisorBanner), or re-validate "
+    "(the pattern mcp/tools/base.py uses for nextStep/agentNotifierBanner), or re-validate "
     "the edited dict through model_validate before returning it -- and if this is a "
     f"serve-time tail on a served body, call {SERVED_TAIL_OWNER}::{SERVED_TAIL_BUILDER}, "
     "which declares exactly the keys it may add"

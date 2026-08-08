@@ -1,6 +1,6 @@
 """Behavioural coverage for the dashboard app's background loops and their lifespan wiring.
 
-``serving/app.py`` runs four always-on background tasks (projection, provider metrics, supervisor
+``serving/app.py`` runs four always-on background tasks (projection, provider metrics, agent-notifier
 sweep, workspace-river compaction) plus two opt-in ones (the heap diagnostic, the glibc arena
 trim). Their *steady state* is exercised by the rest of the suite simply by booting the app; what
 was never exercised is the part that matters operationally:
@@ -9,7 +9,7 @@ was never exercised is the part that matters operationally:
   stops sampling / sweeping / compacting for the lifetime of the daemon, and nothing else in the
   process notices. Each test here proves the failing pass is logged AND that the loop performs the
   next pass anyway;
-* the supervisor's disabled arm -- ``orchestration.supervisor.enabled`` is re-read on every pass,
+* the agent-notifier's disabled arm -- ``orchestration.agentNotifier.enabled`` is re-read on every pass,
   so turning the sweep on must take effect without restarting the daemon;
 * the trim loop, which never runs unless ``AR_MALLOC_TRIM`` is set, and whose interval is resolved
   once at task start rather than per tick;
@@ -54,18 +54,18 @@ from agents_remember.providers.metrics import (
     ProviderMetricsStore,
 )
 from agents_remember.serving import _app_lifespan as lifespan_module
+from agents_remember.serving.agent_notifier_heartbeat import AgentNotifierHeartbeatStore
 from agents_remember.serving.app import (
     ServingCollaborators,
+    _agent_notifier_loop,
     _malloc_trim_loop,
     _metrics_loop,
     _ServingRuntime,
-    _supervisor_loop,
     _workspace_river_compaction_loop,
     create_app,
 )
 from agents_remember.serving.build_info import resolve_serving_build
 from agents_remember.serving.projector import ProjectionCadence, Projector
-from agents_remember.serving.supervisor_heartbeat import SupervisorHeartbeatStore
 from agents_remember.serving.terminal import TerminalHost
 from agents_remember.serving.terminal_catalog import TerminalCatalog
 from agents_remember.serving.terminal_liveness import (
@@ -123,19 +123,19 @@ def _runtime(tmp: Path, *, host: object | None = None) -> _ServingRuntime:
         liveness_config=liveness_config,
         liveness_sweeper=TerminalCatalogLivenessSweeper(catalog, terminal_host),
         build=resolve_serving_build(),
-        heartbeat_store=SupervisorHeartbeatStore(observer_root(config)),
+        heartbeat_store=AgentNotifierHeartbeatStore(observer_root(config)),
         interval=100.0,
     )
 
 
-def _write_supervisor_settings(tmp: Path, *, enabled: bool, interval_seconds: float) -> None:
+def _write_agent_notifier_settings(tmp: Path, *, enabled: bool, interval_seconds: float) -> None:
     path = agentic_settings_path(tmp)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
         json.dumps(
             {
                 "orchestration": {
-                    "supervisor": {"enabled": enabled, "intervalSeconds": interval_seconds}
+                    "agentNotifier": {"enabled": enabled, "intervalSeconds": interval_seconds}
                 }
             }
         ),
@@ -217,7 +217,7 @@ class MetricsLoopTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(current["sampledAt"], "2026-07-31T00:00:02+00:00")
 
 
-class SupervisorLoopTests(unittest.IsolatedAsyncioTestCase):
+class AgentNotifierLoopTests(unittest.IsolatedAsyncioTestCase):
     """The sweep's on/off switch is settings state re-read per pass, not boot state."""
 
     def setUp(self) -> None:
@@ -225,19 +225,21 @@ class SupervisorLoopTests(unittest.IsolatedAsyncioTestCase):
         self.tmp = Path(self._dir.name)
         self.addCleanup(self._dir.cleanup)
 
-    async def test_disabled_supervisor_never_sweeps_and_enabling_it_needs_no_restart(self) -> None:
-        _write_supervisor_settings(self.tmp, enabled=False, interval_seconds=0.01)
+    async def test_disabled_agent_notifier_never_sweeps_and_enabling_it_needs_no_restart(
+        self,
+    ) -> None:
+        _write_agent_notifier_settings(self.tmp, enabled=False, interval_seconds=0.01)
         runtime = _runtime(self.tmp)
-        task = asyncio.create_task(_supervisor_loop(runtime))
+        task = asyncio.create_task(_agent_notifier_loop(runtime))
         try:
             # Many disabled passes: the loop must keep looping and must tick nothing.
             await asyncio.sleep(0.2)
             self.assertIsNone(runtime.heartbeat_store.read())
 
-            _write_supervisor_settings(self.tmp, enabled=True, interval_seconds=0.01)
+            _write_agent_notifier_settings(self.tmp, enabled=True, interval_seconds=0.01)
             await _until(
                 lambda: runtime.heartbeat_store.read() is not None,
-                what="the first sweep after the supervisor was enabled in settings",
+                what="the first sweep after the agent-notifier was enabled in settings",
             )
         finally:
             task.cancel()
@@ -249,7 +251,7 @@ class SupervisorLoopTests(unittest.IsolatedAsyncioTestCase):
         self.assertGreaterEqual(heartbeat.sweepCount, 1)
 
     async def test_a_failed_sweep_is_logged_and_the_next_interval_sweeps_again(self) -> None:
-        _write_supervisor_settings(self.tmp, enabled=True, interval_seconds=0.01)
+        _write_agent_notifier_settings(self.tmp, enabled=True, interval_seconds=0.01)
         runtime = _runtime(self.tmp)
         sweeps: list[datetime] = []
 
@@ -259,16 +261,16 @@ class SupervisorLoopTests(unittest.IsolatedAsyncioTestCase):
                 raise RuntimeError("expectation store unreadable")
 
         with (
-            mock.patch.object(lifespan_module, "run_supervisor_sweep", sweep),
+            mock.patch.object(lifespan_module, "run_agent_notifier_sweep", sweep),
             self.assertLogs(LOGGER_NAME, level="ERROR") as logs,
         ):
             await _run_until(
-                _supervisor_loop(runtime),
+                _agent_notifier_loop(runtime),
                 lambda: len(sweeps) >= 2,
-                what="the supervisor to sweep again after a failed sweep",
+                what="the agent-notifier to sweep again after a failed sweep",
             )
 
-        self.assertIn("supervisor sweep failed", "\n".join(logs.output))
+        self.assertIn("agent-notifier sweep failed", "\n".join(logs.output))
         self.assertIn("expectation store unreadable", "\n".join(logs.output))
 
 

@@ -53,7 +53,7 @@ import type {
   GateNode,
   LifecycleProjection,
   ProviderNode,
-  SupervisorHeartbeat,
+  AgentNotifierHeartbeat,
   TaskDocNode,
   WorkspaceProjection,
 } from "../../types/projection";
@@ -345,14 +345,14 @@ export function projection<O extends Partial<WorkspaceProjection> = NoOverrides>
 }
 
 /**
- * The app-injected supervisor tick. It is NOT reducer truth and so is absent from the snapshot
+ * The app-injected agent-notifier tick. It is NOT reducer truth and so is absent from the snapshot
  * (`contract.test.ts::KnownUnsampled` names it); the base is a typed literal, which is still
  * checked against the mirror in both directions.
  */
-export function supervisorHeartbeat<O extends Partial<SupervisorHeartbeat> = NoOverrides>(
-  overrides?: Overrides<O, SupervisorHeartbeat>,
-): SupervisorHeartbeat {
-  const over: Partial<SupervisorHeartbeat> = overrides ?? {};
+export function agentNotifierHeartbeat<O extends Partial<AgentNotifierHeartbeat> = NoOverrides>(
+  overrides?: Overrides<O, AgentNotifierHeartbeat>,
+): AgentNotifierHeartbeat {
+  const over: Partial<AgentNotifierHeartbeat> = overrides ?? {};
   return {
     lastTickAt: "2026-07-08T00:00:00+00:00",
     ageSeconds: 1,

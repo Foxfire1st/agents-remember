@@ -70,9 +70,9 @@ TORN_LINE = '{"schema":"ar-gate-record/v1","id":"torn","ts":"2026-0'
 #   operator_inbox  -> mcp/tools/operator_inbox.py consumes rows; a consume is the ack of record.
 #   attention       -> observer/snapshots.py + observer/projection_inputs.py only: dashboard state.
 #   nudge           -> rate-limit bookkeeping for orchestration nudges.
-#   supervisor      -> the sweep's cooldown memory, documented as non-authoritative.
+#   agent-notifier -> the sweep's cooldown memory, documented as non-authoritative.
 STRICT_READ_CASES = ("gate", "expectation", "operator_inbox")
-TOLERANT_READ_CASES = ("attention", "nudge", "supervisor_signal")
+TOLERANT_READ_CASES = ("attention", "nudge", "agent_notifier_signal")
 
 
 def _describe(result: dict[str, object]) -> str:
@@ -398,7 +398,7 @@ class HarnessSensitivityTests(_TempRootTest):
     ``STRESS_PROFILE`` after ``harness_work_dir`` was fixed -- four runs, base commit, percentage
     of records the store reported written and then did not have:
 
-        attention 18.27-30.10 | gate 7.50-10.50 | supervisor_signal 7.50-9.00
+        attention 18.27-30.10 | gate 7.50-10.50 | agent_notifier_signal 7.50-9.00
         expectation 6.50-9.50 | nudge 5.50-9.00 | operator_inbox 0.00 (all four runs)
 
     Which is the same ordering, and the same lone survivor, as the figures this leaf recorded

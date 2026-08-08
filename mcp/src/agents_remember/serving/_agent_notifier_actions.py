@@ -6,6 +6,11 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from agents_remember.controlplane import operator_inbox_transitions as inbox_transitions
+from agents_remember.controlplane.agent_notifier_signals import (
+    AgentNotifierSignalKey,
+    AgentNotifierSignalRecord,
+    AgentNotifierSignalTarget,
+)
 from agents_remember.controlplane.escalation_ladder import next_step, seat_is_suspect
 from agents_remember.controlplane.operator_inbox_records import (
     InboxAddress,
@@ -31,17 +36,19 @@ from agents_remember.controlplane.signal_routing import (
     derive_leaf_manager_owner,
     derive_signal_owner,
 )
-from agents_remember.controlplane.supervisor_signals import (
-    SupervisorSignalKey,
-    SupervisorSignalRecord,
-    SupervisorSignalTarget,
-)
 from agents_remember.observer.events import Event, now_iso
 from agents_remember.observer.ulid import new_ulid
-from agents_remember.serving._supervisor_evaluation import (
+from agents_remember.serving._agent_notifier_evaluation import (
     PERSISTENT_FAILURE_ATTEMPTS,
     _ladder_terminal_and_dead,
+    _seat_liveness_ask_identity,
 )
+from agents_remember.serving.agent_notifier_models import (
+    AgentNotifierActionResult,
+    AgentNotifierContext,
+    AgentNotifierFinding,
+)
+from agents_remember.serving.agent_notifier_models import SweepState as _SweepState
 from agents_remember.serving.dispatch_brief import (
     DISPATCH_BRIEF_KIND,
     dispatch_stays_on_exact_session,
@@ -54,33 +61,46 @@ from agents_remember.serving.inbox_delivery import (
     deliver_inbox_entry,
 )
 from agents_remember.serving.retire import SeatClosure, retire_entry
-from agents_remember.serving.supervisor_models import (
-    SupervisorActionResult,
-    SupervisorContext,
-    SupervisorFinding,
-)
-from agents_remember.serving.supervisor_models import SweepState as _SweepState
+
+# The one event-rename seam for the compatibility window (260713-TES-L1): every agent-notifier
+# event is emitted under BOTH the current and the legacy name so observer-river consumers and
+# dashboards on the old name keep working. Remove the legacy prefix and the duplicate append
+# with the window; the current name is the only kind afterward.
+AGENT_NOTIFIER_EVENT_PREFIX = "orchestration.agent-notifier."
+LEGACY_SUPERVISOR_EVENT_PREFIX = "orchestration.supervisor."
 
 
-def _log_event(ctx: SupervisorContext, kind: str, data: dict[str, object]) -> None:
+def _log_event(ctx: AgentNotifierContext, kind: str, data: dict[str, object]) -> None:
     ctx.event_store.append(
         Event(id=new_ulid(), ts=now_iso(), kind=kind, trust="observed", actor="system", data=data)
     )
+    if kind.startswith(AGENT_NOTIFIER_EVENT_PREFIX):
+        legacy_kind = LEGACY_SUPERVISOR_EVENT_PREFIX + kind[len(AGENT_NOTIFIER_EVENT_PREFIX) :]
+        ctx.event_store.append(
+            Event(
+                id=new_ulid(),
+                ts=now_iso(),
+                kind=legacy_kind,
+                trust="observed",
+                actor="system",
+                data=data,
+            )
+        )
 
 
-# 260731-EFA-L7 R10: verbatim L7 split (L7-OQ1 Option A serving scope); unchanged edge branch, out of this leaf's behavior scope (mcp/src/agents_remember/serving/_supervisor_actions.py:71).
+# 260731-EFA-L7 R10: verbatim L7 split (L7-OQ1 Option A serving scope); unchanged edge branch, out of this leaf's behavior scope (mcp/src/agents_remember/serving/_agent_notifier_actions.py:71).
 def _redeliver(  # pragma: no cover
-    ctx: SupervisorContext,
-    finding: SupervisorFinding,
+    ctx: AgentNotifierContext,
+    finding: AgentNotifierFinding,
     *,
     now: datetime,
     sweep: _SweepState,
-) -> SupervisorActionResult:
+) -> AgentNotifierActionResult:
     if finding.source_id is None:
-        return SupervisorActionResult("redeliver", finding, "skipped", "no source entry id")
+        return AgentNotifierActionResult("redeliver", finding, "skipped", "no source entry id")
     entry = sweep.inbox_current.get(finding.source_id)
     if entry is None or entry.state != "pending":
-        return SupervisorActionResult("redeliver", finding, "skipped", "entry not pending")
+        return AgentNotifierActionResult("redeliver", finding, "skipped", "entry not pending")
     if _ladder_terminal_and_dead(ctx.catalog, entry):
         return _resolve_ladder_terminal(ctx, finding, now=now, sweep=sweep)
     updated = deliver_inbox_entry(
@@ -103,7 +123,7 @@ def _redeliver(  # pragma: no cover
     )
     _log_event(
         ctx,
-        "orchestration.supervisor.redeliver",
+        "orchestration.agent-notifier.redeliver",
         {
             "entryId": entry.id,
             "deliveryState": updated.deliveryState,
@@ -117,21 +137,21 @@ def _redeliver(  # pragma: no cover
         and updated.attemptCount >= PERSISTENT_FAILURE_ATTEMPTS
     ):
         _escalate_inbox_entry(ctx, updated.id, now=now, sweep=sweep)
-    return SupervisorActionResult(
+    return AgentNotifierActionResult(
         "redeliver", finding, updated.deliveryState, updated.deliveryDetail
     )
 
 
-# 260731-EFA-L7 R10: verbatim L7 split (L7-OQ1 Option A serving scope); unchanged edge branch, out of this leaf's behavior scope (mcp/src/agents_remember/serving/_supervisor_actions.py:124).
+# 260731-EFA-L7 R10: verbatim L7 split (L7-OQ1 Option A serving scope); unchanged edge branch, out of this leaf's behavior scope (mcp/src/agents_remember/serving/_agent_notifier_actions.py:124).
 def _resolve_ladder_terminal(  # pragma: no cover
-    ctx: SupervisorContext,
-    finding: SupervisorFinding,
+    ctx: AgentNotifierContext,
+    finding: AgentNotifierFinding,
     *,
     now: datetime,
     sweep: _SweepState,
-) -> SupervisorActionResult:
+) -> AgentNotifierActionResult:
     if finding.source_id is None:
-        return SupervisorActionResult("ladder-resolve", finding, "skipped", "no source entry id")
+        return AgentNotifierActionResult("ladder-resolve", finding, "skipped", "no source entry id")
     try:
         resolved, resolved_now = inbox_transitions.mark_ladder_resolved(
             ctx.inbox_store,
@@ -141,12 +161,12 @@ def _resolve_ladder_terminal(  # pragma: no cover
             current=sweep.inbox_current,
         )
     except KeyError:
-        return SupervisorActionResult("ladder-resolve", finding, "skipped", "entry missing")
+        return AgentNotifierActionResult("ladder-resolve", finding, "skipped", "entry missing")
     sweep.remember(resolved)
     if resolved_now:
         _log_event(
             ctx,
-            "orchestration.supervisor.ladder-resolved",
+            "orchestration.agent-notifier.ladder-resolved",
             {
                 "entryId": resolved.id,
                 "agentId": resolved.agentId,
@@ -155,14 +175,14 @@ def _resolve_ladder_terminal(  # pragma: no cover
                 "ladderResolvedAt": resolved.ladderResolvedAt,
             },
         )
-    return SupervisorActionResult(
+    return AgentNotifierActionResult(
         "ladder-resolve", finding, resolved.state, resolved.ladderResolvedReason
     )
 
 
-# 260731-EFA-L7 R10: verbatim L7 split (L7-OQ1 Option A serving scope); unchanged edge branch, out of this leaf's behavior scope (mcp/src/agents_remember/serving/_supervisor_actions.py:161).
+# 260731-EFA-L7 R10: verbatim L7 split (L7-OQ1 Option A serving scope); unchanged edge branch, out of this leaf's behavior scope (mcp/src/agents_remember/serving/_agent_notifier_actions.py:161).
 def _escalate_inbox_entry(  # pragma: no cover
-    ctx: SupervisorContext, entry_id: str, *, now: datetime, sweep: _SweepState
+    ctx: AgentNotifierContext, entry_id: str, *, now: datetime, sweep: _SweepState
 ) -> None:
     """R4d: hand a persistently-failing row to the escalation ladder by stamping ``escalatedAt``,
     the anchor ``escalation_ladder.rung_due`` measures each rung's dwell from."""
@@ -175,22 +195,22 @@ def _escalate_inbox_entry(  # pragma: no cover
     sweep.remember(escalated)
     _log_event(
         ctx,
-        "orchestration.supervisor.escalate",
+        "orchestration.agent-notifier.escalate",
         {"entryId": escalated.id, "kind": "inbox", "escalatedAt": escalated.escalatedAt},
     )
 
 
-def _nudge_reason(finding: SupervisorFinding) -> NudgeReason:
+def _nudge_reason(finding: AgentNotifierFinding) -> NudgeReason:
     return "missing-turn-report" if finding.kind == "turn-report-stale" else "inactive"
 
 
 def _auto_nudge(
-    ctx: SupervisorContext,
-    finding: SupervisorFinding,
+    ctx: AgentNotifierContext,
+    finding: AgentNotifierFinding,
     *,
     now: datetime,
     sweep: _SweepState,
-) -> SupervisorActionResult:
+) -> AgentNotifierActionResult:
     owner = derive_signal_owner(
         ctx.catalog,
         sender_agent_id=finding.session_id,
@@ -198,7 +218,7 @@ def _auto_nudge(
         leaf_key=finding.leaf_key,
     )
     if owner.agent_id is None and owner.lifecycle_id is None and owner.role is None:
-        return SupervisorActionResult("auto-nudge", finding, "skipped", "no routable owner")
+        return AgentNotifierActionResult("auto-nudge", finding, "skipped", "no routable owner")
     reason = _nudge_reason(finding)
     subject = finding.leaf_key or finding.session_id or finding.detail
     message = nudge_message(
@@ -236,7 +256,7 @@ def _auto_nudge(
     )
     if record.state == "rate-limited":
         _mark_expectation_missed(ctx, finding, now=now, sweep=sweep)
-        return SupervisorActionResult("auto-nudge", finding, "rate-limited", message)
+        return AgentNotifierActionResult("auto-nudge", finding, "rate-limited", message)
     delivered = _post_owner_signal(
         ctx,
         owner,
@@ -252,13 +272,13 @@ def _auto_nudge(
         sweep=sweep,
     )
     _mark_expectation_missed(ctx, finding, now=now, sweep=sweep)
-    return SupervisorActionResult("auto-nudge", finding, "sent", delivered)
+    return AgentNotifierActionResult("auto-nudge", finding, "sent", delivered)
 
 
-# 260731-EFA-L7 R10: verbatim L7 split (L7-OQ1 Option A serving scope); unchanged edge branch, out of this leaf's behavior scope (mcp/src/agents_remember/serving/_supervisor_actions.py:255).
+# 260731-EFA-L7 R10: verbatim L7 split (L7-OQ1 Option A serving scope); unchanged edge branch, out of this leaf's behavior scope (mcp/src/agents_remember/serving/_agent_notifier_actions.py:255).
 def _mark_expectation_missed(  # pragma: no cover
-    ctx: SupervisorContext,
-    finding: SupervisorFinding,
+    ctx: AgentNotifierContext,
+    finding: AgentNotifierFinding,
     *,
     now: datetime,
     sweep: _SweepState | None = None,
@@ -287,15 +307,20 @@ def _find_coalescible(
     leaf_key: str | None,
     seat_role: str | None,
 ) -> OperatorInboxEntry | None:
-    """The ruled coalescing lookup (developer, 2026-07-09): a supervisor-authored condition that
-    is still pending under the SAME ask is the row to renew -- matched on content, not address,
-    so a row the ladder has re-addressed still coalesces with its re-firing root condition."""
+    """The ruled coalescing lookup (developer, 2026-07-09): an agent-notifier-authored condition that
+    is still pending under the SAME ask identity is the row to renew -- matched on content, not
+    address, so a row the ladder has re-addressed still coalesces with its re-firing root
+    condition, and a legacy-prefix row still coalesces with a new-prefix re-fire."""
     for row in entries.values():
         if (
             row.state == "pending"
-            and row.createdBy == "supervisor"
+            # Legacy rows created before the rename window carry "supervisor"; both are the
+            # same relay-authored condition and must coalesce until the window closes.
+            and row.createdBy in {"supervisor", "agent-notifier"}
             and row.messageKind == message_kind
-            and row.ask == ask
+            # The ask prefix was renamed too; both prefixes are one signal identity, so a
+            # new-format re-fire renews a legacy-format pending row (one row per root cause).
+            and _seat_liveness_ask_identity(row.ask) == _seat_liveness_ask_identity(ask)
             and row.leafKey == leaf_key
             and row.seatRole == seat_role
         ):
@@ -320,9 +345,9 @@ class OwnerSignal:
     subject_agent_id: str | None = None
 
 
-# 260731-EFA-L7 R10: verbatim L7 split (L7-OQ1 Option A serving scope); unchanged edge branch, out of this leaf's behavior scope (mcp/src/agents_remember/serving/_supervisor_actions.py:323).
+# 260731-EFA-L7 R10: verbatim L7 split (L7-OQ1 Option A serving scope); unchanged edge branch, out of this leaf's behavior scope (mcp/src/agents_remember/serving/_agent_notifier_actions.py:323).
 def _post_owner_signal(  # pragma: no cover
-    ctx: SupervisorContext,
+    ctx: AgentNotifierContext,
     owner: RoutedOwner,
     signal: OwnerSignal,
     *,
@@ -381,7 +406,9 @@ def _post_owner_signal(  # pragma: no cover
                     role=owner.role, agent_id=owner.agent_id, lifecycle_id=owner.lifecycle_id
                 ),
             ),
-            poster=InboxPoster(created_by="supervisor", created_via="cli", sender_role="system"),
+            poster=InboxPoster(
+                created_by="agent-notifier", created_via="cli", sender_role="system"
+            ),
         )
         ctx.inbox_store.append(entry)
     if sweep is not None:
@@ -405,12 +432,12 @@ def _post_owner_signal(  # pragma: no cover
 
 
 def _signal_emit(
-    ctx: SupervisorContext,
-    finding: SupervisorFinding,
+    ctx: AgentNotifierContext,
+    finding: AgentNotifierFinding,
     *,
     now: datetime,
     sweep: _SweepState,
-) -> SupervisorActionResult:
+) -> AgentNotifierActionResult:
     owner = derive_signal_owner(
         ctx.catalog,
         sender_agent_id=finding.session_id,
@@ -418,9 +445,9 @@ def _signal_emit(
         leaf_key=finding.leaf_key,
     )
     if owner.agent_id is None and owner.lifecycle_id is None and owner.role is None:
-        return SupervisorActionResult("signal-emit", finding, "skipped", "no routable owner")
-    signal_key = SupervisorSignalKey(
-        target=SupervisorSignalTarget(
+        return AgentNotifierActionResult("signal-emit", finding, "skipped", "no routable owner")
+    signal_key = AgentNotifierSignalKey(
+        target=AgentNotifierSignalTarget(
             agent_id=owner.agent_id,
             lifecycle_id=owner.lifecycle_id,
             role=owner.role,
@@ -436,8 +463,10 @@ def _signal_emit(
         cooldown_seconds=ctx.signal_cooldown_seconds,
         records=sweep.signal_current,
     ):
-        return SupervisorActionResult("signal-emit", finding, "cooldown", "signal cooldown active")
-    ask = f"Supervisor observed {finding.kind}: {finding.detail}"
+        return AgentNotifierActionResult(
+            "signal-emit", finding, "cooldown", "signal cooldown active"
+        )
+    ask = f"Agent notifier observed {finding.kind}: {finding.detail}"
     response = f"session {finding.session_id or 'unknown'} (leaf {finding.leaf_key or 'unknown'})"
     delivery_state = _post_owner_signal(
         ctx,
@@ -453,7 +482,7 @@ def _signal_emit(
         now=now,
         sweep=sweep,
     )
-    signal_record = SupervisorSignalRecord(
+    signal_record = AgentNotifierSignalRecord(
         id=new_ulid(),
         ts=now.isoformat(),
         targetAgentId=owner.agent_id,
@@ -469,7 +498,7 @@ def _signal_emit(
     sweep.remember_signal(signal_record)
     _log_event(
         ctx,
-        "orchestration.supervisor.signal",
+        "orchestration.agent-notifier.signal",
         {
             "predicateKind": finding.kind,
             "detail": finding.detail,
@@ -480,12 +509,12 @@ def _signal_emit(
             "deliveryState": delivery_state,
         },
     )
-    return SupervisorActionResult("signal-emit", finding, delivery_state)
+    return AgentNotifierActionResult("signal-emit", finding, delivery_state)
 
 
-# 260731-EFA-L7 R10: verbatim L7 split (L7-OQ1 Option A serving scope); unchanged edge branch, out of this leaf's behavior scope (mcp/src/agents_remember/serving/_supervisor_actions.py:481).
+# 260731-EFA-L7 R10: verbatim L7 split (L7-OQ1 Option A serving scope); unchanged edge branch, out of this leaf's behavior scope (mcp/src/agents_remember/serving/_agent_notifier_actions.py:481).
 def _rung_entry(  # pragma: no cover
-    finding: SupervisorFinding,
+    finding: AgentNotifierFinding,
     sweep: _SweepState,
 ) -> tuple[OperatorInboxEntry | None, str | None]:
     if finding.source_id is None:
@@ -500,14 +529,14 @@ def _rung_entry(  # pragma: no cover
     return entry, None
 
 
-# 260731-EFA-L7 R10: verbatim L7 split (L7-OQ1 Option A serving scope); unchanged edge branch, out of this leaf's behavior scope (mcp/src/agents_remember/serving/_supervisor_actions.py:497).
+# 260731-EFA-L7 R10: verbatim L7 split (L7-OQ1 Option A serving scope); unchanged edge branch, out of this leaf's behavior scope (mcp/src/agents_remember/serving/_agent_notifier_actions.py:497).
 def _escalate_rung(  # pragma: no cover
-    ctx: SupervisorContext,
-    finding: SupervisorFinding,
+    ctx: AgentNotifierContext,
+    finding: AgentNotifierFinding,
     *,
     now: datetime,
     sweep: _SweepState,
-) -> SupervisorActionResult:
+) -> AgentNotifierActionResult:
     """R2: advance one pending, unacked row to its next ladder rung -- renudge (1), skip-level
     (2), or architect custody (3, terminal) -- and durably stamp the transition.
 
@@ -518,11 +547,11 @@ def _escalate_rung(  # pragma: no cover
     grew the inbox to 20k+ pending rows and took the host down."""
     entry, refusal = _rung_entry(finding, sweep)
     if entry is None:
-        return SupervisorActionResult("escalate-rung", finding, "skipped", refusal)
+        return AgentNotifierActionResult("escalate-rung", finding, "skipped", refusal)
     sweep.escalated_entry_ids.add(entry.id)
     step = next_step(ctx.catalog, entry)
     if step.owner.agent_id is None and step.owner.role is None:
-        return SupervisorActionResult("escalate-rung", finding, "skipped", "no routable owner")
+        return AgentNotifierActionResult("escalate-rung", finding, "skipped", "no routable owner")
     advanced = inbox_transitions.advance_rung(
         ctx.inbox_store,
         entry.id,
@@ -576,7 +605,7 @@ def _escalate_rung(  # pragma: no cover
     ):
         _respawn_suspect(ctx, entry.agentId, now=now, sweep=sweep)
     if _ladder_terminal_and_dead(ctx.catalog, advanced):
-        terminal_finding = SupervisorFinding(
+        terminal_finding = AgentNotifierFinding(
             kind="inbox-ladder-terminal",
             detail="ladder-resolved",
             session_id=advanced.agentId,
@@ -585,12 +614,12 @@ def _escalate_rung(  # pragma: no cover
             source_id=advanced.id,
         )
         _resolve_ladder_terminal(ctx, terminal_finding, now=now, sweep=sweep)
-    return SupervisorActionResult("escalate-rung", finding, delivery_state, step.action)
+    return AgentNotifierActionResult("escalate-rung", finding, delivery_state, step.action)
 
 
-# 260731-EFA-L7 R10: verbatim L7 split (L7-OQ1 Option A serving scope); unchanged edge branch, out of this leaf's behavior scope (mcp/src/agents_remember/serving/_supervisor_actions.py:584).
+# 260731-EFA-L7 R10: verbatim L7 split (L7-OQ1 Option A serving scope); unchanged edge branch, out of this leaf's behavior scope (mcp/src/agents_remember/serving/_agent_notifier_actions.py:584).
 def _respawn_suspect(  # pragma: no cover
-    ctx: SupervisorContext,
+    ctx: AgentNotifierContext,
     agent_id: str | None,
     *,
     now: datetime,
@@ -620,7 +649,7 @@ def _respawn_suspect(  # pragma: no cover
             at=now.isoformat(),
             by_session=None,
             reason="escalation-ladder-suspect",
-            edge="supervisor-respawn",
+            edge="agent-notifier-respawn",
         ),
     )
     orphaned: list[str] = []
@@ -643,7 +672,7 @@ def _respawn_suspect(  # pragma: no cover
         )
     _log_event(
         ctx,
-        "orchestration.supervisor.respawn",
+        "orchestration.agent-notifier.respawn",
         {
             "agentId": agent_id,
             "spawnRole": entry.spawn_role,
@@ -657,14 +686,14 @@ def _respawn_suspect(  # pragma: no cover
     )
 
 
-# 260731-EFA-L7 R10: verbatim L7 split (L7-OQ1 Option A serving scope); unchanged edge branch, out of this leaf's behavior scope (mcp/src/agents_remember/serving/_supervisor_actions.py:652).
+# 260731-EFA-L7 R10: verbatim L7 split (L7-OQ1 Option A serving scope); unchanged edge branch, out of this leaf's behavior scope (mcp/src/agents_remember/serving/_agent_notifier_actions.py:652).
 def _signal_dead_upstream(  # pragma: no cover
-    ctx: SupervisorContext,
-    finding: SupervisorFinding,
+    ctx: AgentNotifierContext,
+    finding: AgentNotifierFinding,
     *,
     now: datetime,
     sweep: _SweepState,
-) -> SupervisorActionResult:
+) -> AgentNotifierActionResult:
     """R4: hand a leaf whose recorded owner died to its current responsible manager.
 
     Address-time manager resolution repairs stale manager provenance. The ordinary ladder owns any
@@ -674,7 +703,7 @@ def _signal_dead_upstream(  # pragma: no cover
         ctx.catalog, sender_agent_id=finding.session_id, leaf_key=finding.leaf_key
     )
     if owner.agent_id is None and owner.role is None:
-        return SupervisorActionResult("signal-manager", finding, "skipped", "no manager address")
+        return AgentNotifierActionResult("signal-manager", finding, "skipped", "no manager address")
     ask = (
         f"Dead-upstream (R4/P-6): seat {finding.session_id or 'unknown'} lost its recorded owner; "
         "current manager action is required. The seat continues its own brief and never absorbs "
@@ -697,7 +726,7 @@ def _signal_dead_upstream(  # pragma: no cover
     )
     _log_event(
         ctx,
-        "orchestration.supervisor.dead-upstream",
+        "orchestration.agent-notifier.dead-upstream",
         {
             "sessionId": finding.session_id,
             "leafKey": finding.leaf_key,
@@ -707,10 +736,10 @@ def _signal_dead_upstream(  # pragma: no cover
             "deliveryState": delivery_state,
         },
     )
-    return SupervisorActionResult("signal-manager", finding, delivery_state)
+    return AgentNotifierActionResult("signal-manager", finding, delivery_state)
 
 
-_FindingAction = Callable[..., SupervisorActionResult]
+_FindingAction = Callable[..., AgentNotifierActionResult]
 
 # One predicate kind -> the one act-phase handler that answers it. A finding kind with no entry
 # here is reported as unhandled rather than silently doing nothing, so adding a predicate without
@@ -727,16 +756,16 @@ _FINDING_ACTIONS: dict[str, _FindingAction] = {
 
 
 def act_on_finding(
-    ctx: SupervisorContext,
-    finding: SupervisorFinding,
+    ctx: AgentNotifierContext,
+    finding: AgentNotifierFinding,
     *,
     now: datetime,
     sweep: _SweepState | None = None,
-) -> SupervisorActionResult:
+) -> AgentNotifierActionResult:
     if sweep is None:
         current = ctx.inbox_store.current()
         sweep = _SweepState(inbox_current=current, redeliver_budget=ctx.redeliver_budget)
     action = _FINDING_ACTIONS.get(finding.kind)
     if action is None:
-        return SupervisorActionResult("none", finding, "skipped", "unhandled finding kind")
+        return AgentNotifierActionResult("none", finding, "skipped", "unhandled finding kind")
     return action(ctx, finding, now=now, sweep=sweep)

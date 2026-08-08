@@ -17,16 +17,16 @@ from pydantic import BaseModel, Field
 
 from agents_remember.models.application_requests import AgentRole, InboxMessageKind
 from agents_remember.observer import observer_root
+from agents_remember.serving.agent_notifier_heartbeat import (
+    AgentNotifierHeartbeatPayload,
+    AgentNotifierHeartbeatStore,
+)
 from agents_remember.serving.build_info import ServingBuild
 from agents_remember.serving.harness_capability_catalog import HarnessCapabilityCatalog
 from agents_remember.serving.hosted_session_runtime import HostedSessionRuntime
 from agents_remember.serving.leaf_ref_validation import resolve_catalog_leaf_key
 from agents_remember.serving.projector import ProjectionReplay, Projector
 from agents_remember.serving.served_state import served_state_tail
-from agents_remember.serving.supervisor_heartbeat import (
-    SupervisorHeartbeatPayload,
-    SupervisorHeartbeatStore,
-)
 from agents_remember.serving.terminal import TerminalHost, TerminalSessionSpec
 from agents_remember.serving.terminal_catalog import TerminalCatalog, TerminalCatalogEntry
 from agents_remember.serving.terminal_liveness import (
@@ -66,7 +66,7 @@ class _ProjectionBodyCache:
     of the last tick), while every request/subscriber landing within one tick shares a single
     dump. Keying by the coarser ETag revision instead would freeze the volatile age fields
     for ETag-less full GETs and SSE reconnects until the next content change. The volatile
-    tail is NOT cached: ``servingBuild``/``supervisorHeartbeat`` are injected per serve, so
+    tail is NOT cached: ``servingBuild``/``agentNotifierHeartbeat`` are injected per serve, so
     callers must shallow-copy the returned dict and never mutate the memo itself. Holding the
     instance in the entry makes the identity compare ABA-safe, and tuple assignment is
     GIL-atomic, so no lock (the ``/api/state`` threadpool and the event loop can race
@@ -113,15 +113,16 @@ async def stream_events(
     projector: Projector,
     *,
     build: ServingBuild | None = None,
-    supervisor_heartbeat: SupervisorHeartbeatPayload | None = None,
+    agent_notifier_heartbeat: AgentNotifierHeartbeatPayload | None = None,
 ) -> AsyncGenerator[ServerSentEvent]:
     """The SSE event sequence for one atomic projector subscription.
 
     Module-level (not a route closure) so it is unit-testable without an HTTP client.
     ``build`` (the boot-time serving stamp) rides the snapshot as
     ``servingBuild`` so the cockpit can render which process/commit is answering.
-    ``supervisor_heartbeat`` rides as ``supervisorHeartbeat`` -- the tick age
-    at connect time, so a stale supervisor is visible in the dashboard header at a glance.
+    ``agent_notifier_heartbeat`` rides as ``agentNotifierHeartbeat`` (with the legacy
+    ``supervisorHeartbeat`` alias during the rename window) -- the tick age
+    at connect time, so a stale agent-notifier is visible in the dashboard header at a glance.
 
     The tail rides the ``snapshot`` ONLY: a ``delta`` is one projection node, not a state
     body, so there is nothing there for a whole-workspace stamp to be a field of. That
@@ -138,7 +139,7 @@ async def stream_events(
             else:
                 payload = _encode(delta.data)
             if delta.event == "snapshot":
-                payload.update(served_state_tail(build=build, heartbeat=supervisor_heartbeat))
+                payload.update(served_state_tail(build=build, heartbeat=agent_notifier_heartbeat))
             yield ServerSentEvent(data=payload, event=delta.event, id=str(seq), retry=2000)
 
 
@@ -462,7 +463,7 @@ class _ServingRuntime:
     liveness_config: TerminalCatalogLivenessConfig
     liveness_sweeper: TerminalCatalogLivenessSweeper
     build: ServingBuild
-    heartbeat_store: SupervisorHeartbeatStore
+    heartbeat_store: AgentNotifierHeartbeatStore
     interval: float
 
     @property

@@ -1,6 +1,6 @@
-"""Supervisor self-liveness (260707-HFX2-L2, R5): "the watcher must be code AND watched" (#15).
+"""Agent-notifier self-liveness (260707-HFX2-L2, R5): "the watcher must be code AND watched" (#15).
 
-The supervisor sweep writes its own heartbeat tick row on every completed sweep -- the same
+The agent-notifier sweep writes its own heartbeat tick row on every completed sweep -- the same
 durable-row-not-a-timer posture the rest of this leaf uses (a daemon restart must not blind the
 staleness check). Two independent readers consume the tick age: an MCP tool call opportunistically
 attaches a fail-loud banner when it is stale (``mcp/tools/base.py``), and the dashboard header
@@ -20,7 +20,7 @@ from agents_remember.kernel.atomic_write import atomic_write_text
 
 
 @dataclass(frozen=True)
-class SupervisorHeartbeat:
+class AgentNotifierHeartbeat:
     lastTickAt: str
     sweepCount: int
     pendingInboxCount: int = 0
@@ -28,15 +28,17 @@ class SupervisorHeartbeat:
     lastSweepDurationSeconds: float | None = None
 
 
-class SupervisorHeartbeatPayload(BaseModel):
-    """The declared wire form of the tick age, as it rides ``supervisorHeartbeat``.
+class AgentNotifierHeartbeatPayload(BaseModel):
+    """The declared wire form of the tick age, as it rides ``agentNotifierHeartbeat``.
 
-    Distinct from :class:`SupervisorHeartbeat`, which is the durable ROW. This is what a
+    Distinct from :class:`AgentNotifierHeartbeat`, which is the durable ROW. During the rename
+    window the served body also carries the legacy ``supervisorHeartbeat`` key with the same
+    payload (see ``serving/served_state.py``). This is what a
     reader computes ABOUT that row at response time: the row's own counters plus the age
     and the staleness verdict against the configured cutoff. Serving-layer arithmetic on a
     tick-time artifact, which is exactly why it is not a projection field.
 
-    Serialized WITHOUT ``exclude_none``: a supervisor that has never ticked reports
+    Serialized WITHOUT ``exclude_none``: an agent-notifier that has never ticked reports
     ``lastTickAt``/``ageSeconds`` as explicit nulls, because the cockpit distinguishes
     "never ticked" from "this server does not report a heartbeat at all".
     """
@@ -52,22 +54,24 @@ class SupervisorHeartbeatPayload(BaseModel):
     lastSweepDurationSeconds: float | None = None
 
 
-def supervisor_heartbeat_path(observer_root: Path) -> Path:
+def agent_notifier_heartbeat_path(observer_root: Path) -> Path:
+    # The on-disk artifact name is retained during the rename window (durable rows in existing
+    # deployments); the identifier is the new name. Removal rides the heartbeat-schema migration.
     return observer_root / "workspace" / "supervisor-heartbeat.json"
 
 
-class SupervisorHeartbeatStore:
+class AgentNotifierHeartbeatStore:
     """JSON-backed heartbeat row: one atomic overwrite per tick (not an append log -- there is
     exactly one current tick, never a history worth folding)."""
 
     def __init__(self, observer_root: Path) -> None:
-        self._path = supervisor_heartbeat_path(observer_root)
+        self._path = agent_notifier_heartbeat_path(observer_root)
 
     @property
     def path(self) -> Path:
         return self._path
 
-    def read(self) -> SupervisorHeartbeat | None:
+    def read(self) -> AgentNotifierHeartbeat | None:
         try:
             data = json.loads(self._path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
@@ -75,7 +79,7 @@ class SupervisorHeartbeatStore:
         if not isinstance(data, dict):
             return None
         try:
-            return SupervisorHeartbeat(
+            return AgentNotifierHeartbeat(
                 lastTickAt=str(data["lastTickAt"]),
                 sweepCount=int(data["sweepCount"]),
                 pendingInboxCount=int(data.get("pendingInboxCount", 0)),
@@ -96,9 +100,9 @@ class SupervisorHeartbeatStore:
         pending_inbox_count: int = 0,
         redeliverable_inbox_count: int = 0,
         last_sweep_duration_seconds: float | None = None,
-    ) -> SupervisorHeartbeat:
+    ) -> AgentNotifierHeartbeat:
         previous = self.read()
-        heartbeat = SupervisorHeartbeat(
+        heartbeat = AgentNotifierHeartbeat(
             lastTickAt=now.isoformat(),
             sweepCount=(previous.sweepCount if previous else 0) + 1,
             pendingInboxCount=pending_inbox_count,
@@ -121,7 +125,9 @@ class SupervisorHeartbeatStore:
         return heartbeat
 
 
-def heartbeat_age_seconds(heartbeat: SupervisorHeartbeat | None, *, now: datetime) -> float | None:
+def heartbeat_age_seconds(
+    heartbeat: AgentNotifierHeartbeat | None, *, now: datetime
+) -> float | None:
     """Seconds since the last tick, or ``None`` when there has never been one."""
     if heartbeat is None:
         return None
@@ -132,20 +138,20 @@ def heartbeat_age_seconds(heartbeat: SupervisorHeartbeat | None, *, now: datetim
     return (now - last).total_seconds()
 
 
-def supervisor_staleness_banner(
+def agent_notifier_staleness_banner(
     observer_root: Path, *, now: datetime, stale_cutoff_seconds: float
 ) -> str | None:
-    """A fail-loud one-liner once the supervisor tick goes stale past ``stale_cutoff_seconds``,
+    """A fail-loud one-liner once the agent-notifier tick goes stale past ``stale_cutoff_seconds``,
     else ``None``. A heartbeat that has NEVER ticked is deliberately silent, not a banner: the
-    dashboard/supervisor is opt-in (``dashboard.autoStart``), so "no row yet" in a repo that has
+    dashboard/agent-notifier is opt-in (``dashboard.autoStart``), so "no row yet" in a repo that has
     never run it is not evidence of anything wrong -- only a row that STARTED ticking and then
     went quiet is. Best-effort: never raises -- an unreadable heartbeat file degrades to silence
     rather than blocking the caller's tool response."""
-    heartbeat = SupervisorHeartbeatStore(observer_root).read()
+    heartbeat = AgentNotifierHeartbeatStore(observer_root).read()
     if heartbeat is None:
         return None
     age = heartbeat_age_seconds(heartbeat, now=now)
     if age is None or age < stale_cutoff_seconds:
         return None
     minutes = age / 60.0
-    return f"supervisor stale {minutes:.1f}m (past the {stale_cutoff_seconds:.0f}s cutoff)"
+    return f"agent-notifier stale {minutes:.1f}m (past the {stale_cutoff_seconds:.0f}s cutoff)"

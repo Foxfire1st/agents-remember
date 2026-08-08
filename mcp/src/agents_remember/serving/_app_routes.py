@@ -40,7 +40,7 @@ from agents_remember.serving._app_common import (
     _ServingRuntime,
     stream_events,
 )
-from agents_remember.serving._app_lifespan import _supervisor_heartbeat_payload
+from agents_remember.serving._app_lifespan import _agent_notifier_heartbeat_payload
 from agents_remember.serving.actions import (
     ActionEvaluationContext,
     ActionOutcome,
@@ -92,7 +92,7 @@ def _state_response(runtime: _ServingRuntime, if_none_match: str | None) -> Resp
     # per request and hand back exactly what the memo exists to save.
     body = dict(_projection_body_cache.body(snapshot))
     body.update(
-        served_state_tail(build=runtime.build, heartbeat=_supervisor_heartbeat_payload(runtime))
+        served_state_tail(build=runtime.build, heartbeat=_agent_notifier_heartbeat_payload(runtime))
     )
     return JSONResponse(content=body, headers=headers)
 
@@ -160,7 +160,7 @@ def _register_projection_routes(app: FastAPI, runtime: _ServingRuntime) -> None:
         async for event in stream_events(
             runtime.projector,
             build=runtime.build,
-            supervisor_heartbeat=_supervisor_heartbeat_payload(runtime),
+            agent_notifier_heartbeat=_agent_notifier_heartbeat_payload(runtime),
         ):
             yield event
 

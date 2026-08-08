@@ -16,7 +16,7 @@ Read policy is part of each store's authority contract:
 - Gate, expectation-row, and operator-inbox stores read strictly because malformed or
   skipped records could change whether an approval or mutation is permitted. Their
   rewrites must use strict input.
-- Attention-dismissal, orchestration-nudge, and supervisor-cooldown stores read
+- Attention-dismissal, orchestration-nudge, and agent-notifier-cooldown stores read
   tolerantly for projection availability. Their rewrites may permanently drop malformed
   rows, which is acceptable only while those rows carry no mutation authority.
 
@@ -154,7 +154,7 @@ EXPECTATION_ROW_OWNERSHIP = StoreOwnership(
     writers=("mcp", "dashboard"),
     compaction_owner="dashboard",
     rationale=(
-        "The supervisor sweep (serving/supervisor.py) is the only reclamation pass this log has "
+        "The agent-notifier sweep (serving/agent_notifier.py) is the only reclamation pass this log has "
         "and it needs the folded snapshot it produces, so the dashboard owns compaction. Every "
         "dispatch surface appends, and half of them are MCP tools (gate open, inbox post), so "
         "the rewrite is serialized against those appends."
@@ -188,7 +188,7 @@ OPERATOR_INBOX_OWNERSHIP = StoreOwnership(
         "cannot be given a single compaction owner: both processes must physically remove rows, "
         "not merely append them. The MCP deletes the inbox rows tied to a cancelled gate "
         "(application/gate_tools.py delete_by_gate) at the moment the gate is cancelled, while the "
-        "dashboard's supervisor sweep must resolve and compact under one held lock "
+        "dashboard's agent-notifier sweep must resolve and compact under one held lock "
         "(reconcile_and_compact) so that a consume which won the lock stays terminal. Neither "
         "can be moved to the other process without moving the decision it implements. It is "
         "therefore the one log where the lock is the whole mechanism rather than the backstop "
@@ -202,19 +202,21 @@ ORCHESTRATION_NUDGE_OWNERSHIP = StoreOwnership(
     writers=("mcp", "dashboard"),
     compaction_owner="dashboard",
     rationale=(
-        "Appended by the MCP nudge tool and by the supervisor sweep. No production reclaim pass "
+        "Appended by the MCP nudge tool and by the agent-notifier sweep. No production reclaim pass "
         "exists yet; replace_records is the store's declared rewrite entry point, and the "
-        "supervisor is the only sweep that could ever drive it, so the dashboard is named owner "
+        "agent-notifier is the only sweep that could ever drive it, so the dashboard is named owner "
         "now rather than left to be decided by whoever writes the reclaim pass."
     ),
 )
 
-SUPERVISOR_SIGNAL_OWNERSHIP = StoreOwnership(
+AGENT_NOTIFIER_SIGNAL_OWNERSHIP = StoreOwnership(
+    # Retained legacy store identity during the rename window (lock derivation + error text);
+    # removal rides the cooldown-log schema migration.
     store="supervisor-signals",
     writers=("dashboard",),
     compaction_owner="dashboard",
     rationale=(
-        "Single writer: the supervisor sweep is the only thing that appends a signal and the "
+        "Single writer: the agent-notifier sweep is the only thing that appends a signal and the "
         "only thing that compacts the cooldown log. Locked all the same, for the same reason as "
         "attention-dismissals -- the claim is about today's callers, the lock is about the file."
     ),
@@ -377,7 +379,7 @@ def exclusive_access(log_path: Path, ownership: StoreOwnership) -> Iterator[None
     needs from a second store is gathered BEFORE entering this one, or the side effect runs
     AFTER leaving it; never nested. The two nestings this rule now forbids were each locally
     documented (the liveness sweep's catalog batch across the synchronizer's inbox/gate locks;
-    the supervisor's inbox transaction across a catalog read) and their unexamined composition
+    the agent-notifier's inbox transaction across a catalog read) and their unexamined composition
     deadlocked the serving daemon in production on 2026-08-05 -- an ABBA no single store's own
     ordering rule could see, because each store's order was internally correct.
     """

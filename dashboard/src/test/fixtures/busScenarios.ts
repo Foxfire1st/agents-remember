@@ -1,4 +1,4 @@
-import type { AgentPickupNode, SupervisorHeartbeat } from "../../types/projection";
+import type { AgentPickupNode, AgentNotifierHeartbeat } from "../../types/projection";
 
 // FEUI-L7 fixture pack: current pickup owner/redelivery fields plus one persisted legacy row whose
 // optional ownership timestamps are absent and whose required attempt count serializes as zero.
@@ -111,7 +111,7 @@ export const L7_PICKUPS: AgentPickupNode[] = [
   L7_LEGACY_PICKUP,
 ];
 
-export const L7_SUPERVISOR_HEARTBEAT = {
+export const L7_AGENT_NOTIFIER_HEARTBEAT = {
   lastTickAt: "2026-07-17T19:08:00Z",
   ageSeconds: 2,
   staleCutoffSeconds: 30,
@@ -119,4 +119,4 @@ export const L7_SUPERVISOR_HEARTBEAT = {
   pendingInboxCount: 3,
   redeliverableInboxCount: 1,
   lastSweepDurationSeconds: 0.18,
-} satisfies SupervisorHeartbeat;
+} satisfies AgentNotifierHeartbeat;

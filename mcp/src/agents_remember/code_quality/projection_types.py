@@ -7,7 +7,7 @@ dashboard contract remains complete without a second field list.
 
 The schema describes accepted model input, while the dashboard reads serialized output.
 Core projection and serving-build models use ``exclude_none=True``, so nullable fields are
-omitted and become optional TypeScript properties. Supervisor heartbeat deliberately dumps
+omitted and become optional TypeScript properties. AgentNotifier heartbeat deliberately dumps
 nulls, so its nullable properties remain required ``T | null`` values. Non-null defaults
 are always serialized and therefore remain required on the output contract.
 
@@ -31,9 +31,9 @@ TYPESCRIPT_OUTPUT = Path("dashboard/src/types/projection.ts")
 
 DEFINITION_RENAMES = {
     "ServingBuildPayload": "ServingBuild",
-    "SupervisorHeartbeatPayload": "SupervisorHeartbeat",
+    "AgentNotifierHeartbeatPayload": "AgentNotifierHeartbeat",
 }
-NULL_PRESERVING_MODELS = frozenset({"SupervisorHeartbeatPayload"})
+NULL_PRESERVING_MODELS = frozenset({"AgentNotifierHeartbeatPayload"})
 SCHEMA_ANNOTATION_KEYWORDS = frozenset({"default", "description", "title"})
 SCHEMA_KEYWORDS = SCHEMA_ANNOTATION_KEYWORDS | {
     "$defs",

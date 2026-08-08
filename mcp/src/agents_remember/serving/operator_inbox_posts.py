@@ -70,7 +70,9 @@ class OperatorInboxPostContext:
 def _redelivery_floor_seconds(config: McpRuntimeConfig | None) -> float | None:
     if config is None:
         return None
-    return load_agentic_settings(config.coordination_root).supervisor.redeliver_rate_limit_seconds
+    return load_agentic_settings(
+        config.coordination_root
+    ).agent_notifier.redeliver_rate_limit_seconds
 
 
 def _delivery_catalog(

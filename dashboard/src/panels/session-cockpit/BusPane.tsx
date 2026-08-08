@@ -3,7 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { css } from "../../../styled-system/css";
 import { servedAgeSeconds, useNowMs } from "../../data/servedAges";
 import type { OpenSession } from "../../data/sessions";
-import type { AgentPickupNode, SupervisorHeartbeat } from "../../types/projection";
+import type { AgentPickupNode, AgentNotifierHeartbeat } from "../../types/projection";
 import {
   BusDeveloperReply,
   EMPTY_BUS_REPLY_STATE,
@@ -192,9 +192,9 @@ function BusPickupSection({
   );
 }
 
-function HeartbeatSection({ heartbeat }: { heartbeat: SupervisorHeartbeat | null }) {
+function HeartbeatSection({ heartbeat }: { heartbeat: AgentNotifierHeartbeat | null }) {
   return (
-    <InspectorSection title="Supervisor heartbeat" testId="bus-heartbeat">
+    <InspectorSection title="Agent notifier heartbeat" testId="bus-heartbeat">
       {heartbeat ? (
         <>
           <InspectorFact
@@ -229,7 +229,7 @@ function HeartbeatSection({ heartbeat }: { heartbeat: SupervisorHeartbeat | null
         </>
       ) : (
         <InspectorNote>
-          Supervisor heartbeat is not projected; no liveness or health claim is available.
+          Agent notifier heartbeat is not projected; no liveness or health claim is available.
         </InspectorNote>
       )}
     </InspectorSection>
@@ -244,7 +244,7 @@ export function BusPane({
 }: {
   session: OpenSession | undefined;
   pickups: readonly AgentPickupNode[];
-  heartbeat: SupervisorHeartbeat | null;
+  heartbeat: AgentNotifierHeartbeat | null;
   ageClockActive?: boolean;
 }) {
   const [focusedOnly, setFocusedOnly] = useState(false);

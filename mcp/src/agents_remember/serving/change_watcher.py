@@ -47,7 +47,7 @@ blind spots:
 Self-trigger safety: the projection's own per-tick outputs (``latest-state.json`` /
 ``latest-metrics.json`` and their ``*.tmp`` siblings) live at the observer root, *outside*
 every watched subdirectory, so a tick cannot re-wake itself. Inside ``<obs>/workspace``
-the non-input churn (the raw event river + cursor/lock, the supervisor heartbeat) is
+the non-input churn (the raw event river + cursor/lock, the agent-notifier heartbeat) is
 name-filtered, and the control-plane lockfiles are suffix-filtered in every watched
 directory (they are the busiest writes in the tree -- every durable-store append and every
 rewrite opens one ``a+b`` -- and none is an input). TTL-gated writers that run inside a tick
@@ -88,7 +88,7 @@ from agents_remember.observer.projection_inputs import (
 )
 from agents_remember.observer.projection_store import LATEST_METRICS, LATEST_STATE
 from agents_remember.observer.store import WORKSPACE_CURSOR_FILE, WORKSPACE_LOCK_FILE
-from agents_remember.serving.supervisor_heartbeat import supervisor_heartbeat_path
+from agents_remember.serving.agent_notifier_heartbeat import agent_notifier_heartbeat_path
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -127,7 +127,7 @@ _EXCLUDED_NAMES = frozenset({LATEST_STATE, LATEST_METRICS})
 
 #: ``<obs>/workspace`` files that are NOT projection inputs: the raw event river (served
 #: by ``/api/events``, never read by ``project_and_write``) with its cursor + lock, and the
-#: supervisor's own heartbeat (written every sweep on its own cadence). The control-plane
+#: agent-notifier's own heartbeat (written every sweep on its own cadence). The control-plane
 #: lockfiles used to be listed here by name; they are derived instead -- see
 #: :data:`_DURABLE_LOG_LOCK_SUFFIX`.
 _EXCLUDED_WORKSPACE_NAMES = frozenset(
@@ -135,7 +135,7 @@ _EXCLUDED_WORKSPACE_NAMES = frozenset(
         "events.jsonl",
         WORKSPACE_CURSOR_FILE,
         WORKSPACE_LOCK_FILE,
-        supervisor_heartbeat_path(Path(".")).name,
+        agent_notifier_heartbeat_path(Path(".")).name,
     }
 )
 

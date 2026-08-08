@@ -682,8 +682,9 @@ class ProjectionBodyCacheTests(unittest.TestCase):
 
     @staticmethod
     def _memoized_body(response: httpx.Response) -> dict[str, object]:
-        """The served body minus ``supervisorHeartbeat`` (deliberately volatile, never cached)."""
+        """The served body minus the heartbeat tail keys (deliberately volatile, never cached)."""
         body = response.json()
+        body.pop("agentNotifierHeartbeat", None)
         body.pop("supervisorHeartbeat", None)
         return body
 
@@ -810,9 +811,11 @@ class GzipMiddlewareTests(unittest.TestCase):
             # The wire body really shrank (httpx transparently decodes for .json()).
             self.assertLess(int(zipped.headers["content-length"]), len(identity.content))
             zipped_body, identity_body = zipped.json(), identity.json()
-            # supervisorHeartbeat is deliberately volatile (computed at response time).
+            # The heartbeat tail keys are deliberately volatile (computed at response time).
             zipped_body.pop("supervisorHeartbeat", None)
+            zipped_body.pop("agentNotifierHeartbeat", None)
             identity_body.pop("supervisorHeartbeat", None)
+            identity_body.pop("agentNotifierHeartbeat", None)
             self.assertEqual(zipped_body, identity_body)
 
     def test_conversation_sse_media_type_is_gzip_excluded(self) -> None:

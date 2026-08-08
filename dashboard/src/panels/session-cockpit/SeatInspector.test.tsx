@@ -9,7 +9,7 @@ import {
   L7_DECISION_PICKUP,
   L7_ESCALATED_PICKUP,
   L7_PICKUPS,
-  L7_SUPERVISOR_HEARTBEAT,
+  L7_AGENT_NOTIFIER_HEARTBEAT,
 } from "../../test/fixtures/busScenarios";
 import {
   L6_CONTROLLED_WORKING,
@@ -51,7 +51,7 @@ describe("SeatInspector (L6)", () => {
         session={fromTerminalSessionInfo(L6_CONTROLLED_WORKING)}
         cockpit={undefined}
         pickups={L7_PICKUPS}
-        heartbeat={L7_SUPERVISOR_HEARTBEAT}
+        heartbeat={L7_AGENT_NOTIFIER_HEARTBEAT}
       />,
     );
     const evidenceTab = view.getByTestId("inspector-tab-evidence");
@@ -109,7 +109,7 @@ describe("SeatInspector (L6)", () => {
         session={fromTerminalSessionInfo(L6_CONTROLLED_WORKING)}
         cockpit={undefined}
         pickups={[L7_DECISION_PICKUP, L7_ESCALATED_PICKUP]}
-        heartbeat={L7_SUPERVISOR_HEARTBEAT}
+        heartbeat={L7_AGENT_NOTIFIER_HEARTBEAT}
       />,
     );
 
@@ -165,7 +165,7 @@ describe("SeatInspector (L6)", () => {
         session={undefined}
         cockpit={undefined}
         pickups={L7_PICKUPS}
-        heartbeat={L7_SUPERVISOR_HEARTBEAT}
+        heartbeat={L7_AGENT_NOTIFIER_HEARTBEAT}
       />,
     );
     expect(view.getByTestId("inspector-evidence-no-focus").textContent).toContain(

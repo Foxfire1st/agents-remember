@@ -1,4 +1,4 @@
-"""P-15 tiers 1+2: the deterministic supervisor sweep (260707-HFX2-L2).
+"""P-15 tiers 1+2: the deterministic agent-notifier sweep (260707-HFX2-L2).
 
 "The model is never the polling layer." Every intervention the pilot run needed was detectable by
 a MECHANICAL predicate (P-15: pane-state, expectation-deadline expiry, turn-report staleness,
@@ -8,7 +8,7 @@ with zero tokens spent and zero model calls anywhere in the loop.
 
 R3 (#22 root-cause rule, non-negotiable): every predicate reads :class:`TerminalCatalog` /
 :class:`OperatorInboxStore` / :class:`ExpectationRowStore` / the nudge store DIRECTLY. The
-projection is a consumer of the ``orchestration.supervisor.*`` events this module emits, never a
+projection is a consumer of the ``orchestration.agent-notifier.*`` events this module emits, never a
 source -- so this module imports nothing from ``serving/projector.py`` or ``observer/reducer.py``.
 
 Level-triggered by design: any event lost anywhere (a dropped push, a crashed dispatch call) is
@@ -24,7 +24,7 @@ from time import perf_counter
 
 from agents_remember.controlplane.inbox_backoff import require_redelivery_floor_seconds
 from agents_remember.controlplane.operator_inbox_records import OperatorInboxEntry
-from agents_remember.serving._supervisor_actions import (
+from agents_remember.serving._agent_notifier_actions import (
     _FINDING_ACTIONS,
     OwnerSignal,
     _auto_nudge,
@@ -44,7 +44,7 @@ from agents_remember.serving._supervisor_actions import (
     _signal_emit,
     act_on_finding,
 )
-from agents_remember.serving._supervisor_evaluation import (
+from agents_remember.serving._agent_notifier_evaluation import (
     _INACTIVE_EXPECTATION_KINDS,
     DEFAULT_ESCALATION_RUNG_SECONDS,
     DEFAULT_ESCALATION_SLA_SECONDS,
@@ -67,22 +67,22 @@ from agents_remember.serving._supervisor_evaluation import (
     evaluate_turn_report_findings,
     turn_report_path_for_leaf_key,
 )
+from agents_remember.serving.agent_notifier_models import (
+    AgentNotifierActionResult,
+    AgentNotifierContext,
+    AgentNotifierFinding,
+    AgentNotifierSweepResult,
+)
+from agents_remember.serving.agent_notifier_models import SweepState as _SweepState
 from agents_remember.serving.inbox_reclamation import (
     InboxReclamationPlan,
     plan_confirmed_gone_reclamation,
 )
-from agents_remember.serving.supervisor_models import (
-    SupervisorActionResult,
-    SupervisorContext,
-    SupervisorFinding,
-    SupervisorSweepResult,
-)
-from agents_remember.serving.supervisor_models import SweepState as _SweepState
 
 # R1 (260707-HFX2-L4): conservative built-in fallbacks when a caller (a test, or a context built
 # before settings are read) supplies no per-kind/per-rung knobs. ``serving/app.py`` always wires
 # the settings-driven ``EscalationSettings`` values in (mirroring how it already resolves
-# ``supervisor``/``expectations`` knobs into this module's plain-primitive fields) -- this module
+# ``agentNotifier``/``expectations`` knobs into this module's plain-primitive fields) -- this module
 # stays decoupled from the kernel settings loader, R3's "every predicate reads its store directly"
 # extended to knobs: no settings TYPE crosses into this file, only resolved numbers.
 
@@ -93,17 +93,19 @@ from agents_remember.serving.supervisor_models import SweepState as _SweepState
 # --- the sweep itself ------------------------------------------------------------------------
 
 
-def run_supervisor_sweep(ctx: SupervisorContext, *, now: datetime) -> SupervisorSweepResult:
+def run_agent_notifier_sweep(
+    ctx: AgentNotifierContext, *, now: datetime
+) -> AgentNotifierSweepResult:
     """One full R1-R5 sweep: evaluate every predicate, act on every finding, tick the heartbeat.
 
-    Every action is logged as an ``orchestration.supervisor.*`` (or the reused ``orchestration.
+    Every action is logged as an ``orchestration.agent-notifier.*`` (or the reused ``orchestration.
     nudge``) observer event so the dashboard river shows what code did on whose behalf (R4). The
-    heartbeat ticks LAST, unconditionally -- even a sweep with zero findings proves supervisor
+    heartbeat ticks LAST, unconditionally -- even a sweep with zero findings proves agent-notifier
     liveness (R5).
     """
     started = perf_counter()
     # R1-R8 (260712-TRH-L5): fold once under the inbox writer lock, join one catalog snapshot,
-    # terminally resolve only positively-gone supervisor alerts, then compact before selecting
+    # terminally resolve only positively-gone agent-notifier alerts, then compact before selecting
     # anything for redelivery. The existing TTL/cap compaction remains the fallback in this same
     # transaction. Holding the lock through resolve+compact makes a concurrent consume authoritative.
     reclamation: InboxReclamationPlan | None = None
@@ -114,7 +116,7 @@ def run_supervisor_sweep(ctx: SupervisorContext, *, now: datetime) -> Supervisor
     # image of this nesting, and the ABBA deadlocked the serving daemon twice on 2026-08-05.
     # The staleness this accepts is one-directional and benign: a subject that terminates after
     # this snapshot reads as non-terminated and is KEPT this sweep (never a false resolve), the
-    # tmux snapshot inside the callback is still fresh and fail-closed, and the supervisor is
+    # tmux snapshot inside the callback is still fresh and fail-closed, and the agent-notifier is
     # level-triggered, so a kept row is simply re-judged on the next sweep.
     catalog_entries = ctx.catalog.list(include_terminated=True)
 
@@ -144,7 +146,7 @@ def run_supervisor_sweep(ctx: SupervisorContext, *, now: datetime) -> Supervisor
             )
         _log_event(
             ctx,
-            "orchestration.supervisor.inbox-compacted",
+            "orchestration.agent-notifier.inbox-compacted",
             data,
         )
     # CS-6 D2/D3: read + reclaim the append-only signal cooldown log ONCE per sweep. compact()
@@ -152,7 +154,7 @@ def run_supervisor_sweep(ctx: SupervisorContext, *, now: datetime) -> Supervisor
     # the kept snapshot, which every per-finding in_cooldown check reads in-memory -- so the store
     # is read once per sweep and bounded on disk, instead of re-parsed once per finding forever.
     signal_retain = require_redelivery_floor_seconds(
-        ctx.signal_cooldown_seconds, owner="supervisor signal cooldown"
+        ctx.signal_cooldown_seconds, owner="agent-notifier signal cooldown"
     )
     _signals_removed, signal_snapshot = ctx.signal_cooldown_store.compact(
         now=now, retain_seconds=signal_retain
@@ -183,7 +185,7 @@ def run_supervisor_sweep(ctx: SupervisorContext, *, now: datetime) -> Supervisor
         redeliverable_inbox_count=sweep.redeliverable_inbox_count,
         last_sweep_duration_seconds=duration_seconds,
     )
-    return SupervisorSweepResult(
+    return AgentNotifierSweepResult(
         findings=tuple(findings),
         actions=actions,
         swept_at=now.isoformat(),
@@ -199,10 +201,10 @@ __all__ = [
     "PERSISTENT_FAILURE_ATTEMPTS",
     "_FINDING_ACTIONS",
     "_INACTIVE_EXPECTATION_KINDS",
+    "AgentNotifierActionResult",
+    "AgentNotifierFinding",
     "EscalationSchedule",
     "OwnerSignal",
-    "SupervisorActionResult",
-    "SupervisorFinding",
     "_FindingAction",
     "_age_seconds",
     "_auto_nudge",
@@ -234,6 +236,6 @@ __all__ = [
     "evaluate_predicates",
     "evaluate_seat_liveness_findings",
     "evaluate_turn_report_findings",
-    "run_supervisor_sweep",
+    "run_agent_notifier_sweep",
     "turn_report_path_for_leaf_key",
 ]

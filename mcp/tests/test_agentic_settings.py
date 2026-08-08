@@ -14,6 +14,7 @@ import json
 import sys
 import tempfile
 import unittest
+import warnings
 from pathlib import Path
 from typing import ClassVar
 
@@ -414,20 +415,20 @@ class TypedModelTests(unittest.TestCase):
         with self.assertRaisesRegex(AgenticSettingsError, "maxSubAgents"):
             self._load({"concurrency": {"maxSubAgents": 0}})
 
-    def test_supervisor_defaults_when_absent(self) -> None:
+    def test_agent_notifier_defaults_when_absent(self) -> None:
         settings = self._load({})
 
-        self.assertTrue(settings.supervisor.enabled)
-        self.assertEqual(settings.supervisor.interval_seconds, 10.0)
-        self.assertEqual(settings.supervisor.stale_cutoff_seconds, 60.0)
-        self.assertIsNone(settings.supervisor.redeliver_rate_limit_seconds)
-        self.assertEqual(settings.supervisor.signal_cooldown_seconds, 900.0)
-        self.assertEqual(settings.supervisor.redeliver_budget, 1)
+        self.assertTrue(settings.agent_notifier.enabled)
+        self.assertEqual(settings.agent_notifier.interval_seconds, 10.0)
+        self.assertEqual(settings.agent_notifier.stale_cutoff_seconds, 60.0)
+        self.assertIsNone(settings.agent_notifier.redeliver_rate_limit_seconds)
+        self.assertEqual(settings.agent_notifier.signal_cooldown_seconds, 900.0)
+        self.assertEqual(settings.agent_notifier.redeliver_budget, 1)
 
-    def test_supervisor_knobs_parse(self) -> None:
+    def test_agent_notifier_knobs_parse(self) -> None:
         settings = self._load(
             {
-                "supervisor": {
+                "agentNotifier": {
                     "enabled": False,
                     "intervalSeconds": 5,
                     "staleCutoffSeconds": 30,
@@ -438,36 +439,62 @@ class TypedModelTests(unittest.TestCase):
             }
         )
 
-        self.assertFalse(settings.supervisor.enabled)
-        self.assertEqual(settings.supervisor.interval_seconds, 5.0)
-        self.assertEqual(settings.supervisor.stale_cutoff_seconds, 30.0)
-        self.assertEqual(settings.supervisor.redeliver_rate_limit_seconds, 900.0)
-        self.assertEqual(settings.supervisor.signal_cooldown_seconds, 1200.0)
-        self.assertEqual(settings.supervisor.redeliver_budget, 75)
+        self.assertFalse(settings.agent_notifier.enabled)
+        self.assertEqual(settings.agent_notifier.interval_seconds, 5.0)
+        self.assertEqual(settings.agent_notifier.stale_cutoff_seconds, 30.0)
+        self.assertEqual(settings.agent_notifier.redeliver_rate_limit_seconds, 900.0)
+        self.assertEqual(settings.agent_notifier.signal_cooldown_seconds, 1200.0)
+        self.assertEqual(settings.agent_notifier.redeliver_budget, 75)
 
-    def test_supervisor_enabled_must_be_a_boolean(self) -> None:
-        with self.assertRaisesRegex(AgenticSettingsError, "supervisor.enabled"):
-            self._load({"supervisor": {"enabled": "yes"}})
+    def test_agent_notifier_enabled_must_be_a_boolean(self) -> None:
+        with self.assertRaisesRegex(AgenticSettingsError, "agentNotifier.enabled"):
+            self._load({"agentNotifier": {"enabled": "yes"}})
 
-    def test_supervisor_interval_must_be_positive(self) -> None:
+    def test_agent_notifier_interval_must_be_positive(self) -> None:
         with self.assertRaisesRegex(AgenticSettingsError, "intervalSeconds"):
-            self._load({"supervisor": {"intervalSeconds": 0}})
+            self._load({"agentNotifier": {"intervalSeconds": 0}})
 
-    def test_supervisor_redeliver_budget_must_be_positive(self) -> None:
+    def test_agent_notifier_redeliver_budget_must_be_positive(self) -> None:
         with self.assertRaisesRegex(AgenticSettingsError, "redeliverBudget"):
-            self._load({"supervisor": {"redeliverBudget": 0}})
+            self._load({"agentNotifier": {"redeliverBudget": 0}})
 
-    def test_supervisor_redelivery_floor_must_be_at_least_15_minutes(self) -> None:
+    def test_agent_notifier_redelivery_floor_must_be_at_least_15_minutes(self) -> None:
         with self.assertRaisesRegex(AgenticSettingsError, "redeliverRateLimitSeconds"):
-            self._load({"supervisor": {"redeliverRateLimitSeconds": 899}})
+            self._load({"agentNotifier": {"redeliverRateLimitSeconds": 899}})
 
-    def test_supervisor_signal_cooldown_must_be_at_least_15_minutes(self) -> None:
+    def test_agent_notifier_signal_cooldown_must_be_at_least_15_minutes(self) -> None:
         with self.assertRaisesRegex(AgenticSettingsError, "signalCooldownSeconds"):
-            self._load({"supervisor": {"signalCooldownSeconds": 899}})
+            self._load({"agentNotifier": {"signalCooldownSeconds": 899}})
 
-    def test_unknown_supervisor_key_fails_loud(self) -> None:
+    def test_unknown_agent_notifier_key_fails_loud(self) -> None:
         with self.assertRaisesRegex(AgenticSettingsError, "sweepSeconds"):
-            self._load({"supervisor": {"sweepSeconds": 5}})
+            self._load({"agentNotifier": {"sweepSeconds": 5}})
+
+    def test_legacy_supervisor_key_is_an_explicit_deprecated_alias(self) -> None:
+        # OQ1 (260713-TES-L1): the loader accepts the legacy key during ONE explicit
+        # compatibility window, and the alias is loud, never silent.
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            settings = self._load(
+                {
+                    "supervisor": {
+                        "enabled": False,
+                        "intervalSeconds": 7,
+                        "redeliverBudget": 3,
+                    }
+                }
+            )
+        self.assertFalse(settings.agent_notifier.enabled)
+        self.assertEqual(settings.agent_notifier.interval_seconds, 7.0)
+        self.assertEqual(settings.agent_notifier.redeliver_budget, 3)
+        self.assertEqual(len(caught), 1)
+        self.assertIs(caught[0].category, UserWarning)
+        self.assertIn("orchestration.supervisor", str(caught[0].message))
+        self.assertIn("orchestration.agentNotifier", str(caught[0].message))
+
+    def test_legacy_and_new_agent_notifier_keys_together_fail_loud(self) -> None:
+        with self.assertRaisesRegex(AgenticSettingsError, "both set"):
+            self._load({"supervisor": {"enabled": True}, "agentNotifier": {"enabled": True}})
 
     def test_gate_delegation_parses_in_its_new_home(self) -> None:
         settings = self._load(

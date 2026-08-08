@@ -42,7 +42,7 @@ _DEV_HEARTBEAT_ENV = "AR_DASHBOARD_DEV_HEARTBEAT"
 # forever on SIGTERM: the listening socket closes (port released) but the process hangs as a zombie
 # with its landing sweep still spawning git/gh -- exactly the three survivors observed live, killable
 # only by SIGKILL. A bounded graceful window makes SIGTERM force-cancel the lingering streams and run
-# the lifespan shutdown (which cancels the projector/landing/supervisor tasks) within a few seconds.
+# the lifespan shutdown (which cancels the projector/landing/agent-notifier tasks) within a few seconds.
 # Fast API/JSON requests finish well inside this window; only the intentionally-endless SSE streams
 # are force-closed, which is exactly the desired behaviour on shutdown. uvicorn types this as whole
 # seconds (``int | None``), so keep it an int.

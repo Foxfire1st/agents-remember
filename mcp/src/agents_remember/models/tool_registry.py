@@ -110,7 +110,7 @@ INTERNAL_COMPAT_TOOL_NAMES = frozenset(
 
 # ``type[ResponseEnvelope]``, not ``type[BaseModel]``: every registered model is a
 # ``ResponseModel`` or a ``FlexibleResponseEnvelope``, and saying so is what lets the choke
-# point set ``nextStep``/``supervisorBanner`` on the validated response before the dump.
+# point set ``nextStep``/``agentNotifierBanner`` on the validated response before the dump.
 # ``BaseModel`` here made those two fields unreachable by type, which is how they ended up
 # being written into the already-dumped dict instead.
 TOOL_RESPONSE_MODELS: dict[str, type[ResponseEnvelope]] = {

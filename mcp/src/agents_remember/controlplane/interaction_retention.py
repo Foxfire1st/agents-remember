@@ -20,7 +20,7 @@ INBOX_PENDING_TTL_SECONDS = 48 * 60 * 60.0
 """Ruled invariant (developer, 2026-07-09): no row outranks system health -- pending/unacked rows
 age out too. The inbox is a notification surface, not the record; the durable artifact (turn
 report, task doc, gate) lives on disk and survives the purge. A nudge nobody consumed within this
-window is stale noise; if its condition still holds, the supervisor recreates one fresh row.
+window is stale noise; if its condition still holds, the agent-notifier recreates one fresh row.
 Supersedes the HFX2-L1 R1 immortal-pending rule, which let the 2026-07-09 escalation storm grow a
 227 MB / 20k-pending-row inbox that took the host down."""
 
@@ -197,7 +197,7 @@ def _keep_inbox_entry(entry: OperatorInboxEntry, *, now: datetime, ttl_seconds: 
     included. A pending/unacked row is kept only within :data:`INBOX_PENDING_TTL_SECONDS`;
     consumed rows keep the shorter audit window; ladder-resolved rows drop immediately. This
     supersedes HFX2-L1 R1's immortal-pending rule -- the durable record is the artifact on disk,
-    never the inbox row, so purging an old nudge loses nothing the supervisor cannot recreate
+    never the inbox row, so purging an old nudge loses nothing the agent-notifier cannot recreate
     (as one fresh row) while its condition persists."""
     if entry.state == "ladder-resolved":
         return False

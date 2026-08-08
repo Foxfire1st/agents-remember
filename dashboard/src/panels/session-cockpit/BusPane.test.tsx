@@ -9,7 +9,7 @@ import {
   L7_PICKUPS,
   L7_SENDER_AGENT_ONLY_PICKUP,
   L7_SENDER_ROLE_ONLY_PICKUP,
-  L7_SUPERVISOR_HEARTBEAT,
+  L7_AGENT_NOTIFIER_HEARTBEAT,
 } from "../../test/fixtures/busScenarios";
 import { L6_CONTROLLED_WORKING, L6_LEGACY_RAW } from "../../test/fixtures/catalogRows";
 import { developerReplyRequest } from "./BusDeveloperReply";
@@ -50,7 +50,7 @@ describe("BusPane", () => {
   it("defaults fleet-global and renders sender-to-owner, redelivery, escalation, heartbeat, and UA-3 limits", () => {
     const session = fromTerminalSessionInfo(L6_CONTROLLED_WORKING);
     const view = render(
-      <BusPane session={session} pickups={L7_PICKUPS} heartbeat={L7_SUPERVISOR_HEARTBEAT} />,
+      <BusPane session={session} pickups={L7_PICKUPS} heartbeat={L7_AGENT_NOTIFIER_HEARTBEAT} />,
     );
 
     expect(view.getByTestId("bus-pickup-list").getAttribute("data-virtualized")).toBe("false");
@@ -80,14 +80,14 @@ describe("BusPane", () => {
     const focused = fromTerminalSessionInfo(L6_CONTROLLED_WORKING);
     const other = fromTerminalSessionInfo(L6_LEGACY_RAW);
     const view = render(
-      <BusPane session={focused} pickups={L7_PICKUPS} heartbeat={L7_SUPERVISOR_HEARTBEAT} />,
+      <BusPane session={focused} pickups={L7_PICKUPS} heartbeat={L7_AGENT_NOTIFIER_HEARTBEAT} />,
     );
     fireEvent.click(view.getByTestId("bus-focused-filter"));
     expect(view.getByTestId("bus-pickup-inbox-decision-1")).not.toBeNull();
     expect(view.queryByTestId("bus-pickup-inbox-escalation-1")).toBeNull();
 
     view.rerender(
-      <BusPane session={other} pickups={L7_PICKUPS} heartbeat={L7_SUPERVISOR_HEARTBEAT} />,
+      <BusPane session={other} pickups={L7_PICKUPS} heartbeat={L7_AGENT_NOTIFIER_HEARTBEAT} />,
     );
     const empty = view.getByTestId("bus-focused-empty").textContent ?? "";
     expect(empty).toContain("fleet-global bus still has 3 projected pending rows");
@@ -100,14 +100,14 @@ describe("BusPane", () => {
       <BusPane
         session={fromTerminalSessionInfo(L6_CONTROLLED_WORKING)}
         pickups={L7_PICKUPS}
-        heartbeat={L7_SUPERVISOR_HEARTBEAT}
+        heartbeat={L7_AGENT_NOTIFIER_HEARTBEAT}
       />,
     );
     fireEvent.click(view.getByTestId("bus-focused-filter"));
     expect(view.queryByTestId("bus-pickup-inbox-escalation-1")).toBeNull();
 
     view.rerender(
-      <BusPane session={undefined} pickups={L7_PICKUPS} heartbeat={L7_SUPERVISOR_HEARTBEAT} />,
+      <BusPane session={undefined} pickups={L7_PICKUPS} heartbeat={L7_AGENT_NOTIFIER_HEARTBEAT} />,
     );
     expect(view.getByTestId("bus-focused-filter").getAttribute("aria-pressed")).toBe("false");
     expect(view.getByTestId("bus-focused-filter").hasAttribute("disabled")).toBe(true);
@@ -123,7 +123,7 @@ describe("BusPane", () => {
       <BusPane
         session={fromTerminalSessionInfo(L6_CONTROLLED_WORKING)}
         pickups={L7_PICKUPS}
-        heartbeat={L7_SUPERVISOR_HEARTBEAT}
+        heartbeat={L7_AGENT_NOTIFIER_HEARTBEAT}
       />,
     );
     fireEvent.click(view.getByTestId("bus-reply-toggle-inbox-escalation-1"));
@@ -150,7 +150,7 @@ describe("BusPane", () => {
       <BusPane
         session={fromTerminalSessionInfo(L6_CONTROLLED_WORKING)}
         pickups={[L7_DECISION_PICKUP]}
-        heartbeat={L7_SUPERVISOR_HEARTBEAT}
+        heartbeat={L7_AGENT_NOTIFIER_HEARTBEAT}
       />,
     );
     fireEvent.click(view.getByTestId("bus-reply-toggle-inbox-decision-1"));
@@ -190,7 +190,7 @@ describe("BusPane", () => {
       <BusPane
         session={undefined}
         pickups={[L7_LIFECYCLE_ONLY_PICKUP]}
-        heartbeat={L7_SUPERVISOR_HEARTBEAT}
+        heartbeat={L7_AGENT_NOTIFIER_HEARTBEAT}
       />,
     );
 
@@ -224,7 +224,7 @@ describe("BusPane", () => {
       gateId: `gate-virtual-${index}`,
     }));
     const view = render(
-      <BusPane session={undefined} pickups={pickups} heartbeat={L7_SUPERVISOR_HEARTBEAT} />,
+      <BusPane session={undefined} pickups={pickups} heartbeat={L7_AGENT_NOTIFIER_HEARTBEAT} />,
     );
     expect(view.getByTestId("bus-pickup-list").getAttribute("data-virtualized")).toBe("true");
     await waitFor(() =>

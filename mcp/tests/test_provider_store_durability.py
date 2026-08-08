@@ -12,7 +12,7 @@ defect, and it was not theoretical:
   that loop and 800 records accepted: 287 / 320 / 294 of them (35.88% / 40.00% / 36.75%) were
   gone from disk afterwards, with a torn line in one run.
 * ``ProviderDegradationStore`` has ONE writer today, which is exactly the argument this leaf
-  already refused for attention-dismissals and supervisor-signals -- and refused for a measured
+  already refused for attention-dismissals and agent-notifier-signals -- and refused for a measured
   reason, since the draft that left those unlocked measured 31.45% loss. Same shape, same
   measurement: 582 / 574 / 584 of 800 accepted events (72.75% / 71.75% / 73.00%) were gone.
 
@@ -707,7 +707,7 @@ class ProviderOwnershipTests(_TempRootTest):
 
         This is the check that can actually fire in this pair, and it is deliberately NOT what
         makes the log safe -- the lock is, exactly as on attention-dismissals and
-        supervisor-signals, whose single-writer draft measured 31.45% loss. Both writes are
+        agent-notifier-signals, whose single-writer draft measured 31.45% loss. Both writes are
         guarded: the append and the state document, because the store has one of each.
         """
         store = ProviderDegradationStore(self.tmp)

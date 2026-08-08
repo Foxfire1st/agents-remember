@@ -165,7 +165,7 @@ same `(qualified leaf key, seat role)` pair collides.
 
 **Notify-and-stop is safe by design (HFX2-L1..L4, landed):** ending a turn on
 `lifecycle_turn_end_notification` — or simply stopping once your artifact is written and nothing is
-pending — is never a liveness gap. Silence is supervised: the HFX2-L2 supervisor sweep evaluates
+pending — is never a liveness gap. Silence is supervised: the HFX2-L2 agent-notifier sweep evaluates
 every expected artifact/signal on its own mechanical tick and the HFX2-L4 escalation ladder
 (renudge → skip-level → architect custody/architect attention, then respawn) handles inactivity. **No role watches,
 polls, or nudges on its own initiative — that is a banned seat-local watcher (uniform-mechanism
@@ -296,7 +296,7 @@ Every role that dispatches another hosted role uses one exact session id through
    `adapterDeliveryState=accepted|queued`.
 
 If step 3 fails, the original durable row stays pending on the original spawned session for the
-standard injector/supervisor retry path. Never duplicate the row, append another visible draft,
+standard injector/agent-notifier retry path. Never duplicate the row, append another visible draft,
 or respawn merely because delivery is pending. Settings-owned `sessionCommands` remain launch
 configuration; settings-owned `promptKeywords` ride the post-readiness dispatch brief exactly once.
 

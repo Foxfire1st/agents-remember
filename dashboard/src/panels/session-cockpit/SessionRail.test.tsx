@@ -20,7 +20,7 @@ import { seatVisualState } from "../../data/stateGrammar";
 import { dashboardStore } from "../../data/store";
 import { catalogRow, FLEET } from "../../test/fixtures/catalogRows";
 import { agentPickup, analytics, lifecycleWithGate, taskDoc } from "../../test/fixtures/wire";
-import type { SupervisorHeartbeat } from "../../types/projection";
+import type { AgentNotifierHeartbeat } from "../../types/projection";
 import { HeaderStrip } from "./HeaderStrip";
 import { LandedCleanupNotice } from "./LandedCleanupNotice";
 import { RAIL_VIRTUALIZE_THRESHOLD, SessionRail } from "./SessionRail";
@@ -43,7 +43,7 @@ function renderRail(overrides: { focusedSessionId?: string | null } = {}) {
   return { ...view, onFocusSession, model, rollup, sessions };
 }
 
-const HEARTBEAT: SupervisorHeartbeat = {
+const HEARTBEAT: AgentNotifierHeartbeat = {
   lastTickAt: "2026-07-16T09:30:00Z",
   ageSeconds: 2,
   staleCutoffSeconds: 60,
@@ -61,7 +61,7 @@ beforeEach(() => {
     perSession: {},
   });
   dashboardStore.setState({
-    supervisorHeartbeat: HEARTBEAT,
+    agentNotifierHeartbeat: HEARTBEAT,
     analytics: null,
     lifecycles: {},
   });
@@ -457,7 +457,7 @@ describe("freshness (R15) + bus-footer removal (F-c)", () => {
     );
   });
 
-  it("renders NO rail-bus-footer — inbox counts + supervisor liveness live in the top bar (F-c ruling)", () => {
+  it("renders NO rail-bus-footer — inbox counts + agent-notifier liveness live in the top bar (F-c ruling)", () => {
     // To declutter, the rail bus footer (inbox pending/redeliverable + heartbeat/stale cutoff) is
     // removed; one authority per fact — those numbers now live only in the top bar, with the
     // anchored detail in the Inspector's BusPane.

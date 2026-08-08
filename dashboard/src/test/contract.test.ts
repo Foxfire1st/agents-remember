@@ -179,11 +179,14 @@ type UnsampledMirrorPaths = MirrorOnlyPaths<WorkspaceProjection, typeof snapshot
 // that becomes sampled — or that names a path the mirror no longer declares — fails too.
 //
 // Both of these are injected by the serving app at RESPONSE time (`serving/build_info.py`,
-// `serving/supervisor_heartbeat.py`), not by the reducer, and both are absent from the persisted
+// `serving/agent_notifier_heartbeat.py`), not by the reducer, and both are absent from the persisted
 // `latest-state.json` this fixture is shaped like. `store.test.ts` exercises them by construction
 // instead, including the "never ticked" (`lastTickAt: null`) reading that must not render as an
 // alarm — a reading a payload that always carries a heartbeat could not express.
-type KnownUnsampled = "projection.servingBuild" | "projection.supervisorHeartbeat";
+type KnownUnsampled =
+  | "projection.servingBuild"
+  | "projection.agentNotifierHeartbeat"
+  | "projection.supervisorHeartbeat";
 
 /** Fails `tsc -b` naming every mirror path the fixture stopped sampling. */
 function fixtureMustSample<Unsampled extends never>(...unsampledPaths: Unsampled[]): void {

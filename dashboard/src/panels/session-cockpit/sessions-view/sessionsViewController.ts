@@ -262,8 +262,8 @@ export function useSessionsViewSelectors(props: SessionsViewProps) {
   const pickups = useDashboard((state) =>
     state.analytics ? state.analytics.agentPickups : EMPTY_PICKUPS,
   );
-  const supervisorHeartbeat = useDashboard(
-    (state) => state.supervisorHeartbeat,
+  const agentNotifierHeartbeat = useDashboard(
+    (state) => state.agentNotifierHeartbeat,
   );
   const chatsInterrupt = useConversationInterrupt(
     focusedSessionId ?? undefined,
@@ -279,7 +279,7 @@ export function useSessionsViewSelectors(props: SessionsViewProps) {
     perSession,
     taskDocuments,
     pickups,
-    supervisorHeartbeat,
+    agentNotifierHeartbeat,
     chatsInterrupt,
     chatsInterruptRef,
   };

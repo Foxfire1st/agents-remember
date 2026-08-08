@@ -29,6 +29,12 @@ Semantics (``docs/reference/settings-json.md`` is the schema reference):
   boot-snapshot consumer is ``mcp/config.py``'s ``gateDelegation`` (enforcement
   plumbing keeps its boot-cached shape; a change needs a restart -- documented).
 
+- Compatibility window (260713-TES-L1): ``orchestration.supervisor`` is an
+  explicit alias for ``orchestration.agentNotifier`` (the deterministic sweep's
+  knobs). The alias is accepted with a loud deprecation warning, never silently;
+  a file setting BOTH keys is refused. The alias and the legacy key are removed
+  with the window.
+
 Doctrine floors are NOT knobs: no key here touches the master-exit seam gate or
 the strategist's mandatory pre-run (L12 ruling; restated in the schema doc).
 
@@ -40,11 +46,16 @@ orchestration block assembly and re-exports the public surface.
 from __future__ import annotations
 
 import json
+import warnings
 from pathlib import Path
 from typing import Any
 
 from agents_remember.kernel._agentic_settings_core import (
     COMPLEXITY_SCALE,
+    DEFAULT_AGENT_NOTIFIER_ESCALATION_BUDGET,
+    DEFAULT_AGENT_NOTIFIER_INTERVAL_SECONDS,
+    DEFAULT_AGENT_NOTIFIER_REDELIVER_BUDGET,
+    DEFAULT_AGENT_NOTIFIER_STALE_CUTOFF_SECONDS,
     DEFAULT_ESCALATION_RUNG_SECONDS,
     DEFAULT_ESCALATION_SLA_SECONDS,
     DEFAULT_EXPECTATION_SLA_SECONDS,
@@ -53,11 +64,8 @@ from agents_remember.kernel._agentic_settings_core import (
     DEFAULT_LOOP_PER_LEVEL,
     DEFAULT_RESPAWN_AFTER_RUNG,
     DEFAULT_REVIEWER_REUSE,
-    DEFAULT_SUPERVISOR_ESCALATION_BUDGET,
-    DEFAULT_SUPERVISOR_INTERVAL_SECONDS,
-    DEFAULT_SUPERVISOR_REDELIVER_BUDGET,
-    DEFAULT_SUPERVISOR_STALE_CUTOFF_SECONDS,
     HARNESS_IDS,
+    KNOWN_AGENT_NOTIFIER_FIELDS,
     KNOWN_CONCURRENCY_FIELDS,
     KNOWN_ESCALATION_FIELDS,
     KNOWN_ESCALATION_MESSAGE_KINDS,
@@ -77,9 +85,9 @@ from agents_remember.kernel._agentic_settings_core import (
     KNOWN_ROLE_KNOB_FIELDS,
     KNOWN_ROLES,
     KNOWN_SPAWN_FIELDS,
-    KNOWN_SUPERVISOR_FIELDS,
     AgenticSettings,
     AgenticSettingsError,
+    AgentNotifierSettings,
     ConcurrencySettings,
     EscalationSettings,
     ExpectationSettings,
@@ -88,7 +96,6 @@ from agents_remember.kernel._agentic_settings_core import (
     LoopSettings,
     QualityGateSettings,
     RoleKnobs,
-    SupervisorSettings,
     _refuse_unknown,
     _require_bool,
     _require_harness_id,
@@ -118,6 +125,7 @@ from agents_remember.kernel._agentic_settings_policy import (
     parse_gate_delegation,
 )
 from agents_remember.kernel._agentic_settings_sections import (
+    _parse_agent_notifier,
     _parse_concurrency,
     _parse_escalation,
     _parse_escalation_rung_seconds,
@@ -132,12 +140,15 @@ from agents_remember.kernel._agentic_settings_sections import (
     _parse_roles,
     _parse_roles_per_level,
     _parse_spawn,
-    _parse_supervisor,
-    _require_supervisor_floor_seconds,
+    _require_agent_notifier_floor_seconds,
 )
 
 __all__ = [
     "COMPLEXITY_SCALE",
+    "DEFAULT_AGENT_NOTIFIER_ESCALATION_BUDGET",
+    "DEFAULT_AGENT_NOTIFIER_INTERVAL_SECONDS",
+    "DEFAULT_AGENT_NOTIFIER_REDELIVER_BUDGET",
+    "DEFAULT_AGENT_NOTIFIER_STALE_CUTOFF_SECONDS",
     "DEFAULT_ESCALATION_RUNG_SECONDS",
     "DEFAULT_ESCALATION_SLA_SECONDS",
     "DEFAULT_EXPECTATION_SLA_SECONDS",
@@ -146,11 +157,8 @@ __all__ = [
     "DEFAULT_LOOP_PER_LEVEL",
     "DEFAULT_RESPAWN_AFTER_RUNG",
     "DEFAULT_REVIEWER_REUSE",
-    "DEFAULT_SUPERVISOR_ESCALATION_BUDGET",
-    "DEFAULT_SUPERVISOR_INTERVAL_SECONDS",
-    "DEFAULT_SUPERVISOR_REDELIVER_BUDGET",
-    "DEFAULT_SUPERVISOR_STALE_CUTOFF_SECONDS",
     "HARNESS_IDS",
+    "KNOWN_AGENT_NOTIFIER_FIELDS",
     "KNOWN_CONCURRENCY_FIELDS",
     "KNOWN_ESCALATION_FIELDS",
     "KNOWN_ESCALATION_MESSAGE_KINDS",
@@ -169,7 +177,7 @@ __all__ = [
     "KNOWN_ROLES",
     "KNOWN_ROLE_KNOB_FIELDS",
     "KNOWN_SPAWN_FIELDS",
-    "KNOWN_SUPERVISOR_FIELDS",
+    "AgentNotifierSettings",
     "AgenticSettings",
     "AgenticSettingsError",
     "ConcurrencySettings",
@@ -180,11 +188,11 @@ __all__ = [
     "LoopSettings",
     "QualityGateSettings",
     "RoleKnobs",
-    "SupervisorSettings",
     "_HarnessEntry",
     "_entry_string",
     "_entry_string_list",
     "_merged_harness",
+    "_parse_agent_notifier",
     "_parse_concurrency",
     "_parse_escalation",
     "_parse_escalation_rung_seconds",
@@ -202,9 +210,9 @@ __all__ = [
     "_parse_roles",
     "_parse_roles_per_level",
     "_parse_spawn",
-    "_parse_supervisor",
     "_refuse_bad_effort_template",
     "_refuse_unpaired_vehicles",
+    "_require_agent_notifier_floor_seconds",
     "_require_bool",
     "_require_harness_id",
     "_require_object",
@@ -212,7 +220,6 @@ __all__ = [
     "_require_positive_number",
     "_require_string",
     "_require_string_list",
-    "_require_supervisor_floor_seconds",
     "_resolved_launch",
     "agentic_settings_path",
     "default_agentic_settings_seed",
@@ -291,11 +298,46 @@ def _validated_orchestration_block(
     if not isinstance(raw, dict):
         raise AgenticSettingsError(f"orchestration settings must be an object: {source}")
     _refuse_null_families(raw, source)
+    raw = _resolve_agent_notifier_alias(raw, source)
     # strict=False: one LAYER may legitimately be partial (a repo-local file overriding a single
     # leaf of a globally-defined harness entry, or referencing a harness id the OTHER layer
     # declares), so per-file validation checks shapes/keys only; cross-reference and completeness
     # rules run on the MERGED block in load_agentic_settings.
     _parse_orchestration(raw, source=source, sources=(path,), strict=False)
+    return raw
+
+
+def _resolve_agent_notifier_alias(raw: dict[str, Any], source: str) -> dict[str, Any]:
+    """Normalize the legacy ``orchestration.supervisor`` key to ``agentNotifier``.
+
+    The rename window (260713-TES-L1) accepts the legacy key as an EXPLICIT alias:
+    a file that uses it loads correctly but warns loudly, and a file that sets BOTH
+    keys is refused as ambiguous. Once the live settings file uses the new key and
+    the window closes, remove the legacy key from ``KNOWN_ORCHESTRATION_FIELDS``,
+    this resolver, and the warning.
+    """
+    legacy = raw.get("supervisor")
+    current = raw.get("agentNotifier")
+    if legacy is not None and current is not None:
+        raise AgenticSettingsError(
+            "orchestration.supervisor and orchestration.agentNotifier are both set; "
+            "the legacy key is a temporary alias during the agent-notifier rename "
+            "window -- keep orchestration.agentNotifier and remove "
+            f"orchestration.supervisor: {source}"
+        )
+    if legacy is not None:
+        warnings.warn(
+            "orchestration.supervisor is a deprecated alias for "
+            "orchestration.agentNotifier (supervisor renamed to agent-notifier); "
+            f"update {source} to orchestration.agentNotifier before the "
+            "compatibility window closes",
+            UserWarning,
+            stacklevel=3,
+        )
+        normalized = dict(raw)
+        normalized["agentNotifier"] = legacy
+        del normalized["supervisor"]
+        return normalized
     return raw
 
 
@@ -359,7 +401,7 @@ def _parse_orchestration(
         ),
         concurrency=_parse_concurrency(raw.get("concurrency"), source=source),
         expectations=_parse_expectations(raw.get("expectations"), source=source),
-        supervisor=_parse_supervisor(raw.get("supervisor"), source=source),
+        agent_notifier=_parse_agent_notifier(raw.get("agentNotifier"), source=source),
         escalation=_parse_escalation(raw.get("escalation"), source=source),
         quality_gate=_parse_quality_gate(raw.get("qualityGate"), source=source),
         spawn_harness=_parse_spawn(raw.get("spawn"), source=source, harness_ids=harness_ids),

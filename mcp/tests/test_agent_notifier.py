@@ -1,4 +1,4 @@
-"""Tests for the deterministic supervisor sweep (260707-HFX2-L2).
+"""Tests for the deterministic agent-notifier sweep (260707-HFX2-L2).
 
 Predicate unit tests over store/pane fixtures (R6), plus one sweep integration test that seeds
 drift across every predicate family and asserts the expected action set -- no model in the loop
@@ -35,7 +35,7 @@ from agents_remember.controlplane.operator_inbox_records import (
     create_operator_inbox_entry,
 )
 from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
-from agents_remember.serving.supervisor import (
+from agents_remember.serving.agent_notifier import (
     evaluate_expectation_findings,
     evaluate_inbox_findings,
     evaluate_ladder_terminal_findings,
@@ -95,10 +95,10 @@ class _FakeHost:
 
 
 def _fake_paster() -> TerminalPaster:
-    """An already-log-confirmed delivery seam for supervisor orchestration tests."""
+    """An already-log-confirmed delivery seam for agent-notifier orchestration tests."""
 
     class _AcceptedPaster:
-        # 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/test_supervisor.py:101).
+        # 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/test_agent_notifier.py:101).
         def paste(  # pragma: no cover
             self,
             _tmux_name: str,

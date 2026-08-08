@@ -99,7 +99,7 @@ class _PendingInteractionSync:
 
     The synchronizer takes the operator-inbox and gate locks, and the catalog batch (RLock +
     flock held for the whole sweep) must never be held across another store's lock -- the
-    supervisor's reconcile takes the same inbox lock and then reads the catalog, the
+    agent-notifier's reconcile takes the same inbox lock and then reads the catalog, the
     mirror-image nesting whose ABBA deadlocked the serving daemon in production. The
     evidence (projected entry + snapshot + prior quarantine marker) is captured inside the
     sweep exactly as before; only the side effect moves, to just past the batch commit, still
@@ -259,7 +259,7 @@ class TerminalCatalogLivenessSweeper:
 
         The synchronizer folds the operator-inbox and gate stores, and the
         catalog batch lock must never be held across another store's lock (the ABBA with the
-        supervisor's lock-held reconcile that deadlocked the serving daemon twice on 2026-08-05).
+        agent-notifier's lock-held reconcile that deadlocked the serving daemon twice on 2026-08-05).
         The row is re-read before each quarantine upsert so the marker composes with the turn
         state the batch just committed instead of clobbering it with the pre-commit snapshot;
         the only visible cost is that a freshly-quarantined row shows its marker from the next

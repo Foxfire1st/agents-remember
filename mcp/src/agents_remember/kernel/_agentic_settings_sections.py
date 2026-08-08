@@ -1,5 +1,5 @@
 """``orchestration`` section parsers: loops, roles, concurrency, expectations,
-supervisor, escalation, spawn, and the quality gate."""
+agent-notifier, escalation, spawn, and the quality gate."""
 
 from __future__ import annotations
 
@@ -8,6 +8,10 @@ from typing import Any
 from agents_remember.controlplane.inbox_backoff import MIN_REDELIVERY_INTERVAL_SECONDS
 from agents_remember.kernel._agentic_settings_core import (
     COMPLEXITY_SCALE,
+    DEFAULT_AGENT_NOTIFIER_ESCALATION_BUDGET,
+    DEFAULT_AGENT_NOTIFIER_INTERVAL_SECONDS,
+    DEFAULT_AGENT_NOTIFIER_REDELIVER_BUDGET,
+    DEFAULT_AGENT_NOTIFIER_STALE_CUTOFF_SECONDS,
     DEFAULT_ESCALATION_RUNG_SECONDS,
     DEFAULT_ESCALATION_SLA_SECONDS,
     DEFAULT_EXPECTATION_SLA_SECONDS,
@@ -17,10 +21,7 @@ from agents_remember.kernel._agentic_settings_core import (
     DEFAULT_RATE_LIMIT_SECONDS,
     DEFAULT_RESPAWN_AFTER_RUNG,
     DEFAULT_REVIEWER_REUSE,
-    DEFAULT_SUPERVISOR_ESCALATION_BUDGET,
-    DEFAULT_SUPERVISOR_INTERVAL_SECONDS,
-    DEFAULT_SUPERVISOR_REDELIVER_BUDGET,
-    DEFAULT_SUPERVISOR_STALE_CUTOFF_SECONDS,
+    KNOWN_AGENT_NOTIFIER_FIELDS,
     KNOWN_CONCURRENCY_FIELDS,
     KNOWN_ESCALATION_FIELDS,
     KNOWN_ESCALATION_MESSAGE_KINDS,
@@ -36,8 +37,8 @@ from agents_remember.kernel._agentic_settings_core import (
     KNOWN_ROLE_KNOB_FIELDS,
     KNOWN_ROLES,
     KNOWN_SPAWN_FIELDS,
-    KNOWN_SUPERVISOR_FIELDS,
     AgenticSettingsError,
+    AgentNotifierSettings,
     ConcurrencySettings,
     EscalationSettings,
     ExpectationSettings,
@@ -46,7 +47,6 @@ from agents_remember.kernel._agentic_settings_core import (
     LoopSettings,
     QualityGateSettings,
     RoleKnobs,
-    SupervisorSettings,
     _refuse_unknown,
     _require_bool,
     _require_harness_id,
@@ -293,48 +293,48 @@ def _parse_expectations(raw: object, *, source: str) -> ExpectationSettings:  # 
     return ExpectationSettings(sla_seconds=sla_seconds)
 
 
-def _parse_supervisor(raw: object, *, source: str) -> SupervisorSettings:
-    """``orchestration.supervisor``: the deterministic sweep's own knobs (R1/R5).
+def _parse_agent_notifier(raw: object, *, source: str) -> AgentNotifierSettings:
+    """``orchestration.agentNotifier``: the deterministic sweep's own knobs (R1/R5).
 
     Absent -> the documented defaults (enabled, 10s interval, 60s staleness cutoff, inbox-store
     redelivery rate limit inherited).
     """
     if raw is None:
-        return SupervisorSettings()
-    block = _require_object(raw, "orchestration.supervisor", source)
-    _refuse_unknown(block, KNOWN_SUPERVISOR_FIELDS, "orchestration.supervisor", source)
+        return AgentNotifierSettings()
+    block = _require_object(raw, "orchestration.agentNotifier", source)
+    _refuse_unknown(block, KNOWN_AGENT_NOTIFIER_FIELDS, "orchestration.agentNotifier", source)
     enabled = (
-        _require_bool(block["enabled"], "orchestration.supervisor.enabled", source)
+        _require_bool(block["enabled"], "orchestration.agentNotifier.enabled", source)
         if "enabled" in block
         else True
     )
     interval_seconds = (
         _require_positive_number(
-            block["intervalSeconds"], "orchestration.supervisor.intervalSeconds", source
+            block["intervalSeconds"], "orchestration.agentNotifier.intervalSeconds", source
         )
         if "intervalSeconds" in block
-        else DEFAULT_SUPERVISOR_INTERVAL_SECONDS
+        else DEFAULT_AGENT_NOTIFIER_INTERVAL_SECONDS
     )
     stale_cutoff_seconds = (
         _require_positive_number(
-            block["staleCutoffSeconds"], "orchestration.supervisor.staleCutoffSeconds", source
+            block["staleCutoffSeconds"], "orchestration.agentNotifier.staleCutoffSeconds", source
         )
         if "staleCutoffSeconds" in block
-        else DEFAULT_SUPERVISOR_STALE_CUTOFF_SECONDS
+        else DEFAULT_AGENT_NOTIFIER_STALE_CUTOFF_SECONDS
     )
     redeliver_rate_limit_seconds = (
-        _require_supervisor_floor_seconds(
+        _require_agent_notifier_floor_seconds(
             block["redeliverRateLimitSeconds"],
-            "orchestration.supervisor.redeliverRateLimitSeconds",
+            "orchestration.agentNotifier.redeliverRateLimitSeconds",
             source,
         )
         if "redeliverRateLimitSeconds" in block
         else None
     )
     signal_cooldown_seconds = (
-        _require_supervisor_floor_seconds(
+        _require_agent_notifier_floor_seconds(
             block["signalCooldownSeconds"],
-            "orchestration.supervisor.signalCooldownSeconds",
+            "orchestration.agentNotifier.signalCooldownSeconds",
             source,
         )
         if "signalCooldownSeconds" in block
@@ -342,19 +342,19 @@ def _parse_supervisor(raw: object, *, source: str) -> SupervisorSettings:
     )
     redeliver_budget = (
         _require_positive_int(
-            block["redeliverBudget"], "orchestration.supervisor.redeliverBudget", source
+            block["redeliverBudget"], "orchestration.agentNotifier.redeliverBudget", source
         )
         if "redeliverBudget" in block
-        else DEFAULT_SUPERVISOR_REDELIVER_BUDGET
+        else DEFAULT_AGENT_NOTIFIER_REDELIVER_BUDGET
     )
     escalation_budget = (
         _require_positive_int(
-            block["escalationBudget"], "orchestration.supervisor.escalationBudget", source
+            block["escalationBudget"], "orchestration.agentNotifier.escalationBudget", source
         )
         if "escalationBudget" in block
-        else DEFAULT_SUPERVISOR_ESCALATION_BUDGET
+        else DEFAULT_AGENT_NOTIFIER_ESCALATION_BUDGET
     )
-    return SupervisorSettings(
+    return AgentNotifierSettings(
         enabled=enabled,
         interval_seconds=interval_seconds,
         stale_cutoff_seconds=stale_cutoff_seconds,
@@ -365,7 +365,7 @@ def _parse_supervisor(raw: object, *, source: str) -> SupervisorSettings:
     )
 
 
-def _require_supervisor_floor_seconds(raw: object, owner: str, source: str) -> float:
+def _require_agent_notifier_floor_seconds(raw: object, owner: str, source: str) -> float:
     value = _require_positive_number(raw, owner, source)
     if value < MIN_REDELIVERY_INTERVAL_SECONDS:
         raise AgenticSettingsError(

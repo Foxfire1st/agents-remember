@@ -1,7 +1,7 @@
 """Diagnostic pane-state classifier retained for migration visibility.
 
 Distinct from ``turn_state.py``'s four-state diagnostic, this classifier labels older modal and
-busy-pane shapes. Neither the supervisor sweep nor hosted readiness, delivery, liveness, or gate
+busy-pane shapes. Neither the agent-notifier sweep nor hosted readiness, delivery, liveness, or gate
 flow may act on these labels; exact-session protocol snapshots and receipts own those decisions.
 
 * ``mid-turn`` -- an "esc to interrupt"-style marker was visible.

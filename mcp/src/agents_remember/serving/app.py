@@ -77,12 +77,12 @@ from agents_remember.serving._app_common import (
     stream_events,
 )
 from agents_remember.serving._app_lifespan import (
+    _agent_notifier_context,
+    _agent_notifier_heartbeat_payload,
+    _agent_notifier_loop,
     _malloc_trim_loop,
     _metrics_loop,
     _serving_lifespan,
-    _supervisor_context,
-    _supervisor_heartbeat_payload,
-    _supervisor_loop,
     _workspace_river_compaction_loop,
 )
 from agents_remember.serving._app_routes import (
@@ -117,6 +117,7 @@ from agents_remember.serving._app_terminal_routes import (
     _terminate_response,
     _write_paste_image,
 )
+from agents_remember.serving.agent_notifier_heartbeat import AgentNotifierHeartbeatStore
 from agents_remember.serving.build_info import resolve_serving_build
 from agents_remember.serving.change_watcher import ProjectionInputWatcher
 from agents_remember.serving.changeset import register_changeset_routes
@@ -137,7 +138,6 @@ from agents_remember.serving.projector import (
 )
 from agents_remember.serving.seat_events import log_turn_state_change_event
 from agents_remember.serving.static import mount_static
-from agents_remember.serving.supervisor_heartbeat import SupervisorHeartbeatStore
 from agents_remember.serving.terminal import TerminalHost
 from agents_remember.serving.terminal_catalog import TerminalCatalog, terminal_catalog_path
 from agents_remember.serving.terminal_liveness import (
@@ -209,11 +209,11 @@ def _build_serving_runtime(
         liveness_sweeper=liveness_sweeper,
         # Resolved ONCE at boot: the stamp that makes a stale serving process visible.
         build=resolve_serving_build(),
-        # The deterministic supervisor sweep runs on its own decoupled cadence
+        # The deterministic agent-notifier sweep runs on its own decoupled cadence
         # (default ~10s, settings-controlled), zero tokens, pure code. "The model is never the
         # polling layer": every predicate reads TerminalCatalog/OperatorInboxStore/
         # ExpectationRowStore/the nudge log DIRECTLY, never the projection.
-        heartbeat_store=SupervisorHeartbeatStore(observer_root(config)),
+        heartbeat_store=AgentNotifierHeartbeatStore(observer_root(config)),
         interval=cadence.interval,
     )
     # The serving daemon samples labeled provider
@@ -310,6 +310,9 @@ __all__ = [
     "_ResolvedLiveInputs",
     "_ServingRuntime",
     "_action_response",
+    "_agent_notifier_context",
+    "_agent_notifier_heartbeat_payload",
+    "_agent_notifier_loop",
     "_apply_terminal_input",
     "_attach_leaf_response",
     "_attach_terminal_session",
@@ -347,9 +350,6 @@ __all__ = [
     "_serving_lifespan",
     "_socket_to_terminal",
     "_state_response",
-    "_supervisor_context",
-    "_supervisor_heartbeat_payload",
-    "_supervisor_loop",
     "_task_document_response",
     "_terminal_entry_payload",
     "_terminal_image_response",

@@ -80,7 +80,7 @@ class TestLifecycleBlockNoAsk:
 class TestOperatorInboxPostsAndDispatch:
     def test_redelivery_floor_and_disabled_delivery(self) -> None:
         assert operator_inbox_posts._redelivery_floor_seconds(None) is None
-        settings = SimpleNamespace(supervisor=SimpleNamespace(redeliver_rate_limit_seconds=7))
+        settings = SimpleNamespace(agent_notifier=SimpleNamespace(redeliver_rate_limit_seconds=7))
         config = SimpleNamespace(coordination_root=Path("/tmp"))
         with mock.patch.object(
             operator_inbox_posts, "load_agentic_settings", return_value=settings

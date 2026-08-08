@@ -50,6 +50,10 @@ from _durability_measurement import (
     VacuousRunError,
     require_stress_measurement,
 )
+from agents_remember.controlplane.agent_notifier_signals import (
+    AgentNotifierSignalCooldownStore,
+    AgentNotifierSignalRecord,
+)
 from agents_remember.controlplane.attention_dismissals import (
     AttentionDismissalRecord,
     AttentionDismissalStore,
@@ -67,10 +71,6 @@ from agents_remember.controlplane.orchestration_nudges import (
 )
 from agents_remember.controlplane.records import GateRecord, GateState
 from agents_remember.controlplane.store import GateStore
-from agents_remember.controlplane.supervisor_signals import (
-    SupervisorSignalCooldownStore,
-    SupervisorSignalRecord,
-)
 from agents_remember.providers.degradation import (
     DEGRADATION_EVENT_SCHEMA,
     ProviderDegradationStore,
@@ -382,17 +382,17 @@ class NudgeAdapter(StoreAdapter):
         return store.read()
 
 
-class SupervisorSignalAdapter(StoreAdapter):
-    name = "supervisor_signal"
+class AgentNotifierSignalAdapter(StoreAdapter):
+    name = "agent_notifier_signal"
     log_name = "supervisor-signals.jsonl"
     torn_line_policy = "tolerant"
     RETAIN_SECONDS = 300.0
 
     def open(self, root: Path) -> Any:
-        return SupervisorSignalCooldownStore(root)
+        return AgentNotifierSignalCooldownStore(root)
 
-    def _record(self, record_id: str, stamp: str) -> SupervisorSignalRecord:
-        return SupervisorSignalRecord(
+    def _record(self, record_id: str, stamp: str) -> AgentNotifierSignalRecord:
+        return AgentNotifierSignalRecord(
             id=record_id,
             ts=stamp,
             state="sent",
@@ -551,7 +551,7 @@ CONTROLPLANE_ADAPTERS: tuple[type[StoreAdapter], ...] = (
     AttentionAdapter,
     OperatorInboxAdapter,
     NudgeAdapter,
-    SupervisorSignalAdapter,
+    AgentNotifierSignalAdapter,
 )
 PROVIDER_ADAPTERS: tuple[type[StoreAdapter], ...] = (
     ProviderMetricsAdapter,
@@ -1091,6 +1091,68 @@ def run_case(scenario: str, case: str, root: Path, **overrides: Any) -> dict[str
 BASE_COMMIT = "e52edaf5b655f495580efd93306afdf922b19b51"
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
+# 260713-TES-L1: the harness driver imports the CURRENT module names, but the pinned base
+# commit predates the supervisor -> agent-notifier rename. The rename is behavior-neutral
+# (identifiers and module paths only), so renaming the extracted archive the same way keeps
+# the base-commit defect byte-for-byte in every store under test while letting the current
+# driver import and drive it.
+_RENAMED_SOURCE_FILES = {
+    "agents_remember/controlplane/supervisor_signals.py": (
+        "agents_remember/controlplane/agent_notifier_signals.py"
+    ),
+    "agents_remember/serving/supervisor.py": "agents_remember/serving/agent_notifier.py",
+    "agents_remember/serving/supervisor_heartbeat.py": (
+        "agents_remember/serving/agent_notifier_heartbeat.py"
+    ),
+    "agents_remember/serving/supervisor_models.py": (
+        "agents_remember/serving/agent_notifier_models.py"
+    ),
+    "agents_remember/serving/_supervisor_actions.py": (
+        "agents_remember/serving/_agent_notifier_actions.py"
+    ),
+    "agents_remember/serving/_supervisor_evaluation.py": (
+        "agents_remember/serving/_agent_notifier_evaluation.py"
+    ),
+}
+
+
+def _apply_rename_shim_to_base_tree(source_root: Path) -> None:
+    """Rename the supervisor modules/identifiers in an extracted BASE-COMMIT tree."""
+    for old_rel, new_rel in _RENAMED_SOURCE_FILES.items():
+        old_path = source_root / old_rel
+        if not old_path.is_file():
+            continue
+        new_path = source_root / new_rel
+        new_path.parent.mkdir(parents=True, exist_ok=True)
+        old_path.rename(new_path)
+    for path in source_root.rglob("*.py"):
+        text = path.read_text(encoding="utf-8")
+        if "supervisor" not in text.lower():
+            continue
+        updated = (
+            text.replace("_supervisor_actions", "_agent_notifier_actions")
+            .replace("_supervisor_evaluation", "_agent_notifier_evaluation")
+            .replace("_supervisor_context", "_agent_notifier_context")
+            .replace("_supervisor_loop", "_agent_notifier_loop")
+            .replace("_supervisor_heartbeat_payload", "_agent_notifier_heartbeat_payload")
+            .replace("_supervisor_banner", "_agent_notifier_banner")
+            .replace("run_supervisor_sweep", "run_agent_notifier_sweep")
+            .replace("supervisor_staleness_banner", "agent_notifier_staleness_banner")
+            .replace("supervisor_heartbeat", "agent_notifier_heartbeat")
+            .replace("supervisor_signals", "agent_notifier_signals")
+            .replace("supervisor_models", "agent_notifier_models")
+            .replace("supervisor_signal", "agent_notifier_signal")
+            .replace("KNOWN_SUPERVISOR_FIELDS", "KNOWN_AGENT_NOTIFIER_FIELDS")
+            .replace("DEFAULT_SUPERVISOR_", "DEFAULT_AGENT_NOTIFIER_")
+            .replace("_parse_supervisor", "_parse_agent_notifier")
+            .replace("_require_supervisor_floor_seconds", "_require_agent_notifier_floor_seconds")
+            .replace("Supervisor", "AgentNotifier")
+            .replace("SUPERVISOR_SIGNAL_OWNERSHIP", "AGENT_NOTIFIER_SIGNAL_OWNERSHIP")
+            .replace("SUPERVISOR_SIGNAL_SCHEMA", "AGENT_NOTIFIER_SIGNAL_SCHEMA")
+        )
+        if updated != text:
+            path.write_text(updated, encoding="utf-8")
+
 
 def extract_base_commit_tree(destination: Path, *, repo: Path = REPO_ROOT) -> Path:
     """``git archive`` the base commit's ``agents_remember`` into ``destination``.
@@ -1116,7 +1178,9 @@ def extract_base_commit_tree(destination: Path, *, repo: Path = REPO_ROOT) -> Pa
         check=True,
     )
     archive.unlink()
-    return destination / "mcp" / "src"
+    source_root = destination / "mcp" / "src"
+    _apply_rename_shim_to_base_tree(source_root)
+    return source_root
 
 
 # 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/_store_durability.py:1085).

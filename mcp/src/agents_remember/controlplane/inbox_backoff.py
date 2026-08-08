@@ -2,7 +2,7 @@
 
 R3 (260707-HFX2-L1): a pending/unacked row (``state == "pending"``; ``deliveryState`` never
 reaches a terminal state on its own -- only ``consume`` does) carries a ``nextAttemptAt``
-backoff schedule. L2 (the supervisor sweep, a sibling leaf) is the actual driver that walks
+backoff schedule. L2 (the agent-notifier sweep, a sibling leaf) is the actual driver that walks
 ``OperatorInboxStore.list_redeliverable`` on a cadence and calls ``deliver_inbox_entry`` again;
 this module is the pure math + the per-target rate-limit gate the sweep consults before
 re-attempting, mirroring the ``OrchestrationNudgeStore.record`` rate-limit pattern

@@ -12,20 +12,20 @@ from datetime import UTC, datetime
 from typing import Any
 
 from agents_remember.application.next_step import next_step_for
-from agents_remember.kernel.agentic_settings import DEFAULT_SUPERVISOR_STALE_CUTOFF_SECONDS
+from agents_remember.kernel.agentic_settings import DEFAULT_AGENT_NOTIFIER_STALE_CUTOFF_SECONDS
 from agents_remember.models.base import ResponseEnvelope
 from agents_remember.models.tool_response import finalize_tool_response
 from agents_remember.observer.ambient import AmbientLifecycle, ambient
-from agents_remember.serving.supervisor_heartbeat import supervisor_staleness_banner
+from agents_remember.serving.agent_notifier_heartbeat import agent_notifier_staleness_banner
 
 
-def _supervisor_banner(amb: AmbientLifecycle) -> str | None:
-    """Return the stale-supervisor banner without blocking a tool response."""
+def _agent_notifier_banner(amb: AmbientLifecycle) -> str | None:
+    """Return the stale-agent-notifier banner without blocking a tool response."""
     try:
-        return supervisor_staleness_banner(
+        return agent_notifier_staleness_banner(
             amb.root,
             now=datetime.now(UTC),
-            stale_cutoff_seconds=DEFAULT_SUPERVISOR_STALE_CUTOFF_SECONDS,
+            stale_cutoff_seconds=DEFAULT_AGENT_NOTIFIER_STALE_CUTOFF_SECONDS,
         )
     except Exception:
         return None
@@ -41,7 +41,9 @@ def _attach_lifecycle_tail(
     ):
         amb.resume_from_await()
     response.nextStep = next_step_for(amb, tool_name)
-    response.supervisorBanner = _supervisor_banner(amb)
+    banner = _agent_notifier_banner(amb)
+    response.agentNotifierBanner = banner
+    response.supervisorBanner = banner
 
 
 def complete_tool_response(tool_name: str, payload: dict[str, Any]) -> dict[str, Any]:

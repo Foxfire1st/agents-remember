@@ -4,7 +4,7 @@ THE DECLARED LOCK EXCEPTION of leaf 260731-EFA-L5. Every other control-plane log
 single compaction owner so that no two processes read-modify-write it. This one cannot be:
 both long-lived processes must physically REMOVE rows, not merely append them. The MCP deletes
 the inbox rows tied to a cancelled gate at the moment it cancels the gate
-(``application/gate_tools.py`` -> :meth:`delete_by_gate`), and the dashboard's supervisor sweep must
+(``application/gate_tools.py`` -> :meth:`delete_by_gate`), and the dashboard's agent-notifier sweep must
 resolve and compact under one continuously held lock (:meth:`reconcile_and_compact`) so that a
 consume which won the lock stays terminal. Moving either to the other process means moving the
 decision it implements. So the advisory lock this store already had is kept, and it is the only

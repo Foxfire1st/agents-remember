@@ -7,7 +7,7 @@ probe the process together, and a row read against the *wrong* host is a silent 
 
 :class:`HostedSessionRuntime` makes that pairing a single value, so the two can only travel bound to
 each other. It mirrors the composition-time bundles the serving layer already uses
-(``ConversationRuntime``, ``SupervisorContext``): the authorities are frozen together once and then
+(``ConversationRuntime``, ``AgentNotifierContext``): the authorities are frozen together once and then
 passed as one thing.
 """
 

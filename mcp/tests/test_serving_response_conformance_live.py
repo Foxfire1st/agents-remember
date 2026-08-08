@@ -346,7 +346,7 @@ class StreamContractTests(unittest.IsolatedAsyncioTestCase):
         settings = agentic_settings_path(self.tmp)
         settings.parent.mkdir(parents=True, exist_ok=True)
         settings.write_text(
-            json.dumps({"orchestration": {"supervisor": {"enabled": False}}}), encoding="utf-8"
+            json.dumps({"orchestration": {"agentNotifier": {"enabled": False}}}), encoding="utf-8"
         )
         self.config = _config(self.tmp)
         self.app = create_app(self.config, cadence=ProjectionCadence(interval=100))

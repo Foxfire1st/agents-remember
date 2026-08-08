@@ -11,7 +11,7 @@ DURABILITY: THE EVENT LOG IS ON ``ar-durable-store/1.0`` (260731-EFA-L5)
 ``degradation-events.jsonl`` had the same shape as the six ``controlplane/`` logs: an unlocked
 ``open("a")`` append beside a ``compact_events`` whole-file read-filter-rewrite, and a
 ``.compact.tmp`` name with no pid in it. It has ONE writer today, and that is exactly the
-argument this leaf refused for attention-dismissals and supervisor-signals — and refused for a
+argument this leaf refused for attention-dismissals and agent-notifier-signals — and refused for a
 measured reason, since the draft that left those two unlocked on the strength of single-writer
 measured 31.45% loss. Measured here before this change, appenders against one compactor lost
 events this store had reported written.
@@ -97,7 +97,7 @@ PROVIDER_DEGRADATION_OWNERSHIP = StoreOwnership(
         "-- with writers=('dashboard',) it is the one store in this pair where the check can "
         "actually fire, and it fires the moment the MCP process starts evaluating degradation. "
         "It is NOT why the log is safe: the lock is unconditional for the same reason it is on "
-        "attention-dismissals and supervisor-signals, which are also single-writer and whose "
+        "attention-dismissals and agent-notifier-signals, which are also single-writer and whose "
         "unlocked draft measured 31.45% loss."
     ),
 )

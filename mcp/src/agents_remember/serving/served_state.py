@@ -1,9 +1,10 @@
 """The served state contract: the projection as the wire actually carries it.
 
 ``/api/state`` and the SSE ``snapshot`` event do not serve a :class:`WorkspaceProjection`.
-They serve that projection PLUS a two-key serve-time tail -- ``servingBuild`` (which
-process is answering) and ``supervisorHeartbeat`` (how long ago the supervisor last
-ticked, as of THIS response). Both keys were injected into the dumped projection dict with
+They serve that projection PLUS a serve-time tail -- ``servingBuild`` (which
+process is answering) and ``agentNotifierHeartbeat`` (how long ago the agent-notifier last
+ticked, as of THIS response; the legacy ``supervisorHeartbeat`` key rides the same payload
+during the rename window). The tail keys were injected into the dumped projection dict with
 nothing declaring them, so the emitted object was outside its own model: feeding a served
 body back through ``WorkspaceProjection`` (``extra="forbid"``) raised on the extra keys.
 
@@ -12,7 +13,7 @@ body back through ``WorkspaceProjection`` (``extra="forbid"``) raised on the ext
 wrong would be:
 
 1. **Layer.** ``Projector`` builds the projection at TICK time; both keys are serving-layer
-   facts computed at SERVE time (``_supervisor_heartbeat_payload`` is explicitly "the tick
+   facts computed at SERVE time (``_agent_notifier_heartbeat_payload`` is explicitly "the tick
    age at RESPONSE time"). A tick-time model cannot hold a per-response value.
 2. **The dump memo.** ``app._ProjectionBodyCache`` memoizes the ~1.3 MB projection dump per
    published instance *because* the volatile tail is injected onto a shallow copy
@@ -40,8 +41,8 @@ from __future__ import annotations
 from typing import Any
 
 from agents_remember.observer.projection import WorkspaceProjection
+from agents_remember.serving.agent_notifier_heartbeat import AgentNotifierHeartbeatPayload
 from agents_remember.serving.build_info import ServingBuild, ServingBuildPayload
-from agents_remember.serving.supervisor_heartbeat import SupervisorHeartbeatPayload
 
 
 class ServedWorkspaceProjection(WorkspaceProjection):
@@ -52,27 +53,38 @@ class ServedWorkspaceProjection(WorkspaceProjection):
     """
 
     servingBuild: ServingBuildPayload | None = None
-    supervisorHeartbeat: SupervisorHeartbeatPayload | None = None
+    agentNotifierHeartbeat: AgentNotifierHeartbeatPayload | None = None
+    # Legacy alias emitted alongside the current key during the rename window; the consumer
+    # fallback in ``dashboard/src/data/store.ts`` reads either. Removed with the window.
+    supervisorHeartbeat: AgentNotifierHeartbeatPayload | None = None
 
 
-SERVED_TAIL_FIELDS: tuple[str, ...] = ("servingBuild", "supervisorHeartbeat")
+SERVED_TAIL_FIELDS: tuple[str, ...] = (
+    "servingBuild",
+    "agentNotifierHeartbeat",
+    "supervisorHeartbeat",
+)
 """The keys :func:`served_state_tail` may add -- exactly this model's extension over the
 projection it wraps. Named so the assembly and the contract cannot drift apart silently."""
 
 
 def served_state_tail(
-    *, build: ServingBuild | None, heartbeat: SupervisorHeartbeatPayload | None
+    *, build: ServingBuild | None, heartbeat: AgentNotifierHeartbeatPayload | None
 ) -> dict[str, Any]:
     """The serve-time tail, JSON-ready, to be merged onto a copy of the memoized dump.
 
     Each half serializes under its own rule, which is why this is two dumps and not one:
     a missing build fact is OMITTED (absence is not a fabricated claim), while a missing
-    heartbeat fact is an explicit NULL (a supervisor that never ticked is a reported state,
-    not a missing key). ``exclude_none`` is recursive, so one shared dump could not do both.
+    heartbeat fact is an explicit NULL (an agent-notifier that never ticked is a reported
+    state, not a missing key). The heartbeat payload is emitted under BOTH the current
+    ``agentNotifierHeartbeat`` key and the legacy ``supervisorHeartbeat`` alias for the
+    rename window. ``exclude_none`` is recursive, so one shared dump could not do both.
     """
     tail: dict[str, Any] = {}
     if build is not None:
         tail["servingBuild"] = build.payload().model_dump(mode="json", exclude_none=True)
     if heartbeat is not None:
-        tail["supervisorHeartbeat"] = heartbeat.model_dump(mode="json")
+        payload = heartbeat.model_dump(mode="json")
+        tail["agentNotifierHeartbeat"] = payload
+        tail["supervisorHeartbeat"] = payload
     return tail

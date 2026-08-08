@@ -44,7 +44,7 @@ from agents_remember.observer.reducer import (
     project_lifecycle,
 )
 from agents_remember.observer.store import EventStore
-from agents_remember.serving.supervisor_heartbeat import SupervisorHeartbeatStore
+from agents_remember.serving.agent_notifier_heartbeat import AgentNotifierHeartbeatStore
 from agents_remember.worktrees.worktree_contract import WorktreeContract, write_contract
 
 _GUIDANCE = {
@@ -316,16 +316,20 @@ class EdgeAndChokePointTests(unittest.TestCase):
         without_hint = {key: value for key, value in payload.items() if key != "nextStep"}
         self.assertLess(count_response_tokens(without_hint), payload["tokens"])
 
-    def test_advertised_token_count_covers_the_supervisor_banner(self) -> None:
-        # Same invariant for the other choke-point field. A supervisor that ticked and then
+    def test_advertised_token_count_covers_the_agent_notifier_banner(self) -> None:
+        # Same invariant for the other choke-point field. An agent-notifier that ticked and then
         # went quiet past the cutoff puts a banner on EVERY response; it is on the wire, so
         # it is in the count, and (leaf-4) it is a declared field of the envelope.
-        SupervisorHeartbeatStore(self.root).tick(now=datetime.now(UTC) - timedelta(hours=6))
+        AgentNotifierHeartbeatStore(self.root).tick(now=datetime.now(UTC) - timedelta(hours=6))
         self.amb.start()
         payload = ping_payload()
-        self.assertIn("supervisor stale", payload["supervisorBanner"])
+        self.assertIn("agent-notifier stale", payload["agentNotifierBanner"])
+        # The legacy alias rides the same value during the rename window.
+        self.assertEqual(payload["supervisorBanner"], payload["agentNotifierBanner"])
         self.assertEqual(payload["tokens"], count_response_tokens(payload))
-        without_banner = {k: v for k, v in payload.items() if k != "supervisorBanner"}
+        without_banner = {
+            k: v for k, v in payload.items() if k not in {"agentNotifierBanner", "supervisorBanner"}
+        }
         self.assertLess(count_response_tokens(without_banner), payload["tokens"])
         # The whole point of the leaf: the response validates against its own model.
         PingResponse.model_validate(payload)
@@ -336,10 +340,11 @@ class EdgeAndChokePointTests(unittest.TestCase):
         # one, not a half-built envelope.
         self.amb.start()
         with mock.patch(
-            "agents_remember.application.tool_response.supervisor_staleness_banner",
+            "agents_remember.application.tool_response.agent_notifier_staleness_banner",
             side_effect=OSError("heartbeat unreadable"),
         ):
             payload = ping_payload()
+        self.assertNotIn("agentNotifierBanner", payload)
         self.assertNotIn("supervisorBanner", payload)
         PingResponse.model_validate(payload)
         self.assertEqual(payload["tokens"], count_response_tokens(payload))

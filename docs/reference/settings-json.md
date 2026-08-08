@@ -396,24 +396,31 @@ Detection still gates dispatch; an id known nowhere refuses loudly pointing
 at the manual. Schema, semantics, and a worked add-`hermes` example:
 `docs/reference/harnesses.md`.
 
-### orchestration.supervisor
+### orchestration.agentNotifier
 
-`orchestration.supervisor` configures the deterministic supervisor sweep. All
-fields are optional; an empty block keeps the safe defaults.
+`orchestration.agentNotifier` configures the deterministic agent-notifier sweep (the
+supervisor renamed to its relay role). All fields are optional; an empty block keeps
+the safe defaults.
+
+> Compatibility window: the loader still accepts the legacy `orchestration.supervisor`
+> key as an explicit alias, with a loud deprecation warning, until the window closes
+> (the rename is carried by the agent-notifier reform master). A file setting both keys
+> is refused. Remove `orchestration.supervisor` from any live settings file and use
+> `orchestration.agentNotifier`.
 
 | Field | Default | Notes |
 | --- | --- | --- |
 | `enabled` | `true` | Turns the sweep loop on or off. |
 | `intervalSeconds` | `10` | Sweep cadence. |
-| `staleCutoffSeconds` | `60` | Age after which the supervisor heartbeat is reported stale. |
+| `staleCutoffSeconds` | `60` | Age after which the agent-notifier heartbeat is reported stale. |
 | `redeliverRateLimitSeconds` | store default (`900`) | Per-row floor between redelivery attempts. Values below `900` seconds are refused. |
 | `signalCooldownSeconds` | `900` | Minimum interval between repeated pane/seat-liveness owner signals for the same target, leaf, finding kind, and detail. Values below `900` seconds are refused. |
 | `redeliverBudget` | `1` | Maximum inbox redelivery attempts per sweep. Harness-log confirmation is synchronous and bounded per input, so backlogs drain across sweeps without multiplying that wait inside one heartbeat tick. |
 | `escalationBudget` | `250` | Maximum escalation-rung emissions per sweep. A large backlog of rung-due rows is spread across sweeps (rung readiness is level-triggered, so deferred rows re-fire on the next sweep) rather than doing O(backlog) synchronous owner pastes + `escalation.rung` event appends in one sweep. Positive integer. |
 
-`enabled: false` is the emergency kill switch for the supervisor loop. During the
+`enabled: false` is the emergency kill switch for the agent-notifier loop. During the
 2026-07-09 redelivery-cadence incident the global coordinator settings disabled
-the supervisor until the 15-minute redelivery and signal-cooldown fix landed and
+the agent-notifier until the 15-minute redelivery and signal-cooldown fix landed and
 passed smoke.
 
 ### orchestration.qualityGate

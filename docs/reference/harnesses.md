@@ -82,7 +82,7 @@ post-cutover validation:
 
 1. Restart the `agents-remember dashboard` daemon (including an auto-started
    daemon supervised by an MCP server) so its FastAPI routes, projector,
-   supervisor, inbox store, catalog models, and packaged dashboard assets come
+   agent-notifier, inbox store, catalog models, and packaged dashboard assets come
    from the new build.
 2. Restart or reload every connected harness/client process that owns an
    Agents Remember MCP server subprocess. Each Claude, Codex, Pi, or other MCP

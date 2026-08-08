@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import cast
 from unittest import mock
 
+from agents_remember.controlplane.agent_notifier_signals import AgentNotifierSignalCooldownStore
 from agents_remember.controlplane.expectation_rows import (
     Expectation,
     ExpectationRowStore,
@@ -19,24 +20,24 @@ from agents_remember.controlplane.operator_inbox_records import (
     InboxMessage,
     InboxPoster,
     InboxRouting,
+    InboxSubject,
     create_operator_inbox_entry,
 )
 from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
 from agents_remember.controlplane.orchestration_nudges import OrchestrationNudgeStore
-from agents_remember.controlplane.supervisor_signals import SupervisorSignalCooldownStore
 from agents_remember.observer.store import EventStore
-from agents_remember.serving import _supervisor_actions as supervisor_actions_module
-from agents_remember.serving.supervisor import (
-    SupervisorContext,
-    SupervisorFinding,
+from agents_remember.serving import _agent_notifier_actions as agent_notifier_actions_module
+from agents_remember.serving.agent_notifier import (
+    AgentNotifierContext,
+    AgentNotifierFinding,
     act_on_finding,
     evaluate_seat_liveness_findings,
-    run_supervisor_sweep,
+    run_agent_notifier_sweep,
 )
-from agents_remember.serving.supervisor_heartbeat import SupervisorHeartbeatStore
+from agents_remember.serving.agent_notifier_heartbeat import AgentNotifierHeartbeatStore
 from agents_remember.serving.terminal import TerminalHost
 from agents_remember.serving.terminal_catalog import TerminalCatalog
-from test_supervisor import NOW, _entry, _fake_paster, _FakeHost
+from test_agent_notifier import NOW, _entry, _fake_paster, _FakeHost
 
 
 class SeatLivenessPredicateTests(unittest.TestCase):
@@ -149,11 +150,11 @@ class SweepIntegrationTests(unittest.TestCase):
         self.inbox_store = OperatorInboxStore(observer_root)
         self.expectation_store = ExpectationRowStore(observer_root)
         self.nudge_store = OrchestrationNudgeStore(observer_root)
-        self.signal_cooldown_store = SupervisorSignalCooldownStore(observer_root)
+        self.signal_cooldown_store = AgentNotifierSignalCooldownStore(observer_root)
         self.event_store = EventStore(observer_root)
-        self.heartbeat_store = SupervisorHeartbeatStore(observer_root)
+        self.heartbeat_store = AgentNotifierHeartbeatStore(observer_root)
 
-    def _ctx(self, **overrides: object) -> SupervisorContext:
+    def _ctx(self, **overrides: object) -> AgentNotifierContext:
         base: dict[str, object] = dict(
             catalog=self.catalog,
             host=cast(TerminalHost, _FakeHost()),
@@ -168,7 +169,7 @@ class SweepIntegrationTests(unittest.TestCase):
             stale_seat_seconds=60.0,
         )
         base.update(overrides)
-        return SupervisorContext(**base)  # type: ignore[arg-type]
+        return AgentNotifierContext(**base)  # type: ignore[arg-type]
 
     def test_seeded_drift_produces_expected_actions_and_ticks_heartbeat(self) -> None:
         # A worker seat spawned by a manager seat -- the routing edge signal-emit/auto-nudge walk.
@@ -218,7 +219,7 @@ class SweepIntegrationTests(unittest.TestCase):
         )
 
         ctx = self._ctx()
-        result = run_supervisor_sweep(ctx, now=NOW)
+        result = run_agent_notifier_sweep(ctx, now=NOW)
 
         finding_kinds = sorted(f.kind for f in result.findings)
         self.assertIn("inbox-redeliverable", finding_kinds)
@@ -249,15 +250,15 @@ class SweepIntegrationTests(unittest.TestCase):
         self.assertEqual(heartbeat.sweepCount, 1)
         self.assertEqual(heartbeat.lastTickAt, NOW.isoformat())
 
-        # R4e: every action is logged as an orchestration.supervisor.* (or reused nudge) event.
+        # R4e: every action is logged as an orchestration.agent-notifier.* (or reused nudge) event.
         events = self.event_store.read(None)
         kinds = {event.kind for event in events}
         self.assertTrue(
             kinds
             & {
-                "orchestration.supervisor.redeliver",
+                "orchestration.agent-notifier.redeliver",
                 "orchestration.nudge",
-                "orchestration.supervisor.signal",
+                "orchestration.agent-notifier.signal",
             }
         )
 
@@ -283,14 +284,14 @@ class SweepIntegrationTests(unittest.TestCase):
             sla_seconds=60.0,
         )
         ctx = self._ctx()
-        result = run_supervisor_sweep(ctx, now=NOW)
+        result = run_agent_notifier_sweep(ctx, now=NOW)
         outcomes = {a.action: a.outcome for a in result.actions}
         self.assertEqual(outcomes.get("auto-nudge"), "skipped")
         self.assertEqual(outcomes.get("signal-emit"), "skipped")
 
     def test_zero_drift_sweep_still_ticks_the_heartbeat(self) -> None:
         ctx = self._ctx()
-        result = run_supervisor_sweep(ctx, now=NOW)
+        result = run_agent_notifier_sweep(ctx, now=NOW)
         self.assertEqual(result.findings, ())
         self.assertEqual(result.actions, ())
         heartbeat = self.heartbeat_store.read()
@@ -299,8 +300,8 @@ class SweepIntegrationTests(unittest.TestCase):
 
     def test_second_sweep_bumps_sweep_count(self) -> None:
         ctx = self._ctx()
-        run_supervisor_sweep(ctx, now=NOW)
-        run_supervisor_sweep(ctx, now=NOW + timedelta(seconds=10))
+        run_agent_notifier_sweep(ctx, now=NOW)
+        run_agent_notifier_sweep(ctx, now=NOW + timedelta(seconds=10))
         heartbeat = self.heartbeat_store.read()
         assert heartbeat is not None
         self.assertEqual(heartbeat.sweepCount, 2)
@@ -315,7 +316,7 @@ class SweepIntegrationTests(unittest.TestCase):
         ).model_copy(update={"rung": 3})
         self.inbox_store.append(entry)
 
-        result = run_supervisor_sweep(self._ctx(), now=NOW)
+        result = run_agent_notifier_sweep(self._ctx(), now=NOW)
 
         actions = {action.action: action for action in result.actions}
         self.assertIn("ladder-resolve", actions)
@@ -323,7 +324,7 @@ class SweepIntegrationTests(unittest.TestCase):
         resolved = self.inbox_store.current()["dead-row"]
         self.assertEqual(resolved.state, "ladder-resolved")
         event_kinds = {event.kind for event in self.event_store.read(None)}
-        self.assertIn("orchestration.supervisor.ladder-resolved", event_kinds)
+        self.assertIn("orchestration.agent-notifier.ladder-resolved", event_kinds)
 
     def test_redeliver_budget_limits_attempts_and_heartbeat_reports_backlog(self) -> None:
         for index in range(3):
@@ -339,7 +340,7 @@ class SweepIntegrationTests(unittest.TestCase):
                 )
             )
 
-        result = run_supervisor_sweep(self._ctx(redeliver_budget=1), now=NOW)
+        result = run_agent_notifier_sweep(self._ctx(redeliver_budget=1), now=NOW)
 
         redeliver_actions = [action for action in result.actions if action.action == "redeliver"]
         self.assertEqual(len(redeliver_actions), 1)
@@ -363,9 +364,9 @@ class SweepIntegrationTests(unittest.TestCase):
             )
         )
 
-        with mock.patch.object(supervisor_actions_module, "deliver_inbox_entry") as delivered:
+        with mock.patch.object(agent_notifier_actions_module, "deliver_inbox_entry") as delivered:
             delivered.return_value = self.inbox_store.current()["row-1"]
-            run_supervisor_sweep(self._ctx(), now=NOW)
+            run_agent_notifier_sweep(self._ctx(), now=NOW)
 
         self.assertNotIn("submit_timeout", delivered.call_args.kwargs)
         self.assertEqual(self._ctx().redeliver_budget, 1)
@@ -383,8 +384,8 @@ class SweepIntegrationTests(unittest.TestCase):
         )
         ctx = self._ctx(signal_cooldown_seconds=900.0)
 
-        run_supervisor_sweep(ctx, now=NOW)
-        run_supervisor_sweep(ctx, now=NOW + timedelta(seconds=10))
+        run_agent_notifier_sweep(ctx, now=NOW)
+        run_agent_notifier_sweep(ctx, now=NOW + timedelta(seconds=10))
 
         signal_rows = [
             entry
@@ -395,7 +396,7 @@ class SweepIntegrationTests(unittest.TestCase):
         self.assertEqual(signal_rows[0].agentId, "manager-1")
         first = signal_rows[0]
 
-        run_supervisor_sweep(ctx, now=NOW + timedelta(seconds=901))
+        run_agent_notifier_sweep(ctx, now=NOW + timedelta(seconds=901))
         signal_rows = [
             entry
             for entry in self.inbox_store.current().values()
@@ -423,7 +424,7 @@ class SweepIntegrationTests(unittest.TestCase):
         for session_id, role in (("worker-1", "worker"), ("reviewer-1", "reviewer")):
             act_on_finding(
                 self._ctx(),
-                SupervisorFinding(
+                AgentNotifierFinding(
                     kind="seat-liveness",
                     detail="turn-state-stale",
                     session_id=session_id,
@@ -441,6 +442,91 @@ class SweepIntegrationTests(unittest.TestCase):
         self.assertEqual(len(signal_rows), 2)
         self.assertEqual({entry.seatRole for entry in signal_rows}, {"worker", "reviewer"})
 
+    def test_legacy_ask_pending_row_is_renewed_by_new_format_refire(self) -> None:
+        # F1 regression (260713-TES-L1): a pre-window pending seat-liveness row carries the
+        # legacy ask prefix and createdBy. A new-format re-fire must RENEW that one row (same
+        # id, bumped ts), never append a second pending row -- the ruled one-row-per-root-cause
+        # invariant survives the rename window.
+        leaf_key = "repo-a/260707_master/leaf-3"
+        self.catalog.upsert(replace(_entry("manager-1"), spawn_role="manager"))
+        self.catalog.upsert(
+            replace(
+                _entry("worker-1", leaf_key=leaf_key).with_turn_state(
+                    "stale", changed_at=(NOW - timedelta(minutes=5)).isoformat()
+                ),
+                spawn_role="worker",
+                spawned_by_session="manager-1",
+            )
+        )
+        self.inbox_store.append(
+            create_operator_inbox_entry(
+                InboxMessage(
+                    ask="Supervisor observed seat-liveness: turn-state-stale",
+                    response="session worker-1 (leaf repo-a/260707_master/leaf-3)",
+                    message_kind="escalation",
+                    subject=InboxSubject(
+                        leaf_key=leaf_key, seat_role="worker", agent_id="worker-1"
+                    ),
+                ),
+                entry_id="legacy-row",
+                now=(NOW - timedelta(minutes=1)).isoformat(),
+                routing=InboxRouting(
+                    address=InboxAddress(
+                        lifecycle_id=None, agent_id="manager-1", recipient_role="manager"
+                    )
+                ),
+                poster=InboxPoster(created_by="supervisor", created_via="cli"),
+            )
+        )
+
+        run_agent_notifier_sweep(self._ctx(signal_cooldown_seconds=900.0), now=NOW)
+
+        rows = [e for e in self.inbox_store.current().values() if e.messageKind == "escalation"]
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0].id, "legacy-row")
+        self.assertGreater(rows[0].ts, (NOW - timedelta(minutes=1)).isoformat())
+
+    def test_new_format_ask_row_is_renewed_by_new_format_refire(self) -> None:
+        # Same seam, current-format path: prefix normalization must not break new/new coalescing.
+        leaf_key = "repo-a/260707_master/leaf-3"
+        self.catalog.upsert(replace(_entry("manager-1"), spawn_role="manager"))
+        self.catalog.upsert(
+            replace(
+                _entry("worker-1", leaf_key=leaf_key).with_turn_state(
+                    "stale", changed_at=(NOW - timedelta(minutes=5)).isoformat()
+                ),
+                spawn_role="worker",
+                spawned_by_session="manager-1",
+            )
+        )
+        self.inbox_store.append(
+            create_operator_inbox_entry(
+                InboxMessage(
+                    ask="Agent notifier observed seat-liveness: turn-state-stale",
+                    response="session worker-1 (leaf repo-a/260707_master/leaf-3)",
+                    message_kind="escalation",
+                    subject=InboxSubject(
+                        leaf_key=leaf_key, seat_role="worker", agent_id="worker-1"
+                    ),
+                ),
+                entry_id="current-row",
+                now=(NOW - timedelta(minutes=1)).isoformat(),
+                routing=InboxRouting(
+                    address=InboxAddress(
+                        lifecycle_id=None, agent_id="manager-1", recipient_role="manager"
+                    )
+                ),
+                poster=InboxPoster(created_by="agent-notifier", created_via="cli"),
+            )
+        )
+
+        run_agent_notifier_sweep(self._ctx(signal_cooldown_seconds=900.0), now=NOW)
+
+        rows = [e for e in self.inbox_store.current().values() if e.messageKind == "escalation"]
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0].id, "current-row")
+        self.assertGreater(rows[0].ts, (NOW - timedelta(minutes=1)).isoformat())
+
     def test_diagnostic_pane_signal_is_not_actionable(self) -> None:
         self.catalog.upsert(replace(_entry("manager-1"), spawn_role="manager"))
         self.catalog.upsert(
@@ -450,7 +536,7 @@ class SweepIntegrationTests(unittest.TestCase):
                 spawned_by_session="manager-1",
             )
         )
-        finding = SupervisorFinding(
+        finding = AgentNotifierFinding(
             kind="pane-signal",
             detail="mid-turn",
             session_id="worker-1",
@@ -484,7 +570,7 @@ class SweepIntegrationTests(unittest.TestCase):
             self.inbox_store.append(entry)
 
         restarted_ctx = self._ctx()
-        result = run_supervisor_sweep(restarted_ctx, now=NOW + timedelta(seconds=60))
+        result = run_agent_notifier_sweep(restarted_ctx, now=NOW + timedelta(seconds=60))
 
         self.assertEqual([a for a in result.actions if a.action == "redeliver"], [])
         self.assertEqual(result.redeliverable_inbox_count, 0)
@@ -503,7 +589,7 @@ class SweepIntegrationTests(unittest.TestCase):
         ctx = self._ctx(signal_cooldown_seconds=900.0)
 
         for tick in range(180):
-            run_supervisor_sweep(ctx, now=NOW + timedelta(seconds=tick))
+            run_agent_notifier_sweep(ctx, now=NOW + timedelta(seconds=tick))
 
         signal_rows = [
             entry

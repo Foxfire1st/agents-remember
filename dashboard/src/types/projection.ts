@@ -51,6 +51,16 @@ export interface ActionAvailability {
   nextSafeAction?: string;
 }
 
+export interface AgentNotifierHeartbeat {
+  ageSeconds: number | null;
+  lastSweepDurationSeconds: number | null;
+  lastTickAt: string | null;
+  pendingInboxCount: number;
+  redeliverableInboxCount: number;
+  stale: boolean;
+  staleCutoffSeconds: number;
+}
+
 export interface AgentPickupNode {
   ageSeconds?: number;
   agentId?: string;
@@ -409,16 +419,6 @@ export interface SidecarStaleNode {
   repository: string;
 }
 
-export interface SupervisorHeartbeat {
-  ageSeconds: number | null;
-  lastSweepDurationSeconds: number | null;
-  lastTickAt: string | null;
-  pendingInboxCount: number;
-  redeliverableInboxCount: number;
-  stale: boolean;
-  staleCutoffSeconds: number;
-}
-
 export interface TaskCodeExampleNode {
   distinctChange: string;
   id: string;
@@ -523,6 +523,7 @@ export interface WorkspaceProjection {
   metrics: Metrics;
   providers: ProviderNode[];
   version: number;
+  agentNotifierHeartbeat?: AgentNotifierHeartbeat;
   servingBuild?: ServingBuild;
-  supervisorHeartbeat?: SupervisorHeartbeat;
+  supervisorHeartbeat?: AgentNotifierHeartbeat;
 }

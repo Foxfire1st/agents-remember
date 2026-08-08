@@ -204,7 +204,7 @@ def _parse_row(text: str) -> dict[str, Any] | None:
       re-derives the whole state machine from a ROLLING WINDOW OF LIVE SAMPLES every 30s and
       consumes nothing; a row lost to a torn line costs at most one tick's accuracy and the next
       sample corrects it. That is the same self-correcting category the contract already accepts
-      for attention-dismissals and supervisor cooldowns, and it is a structural property of the
+      for attention-dismissals and agent-notifier cooldowns, and it is a structural property of the
       consumer, not the "it is only telemetry" hand-wave.
     * NOTHING THIS RETURNS IS EVER WRITTEN BACK. :meth:`ProviderMetricsStore.compact` reclaims
       from a RAW byte tail (:func:`_tail_lines`) and drops rows by age alone, so a row this

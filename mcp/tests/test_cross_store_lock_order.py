@@ -2,7 +2,7 @@
 
 The 2026-08-05 production incident: the liveness sweep held the TerminalCatalog batch lock
 (RLock + flock, held for the whole sweep) across the HostedInteractionSynchronizer's
-operator-inbox/gate lock acquisitions, while the supervisor sweep held the operator-inbox lock
+operator-inbox/gate lock acquisitions, while the agent-notifier sweep held the operator-inbox lock
 across a catalog read — opposite nestings, one ABBA cycle. The uvicorn event loop then queued
 on the same catalog RLock through an ``async def`` route doing a synchronous catalog read, and
 the serving daemon stopped accepting entirely (41-deep listen backlog, killed twice in one day).
@@ -11,7 +11,7 @@ These tests pin the repair:
 
 1. the synchronizer's store I/O never executes while the calling thread holds the catalog batch;
 2. the two real sweep paths — ``TerminalCatalogLivenessSweeper.refresh`` against
-   ``run_supervisor_sweep`` — run concurrently against shared stores without wedging (this
+   ``run_agent_notifier_sweep`` — run concurrently against shared stores without wedging (this
    test deadlocks by timeout against the pre-fix tree, on daemon threads so the suite survives
    the proof);
 3. control/active route resolution and the terminal-image handler run their blocking catalog
@@ -39,21 +39,21 @@ MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
 from agents_remember.controlplane import durable_store
+from agents_remember.controlplane.agent_notifier_signals import AgentNotifierSignalCooldownStore
 from agents_remember.controlplane.expectation_rows import ExpectationRowStore
 from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
 from agents_remember.controlplane.orchestration_nudges import OrchestrationNudgeStore
-from agents_remember.controlplane.supervisor_signals import SupervisorSignalCooldownStore
 from agents_remember.errors import HarnessControlError
 from agents_remember.observer.store import EventStore
 from agents_remember.serving import _app_terminal_routes as terminal_routes_module
 from agents_remember.serving import app as app_module
+from agents_remember.serving.agent_notifier import AgentNotifierContext, run_agent_notifier_sweep
+from agents_remember.serving.agent_notifier_heartbeat import AgentNotifierHeartbeatStore
 from agents_remember.serving.conversation.active.service import ActiveConversationService
 from agents_remember.serving.conversation.control.service import ConversationControlService
 from agents_remember.serving.conversation.runtime import ConversationRuntime
 from agents_remember.serving.harness_control_models import AdapterSnapshot, ControlIdentity
 from agents_remember.serving.hosted_interactions import HostedInteractionSynchronizer
-from agents_remember.serving.supervisor import SupervisorContext, run_supervisor_sweep
-from agents_remember.serving.supervisor_heartbeat import SupervisorHeartbeatStore
 from agents_remember.serving.terminal import TerminalHost
 from agents_remember.serving.terminal_catalog import TerminalCatalog, TerminalCatalogEntry
 from agents_remember.serving.terminal_liveness import (
@@ -143,17 +143,17 @@ class _SharedStores:
         self.inbox_store = OperatorInboxStore(self.observer_root)
         self.synchronizer = HostedInteractionSynchronizer(self.observer_root)
 
-    def supervisor_ctx(self) -> SupervisorContext:
-        return SupervisorContext(
+    def agent_notifier_ctx(self) -> AgentNotifierContext:
+        return AgentNotifierContext(
             catalog=self.catalog,
             host=cast(TerminalHost, _FakeHost()),
             paster=mock.Mock(),
             inbox_store=self.inbox_store,
             expectation_store=ExpectationRowStore(self.observer_root),
             nudge_store=OrchestrationNudgeStore(self.observer_root),
-            signal_cooldown_store=SupervisorSignalCooldownStore(self.observer_root),
+            signal_cooldown_store=AgentNotifierSignalCooldownStore(self.observer_root),
             event_store=EventStore(self.observer_root),
-            heartbeat_store=SupervisorHeartbeatStore(self.observer_root),
+            heartbeat_store=AgentNotifierHeartbeatStore(self.observer_root),
             coordination_root=self.coordination_root,
             stale_seat_seconds=60.0,
         )
@@ -372,10 +372,10 @@ class CrossStoreLockOrderTests(unittest.TestCase):
             sweeper._observe_catalog_entry(entry, checked_at=NOW)
         self.assertEqual(observe_calls, ["sess-3"])
 
-    def test_liveness_sweep_and_supervisor_sweep_do_not_abba_deadlock(self) -> None:
+    def test_liveness_sweep_and_agent_notifier_sweep_do_not_abba_deadlock(self) -> None:
         """The two real sweep paths run concurrently against shared stores and both finish.
 
-        Rendezvous wrappers park the liveness sweep INSIDE its catalog batch and the supervisor
+        Rendezvous wrappers park the liveness sweep INSIDE its catalog batch and the agent-notifier
         INSIDE its inbox transaction, then release both at once — the exact overlap of the
         2026-08-05 incident. Against the pre-fix tree each side then blocks on the other's lock
         and the joins below time out. Daemon threads keep that proof from hanging the suite.
@@ -413,11 +413,13 @@ class CrossStoreLockOrderTests(unittest.TestCase):
             except BaseException as exc:  # surfaced as a test failure below
                 failures["sweeper"] = exc
 
-        def run_supervisor() -> None:
+        def run_agent_notifier() -> None:
             try:
-                results["supervisor"] = run_supervisor_sweep(self.stores.supervisor_ctx(), now=NOW)
+                results["agent-notifier"] = run_agent_notifier_sweep(
+                    self.stores.agent_notifier_ctx(), now=NOW
+                )
             except BaseException as exc:  # surfaced as a test failure below
-                failures["supervisor"] = exc
+                failures["agent-notifier"] = exc
 
         with (
             mock.patch.object(TerminalCatalog, "batch", parked_batch),
@@ -427,34 +429,34 @@ class CrossStoreLockOrderTests(unittest.TestCase):
                 _no_transcript,
             ),
         ):
-            # The supervisor goes first: its hoisted catalog read must land before the sweeper
+            # The agent-notifier goes first: its hoisted catalog read must land before the sweeper
             # parks inside the batch, exactly as the post-fix sweep orders it.
-            supervisor_thread = threading.Thread(
-                target=run_supervisor, name="supervisor-sweep", daemon=True
+            agent_notifier_thread = threading.Thread(
+                target=run_agent_notifier, name="agent-notifier-sweep", daemon=True
             )
-            supervisor_thread.start()
+            agent_notifier_thread.start()
             self.assertTrue(
                 arrived["inbox"].wait(timeout=RENDEZVOUS_TIMEOUT_SECONDS),
-                "supervisor never reached the inbox transaction",
+                "agent-notifier never reached the inbox transaction",
             )
             sweeper_thread = threading.Thread(
                 target=run_sweeper, name="liveness-sweep", daemon=True
             )
             sweeper_thread.start()
             sweeper_thread.join(timeout=DEADLOCK_DETECTION_SECONDS)
-            supervisor_thread.join(timeout=DEADLOCK_DETECTION_SECONDS)
+            agent_notifier_thread.join(timeout=DEADLOCK_DETECTION_SECONDS)
 
         self.assertFalse(failures, failures)
         self.assertNotEqual(observe_calls, [])  # the sync actually ran — no vacuous pass
         self.assertIn(
             "sweeper",
             results,
-            "liveness sweep wedged against the supervisor's inbox lock — the ABBA is live",
+            "liveness sweep wedged against the agent-notifier's inbox lock — the ABBA is live",
         )
         self.assertIn(
-            "supervisor",
+            "agent-notifier",
             results,
-            "supervisor sweep wedged against the catalog batch lock — the ABBA is live",
+            "agent-notifier sweep wedged against the catalog batch lock — the ABBA is live",
         )
 
     def test_control_resolve_entry_runs_off_the_event_loop(self) -> None:

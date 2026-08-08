@@ -18,7 +18,7 @@ from agents_remember.controlplane.seats import SeatDirectory, SeatRow
 def find_orphaned_workers(catalog: SeatDirectory, *, manager_agent_id: str) -> list[SeatRow]:
     """Every still-``running`` worker seat spawned by ``manager_agent_id`` (pure catalog read).
 
-    Called once a manager seat is confirmed dead/respawned (``serving/supervisor.py``'s dead-
+    Called once a manager seat is confirmed dead/respawned (``serving/agent_notifier.py``'s dead-
     upstream / respawn actions); the caller is responsible for the actual signal post + event.
     """
     return [

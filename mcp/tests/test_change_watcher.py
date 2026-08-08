@@ -118,7 +118,7 @@ class InputEventFilterTests(unittest.TestCase):
             "/c/logs/observer/latest-metrics.json",
             "/c/logs/observer/latest-state.json.01HZX.tmp",
             "/c/tasks/agents-remember/task.json.01HZX.tmp",
-            # workspace/ non-inputs: raw river + cursor/locks, supervisor heartbeat.
+            # workspace/ non-inputs: raw river + cursor/locks, agent-notifier heartbeat.
             "/c/logs/observer/workspace/events.jsonl",
             "/c/logs/observer/workspace/events.cursor.json",
             "/c/logs/observer/workspace/events.lock",

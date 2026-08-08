@@ -352,7 +352,7 @@ function InspectorPanel({ view }: { view: View }) {
               session={focused}
               cockpit={focused ? perSession[focused.id] : undefined}
               pickups={data.pickups}
-              heartbeat={data.supervisorHeartbeat}
+              heartbeat={data.agentNotifierHeartbeat}
               visible={view.propsActive && !state.inspectorCollapsed}
             />
           </div>

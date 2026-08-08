@@ -3,7 +3,7 @@ import { useId, useState, type KeyboardEvent } from "react";
 import { css } from "../../../styled-system/css";
 import type { OpenSession } from "../../data/sessions";
 import type { PerSessionCockpit } from "../../data/sessionCockpitStore";
-import type { AgentPickupNode, SupervisorHeartbeat } from "../../types/projection";
+import type { AgentPickupNode, AgentNotifierHeartbeat } from "../../types/projection";
 import { BusPane } from "./BusPane";
 import { CapabilitiesPane } from "./CapabilitiesPane";
 import { EvidencePane } from "./EvidencePane";
@@ -119,7 +119,7 @@ export function SeatInspector({
   session: OpenSession | undefined;
   cockpit: PerSessionCockpit | undefined;
   pickups?: readonly AgentPickupNode[];
-  heartbeat?: SupervisorHeartbeat | null;
+  heartbeat?: AgentNotifierHeartbeat | null;
   visible?: boolean;
 }) {
   const [active, setActive] = useState<InspectorTab>("evidence");

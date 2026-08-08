@@ -11,10 +11,10 @@ from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
 from agents_remember.controlplane.orchestration_artifacts import turn_report_artifact
 from agents_remember.controlplane.orchestration_nudges import missing_artifact
 from agents_remember.controlplane.signal_routing import is_seat_dead, leaf_chain_has_progress
+from agents_remember.serving.agent_notifier_models import AgentNotifierContext, AgentNotifierFinding
+from agents_remember.serving.agent_notifier_models import SweepState as _SweepState
 from agents_remember.serving.dispatch_brief import dispatch_stays_on_exact_session
 from agents_remember.serving.pane_signals import classify_pane_signal
-from agents_remember.serving.supervisor_models import SupervisorContext, SupervisorFinding
-from agents_remember.serving.supervisor_models import SweepState as _SweepState
 from agents_remember.serving.terminal_catalog import TerminalCatalog, TerminalCatalogEntry
 from agents_remember.serving.terminal_paste import capture_pane as default_capture_pane
 
@@ -27,14 +27,23 @@ through ``operator_inbox_transitions.mark_escalated``. What walks it from there 
 that transition stamps."""
 
 _INACTIVE_EXPECTATION_KINDS = frozenset({"briefed-by", "verdict-by", "ack-by"})
+
+# 260713-TES-L1 rename window: the seat-liveness ask prefix changed from "Supervisor observed
+# seat-liveness:" to "Agent notifier observed seat-liveness:". Both prefixes name the SAME
+# relay-authored signal identity; legacy pending rows carry the old prefix and must still be
+# found by new-format re-fires (coalescing/renewal) and by chain-progress suppression.
+SEAT_LIVENESS_ASK_PREFIXES = (
+    "Agent notifier observed seat-liveness:",
+    "Supervisor observed seat-liveness:",
+)
 # --- R2: predicates ----------------------------------------------------------------------------
 
 
 def evaluate_pane_findings(
     catalog: TerminalCatalog, *, pane_capturer=default_capture_pane
-) -> list[SupervisorFinding]:
+) -> list[AgentNotifierFinding]:
     """Diagnostic-only pane classifications; the production sweep does not act on them."""
-    findings: list[SupervisorFinding] = []
+    findings: list[AgentNotifierFinding] = []
     for entry in catalog.list():
         if entry.kind != "harness" or entry.status != "running":
             continue
@@ -42,7 +51,7 @@ def evaluate_pane_findings(
         if classification.signal == "normal":
             continue
         findings.append(
-            SupervisorFinding(
+            AgentNotifierFinding(
                 kind="pane-signal",
                 detail=classification.signal,
                 session_id=entry.id,
@@ -58,11 +67,11 @@ def evaluate_expectation_findings(
     *,
     now: datetime,
     catalog: TerminalCatalog | None = None,
-) -> list[SupervisorFinding]:
+) -> list[AgentNotifierFinding]:
     """R2b: expectation-deadline expiry (briefed-by / verdict-by / ack-by; turn-report-by is
     handled by :func:`evaluate_turn_report_findings` instead, since it needs a second check)."""
     return [
-        SupervisorFinding(
+        AgentNotifierFinding(
             kind="expectation-overdue",
             detail=row.kind,
             session_id=row.subjectAgentId,
@@ -88,21 +97,21 @@ def turn_report_path_for_leaf_key(coordination_root: Path, leaf_key: str) -> Pat
     return Path(artifact.path)
 
 
-# 260731-EFA-L7 R10: verbatim L7 split (L7-OQ1 Option A serving scope); unchanged edge branch, out of this leaf's behavior scope (mcp/src/agents_remember/serving/_supervisor_evaluation.py:91).
+# 260731-EFA-L7 R10: verbatim L7 split (L7-OQ1 Option A serving scope); unchanged edge branch, out of this leaf's behavior scope (mcp/src/agents_remember/serving/_agent_notifier_evaluation.py:91).
 def evaluate_turn_report_findings(  # pragma: no cover
     store: ExpectationRowStore,
     *,
     coordination_root: Path,
     now: datetime,
     catalog: TerminalCatalog | None = None,
-) -> list[SupervisorFinding]:
+) -> list[AgentNotifierFinding]:
     """R2c: turn-report staleness -- ``missing_artifact()`` finally gets its caller.
 
     An overdue ``turn-report-by`` row alone is R2b's job; this predicate additionally confirms the
     artifact itself is missing/empty before firing, so a worker who wrote the report but hasn't
     yet had the row consumed does not trip a stale-report action.
     """
-    findings: list[SupervisorFinding] = []
+    findings: list[AgentNotifierFinding] = []
     for row in store.overdue(now=now):
         if row.kind != "turn-report-by" or row.leafKey is None:
             continue
@@ -111,7 +120,7 @@ def evaluate_turn_report_findings(  # pragma: no cover
         path = turn_report_path_for_leaf_key(coordination_root, row.leafKey)
         if path is not None and missing_artifact(path):
             findings.append(
-                SupervisorFinding(
+                AgentNotifierFinding(
                     kind="turn-report-stale",
                     detail=str(path),
                     session_id=row.subjectAgentId,
@@ -123,7 +132,7 @@ def evaluate_turn_report_findings(  # pragma: no cover
     return findings
 
 
-# 260731-EFA-L7 R10: verbatim L7 split (L7-OQ1 Option A serving scope); unchanged edge branch, out of this leaf's behavior scope (mcp/src/agents_remember/serving/_supervisor_evaluation.py:125).
+# 260731-EFA-L7 R10: verbatim L7 split (L7-OQ1 Option A serving scope); unchanged edge branch, out of this leaf's behavior scope (mcp/src/agents_remember/serving/_agent_notifier_evaluation.py:125).
 def evaluate_inbox_findings(  # pragma: no cover
     store: OperatorInboxStore,
     *,
@@ -131,7 +140,7 @@ def evaluate_inbox_findings(  # pragma: no cover
     rate_limit_seconds: float | None = None,
     current: dict[str, OperatorInboxEntry] | None = None,
     limit: int | None = None,
-) -> list[SupervisorFinding]:
+) -> list[AgentNotifierFinding]:
     """R2d: unacked-row redelivery due (past backoff, clear of the per-target rate limit)."""
     entries = store.list_redeliverable(
         now=now,
@@ -141,7 +150,7 @@ def evaluate_inbox_findings(  # pragma: no cover
     if limit is not None:
         entries = entries[:limit]
     return [
-        SupervisorFinding(
+        AgentNotifierFinding(
             kind="inbox-redeliverable",
             detail=entry.messageKind,
             session_id=entry.agentId,
@@ -168,11 +177,11 @@ def evaluate_ladder_terminal_findings(
     catalog: TerminalCatalog,
     *,
     current: dict[str, OperatorInboxEntry] | None = None,
-) -> list[SupervisorFinding]:
+) -> list[AgentNotifierFinding]:
     """R1: ladder-complete rows for dead seats become terminal, distinct from ack."""
     entries = store.current() if current is None else current
     return [
-        SupervisorFinding(
+        AgentNotifierFinding(
             kind="inbox-ladder-terminal",
             detail="ladder-resolved",
             session_id=entry.agentId,
@@ -185,7 +194,7 @@ def evaluate_ladder_terminal_findings(
     ]
 
 
-# 260731-EFA-L7 R10: verbatim L7 split (L7-OQ1 Option A serving scope); unchanged edge branch, out of this leaf's behavior scope (mcp/src/agents_remember/serving/_supervisor_evaluation.py:186).
+# 260731-EFA-L7 R10: verbatim L7 split (L7-OQ1 Option A serving scope); unchanged edge branch, out of this leaf's behavior scope (mcp/src/agents_remember/serving/_agent_notifier_evaluation.py:186).
 def _age_seconds(iso_text: str, now: datetime) -> float | None:  # pragma: no cover
     try:
         return (now - datetime.fromisoformat(iso_text)).total_seconds()
@@ -209,10 +218,11 @@ def _expectation_chain_progressed(catalog: TerminalCatalog | None, row: Expectat
 def _inactivity_signal_chain_progressed(
     catalog: TerminalCatalog, entry: OperatorInboxEntry
 ) -> bool:
-    """Whether real leaf-chain progress invalidated one supervisor inactivity root cause."""
+    """Whether real leaf-chain progress invalidated one agent-notifier inactivity root cause."""
     return bool(
-        entry.createdBy == "supervisor"
-        and entry.ask.startswith("Supervisor observed seat-liveness:")
+        # Both values are the same relay-authored inactivity row until the rename window closes.
+        entry.createdBy in {"supervisor", "agent-notifier"}
+        and entry.ask.startswith(SEAT_LIVENESS_ASK_PREFIXES)
         and entry.leafKey is not None
         and leaf_chain_has_progress(
             catalog,
@@ -223,7 +233,20 @@ def _inactivity_signal_chain_progressed(
     )
 
 
-# 260731-EFA-L7 R10: verbatim L7 split (L7-OQ1 Option A serving scope); unchanged edge branch, out of this leaf's behavior scope (mcp/src/agents_remember/serving/_supervisor_evaluation.py:223).
+def _seat_liveness_ask_identity(ask: str) -> str:
+    """Canonical identity of a seat-liveness ask across the rename window.
+
+    Both ask prefixes are one signal identity: a new-format re-fire must renew (and a
+    chain-progress check must match) a pre-window pending row that carries the legacy prefix.
+    Asks that do not start with either prefix are returned unchanged and still compare exactly.
+    """
+    for prefix in SEAT_LIVENESS_ASK_PREFIXES:
+        if ask.startswith(prefix):
+            return f"seat-liveness:{ask[len(prefix) :]}"
+    return ask
+
+
+# 260731-EFA-L7 R10: verbatim L7 split (L7-OQ1 Option A serving scope); unchanged edge branch, out of this leaf's behavior scope (mcp/src/agents_remember/serving/_agent_notifier_evaluation.py:223).
 def _stale_turn_state_due(  # pragma: no cover
     catalog: TerminalCatalog,
     entry: TerminalCatalogEntry,
@@ -248,7 +271,7 @@ def _stale_turn_state_due(  # pragma: no cover
 
 def evaluate_seat_liveness_findings(
     catalog: TerminalCatalog, *, now: datetime, stale_seconds: float
-) -> list[SupervisorFinding]:
+) -> list[AgentNotifierFinding]:
     """R2e: the L5 hysteresis + L8 turn-state join, with graceful degradation.
 
     A row already classified by the L8 turn-state prober (``turn_state``/``turn_state_changed_at``
@@ -257,7 +280,7 @@ def evaluate_seat_liveness_findings(
     failure on an otherwise-``running`` row is itself the signal -- ``has_session`` (the row is
     still ``running``) plus catalog status (failures counted but not yet exit-marked).
     """
-    findings: list[SupervisorFinding] = []
+    findings: list[AgentNotifierFinding] = []
     for entry in catalog.list():
         if entry.kind != "harness" or entry.status != "running":
             continue
@@ -265,7 +288,7 @@ def evaluate_seat_liveness_findings(
             if not _stale_turn_state_due(catalog, entry, now=now, stale_seconds=stale_seconds):
                 continue
             findings.append(
-                SupervisorFinding(
+                AgentNotifierFinding(
                     kind="seat-liveness",
                     detail="turn-state-stale",
                     session_id=entry.id,
@@ -275,7 +298,7 @@ def evaluate_seat_liveness_findings(
             )
         elif entry.liveness_failures > 0:
             findings.append(
-                SupervisorFinding(
+                AgentNotifierFinding(
                     kind="seat-liveness",
                     detail="liveness-degraded",
                     session_id=entry.id,
@@ -317,9 +340,9 @@ def evaluate_escalation_findings(
     schedule: EscalationSchedule,
     catalog: TerminalCatalog | None = None,
     current: dict[str, OperatorInboxEntry] | None = None,
-) -> list[SupervisorFinding]:
+) -> list[AgentNotifierFinding]:
     """R2: every pending, unacked row due for its NEXT ladder rung (escalation_ladder.rung_due)."""
-    findings: list[SupervisorFinding] = []
+    findings: list[AgentNotifierFinding] = []
     entries = store.current() if current is None else current
     for entry in entries.values():
         if catalog is not None and _inactivity_signal_chain_progressed(catalog, entry):
@@ -330,7 +353,7 @@ def evaluate_escalation_findings(
         dwell = schedule.rung_seconds.get(entry.rung, DEFAULT_ESCALATION_RUNG_SECONDS)
         if rung_due(entry, now=now, sla_seconds=sla, rung_seconds=dwell):
             findings.append(
-                SupervisorFinding(
+                AgentNotifierFinding(
                     kind="escalation-due",
                     detail=entry.messageKind,
                     session_id=entry.agentId,
@@ -342,11 +365,11 @@ def evaluate_escalation_findings(
     return findings
 
 
-def evaluate_dead_upstream_findings(catalog: TerminalCatalog) -> list[SupervisorFinding]:
+def evaluate_dead_upstream_findings(catalog: TerminalCatalog) -> list[AgentNotifierFinding]:
     """R4 (P-6 made mechanical): every live spawned worker/manager seat whose OWN direct owner is
     dead, per catalog spawn provenance. Doctrine: the seat never absorbs its dead owner's role --
     it continues its own brief; this predicate is what tells its grandparent to look."""
-    findings: list[SupervisorFinding] = []
+    findings: list[AgentNotifierFinding] = []
     for entry in catalog.list():
         if entry.kind != "harness" or entry.status != "running":
             continue
@@ -357,7 +380,7 @@ def evaluate_dead_upstream_findings(catalog: TerminalCatalog) -> list[Supervisor
         if not is_seat_dead(catalog, entry.spawned_by_session):
             continue
         findings.append(
-            SupervisorFinding(
+            AgentNotifierFinding(
                 kind="dead-upstream",
                 detail="owner-dead",
                 session_id=entry.id,
@@ -368,12 +391,12 @@ def evaluate_dead_upstream_findings(catalog: TerminalCatalog) -> list[Supervisor
     return findings
 
 
-# 260731-EFA-L7 R10: verbatim L7 split (L7-OQ1 Option A serving scope); unchanged edge branch, out of this leaf's behavior scope (mcp/src/agents_remember/serving/_supervisor_evaluation.py:367).
+# 260731-EFA-L7 R10: verbatim L7 split (L7-OQ1 Option A serving scope); unchanged edge branch, out of this leaf's behavior scope (mcp/src/agents_remember/serving/_agent_notifier_evaluation.py:367).
 def evaluate_predicates(  # pragma: no cover
-    ctx: SupervisorContext, *, now: datetime, sweep: _SweepState | None = None
-) -> list[SupervisorFinding]:
+    ctx: AgentNotifierContext, *, now: datetime, sweep: _SweepState | None = None
+) -> list[AgentNotifierFinding]:
     """R2: run every predicate over its store, directly (R3) -- the sweep's full finding set."""
-    findings: list[SupervisorFinding] = []
+    findings: list[AgentNotifierFinding] = []
     inbox_current = sweep.inbox_current if sweep is not None else None
     findings += evaluate_expectation_findings(ctx.expectation_store, now=now, catalog=ctx.catalog)
     findings += evaluate_turn_report_findings(
@@ -401,7 +424,7 @@ def evaluate_predicates(  # pragma: no cover
             and not _inactivity_signal_chain_progressed(ctx.catalog, entry)
         ][: sweep.redeliver_budget]
         findings += [
-            SupervisorFinding(
+            AgentNotifierFinding(
                 kind="inbox-redeliverable",
                 detail=entry.messageKind,
                 session_id=entry.agentId,

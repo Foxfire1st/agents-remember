@@ -163,7 +163,7 @@ on, and custody is its duty:
    contract; one digest per absence is this seat's.
 3. **Brief on return.** When the developer comes back, open with the digest: what completed, what
    died, what needs a ruling — ranked, in plain terms, before anything else is discussed.
-4. **Never expect to be nudged twice.** The supervisor will not repeat-nudge this seat past
+4. **Never expect to be nudged twice.** The agent-notifier will not repeat-nudge this seat past
    custody, because this seat cannot make the developer react faster. If an item needs the
    developer and the developer is absent, it waits in the digest — that is the designed state,
    not a failure.

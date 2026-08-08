@@ -952,20 +952,20 @@ function ServingBuildStamp() {
   );
 }
 
-// "The last turtle is the developer's glance" -- the supervisor sweep's own
-// heartbeat tick, red past its staleness cutoff. `lastTickAt: null` means the supervisor has
-// never ticked in this workspace (dashboard/supervisor autostart is opt-in), which is NOT the
+// "The last turtle is the developer's glance" -- the agent-notifier sweep's own
+// heartbeat tick, red past its staleness cutoff. `lastTickAt: null` means the agent-notifier has
+// never ticked in this workspace (dashboard/agent-notifier autostart is opt-in), which is NOT the
 // same as stale -- the badge renders nothing for it rather than a false alarm.
-function SupervisorHeartbeatBadge() {
-  const heartbeat = useDashboard((s) => s.supervisorHeartbeat);
+function AgentNotifierHeartbeatBadge() {
+  const heartbeat = useDashboard((s) => s.agentNotifierHeartbeat);
   if (!heartbeat || heartbeat.lastTickAt === null) return null;
   // Humanize the age (no raw `9512.1m`): the two most-significant units read as human time.
   const age =
     heartbeat.ageSeconds !== null ? humanizeDuration(heartbeat.ageSeconds * 1000) : null;
   const label =
     age !== null
-      ? `supervisor ${heartbeat.stale ? "stale" : "ok"} ${age}`
-      : "supervisor stale";
+      ? `agent-notifier ${heartbeat.stale ? "stale" : "ok"} ${age}`
+      : "agent-notifier stale";
   const duration =
     heartbeat.lastSweepDurationSeconds !== null
       ? `${heartbeat.lastSweepDurationSeconds.toFixed(2)}s`
@@ -973,11 +973,11 @@ function SupervisorHeartbeatBadge() {
   const backlog = `${heartbeat.redeliverableInboxCount}/${heartbeat.pendingInboxCount}`;
   return (
     <span
-      // A long-stale supervisor degrades to a QUIET-distinct amber (warn), never the pulsing
+      // A long-stale agent-notifier degrades to a QUIET-distinct amber (warn), never the pulsing
       // cried-wolf red: six-day staleness is expected for an idle workspace, not a fault to alarm on.
       className={heartbeat.stale ? caution({ sev: "warn" }) : dim}
-      data-testid="supervisor-heartbeat"
-      title={`Supervisor last ticked ${heartbeat.lastTickAt}; staleness cutoff ${heartbeat.staleCutoffSeconds}s; redeliverable/pending inbox ${backlog}; last sweep ${duration}`}
+      data-testid="agent-notifier-heartbeat"
+      title={`Agent notifier last ticked ${heartbeat.lastTickAt}; staleness cutoff ${heartbeat.staleCutoffSeconds}s; redeliverable/pending inbox ${backlog}; last sweep ${duration}`}
     >
       {heartbeat.stale ? "⚠ " : ""}
       {label} · inbox {backlog} · sweep {duration}
@@ -1028,7 +1028,7 @@ const TopBar = memo(function TopBar() {
           </span>
         ) : null}
         {generatedAt ? <span className={dim}>@ {generatedAt.slice(11, 19)}</span> : null}
-        <SupervisorHeartbeatBadge />
+        <AgentNotifierHeartbeatBadge />
         <ServingBuildStamp />
         <ConnBadge conn={conn} />
         <EffectsToggle />

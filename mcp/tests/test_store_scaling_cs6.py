@@ -3,13 +3,13 @@
 Store-level proofs for the inline fixes this leaf landed, all inheriting the shared
 ``tests/_scaling`` helper so every future durable store gets the same floor:
 
-- ``SupervisorSignalCooldownStore``: read-once snapshot (``records=``), a named
+- ``AgentNotifierSignalCooldownStore``: read-once snapshot (``records=``), a named
   ``compact()`` that bounds the on-disk log, and corrupt-line-tolerant ``read()``.
 - ``ProviderMetricsStore.read_recent``: bounded tail read, not O(filesize).
 - ``EventStore.read``: one torn line no longer poisons the projection tick.
 
-The supervisor-sweep *integration* proofs (read-count per sweep, escalation budget,
-expectation snapshot) live in ``test_supervisor.py`` next to the sweep harness.
+The agent-notifier-sweep *integration* proofs (read-count per sweep, escalation budget,
+expectation snapshot) live in ``test_agent_notifier.py`` next to the sweep harness.
 """
 
 from __future__ import annotations
@@ -25,6 +25,12 @@ MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
 from _scaling import assert_bounded_count, assert_bounded_file_size, assert_subquadratic
+from agents_remember.controlplane.agent_notifier_signals import (
+    AgentNotifierSignalCooldownStore,
+    AgentNotifierSignalKey,
+    AgentNotifierSignalRecord,
+    AgentNotifierSignalTarget,
+)
 from agents_remember.controlplane.attention_dismissals import (
     AttentionDismissalRecord,
     AttentionDismissalStore,
@@ -39,12 +45,6 @@ from agents_remember.controlplane.expectation_rows import (
 from agents_remember.controlplane.orchestration_nudges import (
     OrchestrationNudgeRecord,
     OrchestrationNudgeStore,
-)
-from agents_remember.controlplane.supervisor_signals import (
-    SupervisorSignalCooldownStore,
-    SupervisorSignalKey,
-    SupervisorSignalRecord,
-    SupervisorSignalTarget,
 )
 from agents_remember.observer.ambient import AmbientLifecycle, AmbientTiming
 from agents_remember.observer.event_retention import (
@@ -75,8 +75,8 @@ NOW = datetime(2026, 7, 9, 12, 0, 0, tzinfo=UTC)
 
 def _signal(
     record_id: str, *, ts: datetime, detail: str = "turn-state-stale"
-) -> SupervisorSignalRecord:
-    return SupervisorSignalRecord(
+) -> AgentNotifierSignalRecord:
+    return AgentNotifierSignalRecord(
         id=record_id,
         ts=ts.isoformat(),
         targetAgentId="manager-1",
@@ -89,18 +89,18 @@ def _signal(
     )
 
 
-class SupervisorSignalStoreScalingTests(unittest.TestCase):
+class AgentNotifierSignalStoreScalingTests(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
-        self.store = SupervisorSignalCooldownStore(Path(self.tmp.name))
+        self.store = AgentNotifierSignalCooldownStore(Path(self.tmp.name))
 
     def test_compact_reclaims_stale_records_and_bounds_file_at_two_sizes(self) -> None:
         """CS-6 D3: a named compactor drops records past the retention window and keeps the
         on-disk log bounded no matter how many stale rows accumulated (>= 2 sizes)."""
 
         def compacted_size(stale_count: int) -> float:
-            store = SupervisorSignalCooldownStore(Path(self.tmp.name) / f"n{stale_count}")
+            store = AgentNotifierSignalCooldownStore(Path(self.tmp.name) / f"n{stale_count}")
             for index in range(stale_count):
                 # Far outside the 900s window -> can never suppress a signal again.
                 store.append(_signal(f"old-{index}", ts=NOW - timedelta(days=30, seconds=index)))
@@ -123,15 +123,15 @@ class SupervisorSignalStoreScalingTests(unittest.TestCase):
         reads = {"count": 0}
         original = self.store.read
 
-        def counting_read() -> list[SupervisorSignalRecord]:
+        def counting_read() -> list[AgentNotifierSignalRecord]:
             reads["count"] += 1
             return original()
 
         self.store.read = counting_read  # type: ignore[method-assign]
         for _ in range(50):
             self.store.in_cooldown(
-                SupervisorSignalKey(
-                    target=SupervisorSignalTarget(
+                AgentNotifierSignalKey(
+                    target=AgentNotifierSignalTarget(
                         agent_id="manager-1",
                         lifecycle_id=None,
                         role="manager",
@@ -150,7 +150,7 @@ class SupervisorSignalStoreScalingTests(unittest.TestCase):
 
     def test_read_is_corrupt_line_tolerant(self) -> None:
         """CS-6 D3 robustness: a torn/legacy line is skipped, not raised -- one bad append cannot
-        freeze the supervisor sweep that folds this non-authoritative cooldown log."""
+        freeze the agent-notifier sweep that folds this non-authoritative cooldown log."""
         self.store.append(_signal("good-1", ts=NOW))
         path = self.store.log_path()
         with path.open("a", encoding="utf-8") as handle:
@@ -215,7 +215,7 @@ class ProviderMetricsTailReadTests(unittest.TestCase):
 
 class ExpectationRowSnapshotTests(unittest.TestCase):
     def test_mark_missed_with_snapshot_does_not_read_the_file(self) -> None:
-        """CS-6 D2 (Z4b): the supervisor threads its one-read snapshot into per-finding
+        """CS-6 D2 (Z4b): the agent-notifier threads its one-read snapshot into per-finding
         mark_missed, so K missed-transitions in a sweep cost 0 additional full-file folds."""
         with tempfile.TemporaryDirectory() as tmp:
             store = ExpectationRowStore(Path(tmp))
@@ -708,7 +708,7 @@ class EventRiverCompactionTests(unittest.TestCase):
                 Event(
                     id=f"old-{index:06d}",
                     ts=old_ts,
-                    kind="supervisor.redeliver",
+                    kind="agent-notifier.redeliver",
                     trust="observed",
                     actor="system",
                     data={"n": index},

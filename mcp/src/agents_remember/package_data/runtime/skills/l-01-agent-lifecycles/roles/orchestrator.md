@@ -255,9 +255,9 @@ name a gate, a shared-file one-writer dependency, or an explicit ruling. For eac
 `<repository>/<master>/<docId>`; together the environment role and qualified leaf claim the
 manager's `(leaf, role)` seat; the brief carries the load-bearing base fact: master branches off
 the **current super**, never off main);
-process and ack the pending signals the L2 supervisor sweep wakes you with — turn-report
+process and ack the pending signals the L2 agent-notifier sweep wakes you with — turn-report
 artifacts, nudges, escalation intake — before ending your turn; you never watch for these yourself
-(**watcher ban, uniform-mechanism ruling 2026-07-07:** the supervisor sweep is the one mechanism,
+(**watcher ban, uniform-mechanism ruling 2026-07-07:** the agent-notifier sweep is the one mechanism,
 no seat-local polling/monitoring, own duty inverts to processing what lands, not hunting for it).
 Then apply the **spirit test** — a model-judgment duty, not a watching one — to escalated
 deltas. A manager escalation may carry a **loop's full round history** (3-round cap hit, or a
@@ -451,7 +451,7 @@ task, fill small blanks, escalate real deltas).
 
 - **Inbox** (`operator_inbox_post` / `_poll` / `_consume`) — dispatch orders down, escalation
   intake up; durable + dashboard-visible.
-- **Stdin push** — the L2 supervisor's injector (HFX2-L3, the one standard wake mechanism) delivers
+- **Stdin push** — the L2 agent-notifier's injector (HFX2-L3, the one standard wake mechanism) delivers
   into hosted sessions (echo-confirmed paste) on the sweep's own tick; the inbox is the non-hosted
   equivalent, never a hand-rolled poll of this seat's own.
 - **Idle is safe** — silence is supervised (the L2 sweep + L4 escalation ladder), so

@@ -238,7 +238,7 @@ path = "supervision/"
 present = false
 arrives_in = "260731-EFA-L11"
 charter = """
-DECLARED, NOT YET PRESENT. The supervisor: sweep and heartbeat, seat liveness judgement,
+DECLARED, NOT YET PRESENT. The agent-notifier: sweep and heartbeat, seat liveness judgement,
 signal routing over spawn provenance, the escalation ladder, orphan policy, inbox delivery
 and reclamation, seat binding and events, pane signals and retirement (260731-EFA-L11 R4).
 It decides WHAT should happen and WHO the addressee is; the packages above it perform the

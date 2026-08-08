@@ -9,7 +9,7 @@ import type {
   Metrics,
   ProviderNode,
   ServingBuild,
-  SupervisorHeartbeat,
+  AgentNotifierHeartbeat,
   WorkspaceProjection,
 } from "../types/projection";
 import { stableEquals, stampServed } from "./servedAges";
@@ -33,9 +33,9 @@ export interface DashboardState {
   // The boot-time serving stamp (260703-L15): which build/process is answering. Rides the
   // snapshot; rendered muted in the top bar so a stale server is visible at a glance.
   servingBuild: ServingBuild | null;
-  // The supervisor sweep's self-liveness tick (260707-HFX2-L2 R5). Rendered red in the top bar
+  // The agent-notifier sweep's self-liveness tick (260707-HFX2-L2 R5). Rendered red in the top bar
   // past its staleness cutoff -- "the last turtle is the developer's glance".
-  supervisorHeartbeat: SupervisorHeartbeat | null;
+  agentNotifierHeartbeat: AgentNotifierHeartbeat | null;
   events: ObserverEvent[]; // raw observer feed retained client-side until reset/reload
   eventsHydrated: boolean;
   suppressedAttentionIds: Record<string, true>;
@@ -70,7 +70,10 @@ const reuse = <T>(current: T, incoming: T): T => (stableEquals(current, incoming
 // the field the heartbeat tick advances. A field-literal comparison is needed here so a
 // genuine tick advance (ageSeconds changing) is still recognized as a change, while a truly
 // idle heartbeat (including null/null) still produces zero store writes.
-const heartbeatEquals = (a: SupervisorHeartbeat | null, b: SupervisorHeartbeat | null): boolean => {
+const heartbeatEquals = (
+  a: AgentNotifierHeartbeat | null,
+  b: AgentNotifierHeartbeat | null,
+): boolean => {
   if (a === b) return true;
   if (a === null || b === null) return false;
   return (
@@ -267,7 +270,10 @@ function applySnapshotState(
   // 260707-HFX2-L2 R5: deliberately EXCLUDED from the `unchanged` gate below — it is a live tick
   // age injected at response time (mirroring the backend's own "volatile ages excluded" posture,
   // delta.py), so it is always applied even when nothing else in the snapshot changed.
-  const supervisorHeartbeat = projection.supervisorHeartbeat ?? null;
+  // The rename window serves the tick under both the current key and the legacy alias; accept
+  // either (current wins). Remove the legacy fallback with the window.
+  const agentNotifierHeartbeat =
+    projection.agentNotifierHeartbeat ?? projection.supervisorHeartbeat ?? null;
   const suppressedAttentionIds = pruneSuppressedAttention(
     state.suppressedAttentionIds,
     analytics,
@@ -287,8 +293,8 @@ function applySnapshotState(
   // tick still rides through below -- only when it actually changed, so a truly idle
   // reconnect (e.g. null/null) still performs zero store writes.
   if (unchanged && state.conn === "live") {
-    if (!heartbeatEquals(state.supervisorHeartbeat, supervisorHeartbeat)) {
-      set({ supervisorHeartbeat });
+    if (!heartbeatEquals(state.agentNotifierHeartbeat, agentNotifierHeartbeat)) {
+      set({ agentNotifierHeartbeat });
     }
     return;
   }
@@ -304,7 +310,7 @@ function applySnapshotState(
     metrics,
     analytics,
     servingBuild,
-    supervisorHeartbeat,
+    agentNotifierHeartbeat,
     suppressedAttentionIds,
   });
 }
@@ -320,7 +326,7 @@ export const dashboardStore = createStore<DashboardState>((set, get) => ({
   metrics: null,
   analytics: null,
   servingBuild: null,
-  supervisorHeartbeat: null,
+  agentNotifierHeartbeat: null,
   events: [],
   eventsHydrated: false,
   suppressedAttentionIds: {},
@@ -374,7 +380,7 @@ export const dashboardStore = createStore<DashboardState>((set, get) => ({
       metrics: null,
       analytics: null,
       servingBuild: null,
-      supervisorHeartbeat: null,
+      agentNotifierHeartbeat: null,
       events: [],
       eventsHydrated: false,
       suppressedAttentionIds: {},

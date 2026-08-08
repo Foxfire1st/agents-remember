@@ -90,7 +90,7 @@ class InboxRouting:
 @dataclass(frozen=True)
 class InboxSubject:
     """What a row is about, as opposed to who it goes to: the leaf and the seat under
-    discussion and the agent being reported on. The supervisor coalesces re-fires and the
+    discussion and the agent being reported on. The agent-notifier coalesces re-fires and the
     ladder readdresses on exactly this triple."""
 
     leaf_key: str | None = None
@@ -168,7 +168,7 @@ class OperatorInboxEntry(OperatorInboxCompatibleRecord):
     gateId: str | None = None
     messageKind: InboxMessageKind = "message"
     artifactPath: str | None = None
-    # Leaf-scoped supervisor/completion signals carry their durable routing subject so later
+    # Leaf-scoped agent-notifier/completion signals carry their durable routing subject so later
     # redelivery/escalation can re-check the live leaf chain instead of trusting a stale address.
     leafKey: str | None = None
     seatRole: str | None = None
@@ -229,7 +229,7 @@ def fold_operator_inbox_entries(
 ) -> dict[str, OperatorInboxEntry]:
     """Fold snapshots by id while preserving the first observed terminal transition.
 
-    Delivery can finish from a stale supervisor snapshot after a concurrent consume. Such a
+    Delivery can finish from a stale agent-notifier snapshot after a concurrent consume. Such a
     pending snapshot is physically later in the append-only log, but it cannot reverse an
     already-recorded terminal state. Terminal snapshots otherwise remain last-wins so repeated
     consumes and ladder resolution keep their existing idempotent behavior.

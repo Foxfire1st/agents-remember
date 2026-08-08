@@ -4,7 +4,7 @@
 deterministically -- rung 1 (renudge the original addressee) -> rung 2 (skip-level: re-address to
 the owner's owner, ``signal_routing.derive_skip_level_owner``, which already walks past any dead
 intermediate) -> rung 3 (architect custody, terminal). Every transition is pure here: this module
-decides WHAT should happen and WHO the next addressee is; ``serving/supervisor.py`` (the only
+decides WHAT should happen and WHO the next addressee is; ``serving/agent_notifier.py`` (the only
 caller, mirroring how it already owns every other predicate/action pairing) is what reads the
 stores, calls this, and performs the delivery + durable row update.
 

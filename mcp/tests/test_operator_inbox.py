@@ -380,7 +380,7 @@ class OperatorInboxStoreTests(unittest.TestCase):
         self.assertEqual(consumed.state, "ladder-resolved")
 
     def test_resolving_an_already_resolved_ladder_row_is_idempotent(self) -> None:
-        # The supervisor sweep is level-triggered and re-decides the same finding on every
+        # The agent-notifier sweep is level-triggered and re-decides the same finding on every
         # pass, so this is the ordinary case rather than a corner: the second call must
         # report `resolved_now=False` and append nothing, or one dead seat would grow the
         # log a row per sweep.

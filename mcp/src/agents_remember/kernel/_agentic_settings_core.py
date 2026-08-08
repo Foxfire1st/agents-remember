@@ -39,7 +39,10 @@ KNOWN_ORCHESTRATION_FIELDS = frozenset(
         "spawn",
         "harnesses",
         "expectations",
+        # Compatibility window (260713-TES-L1): the legacy key is accepted as an explicit
+        # alias for ``agentNotifier`` with a loud deprecation, then removed with the window.
         "supervisor",
+        "agentNotifier",
         "escalation",
         "qualityGate",
     }
@@ -90,9 +93,9 @@ KNOWN_ROLE_KNOB_FIELDS = frozenset(
 )
 KNOWN_CONCURRENCY_FIELDS = frozenset({"maxParallelMasters", "maxParallelLeaves", "maxSubAgents"})
 KNOWN_SPAWN_FIELDS = frozenset({"harness"})
-# R1/R5 (260707-HFX2-L2): the deterministic supervisor sweep's own knobs -- interval, enable
+# R1/R5 (260707-HFX2-L2): the deterministic agent-notifier sweep's own knobs -- interval, enable
 # flag, self-liveness staleness cutoff, inbox redelivery rate limit, and owner-signal cooldown.
-KNOWN_SUPERVISOR_FIELDS = frozenset(
+KNOWN_AGENT_NOTIFIER_FIELDS = frozenset(
     {
         "enabled",
         "intervalSeconds",
@@ -109,13 +112,13 @@ KNOWN_SUPERVISOR_FIELDS = frozenset(
 KNOWN_ESCALATION_FIELDS = frozenset(
     {"slaSeconds", "rungSeconds", "nudgeRateLimitSeconds", "respawnAfterRung"}
 )
-DEFAULT_SUPERVISOR_INTERVAL_SECONDS = 10.0
-DEFAULT_SUPERVISOR_STALE_CUTOFF_SECONDS = 60.0
-DEFAULT_SUPERVISOR_REDELIVER_BUDGET = 1
+DEFAULT_AGENT_NOTIFIER_INTERVAL_SECONDS = 10.0
+DEFAULT_AGENT_NOTIFIER_STALE_CUTOFF_SECONDS = 60.0
+DEFAULT_AGENT_NOTIFIER_REDELIVER_BUDGET = 1
 # CS-6 D1 (260707-HFX2-L12): per-sweep cap on escalation-rung emission, the twin of the redeliver
 # budget. Bounds the synchronous hosted pastes + escalation.rung event appends one sweep can do;
 # deferred rows re-fire next sweep (rung_due is level-triggered) so nothing is lost.
-DEFAULT_SUPERVISOR_ESCALATION_BUDGET = 250
+DEFAULT_AGENT_NOTIFIER_ESCALATION_BUDGET = 250
 # R2 (260707-HFX2-L1): the expectation-row kinds every dispatch surface writes a durable
 # what-must-happen-by-when row for, and their default SLAs (schema: docs/reference/settings-json.md,
 # Orchestration Expectations). Kept as a plain string set here (not imported from
@@ -269,20 +272,20 @@ class ExpectationSettings:
 
 
 @dataclass(frozen=True)
-class SupervisorSettings:
-    """``orchestration.supervisor`` -- the deterministic sweep's knobs (R1/R5, 260707-HFX2-L2).
+class AgentNotifierSettings:
+    """``orchestration.agentNotifier`` -- the deterministic sweep's knobs (R1/R5, 260707-HFX2-L2).
 
     ``redeliver_rate_limit_seconds`` of ``None`` inherits ``OperatorInboxStore.list_redeliverable``'s
-    own default. ``signal_cooldown_seconds`` controls supervisor pane/seat-liveness signal posts.
+    own default. ``signal_cooldown_seconds`` controls agent-notifier pane/seat-liveness signal posts.
     """
 
     enabled: bool = True
-    interval_seconds: float = DEFAULT_SUPERVISOR_INTERVAL_SECONDS
-    stale_cutoff_seconds: float = DEFAULT_SUPERVISOR_STALE_CUTOFF_SECONDS
+    interval_seconds: float = DEFAULT_AGENT_NOTIFIER_INTERVAL_SECONDS
+    stale_cutoff_seconds: float = DEFAULT_AGENT_NOTIFIER_STALE_CUTOFF_SECONDS
     redeliver_rate_limit_seconds: float | None = None
     signal_cooldown_seconds: float = DEFAULT_RATE_LIMIT_SECONDS
-    redeliver_budget: int = DEFAULT_SUPERVISOR_REDELIVER_BUDGET
-    escalation_budget: int = DEFAULT_SUPERVISOR_ESCALATION_BUDGET
+    redeliver_budget: int = DEFAULT_AGENT_NOTIFIER_REDELIVER_BUDGET
+    escalation_budget: int = DEFAULT_AGENT_NOTIFIER_ESCALATION_BUDGET
 
 
 @dataclass(frozen=True)
@@ -345,7 +348,7 @@ class AgenticSettings:
     roles_per_level: dict[str, dict[str, RoleKnobs]] = field(default_factory=dict)
     concurrency: ConcurrencySettings = field(default_factory=ConcurrencySettings)
     expectations: ExpectationSettings = field(default_factory=ExpectationSettings)
-    supervisor: SupervisorSettings = field(default_factory=SupervisorSettings)
+    agent_notifier: AgentNotifierSettings = field(default_factory=AgentNotifierSettings)
     escalation: EscalationSettings = field(default_factory=EscalationSettings)
     quality_gate: QualityGateSettings = field(default_factory=QualityGateSettings)
     spawn_harness: str | None = None

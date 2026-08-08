@@ -9,6 +9,7 @@ from typing import cast
 from unittest import mock
 
 from _scaling import assert_bounded_count
+from agents_remember.controlplane.agent_notifier_signals import AgentNotifierSignalCooldownStore
 from agents_remember.controlplane.escalation_ladder import MAX_RUNG
 from agents_remember.controlplane.expectation_rows import (
     Expectation,
@@ -22,27 +23,28 @@ from agents_remember.controlplane.operator_inbox_records import (
     InboxPoster,
     InboxRouting,
     InboxSubject,
+    OperatorInboxEntry,
     create_operator_inbox_entry,
 )
 from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
 from agents_remember.controlplane.orchestration_nudges import OrchestrationNudgeStore
-from agents_remember.controlplane.supervisor_signals import SupervisorSignalCooldownStore
 from agents_remember.observer.store import EventStore
-from agents_remember.serving import _supervisor_actions as supervisor_actions_module
-from agents_remember.serving import supervisor as supervisor_module
-from agents_remember.serving.supervisor import (
+from agents_remember.serving import _agent_notifier_actions as agent_notifier_actions_module
+from agents_remember.serving import agent_notifier as agent_notifier_module
+from agents_remember.serving.agent_notifier import (
+    AgentNotifierContext,
+    AgentNotifierFinding,
     EscalationSchedule,
-    SupervisorContext,
-    SupervisorFinding,
+    _inactivity_signal_chain_progressed,
     act_on_finding,
     evaluate_dead_upstream_findings,
     evaluate_escalation_findings,
-    run_supervisor_sweep,
+    run_agent_notifier_sweep,
 )
-from agents_remember.serving.supervisor_heartbeat import SupervisorHeartbeatStore
+from agents_remember.serving.agent_notifier_heartbeat import AgentNotifierHeartbeatStore
 from agents_remember.serving.terminal import TerminalHost
 from agents_remember.serving.terminal_catalog import TerminalCatalog
-from test_supervisor import NOW, _entry, _fake_paster, _FakeHost
+from test_agent_notifier import NOW, _entry, _fake_paster, _FakeHost
 
 
 class EscalationPredicateTests(unittest.TestCase):
@@ -50,8 +52,8 @@ class EscalationPredicateTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             store = OperatorInboxStore(Path(tmp))
             for entry_id, attempt_count in (
-                ("retrying", supervisor_module.PERSISTENT_FAILURE_ATTEMPTS - 1),
-                ("exhausted", supervisor_module.PERSISTENT_FAILURE_ATTEMPTS),
+                ("retrying", agent_notifier_module.PERSISTENT_FAILURE_ATTEMPTS - 1),
+                ("exhausted", agent_notifier_module.PERSISTENT_FAILURE_ATTEMPTS),
             ):
                 store.append(
                     create_operator_inbox_entry(
@@ -93,7 +95,7 @@ class EscalationPredicateTests(unittest.TestCase):
                 ).model_copy(
                     update={
                         "deliveryState": "unconfirmed",
-                        "attemptCount": supervisor_module.PERSISTENT_FAILURE_ATTEMPTS + 10,
+                        "attemptCount": agent_notifier_module.PERSISTENT_FAILURE_ATTEMPTS + 10,
                     }
                 )
             )
@@ -175,7 +177,7 @@ class EscalationPredicateTests(unittest.TestCase):
             store.append(
                 create_operator_inbox_entry(
                     InboxMessage(
-                        ask="Supervisor observed seat-liveness: turn-state-stale",
+                        ask="Agent notifier observed seat-liveness: turn-state-stale",
                         response="worker-1 inactive",
                         message_kind="escalation",
                         subject=InboxSubject(leaf_key=leaf_key, agent_id="worker-1"),
@@ -187,7 +189,7 @@ class EscalationPredicateTests(unittest.TestCase):
                             lifecycle_id=None, agent_id="manager-current", recipient_role="manager"
                         )
                     ),
-                    poster=InboxPoster(created_by="supervisor", created_via="cli"),
+                    poster=InboxPoster(created_by="agent-notifier", created_via="cli"),
                 ).model_copy(
                     update={
                         "rung": 1,
@@ -207,6 +209,69 @@ class EscalationPredicateTests(unittest.TestCase):
                 ),
                 [],
             )
+
+    def test_inactivity_chain_progress_suppresses_legacy_and_current_ask_formats(self) -> None:
+        # F1 regression (260713-TES-L1): chain-progress suppression must match BOTH the legacy
+        # createdBy/ask-prefix row and the current-format row during the rename window.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            catalog = TerminalCatalog(root / "catalog.json")
+            leaf_key = "repo-a/260707_master/leaf-9"
+            catalog.upsert(
+                replace(
+                    _entry("manager-current", leaf_key="repo-a/260707_master/manager-anchor"),
+                    spawn_role="manager",
+                )
+            )
+            catalog.upsert(
+                replace(
+                    _entry("worker-1", leaf_key=leaf_key),
+                    spawn_role="worker",
+                    spawned_by_session="manager-current",
+                )
+            )
+            catalog.upsert(
+                replace(
+                    _entry("reviewer-1", status="landed"),
+                    spawn_role="reviewer",
+                    spawned_by_session="manager-current",
+                    replacement_for_leaf=leaf_key,
+                    landed_at=(NOW - timedelta(minutes=1)).isoformat(),
+                )
+            )
+
+            def inactivity_row(*, entry_id: str, ask: str, created_by: str) -> OperatorInboxEntry:
+                return create_operator_inbox_entry(
+                    InboxMessage(
+                        ask=ask,
+                        response="worker-1 inactive",
+                        message_kind="escalation",
+                        subject=InboxSubject(leaf_key=leaf_key, agent_id="worker-1"),
+                    ),
+                    entry_id=entry_id,
+                    now=(NOW - timedelta(minutes=10)).isoformat(),
+                    routing=InboxRouting(
+                        address=InboxAddress(
+                            lifecycle_id=None,
+                            agent_id="manager-current",
+                            recipient_role="manager",
+                        )
+                    ),
+                    poster=InboxPoster(created_by=created_by, created_via="cli"),
+                )
+
+            legacy = inactivity_row(
+                entry_id="e-legacy",
+                ask="Supervisor observed seat-liveness: turn-state-stale",
+                created_by="supervisor",
+            )
+            current = inactivity_row(
+                entry_id="e-current",
+                ask="Agent notifier observed seat-liveness: turn-state-stale",
+                created_by="agent-notifier",
+            )
+            self.assertTrue(_inactivity_signal_chain_progressed(catalog, legacy))
+            self.assertTrue(_inactivity_signal_chain_progressed(catalog, current))
 
 
 class DeadUpstreamPredicateTests(unittest.TestCase):
@@ -251,11 +316,11 @@ class LadderWalkIntegrationTests(unittest.TestCase):
         self.inbox_store = OperatorInboxStore(observer_root)
         self.expectation_store = ExpectationRowStore(observer_root)
         self.nudge_store = OrchestrationNudgeStore(observer_root)
-        self.signal_cooldown_store = SupervisorSignalCooldownStore(observer_root)
+        self.signal_cooldown_store = AgentNotifierSignalCooldownStore(observer_root)
         self.event_store = EventStore(observer_root)
-        self.heartbeat_store = SupervisorHeartbeatStore(observer_root)
+        self.heartbeat_store = AgentNotifierHeartbeatStore(observer_root)
 
-    def _ctx(self, **overrides: object) -> SupervisorContext:
+    def _ctx(self, **overrides: object) -> AgentNotifierContext:
         base: dict[str, object] = dict(
             catalog=self.catalog,
             host=cast(TerminalHost, _FakeHost()),
@@ -273,7 +338,7 @@ class LadderWalkIntegrationTests(unittest.TestCase):
             respawn_after_rung=2,
         )
         base.update(overrides)
-        return SupervisorContext(**base)  # type: ignore[arg-type]
+        return AgentNotifierContext(**base)  # type: ignore[arg-type]
 
     def _events(self) -> set[str]:
         return {event.kind for event in self.event_store.read(None)}
@@ -314,13 +379,13 @@ class LadderWalkIntegrationTests(unittest.TestCase):
             ),
             [],
         )
-        finding = SupervisorFinding(
+        finding = AgentNotifierFinding(
             kind="escalation-due",
             detail="dispatch-brief",
             session_id="worker-1",
             source_id=entry.id,
         )
-        with mock.patch.object(supervisor_actions_module, "deliver_inbox_entry") as deliver:
+        with mock.patch.object(agent_notifier_actions_module, "deliver_inbox_entry") as deliver:
             result = act_on_finding(self._ctx(), finding, now=NOW)
 
         deliver.assert_not_called()
@@ -351,29 +416,29 @@ class LadderWalkIntegrationTests(unittest.TestCase):
         self.inbox_store.append(entry)
 
         ctx = self._ctx()
-        run_supervisor_sweep(ctx, now=NOW)
+        run_agent_notifier_sweep(ctx, now=NOW)
         rung1 = self.inbox_store.current()["e1"]
         self.assertEqual(rung1.rung, 1)
         self.assertIn("orchestration.escalation.rung", self._events())
 
-        run_supervisor_sweep(ctx, now=NOW + timedelta(minutes=2))
+        run_agent_notifier_sweep(ctx, now=NOW + timedelta(minutes=2))
         still_rung1 = self.inbox_store.current()["e1"]
         self.assertEqual(still_rung1.rung, 1)
 
-        run_supervisor_sweep(ctx, now=NOW + timedelta(minutes=5))
+        run_agent_notifier_sweep(ctx, now=NOW + timedelta(minutes=5))
         rung2 = self.inbox_store.current()["e1"]
         self.assertEqual(rung2.rung, 2)
 
-        run_supervisor_sweep(ctx, now=NOW + timedelta(minutes=7))
+        run_agent_notifier_sweep(ctx, now=NOW + timedelta(minutes=7))
         still_rung2 = self.inbox_store.current()["e1"]
         self.assertEqual(still_rung2.rung, 2)
 
-        run_supervisor_sweep(ctx, now=NOW + timedelta(minutes=10))
+        run_agent_notifier_sweep(ctx, now=NOW + timedelta(minutes=10))
         rung3 = self.inbox_store.current()["e1"]
         self.assertEqual(rung3.rung, 3)
 
         # Rung 3 is terminal -- a further sweep never advances it past the developer.
-        run_supervisor_sweep(ctx, now=NOW + timedelta(minutes=20))
+        run_agent_notifier_sweep(ctx, now=NOW + timedelta(minutes=20))
         still_rung3 = self.inbox_store.current()["e1"]
         self.assertEqual(still_rung3.rung, 3)
 
@@ -405,16 +470,16 @@ class LadderWalkIntegrationTests(unittest.TestCase):
                 poster=InboxPoster(created_by="system", created_via="cli"),
             )
         )
-        duplicate = SupervisorFinding(
+        duplicate = AgentNotifierFinding(
             kind="escalation-due",
             detail="escalation",
             session_id="worker-1",
             source_id="e1",
         )
         with mock.patch.object(
-            supervisor_module, "evaluate_predicates", return_value=[duplicate, duplicate]
+            agent_notifier_module, "evaluate_predicates", return_value=[duplicate, duplicate]
         ):
-            result = run_supervisor_sweep(self._ctx(), now=NOW)
+            result = run_agent_notifier_sweep(self._ctx(), now=NOW)
 
         self.assertEqual(self.inbox_store.current()["e1"].rung, 1)
         self.assertEqual(result.actions[1].detail, "entry already transitioned this sweep")
@@ -446,7 +511,7 @@ class LadderWalkIntegrationTests(unittest.TestCase):
         self.inbox_store.append(entry)
 
         ctx = self._ctx()
-        run_supervisor_sweep(ctx, now=NOW)
+        run_agent_notifier_sweep(ctx, now=NOW)
         advanced = self.inbox_store.current()["e1"]
         self.assertEqual(advanced.rung, 2)
         # The dead manager is skipped -- the row lands on the orchestrator instead.
@@ -488,7 +553,7 @@ class LadderWalkIntegrationTests(unittest.TestCase):
         self.inbox_store.append(entry)
 
         ctx = self._ctx()
-        run_supervisor_sweep(ctx, now=NOW)
+        run_agent_notifier_sweep(ctx, now=NOW)
 
         # The suspect manager's husk is retired (catalog status flips to terminated)...
         retired = self.catalog.get("manager-1")
@@ -500,9 +565,16 @@ class LadderWalkIntegrationTests(unittest.TestCase):
         respawn_events = [
             event
             for event in self.event_store.read(None)
+            if event.kind == "orchestration.agent-notifier.respawn"
+        ]
+        legacy_respawn_events = [
+            event
+            for event in self.event_store.read(None)
             if event.kind == "orchestration.supervisor.respawn"
         ]
         self.assertEqual(len(respawn_events), 1)
+        # The rename window emits every agent-notifier event under the legacy name too.
+        self.assertEqual(len(legacy_respawn_events), 1)
         self.assertEqual(
             sorted(respawn_events[0].data["orphanedWorkers"]), ["worker-1", "worker-2"]
         )
@@ -535,7 +607,7 @@ class LadderWalkIntegrationTests(unittest.TestCase):
         ).model_copy(update={"rung": 2, "escalatedAt": (NOW - timedelta(minutes=5)).isoformat()})
         self.inbox_store.append(entry)
 
-        run_supervisor_sweep(self._ctx(), now=NOW)
+        run_agent_notifier_sweep(self._ctx(), now=NOW)
 
         advanced = self.inbox_store.current()["e1"]
         self.assertEqual(advanced.rung, 3)
@@ -573,7 +645,7 @@ class LadderWalkIntegrationTests(unittest.TestCase):
         moment = NOW
         for _ in range(50):  # 50 sweeps x 6 min = 5 hours of absent developer
             moment += timedelta(minutes=6)
-            run_supervisor_sweep(ctx, now=moment)
+            run_agent_notifier_sweep(ctx, now=moment)
             current = self.inbox_store.current()
             self.assertLessEqual(len(current), seeded)
             self.assertTrue(all(entry.rung <= MAX_RUNG for entry in current.values()))
@@ -616,16 +688,22 @@ class LadderWalkIntegrationTests(unittest.TestCase):
             )
         )
         ctx = self._ctx()
-        result = run_supervisor_sweep(ctx, now=NOW)
+        result = run_agent_notifier_sweep(ctx, now=NOW)
         dead_upstream_findings = [f for f in result.findings if f.kind == "dead-upstream"]
         self.assertEqual(len(dead_upstream_findings), 1)
         self.assertEqual(dead_upstream_findings[0].session_id, "worker-1")
         events = [
             event
             for event in self.event_store.read(None)
+            if event.kind == "orchestration.agent-notifier.dead-upstream"
+        ]
+        legacy_events = [
+            event
+            for event in self.event_store.read(None)
             if event.kind == "orchestration.supervisor.dead-upstream"
         ]
         self.assertEqual(len(events), 1)
+        self.assertEqual(len(legacy_events), 1)
         self.assertEqual(events[0].data["managerAgentId"], "manager-2")
 
 
@@ -643,11 +721,11 @@ class Cs6SweepScalingTests(unittest.TestCase):
         self.inbox_store = OperatorInboxStore(observer_root)
         self.expectation_store = ExpectationRowStore(observer_root)
         self.nudge_store = OrchestrationNudgeStore(observer_root)
-        self.signal_cooldown_store = SupervisorSignalCooldownStore(observer_root)
+        self.signal_cooldown_store = AgentNotifierSignalCooldownStore(observer_root)
         self.event_store = EventStore(observer_root)
-        self.heartbeat_store = SupervisorHeartbeatStore(observer_root)
+        self.heartbeat_store = AgentNotifierHeartbeatStore(observer_root)
 
-    def _ctx(self, **overrides: object) -> SupervisorContext:
+    def _ctx(self, **overrides: object) -> AgentNotifierContext:
         base: dict[str, object] = dict(
             catalog=self.catalog,
             host=cast(TerminalHost, _FakeHost()),
@@ -662,7 +740,7 @@ class Cs6SweepScalingTests(unittest.TestCase):
             stale_seat_seconds=60.0,
         )
         base.update(overrides)
-        return SupervisorContext(**base)  # type: ignore[arg-type]
+        return AgentNotifierContext(**base)  # type: ignore[arg-type]
 
     def _wrap_reads(self, store: object) -> dict[str, int]:
         counter = {"count": 0}
@@ -697,7 +775,7 @@ class Cs6SweepScalingTests(unittest.TestCase):
                 self.setUp()
                 self._seed_stale_workers(worker_count)
                 counter = self._wrap_reads(self.signal_cooldown_store)
-                result = run_supervisor_sweep(self._ctx(), now=NOW)
+                result = run_agent_notifier_sweep(self._ctx(), now=NOW)
                 signal_emits = [a for a in result.actions if a.action == "signal-emit"]
                 self.assertEqual(len(signal_emits), worker_count)  # every finding hit in_cooldown
                 assert_bounded_count(
@@ -736,7 +814,7 @@ class Cs6SweepScalingTests(unittest.TestCase):
                     sla_seconds=60.0,
                 )
             counter = self._wrap_reads(self.expectation_store)
-            result = run_supervisor_sweep(self._ctx(), now=NOW)
+            result = run_agent_notifier_sweep(self._ctx(), now=NOW)
             overdue_findings = [f for f in result.findings if f.kind == "expectation-overdue"]
             self.assertEqual(len(overdue_findings), overdue_count)
             reads_by_k[overdue_count] = counter["count"]
@@ -766,7 +844,7 @@ class Cs6SweepScalingTests(unittest.TestCase):
                             poster=InboxPoster(created_by="system", created_via="cli"),
                         )
                     )
-                result = run_supervisor_sweep(
+                result = run_agent_notifier_sweep(
                     self._ctx(
                         escalation_budget=5,
                         escalation_sla_seconds={"escalation": 60.0},

@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 
 import type { WorkspaceProjection } from "../types/projection";
 import { asServedProjection } from "../test/servedProjection";
-import { reparsed, supervisorHeartbeat } from "../test/fixtures/wire";
+import { reparsed, agentNotifierHeartbeat } from "../test/fixtures/wire";
 import { dashboardStore } from "./store";
 import snapshot from "../fixtures/snapshot.json";
 
@@ -118,24 +118,24 @@ describe("dashboard store change gate (260703-L15)", () => {
     expect(after.generatedAt).toBe(before.generatedAt); // ages/stamp coherence: no new content, no new stamp
   });
 
-  it("applies an idle re-snapshot with an unchanged supervisorHeartbeat (incl. null/null) with zero store writes", () => {
-    dashboardStore.getState().applySnapshot(projection); // supervisorHeartbeat stays null
+  it("applies an idle re-snapshot with an unchanged agentNotifierHeartbeat (incl. null/null) with zero store writes", () => {
+    dashboardStore.getState().applySnapshot(projection); // agentNotifierHeartbeat stays null
     const before = dashboardStore.getState();
-    expect(before.supervisorHeartbeat).toBeNull();
+    expect(before.agentNotifierHeartbeat).toBeNull();
     let notifications = 0;
     const unsubscribe = dashboardStore.subscribe(() => {
       notifications += 1;
     });
-    dashboardStore.getState().applySnapshot(volatileBump(projection, 1)); // still no supervisorHeartbeat
+    dashboardStore.getState().applySnapshot(volatileBump(projection, 1)); // still no agentNotifierHeartbeat
     unsubscribe();
     expect(notifications).toBe(0);
     expect(dashboardStore.getState()).toBe(before);
-    expect(dashboardStore.getState().supervisorHeartbeat).toBeNull();
+    expect(dashboardStore.getState().agentNotifierHeartbeat).toBeNull();
   });
 
-  it("applies an idle re-snapshot with a genuinely changed supervisorHeartbeat", () => {
-    const heartbeat = supervisorHeartbeat({ pendingInboxCount: 2, redeliverableInboxCount: 1 });
-    const withHeartbeat: WorkspaceProjection = { ...projection, supervisorHeartbeat: heartbeat };
+  it("applies an idle re-snapshot with a genuinely changed agentNotifierHeartbeat", () => {
+    const heartbeat = agentNotifierHeartbeat({ pendingInboxCount: 2, redeliverableInboxCount: 1 });
+    const withHeartbeat: WorkspaceProjection = { ...projection, agentNotifierHeartbeat: heartbeat };
     dashboardStore.getState().applySnapshot(withHeartbeat);
     const before = dashboardStore.getState();
     let notifications = 0;
@@ -144,18 +144,28 @@ describe("dashboard store change gate (260703-L15)", () => {
     });
     const advanced: WorkspaceProjection = {
       ...withHeartbeat,
-      supervisorHeartbeat: { ...heartbeat, ageSeconds: 5 },
+      agentNotifierHeartbeat: { ...heartbeat, ageSeconds: 5 },
     };
     dashboardStore.getState().applySnapshot(advanced);
     unsubscribe();
     expect(notifications).toBe(1); // the tick advance IS a store write
     const after = dashboardStore.getState();
     expect(after).not.toBe(before);
-    expect(after.supervisorHeartbeat).toEqual(advanced.supervisorHeartbeat);
-    // everything else stays identity-stable — only supervisorHeartbeat rode through
+    expect(after.agentNotifierHeartbeat).toEqual(advanced.agentNotifierHeartbeat);
+    // everything else stays identity-stable — only agentNotifierHeartbeat rode through
     expect(after.lifecycles).toBe(before.lifecycles);
     expect(after.analytics).toBe(before.analytics);
     expect(after.generatedAt).toBe(before.generatedAt);
+  });
+
+  it("accepts the legacy supervisorHeartbeat wire key during the rename window", () => {
+    // The served body carries both keys while the window is open; an older server may emit
+    // only the legacy key. The store must read either.
+    dashboardStore.getState().applySnapshot(projection); // both null first
+    const heartbeat = agentNotifierHeartbeat({ pendingInboxCount: 2, redeliverableInboxCount: 1 });
+    const legacyOnly: WorkspaceProjection = { ...projection, supervisorHeartbeat: heartbeat };
+    dashboardStore.getState().applySnapshot(legacyOnly);
+    expect(dashboardStore.getState().agentNotifierHeartbeat).toEqual(heartbeat);
   });
 
   it("skips a redundant delta (volatile-only node) without a store write", () => {

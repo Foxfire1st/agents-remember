@@ -1,4 +1,4 @@
-"""Tests for the supervisor's pane-state classifier (260707-HFX2-L2, R2a)."""
+"""Tests for the agent-notifier's pane-state classifier (260707-HFX2-L2, R2a)."""
 
 from __future__ import annotations
 
