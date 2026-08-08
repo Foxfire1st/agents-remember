@@ -1,12 +1,13 @@
-"""Memory-bound full quality-gate runs (260731-EFA-L17-R3).
+"""Memory-bound full quality-gate runs.
 
 A full wrapper run is expensive (~0.5 GB RSS plateau measured 2026-08-05) and the
 whole point of moving it to the master integration gate was to stop the parallel
 leaf multiplier from taking down the host. Every full run therefore executes
 under a settings-owned cap:
 
-- on a host with systemd, ``systemd-run --scope`` with ``MemoryMax=<bytes>`` is
-  the primary mechanism, and an over-cap run is killed inside its own scope;
+- on a host with systemd, ``systemd-run --scope`` (``--user`` for a non-root
+  user manager) with ``MemoryMax=<bytes>`` is the primary mechanism, and an
+  over-cap run is killed inside its own scope;
 - otherwise the closest available mechanism is a POSIX address-space rlimit
   (``RLIMIT_AS``) applied inside the wrapper itself and inherited by every rail
   subprocess, so an over-cap run dies with ``MemoryError`` rather than taking the
@@ -52,9 +53,9 @@ def systemd_scope_available() -> bool:
     """Whether a systemd-run scope can plausibly start on this host.
 
     Root talks to the system manager directly; a non-root user needs the user
-    manager, signalled by XDG_RUNTIME_DIR being set. The integration runner still
-    fails loudly if the scope cannot start, so this is an availability hint, not
-    the enforcement itself.
+    manager, signalled by XDG_RUNTIME_DIR pointing at a live manager socket.
+    The integration runner still fails loudly if the scope cannot start, so this
+    is an availability hint, not the enforcement itself.
     """
     if shutil.which("systemd-run") is None:
         return False
@@ -62,7 +63,17 @@ def systemd_scope_available() -> bool:
         return False
     if os.geteuid() == 0:
         return True
-    return bool(os.environ.get("XDG_RUNTIME_DIR"))
+    runtime_dir = os.environ.get("XDG_RUNTIME_DIR")
+    if not runtime_dir:
+        return False
+    return (Path(runtime_dir) / "systemd" / "private").is_socket()
+
+
+def _systemd_user_flag() -> list[str]:
+    """Point systemd-run at the user manager when the current user is not root."""
+    if os.geteuid() == 0:
+        return []
+    return ["--user"]
 
 
 def with_self_cap(module_args: list[str], cap_bytes: int) -> list[str]:
@@ -99,6 +110,7 @@ def plan_capped_command(
         return MemoryCapPlan(
             command=[
                 "systemd-run",
+                *_systemd_user_flag(),
                 "--scope",
                 "--quiet",
                 "-p",

@@ -130,23 +130,9 @@ def run_subprocess(
 # --- steps -------------------------------------------------------------------
 
 
-def quality_steps(config: CheckConfig, coverage_json: Path) -> list[Step]:
-    scope = config.scope
-    targeted = getattr(config, "targeted", False)
-    lint_args = posix_args(scope.lint_paths)
-    type_args = posix_args(scope.type_paths)
-    targeted_scope = getattr(config, "targeted_scope", None)
-    if targeted and targeted_scope is not None:
-        # Coverage.py instruments the top-level package root (the same shape the full
-        # wrapper uses, which is the proven-safe FastMCP/pydantic path); records are
-        # only written for modules the test subset actually imports. CRAP is still
-        # scoped to the changed modules below.
-        coverage_args = list(targeted_scope.coverage_root_modules)
-    else:
-        coverage_args = posix_args(scope.coverage_paths)
-    test_args = posix_args(scope.test_paths)
-    size_args = posix_args(scope.size_paths)
-    steps = [
+def _fixed_steps(lint_args: list[str], type_args: list[str]) -> list[Step]:
+    """Ruff, ruff-format, and pyright over the rail's path scope."""
+    return [
         # No `--extend-ignore` and no `--select`: this step lints exactly what
         # `pyproject.toml` selects, C901/PLR0911/PLR0912/PLR0915 included. Anything routed
         # off this command line is a rule the gate stops enforcing, which is the whole
@@ -167,64 +153,107 @@ def quality_steps(config: CheckConfig, coverage_json: Path) -> list[Step]:
             ],
         ),
     ]
+
+
+def _radon_report_steps(radon_args: list[str]) -> list[Step]:
+    """The two report-only radon rails, scoped to the same paths as coverage/CRAP."""
+    return [
+        Step(
+            "radon-cc",
+            [
+                sys.executable,
+                "-m",
+                "radon",
+                "cc",
+                *radon_args,
+                "-s",
+                "-n",
+                "B",
+                "--order",
+                "SCORE",
+            ],
+            report_note=RADON_REPORT_NOTE,
+        ),
+        Step(
+            "radon-mi",
+            [sys.executable, "-m", "radon", "mi", *radon_args, "-s", "-n", "B"],
+            report_note=RADON_REPORT_NOTE,
+        ),
+    ]
+
+
+def _pytest_step(
+    config: CheckConfig,
+    coverage_json: Path,
+    test_args: list[str],
+    coverage_args: list[str],
+) -> Step | None:
+    """The pytest rail, or None when a targeted run derived no test subset."""
+    if getattr(config, "targeted", False) and not config.scope.test_paths:
+        return None
+    pytest_args = [sys.executable, "-m", "pytest", *test_args]
+    if config.scope.coverage_paths:
+        pytest_args += [
+            *(f"--cov={module}" for module in coverage_args),
+            f"--cov-report=json:{coverage_json.as_posix()}",
+            "--cov-report=term",
+        ]
+    return Step("pytest", pytest_args)
+
+
+def _file_size_step(config: CheckConfig, size_args: list[str]) -> Step:
+    """The file-size rail, part of this command vector so hooks, closeout and CI
+    pick it up without a second configuration path. While the repo is unarmed it
+    still runs and reports every band; arming is one boolean in pyproject.toml
+    ([tool.agents_remember] file_size_armed), and then any file at or above the
+    1,200-line hard limit fails the run. A targeted run scopes the rail to the
+    leaf's changed paths (see TargetedScopeResult)."""
+    return Step(
+        "file-size",
+        [
+            sys.executable,
+            "-m",
+            "agents_remember.code_quality.file_size",
+            "--project-root",
+            str(config.project_root),
+            *size_args,
+            *(["--report"] if not config.file_size_armed else []),
+        ],
+    )
+
+
+def quality_steps(config: CheckConfig, coverage_json: Path) -> list[Step]:
+    scope = config.scope
+    targeted = getattr(config, "targeted", False)
+    targeted_scope = getattr(config, "targeted_scope", None)
+    if targeted and targeted_scope is not None:
+        # Coverage.py instruments the top-level package root (the same shape the full
+        # wrapper uses, which is the proven-safe FastMCP/pydantic path); records are
+        # only written for modules the test subset actually imports. CRAP is still
+        # scoped to the changed modules below.
+        coverage_args = list(targeted_scope.coverage_root_modules)
+    else:
+        coverage_args = posix_args(scope.coverage_paths)
+    # Radon consumes the same changed production module FILES the coverage/CRAP
+    # rails score; the pytest-only package roots above would resolve to nothing
+    # at the repo root and make the report rail vacuous.
+    radon_args = posix_args(scope.coverage_paths)
+    steps = _fixed_steps(posix_args(scope.lint_paths), posix_args(scope.type_paths))
     # A targeted run scopes radon and coverage/CRAP to the changed production
     # modules. When no production module changed (tests-only or non-Python leaves),
     # the radon report rails are not applicable and are skipped loudly by the
     # caller's not-applicable lines rather than run vacuous.
     if not targeted or scope.coverage_paths:
-        steps.append(
-            Step(
-                "radon-cc",
-                [
-                    sys.executable,
-                    "-m",
-                    "radon",
-                    "cc",
-                    *coverage_args,
-                    "-s",
-                    "-n",
-                    "B",
-                    "--order",
-                    "SCORE",
-                ],
-                report_note=RADON_REPORT_NOTE,
-            )
-        )
-        steps.append(
-            Step(
-                "radon-mi",
-                [sys.executable, "-m", "radon", "mi", *coverage_args, "-s", "-n", "B"],
-                report_note=RADON_REPORT_NOTE,
-            )
-        )
-    if not targeted or scope.test_paths:
-        pytest_args = [sys.executable, "-m", "pytest", *test_args]
-        if scope.coverage_paths:
-            pytest_args += [
-                *(f"--cov={module}" for module in coverage_args),
-                f"--cov-report=json:{coverage_json.as_posix()}",
-                "--cov-report=term",
-            ]
-        steps.append(Step("pytest", pytest_args))
-    # The file size rail is part of this same command vector so hooks, closeout
-    # and CI pick it up without a second configuration path. While the repo is
-    # unarmed it still runs and reports every band; arming is one boolean in
-    # pyproject.toml ([tool.agents_remember] file_size_armed), and then any
-    # file at or above the 1,200-line hard limit fails the run.
-    steps.append(
-        Step(
-            "file-size",
-            [
-                sys.executable,
-                "-m",
-                "agents_remember.code_quality.file_size",
-                "--project-root",
-                str(config.project_root),
-                *size_args,
-                *(["--report"] if not config.file_size_armed else []),
-            ],
-        ),
+        steps += _radon_report_steps(radon_args)
+    pytest = _pytest_step(
+        config,
+        coverage_json,
+        posix_args(scope.test_paths),
+        coverage_args,
     )
+    if pytest is not None:
+        steps.append(pytest)
+    steps.append(_file_size_step(config, posix_args(scope.size_paths)))
     return steps
 
 

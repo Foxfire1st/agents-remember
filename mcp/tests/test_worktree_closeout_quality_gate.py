@@ -324,6 +324,34 @@ class CodeQualityGateTests(unittest.TestCase):
 
             self.assertIn("orchestration.qualityGate.memoryCapBytes", str(caught.exception))
 
+    def test_gate_failure_names_the_cap_when_the_scope_is_sigkilled(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            worktree = _checkout_with_wrapper(Path(tmp))
+
+            def runner(
+                command: list[str], cwd: Path, env: Mapping[str, str]
+            ) -> subprocess.CompletedProcess[str]:
+                del cwd, env
+                return subprocess.CompletedProcess(command, -9, stdout="")
+
+            with (
+                mock.patch.object(
+                    code_quality_gate, "quality_python", return_value=Path(sys.executable)
+                ),
+                self.assertRaisesRegex(RuntimeError, "killed by the memory cap") as caught,
+            ):
+                code_quality_gate.run_strict_code_quality_gate(
+                    worktree,
+                    plan=code_quality_gate.QualityGatePlan(
+                        mode=code_quality_gate.GATE_FULL,
+                        memory_cap_bytes=1024,
+                        systemd_run_available=False,
+                    ),
+                    runner=runner,
+                )
+
+            self.assertIn("orchestration.qualityGate.memoryCapBytes", str(caught.exception))
+
     def test_gate_failure_includes_bounded_wrapper_output(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             worktree = _checkout_with_wrapper(Path(tmp))

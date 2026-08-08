@@ -254,8 +254,9 @@ def _gate_failure_message(
     details = _failure_output(result.stdout)
     if cap_plan is not None:
         killed = (
-            " The scope was killed by the memory cap (exit 137) inside its own scope."
-            if result.returncode == 137
+            " The scope was killed by the memory cap (returncode -9, shell exit 137) "
+            "inside its own scope."
+            if result.returncode in (137, -9)
             else ""
         )
         details += (

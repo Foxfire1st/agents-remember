@@ -234,14 +234,17 @@ runs the same check inside the suite.
 The hooks are tiered, and both are thin wrappers over `.githooks/_gate.sh`.
 pre-commit runs the fast tier over the **staged** content: the generated-copy
 checks above, plus Ruff, `ruff format --check`, and Pyright. pre-push runs the
-full tier: `python -m agents_remember.code_quality.check`, whose default command
-enforces Ruff, the formatter, Pyright, the full pytest suite, and the configured
-CRAP threshold. No rail carries a baseline or exemption list. Radon is printed as
-a report and cannot fail either tier — it exits 0 whatever it finds. CI runs
-that same wrapper on every branch push and pull request, and closeout runs it
-before creating an Agents Remember code commit even when hooks are not
-configured. See CONTRIBUTING.md for the tier table and the staged-content
-stash contract.
+targeted tier: `python -m agents_remember.code_quality.check --targeted`, which
+scopes ruff, the formatter, Pyright, the pytest subset, and the configured CRAP
+threshold to the leaf's change set (changed files, reverse-import closure, derived
+test subset). No rail carries a baseline or exemption list. Radon is printed as a
+report and cannot fail either tier — it exits 0 whatever it finds. CI runs the
+full wrapper on every branch push and pull request, and the full wrapper also
+runs exactly once per master at the master integration gate (invoked by
+`worktree_integrate` itself, memory-capped). Leaf closeouts and leaf integrations
+run the targeted tier before creating an Agents Remember code commit even when
+hooks are not configured. See CONTRIBUTING.md for the tier table and the
+staged-content stash contract.
 
 Every rail prints one provenance line naming its actual input, resolved config,
 and unit count. A manual dirty-tree run also lists non-ignored untracked files

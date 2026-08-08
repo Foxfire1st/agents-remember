@@ -22,6 +22,7 @@ from ..tools import (
 def register_closeout_tools(server: FastMCP, config: McpRuntimeConfig) -> None:
     @server.tool()
     def worktree_closeout_preview(
+        *,
         contract_path: str,
         code_commit_message: str,
         memory_commit_message: str = "",
@@ -44,12 +45,12 @@ def register_closeout_tools(server: FastMCP, config: McpRuntimeConfig) -> None:
 
     @server.tool()
     def worktree_closeout_apply(
+        *,
         contract_path: str,
         intent_note: str,
         code_commit_message: str,
         memory_commit_message: str = "",
         ledger_commit_message: str = "",
-        *,
         dry_run: bool = False,
     ) -> dict[str, Any]:
         """Apply an approved worktree closeout. When code would commit and the checkout
@@ -74,6 +75,7 @@ def register_closeout_tools(server: FastMCP, config: McpRuntimeConfig) -> None:
 
     @server.tool()
     def worktree_integrate(
+        *,
         contract_path: str,
         strategy: str = "ff-only",
         ledger_commit_message: str = "",
@@ -94,7 +96,7 @@ def register_closeout_tools(server: FastMCP, config: McpRuntimeConfig) -> None:
 
     @server.tool()
     def worktree_cleanup(
-        contract_path: str, dry_run: bool = False, teardown_providers: bool = True
+        *, contract_path: str, dry_run: bool = False, teardown_providers: bool = True
     ) -> dict[str, Any]:
         """Remove a task's worktrees and merged task branches after integration. MUTATING and
         destructive (deletes worktrees/branches) — run only after worktree_integrate. Preview with
@@ -106,7 +108,7 @@ def register_closeout_tools(server: FastMCP, config: McpRuntimeConfig) -> None:
 
     @server.tool()
     def worktree_abandon(
-        contract_path: str, dry_run: bool = False, force: bool = False
+        *, contract_path: str, dry_run: bool = False, force: bool = False
     ) -> dict[str, Any]:
         """Discard a worktree-backed task WITHOUT integrating it: reclaim its isolated provider
         stack (containers, networks, provider-runtime tree), remove the code and memory worktrees,

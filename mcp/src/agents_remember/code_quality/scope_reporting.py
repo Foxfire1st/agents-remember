@@ -151,7 +151,8 @@ def wrapper_scope_line(
             f"{len(scope.lint_paths)} changed Python files; "
             f"{len(scope.type_paths)} pyright files (changed + reverse-import closure); "
             f"{len(scope.coverage_paths)} changed production modules; "
-            f"{len(scope.test_paths)} derived test files"
+            f"{len(scope.test_paths)} derived test files; "
+            f"{len(scope.size_paths)} size-scoped changed files"
             if targeted
             else f"{len(scope.lint_paths)} index-known Python files; "
             f"{len(scope.coverage_paths)} coverage roots; {len(scope.test_paths)} test roots; "

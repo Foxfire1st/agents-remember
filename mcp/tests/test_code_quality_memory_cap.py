@@ -80,24 +80,46 @@ class MemoryCapPlanningTests(unittest.TestCase):
             mock.patch.dict(os.environ, {}, clear=True),
         ):
             self.assertFalse(memory_cap.systemd_scope_available())
+        with (
+            mock.patch.object(memory_cap.os, "geteuid", return_value=1000),
+            mock.patch.dict(os.environ, {"XDG_RUNTIME_DIR": "/run/user/1000"}, clear=True),
+            mock.patch.object(memory_cap.Path, "is_socket", return_value=False),
+        ):
+            self.assertFalse(memory_cap.systemd_scope_available())
+        with (
+            mock.patch.object(memory_cap.os, "geteuid", return_value=1000),
+            mock.patch.dict(os.environ, {"XDG_RUNTIME_DIR": "/run/user/1000"}, clear=True),
+            mock.patch.object(memory_cap.Path, "is_socket", return_value=True),
+        ):
+            self.assertTrue(memory_cap.systemd_scope_available())
 
     def test_systemd_plan_wraps_the_command_in_a_scope(self) -> None:
-        plan = memory_cap.plan_capped_command(
-            "python",
-            ["-m", "agents_remember.code_quality.check", "--diff-base", "abc"],
-            2147483648,
-            systemd_run_available=True,
-        )
+        with mock.patch.object(memory_cap.os, "geteuid", return_value=1000):
+            plan = memory_cap.plan_capped_command(
+                "python",
+                ["-m", "agents_remember.code_quality.check", "--diff-base", "abc"],
+                2147483648,
+                systemd_run_available=True,
+            )
 
         self.assertEqual(plan.mechanism, memory_cap.SYSTEMD_MECHANISM)
         self.assertEqual(plan.cap_bytes, 2147483648)
         self.assertEqual(plan.policy, memory_cap.QUALITY_MEMORY_CAP_POLICY)
         self.assertEqual(plan.command[0], "systemd-run")
+        self.assertIn("--user", plan.command)
         self.assertIn("--scope", plan.command)
         self.assertIn("MemoryMax=2147483648", plan.command)
         self.assertIn("MemorySwapMax=0", plan.command)
         self.assertIn("python", plan.command)
         self.assertIn("--diff-base", plan.command)
+        with mock.patch.object(memory_cap.os, "geteuid", return_value=0):
+            root_plan = memory_cap.plan_capped_command(
+                "python",
+                ["-m", "agents_remember.code_quality.check"],
+                2147483648,
+                systemd_run_available=True,
+            )
+        self.assertNotIn("--user", root_plan.command)
 
     def test_rlimit_fallback_inserts_the_self_cap_flag(self) -> None:
         plan = memory_cap.plan_capped_command(
@@ -251,7 +273,3 @@ class WrapperMemoryCapTests(unittest.TestCase):
 
             self.assertEqual(exit_code, 1)
             self.assertTrue(any("out of memory" in line for line in output))
-
-
-if __name__ == "__main__":
-    unittest.main()

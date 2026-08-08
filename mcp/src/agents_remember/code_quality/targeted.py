@@ -1,7 +1,7 @@
 """Deterministic change-set scoping for leaf-edge quality gates.
 
-The leaf ladder (260731-EFA-L17) keeps mandatory leaf-edge checks mandatory but
-points them at the leaf's own change set instead of the whole tree:
+The ladder keeps mandatory leaf-edge checks mandatory but points them at the
+leaf's own change set instead of the whole tree:
 
 - ruff/ruff-format run over the changed Python files;
 - pyright runs over the changed files PLUS the reverse-import closure, so a
@@ -59,6 +59,7 @@ class TargetedScopeResult:
             type_paths=list(self.type_paths),
             coverage_paths=list(self.coverage_paths),
             test_paths=list(self.test_paths),
+            size_paths=list(self.changed_paths),
             scope_roots=full_scope.scope_roots,
             untracked_paths=full_scope.untracked_paths,
         )
@@ -271,17 +272,50 @@ def _coverage_root_modules(tracked: list[Path], import_roots: tuple[Path, ...]) 
 def _tests_for_changed_modules(
     project_root: Path,
     changed_modules: list[str],
-    importers: dict[str, set[Path]],
+    module_index: tuple[dict[Path, str], dict[str, set[Path]]],
     test_roots: list[Path],
     tracked: list[Path],
 ) -> dict[str, set[Path]]:
+    modules, importers = module_index
     tests_by_module: dict[str, set[Path]] = {}
     for module in changed_modules:
-        tests = {path for path in importers.get(module, ()) if _within_any(path, test_roots)}
+        tests = {
+            path
+            for path in _transitive_importers(module, modules, importers)
+            if _within_any(path, test_roots)
+        }
         tests |= name_match_tests(test_roots, module, tracked)
         tests |= _string_reference_tests(project_root, test_roots, module, tracked)
         tests_by_module[module] = tests
     return tests_by_module
+
+
+def _transitive_importers(
+    module: str,
+    modules: dict[Path, str],
+    importers: dict[str, set[Path]],
+) -> set[Path]:
+    """Every tracked file that imports ``module`` transitively.
+
+    A test can cover a changed module through a public re-export home (the
+    settings loader re-exports its split siblings; tests import the loader, not
+    the internals). Walking importers transitively keeps the derived test subset
+    honest for exactly this shape, mirroring the pyright reverse-import closure.
+    """
+    reachable: set[Path] = set()
+    seen_modules = {module}
+    queue = [module]
+    while queue:
+        current = queue.pop()
+        for importer in importers.get(current, ()):
+            if importer in reachable:
+                continue
+            reachable.add(importer)
+            importer_module = modules.get(importer)
+            if importer_module is not None and importer_module not in seen_modules:
+                seen_modules.add(importer_module)
+                queue.append(importer_module)
+    return reachable
 
 
 def _string_reference_tests(
@@ -324,7 +358,7 @@ def derive_targeted_scope(project_root: Path, base_revision: str) -> TargetedSco
 
     test_roots = [Path(str(root)) for root in pytest_testpaths(project_root)]
     tests_by_module = _tests_for_changed_modules(
-        project_root, changed_modules, importers, test_roots, tracked
+        project_root, changed_modules, (modules, importers), test_roots, tracked
     )
     uncovered = sorted((module for module, tests in tests_by_module.items() if not tests), key=str)
     if uncovered:

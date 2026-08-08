@@ -181,6 +181,34 @@ class TargetedScopeDerivationTests(unittest.TestCase):
                 (Path("tests/test_extra.py"), Path("tests/test_module.py")),
             )
 
+    def test_internal_module_is_covered_through_its_public_import_home(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            base = targeted_repository(root)
+            (root / "src/pkg/internal.py").write_text(
+                "def inner() -> int:\n    return 1\n", encoding="utf-8"
+            )
+            (root / "src/pkg/module.py").write_text(
+                "from pkg.internal import inner\n\ndef value() -> int:\n    return inner()\n",
+                encoding="utf-8",
+            )
+            (root / "tests/test_module.py").write_text(
+                "from pkg.internal import inner\n"
+                "from pkg.module import value\n"
+                "\n"
+                "def test_value() -> None:\n"
+                "    assert value() == inner()\n",
+                encoding="utf-8",
+            )
+            run_git(root, "add", "-A")
+
+            derived = targeted.derive_targeted_scope(root, base)
+
+            self.assertIn(Path("src/pkg/internal.py"), derived.changed_paths)
+            # No test imports pkg.internal directly; the derived subset must
+            # reach it through pkg.module and its importers.
+            self.assertTrue(any(path.name == "test_module.py" for path in derived.test_paths))
+
     def test_changed_production_module_without_tests_is_refused(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -379,13 +407,92 @@ class TargetedWrapperRunTests(unittest.TestCase):
             self.assertIn("src/pkg/module.py", pyright)
             self.assertIn("src/pkg/importer.py", pyright)
             self.assertIn("src/pkg/top.py", pyright)
+            # Radon report rails consume the changed production module FILES, not
+            # the pytest package roots: a module name would resolve to nothing at
+            # the repo root and make the report rail vacuous.
+            radon_cc = commands[3]
+            self.assertEqual(radon_cc[4], "src/pkg/module.py")
+            radon_mi = commands[4]
+            self.assertEqual(radon_mi[4], "src/pkg/module.py")
             pytest = commands[5]
             self.assertIn("tests/test_module.py", pytest)
             self.assertIn("--cov=pkg", pytest)
             self.assertNotIn("--cov=src/pkg", pytest)
+            # The file-size rail is change-set-scoped in a targeted run.
+            file_size = commands[6]
+            self.assertEqual(file_size[2], "agents_remember.code_quality.file_size")
+            self.assertIn("src/pkg/module.py", file_size)
             # CRAP is scoped to the changed production module, not the whole package.
             crap_scope = next(line for line in output if line.startswith("scope: CRAP-Calculator"))
             self.assertIn("1 functions", crap_scope)
+
+    def test_radon_analyzes_the_changed_module_in_a_real_run(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            targeted_repository(root)
+            (root / "src/pkg/module.py").write_text(
+                "def value(flag: int) -> int:\n"
+                "    if flag == 1:\n        return 1\n"
+                "    if flag == 2:\n        return 2\n"
+                "    if flag == 3:\n        return 3\n"
+                "    if flag == 4:\n        return 4\n"
+                "    if flag == 5:\n        return 5\n"
+                "    return 0\n",
+                encoding="utf-8",
+            )
+            run_git(root, "add", "-A")
+
+            result_cc = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "radon",
+                    "cc",
+                    "src/pkg/module.py",
+                    "-s",
+                    "-n",
+                    "B",
+                    "--order",
+                    "SCORE",
+                ],
+                cwd=root,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(result_cc.returncode, 0)
+            self.assertIn("module.py", result_cc.stdout)
+            self.assertIn("value", result_cc.stdout)
+
+            result_mi = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "radon",
+                    "mi",
+                    "src/pkg/module.py",
+                    "-s",
+                    "-n",
+                    "B",
+                ],
+                cwd=root,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(result_mi.returncode, 0)
+            # The wrapper's mi rail applies radon's rank-B display filter, which can
+            # hide a small file; prove the rail consumed the file by rendering
+            # without the filter.
+            unfiltered_mi = subprocess.run(
+                [sys.executable, "-m", "radon", "mi", "src/pkg/module.py", "-s"],
+                cwd=root,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(unfiltered_mi.returncode, 0)
+            self.assertIn("module.py", unfiltered_mi.stdout)
 
     def test_no_python_changes_short_circuits_to_pass(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -404,18 +511,16 @@ class TargetedWrapperRunTests(unittest.TestCase):
                 targeted_scope=derived,
             )
 
-            def unexpected_runner(
-                name: str, command: list[str], cwd: Path, env: Mapping[str, str]
-            ) -> check.StepResult:
-                del name, command, cwd, env
-                raise AssertionError("no rails should run for an empty change set")
-
             output: list[str] = []
+            commands: list[list[str]] = []
             exit_code = check.run_quality_check(
-                config, runner=unexpected_runner, printer=output.append
+                config,
+                runner=fake_runner(commands, root / "coverage.json", root, []),
+                printer=output.append,
             )
 
             self.assertEqual(exit_code, 0)
+            self.assertEqual(commands, [])
             self.assertTrue(any("no Python files changed" in line for line in output))
             self.assertTrue(any("result: quality-wrapper PASS" in line for line in output))
 
@@ -452,7 +557,7 @@ class TargetedWrapperRunTests(unittest.TestCase):
             self.assertEqual(exit_code, 0)
             self.assertEqual(
                 [command[2] for command in commands],
-                ["ruff", "ruff", "pyright", "pytest"],
+                ["ruff", "ruff", "pyright", "pytest", "agents_remember.code_quality.file_size"],
             )
             self.assertTrue(
                 any("radon report and CRAP rails are not applicable" in line for line in output)
@@ -489,7 +594,7 @@ class TargetedWrapperRunTests(unittest.TestCase):
             self.assertEqual(exit_code, 0)
             self.assertEqual(
                 [command[2] for command in commands],
-                ["ruff", "ruff", "pyright"],
+                ["ruff", "ruff", "pyright", "agents_remember.code_quality.file_size"],
             )
             self.assertTrue(
                 any("radon report and CRAP rails are not applicable" in line for line in output)
@@ -523,7 +628,3 @@ class TargetedWrapperRunTests(unittest.TestCase):
                 check.source_import_roots(root, [Path("__init__.py")]),
                 [root],
             )
-
-
-if __name__ == "__main__":
-    unittest.main()

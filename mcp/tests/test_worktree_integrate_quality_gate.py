@@ -190,7 +190,3 @@ class IntegrationQualityGateAltitudeTests(unittest.TestCase):
         memory_cap = quality_gate["memoryCap"]
         assert isinstance(memory_cap, dict)
         self.assertEqual(memory_cap["capBytes"], 999)
-
-
-if __name__ == "__main__":
-    unittest.main()

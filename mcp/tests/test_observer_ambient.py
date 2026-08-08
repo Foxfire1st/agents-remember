@@ -369,9 +369,7 @@ class HeartbeatTests(unittest.TestCase):
         while waiter.stop_seen == 0 and time.monotonic() < deadline:
             time.sleep(0.001)
         self.assertGreaterEqual(waiter.stop_seen, 1)
-        deadline = time.monotonic() + 5.0
-        while ticker.is_alive() and time.monotonic() < deadline:
-            time.sleep(0.001)
+        ticker.join(timeout=5)
         self.assertFalse(ticker.is_alive(), "ticker thread wedged after stop was set")
 
     def test_inactive_seconds_tracks_real_activity_not_heartbeats(self) -> None:
@@ -498,9 +496,7 @@ class HeartbeatTests(unittest.TestCase):
         while waiter.stop_seen == 0 and time.monotonic() < deadline:
             time.sleep(0.001)
         self.assertGreaterEqual(waiter.stop_seen, 1)
-        deadline = time.monotonic() + 5.0
-        while ticker.is_alive() and time.monotonic() < deadline:
-            time.sleep(0.001)
+        ticker.join(timeout=5)
         self.assertFalse(ticker.is_alive(), "ticker thread wedged after stop was set")
 
     def test_default_ticker_wait_returns_after_the_interval(self) -> None:
@@ -569,9 +565,7 @@ class HeartbeatTests(unittest.TestCase):
         with amb._lock:
             amb.current = None
         waiter.allow(1)
-        deadline = time.monotonic() + 5.0
-        while ticker.is_alive() and time.monotonic() < deadline:
-            time.sleep(0.001)
+        ticker.join(timeout=5)
         self.assertFalse(ticker.is_alive(), "loop did not exit when tick reported no lifecycle")
 
 

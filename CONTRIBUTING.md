@@ -137,15 +137,22 @@ Set it up once per clone:
 | Tier | Hook | Input state it reports | Runs | Cost |
 | --- | --- | --- | --- | --- |
 | `fast` | pre-commit | the staged content | generated-copy checks (skills, runtime, harness), ruff, `ruff format --check`, Pyright | about 20 seconds |
-| `full` | pre-push | Git's ref updates plus current-checkout bytes at index-known paths; the changed-lines rail is base-to-working-tree | generated-copy checks, then the full wrapper | minutes |
+| `targeted` | pre-push | Git's ref updates plus the leaf change set (changed Python files, reverse-import closure, derived test subset) at index-known paths; the changed-lines rail is base-to-working-tree | generated-copy checks, then the change-set-scoped wrapper (`--targeted`) | about a minute |
+| `full` | manual; also master integration (`worktree_integrate` on a series/master contract) | the whole tree at current-checkout bytes; memory-capped at the master integration gate | generated-copy checks, then the full wrapper | minutes (~13-18) |
 
-Both tiers enumerate Python paths with `git ls-files '*.py'`; every rail prints
+The fast tier enumerates Python paths with `git ls-files '*.py'` (the
+staged/index population); the targeted tier derives its input from the leaf diff
+(changed files, reverse-import closure, derived test subset). Every rail prints
 that input, its resolved config, and its unit count before its result. The manual
-and full wrapper also enumerate non-ignored untracked files inside the quality
-scope roots and state that they are **not** in the index/diff measurement. That is
-a report, never implicit staging. Neither tier passes a narrowing flag to ruff:
-`ruff check` runs at the configured selection in both, so the complexity rules
-bite at commit time and not only on push.
+and full-tier wrapper also enumerate non-ignored untracked files inside the
+quality scope roots and state that they are **not** in the index/diff
+measurement. That is a report, never implicit staging. Neither tier passes a
+narrowing flag to ruff: `ruff check` runs at the configured selection in both;
+the targeted tier simply points the rails at the leaf's change set, so the
+complexity rules bite at commit time and not only on push. The full wrapper runs
+exactly once per master, at the master integration gate, invoked by the
+integration step itself; leaf closeouts and leaf integrations run the targeted
+tier only.
 
 The pre-push hook forwards Git's four-field ref-update lines as provenance. It
 does not stage, stash, or mutate the index, and it does not claim the current
@@ -237,11 +244,13 @@ zero tests again, or if the runner and the registry drift apart in either direct
 
 ### Closeout
 
-Worktree closeout runs the same strict wrapper before creating a code commit,
-even when hooks are not configured, in any repository whose checkout carries the
-wrapper. A checkout that does not carry it is reported as `wrapper-unavailable`
-in the closeout payload — the commit still happens, and the payload states that
-it was not quality-checked.
+Worktree closeout runs the leaf change-set-scoped quality contract (`--targeted`)
+before creating a code commit, even when hooks are not configured, in any
+repository whose checkout carries the wrapper. The full wrapper runs exactly once
+per master, at the master integration gate, invoked by the integration step
+itself. A checkout that does not carry the wrapper is reported as
+`wrapper-unavailable` in the closeout payload — the commit still happens, and the
+payload states that it was not quality-checked.
 
 ## Writing guidelines
 
