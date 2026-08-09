@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import { ConversationTimeline } from "./ConversationTimeline";
@@ -175,6 +175,8 @@ describe("ConversationTimeline — scroll memory (F-ac)", () => {
       // beyond the end a shorter history would produce.
       expect(await endAlignmentFor(13)).toBeGreaterThan(await endAlignmentFor(10));
     } finally {
+      cleanup();
+      vi.clearAllTimers();
       vi.useRealTimers();
     }
   });
@@ -312,6 +314,8 @@ describe("ConversationTimeline — scroll memory (F-ac)", () => {
       });
       expect(viewport.scrollTop).toBe(611); // consumed — never re-applied
     } finally {
+      cleanup();
+      vi.clearAllTimers();
       vi.useRealTimers();
     }
   });
@@ -414,6 +418,8 @@ describe("ConversationTimeline — scroll memory (F-ac)", () => {
       );
       expect(viewport.scrollTop).toBe(2415 - 741);
     } finally {
+      cleanup();
+      vi.clearAllTimers();
       vi.useRealTimers();
     }
   });
@@ -452,6 +458,8 @@ describe("ConversationTimeline — scroll memory (F-ac)", () => {
       await act(async () => { await vi.advanceTimersByTimeAsync(250); });
       expect(viewport.scrollTop).toBe(2415 - 741);
     } finally {
+      cleanup();
+      vi.clearAllTimers();
       vi.useRealTimers();
     }
   });
@@ -490,6 +498,8 @@ describe("ConversationTimeline — scroll memory (F-ac)", () => {
       expect(alignedTops.length).toBe(alignments);
       expect(viewport.scrollTop).toBe(5400);
     } finally {
+      cleanup();
+      vi.clearAllTimers();
       vi.useRealTimers();
     }
   });
@@ -521,6 +531,8 @@ describe("ConversationTimeline — scroll memory (F-ac)", () => {
       await act(async () => { await vi.advanceTimersByTimeAsync(250); });
       expect(viewport.scrollTop).toBe(5400);
     } finally {
+      cleanup();
+      vi.clearAllTimers();
       vi.useRealTimers();
     }
   });

@@ -37,7 +37,6 @@ import contextlib
 import json
 import multiprocessing
 import os
-import subprocess
 import sys
 import time
 from datetime import UTC, datetime, timedelta
@@ -50,6 +49,7 @@ from _durability_measurement import (
     VacuousRunError,
     require_stress_measurement,
 )
+from _store_durability_source import extract_base_commit_tree, run_against_source
 from agents_remember.controlplane.agent_notifier_signals import (
     AgentNotifierSignalCooldownStore,
     AgentNotifierSignalRecord,
@@ -82,7 +82,13 @@ from agents_remember.providers.metrics import (
     ProviderMetricsStore,
 )
 
-__all__ = ["MIN_SUCCESSFUL_RECLAIMS", "VacuousRunError", "run_case"]
+__all__ = [
+    "MIN_SUCCESSFUL_RECLAIMS",
+    "VacuousRunError",
+    "extract_base_commit_tree",
+    "run_against_source",
+    "run_case",
+]
 
 # Survivors are what the harness accounts for. The anchor is a record that is never prunable and
 # never counted: it keeps the reclaimed set non-empty so a reclaim pass exercises the tmp +
@@ -1079,136 +1085,6 @@ def run_case(scenario: str, case: str, root: Path, **overrides: Any) -> dict[str
     profile = STRESS_PROFILE if scenario == "stress" else FORCED_PROFILE
     config = {**profile, **overrides, "case": case, "root": str(root)}
     return SCENARIOS[scenario](config)
-
-
-# --------------------------------------------------------------------------------------------
-# Pinning a run to the leaf's base commit
-# --------------------------------------------------------------------------------------------
-
-# 260731-EFA-L5 base commit. The fix lands concurrently in this same worktree, so "run it before
-# the fix" is not a thing wall-clock can be trusted to mean. Measuring an archive of this commit
-# makes the baseline reproducible whatever else has landed.
-BASE_COMMIT = "e52edaf5b655f495580efd93306afdf922b19b51"
-REPO_ROOT = Path(__file__).resolve().parents[2]
-
-# 260713-TES-L1: the harness driver imports the CURRENT module names, but the pinned base
-# commit predates the supervisor -> agent-notifier rename. The rename is behavior-neutral
-# (identifiers and module paths only), so renaming the extracted archive the same way keeps
-# the base-commit defect byte-for-byte in every store under test while letting the current
-# driver import and drive it.
-_RENAMED_SOURCE_FILES = {
-    "agents_remember/controlplane/supervisor_signals.py": (
-        "agents_remember/controlplane/agent_notifier_signals.py"
-    ),
-    "agents_remember/serving/supervisor.py": "agents_remember/serving/agent_notifier.py",
-    "agents_remember/serving/supervisor_heartbeat.py": (
-        "agents_remember/serving/agent_notifier_heartbeat.py"
-    ),
-    "agents_remember/serving/supervisor_models.py": (
-        "agents_remember/serving/agent_notifier_models.py"
-    ),
-    "agents_remember/serving/_supervisor_actions.py": (
-        "agents_remember/serving/_agent_notifier_actions.py"
-    ),
-    "agents_remember/serving/_supervisor_evaluation.py": (
-        "agents_remember/serving/_agent_notifier_evaluation.py"
-    ),
-}
-
-
-def _apply_rename_shim_to_base_tree(source_root: Path) -> None:
-    """Rename the supervisor modules/identifiers in an extracted BASE-COMMIT tree."""
-    for old_rel, new_rel in _RENAMED_SOURCE_FILES.items():
-        old_path = source_root / old_rel
-        if not old_path.is_file():
-            continue
-        new_path = source_root / new_rel
-        new_path.parent.mkdir(parents=True, exist_ok=True)
-        old_path.rename(new_path)
-    for path in source_root.rglob("*.py"):
-        text = path.read_text(encoding="utf-8")
-        if "supervisor" not in text.lower():
-            continue
-        updated = (
-            text.replace("_supervisor_actions", "_agent_notifier_actions")
-            .replace("_supervisor_evaluation", "_agent_notifier_evaluation")
-            .replace("_supervisor_context", "_agent_notifier_context")
-            .replace("_supervisor_loop", "_agent_notifier_loop")
-            .replace("_supervisor_heartbeat_payload", "_agent_notifier_heartbeat_payload")
-            .replace("_supervisor_banner", "_agent_notifier_banner")
-            .replace("run_supervisor_sweep", "run_agent_notifier_sweep")
-            .replace("supervisor_staleness_banner", "agent_notifier_staleness_banner")
-            .replace("supervisor_heartbeat", "agent_notifier_heartbeat")
-            .replace("supervisor_signals", "agent_notifier_signals")
-            .replace("supervisor_models", "agent_notifier_models")
-            .replace("supervisor_signal", "agent_notifier_signal")
-            .replace("KNOWN_SUPERVISOR_FIELDS", "KNOWN_AGENT_NOTIFIER_FIELDS")
-            .replace("DEFAULT_SUPERVISOR_", "DEFAULT_AGENT_NOTIFIER_")
-            .replace("_parse_supervisor", "_parse_agent_notifier")
-            .replace("_require_supervisor_floor_seconds", "_require_agent_notifier_floor_seconds")
-            .replace("Supervisor", "AgentNotifier")
-            .replace("SUPERVISOR_SIGNAL_OWNERSHIP", "AGENT_NOTIFIER_SIGNAL_OWNERSHIP")
-            .replace("SUPERVISOR_SIGNAL_SCHEMA", "AGENT_NOTIFIER_SIGNAL_SCHEMA")
-        )
-        if updated != text:
-            path.write_text(updated, encoding="utf-8")
-
-
-def extract_base_commit_tree(destination: Path, *, repo: Path = REPO_ROOT) -> Path:
-    """``git archive`` the base commit's ``agents_remember`` into ``destination``.
-
-    An archive, never a worktree: this runs inside a coordination worktree tree, and adding a
-    second git worktree under it is exactly the kind of side effect a measurement must not have.
-    """
-    destination.mkdir(parents=True, exist_ok=True)
-    archive = destination / "base.tar"
-    with archive.open("wb") as handle:
-        subprocess.run(
-            ["git", "archive", BASE_COMMIT, "mcp/src/agents_remember"],
-            cwd=repo,
-            stdout=handle,
-            stderr=subprocess.PIPE,
-            check=True,
-        )
-    # ``tar`` rather than ``tarfile``: the stdlib extractor's 3.14 filter migration emits a
-    # DeprecationWarning that this suite (correctly) turns into an error.
-    subprocess.run(
-        ["tar", "-xf", str(archive), "-C", str(destination)],
-        capture_output=True,
-        check=True,
-    )
-    archive.unlink()
-    source_root = destination / "mcp" / "src"
-    _apply_rename_shim_to_base_tree(source_root)
-    return source_root
-
-
-# 260731-EFA-L7 R10: test moved verbatim in L7 split; branch not exercised by the unchanged assertion set (mcp/tests/_store_durability.py:1085).
-def run_against_source(
-    source_root: Path, config: dict[str, Any]
-) -> dict[str, Any]:  # pragma: no cover
-    """Run the harness in a fresh interpreter whose ``agents_remember`` is ``source_root``."""
-    work = Path(config["root"])
-    work.mkdir(parents=True, exist_ok=True)
-    config_path = work / "harness-config.json"
-    out_path = work / "harness-result.json"
-    payload = {**config, "source_root": str(source_root), "out": str(out_path)}
-    config_path.write_text(json.dumps(payload), encoding="utf-8")
-    environment = {**os.environ, "PYTHONPATH": str(source_root)}
-    completed = subprocess.run(
-        [sys.executable, str(Path(__file__).resolve()), str(config_path)],
-        env=environment,
-        capture_output=True,
-        text=True,
-        timeout=config.get("timeout", 120.0) * 4,
-        check=False,
-    )
-    if completed.returncode != 0:
-        raise RuntimeError(
-            f"harness against {source_root} exited {completed.returncode}: "
-            f"{completed.stdout}\n{completed.stderr}"
-        )
-    return json.loads(out_path.read_text(encoding="utf-8"))
 
 
 # --------------------------------------------------------------------------------------------

@@ -1,4 +1,4 @@
-import { act, render, screen } from "@testing-library/react";
+import { act, cleanup, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import { ConversationTimeline } from "./ConversationTimeline";
@@ -56,6 +56,8 @@ describe("ConversationTimeline — scroll memory (F-ac)", () => {
       expect(viewport.scrollTop).not.toBe(5000);
       expect(viewport.scrollTop).toBe(5400);
     } finally {
+      cleanup();
+      vi.clearAllTimers();
       vi.useRealTimers();
     }
   });
@@ -93,6 +95,8 @@ describe("ConversationTimeline — scroll memory (F-ac)", () => {
       expect(cancelSpy.mock.calls.length - cancelsAtStart).toBe(0);
     } finally {
       cancelSpy.mockRestore();
+      cleanup();
+      vi.clearAllTimers();
       vi.useRealTimers();
     }
   });
