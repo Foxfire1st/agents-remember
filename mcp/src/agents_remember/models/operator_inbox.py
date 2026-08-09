@@ -59,3 +59,14 @@ class OperatorInboxConsumeResponse(ToolResponse):
     state: OperatorInboxState
     consumedNow: bool
     consumedAt: str | None = None
+
+
+class OperatorInboxSupersedeResponse(ToolResponse):
+    """``operator_inbox_supersede``: the terminal marker after an explicit supersession."""
+
+    entryId: str
+    state: OperatorInboxState
+    supersededNow: bool
+    terminalAt: str | None = None
+    terminalReason: str | None = None
+    supersededBy: str | None = None

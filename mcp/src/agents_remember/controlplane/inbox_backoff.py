@@ -1,8 +1,8 @@
-"""Redelivery backoff + per-target rate limiting for pending unacked operator inbox entries.
+"""Redelivery backoff + per-target rate limiting for pending operator inbox entries.
 
-R3 (260707-HFX2-L1): a pending/unacked row (``state == "pending"``; ``deliveryState`` never
-reaches a terminal state on its own -- only ``consume`` does) carries a ``nextAttemptAt``
-backoff schedule. L2 (the agent-notifier sweep, a sibling leaf) is the actual driver that walks
+Every pending row (``state == "pending"``) carries a ``nextAttemptAt`` backoff schedule until
+it lands (N16) or resolves terminal by ceiling/grace/retention. L2 (the agent-notifier sweep,
+a sibling leaf) is the actual driver that walks
 ``OperatorInboxStore.list_redeliverable`` on a cadence and calls ``deliver_inbox_entry`` again;
 this module is the pure math + the per-target rate-limit gate the sweep consults before
 re-attempting, mirroring the ``OrchestrationNudgeStore.record`` rate-limit pattern
@@ -32,8 +32,9 @@ DEFAULT_RATE_LIMIT_SECONDS = MIN_REDELIVERY_INTERVAL_SECONDS
 _REDELIVERABLE_DELIVERY_STATES = frozenset(
     {"queued", "no-hosted-session", "delivered", "unconfirmed"}
 )
-"""Every deliveryState is redeliverable while the row is pending -- 'delivered' is never terminal
-(R1: pasted != perceived), so a delivered-but-unacked row still schedules a nudge."""
+"""Every deliveryState is redeliverable while the row is pending -- only a correlated adapter
+acceptance at a turn boundary writes the ``landed`` terminal state (N16), so a delivered row
+that has not landed still schedules another attempt."""
 
 
 def backoff_seconds_for_attempt(attempt_count: int) -> float:

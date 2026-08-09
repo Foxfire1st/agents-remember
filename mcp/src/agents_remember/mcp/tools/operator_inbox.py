@@ -8,6 +8,7 @@ from agents_remember.application.operator_inbox_tools import (
     operator_inbox_consume_tool,
     operator_inbox_poll_tool,
     operator_inbox_post_tool,
+    operator_inbox_supersede_tool,
     post_operator_inbox,
 )
 from agents_remember.models.application_requests import OperatorInboxPostRequest
@@ -53,6 +54,7 @@ def operator_inbox_poll_payload(
     lifecycle_id: str | None,
     agent_id: str | None,
     recipient_role: Any = None,
+    include_terminal: bool = False,
 ) -> dict[str, Any]:
     return _tool_payload(
         "operator_inbox_poll",
@@ -61,6 +63,7 @@ def operator_inbox_poll_payload(
             lifecycle_id=lifecycle_id,
             agent_id=agent_id,
             recipient_role=recipient_role,
+            include_terminal=include_terminal,
         ),
     )
 
@@ -79,5 +82,23 @@ def operator_inbox_consume_payload(
             entry_id=entry_id,
             consumed_by=consumed_by,
             consumed_via=consumed_via,
+        ),
+    )
+
+
+def operator_inbox_supersede_payload(
+    config: McpRuntimeConfig,
+    *,
+    entry_id: str,
+    reason: str,
+    superseded_by: str = "model",
+) -> dict[str, Any]:
+    return _tool_payload(
+        "operator_inbox_supersede",
+        operator_inbox_supersede_tool(
+            config,
+            entry_id=entry_id,
+            reason=reason,
+            superseded_by=superseded_by,
         ),
     )

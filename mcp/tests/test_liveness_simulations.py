@@ -193,9 +193,9 @@ class _LivenessSimulationCase(unittest.TestCase):
 
 
 class NeverAckedSeatTests(_LivenessSimulationCase):
-    """Scenario 1 (P-5/P-14): a spawned seat whose ``ack-by`` expectation row is never met."""
+    """Scenario 1 (N3): a live seat whose inbox row never lands hits the attempt ceiling."""
 
-    def test_never_briefed_worker_nudges_then_escalates_to_the_ladder(self) -> None:
+    def test_live_silent_seat_reaches_unresolved_not_escalation(self) -> None:
         self.catalog.upsert(replace(_entry("orchestrator-1"), spawn_role="orchestrator"))
         self.catalog.upsert(
             replace(_entry("manager-1"), spawn_role="manager", spawned_by_session="orchestrator-1")
@@ -207,12 +207,12 @@ class NeverAckedSeatTests(_LivenessSimulationCase):
                 spawned_by_session="manager-1",
             )
         )
-        # The dispatch-time expectation row (HFX2-L1) that a real post writes atomically -- never
-        # met because the worker's inbox row never lands.
+        # The dispatch-time verdict-by expectation row -- still overdue because the worker's
+        # inbox row never lands, so the owner is nudged exactly once.
         write_expectation_row(
             self.expectation_store,
             Expectation(
-                kind="ack-by",
+                kind="verdict-by",
                 source_id="worker-1",
                 subject=ExpectationSubject(
                     agent_id="worker-1", leaf_key="repo-a/260707_master/leaf-9"
@@ -222,10 +222,18 @@ class NeverAckedSeatTests(_LivenessSimulationCase):
             now=NOW - timedelta(minutes=10),
             sla_seconds=60.0,
         )
+        entry = create_operator_inbox_entry(
+            InboxMessage(ask="dispatch", response="you are the worker", message_kind="message"),
+            entry_id="e1",
+            now=NOW.isoformat(),
+            routing=InboxRouting(address=InboxAddress(lifecycle_id=None, agent_id="worker-1")),
+            poster=InboxPoster(created_by="manager", created_via="cli"),
+        )
+        self.inbox_store.append(entry)
         ctx = self._ctx()
 
-        # Tick 1: the sweep sees the overdue ack-by row, auto-nudges the owner (worker-1's
-        # manager, via spawn provenance), and marks the expectation row missed.
+        # Tick 1: the sweep sees the overdue verdict-by row, auto-nudges the owner (worker-1's
+        # manager, via spawn provenance), marks the expectation row missed, and attempts delivery.
         run_agent_notifier_sweep(ctx, now=NOW)
         self.assertEqual(self.expectation_store.current()["acked-worker-1"].state, "missed")
         self.assertIn("orchestration.nudge", self._events())
@@ -233,23 +241,27 @@ class NeverAckedSeatTests(_LivenessSimulationCase):
         self.assertEqual(len(nudges), 1)
         self.assertEqual(nudges[0].agentId, "manager-1")
 
-        # The nudge itself is now a pending, owner-addressed row -- if the manager never acks it,
-        # the SAME escalation ladder every other unacked row rides climbs it to the developer.
-        nudge_id = nudges[0].id
-        final_rung_at = self._run_until(
+        # The original row keeps retrying on its durable backoff; with a live-but-silent
+        # addressee the N3 attempt ceiling resolves it ``unresolved`` -- no ladder rung, no
+        # escalation, delivery evidence intact.
+        _final_at = self._run_until(
             ctx,
-            lambda: self.inbox_store.current()[nudge_id].rung >= 3,
+            lambda: self.inbox_store.current()["e1"].state == "unresolved",
             start=NOW + timedelta(minutes=2),
             max_ticks=90,
         )
-        self.assertLessEqual((final_rung_at - NOW).total_seconds(), 12 * 60 * 60)
-        self.assertEqual(self.inbox_store.current()[nudge_id].rung, 3)
+        final = self.inbox_store.current()["e1"]
+        self.assertEqual(final.attemptCount, PERSISTENT_FAILURE_ATTEMPTS)
+        self.assertEqual(final.terminalReason, "attempt-limit")
+        self.assertIsNone(final.escalatedAt)
+        self.assertNotIn("orchestration.escalation.rung", self._events())
+        self.assertIn("orchestration.agent-notifier.unresolved", self._events())
 
 
 class NoHostedSessionTests(_LivenessSimulationCase):
     """Scenario 3 (#16): a durable row addressed to a seat with no running hosted session."""
 
-    def test_no_hosted_session_row_redelivers_on_backoff_then_escalates(self) -> None:
+    def test_no_hosted_session_row_redelivers_on_backoff_then_unresolved(self) -> None:
         self.catalog.upsert(replace(_entry("manager-1"), spawn_role="manager"))
         # worker-1 has a catalog row but no live tmux session behind it (host says unreachable).
         self.catalog.upsert(
@@ -273,24 +285,26 @@ class NoHostedSessionTests(_LivenessSimulationCase):
             run_agent_notifier_sweep(ctx, now=now)
             current = self.inbox_store.current()["e1"]
             self.assertEqual(current.deliveryState, "no-hosted-session")
-            if current.escalatedAt is not None:
+            if current.state != "pending":
                 break
             assert current.nextAttemptAt is not None
             now = datetime.fromisoformat(current.nextAttemptAt)
 
         final = self.inbox_store.current()["e1"]
         self.assertEqual(final.attemptCount, PERSISTENT_FAILURE_ATTEMPTS)
-        self.assertIsNotNone(final.escalatedAt)
-        self.assertIn("orchestration.agent-notifier.escalate", self._events())
+        self.assertEqual(final.state, "unresolved")
+        self.assertEqual(final.terminalReason, "attempt-limit")
+        self.assertIsNone(final.escalatedAt)
+        self.assertIn("orchestration.agent-notifier.unresolved", self._events())
 
 
 class DeadSeatStormTests(_LivenessSimulationCase):
-    """HFX2-L8: fleet-scale rung-terminal no-hosted-session rows terminate in bounded time.
+    """Fleet-scale dead-seat rows resolve terminal in bounded time (D4 + N2).
 
-    Updated for the ruled invariant (developer, 2026-07-09): a storm past the hard health cap is
-    trimmed to INBOX_MAX_CURRENT_ROWS by the sweep's own compaction BEFORE the sweep reads its
-    snapshot -- system health outranks the rows -- and the capped survivors then ladder-resolve
-    and compact away exactly as before."""
+    A storm past the hard health cap is trimmed to INBOX_MAX_CURRENT_ROWS by the sweep's own
+    compaction BEFORE the sweep reads its snapshot -- system health outranks the rows -- and the
+    capped survivors then expire (rebind grace exhausted, no replacement) and stay inspectable
+    for the 48h marker window before physical eviction."""
 
     def test_dead_seat_storm_terminates_and_compacts_without_stale_heartbeat(self) -> None:
         row_count = 2000
@@ -326,16 +340,16 @@ class DeadSeatStormTests(_LivenessSimulationCase):
         capped = INBOX_MAX_CURRENT_ROWS
         self.assertEqual(result.pending_inbox_count, capped)
         self.assertEqual(result.redeliverable_inbox_count, capped)
-        self.assertEqual(result.findings[0].kind, "inbox-ladder-terminal")
+        self.assertEqual(result.findings[0].kind, "rebind-expired")
         self.assertEqual(
-            len([action for action in result.actions if action.action == "ladder-resolve"]),
+            len([action for action in result.actions if action.action == "expire"]),
             capped,
         )
         self.assertEqual([action for action in result.actions if action.action == "redeliver"], [])
 
         current = self.inbox_store.current()
         self.assertLessEqual(len(current), capped)
-        self.assertTrue(all(entry.state == "ladder-resolved" for entry in current.values()))
+        self.assertTrue(all(entry.state == "expired" for entry in current.values()))
         self.assertEqual(
             self.inbox_store.list_redeliverable(now=NOW + timedelta(seconds=1)),
             [],
@@ -355,7 +369,8 @@ class DeadSeatStormTests(_LivenessSimulationCase):
             )
         )
 
-        removed = self.inbox_store.compact(now=NOW + timedelta(seconds=1))
+        # Terminal markers keep their 48h visibility window, then are physically evicted.
+        removed = self.inbox_store.compact(now=NOW + timedelta(hours=49))
         self.assertGreaterEqual(removed, capped)
         self.assertEqual(self.inbox_store.read(), [])
 
@@ -395,23 +410,19 @@ class ManagerMidTurnSignalLandsTests(_LivenessSimulationCase):
 
 
 class DeadManagerLiveWorkersTests(_LivenessSimulationCase):
-    """Scenario 5 (P-6 + ladder walk): builds on
-    ``test_dead_manager_with_live_workers_respawns_and_surfaces_orphans``
-    (``test_agent_notifier.py::LadderWalkIntegrationTests``) rather than duplicating its single-sweep
-    proof -- this continues the SAME simulation for a second tick to prove the orphaned workers
-    themselves get surfaced to the current manager as dead-upstream on the very next sweep, closing
-    the loop end-to-end instead of stopping at "the manager got respawned"."""
+    """Scenario 5 (N14): replacement mid-flight -- rows rebind to the current manager and
+    orphaned workers surface to it as dead-upstream, without any new post."""
 
-    def test_dead_manager_respawn_then_orphans_signal_the_current_manager_next_tick(self) -> None:
+    def test_dead_manager_rows_rebind_and_orphans_signal_the_current_manager(self) -> None:
         self.catalog.upsert(replace(_entry("orchestrator-1"), spawn_role="orchestrator"))
         self.catalog.upsert(
             replace(
                 _entry("manager-1"),
+                status="terminated",
+                terminated_at=(NOW - timedelta(minutes=10)).isoformat(),
                 spawn_role="manager",
                 spawned_by_session="orchestrator-1",
                 leaf_key="repo-a/260707_master/old-manager-anchor",
-                turn_state="stale",
-                turn_state_changed_at=(NOW - timedelta(minutes=10)).isoformat(),
             )
         )
         self.catalog.upsert(
@@ -428,6 +439,13 @@ class DeadManagerLiveWorkersTests(_LivenessSimulationCase):
                 spawned_by_session="manager-1",
             )
         )
+        # The replacement manager appears before the grace window expires.
+        self.catalog.upsert(
+            replace(
+                _entry("manager-2", leaf_key="repo-a/260707_master/current-manager-anchor"),
+                spawn_role="manager",
+            )
+        )
         entry = create_operator_inbox_entry(
             InboxMessage(ask="ask", response="resp", message_kind="escalation"),
             entry_id="e1",
@@ -437,46 +455,47 @@ class DeadManagerLiveWorkersTests(_LivenessSimulationCase):
                     lifecycle_id=None, agent_id="manager-1", recipient_role="manager"
                 )
             ),
-            poster=InboxPoster(created_by="system", created_via="cli"),
-        ).model_copy(update={"rung": 1, "escalatedAt": (NOW - timedelta(minutes=5)).isoformat()})
+            poster=InboxPoster(
+                created_by="worker-1",
+                created_via="cli",
+                sender_agent_id="worker-1",
+                sender_role="worker",
+            ),
+        ).model_copy(update={"leafKey": "repo-a/260707_master/leaf-1"})
         self.inbox_store.append(entry)
 
         ctx = self._ctx()
 
-        # Tick 1: the silent manager is retired-as-suspect and respawned; its live workers are
-        # surfaced as orphans in the respawn event (the single-sweep proof this builds on).
+        # Tick 1: the row addressed to the dead manager rebinds to the replacement -- the same
+        # durable row, no new post -- while the manager is never resurrected.
         run_agent_notifier_sweep(ctx, now=NOW)
         retired = self.catalog.get("manager-1")
         assert retired is not None
         self.assertEqual(retired.status, "terminated")
-        respawn_events = [
+        rebound = self.inbox_store.current()["e1"]
+        self.assertEqual(rebound.agentId, "manager-2")
+        self.assertEqual(rebound.ownerAgentId, "manager-2")
+        self.assertEqual(rebound.attemptCount, 0)
+        rebound_events = [
             e
             for e in self.event_store.read(None)
-            if e.kind == "orchestration.agent-notifier.respawn"
+            if e.kind == "orchestration.agent-notifier.rebind"
         ]
-        legacy_respawn_events = [
-            e for e in self.event_store.read(None) if e.kind == "orchestration.supervisor.respawn"
-        ]
-        self.assertEqual(len(respawn_events), 1)
-        # The rename window emits every agent-notifier event under the legacy name too.
-        self.assertEqual(len(legacy_respawn_events), 1)
-        self.assertEqual(
-            sorted(respawn_events[0].data["orphanedWorkers"]), ["worker-1", "worker-2"]
-        )
+        self.assertEqual(len(rebound_events), 1)
+        self.assertEqual(rebound_events[0].data["toAgentId"], "manager-2")
 
-        # The respawn directive is the existing mechanism that creates/wakes a successor. Model
-        # that successor appearing before the next reconciliation tick; leaf signals must now
-        # address it rather than the workers' retired provenance or the orchestrator above it.
-        self.catalog.upsert(
-            replace(
-                _entry("manager-2", leaf_key="repo-a/260707_master/current-manager-anchor"),
-                spawn_role="manager",
+        # Tick 2: the SAME catalog shows both workers' owner as dead, so the dead-upstream
+        # predicate fires for each and signals the current manager -- the orphaned workers are
+        # never silently stranded, and they never absorb the manager's role.
+        before_ids = {
+            event.id
+            for event in self.event_store.read(None)
+            if event.kind
+            in (
+                "orchestration.agent-notifier.dead-upstream",
+                "orchestration.supervisor.dead-upstream",
             )
-        )
-
-        # Tick 2 (same ctx, later): the SAME catalog now shows both workers' owner as dead, so the
-        # dead-upstream predicate fires for each and signals the current manager -- the
-        # orphaned workers are never silently stranded, and they never absorb the manager's role.
+        }
         result = run_agent_notifier_sweep(ctx, now=NOW + timedelta(minutes=2))
         dead_upstream = [f for f in result.findings if f.kind == "dead-upstream"]
         session_ids = sorted(f.session_id for f in dead_upstream if f.session_id is not None)
@@ -484,12 +503,12 @@ class DeadManagerLiveWorkersTests(_LivenessSimulationCase):
         manager_events = [
             e
             for e in self.event_store.read(None)
-            if e.kind == "orchestration.agent-notifier.dead-upstream"
+            if e.kind == "orchestration.agent-notifier.dead-upstream" and e.id not in before_ids
         ]
         legacy_manager_events = [
             e
             for e in self.event_store.read(None)
-            if e.kind == "orchestration.supervisor.dead-upstream"
+            if e.kind == "orchestration.supervisor.dead-upstream" and e.id not in before_ids
         ]
         self.assertEqual(len(manager_events), 2)
         self.assertEqual(len(legacy_manager_events), 2)

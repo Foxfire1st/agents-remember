@@ -504,6 +504,12 @@ def _operator_inbox_payloads(config) -> dict[str, dict]:
             consumed_by="model",
             consumed_via="cli",
         ),
+        "operator_inbox_supersede": tools.operator_inbox_supersede_payload(
+            config,
+            entry_id=posted["entryId"],
+            reason="overtaken",
+            superseded_by="developer",
+        ),
     }
 
 

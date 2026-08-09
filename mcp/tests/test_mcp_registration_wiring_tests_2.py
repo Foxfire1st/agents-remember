@@ -505,7 +505,12 @@ class RegistrationWiringTests2(RegistrationWiringTests):
         self.assertEqual(recorder.args, (self.config,))
         self.assertEqual(
             recorder.kwargs,
-            {"lifecycle_id": "life-1", "agent_id": "agent-1", "recipient_role": "worker"},
+            {
+                "lifecycle_id": "life-1",
+                "agent_id": "agent-1",
+                "recipient_role": "worker",
+                "include_terminal": False,
+            },
         )
 
     def test_operator_inbox_consume_records_the_model_as_the_consumer(self) -> None:
@@ -518,6 +523,23 @@ class RegistrationWiringTests2(RegistrationWiringTests):
         self.assertEqual(
             recorder.kwargs,
             {"entry_id": "entry-1", "consumed_by": "model", "consumed_via": "cli"},
+        )
+
+    def test_operator_inbox_supersede_forwards_entry_reason_and_attribution(self) -> None:
+        recorder = self.invoke(
+            "operator_inbox_supersede",
+            "agents_remember.mcp.registration.orchestration.operator_inbox_supersede_payload",
+            {"entry_id": "entry-1", "reason": "overtaken", "superseded_by": "developer"},
+        )
+
+        self.assertEqual(recorder.args, (self.config,))
+        self.assertEqual(
+            recorder.kwargs,
+            {
+                "entry_id": "entry-1",
+                "reason": "overtaken",
+                "superseded_by": "developer",
+            },
         )
 
     def test_orchestration_nudge_manager_separates_target_from_subject(self) -> None:

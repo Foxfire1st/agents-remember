@@ -208,29 +208,31 @@ class ReconcileAndCompactTests(unittest.TestCase):
         self.assertEqual(resolved, ())
         self.assertEqual(self.store.read(), [])
 
-    def test_consumed_snapshot_remains_authoritative_when_resolver_targets_same_id(self) -> None:
+    def test_landed_snapshot_remains_authoritative_when_resolver_targets_same_id(self) -> None:
         self.store.append(_inbox_entry("n1"))
-        self.store.consume(
+        inbox_transitions.mark_landed(
+            self.store,
             "n1",
             now=(NOW + timedelta(seconds=1)).isoformat(),
-            consumed_by="model",
-            consumed_via="cli",
+            reason="adapter-accepted-at-turn-boundary",
         )
         _removed, current, resolved = self.store.reconcile_and_compact(
             now=NOW + timedelta(seconds=2),
             reconcile=lambda _current: {"n1": CONFIRMED_GONE_REASON},
         )
         self.assertEqual(resolved, ())
-        self.assertEqual(current["n1"].state, "consumed")
+        self.assertEqual(current["n1"].state, "landed")
 
-    def test_existing_pending_ttl_fallback_is_unchanged(self) -> None:
+    def test_pending_ttl_is_a_sweep_resolution_boundary_not_silent_compaction(self) -> None:
         self.store.append(_inbox_entry("ancient", subject=None, created_at=NOW - timedelta(days=3)))
         self.store.append(_inbox_entry("fresh", subject=None, created_at=NOW - timedelta(hours=1)))
         _removed, current, _resolved = self.store.reconcile_and_compact(
             now=NOW,
             reconcile=lambda _current: {},
         )
-        self.assertEqual(set(current), {"fresh"})
+        # Compaction keeps both: the sweep stamps the ancient row ``expired`` (visible and
+        # counted) before any retention event may drop it.
+        self.assertEqual(set(current), {"ancient", "fresh"})
 
     def test_removed_count_is_persisted_folded_id_delta_not_transient_snapshot_count(self) -> None:
         self.store.append(_inbox_entry("n1"))

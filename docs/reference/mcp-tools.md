@@ -34,7 +34,10 @@ surrounding procedure. See the [Skills reference](skills.md).
 | `attach_terminal_session_to_leaf` | Bind an existing hosted session to one exact qualified leaf and seat role. | `session_id`, `leaf_key`, `role` |
 | `spawn_agent_session` | Resolve settings-owned role/level launch knobs, create and bind one seat, and return `spawned-unbriefed`; it does not deliver caller task context. | `env.AR_SPAWN_ROLE`, `level`, `leaf_key`, `submit=false`, no `context` |
 | `hosted_session_readiness` | Read-only bounded readiness check for the exact returned catalog id, addressable pane, harness prompt marker, and non-copy-mode state. | `session_id`, finite `wait_seconds` (maximum 60) |
-| `operator_inbox_post` | Create the one durable exact-agent `dispatch-brief`; only `delivered` plus `harness-log-confirmed` proves the seat briefed. | `agent_id`, `message_kind="dispatch-brief"`, `deliver_to_hosted=true` |
+| `operator_inbox_post` | Queue a durable external-chat inbox row; the row lands (terminal `landed`) only on correlated adapter acceptance at a turn boundary (N16). | `ask`, `response`, `lifecycle_id`/`agent_id`/`recipient_role`, `message_kind`, `deliver_to_hosted=true` |
+| `operator_inbox_poll` | List pending rows for a mailbox; `include_terminal=true` additionally lists terminal markers inside their 48h retention window (N11). | `lifecycle_id`/`agent_id`/`recipient_role`, `include_terminal=false` |
+| `operator_inbox_consume` | Optional attribution marker only (N16): nothing mechanical (retry, expectation, escalation, terminality) hangs off it. | `entry_id` |
+| `operator_inbox_supersede` | Explicitly supersede one pending command (R11): terminal `superseded`, no false ack, skipped by every retry/evaluation path. | `entry_id`, `reason`, `superseded_by` |
 | `session_retire` | Terminate and mark one catalog session under role-scoped authority. | `actor_session_id`, `session_id`, `reason` |
 | `session_rename` | Rename one hosted catalog session. | `session_id`, `label` |
 

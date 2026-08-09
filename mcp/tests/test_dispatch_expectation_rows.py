@@ -174,7 +174,8 @@ class InboxExpectationRowTests(unittest.TestCase):
         self.tmp = Path(tempfile.mkdtemp())
         self.config = _config(self.tmp)
 
-    def test_post_writes_an_ack_by_row(self) -> None:
+    def test_post_no_longer_writes_an_ack_by_row(self) -> None:
+        """N16: ack-by is retired -- ordinary posts write no expectation row at all."""
         posted = inbox_tools.operator_inbox_post_payload(
             self.config,
             address=InboxAddress(lifecycle_id="L1", agent_id="agent-a", recipient_role="worker"),
@@ -183,11 +184,10 @@ class InboxExpectationRowTests(unittest.TestCase):
             delivery=HostedDelivery(enabled=False),
         )
         rows = ExpectationRowStore(observer_root(self.config)).pending()
-        self.assertEqual(len(rows), 1)
-        self.assertEqual(rows[0].kind, "ack-by")
-        self.assertEqual(rows[0].sourceId, posted["entryId"])
+        self.assertEqual(rows, [])
+        self.assertEqual(posted["state"], "pending")
 
-    def test_consume_meets_the_ack_by_row(self) -> None:
+    def test_consume_is_attribution_only_and_meets_nothing(self) -> None:
         posted = inbox_tools.operator_inbox_post_payload(
             self.config,
             address=InboxAddress(lifecycle_id="L1", agent_id="agent-a", recipient_role="worker"),
@@ -195,16 +195,16 @@ class InboxExpectationRowTests(unittest.TestCase):
             poster=InboxPoster(created_by="developer", created_via="dashboard"),
             delivery=HostedDelivery(enabled=False),
         )
-        inbox_tools.operator_inbox_consume_payload(
+        consumed = inbox_tools.operator_inbox_consume_payload(
             self.config,
             entry_id=posted["entryId"],
             consumed_by="model",
             consumed_via="cli",
         )
         rows = ExpectationRowStore(observer_root(self.config)).current()
-        self.assertEqual(len(rows), 1)
-        row = next(iter(rows.values()))
-        self.assertEqual(row.state, "met")
+        self.assertEqual(rows, {})
+        self.assertEqual(consumed["state"], "pending")
+        self.assertIsNotNone(consumed["consumedAt"])
 
 
 if __name__ == "__main__":

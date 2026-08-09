@@ -171,6 +171,7 @@ class StateSignalDeliveryTests(unittest.TestCase):
         submit.assert_called_once()
         self.assertEqual(recorded.deliveryState, "delivered")
         self.assertEqual(recorded.adapterDeliveryState, "accepted")
+        self.assertEqual(recorded.state, "landed")
         self.assertTrue(state_signal_landed(recorded))
         self.assertIsNone(recorded.nextAttemptAt)
         self.assertEqual(
@@ -194,6 +195,7 @@ class StateSignalDeliveryTests(unittest.TestCase):
             )
         submit.assert_called_once()
         self.assertEqual(recorded.adapterDeliveryState, "queued")
+        self.assertEqual(recorded.state, "pending")
         self.assertFalse(state_signal_landed(recorded))
         self.assertIsNotNone(recorded.nextAttemptAt)
 

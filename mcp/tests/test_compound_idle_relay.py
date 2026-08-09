@@ -553,6 +553,7 @@ class CompoundIdleRelayTests(unittest.TestCase):
             poster=InboxPoster(created_by="agent-notifier", created_via="cli"),
         ).model_copy(
             update={
+                "state": "landed",
                 "deliveryState": "delivered",
                 "adapterDeliveryState": "accepted",
                 "deliveredToSession": "manager-1",

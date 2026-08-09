@@ -36,6 +36,9 @@ FindingKind = Literal[
     "compound-idle-due",
     "non-reaction-due",
     "boundary-drain",
+    "rebind-due",
+    "rebind-expired",
+    "inbox-ttl-expired",
 ]
 ActionKind = Literal[
     "redeliver",
@@ -48,6 +51,8 @@ ActionKind = Literal[
     "compound-idle",
     "non-reaction",
     "boundary-drain",
+    "rebind",
+    "expire",
     "none",
 ]
 

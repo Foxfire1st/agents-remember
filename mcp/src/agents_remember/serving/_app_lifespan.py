@@ -13,7 +13,11 @@ from agents_remember.controlplane.agent_notifier_signals import AgentNotifierSig
 from agents_remember.controlplane.expectation_rows import ExpectationRowStore
 from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
 from agents_remember.controlplane.orchestration_nudges import OrchestrationNudgeStore
-from agents_remember.kernel.agentic_settings import load_agentic_settings
+from agents_remember.kernel.agentic_settings import (
+    DEFAULT_AGENT_NOTIFIER_INTERVAL_SECONDS,
+    AgenticSettings,
+    load_agentic_settings,
+)
 from agents_remember.observer.event_retention import (
     WORKSPACE_EVENT_COMPACT_INTERVAL_SECONDS,
     compact_workspace_river,
@@ -39,6 +43,7 @@ from agents_remember.serving.heap_diag import (
     start_heap_tracing,
     trim_malloc,
 )
+from agents_remember.serving.relay_death_watch import relay_death_watch_loop
 
 if TYPE_CHECKING:
     from agents_remember.mcp.config import McpRuntimeConfig
@@ -67,10 +72,21 @@ async def _metrics_loop(config: McpRuntimeConfig, metrics_store: ProviderMetrics
         await asyncio.sleep(DEFAULT_SAMPLE_INTERVAL_SECONDS)
 
 
-def _agent_notifier_context(runtime: _ServingRuntime) -> AgentNotifierContext:
-    """One sweep's view of every store its predicates read directly."""
+def _agent_notifier_context(
+    runtime: _ServingRuntime,
+    settings: AgenticSettings | None = None,
+) -> AgentNotifierContext:
+    """One sweep's view of every store its predicates read directly.
 
-    settings = load_agentic_settings(runtime.config.coordination_root)
+    The sweep loop passes its resolved (possibly last-good) settings so the context is built
+    from exactly the same snapshot the enabled-check and interval used.
+    """
+
+    settings = (
+        settings
+        if settings is not None
+        else load_agentic_settings(runtime.config.coordination_root)
+    )
     root = runtime.observer_root
     return AgentNotifierContext(
         catalog=runtime.catalog,
@@ -95,13 +111,34 @@ def _agent_notifier_context(runtime: _ServingRuntime) -> AgentNotifierContext:
 
 
 async def _agent_notifier_loop(runtime: _ServingRuntime) -> None:
+    """The notifier sweep loop, with last-good settings resilience (R7/N5).
+
+    ``load_agentic_settings`` runs INSIDE the loop's try: a failed read keeps the previous
+    good configuration for that sweep, fails loud per tick, and never kills the loop. Only
+    with no last-good snapshot at all does the loop skip the sweep and retry next interval.
+    """
+    last_good: AgenticSettings | None = None
     while True:
-        settings = load_agentic_settings(runtime.config.coordination_root)
-        if not settings.agent_notifier.enabled:
-            await asyncio.sleep(settings.agent_notifier.interval_seconds)
-            continue
         try:
-            ctx = _agent_notifier_context(runtime)
+            settings = load_agentic_settings(runtime.config.coordination_root)
+            last_good = settings
+        except Exception:
+            if last_good is None:
+                logger.exception(
+                    "agent-notifier settings load failed; no last-good settings yet; "
+                    "retrying next interval"
+                )
+                await asyncio.sleep(DEFAULT_AGENT_NOTIFIER_INTERVAL_SECONDS)
+                continue
+            logger.exception(
+                "agent-notifier settings load failed; using last-good settings for this sweep"
+            )
+            settings = last_good
+        try:
+            if not settings.agent_notifier.enabled:
+                await asyncio.sleep(settings.agent_notifier.interval_seconds)
+                continue
+            ctx = _agent_notifier_context(runtime, settings=settings)
             await asyncio.to_thread(run_agent_notifier_sweep, ctx, now=runtime.liveness_clock())
         except Exception:
             logger.exception("agent-notifier sweep failed; retrying next interval")
@@ -150,6 +187,7 @@ def _serving_lifespan(
         projection_task = asyncio.create_task(runtime.projector.run())
         metrics_task = asyncio.create_task(_metrics_loop(runtime.config, metrics_store))
         agent_notifier_task = asyncio.create_task(_agent_notifier_loop(runtime))
+        relay_death_watch_task = asyncio.create_task(relay_death_watch_loop(runtime))
         river_compaction_task = asyncio.create_task(_workspace_river_compaction_loop(runtime))
         optional: list[asyncio.Task[None]] = []
         # The heap-growth diagnostic only exists when AR_HEAP_DIAG is set (tracemalloc started here
@@ -162,6 +200,7 @@ def _serving_lifespan(
         background = [
             river_compaction_task,
             agent_notifier_task,
+            relay_death_watch_task,
             metrics_task,
             projection_task,
             *optional,

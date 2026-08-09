@@ -16,7 +16,7 @@ from agents_remember.controlplane.operator_inbox_records import (
     state_signal_landed,
 )
 from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
-from agents_remember.controlplane.signal_routing import master_key
+from agents_remember.controlplane.signal_routing import is_seat_dead, master_key
 from agents_remember.serving.agent_notifier_models import AgentNotifierFinding
 from agents_remember.serving.inbox_delivery import target_session_for_entry
 from agents_remember.serving.terminal_catalog import (
@@ -199,7 +199,7 @@ def evaluate_non_reaction_findings(
         landed = [
             row
             for row in current.values()
-            if row.state == "pending"
+            if row.state == "landed"
             and row.deliveredToSession == entry.id
             and row.adapterDeliveryState == "accepted"
             and row.adapterAcceptedAt is not None
@@ -245,6 +245,10 @@ def evaluate_boundary_drain_findings(
         if entry.state != "pending":
             continue
         if state_signal_landed(entry):
+            continue
+        if entry.agentId is not None and is_seat_dead(catalog, entry.agentId):
+            # The rebind machinery owns rows to dead seats (N2/N14); a dead seat has no
+            # boundary to cross.
             continue
         if entry.lastAttemptAt is None:
             continue

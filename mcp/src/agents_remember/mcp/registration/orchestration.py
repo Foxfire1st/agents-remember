@@ -16,6 +16,7 @@ from ..config import McpRuntimeConfig
 from ..tools.operator_inbox import (
     operator_inbox_consume_payload,
     operator_inbox_poll_payload,
+    operator_inbox_supersede_payload,
     registered_operator_inbox_post_payload,
 )
 from ..tools.orchestration import (
@@ -69,25 +70,48 @@ def register_orchestration_tools(server: FastMCP, config: McpRuntimeConfig) -> N
         lifecycle_id: str | None = None,
         agent_id: str | None = None,
         recipient_role: AgentRole | None = None,
+        include_terminal: bool = False,
     ) -> dict[str, Any]:
-        """List pending external-chat inbox entries for a lifecycle_id, agent_id, and/or role
-        mailbox key. Consuming an entry is explicit via operator_inbox_consume."""
+        """List external-chat inbox entries for a lifecycle_id, agent_id, and/or role mailbox
+        key. Pending rows are always listed; ``include_terminal=true`` additionally lists the
+        terminal markers (landed/superseded/unresolved/expired) still inside their retention
+        window (N11 terminal inspectability)."""
         return operator_inbox_poll_payload(
             config,
             lifecycle_id=lifecycle_id,
             agent_id=agent_id,
             recipient_role=recipient_role,
+            include_terminal=include_terminal,
         )
 
     @server.tool()
     def operator_inbox_consume(entry_id: str) -> dict[str, Any]:
-        """Mark an external-chat inbox entry consumed. The entry remains in the append-only
-        inbox log; repeated consume calls are idempotent."""
+        """Optionally attribute an external-chat inbox entry to the consuming model (N16).
+        This is an attribution marker only: nothing mechanical -- retry, expectation,
+        escalation, or terminality -- hangs off it, and the entry's state is unchanged."""
         return operator_inbox_consume_payload(
             config,
             entry_id=entry_id,
             consumed_by="model",
             consumed_via="cli",
+        )
+
+    @server.tool()
+    def operator_inbox_supersede(
+        entry_id: str,
+        reason: str,
+        superseded_by: str = "model",
+    ) -> dict[str, Any]:
+        """Explicitly supersede one pending external-chat inbox entry (R11): an overtaken
+        command becomes terminal ``superseded`` without a false ack, is skipped by every
+        retry/evaluation path, and stays inspectable for the marker-retention window.
+        Supersession is always explicit -- never inferred from artifacts, branches, or task
+        state."""
+        return operator_inbox_supersede_payload(
+            config,
+            entry_id=entry_id,
+            reason=reason,
+            superseded_by=superseded_by,
         )
 
     @server.tool()

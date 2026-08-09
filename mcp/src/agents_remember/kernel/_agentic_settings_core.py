@@ -153,6 +153,7 @@ KNOWN_ESCALATION_MESSAGE_KINDS = frozenset(
         "decision-item",
         "decision-ruling",
         "dispatch-brief",
+        "state-signal",
     }
 )
 DEFAULT_ESCALATION_SLA_SECONDS: dict[str, float] = {
@@ -166,6 +167,7 @@ DEFAULT_ESCALATION_SLA_SECONDS: dict[str, float] = {
     "decision-item": 900.0,
     "decision-ruling": 900.0,
     "dispatch-brief": 300.0,
+    "state-signal": 300.0,
 }
 # Conservative-by-default rung timings (R1): seconds a row may sit at its CURRENT rung, past its
 # ``escalatedAt`` anchor, before the walker advances it to the next one. Rung 1 = renudge; rung 2 =

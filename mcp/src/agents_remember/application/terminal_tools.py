@@ -5,9 +5,18 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast, get_args
 from uuid import uuid4
 
+from agents_remember.controlplane.operator_inbox_records import (
+    AgentRole,
+    InboxAddress,
+    InboxMessage,
+    InboxPoster,
+    InboxSubject,
+    OperatorInboxEntry,
+)
+from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
 from agents_remember.errors import HarnessControlError
 from agents_remember.kernel.agentic_settings import (
     AgenticSettings,
@@ -22,6 +31,8 @@ from agents_remember.models.terminal import (
 )
 from agents_remember.observer.ambient import ambient
 from agents_remember.observer.events import now_iso
+from agents_remember.observer.paths import observer_root
+from agents_remember.serving.dispatch_brief import HostedDelivery
 from agents_remember.serving.harness_control_adapter import BUILTIN_PROTOCOL_HARNESSES
 from agents_remember.serving.harness_launch import ResolvedLaunch, resolve_settings_launch
 from agents_remember.serving.harnesses import (
@@ -35,6 +46,10 @@ from agents_remember.serving.harnesses import (
 )
 from agents_remember.serving.hosted_session_runtime import HostedSessionRuntime
 from agents_remember.serving.leaf_ref_validation import resolve_catalog_leaf_key
+from agents_remember.serving.operator_inbox_posts import (
+    OperatorInboxPostContext,
+    post_operator_inbox_entry,
+)
 from agents_remember.serving.retire import SeatClosure, retire_entry
 from agents_remember.serving.retire_policy import (
     RetirePolicyError,
@@ -99,6 +114,7 @@ _DEFAULT_SHELL = "/bin/bash"
 # congruent. The dispatcher knows its level: a manager dispatching leaf seats = leaf, the seam
 # reviewer = master, portfolio/end-to-end seats = portfolio. Omitted = leaf.
 _SPAWN_LEVELS = ("leaf", "master", "portfolio")
+_AGENT_ROLE_VALUES = frozenset(get_args(AgentRole))
 _REMOVED_CALLER_SPEND_FIELDS = (
     "harness",
     "model",
@@ -917,6 +933,7 @@ def _retire_payload(
     *,
     detail: str | None = None,
     closure: TerminalCatalogEntry | None = None,
+    stranded: tuple[tuple[str, ...], str | None] | None = None,
 ) -> dict[str, Any]:
     """One ``session_retire`` result: the status, plus whichever half of the shape it carries.
 
@@ -938,6 +955,13 @@ def _retire_payload(
         payload["retiredEdge"] = closure.retired_edge
     if detail is not None:
         payload["detail"] = detail
+    if stranded is not None:
+        stranded_row_ids, surfaced_row_id = stranded
+        if stranded_row_ids:
+            payload["strandedRowIds"] = list(stranded_row_ids)
+            payload["strandedRowCount"] = len(stranded_row_ids)
+        if surfaced_row_id is not None:
+            payload["surfacedRowId"] = surfaced_row_id
     return _result("session_retire", payload)
 
 
@@ -998,7 +1022,81 @@ def session_retire_tool(
     )
     assert updated is not None  # the entry existed above; nothing between here removes rows
     log_retire_event(config, updated)
-    return _retire_payload("retired", session_id, closure=updated)
+    stranded, surfaced = _surface_stranded_rows(
+        config,
+        catalog=catalog,
+        host=retire_host,
+        target=updated,
+        actor=actor_entry,
+    )
+    return _retire_payload(
+        "retired",
+        session_id,
+        closure=updated,
+        stranded=(tuple(row.id for row in stranded), surfaced),
+    )
+
+
+def _surface_stranded_rows(
+    config: McpRuntimeConfig,
+    *,
+    catalog: TerminalCatalog,
+    host: TerminalHost,
+    target: TerminalCatalogEntry,
+    actor: TerminalCatalogEntry,
+) -> tuple[list[OperatorInboxEntry], str | None]:
+    """N2 surfacing: pending rows stranded by a retirement go to the retiring authority.
+
+    ``session_retire`` never refuses because rows are pending; instead it posts one durable
+    row to the actor's mailbox listing the stranded ids so the owner can rebrief/rebind.
+    Returns ``(stranded_rows, surfaced_row_id)``.
+    """
+    store = OperatorInboxStore(observer_root(config))
+    stranded = [
+        row
+        for row in store.current().values()
+        if row.state == "pending"
+        and (row.agentId == target.id or row.lifecycleId == target.lifecycle_id)
+    ]
+    if not stranded:
+        return [], None
+    actor_role = actor.binding_role if actor.binding_role in _AGENT_ROLE_VALUES else None
+    response = post_operator_inbox_entry(
+        OperatorInboxPostContext(
+            config=config,
+            store=store,
+            delivery=HostedDelivery(
+                enabled=True,
+                catalog=catalog,
+                host=host,
+            ),
+        ),
+        address=InboxAddress(
+            lifecycle_id=actor.lifecycle_id,
+            agent_id=actor.id,
+            recipient_role=cast(AgentRole | None, actor_role),
+        ),
+        message=InboxMessage(
+            ask=(
+                f"Stranded inbox rows after retiring {target.id} "
+                f"({target.binding_role or target.spawn_role or target.kind}): "
+                f"{len(stranded)} pending row(s)"
+            ),
+            response=", ".join(row.id for row in stranded),
+            message_kind="message",
+            subject=InboxSubject(
+                leaf_key=target.binding_leaf_key,
+                seat_role=target.binding_role,
+                agent_id=target.id,
+            ),
+        ),
+        poster=InboxPoster(
+            created_by="session-retire",
+            created_via="cli",
+            sender_role="system",
+        ),
+    )
+    return stranded, str(response["entryId"])
 
 
 def _rename_payload(

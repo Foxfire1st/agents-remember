@@ -130,16 +130,12 @@ class TestOperatorInboxPostsAndDispatch:
 
 
 class TestOperatorInboxConsumeAck:
-    def test_consume_marks_ack_met(self) -> None:
+    def test_consume_is_attribution_only(self) -> None:
+        """N16: consume no longer touches any expectation machinery."""
         entry = SimpleNamespace(id="e", state="consumed", consumedAt="2026-08-05T00:00:00+00:00")
         store = SimpleNamespace(consume=lambda *a, **k: (entry, True))
-        expectations = SimpleNamespace(
-            find_by_source=lambda *a, **k: SimpleNamespace(id="row"),
-            mark_met=lambda *a, **k: None,
-        )
         with (
             mock.patch.object(operator_inbox_tools, "_store", return_value=store),
-            mock.patch.object(operator_inbox_tools, "expectation_store", return_value=expectations),
         ):
             result = operator_inbox_tools.operator_inbox_consume_tool(
                 cast(McpRuntimeConfig, SimpleNamespace()),

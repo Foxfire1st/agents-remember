@@ -70,6 +70,33 @@ class OperatorInboxStore:
         with self._exclusive_access():
             self._append_unlocked(record)
 
+    def transition(
+        self,
+        entry_id: str,
+        transition: Callable[[OperatorInboxEntry], OperatorInboxEntry | None],
+    ) -> tuple[OperatorInboxEntry, bool]:
+        """Lock-held read+append transition against the LATEST folded snapshot.
+
+        The sweep holds a fold from the start of its act phase; a concurrent writer (an
+        explicit ``operator_inbox_supersede``, another process's consume, or a store-level
+        transition) can move the row between that fold and the append. Terminal states are
+        not interchangeable (landed vs superseded vs unresolved vs expired), so a stale
+        terminal write must not overwrite a different terminal truth. This primitive re-reads
+        and re-folds under the store lock, applies ``transition`` to the latest snapshot, and
+        appends only when the transition produced a new snapshot (``None``/identity means
+        "append nothing"). Returns ``(new_or_latest, changed)``.
+        """
+        with self._exclusive_access():
+            current = fold_operator_inbox_entries(self._read_unlocked())
+            entry = current.get(entry_id)
+            if entry is None:
+                raise KeyError(f"no operator inbox entry {entry_id!r}")
+            updated = transition(entry)
+            if updated is None or updated is entry:
+                return entry, False
+            self._append_unlocked(updated)
+            return updated, True
+
     def read(self) -> list[OperatorInboxEntry]:
         """Read the inbox log back as validated snapshots (empty when absent)."""
         with self._exclusive_access():
@@ -87,6 +114,27 @@ class OperatorInboxStore:
         recipient_role: AgentRole | None = None,
     ) -> list[OperatorInboxEntry]:
         """Return pending entries matching all supplied mailbox keys."""
+        return self.list_for_mailbox(
+            lifecycle_id=lifecycle_id,
+            agent_id=agent_id,
+            recipient_role=recipient_role,
+            include_terminal=False,
+        )
+
+    def list_for_mailbox(
+        self,
+        *,
+        lifecycle_id: str | None,
+        agent_id: str | None,
+        recipient_role: AgentRole | None = None,
+        include_terminal: bool = False,
+    ) -> list[OperatorInboxEntry]:
+        """Return entries matching all supplied mailbox keys.
+
+        Pending rows are always listed; ``include_terminal`` additionally surfaces the
+        terminal markers (landed/superseded/unresolved/expired and legacy terminals) still
+        inside their retention window (N11 terminal inspectability).
+        """
         require_inbox_address(
             lifecycle_id=lifecycle_id,
             agent_id=agent_id,
@@ -95,7 +143,7 @@ class OperatorInboxStore:
         entries = [
             record
             for record in self.current().values()
-            if record.state == "pending"
+            if (record.state == "pending" or include_terminal)
             and (lifecycle_id is None or record.lifecycleId == lifecycle_id)
             and (agent_id is None or record.agentId == agent_id)
             and (recipient_role is None or record.recipientRole == recipient_role)
@@ -145,6 +193,8 @@ class OperatorInboxStore:
                 consumed_by=consumed_by,
                 consumed_via=consumed_via,
             )
+            if consumed is current:
+                return current, False
             self._append_unlocked(consumed)
             return consumed, True
 

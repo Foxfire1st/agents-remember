@@ -32,6 +32,7 @@ from agents_remember.controlplane.operator_inbox_records import (
 )
 from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
 from agents_remember.controlplane.operator_inbox_transitions import (
+    AdapterReceipt,
     DeliveryAttempt,
     RedeliveryFloor,
     RungAdvance,
@@ -87,7 +88,8 @@ class OperatorInboxRecordTests(unittest.TestCase):
             consumed_via="cli",
         )
         self.assertEqual(consumed.id, entry.id)
-        self.assertEqual(consumed.state, "consumed")
+        # N16: consume is an attribution marker -- the row state stays pending.
+        self.assertEqual(consumed.state, "pending")
         self.assertEqual(consumed.consumedAt, T2)
         self.assertEqual(consumed.createdBy, "developer")
         self.assertEqual(entry.state, "pending")
@@ -218,7 +220,7 @@ class OperatorInboxStoreTests(unittest.TestCase):
             ["D"],
         )
 
-    def test_consume_marks_entry_and_is_idempotent(self) -> None:
+    def test_consume_is_attribution_only_and_idempotent(self) -> None:
         self.store.append(self._entry("A"))
         consumed, consumed_now = self.store.consume(
             "A",
@@ -227,8 +229,13 @@ class OperatorInboxStoreTests(unittest.TestCase):
             consumed_via="cli",
         )
         self.assertTrue(consumed_now)
-        self.assertEqual(consumed.state, "consumed")
-        self.assertEqual(self.store.list_pending(lifecycle_id="L1", agent_id="agent-a"), [])
+        self.assertEqual(consumed.state, "pending")
+        self.assertEqual(consumed.consumedAt, T2)
+        # Nothing mechanical hangs off the marker: the row stays pending and retryable.
+        self.assertEqual(
+            [entry.id for entry in self.store.list_pending(lifecycle_id="L1", agent_id="agent-a")],
+            ["A"],
+        )
         self.assertEqual(len(self.store.read()), 2)
 
         consumed_again, consumed_now_again = self.store.consume(
@@ -243,13 +250,7 @@ class OperatorInboxStoreTests(unittest.TestCase):
 
     def test_delete_removes_entry_snapshots(self) -> None:
         self.store.append(self._entry("A"))
-        consumed, _ = self.store.consume(
-            "A",
-            now=T2,
-            consumed_by="model",
-            consumed_via="cli",
-        )
-        self.assertEqual(consumed.state, "consumed")
+        self.store.consume("A", now=T2, consumed_by="model", consumed_via="cli")
         self.assertTrue(self.store.delete("A"))
         self.assertEqual(self.store.read(), [])
 
@@ -309,13 +310,21 @@ class OperatorInboxStoreTests(unittest.TestCase):
         assert second.nextAttemptAt is not None
         self.assertGreater(second.nextAttemptAt, delivered.nextAttemptAt)
 
-    def test_record_delivery_clears_schedule_only_via_consume(self) -> None:
+    def test_record_delivery_clears_schedule_only_via_landing(self) -> None:
         self.store.append(self._entry("A"))
         inbox_transitions.record_delivery(
-            self.store, "A", DeliveryAttempt(delivery_state="delivered"), now=T2
+            self.store,
+            "A",
+            DeliveryAttempt(
+                delivery_state="delivered",
+                adapter=AdapterReceipt(delivery_state="accepted"),
+                landed=True,
+            ),
+            now=T2,
         )
-        consumed, _ = self.store.consume("A", now=T2, consumed_by="model", consumed_via="cli")
-        self.assertEqual(consumed.state, "consumed")
+        landed = self.store.current()["A"]
+        self.assertEqual(landed.state, "landed")
+        self.assertIsNone(landed.nextAttemptAt)
 
     def test_list_redeliverable_returns_pending_rows_past_backoff(self) -> None:
         self.store.append(self._entry("A"))
@@ -329,14 +338,15 @@ class OperatorInboxStoreTests(unittest.TestCase):
         redeliverable = self.store.list_redeliverable(now=now)
         self.assertEqual([entry.id for entry in redeliverable], ["A"])
 
-    def test_list_redeliverable_excludes_consumed_rows(self) -> None:
+    def test_list_redeliverable_keeps_attribution_marked_rows(self) -> None:
         self.store.append(self._entry("A"))
         inbox_transitions.record_delivery(
             self.store, "A", DeliveryAttempt(delivery_state="delivered"), now=T1
         )
         self.store.consume("A", now=T2, consumed_by="model", consumed_via="cli")
         now = datetime.fromisoformat("2026-06-24T09:00:00+00:00")
-        self.assertEqual(self.store.list_redeliverable(now=now), [])
+        # N16: consume no longer stops redelivery -- only landing/terminal resolution does.
+        self.assertEqual([entry.id for entry in self.store.list_redeliverable(now=now)], ["A"])
 
     def test_mark_escalated_stamps_the_reserved_field(self) -> None:
         self.store.append(self._entry("A"))
@@ -397,11 +407,11 @@ class OperatorInboxStoreTests(unittest.TestCase):
         self.assertEqual(again.ladderResolvedReason, "first pass")
         self.assertEqual(len(self.store.read()), rows_after_first)
 
-    def test_compaction_purges_pending_rows_past_the_pending_ttl(self) -> None:
-        # Ruled invariant (developer, 2026-07-09): no row outranks system health -- a pending row
-        # past INBOX_PENDING_TTL_SECONDS is stale noise and is physically dropped. The durable
-        # record is the artifact on disk, never the inbox row. Supersedes the HFX2-L1 R1
-        # immortal-pending rule that let the 2026-07-09 escalation storm fill the store.
+    def test_compaction_keeps_an_ancient_pending_row_for_the_sweep_to_expire(self) -> None:
+        # §9/N13: the pending TTL is a resolution boundary owned by the sweep -- an older
+        # pending row is stamped ``expired`` (visible, counted) before retention drops it, so
+        # compaction alone never silently purges a pending row. The hard cap still bounds the
+        # store even when the sweep is down.
         ancient = create_operator_inbox_entry(
             InboxMessage(ask="Ancient ask", response="Ancient response"),
             entry_id="OLD",
@@ -411,8 +421,8 @@ class OperatorInboxStoreTests(unittest.TestCase):
         )
         self.store.append(ancient)
         removed = self.store.compact(now=datetime.now(UTC))
-        self.assertEqual(removed, 1)
-        self.assertEqual(self.store.read(), [])
+        self.assertEqual(removed, 0)
+        self.assertEqual([entry.id for entry in self.store.read()], ["OLD"])
 
     def test_compaction_keeps_a_fresh_pending_row(self) -> None:
         fresh = create_operator_inbox_entry(
@@ -465,9 +475,15 @@ class OperatorInboxStoreTests(unittest.TestCase):
         self.assertEqual(self.store.read(), [])
 
     def test_compaction_still_prunes_a_stale_consumed_row(self) -> None:
-        self.store.append(self._entry("A"))
-        self.store.consume(
-            "A", now="2020-01-01T00:00:00+00:00", consumed_by="model", consumed_via="cli"
+        # Legacy pre-N16 rows may still carry the ``consumed`` state; they keep the same
+        # marker-retention window and age out.
+        self.store.append(
+            self._entry("A").model_copy(
+                update={
+                    "state": "consumed",
+                    "consumedAt": "2020-01-01T00:00:00+00:00",
+                }
+            )
         )
         removed = self.store.compact(now=datetime.now(UTC))
         self.assertGreater(removed, 0)
@@ -519,8 +535,9 @@ class OperatorInboxToolTests(unittest.TestCase):
             consumed_via="cli",
         )
         self.assertTrue(consumed["consumedNow"])
-        self.assertEqual(consumed["state"], "consumed")
-        self.assertEqual([entry.state for entry in self.store.read()], ["pending", "consumed"])
+        self.assertEqual(consumed["state"], "pending")
+        self.assertIsNotNone(consumed["consumedAt"])
+        self.assertEqual([entry.state for entry in self.store.read()], ["pending", "pending"])
 
     def test_poll_without_address_raises(self) -> None:
         with self.assertRaises(ValueError):
@@ -782,7 +799,9 @@ class OperatorInboxDeliveryTests(unittest.TestCase):
         self.assertEqual(delivered.state, "pending")
         self.assertIn("[Agents Remember inbox:message]", submit_prompt.call_args.args[1])
 
-    def test_consume_during_in_flight_delivery_cannot_resurrect_pending_entry(self) -> None:
+    def test_consume_during_in_flight_delivery_cannot_steal_the_landing(self) -> None:
+        # N16: consume is attribution-only, so an in-flight acceptance at a turn boundary still
+        # lands the row -- the marker can never resurrect a pending state over a landing.
         entry = create_operator_inbox_entry(
             InboxMessage(ask="Please continue.", response="Review the report."),
             entry_id="A",
@@ -839,11 +858,12 @@ class OperatorInboxDeliveryTests(unittest.TestCase):
             delivered = delivery.result(timeout=2)
 
         self.assertEqual(delivered.deliveryState, "delivered")
+        self.assertEqual(delivered.state, "landed")
         self.assertEqual(
             [record.state for record in self.store.read()],
-            ["pending", "consumed", "pending"],
+            ["pending", "pending", "landed"],
         )
-        self.assertEqual(self.store.current()[entry.id].state, "consumed")
+        self.assertEqual(self.store.current()[entry.id].state, "landed")
         self.assertEqual(
             self.store.list_pending(lifecycle_id="L1", agent_id="agent-a"),
             [],

@@ -3,12 +3,13 @@ from __future__ import annotations
 import tempfile
 import unittest
 from dataclasses import replace
-from datetime import timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import cast
 from unittest import mock
 
 from _scaling import assert_bounded_count
+from agents_remember.controlplane import operator_inbox_transitions as inbox_transitions
 from agents_remember.controlplane.agent_notifier_signals import AgentNotifierSignalCooldownStore
 from agents_remember.controlplane.escalation_ladder import MAX_RUNG
 from agents_remember.controlplane.expectation_rows import (
@@ -29,19 +30,21 @@ from agents_remember.controlplane.operator_inbox_records import (
 from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
 from agents_remember.controlplane.orchestration_nudges import OrchestrationNudgeStore
 from agents_remember.observer.store import EventStore
-from agents_remember.serving import _agent_notifier_actions as agent_notifier_actions_module
 from agents_remember.serving import agent_notifier as agent_notifier_module
+from agents_remember.serving._agent_notifier_evaluation import PERSISTENT_FAILURE_ATTEMPTS
 from agents_remember.serving.agent_notifier import (
     AgentNotifierContext,
     AgentNotifierFinding,
     EscalationSchedule,
     _inactivity_signal_chain_progressed,
-    act_on_finding,
     evaluate_dead_upstream_findings,
     evaluate_escalation_findings,
     run_agent_notifier_sweep,
 )
 from agents_remember.serving.agent_notifier_heartbeat import AgentNotifierHeartbeatStore
+from agents_remember.serving.harness_control_models import SubmissionReceipt
+from agents_remember.serving.hosted_session_runtime import HostedSessionRuntime
+from agents_remember.serving.inbox_delivery import InboxDeliveryLog, deliver_inbox_entry
 from agents_remember.serving.terminal import TerminalHost
 from agents_remember.serving.terminal_catalog import TerminalCatalog
 from test_agent_notifier import NOW, _entry, _fake_paster, _FakeHost
@@ -143,6 +146,122 @@ class EscalationPredicateTests(unittest.TestCase):
                 store,
                 now=NOW,
                 schedule=EscalationSchedule(sla_seconds={"escalation": 3600.0}, rung_seconds={}),
+            )
+            self.assertEqual(findings, [])
+
+    def test_landed_rows_are_never_escalation_eligible(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            store = OperatorInboxStore(Path(tmp))
+            store.append(
+                create_operator_inbox_entry(
+                    InboxMessage(ask="ask", response="resp", message_kind="escalation"),
+                    entry_id="landed-1",
+                    now=(NOW - timedelta(minutes=10)).isoformat(),
+                    routing=InboxRouting(
+                        address=InboxAddress(lifecycle_id=None, agent_id="worker-1")
+                    ),
+                    poster=InboxPoster(created_by="system", created_via="cli"),
+                ).model_copy(update={"state": "landed"})
+            )
+            findings = evaluate_escalation_findings(
+                store,
+                now=NOW,
+                schedule=EscalationSchedule(sla_seconds={"escalation": 1.0}, rung_seconds={}),
+            )
+            self.assertEqual(findings, [])
+
+    def test_boundary_held_state_signal_is_not_escalation_eligible(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            store = OperatorInboxStore(root / "observer")
+            catalog = TerminalCatalog(root / "catalog.json")
+            catalog.upsert(
+                replace(
+                    _entry("manager-1"),
+                    spawn_role="manager",
+                    turn_state="working",
+                    turn_state_changed_at=NOW.isoformat(),
+                )
+            )
+            store.append(
+                create_operator_inbox_entry(
+                    InboxMessage(ask="state-signal", response="resp", message_kind="state-signal"),
+                    entry_id="signal-1",
+                    now=(NOW - timedelta(minutes=10)).isoformat(),
+                    routing=InboxRouting(
+                        address=InboxAddress(
+                            lifecycle_id=None, agent_id="manager-1", recipient_role="manager"
+                        )
+                    ),
+                    poster=InboxPoster(created_by="agent-notifier", created_via="cli"),
+                )
+            )
+            findings = evaluate_escalation_findings(
+                store,
+                now=NOW,
+                catalog=catalog,
+                schedule=EscalationSchedule(sla_seconds={"state-signal": 1.0}, rung_seconds={}),
+            )
+            self.assertEqual(findings, [])
+
+    def test_inactivity_signal_with_chain_progress_is_not_escalation_eligible(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            store = OperatorInboxStore(root / "observer")
+            catalog = TerminalCatalog(root / "catalog.json")
+            leaf_key = "repo-a/260707_master/leaf-9"
+            catalog.upsert(
+                replace(
+                    _entry("manager-1", leaf_key="repo-a/260707_master/manager-anchor"),
+                    spawn_role="manager",
+                    turn_state="working",
+                    turn_state_changed_at=(NOW - timedelta(minutes=5)).isoformat(),
+                )
+            )
+            catalog.upsert(
+                replace(
+                    _entry("worker-1", leaf_key=leaf_key),
+                    spawn_role="worker",
+                    spawned_by_session="manager-1",
+                )
+            )
+            store.append(
+                create_operator_inbox_entry(
+                    InboxMessage(
+                        ask="Agent notifier observed seat-liveness: stale",
+                        response="resp",
+                        message_kind="escalation",
+                    ),
+                    entry_id="inactivity-1",
+                    now=(NOW - timedelta(minutes=10)).isoformat(),
+                    routing=InboxRouting(
+                        address=InboxAddress(
+                            lifecycle_id=None, agent_id="manager-1", recipient_role="manager"
+                        )
+                    ),
+                    poster=InboxPoster(created_by="agent-notifier", created_via="cli"),
+                ).model_copy(
+                    update={
+                        "leafKey": leaf_key,
+                        "subjectAgentId": "worker-1",
+                        "createdAt": (NOW - timedelta(minutes=10)).isoformat(),
+                    }
+                )
+            )
+            worker = catalog.get("worker-1")
+            assert worker is not None
+            catalog.upsert(
+                replace(
+                    worker,
+                    turn_state="working",
+                    turn_state_changed_at=(NOW - timedelta(minutes=5)).isoformat(),
+                )
+            )
+            findings = evaluate_escalation_findings(
+                store,
+                now=NOW,
+                catalog=catalog,
+                schedule=EscalationSchedule(sla_seconds={"escalation": 1.0}, rung_seconds={}),
             )
             self.assertEqual(findings, [])
 
@@ -343,10 +462,16 @@ class LadderWalkIntegrationTests(unittest.TestCase):
     def _events(self) -> set[str]:
         return {event.kind for event in self.event_store.read(None)}
 
-    def test_delivered_dispatch_never_readdresses_at_rung_two(self) -> None:
+    def test_delivered_dispatch_never_rebinds(self) -> None:
         self.catalog.upsert(replace(_entry("manager-1"), spawn_role="manager"))
         self.catalog.upsert(
-            replace(_entry("worker-1"), spawn_role="worker", spawned_by_session="manager-1")
+            replace(
+                _entry("worker-1"),
+                status="terminated",
+                terminated_at=(NOW - timedelta(minutes=10)).isoformat(),
+                spawn_role="worker",
+                spawned_by_session="manager-1",
+            )
         )
         entry = create_operator_inbox_entry(
             InboxMessage(ask="brief", response="work", message_kind="dispatch-brief"),
@@ -362,39 +487,24 @@ class LadderWalkIntegrationTests(unittest.TestCase):
             update={
                 "deliveryState": "delivered",
                 "deliveryDetail": "harness-log-confirmed",
-                "rung": 1,
-                "escalatedAt": (NOW - timedelta(minutes=5)).isoformat(),
             }
         )
         self.inbox_store.append(entry)
 
+        result = run_agent_notifier_sweep(self._ctx(), now=NOW)
+
         self.assertEqual(
-            evaluate_escalation_findings(
-                self.inbox_store,
-                now=NOW,
-                catalog=self.catalog,
-                schedule=EscalationSchedule(
-                    sla_seconds={"dispatch-brief": 60.0}, rung_seconds={1: 60.0}
-                ),
-            ),
+            [f for f in result.findings if f.kind in ("rebind-due", "rebind-expired")],
             [],
         )
-        finding = AgentNotifierFinding(
-            kind="escalation-due",
-            detail="dispatch-brief",
-            session_id="worker-1",
-            source_id=entry.id,
-        )
-        with mock.patch.object(agent_notifier_actions_module, "deliver_inbox_entry") as deliver:
-            result = act_on_finding(self._ctx(), finding, now=NOW)
-
-        deliver.assert_not_called()
         current = self.inbox_store.current()[entry.id]
-        self.assertEqual(result.detail, "dispatch brief stays on its exact session")
-        self.assertEqual(current.rung, 1)
+        # Exact-pinned: even a dead addressee never rebinds or expires via the rebind path; a
+        # fresh brief comes from the owner.
+        self.assertEqual(current.state, "pending")
         self.assertEqual(current.agentId, "worker-1")
+        self.assertEqual([a for a in result.actions if a.action in ("rebind", "expire")], [])
 
-    def test_silent_seat_climbs_rung_one_then_two_then_three(self) -> None:
+    def test_silent_live_seat_reaches_unresolved_after_attempt_ceiling(self) -> None:
         self.catalog.upsert(replace(_entry("orchestrator-1"), spawn_role="orchestrator"))
         self.catalog.upsert(
             replace(_entry("manager-1"), spawn_role="manager", spawned_by_session="orchestrator-1")
@@ -416,46 +526,50 @@ class LadderWalkIntegrationTests(unittest.TestCase):
         self.inbox_store.append(entry)
 
         ctx = self._ctx()
-        run_agent_notifier_sweep(ctx, now=NOW)
-        rung1 = self.inbox_store.current()["e1"]
-        self.assertEqual(rung1.rung, 1)
-        self.assertIn("orchestration.escalation.rung", self._events())
+        now = NOW
+        for _ in range(PERSISTENT_FAILURE_ATTEMPTS):
+            run_agent_notifier_sweep(ctx, now=now)
+            current = self.inbox_store.current()["e1"]
+            if current.state != "pending":
+                break
+            assert current.nextAttemptAt is not None
+            now = datetime.fromisoformat(current.nextAttemptAt)
 
-        run_agent_notifier_sweep(ctx, now=NOW + timedelta(minutes=2))
-        still_rung1 = self.inbox_store.current()["e1"]
-        self.assertEqual(still_rung1.rung, 1)
-
-        run_agent_notifier_sweep(ctx, now=NOW + timedelta(minutes=5))
-        rung2 = self.inbox_store.current()["e1"]
-        self.assertEqual(rung2.rung, 2)
-
-        run_agent_notifier_sweep(ctx, now=NOW + timedelta(minutes=7))
-        still_rung2 = self.inbox_store.current()["e1"]
-        self.assertEqual(still_rung2.rung, 2)
-
-        run_agent_notifier_sweep(ctx, now=NOW + timedelta(minutes=10))
-        rung3 = self.inbox_store.current()["e1"]
-        self.assertEqual(rung3.rung, 3)
-
-        # Rung 3 is terminal -- a further sweep never advances it past the developer.
-        run_agent_notifier_sweep(ctx, now=NOW + timedelta(minutes=20))
-        still_rung3 = self.inbox_store.current()["e1"]
-        self.assertEqual(still_rung3.rung, 3)
-
-        # Ruled invariant (developer, 2026-07-09): the whole climb mutated the ONE root row --
-        # re-addressed up the chain, original ask preserved, and NO sibling rows minted (the
-        # sibling-per-transition shape is the branching process behind the 2026-07-09 storm).
-        # Terminal custody is the ARCHITECT (role-addressed here: no architect seat is attached,
-        # so the row waits, level-triggered, for the next architect session).
+        # N3: five attempts resolve the live-but-silent row terminal ``unresolved`` with its
+        # delivery evidence intact -- no ladder rung, no escalation, no sibling rows.
+        final = self.inbox_store.current()["e1"]
+        self.assertEqual(final.attemptCount, PERSISTENT_FAILURE_ATTEMPTS)
+        self.assertEqual(final.state, "unresolved")
+        self.assertEqual(final.terminalReason, "attempt-limit")
+        self.assertNotIn("orchestration.escalation.rung", self._events())
+        self.assertIn("orchestration.agent-notifier.unresolved", self._events())
         self.assertEqual(len(self.inbox_store.current()), 1)
-        self.assertEqual(still_rung3.ask, "ask")
-        self.assertEqual(still_rung3.recipientRole, "architect")
-        self.assertIsNone(still_rung3.agentId)
+        self.assertEqual(final.ask, "ask")
+        self.assertEqual(final.recipientRole, "worker")
+        self.assertEqual(final.agentId, "worker-1")
 
-    def test_duplicate_due_findings_cannot_advance_two_rungs_in_one_sweep(self) -> None:
+    def test_duplicate_rebind_findings_cannot_rebind_twice_in_one_sweep(self) -> None:
         self.catalog.upsert(replace(_entry("manager-1"), spawn_role="manager"))
         self.catalog.upsert(
-            replace(_entry("worker-1"), spawn_role="worker", spawned_by_session="manager-1")
+            replace(
+                _entry("manager-1"),
+                status="terminated",
+                terminated_at=(NOW - timedelta(minutes=10)).isoformat(),
+                spawn_role="manager",
+            )
+        )
+        self.catalog.upsert(
+            replace(
+                _entry("worker-1", leaf_key="repo-a/260707_master/leaf-1"),
+                spawn_role="worker",
+                spawned_by_session="manager-1",
+            )
+        )
+        self.catalog.upsert(
+            replace(
+                _entry("manager-2", leaf_key="repo-a/260707_master/current-manager-anchor"),
+                spawn_role="manager",
+            )
         )
         self.inbox_store.append(
             create_operator_inbox_entry(
@@ -464,16 +578,21 @@ class LadderWalkIntegrationTests(unittest.TestCase):
                 now=(NOW - timedelta(minutes=5)).isoformat(),
                 routing=InboxRouting(
                     address=InboxAddress(
-                        lifecycle_id=None, agent_id="worker-1", recipient_role="worker"
+                        lifecycle_id=None, agent_id="manager-1", recipient_role="manager"
                     )
                 ),
-                poster=InboxPoster(created_by="system", created_via="cli"),
-            )
+                poster=InboxPoster(
+                    created_by="worker-1",
+                    created_via="cli",
+                    sender_agent_id="worker-1",
+                    sender_role="worker",
+                ),
+            ).model_copy(update={"leafKey": "repo-a/260707_master/leaf-1"})
         )
         duplicate = AgentNotifierFinding(
-            kind="escalation-due",
-            detail="escalation",
-            session_id="worker-1",
+            kind="rebind-due",
+            detail="replacement-owner",
+            session_id="manager-1",
             source_id="e1",
         )
         with mock.patch.object(
@@ -481,63 +600,34 @@ class LadderWalkIntegrationTests(unittest.TestCase):
         ):
             result = run_agent_notifier_sweep(self._ctx(), now=NOW)
 
-        self.assertEqual(self.inbox_store.current()["e1"].rung, 1)
-        self.assertEqual(result.actions[1].detail, "entry already transitioned this sweep")
+        rebound = self.inbox_store.current()["e1"]
+        self.assertEqual(rebound.agentId, "manager-2")
+        self.assertEqual(result.actions[1].outcome, "skipped")
 
-    def test_dead_intermediate_manager_is_skipped_at_rung_two(self) -> None:
+    def test_dead_manager_row_rebinds_to_replacement_within_grace(self) -> None:
         self.catalog.upsert(replace(_entry("orchestrator-1"), spawn_role="orchestrator"))
         self.catalog.upsert(
             replace(
                 _entry("manager-1"),
                 status="terminated",
+                terminated_at=(NOW - timedelta(minutes=10)).isoformat(),
                 spawn_role="manager",
                 spawned_by_session="orchestrator-1",
+                leaf_key="repo-a/260707_master/old-manager-anchor",
             )
         )
-        self.catalog.upsert(
-            replace(_entry("worker-1"), spawn_role="worker", spawned_by_session="manager-1")
-        )
-        entry = create_operator_inbox_entry(
-            InboxMessage(ask="ask", response="resp", message_kind="escalation"),
-            entry_id="e1",
-            now=(NOW - timedelta(minutes=5)).isoformat(),
-            routing=InboxRouting(
-                address=InboxAddress(
-                    lifecycle_id=None, agent_id="worker-1", recipient_role="worker"
-                )
-            ),
-            poster=InboxPoster(created_by="system", created_via="cli"),
-        ).model_copy(update={"rung": 1, "escalatedAt": (NOW - timedelta(minutes=5)).isoformat()})
-        self.inbox_store.append(entry)
-
-        ctx = self._ctx()
-        run_agent_notifier_sweep(ctx, now=NOW)
-        advanced = self.inbox_store.current()["e1"]
-        self.assertEqual(advanced.rung, 2)
-        # The dead manager is skipped -- the row lands on the orchestrator instead.
-        events = [
-            event
-            for event in self.event_store.read(None)
-            if event.kind == "orchestration.escalation.rung"
-        ]
-        self.assertEqual(events[-1].data["ownerAgentId"], "orchestrator-1")
-
-    def test_dead_manager_with_live_workers_respawns_and_surfaces_orphans(self) -> None:
-        self.catalog.upsert(replace(_entry("orchestrator-1"), spawn_role="orchestrator"))
         self.catalog.upsert(
             replace(
-                _entry("manager-1"),
-                spawn_role="manager",
-                spawned_by_session="orchestrator-1",
-                turn_state="stale",
-                turn_state_changed_at=(NOW - timedelta(minutes=10)).isoformat(),
+                _entry("worker-1", leaf_key="repo-a/260707_master/leaf-1"),
+                spawn_role="worker",
+                spawned_by_session="manager-1",
             )
         )
         self.catalog.upsert(
-            replace(_entry("worker-1"), spawn_role="worker", spawned_by_session="manager-1")
-        )
-        self.catalog.upsert(
-            replace(_entry("worker-2"), spawn_role="worker", spawned_by_session="manager-1")
+            replace(
+                _entry("manager-2", leaf_key="repo-a/260707_master/current-manager-anchor"),
+                spawn_role="manager",
+            )
         )
         entry = create_operator_inbox_entry(
             InboxMessage(ask="ask", response="resp", message_kind="escalation"),
@@ -548,72 +638,189 @@ class LadderWalkIntegrationTests(unittest.TestCase):
                     lifecycle_id=None, agent_id="manager-1", recipient_role="manager"
                 )
             ),
-            poster=InboxPoster(created_by="system", created_via="cli"),
-        ).model_copy(update={"rung": 1, "escalatedAt": (NOW - timedelta(minutes=5)).isoformat()})
+            poster=InboxPoster(
+                created_by="worker-1",
+                created_via="cli",
+                sender_agent_id="worker-1",
+                sender_role="worker",
+            ),
+        ).model_copy(update={"leafKey": "repo-a/260707_master/leaf-1"})
         self.inbox_store.append(entry)
 
-        ctx = self._ctx()
-        run_agent_notifier_sweep(ctx, now=NOW)
-
-        # The suspect manager's husk is retired (catalog status flips to terminated)...
-        retired = self.catalog.get("manager-1")
-        assert retired is not None
-        self.assertEqual(retired.status, "terminated")
-
-        # ...and its live workers are surfaced as orphans in the respawn event, never re-parented
-        # automatically and never absorbing the dead manager's role themselves.
-        respawn_events = [
+        run_agent_notifier_sweep(self._ctx(), now=NOW)
+        rebound = self.inbox_store.current()["e1"]
+        self.assertEqual(rebound.agentId, "manager-2")
+        self.assertEqual(rebound.ownerAgentId, "manager-2")
+        self.assertEqual(rebound.attemptCount, 0)
+        rebind_events = [
             event
             for event in self.event_store.read(None)
-            if event.kind == "orchestration.agent-notifier.respawn"
+            if event.kind == "orchestration.agent-notifier.rebind"
         ]
-        legacy_respawn_events = [
-            event
-            for event in self.event_store.read(None)
-            if event.kind == "orchestration.supervisor.respawn"
-        ]
-        self.assertEqual(len(respawn_events), 1)
-        # The rename window emits every agent-notifier event under the legacy name too.
-        self.assertEqual(len(legacy_respawn_events), 1)
-        self.assertEqual(
-            sorted(respawn_events[0].data["orphanedWorkers"]), ["worker-1", "worker-2"]
-        )
-        self.assertEqual(respawn_events[0].data["ownerRole"], "orchestrator")
-        self.assertEqual(respawn_events[0].data["ownerAgentId"], "orchestrator-1")
+        self.assertEqual(len(rebind_events), 1)
+        self.assertEqual(rebind_events[0].data["toAgentId"], "manager-2")
 
-        # The workers themselves are untouched -- still running, still their own seats.
-        worker1 = self.catalog.get("worker-1")
-        worker2 = self.catalog.get("worker-2")
-        assert worker1 is not None and worker2 is not None
-        self.assertEqual(worker1.status, "running")
-        self.assertEqual(worker2.status, "running")
-
-    def test_rung_three_re_addresses_the_row_to_the_live_architect_seat(self) -> None:
-        """Ruled terminal (developer, 2026-07-09): with an architect session attached, terminal
-        custody lands on that seat (agent-addressed, deliverable, mechanically ackable) -- the
-        one live seat whose job is to hold the item and brief the human."""
-        self.catalog.upsert(replace(_entry("architect-1"), spawn_role="architect"))
+    def test_dead_manager_without_replacement_expires_to_architect_mailbox(self) -> None:
         self.catalog.upsert(replace(_entry("orchestrator-1"), spawn_role="orchestrator"))
+        self.catalog.upsert(
+            replace(
+                _entry("manager-1"),
+                status="terminated",
+                terminated_at=(NOW - timedelta(minutes=10)).isoformat(),
+                spawn_role="manager",
+                spawned_by_session="orchestrator-1",
+                leaf_key="repo-a/260707_master/old-manager-anchor",
+            )
+        )
+        self.catalog.upsert(
+            replace(
+                _entry("worker-1", leaf_key="repo-a/260707_master/leaf-1"),
+                spawn_role="worker",
+                spawned_by_session="manager-1",
+            )
+        )
         entry = create_operator_inbox_entry(
-            InboxMessage(ask="master completed", response="resp", message_kind="escalation"),
+            InboxMessage(ask="ask", response="resp", message_kind="escalation"),
+            entry_id="e1",
+            now=(NOW - timedelta(minutes=10)).isoformat(),
+            routing=InboxRouting(
+                address=InboxAddress(
+                    lifecycle_id=None, agent_id="manager-1", recipient_role="manager"
+                )
+            ),
+            poster=InboxPoster(
+                created_by="worker-1",
+                created_via="cli",
+                sender_agent_id="worker-1",
+                sender_role="worker",
+            ),
+        ).model_copy(update={"leafKey": "repo-a/260707_master/leaf-1"})
+        self.inbox_store.append(entry)
+
+        result = run_agent_notifier_sweep(self._ctx(), now=NOW)
+
+        self.assertNotIn("redeliver", {action.action for action in result.actions})
+        expired = self.inbox_store.current()["e1"]
+        self.assertEqual(expired.state, "expired")
+        self.assertEqual(expired.terminalReason, "rebind-grace-expired")
+        # N3: the dead owner chain surfaces to the scoped architect mailbox -- a mailbox, not
+        # a ladder rung.
+        self.assertEqual(expired.recipientRole, "architect")
+        self.assertIsNone(expired.agentId)
+        self.assertIn("orchestration.agent-notifier.rebind-expired", self._events())
+        # Workers stay their own seats -- never re-parented, never absorbing the dead role.
+        worker1 = self.catalog.get("worker-1")
+        assert worker1 is not None
+        self.assertEqual(worker1.status, "running")
+
+    def test_landed_row_produces_no_retry_nudge_or_escalation_ever(self) -> None:
+        """N16 regression: the delivered-but-unconsumed class is dissolved -- a landed row
+        must produce no further retry, nudge, or escalation of any kind."""
+        self.catalog.upsert(replace(_entry("manager-1"), spawn_role="manager"))
+        entry = create_operator_inbox_entry(
+            InboxMessage(ask="signal", response="worker done", message_kind="state-signal"),
+            entry_id="e1",
+            now=(NOW - timedelta(minutes=5)).isoformat(),
+            routing=InboxRouting(
+                address=InboxAddress(
+                    lifecycle_id=None, agent_id="manager-1", recipient_role="manager"
+                )
+            ),
+            poster=InboxPoster(
+                created_by="agent-notifier", created_via="cli", sender_role="system"
+            ),
+        )
+        self.inbox_store.append(entry)
+        inbox_transitions.mark_landed(
+            self.inbox_store,
+            "e1",
+            now=NOW.isoformat(),
+            reason="adapter-accepted-at-turn-boundary",
+        )
+
+        for offset in (0, 10, 30):
+            result = run_agent_notifier_sweep(self._ctx(), now=NOW + timedelta(seconds=offset))
+            self.assertFalse(any(f.source_id == "e1" for f in result.findings))
+            self.assertFalse(any(a.finding.source_id == "e1" for a in result.actions))
+        self.assertEqual(self.inbox_store.current()["e1"].state, "landed")
+        self.assertEqual(
+            self.inbox_store.list_redeliverable(now=NOW + timedelta(hours=1)),
+            [],
+        )
+
+    def test_relay_restart_reconciles_by_request_id_without_duplicate_submission(self) -> None:
+        """R7: a relay kill/restart mid-redelivery replays the SAME correlated request -- the
+        row fires exactly once more at the boundary and lands, never duplicating the push."""
+        self.catalog.upsert(replace(_entry("architect-1"), spawn_role="architect"))
+        self.catalog.upsert(
+            replace(
+                _entry("worker-1"),
+                turn_state="working",
+                turn_state_changed_at=NOW.isoformat(),
+                control_state="ready",
+                control_endpoint=Path("/tmp/worker.sock"),
+                control_protocol="ar-harness-control/v1",
+            )
+        )
+        entry = create_operator_inbox_entry(
+            InboxMessage(ask="dispatch", response="work", message_kind="message"),
             entry_id="e1",
             now=(NOW - timedelta(minutes=30)).isoformat(),
             routing=InboxRouting(
                 address=InboxAddress(
-                    lifecycle_id=None, agent_id="orchestrator-1", recipient_role="orchestrator"
+                    lifecycle_id=None, agent_id="worker-1", recipient_role="worker"
                 )
             ),
-            poster=InboxPoster(created_by="system", created_via="cli"),
-        ).model_copy(update={"rung": 2, "escalatedAt": (NOW - timedelta(minutes=5)).isoformat()})
+            poster=InboxPoster(created_by="manager-1", created_via="cli"),
+        )
         self.inbox_store.append(entry)
 
-        run_agent_notifier_sweep(self._ctx(), now=NOW)
+        with mock.patch(
+            "agents_remember.serving.inbox_delivery.submit_control_prompt",
+            side_effect=lambda _target, _text, submission: SubmissionReceipt(
+                request_id=submission.request_id,
+                acceptance="immediate",
+                submitted_at=NOW.isoformat(),
+                accepted_at=NOW.isoformat(),
+            ),
+        ) as submit:
+            first = deliver_inbox_entry(
+                InboxDeliveryLog(store=self.inbox_store, entry=entry, at=NOW.isoformat()),
+                sessions=HostedSessionRuntime(
+                    catalog=self.catalog, host=cast(TerminalHost, _FakeHost())
+                ),
+                paster=_fake_paster(),
+            )
+        # Accepted mid-turn: delivered evidence, but NOT landed (N1 gate).
+        self.assertEqual(first.adapterDeliveryState, "accepted")
+        self.assertEqual(first.state, "pending")
+        self.assertEqual(submit.call_count, 1)
 
-        advanced = self.inbox_store.current()["e1"]
-        self.assertEqual(advanced.rung, 3)
-        self.assertEqual(advanced.recipientRole, "architect")
-        self.assertEqual(advanced.agentId, "architect-1")
-        self.assertEqual(len(self.inbox_store.current()), 1)
+        # The relay restarts; the worker reaches a turn boundary; the SAME request id is
+        # reconciled (never resubmitted) and the correlated acceptance now lands the row.
+        worker = self.catalog.get("worker-1")
+        assert worker is not None
+        self.catalog.upsert(
+            replace(
+                worker,
+                turn_state="turn-ended",
+                turn_state_changed_at=(NOW + timedelta(minutes=1)).isoformat(),
+            )
+        )
+        redelivered = deliver_inbox_entry(
+            InboxDeliveryLog(
+                store=self.inbox_store,
+                entry=self.inbox_store.current()["e1"],
+                at=(NOW + timedelta(minutes=1)).isoformat(),
+            ),
+            sessions=HostedSessionRuntime(
+                catalog=self.catalog, host=cast(TerminalHost, _FakeHost())
+            ),
+            paster=_fake_paster(),
+        )
+        self.assertEqual(submit.call_count, 1)
+        self.assertEqual(redelivered.state, "landed")
+        self.assertEqual(redelivered.attemptCount, 2)
 
     def test_unacked_backlog_reaches_a_fixed_point_with_absent_developer(self) -> None:
         """The 2026-07-09 meltdown regression (quiescence probe the HFX2-L12 audit lacked):
@@ -803,7 +1010,7 @@ class Cs6SweepScalingTests(unittest.TestCase):
                 write_expectation_row(
                     self.expectation_store,
                     Expectation(
-                        kind="ack-by",
+                        kind="verdict-by",
                         source_id=f"seat-{index}",
                         subject=ExpectationSubject(
                             agent_id="worker-1", leaf_key="repo/260707_master/leaf-1"
@@ -826,9 +1033,10 @@ class Cs6SweepScalingTests(unittest.TestCase):
         )
         assert_bounded_count(reads_by_k[40], 6, label="expectation reads/sweep")
 
-    def test_escalation_budget_caps_rung_emission_per_sweep(self) -> None:
-        """Z17: a river-storm-sized backlog of rung-due rows emits at most escalation_budget
-        escalation findings per sweep; the rest stay rung_due and re-fire next sweep."""
+    def test_dead_seat_expiry_emission_is_exactly_one_per_row_per_sweep(self) -> None:
+        """Z17 replacement: a backlog of dead-seat rows emits exactly one rebind-expired
+        finding+action per row per sweep (linear, never quadratic), and level-triggered
+        re-fires stop because the rows resolve terminal."""
         for pending_count in (20, 60):
             with self.subTest(pending=pending_count):
                 self.setUp()
@@ -844,18 +1052,24 @@ class Cs6SweepScalingTests(unittest.TestCase):
                             poster=InboxPoster(created_by="system", created_via="cli"),
                         )
                     )
-                result = run_agent_notifier_sweep(
-                    self._ctx(
-                        escalation_budget=5,
-                        escalation_sla_seconds={"escalation": 60.0},
-                    ),
-                    now=NOW,
-                )
-                escalation_findings = [f for f in result.findings if f.kind == "escalation-due"]
+                result = run_agent_notifier_sweep(self._ctx(), now=NOW)
+                expiry_findings = [f for f in result.findings if f.kind == "rebind-expired"]
                 assert_bounded_count(
-                    len(escalation_findings), 5, label=f"escalation findings at N={pending_count}"
+                    len(expiry_findings),
+                    pending_count,
+                    label=f"expiry findings at N={pending_count}",
                 )
-                self.assertEqual(len(escalation_findings), 5)  # budget-full, not fewer
+                self.assertEqual(len(expiry_findings), pending_count)
+                self.assertEqual(
+                    len([a for a in result.actions if a.action == "expire"]),
+                    pending_count,
+                )
+                # Terminal now: a second sweep re-fires nothing.
+                again = run_agent_notifier_sweep(self._ctx(), now=NOW + timedelta(seconds=1))
+                self.assertEqual(
+                    [f for f in again.findings if f.kind == "rebind-expired"],
+                    [],
+                )
                 heartbeat = self.heartbeat_store.read()
                 assert heartbeat is not None
-                self.assertEqual(heartbeat.sweepCount, 1)
+                self.assertEqual(heartbeat.sweepCount, 2)

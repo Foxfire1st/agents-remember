@@ -51,6 +51,7 @@ from .operator_inbox import (
     operator_inbox_consume_payload,
     operator_inbox_poll_payload,
     operator_inbox_post_payload,
+    operator_inbox_supersede_payload,
 )
 from .orchestration import orchestration_nudge_manager_payload
 from .providers import (
@@ -130,6 +131,7 @@ __all__ = [
     "operator_inbox_consume_payload",
     "operator_inbox_poll_payload",
     "operator_inbox_post_payload",
+    "operator_inbox_supersede_payload",
     "orchestration_nudge_manager_payload",
     "ping_payload",
     "provider_diagnostics_payload",

@@ -15,7 +15,7 @@ from agents_remember.controlplane.operator_inbox_records import (
     InboxOwner,
     OperatorInboxEntry,
 )
-from agents_remember.controlplane.operator_inbox_transitions import RungAdvance
+from agents_remember.controlplane.operator_inbox_transitions import ExpiryOptions, RungAdvance
 from agents_remember.controlplane.orchestration_nudges import (
     NudgeReason,
     OrchestrationNudgeRecord,
@@ -23,7 +23,9 @@ from agents_remember.controlplane.orchestration_nudges import (
 )
 from agents_remember.controlplane.orphan_policy import find_orphaned_workers
 from agents_remember.controlplane.signal_routing import (
+    derive_architect_owner,
     derive_leaf_manager_owner,
+    derive_row_owner,
     derive_signal_owner,
 )
 from agents_remember.observer.events import Event, now_iso
@@ -39,7 +41,6 @@ from agents_remember.serving.agent_notifier_models import (
 )
 from agents_remember.serving.agent_notifier_models import SweepState as _SweepState
 from agents_remember.serving.dispatch_brief import (
-    DISPATCH_BRIEF_KIND,
     dispatch_stays_on_exact_session,
     fulfill_briefed_expectation,
 )
@@ -109,8 +110,6 @@ def _redeliver(  # pragma: no cover
     entry = sweep.inbox_current.get(finding.source_id)
     if entry is None or entry.state != "pending":
         return AgentNotifierActionResult("redeliver", finding, "skipped", "entry not pending")
-    if _ladder_terminal_and_dead(ctx.catalog, entry):
-        return _resolve_ladder_terminal(ctx, finding, now=now, sweep=sweep)
     admission = (
         DeliveryAdmission(boundary=True)
         if entry.messageKind == "state-signal"
@@ -145,15 +144,156 @@ def _redeliver(  # pragma: no cover
             "sessionId": finding.session_id,
         },
     )
-    if (
-        entry.messageKind != DISPATCH_BRIEF_KIND
-        and updated.deliveryState != "delivered"
-        and updated.attemptCount >= PERSISTENT_FAILURE_ATTEMPTS
-    ):
-        _escalate_inbox_entry(ctx, updated.id, now=now, sweep=sweep)
+    if updated.state == "pending" and updated.attemptCount >= PERSISTENT_FAILURE_ATTEMPTS:
+        _mark_unresolved(ctx, updated.id, now=now, sweep=sweep)
     return AgentNotifierActionResult(
         "redeliver", finding, updated.deliveryState, updated.deliveryDetail
     )
+
+
+def _mark_unresolved(
+    ctx: AgentNotifierContext,
+    entry_id: str,
+    *,
+    now: datetime,
+    sweep: _SweepState,
+) -> None:
+    """N3 attempt ceiling: 5 attempts without a landing resolve the row ``unresolved``."""
+    try:
+        unresolved, _ = inbox_transitions.mark_unresolved(
+            ctx.inbox_store,
+            entry_id,
+            now=now.isoformat(),
+            reason="attempt-limit",
+        )
+    except KeyError:
+        return
+    sweep.remember(unresolved)
+    _log_event(
+        ctx,
+        "orchestration.agent-notifier.unresolved",
+        {
+            "entryId": unresolved.id,
+            "agentId": unresolved.agentId,
+            "state": unresolved.state,
+            "attemptCount": unresolved.attemptCount,
+            "terminalAt": unresolved.terminalAt,
+        },
+    )
+
+
+def _rebind_due(
+    ctx: AgentNotifierContext,
+    finding: AgentNotifierFinding,
+    *,
+    now: datetime,
+    sweep: _SweepState,
+) -> AgentNotifierActionResult:
+    """Sweep-time rebind (N14): move a pending row onto its current qualified owner."""
+    if finding.source_id is None:
+        return AgentNotifierActionResult("rebind", finding, "skipped", "no source entry id")
+    entry = sweep.inbox_current.get(finding.source_id)
+    if entry is None or entry.state != "pending":
+        return AgentNotifierActionResult("rebind", finding, "skipped", "entry not pending")
+    owner = derive_row_owner(ctx.catalog, entry)
+    if owner.agent_id is None or owner.agent_id == entry.agentId:
+        return AgentNotifierActionResult("rebind", finding, "skipped", "no replacement owner")
+    rebound, _ = inbox_transitions.rebind_entry(
+        ctx.inbox_store,
+        entry.id,
+        InboxOwner(role=owner.role, agent_id=owner.agent_id, lifecycle_id=owner.lifecycle_id),
+        now=now.isoformat(),
+        current=sweep.inbox_current,
+    )
+    sweep.remember(rebound)
+    _log_event(
+        ctx,
+        "orchestration.agent-notifier.rebind",
+        {
+            "entryId": rebound.id,
+            "fromAgentId": entry.agentId,
+            "toAgentId": owner.agent_id,
+            "toRole": owner.role,
+            "leafKey": rebound.leafKey,
+        },
+    )
+    return AgentNotifierActionResult("rebind", finding, "rebound", owner.agent_id)
+
+
+def _rebind_expired(
+    ctx: AgentNotifierContext,
+    finding: AgentNotifierFinding,
+    *,
+    now: datetime,
+    sweep: _SweepState,
+) -> AgentNotifierActionResult:
+    """N2 grace expiry: no replacement appeared -- terminal-visible, then compacted.
+
+    The terminal marker is readdressed to the scoped architect mailbox (N3: a mailbox, not a
+    ladder rung) so a dead owner chain stays inspectable during the marker-retention window.
+    """
+    if finding.source_id is None:
+        return AgentNotifierActionResult("expire", finding, "skipped", "no source entry id")
+    entry = sweep.inbox_current.get(finding.source_id)
+    if entry is None or entry.state != "pending":
+        return AgentNotifierActionResult("expire", finding, "skipped", "entry not pending")
+    owner = derive_row_owner(ctx.catalog, entry)
+    if owner.agent_id is not None and owner.agent_id != entry.agentId:
+        return _rebind_due(ctx, finding, now=now, sweep=sweep)
+    mailbox = derive_architect_owner(ctx.catalog, leaf_key=entry.leafKey)
+    expired, _ = inbox_transitions.mark_expired(
+        ctx.inbox_store,
+        entry.id,
+        now=now.isoformat(),
+        options=ExpiryOptions(
+            reason="rebind-grace-expired",
+            readdress_to=InboxOwner(
+                role=mailbox.role, agent_id=mailbox.agent_id, lifecycle_id=mailbox.lifecycle_id
+            ),
+        ),
+    )
+    sweep.remember(expired)
+    _log_event(
+        ctx,
+        "orchestration.agent-notifier.rebind-expired",
+        {
+            "entryId": expired.id,
+            "agentId": expired.agentId,
+            "state": expired.state,
+            "terminalAt": expired.terminalAt,
+            "architectRole": mailbox.role,
+            "architectAgentId": mailbox.agent_id,
+        },
+    )
+    return AgentNotifierActionResult("expire", finding, expired.state, "rebind-grace-expired")
+
+
+def _expire_pending(
+    ctx: AgentNotifierContext,
+    finding: AgentNotifierFinding,
+    *,
+    now: datetime,
+    sweep: _SweepState,
+) -> AgentNotifierActionResult:
+    """Retention boundary (D6/§9): a pending row past the 48h window resolves ``expired``."""
+    if finding.source_id is None:
+        return AgentNotifierActionResult("expire", finding, "skipped", "no source entry id")
+    entry = sweep.inbox_current.get(finding.source_id)
+    if entry is None or entry.state != "pending":
+        return AgentNotifierActionResult("expire", finding, "skipped", "entry not pending")
+    expired, _ = inbox_transitions.mark_expired(
+        ctx.inbox_store,
+        entry.id,
+        now=now.isoformat(),
+        options=ExpiryOptions(reason="pending-ttl-expired"),
+    )
+    sweep.remember(expired)
+    _log_event(
+        ctx,
+        "orchestration.agent-notifier.inbox-expired",
+        {"entryId": expired.id, "agentId": expired.agentId, "terminalAt": expired.terminalAt},
+    )
+    return AgentNotifierActionResult("expire", finding, expired.state, "pending-ttl-expired")
 
 
 # 260731-EFA-L7 R10: verbatim L7 split (L7-OQ1 Option A serving scope); unchanged edge branch, out of this leaf's behavior scope (mcp/src/agents_remember/serving/_agent_notifier_actions.py:124).
@@ -817,7 +957,9 @@ _FINDING_ACTIONS: dict[str, _FindingAction] = {
     "inbox-redeliverable": _redeliver,
     "inbox-ladder-terminal": _resolve_ladder_terminal,
     "expectation-overdue": _auto_nudge,
-    "escalation-due": _escalate_rung,
+    "rebind-due": _rebind_due,
+    "rebind-expired": _rebind_expired,
+    "inbox-ttl-expired": _expire_pending,
     "dead-upstream": _signal_dead_upstream,
     "seat-liveness": _signal_emit,
     "state-signal-due": _emit_state_signal,

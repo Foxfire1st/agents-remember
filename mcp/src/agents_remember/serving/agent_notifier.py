@@ -22,6 +22,7 @@ from __future__ import annotations
 from datetime import datetime
 from time import perf_counter
 
+from agents_remember.controlplane import operator_inbox_transitions as inbox_transitions
 from agents_remember.controlplane.inbox_backoff import require_redelivery_floor_seconds
 from agents_remember.controlplane.operator_inbox_records import OperatorInboxEntry
 from agents_remember.serving._agent_notifier_actions import (
@@ -33,9 +34,12 @@ from agents_remember.serving._agent_notifier_actions import (
     _emit_state_signal,
     _escalate_inbox_entry,
     _escalate_rung,
+    _expire_pending,
     _FindingAction,
     _log_event,
     _mark_expectation_missed,
+    _rebind_due,
+    _rebind_expired,
     _redeliver,
     _resolve_ladder_terminal,
     _respawn_suspect,
@@ -62,7 +66,9 @@ from agents_remember.serving._agent_notifier_evaluation import (
     evaluate_inbox_findings,
     evaluate_ladder_terminal_findings,
     evaluate_pane_findings,
+    evaluate_pending_expiry_findings,
     evaluate_predicates,
+    evaluate_rebind_findings,
     evaluate_seat_liveness_findings,
 )
 from agents_remember.serving.agent_notifier_models import (
@@ -164,6 +170,9 @@ def run_agent_notifier_sweep(
             "orchestration.agent-notifier.inbox-compacted",
             data,
         )
+    # N13 migration fold: pre-migration rows that satisfied the by-rule landing predicate
+    # (state-signal + delivered + accepted) gain the formal ``landed`` state exactly once.
+    _fold_legacy_landed(ctx, current, now=now)
     # CS-6 D2/D3: read + reclaim the append-only signal cooldown log ONCE per sweep. compact()
     # drops rows older than the cooldown window (they can no longer suppress a signal) and returns
     # the kept snapshot, which every per-finding in_cooldown check reads in-memory -- so the store
@@ -210,6 +219,37 @@ def run_agent_notifier_sweep(
     )
 
 
+def _fold_legacy_landed(
+    ctx: AgentNotifierContext,
+    current: dict[str, OperatorInboxEntry],
+    *,
+    now: datetime,
+) -> int:
+    """Formally land rows created under the retired by-rule predicate (N13)."""
+    folded = 0
+    for row in current.values():
+        if row.state != "pending" or row.messageKind != "state-signal":
+            continue
+        if row.deliveryState != "delivered" or row.adapterDeliveryState != "accepted":
+            continue
+        landed, changed = inbox_transitions.mark_landed(
+            ctx.inbox_store,
+            row.id,
+            now=now.isoformat(),
+            reason="legacy-by-rule-landed",
+        )
+        current[row.id] = landed
+        if changed:
+            folded += 1
+    if folded:
+        _log_event(
+            ctx,
+            "orchestration.agent-notifier.inbox-landed-fold",
+            {"count": folded},
+        )
+    return folded
+
+
 __all__ = [
     "COMPOUND_IDLE_SWEEP_LATENCY_SECONDS",
     "DEFAULT_ESCALATION_RUNG_SECONDS",
@@ -233,12 +273,15 @@ __all__ = [
     "_escalate_inbox_entry",
     "_escalate_rung",
     "_expectation_chain_progressed",
+    "_expire_pending",
     "_find_coalescible",
     "_inactivity_signal_chain_progressed",
     "_ladder_terminal_and_dead",
     "_log_event",
     "_mark_expectation_missed",
     "_post_owner_signal",
+    "_rebind_due",
+    "_rebind_expired",
     "_redeliver",
     "_resolve_ladder_terminal",
     "_respawn_suspect",
@@ -258,7 +301,9 @@ __all__ = [
     "evaluate_ladder_terminal_findings",
     "evaluate_non_reaction_findings",
     "evaluate_pane_findings",
+    "evaluate_pending_expiry_findings",
     "evaluate_predicates",
+    "evaluate_rebind_findings",
     "evaluate_seat_liveness_findings",
     "evaluate_state_signal_findings",
     "non_reaction_response",

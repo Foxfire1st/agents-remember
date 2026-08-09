@@ -6,11 +6,6 @@ from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
-from agents_remember.controlplane.expectation_rows import (
-    Expectation,
-    ExpectationSubject,
-    write_expectation_row,
-)
 from agents_remember.controlplane.operator_inbox_records import (
     InboxAddress,
     InboxMessage,
@@ -34,8 +29,6 @@ from agents_remember.observer.events import now_iso
 from agents_remember.observer.ulid import new_ulid
 from agents_remember.serving.dispatch_brief import (
     HostedDelivery,
-    expectation_sla_seconds,
-    expectation_store,
     fulfill_dispatch_expectation,
     require_dispatch_target,
     start_dispatch_expectations,
@@ -104,21 +97,62 @@ def _signal_route(
 
 
 def _post_address(
+    catalog: TerminalCatalog | None,
     owner: RoutedOwner,
     *,
     message_kind: InboxMessageKind,
     address: InboxAddress,
 ) -> InboxAddress:
+    """The delivery address for one post, after N14 post-time owner re-resolution.
+
+    Every owner-addressed post re-derives the CURRENT qualified owner from the sender's
+    leaf/role identity before persisting, so a worker whose manager was replaced never
+    addresses the corpse. ``dispatch-brief`` rows are exact-pinned and never rebind; a
+    caller-addressed recipient that is not an owner (or cannot be proven to be one) is kept
+    verbatim -- cross-agent messages are never hijacked by derivation.
+    """
     has_owner = (
-        owner.agent_id is not None or owner.lifecycle_id is not None or owner.role is not None
+        owner.role is not None or owner.agent_id is not None or owner.lifecycle_id is not None
     )
-    if message_kind not in ("turn-report", "master-handover") or not has_owner:
+    if message_kind == "dispatch-brief" or not has_owner or catalog is None:
+        return address
+    if not _is_owner_addressed(catalog, owner, address):
         return address
     return InboxAddress(
         lifecycle_id=owner.lifecycle_id,
         agent_id=owner.agent_id,
         recipient_role=owner.role,
     )
+
+
+_OWNER_ADDRESS_ROLES = frozenset({"manager", "orchestrator", "architect"})
+
+
+def _is_owner_addressed(
+    catalog: TerminalCatalog,
+    owner: RoutedOwner,
+    address: InboxAddress,
+) -> bool:
+    """Whether ``address`` names an owner mailbox rather than an arbitrary peer seat."""
+    if address.recipient_role is not None:
+        return address.recipient_role in _OWNER_ADDRESS_ROLES
+    if address.agent_id is not None:
+        target = catalog.get(address.agent_id)
+        if target is None:
+            # The addressed seat does not exist: the derived owner is the current qualified
+            # owner (the row would otherwise be born addressed to nobody).
+            return True
+        return target.binding_role == owner.role
+    if address.lifecycle_id is not None:
+        seats = [
+            entry
+            for entry in catalog.list(include_terminated=True)
+            if entry.lifecycle_id == address.lifecycle_id
+        ]
+        if not seats:
+            return True
+        return any(entry.binding_role == owner.role for entry in seats)
+    return False
 
 
 def _post_catalog(
@@ -148,33 +182,11 @@ def _persist_post(
     store: OperatorInboxStore,
     entry: OperatorInboxEntry,
     dispatch_target: TerminalCatalogEntry | None,
-    *,
-    address: InboxAddress,
 ) -> None:
     store.append(entry)
     store.compact(now=datetime.now(UTC))
     if dispatch_target is not None and config is not None:
         start_dispatch_expectations(config, entry, dispatch_target)
-    if config is None:
-        return
-    write_expectation_row(
-        expectation_store(config),
-        Expectation(
-            kind="ack-by",
-            source_id=entry.id,
-            subject=ExpectationSubject(
-                agent_id=address.agent_id,
-                lifecycle_id=address.lifecycle_id,
-            ),
-            note=(
-                f"ack-by: {entry.messageKind} to "
-                f"{address.recipient_role or address.agent_id or address.lifecycle_id}"
-            ),
-        ),
-        row_id=new_ulid(),
-        now=datetime.now(UTC),
-        sla_seconds=expectation_sla_seconds(config, "ack-by"),
-    )
 
 
 def _deliver_post(
@@ -229,7 +241,7 @@ def post_operator_inbox_entry(
         routed_leaf_key=routed_leaf_key,
         sender_agent_id=poster.sender_agent_id,
     )
-    target = _post_address(owner, message_kind=message.message_kind, address=address)
+    target = _post_address(catalog, owner, message_kind=message.message_kind, address=address)
     entry = create_operator_inbox_entry(
         replace(
             message,
@@ -251,7 +263,7 @@ def post_operator_inbox_entry(
         ),
         poster=poster,
     )
-    _persist_post(context.config, context.store, entry, dispatch_target, address=target)
+    _persist_post(context.config, context.store, entry, dispatch_target)
     if delivery.enabled:
         entry = _deliver_post(
             context.config,

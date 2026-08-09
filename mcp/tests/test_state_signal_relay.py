@@ -387,6 +387,7 @@ class StateSignalRelayTests(unittest.TestCase):
             poster=InboxPoster(created_by="system", created_via="cli"),
         ).model_copy(
             update={
+                "state": "landed",
                 "deliveryState": "delivered",
                 "adapterDeliveryState": "accepted",
                 "deliveredToSession": "worker-1",
@@ -429,6 +430,7 @@ class StateSignalRelayTests(unittest.TestCase):
             poster=InboxPoster(created_by="system", created_via="cli"),
         ).model_copy(
             update={
+                "state": "landed",
                 "deliveryState": "delivered",
                 "adapterDeliveryState": "accepted",
                 "deliveredToSession": "worker-1",

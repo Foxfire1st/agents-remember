@@ -17,18 +17,17 @@ INTERACTION_RECORD_TTL_SECONDS = 24 * 60 * 60.0
 AGENT_PICKUP_TTL_SECONDS = 300.0
 
 INBOX_PENDING_TTL_SECONDS = 48 * 60 * 60.0
-"""Ruled invariant (developer, 2026-07-09): no row outranks system health -- pending/unacked rows
-age out too. The inbox is a notification surface, not the record; the durable artifact (turn
-report, task doc, gate) lives on disk and survives the purge. A nudge nobody consumed within this
-window is stale noise; if its condition still holds, the agent-notifier recreates one fresh row.
-Supersedes the HFX2-L1 R1 immortal-pending rule, which let the 2026-07-09 escalation storm grow a
-227 MB / 20k-pending-row inbox that took the host down."""
+INBOX_TERMINAL_MARKER_RETENTION_SECONDS = INBOX_PENDING_TTL_SECONDS
+"""Terminal-marker retention (design §9/N13): terminal rows are inspectable for 48h, then
+physically evicted. In normal operation every resolution clock (attempt ceiling, rebind grace)
+is far shorter than 48h, so a pending row reaches a surfaced terminal state before retention
+can touch it; the old silent pending purge is replaced by the ``expired`` stamp + sweep event."""
 
 INBOX_MAX_CURRENT_ROWS = 500
-"""Hard health cap on folded inbox rows: past this, compaction keeps the newest rows and evicts
-the oldest regardless of state. A correctly coalescing system sits orders of magnitude below this
-(one row per distinct root cause); the cap is the backstop that bounds the store even when a
-producer misbehaves."""
+"""Hard health cap on folded inbox rows (D4): past this, compaction drops rows outright.
+Eviction prefers terminal markers oldest-first; only when the pending set itself exceeds the
+cap do pending rows drop (and that is accepted behavior, not data loss). Cap drops are
+counted/surfaced by the sweep's compaction event."""
 
 MUTATING_TOOL_GATE_KINDS: frozenset[GateKind] = frozenset(
     {
@@ -142,20 +141,25 @@ def inbox_keep_ids(
     entries: list[OperatorInboxEntry],
     *,
     now: datetime,
-    ttl_seconds: float = INTERACTION_RECORD_TTL_SECONDS,
     max_rows: int = INBOX_MAX_CURRENT_ROWS,
     current: dict[str, OperatorInboxEntry] | None = None,
 ) -> set[str]:
     """Inbox ids whose current snapshot still belongs in the compacted log."""
     latest = fold_operator_inbox_entries(entries) if current is None else current
-    kept = [
-        entry
-        for entry in latest.values()
-        if _keep_inbox_entry(entry, now=now, ttl_seconds=ttl_seconds)
-    ]
+    kept = [entry for entry in latest.values() if _keep_inbox_entry(entry, now=now)]
     if len(kept) > max_rows:
-        kept.sort(key=lambda entry: entry.createdAt, reverse=True)
-        kept = kept[:max_rows]
+        # Hard bounded-store cap (D4): pending rows survive before terminal markers, so the
+        # eviction class is terminal-oldest-first; only an overflowing pending set itself
+        # loses pending rows (oldest first). Dropping a pending row at the bound is accepted
+        # behavior, and the sweep counts/surfaces the drop.
+        pending = [entry for entry in kept if entry.state == "pending"]
+        terminal = [entry for entry in kept if entry.state != "pending"]
+        pending.sort(key=lambda entry: entry.createdAt, reverse=True)
+        terminal.sort(key=lambda entry: entry.createdAt, reverse=True)
+        selected = pending[:max_rows]
+        if len(selected) < max_rows:
+            selected = selected + terminal[: max_rows - len(selected)]
+        kept = selected
     return {entry.id for entry in kept}
 
 
@@ -192,16 +196,26 @@ def _keep_gate(gate: GateRecord, *, now: datetime, ttl_seconds: float) -> bool:
     return age is None or age <= ttl_seconds
 
 
-def _keep_inbox_entry(entry: OperatorInboxEntry, *, now: datetime, ttl_seconds: float) -> bool:
-    """Ruled invariant (developer, 2026-07-09): system health outranks every row, pending
-    included. A pending/unacked row is kept only within :data:`INBOX_PENDING_TTL_SECONDS`;
-    consumed rows keep the shorter audit window; ladder-resolved rows drop immediately. This
-    supersedes HFX2-L1 R1's immortal-pending rule -- the durable record is the artifact on disk,
-    never the inbox row, so purging an old nudge loses nothing the agent-notifier cannot recreate
-    (as one fresh row) while its condition persists."""
+def _keep_inbox_entry(entry: OperatorInboxEntry, *, now: datetime) -> bool:
+    """D4 bounded-store retention: terminal markers keep their 48h visibility window, then drop.
+
+    A pending row is kept within :data:`INBOX_PENDING_TTL_SECONDS` -- the sweep stamps older
+    pending rows ``expired`` first, so the TTL is a resolution boundary, not a silent purge.
+    The post-N16 terminal states (landed/superseded/unresolved/expired) are retained for
+    :data:`INBOX_TERMINAL_MARKER_RETENTION_SECONDS` from their terminal stamp; legacy consumed
+    rows keep the same window from their consume stamp; legacy ladder-resolved rows drop
+    immediately (their immediate-drop behavior predates the marker window).
+    """
     if entry.state == "ladder-resolved":
         return False
-    age = age_seconds(entry.createdAt, now)
     if entry.state == "pending":
-        return age is None or age <= INBOX_PENDING_TTL_SECONDS
-    return age is None or age <= ttl_seconds
+        # The sweep owns the pending TTL as a RESOLUTION boundary: an older pending row is
+        # stamped ``expired`` (visible, counted) before retention can drop it. Compaction
+        # itself keeps pending rows so the expiry is always surfaced first; the hard cap
+        # remains the ultimate bound even when the sweep is down.
+        return True
+    if entry.state == "consumed":
+        marker_age = age_seconds(entry.consumedAt or entry.createdAt, now)
+        return marker_age is None or marker_age <= INBOX_TERMINAL_MARKER_RETENTION_SECONDS
+    marker_age = age_seconds(entry.terminalAt or entry.createdAt, now)
+    return marker_age is None or marker_age <= INBOX_TERMINAL_MARKER_RETENTION_SECONDS

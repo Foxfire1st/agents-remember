@@ -203,11 +203,12 @@ class SweepIntegrationTests(unittest.TestCase):
         )
         self.inbox_store.append(inbox_entry)
 
-        # R2b: an overdue ack-by row for the worker.
+        # R2b: an overdue verdict-by row for the worker (ack-by retired with the N16 consume
+        # demotion).
         write_expectation_row(
             self.expectation_store,
             Expectation(
-                kind="ack-by",
+                kind="verdict-by",
                 source_id="worker-1",
                 subject=ExpectationSubject(
                     agent_id="worker-1", leaf_key="repo-a/260707_master/leaf-9"
@@ -275,7 +276,7 @@ class SweepIntegrationTests(unittest.TestCase):
         write_expectation_row(
             self.expectation_store,
             Expectation(
-                kind="ack-by",
+                kind="verdict-by",
                 source_id="orphan-1",
                 subject=ExpectationSubject(agent_id="orphan-1"),
             ),
@@ -306,11 +307,11 @@ class SweepIntegrationTests(unittest.TestCase):
         assert heartbeat is not None
         self.assertEqual(heartbeat.sweepCount, 2)
 
-    def test_terminal_dead_seat_row_becomes_ladder_resolved_not_redelivered(self) -> None:
+    def test_dead_seat_row_expires_to_the_architect_mailbox_not_redelivered(self) -> None:
         entry = create_operator_inbox_entry(
             InboxMessage(ask="ask", response="resp"),
             entry_id="dead-row",
-            now=NOW.isoformat(),
+            now=(NOW - timedelta(minutes=10)).isoformat(),
             routing=InboxRouting(address=InboxAddress(lifecycle_id=None, agent_id="missing-seat")),
             poster=InboxPoster(created_by="system", created_via="cli"),
         ).model_copy(update={"rung": 3})
@@ -319,14 +320,18 @@ class SweepIntegrationTests(unittest.TestCase):
         result = run_agent_notifier_sweep(self._ctx(), now=NOW)
 
         actions = {action.action: action for action in result.actions}
-        self.assertIn("ladder-resolve", actions)
+        self.assertIn("expire", actions)
         self.assertNotIn("redeliver", actions)
-        resolved = self.inbox_store.current()["dead-row"]
-        self.assertEqual(resolved.state, "ladder-resolved")
+        expired = self.inbox_store.current()["dead-row"]
+        self.assertEqual(expired.state, "expired")
+        self.assertEqual(expired.terminalReason, "rebind-grace-expired")
+        self.assertEqual(expired.recipientRole, "architect")
         event_kinds = {event.kind for event in self.event_store.read(None)}
-        self.assertIn("orchestration.agent-notifier.ladder-resolved", event_kinds)
+        self.assertIn("orchestration.agent-notifier.rebind-expired", event_kinds)
 
     def test_redeliver_budget_limits_attempts_and_heartbeat_reports_backlog(self) -> None:
+        for index in range(3):
+            self.catalog.upsert(_entry(f"seat-{index}"))
         for index in range(3):
             self.inbox_store.append(
                 create_operator_inbox_entry(
@@ -334,7 +339,7 @@ class SweepIntegrationTests(unittest.TestCase):
                     entry_id=f"row-{index}",
                     now=NOW.isoformat(),
                     routing=InboxRouting(
-                        address=InboxAddress(lifecycle_id=None, agent_id=f"missing-seat-{index}")
+                        address=InboxAddress(lifecycle_id=None, agent_id=f"seat-{index}")
                     ),
                     poster=InboxPoster(created_by="system", created_via="cli"),
                 )

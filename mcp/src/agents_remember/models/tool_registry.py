@@ -60,6 +60,7 @@ from agents_remember.models.operator_inbox import (
     OperatorInboxConsumeResponse,
     OperatorInboxPollResponse,
     OperatorInboxPostResponse,
+    OperatorInboxSupersedeResponse,
 )
 from agents_remember.models.orchestration import OrchestrationNudgeManagerResponse
 from agents_remember.models.providers import (
@@ -175,6 +176,7 @@ TOOL_RESPONSE_MODELS: dict[str, type[ResponseEnvelope]] = {
     "operator_inbox_post": OperatorInboxPostResponse,
     "operator_inbox_poll": OperatorInboxPollResponse,
     "operator_inbox_consume": OperatorInboxConsumeResponse,
+    "operator_inbox_supersede": OperatorInboxSupersedeResponse,
     "orchestration_nudge_manager": OrchestrationNudgeManagerResponse,
 }
 

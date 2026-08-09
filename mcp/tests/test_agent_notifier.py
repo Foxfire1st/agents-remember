@@ -137,13 +137,13 @@ class PanePredicateTests(unittest.TestCase):
 
 
 class ExpectationPredicateTests(unittest.TestCase):
-    def test_overdue_ack_by_row_fires(self) -> None:
+    def test_overdue_verdict_by_row_fires(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             store = ExpectationRowStore(Path(tmp))
             write_expectation_row(
                 store,
                 Expectation(
-                    kind="ack-by", source_id="s1", subject=ExpectationSubject(agent_id="s1")
+                    kind="verdict-by", source_id="s1", subject=ExpectationSubject(agent_id="s1")
                 ),
                 row_id="r1",
                 now=NOW - timedelta(minutes=10),
@@ -158,7 +158,7 @@ class ExpectationPredicateTests(unittest.TestCase):
             store = ExpectationRowStore(Path(tmp))
             write_expectation_row(
                 store,
-                Expectation(kind="ack-by", source_id="s1"),
+                Expectation(kind="verdict-by", source_id="s1"),
                 row_id="r1",
                 now=NOW,
                 sla_seconds=3600.0,

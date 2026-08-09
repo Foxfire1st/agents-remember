@@ -12,7 +12,19 @@ from agents_remember.controlplane.durable_store import DurableRecord
 
 OPERATOR_INBOX_RECORD_SCHEMA = "ar-operator-inbox-entry/v1"
 
-OperatorInboxState = Literal["pending", "consumed", "ladder-resolved"]
+OperatorInboxState = Literal[
+    "pending",
+    "landed",
+    "superseded",
+    "unresolved",
+    "expired",
+    # Legacy states retained for parse compatibility with pre-N16 rows. ``consumed`` is no
+    # longer written (operator_inbox_consume is an attribution marker, not a state
+    # transition) and ``ladder-resolved`` predates the formal terminal vocabulary; both are
+    # still treated as terminal by the fold and never re-enter the retry path.
+    "consumed",
+    "ladder-resolved",
+]
 OperatorInboxVia = Literal["chat", "dashboard", "cli"]
 AgentRole = Literal[
     "developer",
@@ -52,15 +64,14 @@ OPERATOR_INBOX_FORWARD_COMPATIBLE_FIELDS = frozenset(
 
 
 def state_signal_landed(entry: OperatorInboxEntry) -> bool:
-    """Whether a state-signal row is terminal on the relay path: correlated adapter
-    acceptance at a turn boundary (the N1 gate). ``acceptance=queued`` from a busy adapter is
-    NOT this; only an accepted push at a boundary is a landing."""
-    return (
-        entry.messageKind == "state-signal"
-        and entry.state == "pending"
-        and entry.deliveryState == "delivered"
-        and entry.adapterDeliveryState == "accepted"
-    )
+    """Whether an inbox row is terminal by landing (N16): the formal ``landed`` state.
+
+    The by-rule predicate that derived landing from ``state-signal`` + ``delivered`` +
+    ``adapterDeliveryState=accepted`` folded into the schema: :func:`record_delivery` now
+    writes the ``landed`` snapshot itself when a correlated acceptance happened at a turn
+    boundary. ``acceptance=queued`` from a busy adapter is never this.
+    """
+    return entry.state == "landed"
 
 
 @dataclass(frozen=True)
@@ -76,10 +87,10 @@ class InboxAddress:
 
 @dataclass(frozen=True)
 class InboxOwner:
-    """R4: the routed owner a poster derives from catalog spawn provenance BEFORE posting.
+    """The routed owner a poster derives from catalog provenance BEFORE posting.
 
-    Stamped once at creation (and re-stamped by a readdressing ladder rung) so redelivery
-    never has to re-derive it from a catalog snapshot that has since moved on.
+    Stamped at creation and re-stamped by post-time re-resolution and sweep-time rebinding so
+    redelivery never has to re-derive it from a catalog snapshot that has since moved on.
     """
 
     role: AgentRole | None = None
@@ -195,8 +206,9 @@ class OperatorInboxEntry(OperatorInboxCompatibleRecord):
     deliveredAt: str | None = None
     deliveredToSession: str | None = None
     deliveryDetail: str | None = None
-    # Protocol delivery evidence is additive to the stable inbox delivery vocabulary. Acceptance
-    # never mutates ``state``; explicit recipient consume remains the only acknowledgement (R14).
+    # Protocol delivery evidence is additive to the stable inbox delivery vocabulary.
+    # Correlated adapter acceptance AT A TURN BOUNDARY writes the formal ``landed`` terminal
+    # state (N16); acceptance at any other time is delivery evidence, never terminality.
     adapterDeliveryState: AdapterDeliveryState | None = None
     adapterRequestId: str | None = None
     adapterVendorCorrelationId: str | None = None
@@ -208,12 +220,18 @@ class OperatorInboxEntry(OperatorInboxCompatibleRecord):
     consumedVia: OperatorInboxVia | None = None
     ladderResolvedAt: str | None = None
     ladderResolvedReason: str | None = None
-    # R1 (260707-HFX2-L1): ack semantics -- consume=ack is the ONLY terminal outcome. 'delivered'
-    # is never terminal (F-A/F-V proved pasted != perceived), so every delivery attempt -- including
-    # a confirmed paste -- stamps a redelivery schedule until the row is actually consumed.
+    # N16 (260713-TES): the system acks -- a row lands when a correlated adapter acceptance
+    # reaches it at a turn boundary. Every other delivery attempt stamps a redelivery schedule;
+    # ``consumed`` is an optional attribution marker with nothing mechanical attached.
     attemptCount: int = 0
     lastAttemptAt: str | None = None
     nextAttemptAt: str | None = None
+    # Formal terminal stamps for the post-N16 vocabulary: every non-pending transition writes
+    # ``terminalAt`` (when the row became terminal) and ``terminalReason`` (why). Terminal
+    # markers stay inspectable for the marker-retention window, then are physically evicted.
+    terminalAt: str | None = None
+    terminalReason: str | None = None
+    supersededBy: str | None = None
     # Set only when the ladder (HFX2-L4) escalates an unacked row past redelivery; this leaf only
     # reserves the field so the row stays escalatable -- it never sets it itself.
     escalatedAt: str | None = None
@@ -306,13 +324,18 @@ def consume_operator_inbox_entry(
     consumed_by: str,
     consumed_via: OperatorInboxVia,
 ) -> OperatorInboxEntry:
-    """Return a consumed snapshot, preserving the original post attribution."""
-    if entry.state != "pending":
+    """Return an attribution-marked snapshot, preserving the row's state (N16).
+
+    ``operator_inbox_consume`` is demoted to an optional attribution marker: it stamps
+    ``consumedAt``/``consumedBy``/``consumedVia`` once and nothing else. No mechanical
+    behavior -- retry, expectation, escalation, or terminality -- hangs off it, so ``state`` is
+    untouched and a landed row stays ``landed`` even when a model also marks it consumed.
+    """
+    if entry.consumedAt is not None:
         return entry
     return entry.model_copy(
         update={
             "ts": now,
-            "state": "consumed",
             "consumedAt": now,
             "consumedBy": consumed_by,
             "consumedVia": consumed_via,

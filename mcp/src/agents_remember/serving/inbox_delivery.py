@@ -173,6 +173,12 @@ def deliver_inbox_entry(
 
     ``paster`` remains in the public composition signature for callers shared with ordinary
     terminal plumbing, but harness delivery never invokes it and has no raw-input fallback.
+
+    Landing (N16) is decided HERE, where the target's boundary state is still live: a
+    correlated adapter ``accepted`` receipt while ``seat_at_turn_boundary(target)`` holds
+    writes the formal ``landed`` terminal state. ``acceptance=queued`` from a busy adapter is
+    never a landing, and acceptance outside a boundary leaves the row on its redelivery
+    schedule so the next boundary can drain it.
     """
 
     del paster  # compatibility composition parameter; protocol delivery never uses terminal input
@@ -190,10 +196,11 @@ def deliver_inbox_entry(
         )
     refusal = _delivery_refusal(entry, sessions=sessions, target=target, admission=admission)
     if refusal is not None:
-        return _record(log, target, refusal)
+        return _record(log, target, refusal, landed=False)
 
+    at_boundary = seat_at_turn_boundary(target)
     if entry.adapterRequestId is not None:
-        return _redelivery(log, target)
+        return _redelivery(log, target, at_boundary=at_boundary)
 
     text = _push_text(entry)
     if entry.messageKind == DISPATCH_BRIEF_KIND:
@@ -211,11 +218,14 @@ def deliver_inbox_entry(
             target,
             reconciliation,
             fallback_detail=f"ambiguous adapter transport: {exc}",
+            at_boundary=at_boundary,
         )
-    return _record_receipt(log, target, receipt)
+    return _record_receipt(log, target, receipt, at_boundary=at_boundary)
 
 
-def _redelivery(log: InboxDeliveryLog, target: TerminalCatalogEntry) -> OperatorInboxEntry:
+def _redelivery(
+    log: InboxDeliveryLog, target: TerminalCatalogEntry, *, at_boundary: bool
+) -> OperatorInboxEntry:
     entry = log.entry
     if entry.adapterDeliveryState in {"accepted", "queued", "completed"}:
         return _record(
@@ -226,6 +236,7 @@ def _redelivery(log: InboxDeliveryLog, target: TerminalCatalogEntry) -> Operator
                 entry.adapterDeliveryState,
                 f"adapter-{entry.adapterDeliveryState}: already correlated",
             ),
+            landed=at_boundary and entry.adapterDeliveryState == "accepted",
         )
     request_id = entry.adapterRequestId
     assert request_id is not None  # this helper is entered only for an already-correlated row
@@ -234,6 +245,7 @@ def _redelivery(log: InboxDeliveryLog, target: TerminalCatalogEntry) -> Operator
         target,
         _try_reconcile(target, request_id),
         fallback_detail="adapter request remains ambiguous; not resubmitted",
+        at_boundary=at_boundary,
     )
 
 
@@ -248,6 +260,8 @@ def _record_receipt(
     log: InboxDeliveryLog,
     target: TerminalCatalogEntry,
     receipt: SubmissionReceipt,
+    *,
+    at_boundary: bool,
 ) -> OperatorInboxEntry:
     adapter_state: AdapterDeliveryState = (
         "accepted" if receipt.acceptance == "immediate" else receipt.acceptance
@@ -267,6 +281,7 @@ def _record_receipt(
             vendor_correlation_id=receipt.vendor_correlation_id,
             accepted_at=receipt.accepted_at,
         ),
+        landed=at_boundary and adapter_state == "accepted",
     )
 
 
@@ -276,6 +291,7 @@ def _record_reconciliation(
     reconciliation: ReconciliationResult | None,
     *,
     fallback_detail: str,
+    at_boundary: bool,
 ) -> OperatorInboxEntry:
     if reconciliation is None or reconciliation.state == "unresolved":
         state: AdapterDeliveryState = "unknown"
@@ -300,6 +316,7 @@ def _record_reconciliation(
                 reconciliation.vendor_correlation_id if reconciliation is not None else None
             ),
         ),
+        landed=at_boundary and state == "accepted",
     )
 
 
@@ -308,6 +325,8 @@ def _record(
     target: TerminalCatalogEntry | None,
     outcome: _DeliveryOutcome,
     correlation: _AdapterCorrelation = _NO_ADAPTER_CORRELATION,
+    *,
+    landed: bool = False,
 ) -> OperatorInboxEntry:
     return inbox_transitions.record_delivery(
         log.store,
@@ -316,6 +335,7 @@ def _record(
             delivery_state=outcome.delivery_state,
             delivered_to_session=target.id if target is not None else None,
             detail=outcome.detail,
+            landed=landed,
             adapter=AdapterReceipt(
                 delivery_state=outcome.adapter_state,
                 request_id=log.entry.adapterRequestId or correlation.request_id,

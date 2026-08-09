@@ -132,7 +132,9 @@ def _post(
     return posted, submit_prompt, paster
 
 
-def test_ready_dispatch_is_inbox_rooted_and_starts_expectation_clocks(tmp_path: Path) -> None:
+def test_ready_dispatch_is_inbox_rooted_lands_and_starts_expectation_clocks(
+    tmp_path: Path,
+) -> None:
     config = _config(tmp_path)
     catalog = TerminalCatalog(tmp_path / "logs" / "dashboard" / "terminal-sessions.json")
     target = _target(tmp_path)
@@ -141,7 +143,8 @@ def test_ready_dispatch_is_inbox_rooted_and_starts_expectation_clocks(tmp_path: 
 
     assert posted["deliveryState"] == "delivered"
     assert posted["adapterDeliveryState"] == "accepted"
-    assert posted["state"] == "pending"
+    # N16: a brief accepted at a ready (turn-boundary) seat is terminal ``landed``.
+    assert posted["state"] == "landed"
     assert posted["agentId"] == target.id
     assert paster.calls == []
     assert submit_prompt.call_count == 1
@@ -149,12 +152,12 @@ def test_ready_dispatch_is_inbox_rooted_and_starts_expectation_clocks(tmp_path: 
     assert f"entry: {posted['entryId']}" in submit_prompt.call_args.args[1]
 
     durable = OperatorInboxStore(observer_root(config)).current()[str(posted["entryId"])]
-    assert durable.state == "pending"
+    assert durable.state == "landed"
     expectations = ExpectationRowStore(observer_root(config)).current()
     by_kind = {row.kind: row for row in expectations.values()}
-    assert set(by_kind) == {"ack-by", "briefed-by"}
+    # ack-by is retired with the N16 consume demotion; only the briefed-by clock rides here.
+    assert set(by_kind) == {"briefed-by"}
     assert by_kind["briefed-by"].state == "met"
-    assert by_kind["ack-by"].state == "pending"
 
 
 def test_rejected_adapter_receipt_keeps_same_row_pending(tmp_path: Path) -> None:
@@ -211,7 +214,8 @@ def test_ambiguous_redelivery_reconciles_without_resubmitting(tmp_path: Path) ->
         )
     assert delivered.deliveryState == "delivered"
     assert delivered.adapterDeliveryState == "accepted"
-    assert delivered.state == "pending"
+    # The reconciled acceptance at a ready boundary lands the row (N16).
+    assert delivered.state == "landed"
     submit_prompt.assert_not_called()
     assert paster.calls == []
 

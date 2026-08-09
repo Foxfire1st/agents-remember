@@ -145,10 +145,10 @@ def next_step(
             return LadderStep(
                 rung=MAX_RUNG,
                 action="architect-attention",
-                owner=derive_architect_owner(catalog),
+                owner=derive_architect_owner(catalog, leaf_key=entry.leafKey),
             )
     else:
-        owner = derive_architect_owner(catalog)
+        owner = derive_architect_owner(catalog, leaf_key=entry.leafKey)
     return LadderStep(rung=rung, action=action, owner=owner)
 
 

@@ -1,7 +1,7 @@
 """What one inbox row's next snapshot says: the policy over the operator inbox log.
 
 The store next door owns the FILE -- the advisory lock, the append, the physical
-removal of rows both processes must be able to perform. These six functions own the
+removal of rows both processes must be able to perform. These functions own the
 DECISION: given the row as it stands, what does the next snapshot of it say. They were
 methods on ``OperatorInboxStore`` and are here because they are a second job: every one
 of them reads the current fold, computes a ``model_copy`` update, and hands the result
@@ -45,7 +45,6 @@ from agents_remember.controlplane.operator_inbox_records import (
     InboxOwner,
     InboxSubject,
     OperatorInboxEntry,
-    state_signal_landed,
 )
 from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
 
@@ -68,13 +67,18 @@ class AdapterReceipt:
 @dataclass(frozen=True)
 class DeliveryAttempt:
     """One attempt to put a pending row in front of its addressee: the outcome, the session it
-    was pasted into, the human-readable detail, and the adapter's receipt for the same attempt.
-    ``delivered`` is not terminal (pasted != perceived); only a consume ends the schedule."""
+    was pasted into, the human-readable detail, the adapter's receipt for the same attempt,
+    and whether the target seat was at a turn boundary when the attempt happened.
+
+    ``landed`` is the N16 gate: a correlated ``accepted`` receipt at a turn boundary writes the
+    formal ``landed`` terminal state. ``delivered`` outside a boundary is not terminal, and a
+    busy adapter's ``queued`` acceptance is never a landing."""
 
     delivery_state: InboxDeliveryState
     delivered_to_session: str | None = None
     detail: str | None = None
     adapter: AdapterReceipt = AdapterReceipt()
+    landed: bool = False
 
 
 @dataclass(frozen=True)
@@ -124,6 +128,14 @@ class RungAdvance:
     readdress_to: InboxOwner | None = None
 
 
+@dataclass(frozen=True)
+class ExpiryOptions:
+    """Why a row expires, and whether its terminal marker moves to an inspection mailbox."""
+
+    reason: str
+    readdress_to: InboxOwner | None = None
+
+
 # "The caller folded nothing and applies no floor" -- what a one-off transition passes. A
 # module-level singleton rather than a call in the parameter default, which ruff B008 refuses
 # because a default evaluated at definition time reads as if it were evaluated per call.
@@ -167,17 +179,58 @@ def record_delivery(
 ) -> OperatorInboxEntry:
     """Append a delivery-status snapshot for one pending entry.
 
-    R1/R3: every attempt -- including a confirmed ``delivered`` paste -- bumps
-    ``attemptCount``, stamps ``lastAttemptAt``, and schedules ``nextAttemptAt`` from the
-    backoff ladder. 'delivered' is never terminal (pasted != perceived), so only
-    ``consume`` clears the redelivery schedule; a still-pending entry always carries a
-    durable next-attempt row L2 can sweep, restart-proof.
+    Every attempt bumps ``attemptCount`` and stamps ``lastAttemptAt``. A correlated adapter
+    acceptance while the target was at a turn boundary (``attempt.landed``) writes the formal
+    ``landed`` terminal state and clears the redelivery schedule (N16); everything else keeps
+    the durable ``nextAttemptAt`` backoff row, restart-proof. The landed write is a
+    lock-held latest-fold transition: a concurrent terminal write (explicit supersession,
+    another expiry) wins and the stale landing appends nothing (F1).
     """
     entry = _require_entry(store, entry_id, floor.current)
-    delivery_state = attempt.delivery_state
     adapter = attempt.adapter
-    attempt_count = entry.attemptCount + 1
-    update: dict[str, object] = {
+    landed = attempt.landed and adapter.delivery_state == "accepted" and entry.state == "pending"
+    if landed:
+
+        def _land_latest(latest: OperatorInboxEntry) -> OperatorInboxEntry | None:
+            if latest.state != "pending":
+                return None
+            update = _delivery_evidence_update(latest, attempt, now=now)
+            update.update(
+                {
+                    "state": "landed",
+                    "terminalAt": now,
+                    "terminalReason": "adapter-accepted-at-turn-boundary",
+                    "nextAttemptAt": None,
+                }
+            )
+            return latest.model_copy(update=update)
+
+        return store.transition(entry_id, _land_latest)[0]
+    update = _delivery_evidence_update(entry, attempt, now=now)
+    update["nextAttemptAt"] = (
+        next_attempt_at(
+            now=datetime.fromisoformat(now),
+            attempt_count=entry.attemptCount + 1,
+            redelivery_floor_seconds=floor.seconds,
+        )
+        if entry.state == "pending"
+        else entry.nextAttemptAt
+    )
+    delivered = entry.model_copy(update=update)
+    store.append(delivered)
+    return delivered
+
+
+def _delivery_evidence_update(
+    entry: OperatorInboxEntry,
+    attempt: DeliveryAttempt,
+    *,
+    now: str,
+) -> dict[str, object]:
+    """The delivery-evidence half of one attempt snapshot, computed against ``entry``."""
+    adapter = attempt.adapter
+    delivery_state = attempt.delivery_state
+    return {
         "ts": now,
         "deliveryState": delivery_state,
         "deliveredAt": now if delivery_state == "delivered" else entry.deliveredAt,
@@ -192,26 +245,165 @@ def record_delivery(
         "adapterDeliveryDetail": (
             adapter.detail if adapter.detail is not None else entry.adapterDeliveryDetail
         ),
-        "attemptCount": attempt_count,
+        "attemptCount": entry.attemptCount + 1,
         "lastAttemptAt": now,
     }
-    landed = state_signal_landed(entry.model_copy(update=update))
-    update["nextAttemptAt"] = (
-        None
-        if landed
-        else (
-            next_attempt_at(
-                now=datetime.fromisoformat(now),
-                attempt_count=attempt_count,
-                redelivery_floor_seconds=floor.seconds,
-            )
-            if entry.state == "pending"
-            else entry.nextAttemptAt
+
+
+def mark_landed(
+    store: OperatorInboxStore,
+    entry_id: str,
+    *,
+    now: str,
+    reason: str,
+) -> tuple[OperatorInboxEntry, bool]:
+    """Fold a legacy by-rule landing into the formal ``landed`` state (N13 migration)."""
+
+    def _apply(latest: OperatorInboxEntry) -> OperatorInboxEntry | None:
+        if latest.state != "pending":
+            return None
+        return latest.model_copy(
+            update={
+                "ts": now,
+                "state": "landed",
+                "terminalAt": now,
+                "terminalReason": reason,
+                "nextAttemptAt": None,
+            }
         )
+
+    return store.transition(entry_id, _apply)
+
+
+def mark_superseded(
+    store: OperatorInboxStore,
+    entry_id: str,
+    *,
+    now: str,
+    reason: str,
+    superseded_by: str | None = None,
+) -> tuple[OperatorInboxEntry, bool]:
+    """Explicitly mark one overtaken command terminal ``superseded`` without a false ack.
+
+    Supersession is always explicit (owner/developer); nothing here infers it from artifacts,
+    branches, or task state. The row keeps its delivery evidence; it never lands.
+    """
+
+    def _apply(latest: OperatorInboxEntry) -> OperatorInboxEntry | None:
+        if latest.state != "pending":
+            return None
+        return latest.model_copy(
+            update={
+                "ts": now,
+                "state": "superseded",
+                "terminalAt": now,
+                "terminalReason": reason,
+                "supersededBy": superseded_by,
+                "nextAttemptAt": None,
+            }
+        )
+
+    return store.transition(entry_id, _apply)
+
+
+def mark_unresolved(
+    store: OperatorInboxStore,
+    entry_id: str,
+    *,
+    now: str,
+    reason: str,
+) -> tuple[OperatorInboxEntry, bool]:
+    """Terminally resolve a row whose delivery attempts hit the ceiling (N3).
+
+    Delivery evidence stays intact on the row -- never-accepted vs accepted-but-not-at-a-
+    boundary remain distinguishable via ``deliveryState``/``adapterDeliveryState``.
+    """
+
+    def _apply(latest: OperatorInboxEntry) -> OperatorInboxEntry | None:
+        if latest.state != "pending":
+            return None
+        return latest.model_copy(
+            update={
+                "ts": now,
+                "state": "unresolved",
+                "terminalAt": now,
+                "terminalReason": reason,
+                "nextAttemptAt": None,
+            }
+        )
+
+    return store.transition(entry_id, _apply)
+
+
+def mark_expired(
+    store: OperatorInboxStore,
+    entry_id: str,
+    *,
+    now: str,
+    options: ExpiryOptions,
+) -> tuple[OperatorInboxEntry, bool]:
+    """Terminally resolve a row by an expiry clock (rebind grace, retention TTL).
+
+    ``options.readdress_to`` optionally moves the terminal marker onto an inspection mailbox (the N3
+    architect mailbox of last resort) so a dead owner chain stays visible instead of vanishing.
+    """
+
+    def _apply(latest: OperatorInboxEntry) -> OperatorInboxEntry | None:
+        if latest.state != "pending":
+            return None
+        update: dict[str, object] = {
+            "ts": now,
+            "state": "expired",
+            "terminalAt": now,
+            "terminalReason": options.reason,
+            "nextAttemptAt": None,
+        }
+        if options.readdress_to is not None:
+            update.update(_readdress_fields(options.readdress_to))
+        return latest.model_copy(update=update)
+
+    return store.transition(entry_id, _apply)
+
+
+def rebind_entry(
+    store: OperatorInboxStore,
+    entry_id: str,
+    owner: InboxOwner,
+    *,
+    now: str,
+    current: InboxFold = None,
+) -> tuple[OperatorInboxEntry, bool]:
+    """Sweep-time rebind (N14): move a pending row onto its current qualified owner.
+
+    The delivery address and the stamped routed owner move together (one routing decision).
+    Per-attempt adapter correlation from the dead seat is cleared -- the replacement never
+    saw that submission -- and the attempt clock restarts so the replacement gets the full
+    redelivery schedule instead of inheriting the dead seat's attempt count.
+    """
+    entry = _require_entry(store, entry_id, current)
+    if entry.state != "pending":
+        return entry, False
+    rebound = entry.model_copy(
+        update={
+            "ts": now,
+            **_readdress_fields(owner),
+            "deliveryState": "queued",
+            "deliveredAt": None,
+            "deliveredToSession": None,
+            "deliveryDetail": None,
+            "adapterDeliveryState": None,
+            "adapterRequestId": None,
+            "adapterVendorCorrelationId": None,
+            "adapterAcceptedAt": None,
+            "adapterCompletedAt": None,
+            "adapterDeliveryDetail": None,
+            "attemptCount": 0,
+            "lastAttemptAt": None,
+            "nextAttemptAt": None,
+        }
     )
-    delivered = entry.model_copy(update=update)
-    store.append(delivered)
-    return delivered
+    store.append(rebound)
+    return rebound, True
 
 
 def record_adapter_completion(

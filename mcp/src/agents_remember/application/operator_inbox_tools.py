@@ -14,14 +14,11 @@ from agents_remember.controlplane.operator_inbox_records import (
     OperatorInboxVia,
 )
 from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
+from agents_remember.controlplane.operator_inbox_transitions import mark_superseded
 from agents_remember.models.application_requests import OperatorInboxPostRequest
 from agents_remember.observer import observer_root
 from agents_remember.observer.events import now_iso
-from agents_remember.serving.dispatch_brief import (
-    HOSTED_DELIVERY,
-    HostedDelivery,
-    expectation_store,
-)
+from agents_remember.serving.dispatch_brief import HOSTED_DELIVERY, HostedDelivery
 from agents_remember.serving.operator_inbox_posts import (
     OperatorInboxPostContext,
     post_operator_inbox_entry,
@@ -104,11 +101,13 @@ def operator_inbox_poll_tool(
     lifecycle_id: str | None,
     agent_id: str | None,
     recipient_role: AgentRole | None = None,
+    include_terminal: bool = False,
 ) -> dict[str, Any]:
-    entries = _store(config).list_pending(
+    entries = _store(config).list_for_mailbox(
         lifecycle_id=lifecycle_id,
         agent_id=agent_id,
         recipient_role=recipient_role,
+        include_terminal=include_terminal,
     )
     return _result(
         "operator_inbox_poll",
@@ -138,13 +137,6 @@ def operator_inbox_consume_tool(
         consumed_by=consumed_by,
         consumed_via=consumed_via,
     )
-    if consumed_now and config is not None:
-        # R1: consume=ack is the ONLY terminal delivery outcome; it also fulfills the signal's
-        # ack-by expectation row (R2), so redelivery/backoff and the deadline sweep both stop.
-        expectations = expectation_store(config)
-        row = expectations.find_by_source(entry.id, kind="ack-by")
-        if row is not None:
-            expectations.mark_met(row.id, now=now_iso())
     return _result(
         "operator_inbox_consume",
         {
@@ -154,5 +146,35 @@ def operator_inbox_consume_tool(
             "state": entry.state,
             "consumedNow": consumed_now,
             "consumedAt": entry.consumedAt,
+        },
+    )
+
+
+def operator_inbox_supersede_tool(
+    config: McpRuntimeConfig,
+    *,
+    entry_id: str,
+    reason: str,
+    superseded_by: str = "model",
+) -> dict[str, Any]:
+    """Explicitly supersede one pending command (R11): terminal, visible, never a false ack."""
+    entry, superseded_now = mark_superseded(
+        _store(config),
+        entry_id,
+        now=now_iso(),
+        reason=reason,
+        superseded_by=superseded_by,
+    )
+    return _result(
+        "operator_inbox_supersede",
+        {
+            "ok": True,
+            "operation": "operator_inbox_supersede",
+            "entryId": entry.id,
+            "state": entry.state,
+            "supersededNow": superseded_now,
+            "terminalAt": entry.terminalAt,
+            "terminalReason": entry.terminalReason,
+            "supersededBy": entry.supersededBy,
         },
     )

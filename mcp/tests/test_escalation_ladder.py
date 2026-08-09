@@ -157,8 +157,16 @@ class NextStepTests(unittest.TestCase):
     def test_rung_three_lands_on_the_live_architect_seat(self) -> None:
         # Ruled terminal (developer, 2026-07-09): the ladder ends at the architect seat -- the
         # session the human actually talks to -- so custody can be mechanically acked.
-        self.catalog.upsert(_catalog_entry("architect-1", spawn_role="architect"))
-        entry = _entry(agent_id="worker-1").model_copy(update={"rung": 2})
+        self.catalog.upsert(
+            _catalog_entry(
+                "architect-1",
+                spawn_role="architect",
+                leaf_key="repo-a/260707_master/architect-anchor",
+            )
+        )
+        entry = _entry(agent_id="worker-1").model_copy(
+            update={"rung": 2, "leafKey": "repo-a/260707_master/leaf-9"}
+        )
         step = next_step(self.catalog, entry)
         self.assertEqual(step.rung, 3)
         self.assertEqual(step.action, "architect-attention")

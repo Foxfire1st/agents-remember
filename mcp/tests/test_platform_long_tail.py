@@ -350,12 +350,15 @@ class InboxRenewalTests(unittest.TestCase):
             )
 
     def test_a_row_that_is_no_longer_pending_is_returned_untouched(self) -> None:
-        """Coalescing is for a row still waiting on someone. Once a row is consumed the
-        condition it carried is answered, so a re-firing condition must not reanimate it by
-        bumping its date -- it appends nothing, and the caller sees the terminal row back."""
+        """Coalescing is for a row still waiting on someone. Once a row has landed, a
+        re-firing condition must not reanimate it by bumping its date -- it appends nothing,
+        and the caller sees the terminal row back."""
         self.seed()
-        self.store.consume(
-            "entry-1", now="2026-07-31T10:30:00Z", consumed_by="model", consumed_via="cli"
+        inbox_transitions.mark_landed(
+            self.store,
+            "entry-1",
+            now="2026-07-31T10:30:00Z",
+            reason="adapter-accepted-at-turn-boundary",
         )
         before = len(self.store.read())
 
@@ -366,7 +369,7 @@ class InboxRenewalTests(unittest.TestCase):
             now="2026-07-31T11:00:00Z",
         )
 
-        self.assertEqual(renewed.state, "consumed")
+        self.assertEqual(renewed.state, "landed")
         self.assertEqual(renewed.response, "green")
         self.assertEqual(len(self.store.read()), before)
 

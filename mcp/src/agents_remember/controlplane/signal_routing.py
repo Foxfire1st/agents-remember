@@ -17,7 +17,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 
-from agents_remember.controlplane.operator_inbox_records import AgentRole, InboxMessageKind
+from agents_remember.controlplane.operator_inbox_records import (
+    AgentRole,
+    InboxMessageKind,
+    OperatorInboxEntry,
+)
 from agents_remember.controlplane.seats import SeatDirectory, SeatRow
 
 # One hop up the spawn edge: the role a signal's SENDER was spawned as -> the role its routed
@@ -316,21 +320,171 @@ def is_seat_dead(catalog: SeatDirectory, agent_id: str | None) -> bool:
     return entry is None or entry.status != "running"
 
 
-def derive_architect_owner(catalog: SeatDirectory) -> RoutedOwner:
-    """The ladder's terminal addressee (ruled 2026-07-09): the LIVE architect seat when one is
-    attached, else the role-only architect mailbox. The developer is an authority label, never an
-    address -- a human-shaped mailbox cannot mechanically ack, which is how the 2026-07-09 storm's
-    rows became immortal. The architect seat acks custody and briefs the human; with no architect
-    seat attached the role-addressed row waits, level-triggered, for the next architect session
-    (delivery on appearance, or poll at session start)."""
-    for entry in catalog.list():
-        if (
-            entry.kind == "harness"
-            and entry.status == "running"
-            and entry.binding_role == "architect"
-        ):
-            return RoutedOwner(role="architect", agent_id=entry.id, lifecycle_id=entry.lifecycle_id)
+def derive_architect_owner(
+    catalog: SeatDirectory,
+    *,
+    leaf_key: str | None = None,
+) -> RoutedOwner:
+    """Repository+sprint-scoped architect custody (R13), never global first-match.
+
+    The row's ``leafKey`` resolves to its master scope (``repo/master``); only a running
+    architect seat bound to that scope is the custody owner. An unscoped request, an
+    ambiguous set of scoped seats, or no scoped seat resolves to the role-only architect
+    mailbox -- fail-closed, so a second repository's architect can never capture another
+    repo's rows. The developer is an authority label, never an address.
+    """
+    master = master_key(leaf_key)
+    scoped = [
+        entry
+        for entry in catalog.list()
+        if entry.kind == "harness"
+        and entry.status == "running"
+        and entry.binding_role == "architect"
+        and _seat_in_scope(entry, leaf_key=leaf_key, master=master)
+    ]
+    exact = [
+        entry
+        for entry in scoped
+        if leaf_key in (entry.binding_leaf_key, entry.replacement_for_leaf)
+    ]
+    candidates = exact if len(exact) == 1 else scoped
+    if len(candidates) == 1:
+        entry = candidates[0]
+        return RoutedOwner(role="architect", agent_id=entry.id, lifecycle_id=entry.lifecycle_id)
     return RoutedOwner(role="architect")
+
+
+def _seat_in_scope(
+    entry: SeatRow,
+    *,
+    leaf_key: str | None,
+    master: str | None,
+) -> bool:
+    """Whether a seat's binding or replacement target falls inside ``master``'s scope."""
+    for anchor in (entry.binding_leaf_key, entry.replacement_for_leaf):
+        if anchor is None:
+            continue
+        if anchor == leaf_key:
+            return True
+        if master is not None and master_key(anchor) == master:
+            return True
+    return False
+
+
+def _scoped_orchestrator(
+    catalog: SeatDirectory,
+    *,
+    master: str | None,
+) -> SeatRow | None:
+    """The live orchestrator bound to ``master``, or ``None`` (never a global fallback)."""
+    candidates = [
+        entry
+        for entry in catalog.list()
+        if entry.kind == "harness"
+        and entry.status == "running"
+        and entry.binding_role == "orchestrator"
+        and _seat_in_scope(entry, leaf_key=None, master=master)
+    ]
+    if len(candidates) != 1:
+        return None
+    return candidates[0]
+
+
+def derive_row_owner(
+    catalog: SeatDirectory,
+    entry: OperatorInboxEntry,
+) -> RoutedOwner:
+    """The CURRENT qualified owner of one pending inbox row (N14 sweep-time rebinding).
+
+    Derived from the row's durable subject identity (leaf key + seat role + subject agent),
+    never from the stamped address: a worker/reviewer/curator row re-resolves its manager, a
+    manager row re-resolves its orchestrator, and a row whose chain is entirely dead falls
+    back through the stamped ``ownerRole`` to the scoped architect mailbox. ``dispatch-brief``
+    rows never rebind (exact-pinned; a replacement seat receives a fresh brief from its owner).
+    """
+    if entry.messageKind == "dispatch-brief":
+        return RoutedOwner()
+    role = entry.seatRole or entry.senderRole
+    subject_agent_id = entry.subjectAgentId or entry.senderAgentId or entry.ownerAgentId
+    owner = _owner_for_role(catalog, role, subject_agent_id, entry)
+    if owner.agent_id is not None or owner.role is not None:
+        return owner
+    return _owner_for_stamped_role(catalog, entry, subject_agent_id)
+
+
+def _owner_for_role(
+    catalog: SeatDirectory,
+    role: str | None,
+    subject_agent_id: str | None,
+    entry: OperatorInboxEntry,
+) -> RoutedOwner:
+    """The live owner for a row whose durable subject names a spawned seat role."""
+    if role in ("worker", "reviewer", "curator"):
+        return derive_leaf_manager_owner(
+            catalog, sender_agent_id=subject_agent_id, leaf_key=entry.leafKey
+        )
+    if role == "manager":
+        return _orchestrator_owner(
+            catalog,
+            entry,
+            subject_agent_id=subject_agent_id,
+        )
+    return RoutedOwner()
+
+
+def _orchestrator_owner(
+    catalog: SeatDirectory,
+    entry: OperatorInboxEntry,
+    *,
+    subject_agent_id: str | None,
+) -> RoutedOwner:
+    """The manager's current orchestrator: live spawn provenance, else master-scoped
+    replacement, else the role-only orchestrator mailbox."""
+    owner = derive_signal_owner(
+        catalog,
+        sender_agent_id=subject_agent_id,
+        message_kind=entry.messageKind or "state-signal",
+        leaf_key=entry.leafKey,
+    )
+    if (
+        owner.role == "orchestrator"
+        and owner.agent_id is not None
+        and is_seat_dead(catalog, owner.agent_id)
+    ):
+        return _live_scoped_orchestrator(catalog, entry)
+    return owner
+
+
+def _live_scoped_orchestrator(
+    catalog: SeatDirectory,
+    entry: OperatorInboxEntry,
+) -> RoutedOwner:
+    """A live orchestrator bound to the row's master, else the role-only orchestrator mailbox."""
+    replacement = _scoped_orchestrator(catalog, master=master_key(entry.leafKey))
+    if replacement is not None:
+        return RoutedOwner(
+            role="orchestrator",
+            agent_id=replacement.id,
+            lifecycle_id=replacement.lifecycle_id,
+        )
+    return RoutedOwner(role="orchestrator")
+
+
+def _owner_for_stamped_role(
+    catalog: SeatDirectory,
+    entry: OperatorInboxEntry,
+    subject_agent_id: str | None,
+) -> RoutedOwner:
+    """Fallback through the stamped routed owner when the row carries no seat-role subject."""
+    if entry.ownerRole == "manager":
+        return derive_leaf_manager_owner(
+            catalog, sender_agent_id=subject_agent_id, leaf_key=entry.leafKey
+        )
+    if entry.ownerRole == "orchestrator":
+        return _live_scoped_orchestrator(catalog, entry)
+    if entry.ownerRole == "architect":
+        return derive_architect_owner(catalog, leaf_key=entry.leafKey)
+    return RoutedOwner()
 
 
 def derive_skip_level_owner(

@@ -5,12 +5,17 @@ from datetime import datetime
 
 from agents_remember.controlplane.escalation_ladder import MAX_RUNG, rung_due
 from agents_remember.controlplane.expectation_rows import ExpectationRow, ExpectationRowStore
+from agents_remember.controlplane.interaction_retention import INBOX_PENDING_TTL_SECONDS
 from agents_remember.controlplane.operator_inbox_records import (
     OperatorInboxEntry,
     state_signal_landed,
 )
 from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
-from agents_remember.controlplane.signal_routing import is_seat_dead, leaf_chain_has_progress
+from agents_remember.controlplane.signal_routing import (
+    derive_row_owner,
+    is_seat_dead,
+    leaf_chain_has_progress,
+)
 from agents_remember.serving.agent_notifier_models import AgentNotifierContext, AgentNotifierFinding
 from agents_remember.serving.agent_notifier_models import SweepState as _SweepState
 from agents_remember.serving.dispatch_brief import dispatch_stays_on_exact_session
@@ -33,7 +38,13 @@ through ``operator_inbox_transitions.mark_escalated``. What walks it from there 
 ``controlplane.escalation_ladder``, which anchors every rung's dwell on the ``escalatedAt``
 that transition stamps."""
 
-_INACTIVE_EXPECTATION_KINDS = frozenset({"verdict-by", "ack-by"})
+_INACTIVE_EXPECTATION_KINDS = frozenset({"verdict-by"})
+"""Expectation kinds that still drive findings. ``ack-by`` retires with the N16 consume
+demotion: no post writes one anymore, and legacy rows no longer nudge/escalate."""
+
+REBIND_GRACE_SECONDS = 300.0
+"""N2 grace: a pending row addressed to a dead seat rebinds to the same-leaf+role replacement
+that exists or appears within this window, else resolves terminal-visible-then-compacted."""
 
 # 260713-TES-L1 rename window: the seat-liveness ask prefix changed from "Supervisor observed
 # seat-liveness:" to "Agent notifier observed seat-liveness:". Both prefixes name the SAME
@@ -130,6 +141,110 @@ def _ladder_terminal_and_dead(catalog: TerminalCatalog, entry: OperatorInboxEntr
         and entry.agentId is not None
         and is_seat_dead(catalog, entry.agentId)
     )
+
+
+def _row_target_dead(catalog: TerminalCatalog, entry: OperatorInboxEntry) -> bool:
+    """Whether a pending row is addressed to a seat the rebind machinery owns."""
+    return entry.agentId is not None and is_seat_dead(catalog, entry.agentId)
+
+
+def _row_dead_since(
+    catalog: TerminalCatalog,
+    row: OperatorInboxEntry,
+) -> datetime | None:
+    """When the row's addressed seat stopped being live, or a bounded fallback anchor.
+
+    Prefers explicit terminal stamps (retired/landed/terminated); an exited-but-unstamped
+    catalog row falls back to its last turn-state change, and a seat with no catalog trace at
+    all falls back to the row's own delivery timeline so the grace window stays bounded.
+    """
+    seat = catalog.get(row.agentId) if row.agentId is not None else None
+    stamp: str | None = None
+    if seat is not None:
+        if seat.status == "running":
+            return None
+        stamp = (
+            seat.terminated_at or seat.retired_at or seat.landed_at or seat.turn_state_changed_at
+        )
+    stamp = stamp or row.lastAttemptAt or row.createdAt
+    try:
+        return datetime.fromisoformat(stamp)
+    except ValueError:
+        return None
+
+
+def evaluate_rebind_findings(
+    catalog: TerminalCatalog,
+    *,
+    current: dict[str, OperatorInboxEntry] | None = None,
+    now: datetime,
+    grace_seconds: float = REBIND_GRACE_SECONDS,
+) -> list[AgentNotifierFinding]:
+    """N14 sweep-time rebinding: pending rows to a dead/replaced seat.
+
+    A live same-leaf+role replacement produces ``rebind-due``; no replacement within the grace
+    window produces ``rebind-expired`` (terminal-visible, then compacted). ``dispatch-brief``
+    rows never rebind (exact-pinned) and are not evaluated here.
+    """
+    findings: list[AgentNotifierFinding] = []
+    entries = current or {}
+    for row in entries.values():
+        if row.state != "pending" or row.messageKind == "dispatch-brief" or row.agentId is None:
+            continue
+        if not is_seat_dead(catalog, row.agentId):
+            continue
+        owner = derive_row_owner(catalog, row)
+        if owner.agent_id is not None and owner.agent_id != row.agentId:
+            findings.append(
+                AgentNotifierFinding(
+                    kind="rebind-due",
+                    detail="replacement-owner",
+                    session_id=row.agentId,
+                    leaf_key=row.leafKey,
+                    seat_role=row.seatRole,
+                    source_id=row.id,
+                )
+            )
+            continue
+        dead_since = _row_dead_since(catalog, row)
+        if dead_since is not None and (now - dead_since).total_seconds() >= grace_seconds:
+            findings.append(
+                AgentNotifierFinding(
+                    kind="rebind-expired",
+                    detail="rebind-grace-expired",
+                    session_id=row.agentId,
+                    leaf_key=row.leafKey,
+                    seat_role=row.seatRole,
+                    source_id=row.id,
+                )
+            )
+    return findings
+
+
+def evaluate_pending_expiry_findings(
+    current: dict[str, OperatorInboxEntry],
+    *,
+    now: datetime,
+    ttl_seconds: float = INBOX_PENDING_TTL_SECONDS,
+) -> list[AgentNotifierFinding]:
+    """Pending rows past the retention boundary: resolve ``expired`` before compaction (D6)."""
+    findings: list[AgentNotifierFinding] = []
+    for row in current.values():
+        if row.state != "pending":
+            continue
+        age = _age_seconds(row.createdAt, now)
+        if age is not None and age >= ttl_seconds:
+            findings.append(
+                AgentNotifierFinding(
+                    kind="inbox-ttl-expired",
+                    detail="pending-ttl-expired",
+                    session_id=row.agentId,
+                    leaf_key=row.leafKey,
+                    seat_role=row.seatRole,
+                    source_id=row.id,
+                )
+            )
+    return findings
 
 
 def evaluate_ladder_terminal_findings(
@@ -363,9 +478,6 @@ def evaluate_predicates(  # pragma: no cover
     findings: list[AgentNotifierFinding] = []
     inbox_current = sweep.inbox_current if sweep is not None else None
     findings += evaluate_expectation_findings(ctx.expectation_store, now=now, catalog=ctx.catalog)
-    findings += evaluate_ladder_terminal_findings(
-        ctx.inbox_store, ctx.catalog, current=inbox_current
-    )
     if sweep is None:
         findings += evaluate_inbox_findings(
             ctx.inbox_store,
@@ -381,6 +493,7 @@ def evaluate_predicates(  # pragma: no cover
             if not _ladder_terminal_and_dead(ctx.catalog, entry)
             and not _inactivity_signal_chain_progressed(ctx.catalog, entry)
             and not state_signal_held_on_boundary(ctx.catalog, entry)
+            and not _row_target_dead(ctx.catalog, entry)
         ][: sweep.redeliver_budget]
         findings += [
             AgentNotifierFinding(
@@ -395,19 +508,10 @@ def evaluate_predicates(  # pragma: no cover
     findings += evaluate_seat_liveness_findings(
         ctx.catalog, now=now, stale_seconds=ctx.stale_seat_seconds
     )
-    # CS-6 D1 load-shed: cap escalation-rung emission per sweep (twin of the redeliver budget).
-    # Dropped rows stay rung_due and re-fire next sweep (level-triggered), so nothing is lost --
-    # only the per-sweep burst that pegged the river with escalation.rung rows is bounded.
-    findings += evaluate_escalation_findings(
-        ctx.inbox_store,
-        now=now,
-        catalog=ctx.catalog,
-        current=inbox_current,
-        schedule=EscalationSchedule(
-            sla_seconds=ctx.escalation_sla_seconds, rung_seconds=ctx.escalation_rung_seconds
-        ),
-    )[: max(1, ctx.escalation_budget)]
     findings += evaluate_dead_upstream_findings(ctx.catalog)
+    entries = inbox_current if inbox_current is not None else ctx.inbox_store.current()
+    findings += evaluate_rebind_findings(ctx.catalog, current=entries, now=now)
+    findings += evaluate_pending_expiry_findings(entries, now=now)
     findings += evaluate_state_signal_findings(ctx.catalog)
     findings += evaluate_compound_idle_findings(ctx.catalog)
     findings += evaluate_non_reaction_findings(ctx.catalog, ctx.inbox_store, now=now)
