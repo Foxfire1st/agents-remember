@@ -130,22 +130,7 @@ def run_agent_notifier_sweep(
         now=now,
         reconcile=reconcile,
     )
-    if inbox_removed or resolved_entries:
-        data: dict[str, object] = {"removed": inbox_removed, "kept": len(current)}
-        if reclamation is not None and reclamation.candidate_row_count:
-            data.update(
-                {
-                    "resolvedRowCount": len(resolved_entries),
-                    "uniqueSubjectCount": reclamation.unique_subject_count,
-                    "keptCandidateCount": reclamation.kept_row_count,
-                    "evidenceClass": reclamation.evidence_class,
-                }
-            )
-        _log_event(
-            ctx,
-            "orchestration.agent-notifier.inbox-compacted",
-            data,
-        )
+    _log_inbox_compaction(ctx, inbox_removed, current, resolved_entries, reclamation)
     # N13 migration fold: pre-migration rows that satisfied the by-rule landing predicate
     # (state-signal + delivered + accepted) gain the formal ``landed`` state exactly once.
     _fold_legacy_landed(ctx, current, now=now)
@@ -193,6 +178,28 @@ def run_agent_notifier_sweep(
         redeliverable_inbox_count=sweep.redeliverable_inbox_count,
         duration_seconds=duration_seconds,
     )
+
+
+def _log_inbox_compaction(
+    ctx: AgentNotifierContext,
+    removed: int,
+    current: dict[str, OperatorInboxEntry],
+    resolved_entries: tuple[OperatorInboxEntry, ...],
+    reclamation: InboxReclamationPlan | None,
+) -> None:
+    if not removed and not resolved_entries:
+        return
+    data: dict[str, object] = {"removed": removed, "kept": len(current)}
+    if reclamation is not None and reclamation.candidate_row_count:
+        data.update(
+            {
+                "resolvedRowCount": len(resolved_entries),
+                "uniqueSubjectCount": reclamation.unique_subject_count,
+                "keptCandidateCount": reclamation.kept_row_count,
+                "evidenceClass": reclamation.evidence_class,
+            }
+        )
+    _log_event(ctx, "orchestration.agent-notifier.inbox-compacted", data)
 
 
 def _fold_legacy_landed(

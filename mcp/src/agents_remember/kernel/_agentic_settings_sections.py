@@ -365,7 +365,7 @@ def _require_agent_notifier_floor_seconds(raw: object, owner: str, source: str) 
     return value
 
 
-# 260731-EFA-L7 R10: verbatim L7 split; unchanged branch, out of this leaf's behavior scope (mcp/src/agents_remember/kernel/_agentic_settings_sections.py:457).
+# 260731-EFA-L7 R10: verbatim L7 split; unchanged branch, out of this leaf's behavior scope (mcp/src/agents_remember/kernel/_agentic_settings_sections.py:369).
 def _parse_spawn(
     raw: object, *, source: str, harness_ids: tuple[str, ...] | None
 ) -> str | None:  # pragma: no cover

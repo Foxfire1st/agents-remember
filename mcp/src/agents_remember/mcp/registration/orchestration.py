@@ -24,7 +24,7 @@ from ..tools.orchestration import (
 )
 
 
-def register_orchestration_tools(server: FastMCP, config: McpRuntimeConfig) -> None:
+def _register_operator_inbox_tools(server: FastMCP, config: McpRuntimeConfig) -> None:
     @server.tool()
     def operator_inbox_post(
         ask: str,
@@ -114,6 +114,8 @@ def register_orchestration_tools(server: FastMCP, config: McpRuntimeConfig) -> N
             superseded_by=superseded_by,
         )
 
+
+def _register_manager_nudge_tools(server: FastMCP, config: McpRuntimeConfig) -> None:
     @server.tool()
     def orchestration_nudge_manager(
         reason: NudgeReason,
@@ -140,3 +142,8 @@ def register_orchestration_tools(server: FastMCP, config: McpRuntimeConfig) -> N
                 rate_limit_seconds=rate_limit_seconds,
             ),
         )
+
+
+def register_orchestration_tools(server: FastMCP, config: McpRuntimeConfig) -> None:
+    _register_operator_inbox_tools(server, config)
+    _register_manager_nudge_tools(server, config)

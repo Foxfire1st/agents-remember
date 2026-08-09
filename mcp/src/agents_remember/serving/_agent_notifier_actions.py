@@ -364,7 +364,7 @@ def _signal_emit(
     return AgentNotifierActionResult("signal-emit", finding, delivery_state)
 
 
-# 260731-EFA-L7 R10: verbatim L7 split (L7-OQ1 Option A serving scope); unchanged edge branch, out of this leaf's behavior scope (mcp/src/agents_remember/serving/_agent_notifier_actions.py:652).
+# 260731-EFA-L7 R10: verbatim L7 split (L7-OQ1 Option A serving scope); unchanged edge branch, out of this leaf's behavior scope (mcp/src/agents_remember/serving/_agent_notifier_actions.py:368).
 def _signal_dead_upstream(  # pragma: no cover
     ctx: AgentNotifierContext,
     finding: AgentNotifierFinding,
