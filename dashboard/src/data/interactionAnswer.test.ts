@@ -1,13 +1,9 @@
-// The answer paths (structured decision items): kind
-// classification, gate matching, the legacy gate answer POST, and the session-direct
-// interaction-response route (structured questions + permission-kind — NO lifecycle required).
+// The answer paths (structured decision items): kind classification and the one session-direct
+// interaction-response route used by every vendor interaction — NO lifecycle required.
 // Never a PTY write (there is no terminal code here at all, by construction).
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 
-import type { LifecycleProjection } from "../types/projection";
 import {
-  answerPendingInteraction,
-  findInteractionGate,
   pendingInteractionAgentLabel,
   readAdapterDecisionFailure,
   representPendingInteraction,
@@ -22,38 +18,6 @@ import {
   L5I_INTERACTION_PERMISSION,
   L5I_INTERACTION_QUESTIONS,
 } from "../test/fixtures/catalogRows";
-import { lifecycleWithGate as servedLifecycleWithGate } from "../test/fixtures/wire";
-
-/** The one shape these tests care about: a lifecycle holding an open agent-question gate whose
- *  packet carries the adapter interaction identity. Everything else is served default, so the
- *  fixture is checked against the mirror instead of asserted past it. */
-function lifecycleWithGate(overrides: {
-  lifecycleId: string;
-  gateId: string;
-  state?: string;
-  kind?: string;
-  sessionId?: string;
-  interactionId?: string;
-}): LifecycleProjection {
-  return servedLifecycleWithGate(
-    { id: overrides.lifecycleId },
-    {
-      id: overrides.gateId,
-      kind: overrides.kind ?? "agent-question",
-      state: overrides.state ?? "open",
-      ts: "2026-07-17T09:00:00Z",
-      packet: {
-        adapterInteraction: {
-          sessionId: overrides.sessionId ?? "seat-1",
-          interactionId: overrides.interactionId ?? "ix-1",
-          kind: "approval",
-          prompt: "Allow?",
-          choices: ["allow", "deny"],
-        },
-      },
-    },
-  );
-}
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -114,26 +78,6 @@ describe("representPendingInteraction (kind-awareness, F8)", () => {
   });
 });
 
-describe("findInteractionGate", () => {
-  it("matches the open agent-question gate by (sessionId, interactionId)", () => {
-    const lifecycles = {
-      "lc-a": lifecycleWithGate({ lifecycleId: "lc-a", gateId: "g-a", sessionId: "other" }),
-      "lc-b": lifecycleWithGate({ lifecycleId: "lc-b", gateId: "g-b", sessionId: "seat-1" }),
-    };
-    const ref = findInteractionGate(lifecycles, "seat-1", "ix-1");
-    expect(ref?.lifecycleId).toBe("lc-b");
-    expect(ref?.gate.id).toBe("g-b");
-  });
-
-  it("ignores decided gates and non-question kinds", () => {
-    const lifecycles = {
-      "lc-a": lifecycleWithGate({ lifecycleId: "lc-a", gateId: "g-a", state: "approved" }),
-      "lc-b": lifecycleWithGate({ lifecycleId: "lc-b", gateId: "g-b", kind: "worktree-closeout" }),
-    };
-    expect(findInteractionGate(lifecycles, "seat-1", "ix-1")).toBeNull();
-  });
-});
-
 describe("readAdapterDecisionFailure (M6 reopen honesty)", () => {
   it("parses a well-formed failure record and drops the decided-attribution fields it does not use", () => {
     const failure = readAdapterDecisionFailure({
@@ -167,89 +111,6 @@ describe("readAdapterDecisionFailure (M6 reopen honesty)", () => {
     expect(readAdapterDecisionFailure({ adapterDecisionFailure: "not-an-object" })).toBeNull();
   });
 });
-
-describe("answerPendingInteraction (round-trip, F7)", () => {
-  it("POSTs the answer as the gate decision note on the approve verb", async () => {
-    const calls: Array<{ url: string; body: Record<string, string> }> = [];
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (url: string, init?: RequestInit) => {
-        calls.push({ url: String(url), body: JSON.parse(String(init?.body)) });
-        return { status: 202, text: async () => "" } as Response;
-      }),
-    );
-    const outcome = await answerPendingInteraction({
-      lifecycles: { "lc-b": lifecycleWithGate({ lifecycleId: "lc-b", gateId: "g-b" }) },
-      sessionId: "seat-1",
-      sessionLifecycleId: "lc-b",
-      interactionId: "ix-1",
-      answer: "allow",
-    });
-    expect(outcome).toEqual({ status: "answered" });
-    expect(calls).toEqual([
-      {
-        url: "/api/actions/approve",
-        body: { target: "lc-b", gateId: "g-b", note: "allow" },
-      },
-    ]);
-  });
-
-  it("keeps the server's words VERBATIM on failure", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async () => ({
-        status: 409,
-        text: async () => '{"status":"stale-gate","detail":"gate g-b was superseded"}',
-      })) as unknown as typeof fetch,
-    );
-    const outcome = await answerPendingInteraction({
-      lifecycles: { "lc-b": lifecycleWithGate({ lifecycleId: "lc-b", gateId: "g-b" }) },
-      sessionId: "seat-1",
-      sessionLifecycleId: "lc-b",
-      interactionId: "ix-1",
-      answer: "allow",
-    });
-    expect(outcome.status).toBe("error");
-    if (outcome.status === "error") {
-      expect(outcome.error).toContain("stale-gate");
-      expect(outcome.error).toContain("gate g-b was superseded");
-    }
-  });
-
-  it("states the poll-bounded truth when the gate has not been projected YET (seat has a lifecycle)", async () => {
-    const fetchSpy = vi.fn();
-    vi.stubGlobal("fetch", fetchSpy);
-    const outcome = await answerPendingInteraction({
-      lifecycles: {},
-      sessionId: "seat-1",
-      sessionLifecycleId: "lc-b",
-      interactionId: "ix-1",
-      answer: "allow",
-    });
-    expect(outcome.status).toBe("error");
-    if (outcome.status === "error") expect(outcome.error).toContain("poll-bounded");
-    expect(fetchSpy).not.toHaveBeenCalled(); // no blind POST without a target gate
-  });
-
-  it("says CANNOT (not 'retry in a moment') for a lifecycle-less seat — its gate never projects (review finding 2)", async () => {
-    const fetchSpy = vi.fn();
-    vi.stubGlobal("fetch", fetchSpy);
-    const outcome = await answerPendingInteraction({
-      lifecycles: {},
-      sessionId: "seat-1",
-      sessionLifecycleId: undefined,
-      interactionId: "ix-1",
-      answer: "allow",
-    });
-    expect(outcome.status).toBe("error");
-    if (outcome.status === "error") {
-      expect(outcome.error).toContain("cannot be answered from the cockpit");
-      expect(outcome.error).not.toContain("retry in a moment");
-    }
-    expect(fetchSpy).not.toHaveBeenCalled();
-  });
-});
-
 
 // ── Structured decision items + the session-direct route ────────────────────
 
@@ -330,7 +191,7 @@ describe("representPendingInteraction — structured questions (L5I)", () => {
     }
   });
 
-  it("a choice set beyond allow/deny stays LEGACY choices mode (gate fallback)", () => {
+  it("a choice set beyond allow/deny stays choices mode", () => {
     const result = representPendingInteraction({
       interactionId: "ix-9",
       kind: "approval",
@@ -526,6 +387,59 @@ describe("submitInteractionAnswer — the session-direct route (L5I, no lifecycl
       response: "allow",
     });
     expect("answers" in (posts[0]?.body ?? {})).toBe(false);
+  });
+
+  it("a lifecycle-less Codex MCP approval choice uses the exact-session route", async () => {
+    const session = {
+      ...fromTerminalSessionInfo(L5I_INTERACTION_NO_LIFECYCLE),
+      controlPendingInteraction: {
+        interactionId: "codex:mcpServer/elicitation/request:bootstrap-1",
+        kind: "mcpServer/elicitation/request",
+        prompt:
+          'Allow the agents-remember MCP server to run tool "attach_terminal_session_to_leaf"?',
+        choices: ["accept", "decline", "cancel"],
+        questions: [],
+      },
+    };
+    expect(session.lifecycleId).toBeUndefined();
+    const posts = stubDirectRoute({});
+    const outcome = await submitInteractionAnswer({
+      session,
+      interactionId: "codex:mcpServer/elicitation/request:bootstrap-1",
+      answer: "accept",
+    });
+    expect(outcome).toEqual({ status: "answered" });
+    expect(posts).toHaveLength(1);
+    expect(posts[0]?.body).toEqual({
+      interactionId: "codex:mcpServer/elicitation/request:bootstrap-1",
+      expectedBridgeEpoch: "ep-1",
+      response: "accept",
+    });
+  });
+
+  it("a free-text interaction is session-owned too, never lifecycle-gate-owned", async () => {
+    const session = {
+      ...fromTerminalSessionInfo(L5I_INTERACTION_NO_LIFECYCLE),
+      controlPendingInteraction: {
+        interactionId: "vendor:free-text:1",
+        kind: "input",
+        prompt: "Which branch?",
+        choices: [],
+        questions: [],
+      },
+    };
+    const posts = stubDirectRoute({});
+    const outcome = await submitInteractionAnswer({
+      session,
+      interactionId: "vendor:free-text:1",
+      answer: "ar/hotfix",
+    });
+    expect(outcome).toEqual({ status: "answered" });
+    expect(posts[0]?.body).toEqual({
+      interactionId: "vendor:free-text:1",
+      expectedBridgeEpoch: "ep-1",
+      response: "ar/hotfix",
+    });
   });
 
   it("a 409 not-pending surfaces the server's words VERBATIM", async () => {

@@ -31,10 +31,10 @@ import {
 // decision items): the ONE interaction axis. Sits directly ABOVE the composer — never replaces it —
 // and appears only while the focused row carries `controlPendingInteraction` (or multiplexed
 // sub-agent entries in `controlPendingInteractions`, one bar per pending interaction). Answer
-// channels are
-// picked by the interaction's shape (data/interactionAnswer): structured AskUserQuestion pages and
-// allow/deny permissions POST the session-direct interaction-response route (no lifecycle needed);
-// legacy kinds keep the gate-decision fallback. On controlled sessions the
+// payloads are picked by the interaction's shape (data/interactionAnswer): structured
+// AskUserQuestion pages send an answers map; choices and composer text send one response string.
+// Every payload POSTs the session-direct interaction-response route (no lifecycle needed). On
+// controlled sessions the
 // PTY can NEVER answer — a terminal-typed line queues an ordinary message, which is exactly what
 // the honesty hint states. Kind-aware: structured questions → one option GROUP PER QUESTION (never
 // the legacy flat concatenation), multiSelect toggles join into one answer per question, and the

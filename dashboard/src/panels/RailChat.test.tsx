@@ -7,7 +7,7 @@ import { submitSessionText, waitForSubmissionReady } from "../data/submitClient"
 import { startSubmitRecord } from "../data/submitMachine";
 import { dashboardStore } from "../data/store";
 import { L6_INTERACTION_FREETEXT } from "../test/fixtures/catalogRows";
-import { engineProcess, lifecycleWithGate, taskDoc } from "../test/fixtures/wire";
+import { engineProcess, taskDoc } from "../test/fixtures/wire";
 import type { EngineProcessNode, TaskDocNode } from "../types/projection";
 import { RailChat } from "./RailChat";
 
@@ -477,11 +477,11 @@ describe("RailChat create from anywhere (L5)", () => {
 });
 
 describe("RailChat chat + terminal split (L5 fix 2)", () => {
-  it("routes a pane's pending non-choice answer through the gate and never /submit", async () => {
+  it("routes a pane's lifecycle-free non-choice answer by exact session and never /submit", async () => {
     const session = fromTerminalSessionInfo({
       ...L6_INTERACTION_FREETEXT,
       id: "rail-answer",
-      lifecycleId: "lc-rail-answer",
+      lifecycleId: undefined,
       leafKey: LEAF_KEY,
       controlPendingInteraction: {
         ...L6_INTERACTION_FREETEXT.controlPendingInteraction,
@@ -489,34 +489,26 @@ describe("RailChat chat + terminal split (L5 fix 2)", () => {
       },
     });
     sessionStore.getState().hydrate([session]);
-    dashboardStore.setState({
-      lifecycles: {
-        "lc-rail-answer": lifecycleWithGate(
-          { id: "lc-rail-answer" },
-          {
-            id: "gate-rail-answer",
-            kind: "agent-question",
-            state: "open",
-            decisions: [],
-            ts: "2026-07-17T09:00:00Z",
-            packet: {
-              adapterInteraction: {
-                sessionId: session.id,
-                interactionId: "ix-rail-answer",
-              },
-            },
-          },
-        ),
-      },
-    });
     const urls: string[] = [];
+    const responseBodies: Record<string, unknown>[] = [];
     vi.stubGlobal(
       "fetch",
-      vi.fn(async (input: RequestInfo | URL) => {
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
         const url = String(input);
         urls.push(url);
-        if (url === "/api/actions/approve") {
-          return { status: 202, text: async () => "" } as Response;
+        if (url.endsWith("/submission-authority")) {
+          return {
+            ok: true,
+            json: async () => ({ bridgeEpoch: "bridge-rail-answer" }),
+          } as Response;
+        }
+        if (url === "/api/terminal/rail-answer/interaction-response") {
+          responseBodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({ status: "accepted" }),
+          } as Response;
         }
         throw new Error(`no backend for ${url}`);
       }),
@@ -525,7 +517,12 @@ describe("RailChat chat + terminal split (L5 fix 2)", () => {
     await findByTestId("session-composer-answer-mode");
     act(() => sessionCockpitStore.getState().setComposerDraft(session.id, "use ar/base"));
     fireEvent.click(await findByTestId("session-composer-send"));
-    await waitFor(() => expect(urls).toContain("/api/actions/approve"));
+    await waitFor(() => expect(responseBodies).toHaveLength(1));
+    expect(responseBodies[0]).toEqual({
+      interactionId: "ix-rail-answer",
+      expectedBridgeEpoch: "bridge-rail-answer",
+      response: "use ar/base",
+    });
     expect(submitSessionText).not.toHaveBeenCalled();
     expect(urls.some((url) => url.endsWith("/submit"))).toBe(false);
   });

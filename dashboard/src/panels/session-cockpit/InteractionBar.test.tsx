@@ -1,4 +1,4 @@
-// The InteractionBar: kind-awareness, the gate-only answer path, and the
+// The InteractionBar: kind-awareness, the session-direct answer path, and the
 // full round-trip — answering… → verbatim error + retry | answered-waiting (poll-bounded).
 // xterm never appears here: the bar has no terminal dependency by construction.
 import { act, cleanup, fireEvent, render, waitFor, within } from "@testing-library/react";
@@ -19,28 +19,9 @@ import {
   L6_INTERACTION_UNREPRESENTABLE,
   L7_MULTIPLEXED_INTERACTIONS,
 } from "../../test/fixtures/catalogRows";
-import { lifecycleWithGate } from "../../test/fixtures/wire";
 import type { SessionComposerHandle } from "../SessionComposer";
 import { InteractionBar } from "./InteractionBar";
 import { INTERACTION_HONESTY_HINT } from "./lifecycleCopy";
-
-function projectGate(lifecycleId: string, gateId: string, sessionId: string, interactionId: string) {
-  dashboardStore.setState({
-    lifecycles: {
-      [lifecycleId]: lifecycleWithGate(
-        { id: lifecycleId },
-        {
-          id: gateId,
-          kind: "agent-question",
-          state: "open",
-          decisions: [],
-          ts: "2026-07-17T09:00:00Z",
-          packet: { adapterInteraction: { sessionId, interactionId } },
-        },
-      ),
-    },
-  });
-}
 
 const choicesSession = () => fromTerminalSessionInfo(L6_INTERACTION_CHOICES);
 const freetextSession = () => fromTerminalSessionInfo(L6_INTERACTION_FREETEXT);
@@ -85,12 +66,12 @@ describe("kind-awareness (F8)", () => {
     expect(getByTestId("interaction-bar-hint").textContent).toBe(INTERACTION_HONESTY_HINT);
   });
 
-  it("non-choice kinds mark the composer as the answer input (gate-routed, labeled)", () => {
+  it("non-choice kinds mark the composer as the direct answer input", () => {
     const { element: composer, ref } = composerHandleRef();
     const { getByTestId } = render(
       <InteractionBar session={freetextSession()} composerRef={ref} />,
     );
-    expect(getByTestId("interaction-bar-composer-mode").textContent).toContain("gate channel");
+    expect(getByTestId("interaction-bar-composer-mode").textContent).toContain("agent session");
     expect(composer.getAttribute("data-answer-mode")).toBe("true");
     composer.remove();
   });
@@ -113,35 +94,58 @@ describe("kind-awareness (F8)", () => {
 
 describe("round-trip states (F7)", () => {
   it("answering… disables the buttons in flight, then lands on answered — waiting (poll-bounded copy)", async () => {
-    projectGate("lc-l6-choices", "g-1", "l6-ix-choices", "ix_l6_choice");
     let release: (value: Response) => void = () => {};
     vi.stubGlobal(
       "fetch",
-      vi.fn(() => new Promise<Response>((resolve) => (release = resolve))),
+      vi.fn((url: string) => {
+        if (String(url).includes("/submission-authority")) {
+          return Promise.resolve({
+            ok: true,
+            status: 200,
+            json: async () => ({ bridgeEpoch: "ep-1" }),
+          } as Response);
+        }
+        return new Promise<Response>((resolve) => (release = resolve));
+      }),
     );
     const { getByTestId, getAllByTestId, queryByTestId } = render(
       <InteractionBar session={choicesSession()} />,
     );
     fireEvent.click(getAllByTestId("interaction-bar-choice")[0]);
-    await waitFor(() => expect(getByTestId("interaction-bar-inflight").textContent).toContain("answering"));
+    await waitFor(() =>
+      expect(getByTestId("interaction-bar-inflight").textContent).toContain("answering"),
+    );
     for (const button of getAllByTestId("interaction-bar-choice")) {
       expect(button.getAttribute("disabled")).not.toBeNull();
     }
-    release({ status: 202, text: async () => "" } as Response);
+    release({ ok: true, status: 200, json: async () => ({ status: "accepted" }) } as Response);
     await waitFor(() => expect(queryByTestId("interaction-bar-answered")).not.toBeNull());
     expect(getByTestId("interaction-bar-answered").textContent).toContain("waiting for the agent");
     expect(getByTestId("interaction-bar-answered").textContent).toContain("2.5");
   });
 
   it("POST failure renders the verbatim error and retry re-sends the SAME answer", async () => {
-    projectGate("lc-l6-choices", "g-1", "l6-ix-choices", "ix_l6_choice");
-    const bodies: string[] = [];
-    let status = 500;
+    const bodies: Array<Record<string, unknown>> = [];
+    let status = 409;
     vi.stubGlobal(
       "fetch",
-      vi.fn(async (_url: string, init?: RequestInit) => {
-        bodies.push(String(init?.body));
-        return { status, text: async () => "projection not ready" } as Response;
+      vi.fn(async (url: string, init?: RequestInit) => {
+        if (String(url).includes("/submission-authority")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({ bridgeEpoch: "ep-1" }),
+          } as Response;
+        }
+        bodies.push(JSON.parse(String(init?.body)));
+        return {
+          ok: status === 200,
+          status,
+          json: async () =>
+            status === 200
+              ? { status: "accepted" }
+              : { status: "not-pending", detail: "adapter response was not accepted" },
+        } as Response;
       }),
     );
     const { getByTestId, getAllByTestId, queryByTestId } = render(
@@ -149,67 +153,65 @@ describe("round-trip states (F7)", () => {
     );
     fireEvent.click(getAllByTestId("interaction-bar-choice")[2]); // "deny"
     await waitFor(() => expect(queryByTestId("interaction-bar-error")).not.toBeNull());
-    expect(getByTestId("interaction-bar-error").textContent).toContain("projection not ready");
-    status = 202;
+    expect(getByTestId("interaction-bar-error").textContent).toContain(
+      "adapter response was not accepted",
+    );
+    status = 200;
     fireEvent.click(getByTestId("interaction-bar-retry"));
     await waitFor(() => expect(queryByTestId("interaction-bar-answered")).not.toBeNull());
     expect(bodies).toHaveLength(2);
-    expect(JSON.parse(bodies[0])).toMatchObject({ note: "deny" });
-    expect(JSON.parse(bodies[1])).toMatchObject({ note: "deny" });
+    expect(bodies[0]).toMatchObject({ response: "deny" });
+    expect(bodies[1]).toEqual(bodies[0]);
   });
 
-  it("a missing gate is stated as the poll-bounded truth, retryable — never a blind POST", async () => {
-    const fetchSpy = vi.fn();
-    vi.stubGlobal("fetch", fetchSpy);
-    const { getAllByTestId, getByTestId, queryByTestId } = render(
-      <InteractionBar session={choicesSession()} />,
-    );
+  it("a lifecycle-less choice still POSTs to its exact session", async () => {
+    const posts = stubDirectRoute();
+    const session = { ...choicesSession(), lifecycleId: undefined };
+    const { getAllByTestId, queryByTestId } = render(<InteractionBar session={session} />);
     fireEvent.click(getAllByTestId("interaction-bar-choice")[0]);
-    await waitFor(() => expect(queryByTestId("interaction-bar-error")).not.toBeNull());
-    expect(getByTestId("interaction-bar-error").textContent).toContain("poll-bounded");
-    expect(fetchSpy).not.toHaveBeenCalled();
+    await waitFor(() => expect(queryByTestId("interaction-bar-answered")).not.toBeNull());
+    expect(posts[0]?.url).toBe("/api/terminal/l6-ix-choices/interaction-response");
+    expect(posts[0]?.body).toMatchObject({ response: "allow" });
   });
 
-  it("composer answer-mode routes the composer text through the gate channel, NOT /submit", async () => {
-    projectGate("lc-l6-freetext", "g-2", "l6-ix-freetext", "ix_l6_text");
-    const calls: Array<{ url: string; body: Record<string, string> }> = [];
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (url: string, init?: RequestInit) => {
-        calls.push({ url: String(url), body: JSON.parse(String(init?.body)) });
-        return { status: 202, text: async () => "" } as Response;
-      }),
-    );
+  it("composer answer-mode routes text to the exact session, NOT /submit", async () => {
+    const posts = stubDirectRoute();
     const { element: composer, ref } = composerHandleRef("start from ar/base");
     const { getByTestId, queryByTestId } = render(
       <InteractionBar session={freetextSession()} composerRef={ref} />,
     );
     fireEvent.click(getByTestId("interaction-bar-composer-send"));
     await waitFor(() => expect(queryByTestId("interaction-bar-answered")).not.toBeNull());
-    expect(calls).toEqual([
-      {
-        url: "/api/actions/approve",
-        body: { target: "lc-l6-freetext", gateId: "g-2", note: "start from ar/base" },
-      },
-    ]);
+    expect(posts[0]?.url).toBe("/api/terminal/l6-ix-freetext/interaction-response");
+    expect(posts[0]?.body).toMatchObject({ response: "start from ar/base" });
     composer.remove();
   });
 
   it("retries the exact failed composer answer with its original revision and preserves a newer edit", async () => {
-    projectGate("lc-l6-freetext", "g-2", "l6-ix-freetext", "ix_l6_text");
     const session = freetextSession();
     sessionCockpitStore.getState().setComposerDraft(session.id, "start from ar/base");
     const originalRevision =
       sessionCockpitStore.getState().perSession[session.id].composer.draftRevision;
-    const bodies: Array<Record<string, string>> = [];
-    let status = 500;
+    const bodies: Array<Record<string, unknown>> = [];
+    let status = 409;
     vi.stubGlobal(
       "fetch",
-      vi.fn(async (_url: string, init?: RequestInit) => {
+      vi.fn(async (url: string, init?: RequestInit) => {
+        if (String(url).includes("/submission-authority")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({ bridgeEpoch: "ep-1" }),
+          } as Response;
+        }
         bodies.push(JSON.parse(String(init?.body)));
         return {
+          ok: status === 200,
           status,
-          text: async () => (status === 202 ? "" : "projection not ready"),
+          json: async () =>
+            status === 200
+              ? { status: "accepted" }
+              : { status: "not-pending", detail: "adapter not ready" },
         } as Response;
       }),
     );
@@ -219,23 +221,19 @@ describe("round-trip states (F7)", () => {
     );
     fireEvent.click(getByTestId("interaction-bar-composer-send"));
     await waitFor(() => expect(queryByTestId("interaction-bar-error")).not.toBeNull());
-    expect(
-      sessionCockpitStore.getState().perSession[session.id].interactionAnswer,
-    ).toMatchObject({
+    expect(sessionCockpitStore.getState().perSession[session.id].interactionAnswer).toMatchObject({
       answer: "start from ar/base",
       draftRevision: originalRevision,
       inflight: false,
     });
 
-    act(() =>
-      sessionCockpitStore.getState().setComposerDraft(session.id, "newer human edit"),
-    );
-    status = 202;
+    act(() => sessionCockpitStore.getState().setComposerDraft(session.id, "newer human edit"));
+    status = 200;
     fireEvent.click(getByTestId("interaction-bar-retry"));
     await waitFor(() => expect(queryByTestId("interaction-bar-answered")).not.toBeNull());
     expect(bodies).toHaveLength(2);
-    expect(bodies[0]?.note).toBe("start from ar/base");
-    expect(bodies[1]?.note).toBe("start from ar/base");
+    expect(bodies[0]?.response).toBe("start from ar/base");
+    expect(bodies[1]).toEqual(bodies[0]);
     expect(sessionCockpitStore.getState().perSession[session.id].composer.draft).toBe(
       "newer human edit",
     );

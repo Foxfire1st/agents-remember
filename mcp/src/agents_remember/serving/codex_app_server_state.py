@@ -68,6 +68,7 @@ class CodexThreadEvidence:
 class CodexServerInteraction:
     rpc_id: RequestId
     method: str
+    params: JsonObject
     pending: PendingInteraction
 
 
@@ -454,6 +455,7 @@ def parse_server_interaction(
     return CodexServerInteraction(
         rpc_id=rpc_id,
         method=method,
+        params=dict(params),
         pending=PendingInteraction(
             interaction_id=interaction_id,
             kind=method,
@@ -470,7 +472,7 @@ def parse_server_interaction(
     )
 
 
-def interaction_result(method: str, response: str) -> JsonObject:
+def interaction_result(method: str, response: str, *, params: Mapping[str, object]) -> JsonObject:
     if method in {
         "item/commandExecution/requestApproval",
         "item/fileChange/requestApproval",
@@ -481,6 +483,8 @@ def interaction_result(method: str, response: str) -> JsonObject:
                 f"Codex approval response must be one of {', '.join(sorted(allowed))}"
             )
         return {"decision": response}
+    if method == "mcpServer/elicitation/request":
+        return mcp_elicitation_result(response, params=params)
     payload = parse_response_object(response, method=method)
     if method == "item/permissions/requestApproval":
         required_object(payload.get("permissions"), context="permissions approval response")
@@ -488,14 +492,25 @@ def interaction_result(method: str, response: str) -> JsonObject:
         if scope not in {"turn", "session"}:
             raise CodexAppServerError("permissions approval scope must be 'turn' or 'session'")
         return payload
-    if method == "mcpServer/elicitation/request":
-        action = payload.get("action")
-        if action not in {"accept", "decline", "cancel"}:
-            raise CodexAppServerError("MCP elicitation action must be accept, decline, or cancel")
-        if action == "accept" and "content" not in payload:
-            raise CodexAppServerError("accepted MCP elicitation requires content")
-        return payload
     raise CodexAppServerError(f"unsupported Codex interaction response method {method!r}")
+
+
+def mcp_elicitation_result(response: str, *, params: Mapping[str, object]) -> JsonObject:
+    if response in {"accept", "decline", "cancel"}:
+        if response == "accept":
+            if not mcp_elicitation_is_empty_form(params):
+                raise CodexAppServerError(
+                    "accepted non-empty MCP elicitation requires a structured JSON response"
+                )
+            return {"action": "accept", "content": {}}
+        return {"action": response}
+    payload = parse_response_object(response, method="mcpServer/elicitation/request")
+    action = payload.get("action")
+    if action not in {"accept", "decline", "cancel"}:
+        raise CodexAppServerError("MCP elicitation action must be accept, decline, or cancel")
+    if action == "accept" and "content" not in payload:
+        raise CodexAppServerError("accepted MCP elicitation requires content")
+    return payload
 
 
 def interaction_prompt(method: str, params: Mapping[str, object]) -> tuple[str, tuple[str, ...]]:
@@ -507,11 +522,22 @@ def interaction_prompt(method: str, params: Mapping[str, object]) -> tuple[str, 
         return str(value), ("accept", "acceptForSession", "decline", "cancel")
     if method == "item/permissions/requestApproval":
         return "Codex requested additional permissions; respond with the structured JSON grant", ()
-    return required_text(params, "message", context="MCP elicitation request"), (
-        "accept",
-        "decline",
-        "cancel",
-    )
+    prompt = required_text(params, "message", context="MCP elicitation request")
+    if mcp_elicitation_is_empty_form(params):
+        return prompt, ("accept", "decline", "cancel")
+    return prompt, ()
+
+
+def mcp_elicitation_is_empty_form(params: Mapping[str, object]) -> bool:
+    """True only for Codex's action-only MCP approval form (content is exactly ``{}``)."""
+
+    if params.get("mode") != "form":
+        return False
+    schema = params.get("requestedSchema")
+    if not isinstance(schema, Mapping):
+        return False
+    properties = schema.get("properties")
+    return isinstance(properties, Mapping) and not properties
 
 
 def user_message_text(item: Mapping[str, object]) -> str:

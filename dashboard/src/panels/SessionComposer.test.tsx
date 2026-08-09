@@ -14,7 +14,6 @@ import {
   type SubmissionStatusBatchWire,
 } from "../data/submissionLifecycleClient";
 import { catalogRow } from "../test/fixtures/catalogRows";
-import { lifecycleWithGate } from "../test/fixtures/wire";
 import {
   L5_ALREADY_DELIVERED_RACE_FIXTURE,
   L5_MULTI_QUEUE_FIXTURE,
@@ -695,10 +694,10 @@ describe("SessionComposer (FEUI-L5)", () => {
     fireEvent.compositionEnd(content);
   });
 
-  it("makes answer-mode a built-in gate route and locks duplicate sends, never /submit", async () => {
+  it("routes lifecycle-free answer-mode by exact session and locks duplicate sends, never /submit", async () => {
     const session = {
       ...readySession("answer-mode"),
-      lifecycleId: "lc-answer-mode",
+      lifecycleId: undefined,
       controlPendingInteraction: {
         interactionId: "ix-answer-mode",
         kind: "input",
@@ -707,29 +706,15 @@ describe("SessionComposer (FEUI-L5)", () => {
       },
     };
     sessionStore.getState().hydrate([session]);
-    dashboardStore.setState({
-      lifecycles: {
-        "lc-answer-mode": lifecycleWithGate(
-          { id: "lc-answer-mode" },
-          {
-            id: "gate-answer-mode",
-            kind: "agent-question",
-            state: "open",
-            decisions: [],
-            ts: "2026-07-17T09:00:00Z",
-            packet: {
-              adapterInteraction: {
-                sessionId: session.id,
-                interactionId: "ix-answer-mode",
-              },
-            },
-          },
-        ),
-      },
-    });
     let release: (response: Response) => void = () => {};
     const fetchMock = vi.fn((url: string, init?: RequestInit) => {
-      expect(url).toBe("/api/actions/approve");
+      if (url.endsWith("/submission-authority")) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ bridgeEpoch: "bridge-answer-mode" }),
+        } as Response);
+      }
+      expect(url).toBe("/api/terminal/answer-mode/interaction-response");
       expect(init?.method).toBe("POST");
       return new Promise<Response>((resolve) => (release = resolve));
     });
@@ -738,20 +723,20 @@ describe("SessionComposer (FEUI-L5)", () => {
     act(() => sessionCockpitStore.getState().setComposerDraft(session.id, "exact answer"));
     fireEvent.click(getByTestId("session-composer-send"));
     fireEvent.click(getByTestId("session-composer-send"));
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
-    expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/actions/approve");
-    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toMatchObject({
-      target: "lc-answer-mode",
-      gateId: "gate-answer-mode",
-      note: "exact answer",
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    expect(fetchMock.mock.calls[1]?.[0]).toBe("/api/terminal/answer-mode/interaction-response");
+    expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))).toEqual({
+      interactionId: "ix-answer-mode",
+      expectedBridgeEpoch: "bridge-answer-mode",
+      response: "exact answer",
     });
     expect(getByTestId("session-composer-send").textContent).toBe("send answer");
     expect(getByTestId("session-composer-send").getAttribute("disabled")).not.toBeNull();
-    release({ status: 202, text: async () => "" } as Response);
+    release({ ok: true, status: 200, json: async () => ({ status: "accepted" }) } as Response);
     await waitFor(() =>
       expect(getByTestId("session-composer-answer-mode").textContent).toContain("answered"),
     );
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
   it("disables native submission on a raw terminal while naming raw typing as the supported path", () => {

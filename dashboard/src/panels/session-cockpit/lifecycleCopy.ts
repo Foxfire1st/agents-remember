@@ -78,9 +78,9 @@ export const INTERACTION_ANSWERING = "answering…";
 export const INTERACTION_ANSWERED =
   "answered — waiting for the agent (the question clears with the next catalog poll, ≤ ~2.5 s)";
 
-/** Composer answer-mode label (non-choice kinds): routed through the gate channel, not /submit. */
+/** Composer answer-mode label (non-choice kinds): routed to the adapter, not terminal stdin. */
 export const INTERACTION_COMPOSER_MODE =
-  "the composer below is answering the pending question — routed through the gate channel, not the terminal";
+  "the composer below is answering the pending question — routed directly to the agent session, not the terminal";
 
 export const INTERACTION_NO_PROMPT_TEXT =
   "the harness sent a question without prompt text — raw payload in the inspector";

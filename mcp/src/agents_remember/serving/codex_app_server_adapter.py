@@ -340,7 +340,11 @@ class CodexAppServerAdapter:
         ):
             raise CodexAppServerError("Codex response does not match the active operation")
         transport = self._require_transport()
-        result = interaction_result(pending.method, response.response)
+        result = interaction_result(
+            pending.method,
+            response.response,
+            params=pending.params,
+        )
         await transport.respond(pending.rpc_id, result)
         del state.pending_interactions[rpc_id]
         if state.is_parent:

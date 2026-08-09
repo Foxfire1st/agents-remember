@@ -1,27 +1,16 @@
-import type { GateNode, LifecycleProjection } from "../types/projection";
-import { postGateDecisionDetailed } from "./actions";
 import { sessionCockpitStore } from "./sessionCockpitStore";
 import type { OpenSession } from "./sessions";
-import { dashboardStore } from "./store";
 import {
   clearSubmissionAuthorityCache,
   readSubmissionAuthority,
 } from "./submissionLifecycleClient";
 
 // The InteractionBar's answer paths (design §7.3; structured
-// decision items). TWO honest channels, picked by the interaction's own shape:
-//   1. STRUCTURED (AskUserQuestion `questions` — top-level additive list, with the claude-native
-//      `raw.input.questions` fallback for pre-fix runners) and PERMISSION (allow/deny)
-//      interactions answer through the session-direct route POST
-//      /api/terminal/{session}/interaction-response — no lifecycle required (a
-//      lifecycle-less seat's question used to be unanswerable). The route is
-//      all-or-nothing for structured questions: the answers map must cover EVERY question by its
-//      exact text (claude_stream_protocol.py `_question_answers`).
-//   2. LEGACY fallback: every other kind (free-text, exotic choice sets) rides the landed
-//      gate-decision channel — pending interactions project into `agent-question` gates
-//      server-side and the decision note returns VERBATIM to the interaction. A structured gate
-//      whose note is NOT the JSON answers map is now honestly REOPENED server-side, so structured
-//      interactions NEVER take this path.
+// decision items). Every adapter-owned interaction answers through the session-direct route POST
+// /api/terminal/{session}/interaction-response — no lifecycle required. Structured
+// AskUserQuestion pages send the all-or-nothing answers map keyed by exact question text; choices
+// and composer answers send one response string. Lifecycle gates may mirror the interaction for
+// coordination, but they are never the adapter answer channel.
 // NEVER a PTY write: on controlled sessions a terminal-typed line is queued as an ordinary user
 // message and can never answer the interaction (harness_control_runner.py stdin path).
 
@@ -46,16 +35,16 @@ export interface PendingInteractionView {
   /** Never fabricated: empty string when the vendor sent no prompt text (the bar says so). */
   prompt: string;
   choices: string[];
-  /** The additive structured questions — [] for permission-kind and legacy payloads. */
+  /** The additive structured questions — [] for scalar-answer payloads. */
   questions: InteractionQuestion[];
 }
 
 export type InteractionRepresentation =
   | { mode: "questions"; view: PendingInteractionView }
-  /** Permission-kind: choices are exactly allow/deny — the direct route carries `response`. */
+  /** Permission-kind: choices are exactly allow/deny. */
   | { mode: "permission"; view: PendingInteractionView }
   | { mode: "choices"; view: PendingInteractionView }
-  /** Free-text/confirm kinds: the composer becomes the answer input, routed through the gate. */
+  /** Free-text/confirm kinds: the composer becomes the direct answer input. */
   | { mode: "composer"; view: PendingInteractionView }
   /** Present but unanswerable — the bar states this honestly instead of rendering dead buttons. */
   | { mode: "unrepresentable"; reason: string };
@@ -122,9 +111,9 @@ function parseWireQuestions(payload: Record<string, unknown>): InteractionQuesti
 /**
  * Classify one `controlPendingInteraction` payload (kind-aware; structured). Structured
  * questions → per-question pages answered together through the direct route; allow/deny choices →
- * permission mode (direct route `response`); other choices → legacy gate buttons; absent →
- * composer answer-mode; no usable `interactionId` → unrepresentable (there is nothing either
- * channel could target — the raw payload stays inspectable, never silently dropped).
+ * permission mode; other choices → choice buttons; absent → composer answer-mode; no usable
+ * `interactionId` → unrepresentable (there is nothing the direct channel could target — the raw
+ * payload stays inspectable, never silently dropped).
  *
  * A questions payload holding an OPTION-LESS question also lands on unrepresentable. Such a
  * question is backend-legal (`_question_pages` checks only `isinstance(options, list)`) but has
@@ -236,7 +225,7 @@ export function pendingInteractionPayloads(
  * The representation of ONE pending interaction by id, looked up across the singular slot AND
  * the multiplexed sub-agent entries: answer-channel routing must see an agent
  * permission/questions payload exactly like the parent's — routing against only the singular
- * slot silently dropped agent answers into the legacy gate fallback.
+ * slot silently missed agent-owned answers.
  */
 export function representSessionPendingInteraction(
   session: OpenSession,
@@ -250,34 +239,6 @@ export function representSessionPendingInteraction(
       representation.view.interactionId === interactionId
     ) {
       return representation;
-    }
-  }
-  return null;
-}
-
-export interface InteractionGateRef {
-  lifecycleId: string;
-  gate: GateNode;
-}
-/**
- * The projected `agent-question` gate matching one (session, interaction) pair. The synchronizer
- * stamps `packet.adapterInteraction.{sessionId,interactionId}`; the gate rides its lifecycle's
- * projection. Null = the gate has not appeared in the projection yet (its creation is bounded by
- * the observe/poll cadence) — the bar states that instead of inventing an answer path.
- */
-export function findInteractionGate(
-  lifecycles: Record<string, LifecycleProjection>,
-  sessionId: string,
-  interactionId: string,
-): InteractionGateRef | null {
-  for (const lifecycle of Object.values(lifecycles)) {
-    const gate = lifecycle.gate;
-    if (!gate || gate.kind !== "agent-question" || gate.state !== "open") continue;
-    const adapter = gate.packet?.adapterInteraction;
-    if (typeof adapter !== "object" || adapter === null) continue;
-    const identity = adapter as Record<string, unknown>;
-    if (identity.sessionId === sessionId && identity.interactionId === interactionId) {
-      return { lifecycleId: lifecycle.id, gate };
     }
   }
   return null;
@@ -386,7 +347,7 @@ function responseDetail(record: Record<string, unknown> | undefined): string {
 /**
  * POST the session-direct interaction-response route (NO lifecycle required).
  * Body is exactly one of {interactionId, expectedBridgeEpoch, answers} (AskUserQuestion) or
- * {interactionId, expectedBridgeEpoch, response} (permission-kind). Failures keep the server's
+ * {interactionId, expectedBridgeEpoch, response} (every scalar answer). Failures keep the server's
  * own status word + detail verbatim (200 `accepted` / 409 `not-pending` / 409
  * `bridge-epoch-mismatch` / 404·409 `unsupported` / 503).
  */
@@ -467,47 +428,6 @@ async function answerViaInteractionRoute(args: {
     : { status: "error", error: result.error };
 }
 
-/**
- * LEGACY fallback: answer one pending interaction through the landed gate-decision channel. Only
- * kinds the direct route cannot carry (free-text, exotic choice sets) take this path, and only
- * seats WITH a lifecycle ever get the projected gate. The answer text rides as the decision
- * note — the backend synchronizer returns it verbatim to the vendor interaction. Failures come
- * back with the server's words (verbatim, retryable).
- */
-export async function answerPendingInteraction(args: {
-  lifecycles: Record<string, LifecycleProjection>;
-  sessionId: string;
-  /** The seat's lifecycle binding: gates project UNDER a lifecycle, so a seat without one has
-   *  a question that will NEVER appear as an answerable gate — the copy must say "cannot",
-   *  not "retry in a moment". */
-  sessionLifecycleId: string | undefined;
-  interactionId: string;
-  answer: string;
-}): Promise<InteractionAnswerOutcome> {
-  const answer = args.answer.trim();
-  if (!answer) return { status: "error", error: "the answer text is empty" };
-  const ref = findInteractionGate(args.lifecycles, args.sessionId, args.interactionId);
-  if (!ref) {
-    return {
-      status: "error",
-      error: args.sessionLifecycleId
-        ? "the answer channel (agent-question gate) has not appeared in the projection yet — gate creation is poll-bounded; retry in a moment"
-        : "this seat has no lifecycle, so its question is never projected as an answerable gate — it cannot be answered from the cockpit (a gate-id-only projection is an upstream ask)",
-    };
-  }
-  const result = await postGateDecisionDetailed(ref.lifecycleId, "approve", {
-    gateId: ref.gate.id,
-    note: answer,
-  });
-  if (result.status === "recorded") return { status: "answered" };
-  return {
-    status: "error",
-    error: result.detail
-      ? `gate decision POST failed (${result.status}): ${result.detail}`
-      : `gate decision POST failed (${result.status})`,
-  };
-}
-
 /** Store-backed lock shared by every SessionComposer and InteractionBar surface. */
 export function interactionAnswerIsLocked(sessionId: string, interactionId: string): boolean {
   const state = sessionCockpitStore.getState().perSession[sessionId]?.interactionAnswer;
@@ -524,10 +444,10 @@ export function interactionAnswerIsLocked(sessionId: string, interactionId: stri
  * answers map) and draft revision stay with an error so Retry can resend the same payload and
  * clear only the unchanged draft after success.
  *
- * Channel routing is derived from the session's CURRENT pending interaction (never from the
- * caller's say-so): structured questions → direct-route answers map covering EVERY question
- * (the backend's all-or-nothing contract — a partial map is refused client-side first);
- * permission-kind → direct-route response; anything else → the legacy gate fallback.
+ * Payload routing is derived from the session's CURRENT pending interaction (never from the
+ * caller's say-so): structured questions → answers map covering EVERY question (the backend's
+ * all-or-nothing contract — a partial map is refused client-side first); every other answer → one
+ * direct-route response string.
  */
 async function routeStructuredAnswers(
   args: {
@@ -566,7 +486,7 @@ async function routeStructuredAnswers(
   });
 }
 
-async function routePermissionAnswer(
+async function routeScalarAnswer(
   args: {
     session: OpenSession;
     interactionId: string;
@@ -575,16 +495,12 @@ async function routePermissionAnswer(
   representation: InteractionRepresentation | null,
 ): Promise<InteractionAnswerOutcome | null> {
   if (
-    representation?.mode !== "permission" ||
+    representation === null ||
+    representation.mode === "questions" ||
+    representation.mode === "unrepresentable" ||
     representation.view.interactionId !== args.interactionId
   ) {
     return null;
-  }
-  if (!PERMISSION_RESPONSES.has(answer)) {
-    return {
-      status: "error",
-      error: "a permission answer must be exactly allow or deny",
-    };
   }
   return answerViaInteractionRoute({
     sessionId: args.session.id,
@@ -686,16 +602,13 @@ export async function submitInteractionAnswer(args: {
           "the pending questions changed or cleared before the answers could be sent — wait for the catalog poll",
       };
   } else {
-    const permissionOutcome = await routePermissionAnswer(args, answer, representation);
+    const scalarOutcome = await routeScalarAnswer(args, answer, representation);
     outcome =
-      permissionOutcome ??
-      (await answerPendingInteraction({
-        lifecycles: dashboardStore.getState().lifecycles,
-        sessionId: args.session.id,
-        sessionLifecycleId: args.session.lifecycleId,
-        interactionId: args.interactionId,
-        answer,
-      }));
+      scalarOutcome ?? {
+        status: "error",
+        error:
+          "the pending interaction changed or cleared before the answer could be sent — wait for the catalog poll",
+      };
   }
   settleInteractionAnswer(args, retained, outcome);
   return outcome;

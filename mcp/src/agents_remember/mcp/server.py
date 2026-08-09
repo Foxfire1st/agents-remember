@@ -4,6 +4,7 @@ import argparse
 from typing import Any
 
 from mcp.server.fastmcp import FastMCP
+from mcp.server.fastmcp.server import Settings as FastMCPSettings
 
 from agents_remember.application.server_startup import (
     initialize_mcp_application,
@@ -15,11 +16,17 @@ from .config import ConfigError, McpRuntimeConfig, load_config
 from .registration import TOOL_REGISTRARS
 
 
+def _complete_fastmcp_settings() -> None:
+    """Resolve FastMCP's generic forward reference for strict warning policies."""
+    FastMCPSettings.model_rebuild(_types_namespace={"FastMCP": FastMCP})
+
+
 def create_server(config: McpRuntimeConfig) -> Any:
     install_compact_content()
     # One ambient lifecycle per server process; the _tool_payload choke point
     # tags tool calls onto it once a lifecycle is started.
     initialize_mcp_application(config)
+    _complete_fastmcp_settings()
     server = FastMCP("Agents Remember")
     # The tool surface itself lives in `.registration`, one module per family; this loop is
     # the only place that decides which families a server advertises.

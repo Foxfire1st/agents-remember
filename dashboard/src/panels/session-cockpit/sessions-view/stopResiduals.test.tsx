@@ -10,14 +10,12 @@ import {
   activeConversationStore,
 } from "../../../data/conversation/store";
 import { fromTerminalSessionInfo, sessionStore } from "../../../data/sessions";
-import { dashboardStore } from "../../../data/store";
 import { lifecycleNoticeStore } from "../../../data/sessionLifecycle";
 import { sessionCockpitStore } from "../../../data/sessionCockpitStore";
 import {
   FLEET,
   L6_INTERACTION_FREETEXT,
 } from "../../../test/fixtures/catalogRows";
-import { gate, lifecycle } from "../../../test/fixtures/wire";
 import { SessionsView } from "./SessionsView";
 import {
   l5qStatus,
@@ -71,11 +69,11 @@ describe("L6: stage surface — InteractionBar and stop residuals", () => {
     );
   });
 
-  it("routes the focused shared composer answer once through the gate and never /submit", async () => {
+  it("routes the focused lifecycle-free composer answer once by exact session and never /submit", async () => {
     const session = fromTerminalSessionInfo({
       ...L6_INTERACTION_FREETEXT,
       id: "sessions-answer",
-      lifecycleId: "lc-sessions-answer",
+      lifecycleId: undefined,
       controlPendingInteraction: {
         ...L6_INTERACTION_FREETEXT.controlPendingInteraction,
         interactionId: "ix-sessions-answer",
@@ -83,34 +81,22 @@ describe("L6: stage surface — InteractionBar and stop residuals", () => {
     });
     sessionStore.getState().hydrate([session]);
     sessionCockpitStore.setState({ focusedSessionId: null, perSession: {} });
-    dashboardStore.setState({
-      lifecycles: {
-        "lc-sessions-answer": lifecycle({
-          id: "lc-sessions-answer",
-          gate: gate({
-            id: "gate-sessions-answer",
-            kind: "agent-question",
-            state: "open",
-            decisions: [],
-            ts: "2026-07-17T09:00:00Z",
-            packet: {
-              adapterInteraction: {
-                sessionId: session.id,
-                interactionId: "ix-sessions-answer",
-              },
-            },
-          }),
-        }),
-      },
-    });
     const urls: string[] = [];
+    const responseBodies: Record<string, unknown>[] = [];
     let release: (response: Response) => void = () => {};
     vi.stubGlobal(
       "fetch",
-      vi.fn(async (input: RequestInfo | URL) => {
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
         const url = String(input);
         urls.push(url);
-        if (url === "/api/actions/approve") {
+        if (url.endsWith("/submission-authority")) {
+          return {
+            ok: true,
+            json: async () => ({ bridgeEpoch: "bridge-sessions-answer" }),
+          } as Response;
+        }
+        if (url === "/api/terminal/sessions-answer/interaction-response") {
+          responseBodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
           return new Promise<Response>((resolve) => (release = resolve));
         }
         return {
@@ -133,13 +119,14 @@ describe("L6: stage surface — InteractionBar and stop residuals", () => {
     const send = await findByTestId("session-composer-send");
     fireEvent.click(send);
     fireEvent.click(send);
-    await waitFor(() =>
-      expect(urls.filter((url) => url === "/api/actions/approve")).toHaveLength(
-        1,
-      ),
-    );
+    await waitFor(() => expect(responseBodies).toHaveLength(1));
+    expect(responseBodies[0]).toEqual({
+      interactionId: "ix-sessions-answer",
+      expectedBridgeEpoch: "bridge-sessions-answer",
+      response: "use ar/base",
+    });
     expect(urls.some((url) => url.endsWith("/submit"))).toBe(false);
-    release({ status: 202, text: async () => "" } as Response);
+    release({ ok: true, status: 200, json: async () => ({ status: "accepted" }) } as Response);
     await waitFor(() =>
       expect(
         sessionCockpitStore.getState().perSession[session.id]?.interactionAnswer

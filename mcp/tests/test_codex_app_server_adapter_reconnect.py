@@ -6,11 +6,12 @@ from collections.abc import Mapping
 
 import pytest
 from _agent_wire_fixtures import turn_completed_params, turn_started_params
-from agents_remember.errors import HarnessAdapterDisconnectedError
+from agents_remember.errors import CodexAppServerError, HarnessAdapterDisconnectedError
 from agents_remember.serving.codex_app_server_adapter import (
     CodexAppServerAdapter,
     CodexAppServerSettings,
 )
+from agents_remember.serving.codex_app_server_state import interaction_prompt, interaction_result
 from agents_remember.serving.harness_control_models import InteractionResponse
 from test_codex_app_server_adapter import (
     FakeCodexTransport,
@@ -82,8 +83,82 @@ async def test_correlated_server_approval_and_elicitation_responses() -> None:
             "input-1",
             {"action": "accept", "content": {"value": "chosen"}},
         )
+
+        for rpc_id, action, expected in (
+            ("tool-approval-accept", "accept", {"action": "accept", "content": {}}),
+            ("tool-approval-decline", "decline", {"action": "decline"}),
+            ("tool-approval-cancel", "cancel", {"action": "cancel"}),
+        ):
+            transport.emit(
+                {
+                    "id": rpc_id,
+                    "method": "mcpServer/elicitation/request",
+                    "params": {
+                        "threadId": "thread-1",
+                        "turnId": "turn-1",
+                        "serverName": "agents-remember",
+                        "mode": "form",
+                        "message": (
+                            "Allow the agents-remember MCP server to run tool "
+                            '"attach_terminal_session_to_leaf"?'
+                        ),
+                        "requestedSchema": {"type": "object", "properties": {}},
+                    },
+                }
+            )
+            await settle()
+            pending = (await adapter.snapshot()).pending_interaction
+            assert pending is not None
+            assert pending.interaction_id.endswith(rpc_id)
+            assert pending.choices == ("accept", "decline", "cancel")
+            await adapter.respond(
+                InteractionResponse(
+                    interaction_id=pending.interaction_id,
+                    response=action,
+                    responded_at="2026-07-14T12:04:30+00:00",
+                    operation=active.operation,
+                )
+            )
+            assert transport.server_responses[-1] == (rpc_id, expected)
     finally:
         await adapter.stop("forced")
+
+
+def test_mcp_elicitation_response_edges_remain_typed_and_fail_closed() -> None:
+    assert interaction_result(
+        "item/permissions/requestApproval",
+        '{"permissions":{}}',
+        params={},
+    ) == {"permissions": {}}
+
+    non_empty_form = {
+        "mode": "form",
+        "message": "Choose a value",
+        "requestedSchema": {"type": "object", "properties": {"value": {"type": "string"}}},
+    }
+    with pytest.raises(CodexAppServerError, match="structured JSON response"):
+        interaction_result("mcpServer/elicitation/request", "accept", params=non_empty_form)
+    with pytest.raises(CodexAppServerError, match="action must be"):
+        interaction_result(
+            "mcpServer/elicitation/request",
+            '{"action":"later"}',
+            params=non_empty_form,
+        )
+    with pytest.raises(CodexAppServerError, match="requires content"):
+        interaction_result(
+            "mcpServer/elicitation/request",
+            '{"action":"accept"}',
+            params=non_empty_form,
+        )
+
+    for params in (
+        {"mode": "url", "message": "Open the authorization URL"},
+        {"mode": "form", "message": "Malformed form", "requestedSchema": "not-an-object"},
+    ):
+        assert interaction_prompt("mcpServer/elicitation/request", params) == (
+            params["message"],
+            (),
+        )
 
 
 @pytest.mark.anyio
