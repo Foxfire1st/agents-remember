@@ -353,6 +353,7 @@ class TerminalCatalogEntryWire(WireResponse):
     interrupt_requested_turn_id: str | None = None
     state_signal_emitted_for: str | None = None
     non_reaction_emitted_for: str | None = None
+    compound_idle_emitted_for: str | None = None
     liveness_failures: int | None = None
     exit_evidence: Literal["tmux-command-failed", "pane-gone"] | None = None
 

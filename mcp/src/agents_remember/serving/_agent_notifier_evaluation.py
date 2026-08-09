@@ -17,6 +17,7 @@ from agents_remember.serving.dispatch_brief import dispatch_stays_on_exact_sessi
 from agents_remember.serving.pane_signals import classify_pane_signal
 from agents_remember.serving.state_signals import (
     evaluate_boundary_drain_findings,
+    evaluate_compound_idle_findings,
     evaluate_non_reaction_findings,
     evaluate_state_signal_findings,
     state_signal_held_on_boundary,
@@ -408,6 +409,7 @@ def evaluate_predicates(  # pragma: no cover
     )[: max(1, ctx.escalation_budget)]
     findings += evaluate_dead_upstream_findings(ctx.catalog)
     findings += evaluate_state_signal_findings(ctx.catalog)
+    findings += evaluate_compound_idle_findings(ctx.catalog)
     findings += evaluate_non_reaction_findings(ctx.catalog, ctx.inbox_store, now=now)
     findings += evaluate_boundary_drain_findings(
         ctx.catalog,

@@ -33,6 +33,7 @@ FindingKind = Literal[
     "escalation-due",
     "dead-upstream",
     "state-signal-due",
+    "compound-idle-due",
     "non-reaction-due",
     "boundary-drain",
 ]
@@ -44,6 +45,7 @@ ActionKind = Literal[
     "escalate-rung",
     "signal-manager",
     "state-signal",
+    "compound-idle",
     "non-reaction",
     "boundary-drain",
     "none",

@@ -54,6 +54,14 @@ def with_non_reaction_emitted(
     return replace(entry, non_reaction_emitted_for=row_id)
 
 
+def with_compound_idle_emitted(
+    entry: TerminalCatalogEntry,
+    signature: str,
+) -> TerminalCatalogEntry:
+    """A copy recording that one compound-idle episode was already relayed."""
+    return replace(entry, compound_idle_emitted_for=signature)
+
+
 def with_interrupt_request(
     entry: TerminalCatalogEntry,
     *,
@@ -142,6 +150,18 @@ def record_non_reaction_emitted(
     if entry is None or entry.non_reaction_emitted_for == row_id:
         return
     catalog.upsert(with_non_reaction_emitted(entry, row_id))
+
+
+def record_compound_idle_emitted(
+    catalog: TerminalCatalog,
+    session_id: str,
+    signature: str,
+) -> None:
+    """Record that one compound-idle episode was already relayed to its orchestrator."""
+    entry = catalog.get(session_id)
+    if entry is None or entry.compound_idle_emitted_for == signature:
+        return
+    catalog.upsert(with_compound_idle_emitted(entry, signature))
 
 
 def record_interrupt_request(

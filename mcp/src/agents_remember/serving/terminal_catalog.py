@@ -224,10 +224,13 @@ class TerminalCatalogEntry:
     interrupt_requested_by: Literal["developer"] | None = None
     interrupt_requested_at: str | None = None
     interrupt_requested_turn_id: str | None = None
-    # State-signal emission dedupe: the terminal evidence identity already relayed, and the
-    # landed inbox row id already relayed as the non-reaction residue fact. One per episode.
+    # State-signal emission dedupe: the terminal evidence identity already relayed, the
+    # landed inbox row id already relayed as the non-reaction residue fact, and the
+    # compound-idle episode signature already relayed. One marker per episode; a seat
+    # returning to activity changes the compound signature, which is the re-arm.
     state_signal_emitted_for: str | None = None
     non_reaction_emitted_for: str | None = None
+    compound_idle_emitted_for: str | None = None
 
     @classmethod
     def from_json(cls, data: dict[str, object]) -> TerminalCatalogEntry:
@@ -309,6 +312,7 @@ class TerminalCatalogEntry:
             interrupt_requested_turn_id=_optional_str(data, "interruptRequestedTurnId"),
             state_signal_emitted_for=_optional_str(data, "stateSignalEmittedFor"),
             non_reaction_emitted_for=_optional_str(data, "nonReactionEmittedFor"),
+            compound_idle_emitted_for=_optional_str(data, "compoundIdleEmittedFor"),
         )
 
     def to_json(self) -> dict[str, object]:
@@ -384,6 +388,7 @@ class TerminalCatalogEntry:
                     "interruptRequestedTurnId": self.interrupt_requested_turn_id,
                     "stateSignalEmittedFor": self.state_signal_emitted_for,
                     "nonReactionEmittedFor": self.non_reaction_emitted_for,
+                    "compoundIdleEmittedFor": self.compound_idle_emitted_for,
                 }
             )
         )

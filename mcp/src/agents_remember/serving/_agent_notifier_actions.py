@@ -58,10 +58,14 @@ from agents_remember.serving.owner_signals import (
 )
 from agents_remember.serving.retire import SeatClosure, retire_entry
 from agents_remember.serving.seat_turn_truth import (
+    record_compound_idle_emitted,
     record_non_reaction_emitted,
     record_state_signal_emitted,
 )
 from agents_remember.serving.state_signals import (
+    compound_idle_response,
+    compound_idle_sets,
+    compound_idle_signature,
     non_reaction_response,
     state_signal_response,
 )
@@ -673,6 +677,65 @@ def _emit_state_signal(  # pragma: no cover
     )
 
 
+def _emit_compound_idle(
+    ctx: AgentNotifierContext,
+    finding: AgentNotifierFinding,
+    *,
+    now: datetime,
+    sweep: _SweepState,
+) -> AgentNotifierActionResult:
+    """Emit exactly one durable compound-idle state-signal to the owning orchestrator.
+
+    Ownership is the manager's own spawn provenance (one hop up, sprint-scope bounded):
+    a manager with no recorded orchestrator edge is never routed by a global fallback.
+    The episode signature is derived from the ACTION-time member read (a concurrent
+    catalog write cannot leave a stale marker behind); a seat returning to activity
+    changes that signature, which is the re-arm.
+    """
+    if finding.session_id is None:
+        return AgentNotifierActionResult("compound-idle", finding, "skipped", "no seat row")
+    entry = ctx.catalog.get(finding.session_id)
+    if entry is None:
+        return AgentNotifierActionResult("compound-idle", finding, "skipped", "no seat row")
+    members = compound_idle_sets(ctx.catalog).get(entry.id)
+    if members is None:
+        return AgentNotifierActionResult("compound-idle", finding, "skipped", "no longer idle")
+    signature = compound_idle_signature(members)
+    if entry.compound_idle_emitted_for == signature:
+        return AgentNotifierActionResult("compound-idle", finding, "skipped", "already emitted")
+    owner = derive_signal_owner(ctx.catalog, sender_agent_id=entry.id, message_kind="state-signal")
+    if owner.agent_id is None and owner.lifecycle_id is None:
+        return AgentNotifierActionResult("compound-idle", finding, "skipped", "no routable owner")
+    delivery_state = _post_owner_signal(
+        ctx,
+        owner,
+        OwnerSignal(
+            message_kind="state-signal",
+            ask=f"Agent notifier observed state-signal: compound-idle ({signature})",
+            response=compound_idle_response(members),
+            leaf_key=finding.leaf_key,
+            seat_role=finding.seat_role,
+            subject_agent_id=entry.id,
+        ),
+        OwnerSignalOptions(now=now, sweep=sweep, admission=DeliveryAdmission(boundary=True)),
+    )
+    record_compound_idle_emitted(ctx.catalog, entry.id, signature)
+    _log_event(
+        ctx,
+        "orchestration.agent-notifier.state-signal",
+        {
+            "sessionId": entry.id,
+            "leafKey": finding.leaf_key,
+            "terminalOutcome": "compound-idle",
+            "episode": signature,
+            "ownerRole": owner.role,
+            "ownerAgentId": owner.agent_id,
+            "deliveryState": delivery_state,
+        },
+    )
+    return AgentNotifierActionResult("compound-idle", finding, delivery_state)
+
+
 def _emit_non_reaction(  # pragma: no cover
     ctx: AgentNotifierContext,
     finding: AgentNotifierFinding,
@@ -689,9 +752,18 @@ def _emit_non_reaction(  # pragma: no cover
         return AgentNotifierActionResult("non-reaction", finding, "skipped", "row not pending")
     if entry.non_reaction_emitted_for == finding.source_id:
         return AgentNotifierActionResult("non-reaction", finding, "skipped", "already emitted")
-    owner = derive_leaf_manager_owner(
-        ctx.catalog, sender_agent_id=finding.session_id, leaf_key=finding.leaf_key
-    )
+    if entry.binding_role == "manager":
+        owner = derive_signal_owner(
+            ctx.catalog, sender_agent_id=finding.session_id, message_kind="state-signal"
+        )
+        if owner.agent_id is None and owner.lifecycle_id is None:
+            return AgentNotifierActionResult(
+                "non-reaction", finding, "skipped", "no routable owner"
+            )
+    else:
+        owner = derive_leaf_manager_owner(
+            ctx.catalog, sender_agent_id=finding.session_id, leaf_key=finding.leaf_key
+        )
     if owner.agent_id is None and owner.lifecycle_id is None and owner.role is None:
         return AgentNotifierActionResult("non-reaction", finding, "skipped", "no routable owner")
     delivery_state = _post_owner_signal(
@@ -749,6 +821,7 @@ _FINDING_ACTIONS: dict[str, _FindingAction] = {
     "dead-upstream": _signal_dead_upstream,
     "seat-liveness": _signal_emit,
     "state-signal-due": _emit_state_signal,
+    "compound-idle-due": _emit_compound_idle,
     "non-reaction-due": _emit_non_reaction,
     "boundary-drain": _drain_boundary,
 }

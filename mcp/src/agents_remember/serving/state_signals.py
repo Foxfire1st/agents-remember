@@ -1,8 +1,10 @@
-"""Worker→manager state-signal relay: facts from catalog turn truth, never inference.
+"""Worker→manager and compound-idle state-signal relay: facts from catalog turn truth, never
+inference.
 
 The relay emits exactly one durable state-signal per seat+turn from the lifted
-terminal outcome, holds delivery at the manager's turn boundary, drains pending
-rows when a boundary arrives, and surfaces the non-reaction residue fact.
+terminal outcome, one compound-idle signal per manager set to the owning
+orchestrator, holds delivery at the target's turn boundary, drains pending rows
+when a boundary arrives, and surfaces the non-reaction residue fact.
 """
 
 from __future__ import annotations
@@ -14,6 +16,7 @@ from agents_remember.controlplane.operator_inbox_records import (
     state_signal_landed,
 )
 from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
+from agents_remember.controlplane.signal_routing import master_key
 from agents_remember.serving.agent_notifier_models import AgentNotifierFinding
 from agents_remember.serving.inbox_delivery import target_session_for_entry
 from agents_remember.serving.terminal_catalog import (
@@ -25,6 +28,87 @@ from agents_remember.serving.terminal_catalog import (
 NON_REACTION_WINDOW_SECONDS = 300.0
 """Bounded window after which a seat that landed rows at a boundary and never left
 ``turn-ended`` is relayed to its owner as the non-reaction residue fact."""
+
+COMPOUND_IDLE_SWEEP_LATENCY_SECONDS = 10.0
+"""Upper bound on compound-idle relay latency: one agent-notifier sweep at the default
+10 s cadence (N6). The predicate is evaluated from catalog truth at each projection tick,
+so a set observed idle is signaled no later than this bound after that tick."""
+
+
+def _compound_worker_index(
+    catalog: TerminalCatalog,
+) -> tuple[
+    list[TerminalCatalogEntry],
+    dict[str, list[TerminalCatalogEntry]],
+    dict[str, list[TerminalCatalogEntry]],
+]:
+    """Live managers and live workers indexed by spawner id and master key.
+
+    One catalog scan feeds every compound-idle set, so the sweep stays O(catalog + sets),
+    never O(managers x catalog). Status is gated FIRST here: non-running rows
+    (retired/exited/landed) are never indexed, so their stale turn state never counts.
+    """
+    managers: list[TerminalCatalogEntry] = []
+    by_spawner: dict[str, list[TerminalCatalogEntry]] = {}
+    by_master: dict[str, list[TerminalCatalogEntry]] = {}
+    for entry in catalog.list():
+        if entry.kind != "harness" or entry.status != "running":
+            continue
+        if entry.binding_role == "manager":
+            managers.append(entry)
+        elif entry.binding_role == "worker":
+            if entry.spawned_by_session is not None:
+                by_spawner.setdefault(entry.spawned_by_session, []).append(entry)
+            leaf = entry.binding_leaf_key or entry.replacement_for_leaf
+            master = master_key(leaf)
+            if master is not None:
+                by_master.setdefault(master, []).append(entry)
+    return managers, by_spawner, by_master
+
+
+def compound_idle_sets(
+    catalog: TerminalCatalog,
+) -> dict[str, tuple[TerminalCatalogEntry, ...]]:
+    """Every live manager's compound-idle member set, keyed by manager id.
+
+    Membership is master-scoped on EVERY arm: a worker joins only when it is bound
+    (``binding_leaf_key`` / ``replacement_for_leaf``) to the manager's master,
+    whether or not the manager spawned it. A running member with unclassified turn
+    state is unknown and fails the set closed; ``working``/``stale`` members mean
+    the set is not idle. A manager with no workers never forms a set.
+    """
+    managers, by_spawner, by_master = _compound_worker_index(catalog)
+    sets: dict[str, tuple[TerminalCatalogEntry, ...]] = {}
+    for manager in managers:
+        manager_master = master_key(manager.binding_leaf_key)
+        members = [manager]
+        seen: set[str] = set()
+        for worker in [
+            *by_spawner.get(manager.id, ()),
+            *by_master.get(manager_master or "", ()),
+        ]:
+            if worker.id in seen:
+                continue
+            leaf = worker.binding_leaf_key
+            if manager_master is None or leaf is None or master_key(leaf) != manager_master:
+                continue
+            seen.add(worker.id)
+            members.append(worker)
+        if not members[1:]:
+            continue
+        if all(member.turn_state in {"turn-ended", "awaiting-input"} for member in members):
+            sets[manager.id] = tuple(members)
+    return sets
+
+
+def compound_idle_signature(members: tuple[TerminalCatalogEntry, ...]) -> str:
+    """Identity of one idle episode: every member's seat, state and boundary time."""
+    return ";".join(
+        sorted(
+            f"{member.id}:{member.turn_state}:{member.turn_state_changed_at or ''}"
+            for member in members
+        )
+    )
 
 
 def state_signal_held_on_boundary(catalog: TerminalCatalog, entry: OperatorInboxEntry) -> bool:
@@ -72,6 +156,29 @@ def evaluate_state_signal_findings(
     return findings
 
 
+def evaluate_compound_idle_findings(
+    catalog: TerminalCatalog,
+) -> list[AgentNotifierFinding]:
+    """A manager seat whose whole live set is at a turn boundary, not yet relayed."""
+    findings: list[AgentNotifierFinding] = []
+    for manager_id, members in compound_idle_sets(catalog).items():
+        manager = members[0]
+        signature = compound_idle_signature(members)
+        if manager.compound_idle_emitted_for == signature:
+            continue
+        findings.append(
+            AgentNotifierFinding(
+                kind="compound-idle-due",
+                detail="compound-idle",
+                session_id=manager_id,
+                leaf_key=manager.binding_leaf_key,
+                seat_role=manager.binding_role,
+                source_id=signature,
+            )
+        )
+    return findings
+
+
 def evaluate_non_reaction_findings(
     catalog: TerminalCatalog,
     inbox_store: OperatorInboxStore,
@@ -85,7 +192,7 @@ def evaluate_non_reaction_findings(
     for entry in catalog.list():
         if entry.kind != "harness" or entry.status != "running":
             continue
-        if entry.binding_role != "worker":
+        if entry.binding_role not in ("worker", "manager"):
             continue
         if entry.turn_state != "turn-ended":
             continue
@@ -173,6 +280,19 @@ def state_signal_response(entry: TerminalCatalogEntry) -> str:
         f"session {entry.id} leaf {entry.binding_leaf_key or '-'} "
         f"turn {entry.terminal_evidence_id or '-'} outcome {entry.terminal_outcome or 'unknown'} "
         f"at {entry.terminal_outcome_at or '-'} interrupted_by={origin}"
+    )
+
+
+def compound_idle_response(members: tuple[TerminalCatalogEntry, ...]) -> str:
+    """The self-contained compound-idle payload naming every set member."""
+    manager = members[0]
+    workers = ", ".join(
+        f"{entry.id}@{entry.binding_leaf_key or entry.replacement_for_leaf or '-'}"
+        for entry in members[1:]
+    )
+    return (
+        f"compound-idle set: manager {manager.id} leaf {manager.binding_leaf_key or '-'} "
+        f"workers {workers or '-'}"
     )
 
 

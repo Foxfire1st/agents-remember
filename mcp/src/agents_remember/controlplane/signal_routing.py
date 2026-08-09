@@ -49,7 +49,8 @@ def _manager_owner(entry: SeatRow) -> RoutedOwner:
     )
 
 
-def _master_key(leaf_key: str | None) -> str | None:
+def master_key(leaf_key: str | None) -> str | None:
+    """The qualified master prefix (``repo/master``) of a qualified leaf key, or ``None``."""
     if leaf_key is None:
         return None
     parts = leaf_key.split("/", 2)
@@ -112,7 +113,7 @@ def _scoped_managers(
     *,
     route_leaf: str,
 ) -> list[SeatRow]:
-    route_master = _master_key(route_leaf)
+    route_master = master_key(route_leaf)
     linked_manager_ids = {
         entry.spawned_by_session
         for entry in catalog.list()
@@ -123,7 +124,7 @@ def _scoped_managers(
         for manager in managers
         if manager.id in linked_manager_ids
         or manager.binding_leaf_key == route_leaf
-        or (route_master is not None and _master_key(manager.binding_leaf_key) == route_master)
+        or (route_master is not None and master_key(manager.binding_leaf_key) == route_master)
     ]
 
 

@@ -701,7 +701,7 @@ class ValidatedRouteHazardTests(unittest.TestCase):
         self.assertEqual(sorted(emitted - declared), [])
         self.assertEqual(sorted(declared - emitted), [])
         # Pinned, because the scan reading zero keys would satisfy the equality above.
-        self.assertEqual(len(emitted), 63)
+        self.assertEqual(len(emitted), 64)
 
 
 class RouteWalkerTests(unittest.TestCase):

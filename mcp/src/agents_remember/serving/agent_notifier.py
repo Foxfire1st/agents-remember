@@ -28,6 +28,7 @@ from agents_remember.serving._agent_notifier_actions import (
     _FINDING_ACTIONS,
     _auto_nudge,
     _drain_boundary,
+    _emit_compound_idle,
     _emit_non_reaction,
     _emit_state_signal,
     _escalate_inbox_entry,
@@ -81,8 +82,12 @@ from agents_remember.serving.owner_signals import (
     _post_owner_signal,
 )
 from agents_remember.serving.state_signals import (
+    COMPOUND_IDLE_SWEEP_LATENCY_SECONDS,
     NON_REACTION_WINDOW_SECONDS,
+    compound_idle_response,
+    compound_idle_signature,
     evaluate_boundary_drain_findings,
+    evaluate_compound_idle_findings,
     evaluate_non_reaction_findings,
     evaluate_state_signal_findings,
     non_reaction_response,
@@ -206,6 +211,7 @@ def run_agent_notifier_sweep(
 
 
 __all__ = [
+    "COMPOUND_IDLE_SWEEP_LATENCY_SECONDS",
     "DEFAULT_ESCALATION_RUNG_SECONDS",
     "DEFAULT_ESCALATION_SLA_SECONDS",
     "NON_REACTION_WINDOW_SECONDS",
@@ -221,6 +227,7 @@ __all__ = [
     "_auto_nudge",
     "_delivery_failure_still_retrying",
     "_drain_boundary",
+    "_emit_compound_idle",
     "_emit_non_reaction",
     "_emit_state_signal",
     "_escalate_inbox_entry",
@@ -240,7 +247,10 @@ __all__ = [
     "_signal_emit",
     "_stale_turn_state_due",
     "act_on_finding",
+    "compound_idle_response",
+    "compound_idle_signature",
     "evaluate_boundary_drain_findings",
+    "evaluate_compound_idle_findings",
     "evaluate_dead_upstream_findings",
     "evaluate_escalation_findings",
     "evaluate_expectation_findings",

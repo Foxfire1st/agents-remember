@@ -314,7 +314,10 @@ class StateSignalRelayTests(unittest.TestCase):
             replace(
                 _manager("manager-2"),
                 spawned_by_session="orchestrator-1",
-                turn_state="turn-ended",
+                # A working manager isolates the worker-done rebinding regression: a
+                # turn-ended manager + idle worker would additionally fire the
+                # compound-idle fact, which this test does not exercise.
+                turn_state="working",
                 control_endpoint=None,
             )
         )
