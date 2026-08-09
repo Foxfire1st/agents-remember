@@ -29,7 +29,6 @@ from agents_remember.controlplane.operator_inbox_records import (
 )
 from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
 from agents_remember.controlplane.operator_inbox_transitions import RedeliveryFloor
-from agents_remember.controlplane.orchestration_nudges import OrchestrationNudgeStore
 from agents_remember.controlplane.signal_routing import RoutedOwner
 from agents_remember.observer.store import EventStore
 from agents_remember.serving.agent_notifier import AgentNotifierContext, run_agent_notifier_sweep
@@ -135,7 +134,6 @@ class StateSignalRelayTests(unittest.TestCase):
         self.catalog = TerminalCatalog(root / "catalog.json")
         self.inbox_store = OperatorInboxStore(observer_root)
         self.expectation_store = ExpectationRowStore(observer_root)
-        self.nudge_store = OrchestrationNudgeStore(observer_root)
         self.signal_cooldown_store = AgentNotifierSignalCooldownStore(observer_root)
         self.event_store = EventStore(observer_root)
         self.heartbeat_store = AgentNotifierHeartbeatStore(observer_root)
@@ -147,7 +145,6 @@ class StateSignalRelayTests(unittest.TestCase):
             paster=_accepted_paster(),
             inbox_store=self.inbox_store,
             expectation_store=self.expectation_store,
-            nudge_store=self.nudge_store,
             signal_cooldown_store=self.signal_cooldown_store,
             event_store=self.event_store,
             heartbeat_store=self.heartbeat_store,

@@ -42,7 +42,6 @@ from agents_remember.controlplane import durable_store
 from agents_remember.controlplane.agent_notifier_signals import AgentNotifierSignalCooldownStore
 from agents_remember.controlplane.expectation_rows import ExpectationRowStore
 from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
-from agents_remember.controlplane.orchestration_nudges import OrchestrationNudgeStore
 from agents_remember.errors import HarnessControlError
 from agents_remember.observer.store import EventStore
 from agents_remember.serving import _app_terminal_routes as terminal_routes_module
@@ -150,7 +149,6 @@ class _SharedStores:
             paster=mock.Mock(),
             inbox_store=self.inbox_store,
             expectation_store=ExpectationRowStore(self.observer_root),
-            nudge_store=OrchestrationNudgeStore(self.observer_root),
             signal_cooldown_store=AgentNotifierSignalCooldownStore(self.observer_root),
             event_store=EventStore(self.observer_root),
             heartbeat_store=AgentNotifierHeartbeatStore(self.observer_root),

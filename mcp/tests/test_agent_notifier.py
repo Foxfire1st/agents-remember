@@ -13,7 +13,6 @@ import unittest
 from datetime import (
     UTC,
     datetime,
-    timedelta,
 )
 from pathlib import Path
 from typing import cast
@@ -21,12 +20,6 @@ from typing import cast
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
-from agents_remember.controlplane.expectation_rows import (
-    Expectation,
-    ExpectationRowStore,
-    ExpectationSubject,
-    write_expectation_row,
-)
 from agents_remember.controlplane.operator_inbox_records import (
     InboxAddress,
     InboxMessage,
@@ -36,9 +29,7 @@ from agents_remember.controlplane.operator_inbox_records import (
 )
 from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
 from agents_remember.serving.agent_notifier import (
-    evaluate_expectation_findings,
     evaluate_inbox_findings,
-    evaluate_ladder_terminal_findings,
     evaluate_pane_findings,
 )
 from agents_remember.serving.terminal_catalog import (
@@ -136,73 +127,6 @@ class PanePredicateTests(unittest.TestCase):
             self.assertEqual(findings, [])
 
 
-class ExpectationPredicateTests(unittest.TestCase):
-    def test_overdue_verdict_by_row_fires(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            store = ExpectationRowStore(Path(tmp))
-            write_expectation_row(
-                store,
-                Expectation(
-                    kind="verdict-by", source_id="s1", subject=ExpectationSubject(agent_id="s1")
-                ),
-                row_id="r1",
-                now=NOW - timedelta(minutes=10),
-                sla_seconds=60.0,
-            )
-            findings = evaluate_expectation_findings(store, now=NOW)
-            self.assertEqual(len(findings), 1)
-            self.assertEqual(findings[0].source_id, "r1")
-
-    def test_not_yet_due_row_is_silent(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            store = ExpectationRowStore(Path(tmp))
-            write_expectation_row(
-                store,
-                Expectation(kind="verdict-by", source_id="s1"),
-                row_id="r1",
-                now=NOW,
-                sla_seconds=3600.0,
-            )
-            self.assertEqual(evaluate_expectation_findings(store, now=NOW), [])
-
-
-class RetiredDispatchExpectationTests(unittest.TestCase):
-    """Briefed-by / turn-report-by no longer drive expectation findings on this path."""
-
-    def _store(self) -> ExpectationRowStore:
-        return ExpectationRowStore(Path(tempfile.mkdtemp()))
-
-    def test_overdue_turn_report_by_row_is_silent(self) -> None:
-        store = self._store()
-        write_expectation_row(
-            store,
-            Expectation(
-                kind="turn-report-by",
-                source_id="s1",
-                subject=ExpectationSubject(agent_id="s1", leaf_key="repo-a/260707_master/leaf-9"),
-            ),
-            row_id="r1",
-            now=NOW - timedelta(hours=2),
-            sla_seconds=60.0,
-        )
-        self.assertEqual(evaluate_expectation_findings(store, now=NOW), [])
-
-    def test_overdue_briefed_by_row_is_silent(self) -> None:
-        store = self._store()
-        write_expectation_row(
-            store,
-            Expectation(
-                kind="briefed-by",
-                source_id="s1",
-                subject=ExpectationSubject(agent_id="s1", leaf_key="repo-a/260707_master/leaf-9"),
-            ),
-            row_id="r1",
-            now=NOW - timedelta(minutes=10),
-            sla_seconds=60.0,
-        )
-        self.assertEqual(evaluate_expectation_findings(store, now=NOW), [])
-
-
 class InboxPredicateTests(unittest.TestCase):
     def test_pending_row_with_no_next_attempt_is_immediately_redeliverable(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -217,24 +141,6 @@ class InboxPredicateTests(unittest.TestCase):
             store.append(entry)
             findings = evaluate_inbox_findings(store, now=NOW)
             self.assertEqual(len(findings), 1)
-            self.assertEqual(findings[0].source_id, "e1")
-
-    def test_terminal_ladder_row_for_dead_seat_fires_ladder_terminal_finding(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            store = OperatorInboxStore(root / "observer")
-            catalog = TerminalCatalog(root / "catalog.json")
-            entry = create_operator_inbox_entry(
-                InboxMessage(ask="ask", response="resp"),
-                entry_id="e1",
-                now=NOW.isoformat(),
-                routing=InboxRouting(address=InboxAddress(lifecycle_id=None, agent_id="dead-seat")),
-                poster=InboxPoster(created_by="system", created_via="cli"),
-            ).model_copy(update={"rung": 3})
-            store.append(entry)
-            findings = evaluate_ladder_terminal_findings(store, catalog)
-            self.assertEqual(len(findings), 1)
-            self.assertEqual(findings[0].kind, "inbox-ladder-terminal")
             self.assertEqual(findings[0].source_id, "e1")
 
 

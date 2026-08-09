@@ -20,8 +20,9 @@ OperatorInboxState = Literal[
     "expired",
     # Legacy states retained for parse compatibility with pre-N16 rows. ``consumed`` is no
     # longer written (operator_inbox_consume is an attribution marker, not a state
-    # transition) and ``ladder-resolved`` predates the formal terminal vocabulary; both are
-    # still treated as terminal by the fold and never re-enter the retry path.
+    # transition) and ``ladder-resolved`` predates the formal terminal vocabulary (the timed
+    # escalation ladder is retired); both are still treated as terminal by the fold and never
+    # re-enter the retry path.
     "consumed",
     "ladder-resolved",
 ]
@@ -103,8 +104,8 @@ class InboxRouting:
     """Where an inbox row goes and who owns it.
 
     ``address`` is the mailbox this snapshot is delivered to right now; ``owner`` is the
-    routed owner recorded alongside it. A readdressing ladder rung moves the address onto the
-    next owner and rewrites both together, which is why they are one routing decision.
+    routed owner recorded alongside it. Sweep-time rebinding moves the address onto the current
+    qualified owner and rewrites both together, which is why they are one routing decision.
     """
 
     address: InboxAddress
@@ -115,7 +116,7 @@ class InboxRouting:
 class InboxSubject:
     """What a row is about, as opposed to who it goes to: the leaf and the seat under
     discussion and the agent being reported on. The agent-notifier coalesces re-fires and the
-    ladder readdresses on exactly this triple."""
+    rebind machinery resolves the current owner on exactly this triple."""
 
     leaf_key: str | None = None
     seat_role: str | None = None
@@ -232,17 +233,14 @@ class OperatorInboxEntry(OperatorInboxCompatibleRecord):
     terminalAt: str | None = None
     terminalReason: str | None = None
     supersededBy: str | None = None
-    # Set only when the ladder (HFX2-L4) escalates an unacked row past redelivery; this leaf only
-    # reserves the field so the row stays escalatable -- it never sets it itself.
+    # Legacy field from the retired timed escalation ladder; retained for parse compatibility
+    # only -- no transition writes it anymore.
     escalatedAt: str | None = None
-    # Independent safety-floor stamp written only by advance_rung. General row ``ts`` changes on
-    # delivery/renewal and therefore cannot prove when the last rung transition occurred.
+    # Legacy field from the retired timed escalation ladder; retained for parse compatibility
+    # only -- no transition writes it anymore.
     rungTransitionAt: str | None = None
-    # P-15 tier 3 (260707-HFX2-L4): the ladder's own rung marker. 0 = not yet escalated;
-    # 1 = renudged to the original addressee; 2 = skip-level re-addressed to the owner's owner;
-    # 3 = surfaced to the developer attention queue. ``escalatedAt`` is re-stamped on every rung
-    # transition (the anchor the next SLA check reads from), so it always names "since when has
-    # this row sat at its CURRENT rung", not merely "was this row ever escalated".
+    # Legacy field from the retired timed escalation ladder; retained for parse compatibility
+    # only (0 = never escalated; no transition advances it anymore).
     rung: int = 0
     # R4 hierarchical routing: the owner address derived from catalog spawn provenance
     # (spawned_by_session chain) at post time, so redelivery/escalation never has to
@@ -263,7 +261,7 @@ def fold_operator_inbox_entries(
     Delivery can finish from a stale agent-notifier snapshot after a concurrent consume. Such a
     pending snapshot is physically later in the append-only log, but it cannot reverse an
     already-recorded terminal state. Terminal snapshots otherwise remain last-wins so repeated
-    consumes and ladder resolution keep their existing idempotent behavior.
+    attribution marks keep their existing idempotent behavior.
     """
     current: dict[str, OperatorInboxEntry] = {}
     for entry in entries:

@@ -9,12 +9,7 @@ from typing import cast
 from unittest import mock
 
 from agents_remember.controlplane.agent_notifier_signals import AgentNotifierSignalCooldownStore
-from agents_remember.controlplane.expectation_rows import (
-    Expectation,
-    ExpectationRowStore,
-    ExpectationSubject,
-    write_expectation_row,
-)
+from agents_remember.controlplane.expectation_rows import ExpectationRowStore
 from agents_remember.controlplane.operator_inbox_records import (
     InboxAddress,
     InboxMessage,
@@ -24,7 +19,6 @@ from agents_remember.controlplane.operator_inbox_records import (
     create_operator_inbox_entry,
 )
 from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
-from agents_remember.controlplane.orchestration_nudges import OrchestrationNudgeStore
 from agents_remember.observer.store import EventStore
 from agents_remember.serving import _agent_notifier_actions as agent_notifier_actions_module
 from agents_remember.serving.agent_notifier import (
@@ -149,7 +143,6 @@ class SweepIntegrationTests(unittest.TestCase):
         self.catalog = TerminalCatalog(root / "catalog.json")
         self.inbox_store = OperatorInboxStore(observer_root)
         self.expectation_store = ExpectationRowStore(observer_root)
-        self.nudge_store = OrchestrationNudgeStore(observer_root)
         self.signal_cooldown_store = AgentNotifierSignalCooldownStore(observer_root)
         self.event_store = EventStore(observer_root)
         self.heartbeat_store = AgentNotifierHeartbeatStore(observer_root)
@@ -161,7 +154,6 @@ class SweepIntegrationTests(unittest.TestCase):
             paster=_fake_paster(),
             inbox_store=self.inbox_store,
             expectation_store=self.expectation_store,
-            nudge_store=self.nudge_store,
             signal_cooldown_store=self.signal_cooldown_store,
             event_store=self.event_store,
             heartbeat_store=self.heartbeat_store,
@@ -172,7 +164,7 @@ class SweepIntegrationTests(unittest.TestCase):
         return AgentNotifierContext(**base)  # type: ignore[arg-type]
 
     def test_seeded_drift_produces_expected_actions_and_ticks_heartbeat(self) -> None:
-        # A worker seat spawned by a manager seat -- the routing edge signal-emit/auto-nudge walk.
+        # A worker seat spawned by a manager seat -- the routing edge signal-emit walk.
         self.catalog.upsert(replace(_entry("manager-1"), spawn_role="manager"))
         worker = replace(
             _entry("worker-1", leaf_key="repo-a/260707_master/leaf-9"),
@@ -203,33 +195,15 @@ class SweepIntegrationTests(unittest.TestCase):
         )
         self.inbox_store.append(inbox_entry)
 
-        # R2b: an overdue verdict-by row for the worker (ack-by retired with the N16 consume
-        # demotion).
-        write_expectation_row(
-            self.expectation_store,
-            Expectation(
-                kind="verdict-by",
-                source_id="worker-1",
-                subject=ExpectationSubject(
-                    agent_id="worker-1", leaf_key="repo-a/260707_master/leaf-9"
-                ),
-            ),
-            row_id="exp-1",
-            now=NOW - timedelta(minutes=10),
-            sla_seconds=60.0,
-        )
-
         ctx = self._ctx()
         result = run_agent_notifier_sweep(ctx, now=NOW)
 
         finding_kinds = sorted(f.kind for f in result.findings)
         self.assertIn("inbox-redeliverable", finding_kinds)
-        self.assertIn("expectation-overdue", finding_kinds)
         self.assertIn("seat-liveness", finding_kinds)
 
         action_kinds = {a.action for a in result.actions}
         self.assertIn("redeliver", action_kinds)
-        self.assertIn("auto-nudge", action_kinds)
         self.assertIn("signal-emit", action_kinds)
 
         # The signal-emit action routed to the stale seat's manager. This legacy fixture has no
@@ -240,10 +214,6 @@ class SweepIntegrationTests(unittest.TestCase):
         # The pre-existing row follows the same no-fallback contract.
         redeliver_actions = [a for a in result.actions if a.action == "redeliver"]
         self.assertEqual(redeliver_actions[0].outcome, "unconfirmed")
-
-        # The overdue expectation row is marked missed -- the sweep is its reserved caller.
-        current = self.expectation_store.current()["exp-1"]
-        self.assertEqual(current.state, "missed")
 
         # R5: the heartbeat ticked exactly once for this sweep.
         heartbeat = self.heartbeat_store.read()
@@ -258,14 +228,13 @@ class SweepIntegrationTests(unittest.TestCase):
             kinds
             & {
                 "orchestration.agent-notifier.redeliver",
-                "orchestration.nudge",
                 "orchestration.agent-notifier.signal",
             }
         )
 
     def test_finding_with_no_routable_owner_skips_its_action(self) -> None:
-        # A seat with no spawn provenance -- derive_signal_owner has nothing to route to, so both
-        # the nudge and signal-emit actions must skip rather than raise or fabricate an address.
+        # A seat with no spawn provenance -- derive_signal_owner has nothing to route to, so the
+        # signal-emit action must skip rather than raise or fabricate an address.
         self.catalog.upsert(
             replace(
                 _entry("orphan-1").with_turn_state(
@@ -273,21 +242,9 @@ class SweepIntegrationTests(unittest.TestCase):
                 )
             )
         )
-        write_expectation_row(
-            self.expectation_store,
-            Expectation(
-                kind="verdict-by",
-                source_id="orphan-1",
-                subject=ExpectationSubject(agent_id="orphan-1"),
-            ),
-            row_id="exp-orphan",
-            now=NOW - timedelta(minutes=10),
-            sla_seconds=60.0,
-        )
         ctx = self._ctx()
         result = run_agent_notifier_sweep(ctx, now=NOW)
         outcomes = {a.action: a.outcome for a in result.actions}
-        self.assertEqual(outcomes.get("auto-nudge"), "skipped")
         self.assertEqual(outcomes.get("signal-emit"), "skipped")
 
     def test_zero_drift_sweep_still_ticks_the_heartbeat(self) -> None:

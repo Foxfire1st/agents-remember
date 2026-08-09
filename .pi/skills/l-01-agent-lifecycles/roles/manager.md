@@ -117,11 +117,12 @@ stops belong to the orchestrator via the system-specialist protocol.
   `(leaf, role)` seat, and the worker edits inside the leaf worktrees the brief names.
 - **Process and ack the worker's signals — passive contract.** A turn-report artifact is expected at
   **every** hand-off; you do not watch for it. The HFX2-L2 agent-notifier sweep evaluates each expected
-  artifact (`evaluate_turn_report_findings`/`missing_artifact()`) on its own mechanical tick and, on
-  inactivity or a missing artifact, injects the nudge and — on continued silence — walks the HFX2-L4
-  escalation ladder (renudge → skip-level → architect custody/architect attention) and respawns
-  per the dead-man policy. Your job is to **be woken with your pending signals and process + ack every item before
-  ending your turn** — never to poll, timer-loop, or hand-roll your own watch over the worker.
+  artifact at every hand-off; you do not watch for it. The HFX2-L2 agent-notifier sweep relays
+  seat-state facts (turn-ended/completed state-signals, compound-idle, non-reaction residue) on its
+  own mechanical tick — it never infers expectations from artifacts, never climbs an escalation
+  ladder, and never respawns a seat. Your job is to **be woken with your pending signals and process
+  + ack every item before ending your turn** — never to poll, timer-loop, or hand-roll your own watch
+  over the worker.
   **Watcher ban (uniform-mechanism ruling 2026-07-07):** no seat-local watcher of any kind — the L2
   agent-notifier sweep is the one mechanism, no per-seat variance. Escalation intake via the inbox.
 - **Review artifact vs `task_doc`** — completion vs requirements/steps · checks green ·

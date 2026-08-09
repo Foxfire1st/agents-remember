@@ -1,15 +1,9 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 from datetime import datetime
 
-from agents_remember.controlplane.escalation_ladder import MAX_RUNG, rung_due
-from agents_remember.controlplane.expectation_rows import ExpectationRow, ExpectationRowStore
 from agents_remember.controlplane.interaction_retention import INBOX_PENDING_TTL_SECONDS
-from agents_remember.controlplane.operator_inbox_records import (
-    OperatorInboxEntry,
-    state_signal_landed,
-)
+from agents_remember.controlplane.operator_inbox_records import OperatorInboxEntry
 from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
 from agents_remember.controlplane.signal_routing import (
     derive_row_owner,
@@ -18,7 +12,6 @@ from agents_remember.controlplane.signal_routing import (
 )
 from agents_remember.serving.agent_notifier_models import AgentNotifierContext, AgentNotifierFinding
 from agents_remember.serving.agent_notifier_models import SweepState as _SweepState
-from agents_remember.serving.dispatch_brief import dispatch_stays_on_exact_session
 from agents_remember.serving.pane_signals import classify_pane_signal
 from agents_remember.serving.state_signals import (
     evaluate_boundary_drain_findings,
@@ -30,17 +23,8 @@ from agents_remember.serving.state_signals import (
 from agents_remember.serving.terminal_catalog import TerminalCatalog, TerminalCatalogEntry
 from agents_remember.serving.terminal_paste import capture_pane as default_capture_pane
 
-DEFAULT_ESCALATION_SLA_SECONDS = 300.0
-DEFAULT_ESCALATION_RUNG_SECONDS = 900.0
 PERSISTENT_FAILURE_ATTEMPTS = 5
-"""Attempt count past which an unacked inbox row is handed to the escalation ladder (R4d),
-through ``operator_inbox_transitions.mark_escalated``. What walks it from there is
-``controlplane.escalation_ladder``, which anchors every rung's dwell on the ``escalatedAt``
-that transition stamps."""
-
-_INACTIVE_EXPECTATION_KINDS = frozenset({"verdict-by"})
-"""Expectation kinds that still drive findings. ``ack-by`` retires with the N16 consume
-demotion: no post writes one anymore, and legacy rows no longer nudge/escalate."""
+"""Attempt count past which a live-but-silent row resolves terminal ``unresolved`` (N3)."""
 
 REBIND_GRACE_SECONDS = 300.0
 """N2 grace: a pending row addressed to a dead seat rebinds to the same-leaf+role replacement
@@ -80,29 +64,6 @@ def evaluate_pane_findings(
     return findings
 
 
-def evaluate_expectation_findings(
-    store: ExpectationRowStore,
-    *,
-    now: datetime,
-    catalog: TerminalCatalog | None = None,
-) -> list[AgentNotifierFinding]:
-    """R2b: expectation-deadline expiry (verdict-by / ack-by; dispatch-time SLA findings on the
-    worker→manager path are retired with the turn-truth relay)."""
-    return [
-        AgentNotifierFinding(
-            kind="expectation-overdue",
-            detail=row.kind,
-            session_id=row.subjectAgentId,
-            leaf_key=row.leafKey,
-            seat_role=row.seatRole,
-            source_id=row.id,
-        )
-        for row in store.overdue(now=now)
-        if row.kind in _INACTIVE_EXPECTATION_KINDS
-        and not _expectation_chain_progressed(catalog, row)
-    ]
-
-
 # 260731-EFA-L7 R10: verbatim L7 split (L7-OQ1 Option A serving scope); unchanged edge branch, out of this leaf's behavior scope (mcp/src/agents_remember/serving/_agent_notifier_evaluation.py:125).
 def evaluate_inbox_findings(  # pragma: no cover
     store: OperatorInboxStore,
@@ -131,16 +92,6 @@ def evaluate_inbox_findings(  # pragma: no cover
         )
         for entry in entries
     ]
-
-
-def _ladder_terminal_and_dead(catalog: TerminalCatalog, entry: OperatorInboxEntry) -> bool:
-    """True only for a pending row whose terminal rung cannot land on a live target seat."""
-    return (
-        entry.state == "pending"
-        and entry.rung >= MAX_RUNG
-        and entry.agentId is not None
-        and is_seat_dead(catalog, entry.agentId)
-    )
 
 
 def _row_target_dead(catalog: TerminalCatalog, entry: OperatorInboxEntry) -> bool:
@@ -247,47 +198,12 @@ def evaluate_pending_expiry_findings(
     return findings
 
 
-def evaluate_ladder_terminal_findings(
-    store: OperatorInboxStore,
-    catalog: TerminalCatalog,
-    *,
-    current: dict[str, OperatorInboxEntry] | None = None,
-) -> list[AgentNotifierFinding]:
-    """R1: ladder-complete rows for dead seats become terminal, distinct from ack."""
-    entries = store.current() if current is None else current
-    return [
-        AgentNotifierFinding(
-            kind="inbox-ladder-terminal",
-            detail="ladder-resolved",
-            session_id=entry.agentId,
-            leaf_key=entry.leafKey,
-            seat_role=entry.seatRole,
-            source_id=entry.id,
-        )
-        for entry in entries.values()
-        if _ladder_terminal_and_dead(catalog, entry)
-    ]
-
-
 # 260731-EFA-L7 R10: verbatim L7 split (L7-OQ1 Option A serving scope); unchanged edge branch, out of this leaf's behavior scope (mcp/src/agents_remember/serving/_agent_notifier_evaluation.py:186).
 def _age_seconds(iso_text: str, now: datetime) -> float | None:  # pragma: no cover
     try:
         return (now - datetime.fromisoformat(iso_text)).total_seconds()
     except ValueError:
         return None
-
-
-def _expectation_chain_progressed(catalog: TerminalCatalog | None, row: ExpectationRow) -> bool:
-    return bool(
-        catalog is not None
-        and row.leafKey is not None
-        and leaf_chain_has_progress(
-            catalog,
-            leaf_key=row.leafKey,
-            subject_agent_id=row.subjectAgentId,
-            since=row.createdAt,
-        )
-    )
 
 
 def _inactivity_signal_chain_progressed(
@@ -384,66 +300,6 @@ def evaluate_seat_liveness_findings(
     return findings
 
 
-def _delivery_failure_still_retrying(entry: OperatorInboxEntry) -> bool:
-    """Delivery-failure rows exhaust redelivery before the generic unacked ladder takes over."""
-    if dispatch_stays_on_exact_session(entry):
-        return True
-    return (
-        entry.escalatedAt is None
-        and entry.deliveryState in ("no-hosted-session", "unconfirmed")
-        and entry.attemptCount < PERSISTENT_FAILURE_ATTEMPTS
-    )
-
-
-@dataclass(frozen=True)
-class EscalationSchedule:
-    """When an unacked row is due for its next ladder rung.
-
-    The SLA (how long a kind of message may sit unacked) and the rung dwell (how long each rung of
-    the ladder waits before the next) are one timetable: raising the SLA without the dwell just
-    moves where the same storm starts. ``rung_due`` needs both for every row.
-    """
-
-    sla_seconds: dict[str, float] = field(default_factory=dict)
-    rung_seconds: dict[int, float] = field(default_factory=dict)
-
-
-def evaluate_escalation_findings(
-    store: OperatorInboxStore,
-    *,
-    now: datetime,
-    schedule: EscalationSchedule,
-    catalog: TerminalCatalog | None = None,
-    current: dict[str, OperatorInboxEntry] | None = None,
-) -> list[AgentNotifierFinding]:
-    """R2: every pending, unacked row due for its NEXT ladder rung (escalation_ladder.rung_due)."""
-    findings: list[AgentNotifierFinding] = []
-    entries = store.current() if current is None else current
-    for entry in entries.values():
-        if state_signal_landed(entry):
-            continue
-        if catalog is not None and state_signal_held_on_boundary(catalog, entry):
-            continue
-        if catalog is not None and _inactivity_signal_chain_progressed(catalog, entry):
-            continue
-        if _delivery_failure_still_retrying(entry):
-            continue
-        sla = schedule.sla_seconds.get(entry.messageKind, DEFAULT_ESCALATION_SLA_SECONDS)
-        dwell = schedule.rung_seconds.get(entry.rung, DEFAULT_ESCALATION_RUNG_SECONDS)
-        if rung_due(entry, now=now, sla_seconds=sla, rung_seconds=dwell):
-            findings.append(
-                AgentNotifierFinding(
-                    kind="escalation-due",
-                    detail=entry.messageKind,
-                    session_id=entry.agentId,
-                    leaf_key=entry.leafKey,
-                    seat_role=entry.seatRole,
-                    source_id=entry.id,
-                )
-            )
-    return findings
-
-
 def evaluate_dead_upstream_findings(catalog: TerminalCatalog) -> list[AgentNotifierFinding]:
     """R4 (P-6 made mechanical): every live spawned worker/manager seat whose OWN direct owner is
     dead, per catalog spawn provenance. Doctrine: the seat never absorbs its dead owner's role --
@@ -474,10 +330,15 @@ def evaluate_dead_upstream_findings(catalog: TerminalCatalog) -> list[AgentNotif
 def evaluate_predicates(  # pragma: no cover
     ctx: AgentNotifierContext, *, now: datetime, sweep: _SweepState | None = None
 ) -> list[AgentNotifierFinding]:
-    """R2: run every predicate over its store, directly (R3) -- the sweep's full finding set."""
+    """Run every fact-relay predicate over its store -- the sweep's full finding set.
+
+    The relay interprets nothing: seat-liveness and dead-upstream findings are
+    ``escalationBudget``-shed per sweep (load-shed, level-triggered re-fire), the twin of
+    ``redeliverBudget``. Expectation rows are never evaluated here -- they are an
+    owner-visible deadline surface only.
+    """
     findings: list[AgentNotifierFinding] = []
     inbox_current = sweep.inbox_current if sweep is not None else None
-    findings += evaluate_expectation_findings(ctx.expectation_store, now=now, catalog=ctx.catalog)
     if sweep is None:
         findings += evaluate_inbox_findings(
             ctx.inbox_store,
@@ -490,8 +351,7 @@ def evaluate_predicates(  # pragma: no cover
         budgeted = [
             entry
             for entry in sweep.redeliverable_entries
-            if not _ladder_terminal_and_dead(ctx.catalog, entry)
-            and not _inactivity_signal_chain_progressed(ctx.catalog, entry)
+            if not _inactivity_signal_chain_progressed(ctx.catalog, entry)
             and not state_signal_held_on_boundary(ctx.catalog, entry)
             and not _row_target_dead(ctx.catalog, entry)
         ][: sweep.redeliver_budget]
@@ -505,10 +365,10 @@ def evaluate_predicates(  # pragma: no cover
             )
             for entry in budgeted
         ]
-    findings += evaluate_seat_liveness_findings(
+    owner_signal_findings = evaluate_seat_liveness_findings(
         ctx.catalog, now=now, stale_seconds=ctx.stale_seat_seconds
-    )
-    findings += evaluate_dead_upstream_findings(ctx.catalog)
+    ) + evaluate_dead_upstream_findings(ctx.catalog)
+    findings += owner_signal_findings[: max(1, ctx.escalation_budget)]
     entries = inbox_current if inbox_current is not None else ctx.inbox_store.current()
     findings += evaluate_rebind_findings(ctx.catalog, current=entries, now=now)
     findings += evaluate_pending_expiry_findings(entries, now=now)

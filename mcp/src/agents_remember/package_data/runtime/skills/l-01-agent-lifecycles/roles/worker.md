@@ -143,7 +143,7 @@ leaf well, ask when the leaf itself is in question" default.
   you) watching/polling by hand. Your replies are inbox rows or the turn report — never an untracked
   side channel.
 - **Idle is safe** — once your turn report is written, ending your turn is correct; silence is
-  supervised (HFX2-L2 sweep + HFX2-L4 escalation ladder), not a gap you must cover by lingering or
+  supervised (HFX2-L2 sweep + the state-signal relay), not a gap you must cover by lingering or
   self-nudging. **Watcher ban (uniform-mechanism ruling 2026-07-07):** never hand-roll your own
   watcher — one mechanism, no per-seat variance.
 - **Escalation** — one rung up, always: **worker → owning seat (manager/orchestrator/architect in

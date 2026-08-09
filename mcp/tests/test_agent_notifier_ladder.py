@@ -11,7 +11,6 @@ from unittest import mock
 from _scaling import assert_bounded_count
 from agents_remember.controlplane import operator_inbox_transitions as inbox_transitions
 from agents_remember.controlplane.agent_notifier_signals import AgentNotifierSignalCooldownStore
-from agents_remember.controlplane.escalation_ladder import MAX_RUNG
 from agents_remember.controlplane.expectation_rows import (
     Expectation,
     ExpectationRowStore,
@@ -28,17 +27,14 @@ from agents_remember.controlplane.operator_inbox_records import (
     create_operator_inbox_entry,
 )
 from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
-from agents_remember.controlplane.orchestration_nudges import OrchestrationNudgeStore
 from agents_remember.observer.store import EventStore
 from agents_remember.serving import agent_notifier as agent_notifier_module
 from agents_remember.serving._agent_notifier_evaluation import PERSISTENT_FAILURE_ATTEMPTS
 from agents_remember.serving.agent_notifier import (
     AgentNotifierContext,
     AgentNotifierFinding,
-    EscalationSchedule,
     _inactivity_signal_chain_progressed,
     evaluate_dead_upstream_findings,
-    evaluate_escalation_findings,
     run_agent_notifier_sweep,
 )
 from agents_remember.serving.agent_notifier_heartbeat import AgentNotifierHeartbeatStore
@@ -50,288 +46,39 @@ from agents_remember.serving.terminal_catalog import TerminalCatalog
 from test_agent_notifier import NOW, _entry, _fake_paster, _FakeHost
 
 
-class EscalationPredicateTests(unittest.TestCase):
-    def test_delivery_failure_waits_for_retry_exhaustion_before_escalating(self) -> None:
+class DeadUpstreamPredicateTests(unittest.TestCase):
+    def test_worker_with_dead_manager_fires(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            store = OperatorInboxStore(Path(tmp))
-            for entry_id, attempt_count in (
-                ("retrying", agent_notifier_module.PERSISTENT_FAILURE_ATTEMPTS - 1),
-                ("exhausted", agent_notifier_module.PERSISTENT_FAILURE_ATTEMPTS),
-            ):
-                store.append(
-                    create_operator_inbox_entry(
-                        InboxMessage(ask="ask", response="resp", message_kind="escalation"),
-                        entry_id=entry_id,
-                        now=(NOW - timedelta(minutes=10)).isoformat(),
-                        routing=InboxRouting(
-                            address=InboxAddress(lifecycle_id=None, agent_id="worker-1")
-                        ),
-                        poster=InboxPoster(created_by="system", created_via="cli"),
-                    ).model_copy(
-                        update={
-                            "deliveryState": "no-hosted-session",
-                            "attemptCount": attempt_count,
-                        }
-                    )
-                )
-
-            findings = evaluate_escalation_findings(
-                store,
-                now=NOW,
-                schedule=EscalationSchedule(sla_seconds={"escalation": 60.0}, rung_seconds={}),
+            catalog = TerminalCatalog(Path(tmp) / "catalog.json")
+            catalog.upsert(replace(_entry("manager-1"), status="terminated", spawn_role="manager"))
+            catalog.upsert(
+                replace(_entry("worker-1"), spawn_role="worker", spawned_by_session="manager-1")
             )
-
-            self.assertEqual([finding.source_id for finding in findings], ["exhausted"])
-
-    def test_dispatch_failure_never_enters_generic_escalation_ladder(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            store = OperatorInboxStore(Path(tmp))
-            store.append(
-                create_operator_inbox_entry(
-                    InboxMessage(ask="brief", response="work", message_kind="dispatch-brief"),
-                    entry_id="dispatch-1",
-                    now=(NOW - timedelta(minutes=10)).isoformat(),
-                    routing=InboxRouting(
-                        address=InboxAddress(lifecycle_id=None, agent_id="worker-1")
-                    ),
-                    poster=InboxPoster(created_by="manager-1", created_via="cli"),
-                ).model_copy(
-                    update={
-                        "deliveryState": "unconfirmed",
-                        "attemptCount": agent_notifier_module.PERSISTENT_FAILURE_ATTEMPTS + 10,
-                    }
-                )
-            )
-
-            findings = evaluate_escalation_findings(
-                store,
-                now=NOW,
-                schedule=EscalationSchedule(sla_seconds={"dispatch-brief": 60.0}, rung_seconds={}),
-            )
-
-            self.assertEqual(findings, [])
-
-    def test_pending_row_past_sla_fires(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            store = OperatorInboxStore(Path(tmp))
-            entry = create_operator_inbox_entry(
-                InboxMessage(ask="ask", response="resp", message_kind="escalation"),
-                entry_id="e1",
-                now=(NOW - timedelta(minutes=10)).isoformat(),
-                routing=InboxRouting(address=InboxAddress(lifecycle_id=None, agent_id="worker-1")),
-                poster=InboxPoster(created_by="system", created_via="cli"),
-            )
-            store.append(entry)
-            findings = evaluate_escalation_findings(
-                store,
-                now=NOW,
-                schedule=EscalationSchedule(sla_seconds={"escalation": 60.0}, rung_seconds={}),
-            )
+            findings = evaluate_dead_upstream_findings(catalog)
             self.assertEqual(len(findings), 1)
-            self.assertEqual(findings[0].kind, "escalation-due")
-            self.assertEqual(findings[0].source_id, "e1")
+            self.assertEqual(findings[0].kind, "dead-upstream")
+            self.assertEqual(findings[0].session_id, "worker-1")
 
-    def test_not_yet_due_row_is_silent(self) -> None:
+    def test_live_owner_does_not_fire(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            store = OperatorInboxStore(Path(tmp))
-            entry = create_operator_inbox_entry(
-                InboxMessage(ask="ask", response="resp", message_kind="escalation"),
-                entry_id="e1",
-                now=NOW.isoformat(),
-                routing=InboxRouting(address=InboxAddress(lifecycle_id=None, agent_id="worker-1")),
-                poster=InboxPoster(created_by="system", created_via="cli"),
+            catalog = TerminalCatalog(Path(tmp) / "catalog.json")
+            catalog.upsert(replace(_entry("manager-1"), spawn_role="manager"))
+            catalog.upsert(
+                replace(_entry("worker-1"), spawn_role="worker", spawned_by_session="manager-1")
             )
-            store.append(entry)
-            findings = evaluate_escalation_findings(
-                store,
-                now=NOW,
-                schedule=EscalationSchedule(sla_seconds={"escalation": 3600.0}, rung_seconds={}),
-            )
-            self.assertEqual(findings, [])
+            self.assertEqual(evaluate_dead_upstream_findings(catalog), [])
 
-    def test_landed_rows_are_never_escalation_eligible(self) -> None:
+    def test_no_provenance_at_all_does_not_fire(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            store = OperatorInboxStore(Path(tmp))
-            store.append(
-                create_operator_inbox_entry(
-                    InboxMessage(ask="ask", response="resp", message_kind="escalation"),
-                    entry_id="landed-1",
-                    now=(NOW - timedelta(minutes=10)).isoformat(),
-                    routing=InboxRouting(
-                        address=InboxAddress(lifecycle_id=None, agent_id="worker-1")
-                    ),
-                    poster=InboxPoster(created_by="system", created_via="cli"),
-                ).model_copy(update={"state": "landed"})
-            )
-            findings = evaluate_escalation_findings(
-                store,
-                now=NOW,
-                schedule=EscalationSchedule(sla_seconds={"escalation": 1.0}, rung_seconds={}),
-            )
-            self.assertEqual(findings, [])
+            catalog = TerminalCatalog(Path(tmp) / "catalog.json")
+            catalog.upsert(replace(_entry("worker-1"), spawn_role="worker"))
+            self.assertEqual(evaluate_dead_upstream_findings(catalog), [])
 
-    def test_boundary_held_state_signal_is_not_escalation_eligible(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            store = OperatorInboxStore(root / "observer")
-            catalog = TerminalCatalog(root / "catalog.json")
-            catalog.upsert(
-                replace(
-                    _entry("manager-1"),
-                    spawn_role="manager",
-                    turn_state="working",
-                    turn_state_changed_at=NOW.isoformat(),
-                )
-            )
-            store.append(
-                create_operator_inbox_entry(
-                    InboxMessage(ask="state-signal", response="resp", message_kind="state-signal"),
-                    entry_id="signal-1",
-                    now=(NOW - timedelta(minutes=10)).isoformat(),
-                    routing=InboxRouting(
-                        address=InboxAddress(
-                            lifecycle_id=None, agent_id="manager-1", recipient_role="manager"
-                        )
-                    ),
-                    poster=InboxPoster(created_by="agent-notifier", created_via="cli"),
-                )
-            )
-            findings = evaluate_escalation_findings(
-                store,
-                now=NOW,
-                catalog=catalog,
-                schedule=EscalationSchedule(sla_seconds={"state-signal": 1.0}, rung_seconds={}),
-            )
-            self.assertEqual(findings, [])
 
-    def test_inactivity_signal_with_chain_progress_is_not_escalation_eligible(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            store = OperatorInboxStore(root / "observer")
-            catalog = TerminalCatalog(root / "catalog.json")
-            leaf_key = "repo-a/260707_master/leaf-9"
-            catalog.upsert(
-                replace(
-                    _entry("manager-1", leaf_key="repo-a/260707_master/manager-anchor"),
-                    spawn_role="manager",
-                    turn_state="working",
-                    turn_state_changed_at=(NOW - timedelta(minutes=5)).isoformat(),
-                )
-            )
-            catalog.upsert(
-                replace(
-                    _entry("worker-1", leaf_key=leaf_key),
-                    spawn_role="worker",
-                    spawned_by_session="manager-1",
-                )
-            )
-            store.append(
-                create_operator_inbox_entry(
-                    InboxMessage(
-                        ask="Agent notifier observed seat-liveness: stale",
-                        response="resp",
-                        message_kind="escalation",
-                    ),
-                    entry_id="inactivity-1",
-                    now=(NOW - timedelta(minutes=10)).isoformat(),
-                    routing=InboxRouting(
-                        address=InboxAddress(
-                            lifecycle_id=None, agent_id="manager-1", recipient_role="manager"
-                        )
-                    ),
-                    poster=InboxPoster(created_by="agent-notifier", created_via="cli"),
-                ).model_copy(
-                    update={
-                        "leafKey": leaf_key,
-                        "subjectAgentId": "worker-1",
-                        "createdAt": (NOW - timedelta(minutes=10)).isoformat(),
-                    }
-                )
-            )
-            worker = catalog.get("worker-1")
-            assert worker is not None
-            catalog.upsert(
-                replace(
-                    worker,
-                    turn_state="working",
-                    turn_state_changed_at=(NOW - timedelta(minutes=5)).isoformat(),
-                )
-            )
-            findings = evaluate_escalation_findings(
-                store,
-                now=NOW,
-                catalog=catalog,
-                schedule=EscalationSchedule(sla_seconds={"escalation": 1.0}, rung_seconds={}),
-            )
-            self.assertEqual(findings, [])
-
-    def test_leaf_chain_progress_suppresses_inactivity_signal_escalation(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            store = OperatorInboxStore(root / "observer")
-            catalog = TerminalCatalog(root / "catalog.json")
-            leaf_key = "repo-a/260707_master/leaf-9"
-            catalog.upsert(
-                replace(
-                    _entry("manager-current", leaf_key="repo-a/260707_master/manager-anchor"),
-                    spawn_role="manager",
-                )
-            )
-            catalog.upsert(
-                replace(
-                    _entry("worker-1", leaf_key=leaf_key),
-                    spawn_role="worker",
-                    spawned_by_session="manager-current",
-                )
-            )
-            catalog.upsert(
-                replace(
-                    _entry("reviewer-1", status="landed"),
-                    spawn_role="reviewer",
-                    spawned_by_session="manager-current",
-                    replacement_for_leaf=leaf_key,
-                    landed_at=(NOW - timedelta(minutes=1)).isoformat(),
-                )
-            )
-            store.append(
-                create_operator_inbox_entry(
-                    InboxMessage(
-                        ask="Agent notifier observed seat-liveness: turn-state-stale",
-                        response="worker-1 inactive",
-                        message_kind="escalation",
-                        subject=InboxSubject(leaf_key=leaf_key, agent_id="worker-1"),
-                    ),
-                    entry_id="e1",
-                    now=(NOW - timedelta(minutes=10)).isoformat(),
-                    routing=InboxRouting(
-                        address=InboxAddress(
-                            lifecycle_id=None, agent_id="manager-current", recipient_role="manager"
-                        )
-                    ),
-                    poster=InboxPoster(created_by="agent-notifier", created_via="cli"),
-                ).model_copy(
-                    update={
-                        "rung": 1,
-                        "escalatedAt": (NOW - timedelta(minutes=10)).isoformat(),
-                    }
-                )
-            )
-
-            self.assertEqual(
-                evaluate_escalation_findings(
-                    store,
-                    now=NOW,
-                    catalog=catalog,
-                    schedule=EscalationSchedule(
-                        sla_seconds={"escalation": 60.0}, rung_seconds={1: 60.0}
-                    ),
-                ),
-                [],
-            )
+class InactivityChainProgressTests(unittest.TestCase):
+    """Chain-progress suppression on relay-authored inactivity rows (rename-window F1)."""
 
     def test_inactivity_chain_progress_suppresses_legacy_and_current_ask_formats(self) -> None:
-        # F1 regression (260713-TES-L1): chain-progress suppression must match BOTH the legacy
-        # createdBy/ask-prefix row and the current-format row during the rename window.
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             catalog = TerminalCatalog(root / "catalog.json")
@@ -393,35 +140,6 @@ class EscalationPredicateTests(unittest.TestCase):
             self.assertTrue(_inactivity_signal_chain_progressed(catalog, current))
 
 
-class DeadUpstreamPredicateTests(unittest.TestCase):
-    def test_worker_with_dead_manager_fires(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            catalog = TerminalCatalog(Path(tmp) / "catalog.json")
-            catalog.upsert(replace(_entry("manager-1"), status="terminated", spawn_role="manager"))
-            catalog.upsert(
-                replace(_entry("worker-1"), spawn_role="worker", spawned_by_session="manager-1")
-            )
-            findings = evaluate_dead_upstream_findings(catalog)
-            self.assertEqual(len(findings), 1)
-            self.assertEqual(findings[0].kind, "dead-upstream")
-            self.assertEqual(findings[0].session_id, "worker-1")
-
-    def test_live_owner_does_not_fire(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            catalog = TerminalCatalog(Path(tmp) / "catalog.json")
-            catalog.upsert(replace(_entry("manager-1"), spawn_role="manager"))
-            catalog.upsert(
-                replace(_entry("worker-1"), spawn_role="worker", spawned_by_session="manager-1")
-            )
-            self.assertEqual(evaluate_dead_upstream_findings(catalog), [])
-
-    def test_no_provenance_at_all_does_not_fire(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            catalog = TerminalCatalog(Path(tmp) / "catalog.json")
-            catalog.upsert(replace(_entry("worker-1"), spawn_role="worker"))
-            self.assertEqual(evaluate_dead_upstream_findings(catalog), [])
-
-
 class LadderWalkIntegrationTests(unittest.TestCase):
     """R6 fixtures: silent seat, dead intermediate, dead manager with live workers."""
 
@@ -434,7 +152,6 @@ class LadderWalkIntegrationTests(unittest.TestCase):
         self.catalog = TerminalCatalog(root / "catalog.json")
         self.inbox_store = OperatorInboxStore(observer_root)
         self.expectation_store = ExpectationRowStore(observer_root)
-        self.nudge_store = OrchestrationNudgeStore(observer_root)
         self.signal_cooldown_store = AgentNotifierSignalCooldownStore(observer_root)
         self.event_store = EventStore(observer_root)
         self.heartbeat_store = AgentNotifierHeartbeatStore(observer_root)
@@ -446,15 +163,11 @@ class LadderWalkIntegrationTests(unittest.TestCase):
             paster=_fake_paster(),
             inbox_store=self.inbox_store,
             expectation_store=self.expectation_store,
-            nudge_store=self.nudge_store,
             signal_cooldown_store=self.signal_cooldown_store,
             event_store=self.event_store,
             heartbeat_store=self.heartbeat_store,
             coordination_root=self.coordination_root,
             stale_seat_seconds=60.0,
-            escalation_sla_seconds={"escalation": 60.0},
-            escalation_rung_seconds={1: 60.0, 2: 60.0},
-            respawn_after_rung=2,
         )
         base.update(overrides)
         return AgentNotifierContext(**base)  # type: ignore[arg-type]
@@ -825,9 +538,10 @@ class LadderWalkIntegrationTests(unittest.TestCase):
     def test_unacked_backlog_reaches_a_fixed_point_with_absent_developer(self) -> None:
         """The 2026-07-09 meltdown regression (quiescence probe the HFX2-L12 audit lacked):
         with NO acks, NO live seats, and hours of sweeps, the inbox must reach a fixed point --
-        exactly the seeded root-cause rows, rungs capped at MAX_RUNG, on-disk log bounded near
-        folded size. The pre-fix ladder diverged here: every rung transition minted a new
-        ladder-eligible pending row, so an absent developer grew 67k lines / 227 MB overnight."""
+        exactly the seeded root-cause rows, each terminally resolved by the rebind-grace expiry,
+        on-disk log bounded near folded size. The pre-fix ladder diverged here: every rung
+        transition minted a new ladder-eligible pending row, so an absent developer grew
+        67k lines / 227 MB overnight."""
         seeded = 9
         for index in range(seeded):
             self.inbox_store.append(
@@ -855,11 +569,16 @@ class LadderWalkIntegrationTests(unittest.TestCase):
             run_agent_notifier_sweep(ctx, now=moment)
             current = self.inbox_store.current()
             self.assertLessEqual(len(current), seeded)
-            self.assertTrue(all(entry.rung <= MAX_RUNG for entry in current.values()))
+            self.assertTrue(
+                all(entry.state in {"pending", "expired"} for entry in current.values())
+            )
 
         final = self.inbox_store.current()
         self.assertEqual(len(final), seeded)
         self.assertEqual(sorted(final), [f"root-{index}" for index in range(seeded)])
+        # Every row resolved terminal through the grace path -- never an escalation rung.
+        self.assertTrue(all(entry.state == "expired" for entry in final.values()))
+        self.assertNotIn("orchestration.escalation.rung", self._events())
         # Per-sweep compaction keeps the on-disk log within one sweep's appends of folded size.
         lines = [
             line
@@ -927,7 +646,6 @@ class Cs6SweepScalingTests(unittest.TestCase):
         self.catalog = TerminalCatalog(root / "catalog.json")
         self.inbox_store = OperatorInboxStore(observer_root)
         self.expectation_store = ExpectationRowStore(observer_root)
-        self.nudge_store = OrchestrationNudgeStore(observer_root)
         self.signal_cooldown_store = AgentNotifierSignalCooldownStore(observer_root)
         self.event_store = EventStore(observer_root)
         self.heartbeat_store = AgentNotifierHeartbeatStore(observer_root)
@@ -939,7 +657,6 @@ class Cs6SweepScalingTests(unittest.TestCase):
             paster=_fake_paster(),
             inbox_store=self.inbox_store,
             expectation_store=self.expectation_store,
-            nudge_store=self.nudge_store,
             signal_cooldown_store=self.signal_cooldown_store,
             event_store=self.event_store,
             heartbeat_store=self.heartbeat_store,
@@ -992,20 +709,30 @@ class Cs6SweepScalingTests(unittest.TestCase):
                 assert heartbeat is not None
                 self.assertEqual(heartbeat.sweepCount, 1)
 
-    def test_expectation_store_reads_do_not_scale_with_overdue_finding_count(self) -> None:
-        """Z4b: K overdue expectations -> K mark_missed calls, but each uses the sweep's one-read
-        snapshot, so total expectation-store reads stay flat instead of growing by K."""
+    def test_owner_signal_emissions_are_load_shed_by_escalation_budget(self) -> None:
+        """The preserved escalationBudget is a per-sweep load-shed cap: F seat-liveness findings
+        with F > budget emit at most budget owner signals this sweep; the rest re-fire next sweep
+        (level-triggered), so nothing is lost and no judgment is added."""
+        for worker_count, budget, expected in ((60, 10, 10), (60, 250, 60)):
+            with self.subTest(workers=worker_count, budget=budget):
+                self.setUp()
+                self._seed_stale_workers(worker_count)
+                ctx = self._ctx(escalation_budget=budget)
+                result = run_agent_notifier_sweep(ctx, now=NOW)
+                signal_emits = [a for a in result.actions if a.action == "signal-emit"]
+                self.assertEqual(len(signal_emits), expected)
+                self.assertEqual(
+                    len([f for f in result.findings if f.kind == "seat-liveness"]),
+                    expected,
+                )
+
+    def test_expectation_store_compacted_once_with_zero_findings_per_sweep(self) -> None:
+        """Z4b replacement: expectation rows are an owner-visible surface, never evaluated --
+        K overdue rows produce ZERO findings and the store is still read exactly once per sweep
+        (the compaction pass), so reads stay flat instead of growing by K."""
         reads_by_k: dict[int, int] = {}
         for overdue_count in (2, 40):
             self.setUp()
-            self.catalog.upsert(replace(_entry("manager-1"), spawn_role="orchestrator"))
-            self.catalog.upsert(
-                replace(
-                    _entry("worker-1", leaf_key="repo/260707_master/leaf-1"),
-                    spawn_role="worker",
-                    spawned_by_session="manager-1",
-                )
-            )
             for index in range(overdue_count):
                 write_expectation_row(
                     self.expectation_store,
@@ -1022,14 +749,14 @@ class Cs6SweepScalingTests(unittest.TestCase):
                 )
             counter = self._wrap_reads(self.expectation_store)
             result = run_agent_notifier_sweep(self._ctx(), now=NOW)
-            overdue_findings = [f for f in result.findings if f.kind == "expectation-overdue"]
-            self.assertEqual(len(overdue_findings), overdue_count)
+            self.assertEqual([f for f in result.findings if f.kind == "expectation-overdue"], [])
+            self.assertFalse(any(a.action == "auto-nudge" for a in result.actions))
             reads_by_k[overdue_count] = counter["count"]
-        # Reads are flat in K (the fix); the pre-fix code did one full fold per overdue finding.
+        # Reads are flat in K: one compaction pass per sweep, never per row.
         self.assertEqual(
             reads_by_k[40],
             reads_by_k[2],
-            f"expectation reads scaled with finding count: {reads_by_k}",
+            f"expectation reads scaled with row count: {reads_by_k}",
         )
         assert_bounded_count(reads_by_k[40], 6, label="expectation reads/sweep")
 

@@ -27,7 +27,6 @@ from agents_remember.controlplane.operator_inbox_records import (
 )
 from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
 from agents_remember.controlplane.operator_inbox_transitions import ExpiryOptions
-from agents_remember.controlplane.orchestration_nudges import OrchestrationNudgeStore
 from agents_remember.controlplane.signal_routing import derive_row_owner
 from agents_remember.kernel.agentic_settings import load_agentic_settings
 from agents_remember.mcp.config import McpRuntimeConfig
@@ -314,7 +313,6 @@ class ActionSkipBranchTests(unittest.TestCase):
             paster=cast("object", None),  # type: ignore[arg-type]
             inbox_store=self.inbox_store,
             expectation_store=ExpectationRowStore(self.observer_root),
-            nudge_store=OrchestrationNudgeStore(self.observer_root),
             signal_cooldown_store=AgentNotifierSignalCooldownStore(self.observer_root),
             event_store=EventStore(self.observer_root),
             heartbeat_store=AgentNotifierHeartbeatStore(self.observer_root),
@@ -757,7 +755,6 @@ class LegacyLandedFoldTests(unittest.TestCase):
                 paster=cast("object", None),  # type: ignore[arg-type]
                 inbox_store=store,
                 expectation_store=ExpectationRowStore(observer),
-                nudge_store=OrchestrationNudgeStore(observer),
                 signal_cooldown_store=AgentNotifierSignalCooldownStore(observer),
                 event_store=EventStore(observer),
                 heartbeat_store=AgentNotifierHeartbeatStore(observer),
@@ -1031,7 +1028,6 @@ class SupersedeDuringInFlightDeliveryTests(unittest.TestCase):
                 paster=cast("object", None),  # type: ignore[arg-type]
                 inbox_store=store,
                 expectation_store=ExpectationRowStore(observer),
-                nudge_store=OrchestrationNudgeStore(observer),
                 signal_cooldown_store=AgentNotifierSignalCooldownStore(observer),
                 event_store=EventStore(observer),
                 heartbeat_store=AgentNotifierHeartbeatStore(observer),
@@ -1165,7 +1161,6 @@ class ReboundDeliveryToReplacementTests(unittest.TestCase):
                 paster=cast("object", None),  # type: ignore[arg-type]
                 inbox_store=store,
                 expectation_store=ExpectationRowStore(observer),
-                nudge_store=OrchestrationNudgeStore(observer),
                 signal_cooldown_store=AgentNotifierSignalCooldownStore(observer),
                 event_store=EventStore(observer),
                 heartbeat_store=AgentNotifierHeartbeatStore(observer),

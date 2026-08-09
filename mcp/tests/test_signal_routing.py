@@ -14,7 +14,6 @@ from agents_remember.controlplane.signal_routing import (
     RoutedOwner,
     derive_leaf_manager_owner,
     derive_signal_owner,
-    derive_skip_level_owner,
     is_seat_dead,
     leaf_chain_has_progress,
 )
@@ -348,97 +347,6 @@ class SignalRoutingTests(unittest.TestCase):
                     ).agent_id,
                     "manager",
                 )
-
-
-class SkipLevelOwnerTests(unittest.TestCase):
-    """R2/R4 (260707-HFX2-L4): the two-hop owner's-owner walk, past dead intermediates."""
-
-    def setUp(self) -> None:
-        tmp = tempfile.TemporaryDirectory()
-        self.addCleanup(tmp.cleanup)
-        self.catalog = TerminalCatalog(Path(tmp.name) / "terminal-sessions.json")
-
-    def _upsert(self, **overrides: object) -> None:
-        base: dict[str, object] = {
-            "id": "entry",
-            "label": "Entry",
-            "kind": "harness",
-            "harness": "claude",
-            "lifecycle_id": "L1",
-            "cwd": Path("/tmp"),
-            "tmux_name": "ar-entry",
-            "command": ("claude",),
-            "created_at": T1,
-            "last_attached_at": T1,
-            "status": "running",
-        }
-        base.update(overrides)
-        self.catalog.upsert(TerminalCatalogEntry(**base))  # type: ignore[arg-type]
-
-    def _chain(
-        self, *, manager_status: str = "running", orchestrator_status: str = "running"
-    ) -> None:
-        self._upsert(id="orchestrator-1", spawn_role="orchestrator", status=orchestrator_status)
-        self._upsert(
-            id="manager-1",
-            spawn_role="manager",
-            spawned_by_session="orchestrator-1",
-            spawned_by_lifecycle="L-orchestrator",
-            status=manager_status,
-        )
-        self._upsert(
-            id="worker-1",
-            spawn_role="worker",
-            spawned_by_session="manager-1",
-            spawned_by_lifecycle="L-manager",
-        )
-
-    def test_live_chain_lands_on_the_owners_owner(self) -> None:
-        self._chain()
-        owner = derive_skip_level_owner(
-            self.catalog, sender_agent_id="worker-1", message_kind="escalation"
-        )
-        self.assertEqual(owner.agent_id, "orchestrator-1")
-        self.assertEqual(owner.role, "orchestrator")
-
-    def test_dead_intermediate_manager_is_skipped_not_addressed(self) -> None:
-        self._chain(manager_status="terminated")
-        owner = derive_skip_level_owner(
-            self.catalog, sender_agent_id="worker-1", message_kind="escalation"
-        )
-        # Still lands on the orchestrator -- the dead manager is never itself the rung-2 target.
-        self.assertEqual(owner.agent_id, "orchestrator-1")
-
-    def test_dead_grandparent_walks_further_but_hits_the_hierarchy_ceiling(self) -> None:
-        # The orchestrator has no owner-role mapping of its own -- dead or alive, the walk cannot
-        # climb past it (the developer is the top rung, never modeled in catalog provenance).
-        self._chain(orchestrator_status="terminated")
-        owner = derive_skip_level_owner(
-            self.catalog, sender_agent_id="worker-1", message_kind="escalation"
-        )
-        self.assertEqual(owner, RoutedOwner())
-
-    def test_unknown_sender_derives_no_skip_level_route(self) -> None:
-        owner = derive_skip_level_owner(
-            self.catalog, sender_agent_id="ghost", message_kind="escalation"
-        )
-        self.assertEqual(owner, RoutedOwner())
-
-    def test_no_second_hop_session_still_resolves_a_role_only_address(self) -> None:
-        # A manager spawned with no recorded spawner session id -- the ROLE the mapping resolves
-        # to (orchestrator) is still known even though there is no live session id for it; the
-        # walk returns that role-only address rather than fabricating or discarding it.
-        self._upsert(id="manager-1", spawn_role="manager", spawned_by_session=None)
-        self._upsert(
-            id="worker-1",
-            spawn_role="worker",
-            spawned_by_session="manager-1",
-            spawned_by_lifecycle="L-manager",
-        )
-        owner = derive_skip_level_owner(
-            self.catalog, sender_agent_id="worker-1", message_kind="escalation"
-        )
-        self.assertEqual(owner, RoutedOwner(role="orchestrator"))
 
 
 class IsSeatDeadTests(unittest.TestCase):

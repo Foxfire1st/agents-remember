@@ -212,7 +212,7 @@ def _build_serving_runtime(
         # The deterministic agent-notifier sweep runs on its own decoupled cadence
         # (default ~10s, settings-controlled), zero tokens, pure code. "The model is never the
         # polling layer": every predicate reads TerminalCatalog/OperatorInboxStore/
-        # ExpectationRowStore/the nudge log DIRECTLY, never the projection.
+        # ExpectationRowStore DIRECTLY, never the projection.
         heartbeat_store=AgentNotifierHeartbeatStore(observer_root(config)),
         interval=cadence.interval,
     )

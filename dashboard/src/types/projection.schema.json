@@ -46,7 +46,7 @@
     },
     "AgentPickupNode": {
       "additionalProperties": false,
-      "description": "A pending dashboard response waiting for an agent to consume it.\n\nR5 (260707-HFX2-L1): every pending row here IS an unacked signal -- consume=ack is the only\nterminal outcome, so this list already surfaces \"pending/unacked\" for the dashboard. The\nattempt/backoff/escalation fields ride along so the panel can show redelivery state without a\nsecond surface; an L2 predicate reads the stores directly and never this projection.",
+      "description": "A pending dashboard response waiting for a turn-boundary landing.\n\nN16: the system acks -- a row lands when a correlated adapter acceptance reaches the\nrecipient at a turn boundary, so this list surfaces \"pending / not yet landed\" for the\ndashboard. ``operator_inbox_consume`` is an optional attribution marker with nothing\nmechanical attached. The attempt/backoff fields ride along so the panel can show\nredelivery state without a second surface; the sweep predicates read the stores directly\nand never this projection.",
       "properties": {
         "ageSeconds": {
           "anyOf": [

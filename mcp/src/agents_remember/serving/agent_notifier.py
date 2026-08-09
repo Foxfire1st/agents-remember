@@ -1,10 +1,11 @@
 """P-15 tiers 1+2: the deterministic agent-notifier sweep (260707-HFX2-L2).
 
 "The model is never the polling layer." Every intervention the pilot run needed was detectable by
-a MECHANICAL predicate (P-15: pane-state, expectation-deadline expiry, unacked-row redelivery,
-seat-liveness, turn-truth state signals). This module sweeps the authoritative stores on its own
-cadence, evaluates those predicates, and acts -- redeliver, auto-nudge, signal-emit, escalate,
-state-signal -- with zero tokens spent and zero model calls anywhere in the loop.
+a MECHANICAL predicate (P-15: pane-state, unacked-row redelivery, seat-liveness, turn-truth state
+signals). This module sweeps the authoritative stores on its own cadence, evaluates those
+predicates, and relays facts -- redeliver, owner signal, state-signal -- with zero tokens spent
+and zero model calls anywhere in the loop. It never interprets: no suspect classification, no
+escalation rungs, no expectation judgment.
 
 R3 (#22 root-cause rule, non-negotiable): every predicate reads :class:`TerminalCatalog` /
 :class:`OperatorInboxStore` / :class:`ExpectationRowStore` / the nudge store DIRECTLY. The
@@ -27,44 +28,27 @@ from agents_remember.controlplane.inbox_backoff import require_redelivery_floor_
 from agents_remember.controlplane.operator_inbox_records import OperatorInboxEntry
 from agents_remember.serving._agent_notifier_actions import (
     _FINDING_ACTIONS,
-    _auto_nudge,
     _drain_boundary,
     _emit_compound_idle,
     _emit_non_reaction,
     _emit_state_signal,
-    _escalate_inbox_entry,
-    _escalate_rung,
     _expire_pending,
     _FindingAction,
     _log_event,
-    _mark_expectation_missed,
     _rebind_due,
     _rebind_expired,
     _redeliver,
-    _resolve_ladder_terminal,
-    _respawn_suspect,
-    _rung_entry,
     _signal_dead_upstream,
     _signal_emit,
     act_on_finding,
 )
 from agents_remember.serving._agent_notifier_evaluation import (
-    _INACTIVE_EXPECTATION_KINDS,
-    DEFAULT_ESCALATION_RUNG_SECONDS,
-    DEFAULT_ESCALATION_SLA_SECONDS,
     PERSISTENT_FAILURE_ATTEMPTS,
-    EscalationSchedule,
     _age_seconds,
-    _delivery_failure_still_retrying,
-    _expectation_chain_progressed,
     _inactivity_signal_chain_progressed,
-    _ladder_terminal_and_dead,
     _stale_turn_state_due,
     evaluate_dead_upstream_findings,
-    evaluate_escalation_findings,
-    evaluate_expectation_findings,
     evaluate_inbox_findings,
-    evaluate_ladder_terminal_findings,
     evaluate_pane_findings,
     evaluate_pending_expiry_findings,
     evaluate_predicates,
@@ -99,14 +83,6 @@ from agents_remember.serving.state_signals import (
     non_reaction_response,
     state_signal_response,
 )
-
-# R1 (260707-HFX2-L4): conservative built-in fallbacks when a caller (a test, or a context built
-# before settings are read) supplies no per-kind/per-rung knobs. ``serving/app.py`` always wires
-# the settings-driven ``EscalationSettings`` values in (mirroring how it already resolves
-# ``agentNotifier``/``expectations`` knobs into this module's plain-primitive fields) -- this module
-# stays decoupled from the kernel settings loader, R3's "every predicate reads its store directly"
-# extended to knobs: no settings TYPE crosses into this file, only resolved numbers.
-
 
 # --- R4: actions ---------------------------------------------------------------------------------
 
@@ -252,40 +228,26 @@ def _fold_legacy_landed(
 
 __all__ = [
     "COMPOUND_IDLE_SWEEP_LATENCY_SECONDS",
-    "DEFAULT_ESCALATION_RUNG_SECONDS",
-    "DEFAULT_ESCALATION_SLA_SECONDS",
     "NON_REACTION_WINDOW_SECONDS",
     "PERSISTENT_FAILURE_ATTEMPTS",
     "_FINDING_ACTIONS",
-    "_INACTIVE_EXPECTATION_KINDS",
     "AgentNotifierActionResult",
     "AgentNotifierFinding",
-    "EscalationSchedule",
     "OwnerSignal",
     "_FindingAction",
     "_age_seconds",
-    "_auto_nudge",
-    "_delivery_failure_still_retrying",
     "_drain_boundary",
     "_emit_compound_idle",
     "_emit_non_reaction",
     "_emit_state_signal",
-    "_escalate_inbox_entry",
-    "_escalate_rung",
-    "_expectation_chain_progressed",
     "_expire_pending",
     "_find_coalescible",
     "_inactivity_signal_chain_progressed",
-    "_ladder_terminal_and_dead",
     "_log_event",
-    "_mark_expectation_missed",
     "_post_owner_signal",
     "_rebind_due",
     "_rebind_expired",
     "_redeliver",
-    "_resolve_ladder_terminal",
-    "_respawn_suspect",
-    "_rung_entry",
     "_signal_dead_upstream",
     "_signal_emit",
     "_stale_turn_state_due",
@@ -295,10 +257,7 @@ __all__ = [
     "evaluate_boundary_drain_findings",
     "evaluate_compound_idle_findings",
     "evaluate_dead_upstream_findings",
-    "evaluate_escalation_findings",
-    "evaluate_expectation_findings",
     "evaluate_inbox_findings",
-    "evaluate_ladder_terminal_findings",
     "evaluate_non_reaction_findings",
     "evaluate_pane_findings",
     "evaluate_pending_expiry_findings",

@@ -38,7 +38,7 @@ that has not landed still schedules another attempt."""
 
 
 def backoff_seconds_for_attempt(attempt_count: int) -> float:
-    """The wait before attempt ``attempt_count + 1``, from the ladder (clamped to the ceiling)."""
+    """The wait before attempt ``attempt_count + 1``, from the schedule (clamped to the ceiling)."""
     index = max(0, min(attempt_count, len(BACKOFF_SCHEDULE_SECONDS) - 1))
     return BACKOFF_SCHEDULE_SECONDS[index]
 
@@ -127,5 +127,5 @@ def redeliverable(
 
 
 def is_ladder_resolved(entry: OperatorInboxEntry) -> bool:
-    """Whether the escalation ladder has terminally resolved this row without an ack."""
+    """Whether a legacy row carries the retired pre-formal-vocabulary terminal state."""
     return entry.state == "ladder-resolved"

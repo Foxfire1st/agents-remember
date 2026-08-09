@@ -146,7 +146,7 @@ def read_agent_pickups(
 
     260731-EFA-L5: ``ValidationError`` by name, and unlike ``read_gates`` above it is genuinely
     load-bearing here -- ``OperatorInboxStore._read_unlocked`` is STRICT on purpose (an inbox row
-    nobody can parse is an ack nobody can account for, and ``consume`` decides on that fold), so a
+    nobody can parse is a landing nobody can account for, and the store's fold decides on it), so a
     torn row really does raise out of both calls below and really must not crash the tick. Spelt
     ``ValidationError`` rather than ``ValueError`` all the same: the wide net would also swallow
     an unrelated ``ValueError`` from anywhere in the loop, which is the trap this leaf closed in
@@ -195,8 +195,8 @@ def read_expectation_rows(
 ) -> list[ExpectationRowNode]:  # pragma: no cover
     """Pending expectation (deadline) rows, for dashboard/architect observability (R5).
 
-    Surfacing only: an L2 predicate reads ``ExpectationRowStore`` directly and never this
-    projection (the #22 correctness half stays L2's rule; this is the visibility half).
+    Surfacing only: the relay never evaluates expectation rows -- this is an owner-visible
+    deadline surface, and verification is by expected product (owner work).
 
     260731-EFA-L5 R8: ``pending_for_projection`` and not ``pending``. The strict read raises
     ``ValidationError``, which subclasses ``ValueError`` -- so the ``suppress`` below used to

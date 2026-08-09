@@ -81,13 +81,46 @@ RENAMED_FACADE_NAMES: dict[str, dict[str, str]] = {
     },
 }
 
-# 260713-TES-L2: names deliberately removed from the worker→manager relay surface (the
-# turn-report artifact/SLA predicates retire with the catalog-truth relay). The pin would
-# otherwise fail the removal; these are intended deletions, not lost split names.
+# 260713-TES-L2/L5: names deliberately removed from the relay surface -- the turn-report
+# artifact/SLA predicates (L2) and the suspect-respawn/ladder/expectation-interpretation
+# machinery (L5). The pin would otherwise fail the removal; these are intended deletions,
+# not lost split names.
 REMOVED_FACADE_NAMES: dict[str, frozenset[str]] = {
+    "agents_remember.kernel.agentic_settings": frozenset(
+        {
+            "DEFAULT_ESCALATION_RUNG_SECONDS",
+            "DEFAULT_ESCALATION_SLA_SECONDS",
+            "DEFAULT_RESPAWN_AFTER_RUNG",
+            "EscalationSettings",
+            "KNOWN_ESCALATION_FIELDS",
+            "KNOWN_ESCALATION_MESSAGE_KINDS",
+            "KNOWN_ESCALATION_RUNGS",
+            "_parse_escalation",
+            "_parse_escalation_rung_seconds",
+            "_parse_escalation_sla_seconds",
+            "_parse_respawn_after_rung",
+        }
+    ),
     "agents_remember.serving.agent_notifier": frozenset(
         {
+            "DEFAULT_ESCALATION_RUNG_SECONDS",
+            "DEFAULT_ESCALATION_SLA_SECONDS",
+            "EscalationSchedule",
+            "_INACTIVE_EXPECTATION_KINDS",
+            "_auto_nudge",
+            "_delivery_failure_still_retrying",
+            "_escalate_inbox_entry",
+            "_escalate_rung",
+            "_expectation_chain_progressed",
+            "_ladder_terminal_and_dead",
+            "_mark_expectation_missed",
             "_nudge_reason",
+            "_respawn_suspect",
+            "_resolve_ladder_terminal",
+            "_rung_entry",
+            "evaluate_escalation_findings",
+            "evaluate_expectation_findings",
+            "evaluate_ladder_terminal_findings",
             "evaluate_turn_report_findings",
             "turn_report_path_for_leaf_key",
         }

@@ -225,19 +225,20 @@ signal shows a large operator-inbox backlog that is not draining.
    ```
 
 4. Inspect the `.bak` file offline. Rows whose latest snapshot is already
-   `ladder-resolved` are terminal and may stay only in the backup. Rows for seats that
-   are still live must be re-posted or allowed to be consumed by that live agent; do not
-   rewrite them as terminal.
-5. For rows at the terminal ladder rung whose target seat is retired or absent from the
-   terminal catalog, park them as ladder-resolved in a reconstructed inbox log or leave
-   them quarantined if no live consumer remains. Keep the `.bak` as the audit trail.
+   `ladder-resolved` (a legacy pre-formal-vocabulary state; the timed escalation ladder is
+   retired) are terminal and may stay only in the backup. Rows for seats that are still
+   live must be re-posted or allowed to land for that live agent; do not rewrite them as
+   terminal.
+5. For rows whose target seat is retired or absent from the terminal catalog, they resolve
+   through the normal sweep paths (`unresolved` after the attempt ceiling, `expired` after
+   the rebind grace); keep the `.bak` as the audit trail.
 6. Start the dashboard cleanly. Confirm `/api/state` shows a fresh
    `agentNotifierHeartbeat` (legacy alias `supervisorHeartbeat` during the rename window),
    bounded `pendingInboxCount`/`redeliverableInboxCount`, and a
    recent `lastSweepDurationSeconds`.
 7. Compact through the normal inbox compaction path after recovery. Do not hand-edit
-   away pending live-seat rows; pending/unacked live rows are protected until acked or
-   ladder-resolved.
+   away pending live-seat rows; pending rows resolve terminal by the sweep's own
+   landing/ceiling/grace paths.
 
 ### 2.5 The observer and its projections
 

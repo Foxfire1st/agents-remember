@@ -13,7 +13,6 @@ from agents_remember.controlplane.agent_notifier_signals import (
 from agents_remember.controlplane.expectation_rows import ExpectationRow, ExpectationRowStore
 from agents_remember.controlplane.operator_inbox_records import OperatorInboxEntry
 from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
-from agents_remember.controlplane.orchestration_nudges import OrchestrationNudgeStore
 from agents_remember.observer.store import EventStore
 from agents_remember.serving.agent_notifier_heartbeat import AgentNotifierHeartbeatStore
 from agents_remember.serving.inbox_reclamation import (
@@ -26,11 +25,8 @@ from agents_remember.serving.terminal_paste import TerminalPaster
 
 FindingKind = Literal[
     "pane-signal",
-    "expectation-overdue",
     "inbox-redeliverable",
-    "inbox-ladder-terminal",
     "seat-liveness",
-    "escalation-due",
     "dead-upstream",
     "state-signal-due",
     "compound-idle-due",
@@ -42,10 +38,7 @@ FindingKind = Literal[
 ]
 ActionKind = Literal[
     "redeliver",
-    "ladder-resolve",
-    "auto-nudge",
     "signal-emit",
-    "escalate-rung",
     "signal-manager",
     "state-signal",
     "compound-idle",
@@ -55,8 +48,6 @@ ActionKind = Literal[
     "expire",
     "none",
 ]
-
-DEFAULT_RESPAWN_AFTER_RUNG = 2
 
 
 @dataclass(frozen=True)
@@ -100,7 +91,6 @@ class AgentNotifierContext:
     paster: TerminalPaster
     inbox_store: OperatorInboxStore
     expectation_store: ExpectationRowStore
-    nudge_store: OrchestrationNudgeStore
     signal_cooldown_store: AgentNotifierSignalCooldownStore
     event_store: EventStore
     heartbeat_store: AgentNotifierHeartbeatStore
@@ -108,10 +98,6 @@ class AgentNotifierContext:
     stale_seat_seconds: float = 120.0
     redeliver_rate_limit_seconds: float | None = None
     signal_cooldown_seconds: float = 900.0
-    nudge_rate_limit_seconds: int = 900
-    escalation_sla_seconds: dict[str, float] = field(default_factory=dict)
-    escalation_rung_seconds: dict[int, float] = field(default_factory=dict)
-    respawn_after_rung: int = DEFAULT_RESPAWN_AFTER_RUNG
     redeliver_budget: int = 1
     escalation_budget: int = 250
     tmux_name_snapshotter: TmuxSessionNameSnapshotter = snapshot_tmux_session_names
@@ -125,7 +111,6 @@ class SweepState:
     redeliverable_entries: list[OperatorInboxEntry] = field(default_factory=list)
     signal_current: list[AgentNotifierSignalRecord] | None = None
     expectation_current: dict[str, ExpectationRow] | None = None
-    escalated_entry_ids: set[str] = field(default_factory=set)
 
     @property
     def redeliverable_inbox_count(self) -> int:

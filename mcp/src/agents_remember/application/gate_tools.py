@@ -648,8 +648,9 @@ def gate_response_wait_tool(
 
     The lower-level helper owns the compatibility wait window: one call polls
     every five seconds for up to five minutes by default. Pass
-    ``timeout_seconds=None`` for a blocking wait. Returned inbox entries are not
-    consumed; call ``operator_inbox_consume`` after reading each handled entry.
+    ``timeout_seconds=None`` for a blocking wait. Returned inbox entries land at the
+    recipient's turn boundary; ``operator_inbox_consume`` is an optional attribution
+    marker, never a mechanical ack.
     """
     gate_store = _store(config)
     inbox_store = _inbox_store(config)

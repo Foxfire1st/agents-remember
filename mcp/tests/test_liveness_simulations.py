@@ -29,12 +29,7 @@ MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
 from agents_remember.controlplane.agent_notifier_signals import AgentNotifierSignalCooldownStore
-from agents_remember.controlplane.expectation_rows import (
-    Expectation,
-    ExpectationRowStore,
-    ExpectationSubject,
-    write_expectation_row,
-)
+from agents_remember.controlplane.expectation_rows import ExpectationRowStore
 from agents_remember.controlplane.interaction_retention import INBOX_MAX_CURRENT_ROWS
 from agents_remember.controlplane.operator_inbox_records import (
     InboxAddress,
@@ -44,7 +39,6 @@ from agents_remember.controlplane.operator_inbox_records import (
     create_operator_inbox_entry,
 )
 from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
-from agents_remember.controlplane.orchestration_nudges import OrchestrationNudgeStore
 from agents_remember.observer.store import EventStore
 from agents_remember.serving.agent_notifier import (
     PERSISTENT_FAILURE_ATTEMPTS,
@@ -143,7 +137,6 @@ class _LivenessSimulationCase(unittest.TestCase):
         self.catalog = TerminalCatalog(root / "catalog.json")
         self.inbox_store = OperatorInboxStore(self.observer_root)
         self.expectation_store = ExpectationRowStore(self.observer_root)
-        self.nudge_store = OrchestrationNudgeStore(self.observer_root)
         self.signal_cooldown_store = AgentNotifierSignalCooldownStore(self.observer_root)
         self.event_store = EventStore(self.observer_root)
         self.heartbeat_store = AgentNotifierHeartbeatStore(self.observer_root)
@@ -161,15 +154,11 @@ class _LivenessSimulationCase(unittest.TestCase):
             paster=paster if paster is not None else _landing_paster(),
             inbox_store=self.inbox_store,
             expectation_store=self.expectation_store,
-            nudge_store=self.nudge_store,
             signal_cooldown_store=self.signal_cooldown_store,
             event_store=self.event_store,
             heartbeat_store=self.heartbeat_store,
             coordination_root=self.coordination_root,
             stale_seat_seconds=60.0,
-            escalation_sla_seconds={"nudge": 60.0, "escalation": 60.0},
-            escalation_rung_seconds={1: 60.0, 2: 60.0},
-            respawn_after_rung=2,
         )
         base.update(overrides)
         return AgentNotifierContext(**base)  # type: ignore[arg-type]
@@ -207,21 +196,6 @@ class NeverAckedSeatTests(_LivenessSimulationCase):
                 spawned_by_session="manager-1",
             )
         )
-        # The dispatch-time verdict-by expectation row -- still overdue because the worker's
-        # inbox row never lands, so the owner is nudged exactly once.
-        write_expectation_row(
-            self.expectation_store,
-            Expectation(
-                kind="verdict-by",
-                source_id="worker-1",
-                subject=ExpectationSubject(
-                    agent_id="worker-1", leaf_key="repo-a/260707_master/leaf-9"
-                ),
-            ),
-            row_id="acked-worker-1",
-            now=NOW - timedelta(minutes=10),
-            sla_seconds=60.0,
-        )
         entry = create_operator_inbox_entry(
             InboxMessage(ask="dispatch", response="you are the worker", message_kind="message"),
             entry_id="e1",
@@ -232,14 +206,10 @@ class NeverAckedSeatTests(_LivenessSimulationCase):
         self.inbox_store.append(entry)
         ctx = self._ctx()
 
-        # Tick 1: the sweep sees the overdue verdict-by row, auto-nudges the owner (worker-1's
-        # manager, via spawn provenance), marks the expectation row missed, and attempts delivery.
+        # Tick 1: the sweep attempts delivery. No expectation row exists and none is evaluated:
+        # the relay never nudges -- expectation rows are an owner-visible surface only.
         run_agent_notifier_sweep(ctx, now=NOW)
-        self.assertEqual(self.expectation_store.current()["acked-worker-1"].state, "missed")
-        self.assertIn("orchestration.nudge", self._events())
-        nudges = [e for e in self.inbox_store.current().values() if e.messageKind == "nudge"]
-        self.assertEqual(len(nudges), 1)
-        self.assertEqual(nudges[0].agentId, "manager-1")
+        self.assertNotIn("orchestration.nudge", self._events())
 
         # The original row keeps retrying on its durable backoff; with a live-but-silent
         # addressee the N3 attempt ceiling resolves it ``unresolved`` -- no ladder rung, no
@@ -277,7 +247,6 @@ class NoHostedSessionTests(_LivenessSimulationCase):
         self.inbox_store.append(entry)
         ctx = self._ctx(
             host=cast(TerminalHost, _FakeHost(reachable=False)),
-            escalation_sla_seconds={"message": 1_000_000_000.0, "nudge": 60.0, "escalation": 60.0},
         )
 
         now = NOW
@@ -594,7 +563,6 @@ class CodexQuotaModalTests(_LivenessSimulationCase):
         )
         ctx = self._ctx(
             paster=quota_paster,
-            escalation_sla_seconds={"message": 1_000_000_000.0, "nudge": 60.0, "escalation": 60.0},
         )
 
         run_agent_notifier_sweep(ctx, now=NOW)

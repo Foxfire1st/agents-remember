@@ -115,9 +115,8 @@ def state_signal_held_on_boundary(catalog: TerminalCatalog, entry: OperatorInbox
     """Whether a non-landed state-signal row is merely boundary-held by a LIVE target seat.
 
     A live addressee's availability gate owns delivery timing: the row must not be
-    redelivered on the backoff schedule or climb the escalation ladder while its target
-    is running but not at a turn boundary. Dead/archived targets keep the ordinary
-    redelivery/ladder safety net.
+    redelivered while its target is running but not at a turn boundary. Dead/archived
+    targets keep the ordinary redelivery schedule.
     """
     if entry.messageKind != "state-signal" or state_signal_landed(entry):
         return False

@@ -385,12 +385,14 @@ class SetupProgressNode(BaseModel):
 
 
 class AgentPickupNode(BaseModel):
-    """A pending dashboard response waiting for an agent to consume it.
+    """A pending dashboard response waiting for a turn-boundary landing.
 
-    R5 (260707-HFX2-L1): every pending row here IS an unacked signal -- consume=ack is the only
-    terminal outcome, so this list already surfaces "pending/unacked" for the dashboard. The
-    attempt/backoff/escalation fields ride along so the panel can show redelivery state without a
-    second surface; an L2 predicate reads the stores directly and never this projection.
+    N16: the system acks -- a row lands when a correlated adapter acceptance reaches the
+    recipient at a turn boundary, so this list surfaces "pending / not yet landed" for the
+    dashboard. ``operator_inbox_consume`` is an optional attribution marker with nothing
+    mechanical attached. The attempt/backoff fields ride along so the panel can show
+    redelivery state without a second surface; the sweep predicates read the stores directly
+    and never this projection.
     """
 
     model_config = ConfigDict(extra="forbid")

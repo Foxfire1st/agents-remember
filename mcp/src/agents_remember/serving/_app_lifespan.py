@@ -12,7 +12,6 @@ from fastapi import FastAPI
 from agents_remember.controlplane.agent_notifier_signals import AgentNotifierSignalCooldownStore
 from agents_remember.controlplane.expectation_rows import ExpectationRowStore
 from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
-from agents_remember.controlplane.orchestration_nudges import OrchestrationNudgeStore
 from agents_remember.kernel.agentic_settings import (
     DEFAULT_AGENT_NOTIFIER_INTERVAL_SECONDS,
     AgenticSettings,
@@ -94,7 +93,6 @@ def _agent_notifier_context(
         paster=runtime.paster,
         inbox_store=OperatorInboxStore(root),
         expectation_store=ExpectationRowStore(root),
-        nudge_store=OrchestrationNudgeStore(root),
         signal_cooldown_store=AgentNotifierSignalCooldownStore(root),
         event_store=EventStore(root),
         heartbeat_store=runtime.heartbeat_store,
@@ -102,9 +100,6 @@ def _agent_notifier_context(
         stale_seat_seconds=max(settings.agent_notifier.interval_seconds * 4, 60.0),
         redeliver_rate_limit_seconds=settings.agent_notifier.redeliver_rate_limit_seconds,
         signal_cooldown_seconds=settings.agent_notifier.signal_cooldown_seconds,
-        escalation_sla_seconds=settings.escalation.sla_seconds,
-        escalation_rung_seconds=settings.escalation.rung_seconds,
-        respawn_after_rung=settings.escalation.respawn_after_rung,
         redeliver_budget=settings.agent_notifier.redeliver_budget,
         escalation_budget=settings.agent_notifier.escalation_budget,
     )

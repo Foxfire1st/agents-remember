@@ -16,6 +16,7 @@ from agents_remember.serving.conversation.projectors.common import (
 from agents_remember.serving.harness_control_models import (
     EvidenceFrame,
     EvidencePage,
+    NativeEvidenceFrame,
     NativeEvidencePage,
 )
 
@@ -86,10 +87,7 @@ class NativeEvidenceIngestion:
                 )
                 for frame in page.frames:
                     ref = self._refs.native(frame.native_id)
-                    outputs = [
-                        self._agents.reconcile_roster(output)
-                        for output in self._mapper.map_native_frame(frame, evidence_ref=ref)
-                    ]
+                    outputs = self.map_native_frame(frame, ref)
                     outputs = self.suppress_live_twins(outputs, live_native_turns, None)
                     self._stream.apply_outputs(outputs, ref)
                 self.native_cursor = page.next_cursor
@@ -199,6 +197,47 @@ class NativeEvidenceIngestion:
             outputs = [self._agents.bind_thread(output, agent_thread) for output in outputs]
         return [self._agents.reconcile_roster(output) for output in outputs]
 
+    def map_native_frame(self, frame: NativeEvidenceFrame, evidence_ref: str) -> list[MapperOutput]:
+        """Map one native-page frame without surrendering its transport identity."""
+
+        if frame.raw.get("arEvidenceTruncated") is True:
+            frame_type = frame.raw.get("type")
+            original_bytes = frame.raw.get("originalBytes")
+            type_label = frame_type if isinstance(frame_type, str) else frame.native_type
+            size_label = (
+                f" ({original_bytes} bytes)"
+                if isinstance(original_bytes, int) and not isinstance(original_bytes, bool)
+                else ""
+            )
+            outputs: list[MapperOutput] = [
+                MappedUnknownVendor(
+                    item_id=frame.native_id,
+                    vendor_type=f"{self._mapper.harness_id}:evidence-truncated",
+                    safe_summary=(
+                        f"oversized {type_label} native frame clipped to the evidence budget"
+                        f"{size_label}"
+                    ),
+                    live=False,
+                    turn_id=frame.native_parent_id,
+                    created_at=frame.created_at,
+                )
+            ]
+        else:
+            try:
+                outputs = self._mapper.map_native_frame(frame, evidence_ref=evidence_ref)
+            except UnmappableShape:
+                outputs = [
+                    MappedUnknownVendor(
+                        item_id=frame.native_id,
+                        vendor_type=f"{self._mapper.harness_id}:malformed",
+                        safe_summary="native frame failed exact schema parsing",
+                        live=False,
+                        turn_id=frame.native_parent_id,
+                        created_at=frame.created_at,
+                    )
+                ]
+        return [self._agents.reconcile_roster(output) for output in outputs]
+
     def record_live_turn(self, outputs: list[MapperOutput], bucket: str | None) -> None:
         live_turns = self.live_turn_ids.setdefault(bucket, set())
         live_requests = self.live_request_ids.setdefault(bucket, set())
@@ -257,10 +296,7 @@ class NativeEvidenceIngestion:
                 return
             for frame in page.frames:
                 ref = self._refs.native(frame.native_id)
-                outputs = [
-                    self._agents.reconcile_roster(output)
-                    for output in self._mapper.map_native_frame(frame, evidence_ref=ref)
-                ]
+                outputs = self.map_native_frame(frame, ref)
                 self._stream.apply_outputs(outputs, ref)
             self.native_cursor = page.next_cursor
             if page.next_cursor is None:

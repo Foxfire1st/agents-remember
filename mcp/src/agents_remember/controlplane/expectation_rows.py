@@ -1,11 +1,13 @@
-"""R2 (260707-HFX2-L1): durable what-must-happen-by-when rows, written atomically at dispatch.
+"""R2 (260707-HFX2-L1): durable owner-visible deadline rows, written atomically at dispatch.
 
-Every dispatch surface -- a durable ``dispatch-brief`` inbox row (briefed-by), a gate opening
-(verdict-by), and every operator-inbox post (ack-by) -- writes one durable :class:`ExpectationRow`
-in the SAME call that performs the
-dispatch, never as a follow-up step a caller could forget. Seat spawn and readiness waiting start
-no assignment clock. Deadlines are ROWS an L2 sweep scans, never in-memory timers -- the Restate
-durable-timer lesson (R2): a row survives a daemon/MCP restart; a timer does not.
+Two dispatch surfaces write one durable :class:`ExpectationRow` in the SAME call that performs
+the dispatch, never as a follow-up step a caller could forget: a durable ``dispatch-brief`` inbox
+row (briefed-by) and a gate opening (verdict-by). Ordinary operator-inbox posts write no
+expectation row (N16: landing is terminal, model-consume is abolished). The relay never evaluates
+these rows -- they are an owner-visible deadline surface, and verification is by expected
+product, which is owner work. Seat spawn and readiness waiting start no assignment clock.
+Deadlines are ROWS, never in-memory timers -- the Restate durable-timer lesson (R2): a row
+survives a daemon/MCP restart; a timer does not.
 
 ``ExpectationKind`` must be kept in sync with ``KNOWN_EXPECTATION_KINDS`` in
 ``kernel/agentic_settings.py`` (duplicated there to avoid a kernel<->controlplane import cycle).
@@ -31,12 +33,15 @@ from agents_remember.controlplane.durable_store import (
 
 EXPECTATION_ROW_SCHEMA = "ar-expectation-row/v1"
 
-# 260707-HFX2-L12 F4: how long a met/missed row is kept for dashboard/provenance before the sweep
-# reclaims it. Pending rows are always kept. Terminal rows older than this can no longer drive a
-# finding (overdue/find_by_source read pending only), so dropping them is safe.
+# 260707-HFX2-L12 F4: how long a met/missed row is kept for dashboard/provenance before the
+# store reclaims it. Pending rows are always kept. Terminal rows older than this can no longer
+# be surfaced as pending deadlines (overdue/find_by_source read pending only), so dropping them
+# is safe.
 EXPECTATION_RETENTION_SECONDS = 3600.0
 
-ExpectationKind = Literal["briefed-by", "turn-report-by", "verdict-by", "ack-by"]
+ExpectationKind = Literal["briefed-by", "verdict-by", "turn-report-by", "ack-by"]
+# The retired ``turn-report-by``/``ack-by`` values stay in the Literal for legacy-row parse
+# compatibility only; nothing writes or evaluates them.
 ExpectationState = Literal["pending", "met", "missed"]
 
 
@@ -51,7 +56,7 @@ class ExpectationRow(DurableRecord):
     createdAt: str
     dueAt: str
     # The dispatch surface's own id this row rides beside -- the dispatch-brief inbox entry id
-    # (briefed-by / ack-by) or a gate id (verdict-by). Lets a sweep or dashboard
+    # (briefed-by) or a gate id (verdict-by). Lets the dashboard
     # resolve straight back to the thing it is a deadline FOR.
     sourceId: str
     subjectAgentId: str | None = None
@@ -127,7 +132,8 @@ def mark_met(row: ExpectationRow, *, now: str) -> ExpectationRow:
 def mark_missed(row: ExpectationRow, *, now: str) -> ExpectationRow:
     """Return a snapshot marking the expectation missed (idempotent past the first call).
 
-    This leaf only reserves the transition -- the L2 sweep is the actual caller.
+    Store primitive only: the relay never marks expectations missed (no expectation
+    evaluation exists); this exists for explicit owner-side tooling and legacy rows.
     """
     if row.state != "pending":
         return row
@@ -171,9 +177,9 @@ class ExpectationRowStore:
     def read(self) -> list[ExpectationRow]:
         """Read the log back as validated rows (empty when absent).
 
-        STRICT, unchanged: a deadline row that cannot be parsed is a deadline nobody is
-        watching, and the L2 sweep is the only thing standing between a missed expectation and
-        silence. The tolerant policy belongs to reads that only render (see
+        STRICT, unchanged: a deadline row that cannot be parsed is a deadline nobody can
+        render, and this store is the owner-visible deadline surface for dispatch and gate
+        deadlines. The tolerant policy belongs to reads that only render (see
         ``GateStore.read_for_projection``); this one decides.
         """
         return [
@@ -235,7 +241,11 @@ class ExpectationRowStore:
         return max(candidates, key=lambda row: row.createdAt, default=None)
 
     def overdue(self, *, now: datetime) -> list[ExpectationRow]:
-        """Pending rows whose ``dueAt`` has already passed -- the L2 sweep's predicate input."""
+        """Pending rows whose ``dueAt`` has already passed (test-facing helper).
+
+        The relay never evaluates expectation rows; owners see pending deadlines through the
+        dashboard projection.
+        """
         due: list[ExpectationRow] = []
         for row in self.pending():
             try:

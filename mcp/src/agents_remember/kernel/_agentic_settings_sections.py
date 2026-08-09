@@ -1,9 +1,7 @@
 """``orchestration`` section parsers: loops, roles, concurrency, expectations,
-agent-notifier, escalation, spawn, and the quality gate."""
+agent-notifier, spawn, and the quality gate."""
 
 from __future__ import annotations
-
-from typing import Any
 
 from agents_remember.controlplane.inbox_backoff import MIN_REDELIVERY_INTERVAL_SECONDS
 from agents_remember.kernel._agentic_settings_core import (
@@ -12,20 +10,14 @@ from agents_remember.kernel._agentic_settings_core import (
     DEFAULT_AGENT_NOTIFIER_INTERVAL_SECONDS,
     DEFAULT_AGENT_NOTIFIER_REDELIVER_BUDGET,
     DEFAULT_AGENT_NOTIFIER_STALE_CUTOFF_SECONDS,
-    DEFAULT_ESCALATION_RUNG_SECONDS,
-    DEFAULT_ESCALATION_SLA_SECONDS,
     DEFAULT_EXPECTATION_SLA_SECONDS,
     DEFAULT_FULL_GATE_MEMORY_CAP_BYTES,
     DEFAULT_LOOP_MAX_ROUNDS,
     DEFAULT_LOOP_PER_LEVEL,
     DEFAULT_RATE_LIMIT_SECONDS,
-    DEFAULT_RESPAWN_AFTER_RUNG,
     DEFAULT_REVIEWER_REUSE,
     KNOWN_AGENT_NOTIFIER_FIELDS,
     KNOWN_CONCURRENCY_FIELDS,
-    KNOWN_ESCALATION_FIELDS,
-    KNOWN_ESCALATION_MESSAGE_KINDS,
-    KNOWN_ESCALATION_RUNGS,
     KNOWN_EXPECTATION_KINDS,
     KNOWN_EXPECTATIONS_FIELDS,
     KNOWN_LOOP_COMPLEXITY_FIELDS,
@@ -40,7 +32,6 @@ from agents_remember.kernel._agentic_settings_core import (
     AgenticSettingsError,
     AgentNotifierSettings,
     ConcurrencySettings,
-    EscalationSettings,
     ExpectationSettings,
     LoopComplexity,
     LoopDefaults,
@@ -372,92 +363,6 @@ def _require_agent_notifier_floor_seconds(raw: object, owner: str, source: str) 
             f"{owner} must be at least {MIN_REDELIVERY_INTERVAL_SECONDS:g} seconds: {source}"
         )
     return value
-
-
-def _parse_escalation(raw: object, *, source: str) -> EscalationSettings:
-    """``orchestration.escalation`` (R1, 260707-HFX2-L4): per-``message_kind`` ack SLAs, per-rung
-    dwell timings, the renudge rate limit, and the respawn-after-rung threshold. Absent -> the
-    documented conservative defaults."""
-    if raw is None:
-        return EscalationSettings()
-    block = _require_object(raw, "orchestration.escalation", source)
-    _refuse_unknown(block, KNOWN_ESCALATION_FIELDS, "orchestration.escalation", source)
-    # Field order is the refusal order: a settings file with more than one bad field is
-    # reported against the first one, as it was before these parsers were split out.
-    sla_seconds = _parse_escalation_sla_seconds(block.get("slaSeconds"), source=source)
-    rung_seconds = _parse_escalation_rung_seconds(block.get("rungSeconds"), source=source)
-    nudge_rate_limit_seconds = 900
-    if "nudgeRateLimitSeconds" in block:
-        nudge_rate_limit_seconds = _require_positive_int(
-            block["nudgeRateLimitSeconds"],
-            "orchestration.escalation.nudgeRateLimitSeconds",
-            source,
-        )
-    return EscalationSettings(
-        sla_seconds=sla_seconds,
-        rung_seconds=rung_seconds,
-        nudge_rate_limit_seconds=nudge_rate_limit_seconds,
-        respawn_after_rung=_parse_respawn_after_rung(block, source=source),
-    )
-
-
-def _parse_escalation_sla_seconds(raw: object, *, source: str) -> dict[str, float]:
-    """``orchestration.escalation.slaSeconds``: per-``message_kind`` ack SLAs over the defaults."""
-    sla_seconds = dict(DEFAULT_ESCALATION_SLA_SECONDS)
-    if raw is None:
-        return sla_seconds
-    sla_block = _require_object(raw, "orchestration.escalation.slaSeconds", source)
-    for kind, value in sla_block.items():
-        if kind not in KNOWN_ESCALATION_MESSAGE_KINDS:
-            allowed = ", ".join(sorted(KNOWN_ESCALATION_MESSAGE_KINDS))
-            raise AgenticSettingsError(
-                f"orchestration.escalation.slaSeconds key {kind!r} is not a known "
-                f"message kind; allowed: {allowed}: {source}"
-            )
-        owner = f"orchestration.escalation.slaSeconds.{kind}"
-        sla_seconds[kind] = _require_positive_number(value, owner, source)
-    return sla_seconds
-
-
-def _parse_escalation_rung_seconds(raw: object, *, source: str) -> dict[int, float]:
-    """``orchestration.escalation.rungSeconds``: per-rung dwell timings over the defaults.
-
-    Keys arrive as JSON object names, so a rung is read as an int; anything that is not a
-    known rung (including a non-numeric key) is refused by name.
-    """
-    rung_seconds = dict(DEFAULT_ESCALATION_RUNG_SECONDS)
-    if raw is None:
-        return rung_seconds
-    rung_block = _require_object(raw, "orchestration.escalation.rungSeconds", source)
-    for raw_rung, value in rung_block.items():
-        try:
-            rung = int(raw_rung)
-        except (TypeError, ValueError):
-            rung = -1
-        if rung not in KNOWN_ESCALATION_RUNGS:
-            allowed = ", ".join(str(r) for r in KNOWN_ESCALATION_RUNGS)
-            raise AgenticSettingsError(
-                f"orchestration.escalation.rungSeconds key {raw_rung!r} must be one of: "
-                f"{allowed}: {source}"
-            )
-        owner = f"orchestration.escalation.rungSeconds.{rung}"
-        rung_seconds[rung] = _require_positive_number(value, owner, source)
-    return rung_seconds
-
-
-def _parse_respawn_after_rung(block: dict[str, Any], *, source: str) -> int:
-    """``orchestration.escalation.respawnAfterRung``: the rung a respawn follows."""
-    if "respawnAfterRung" not in block:
-        return DEFAULT_RESPAWN_AFTER_RUNG
-    respawn_after_rung = _require_positive_int(
-        block["respawnAfterRung"], "orchestration.escalation.respawnAfterRung", source
-    )
-    if respawn_after_rung not in KNOWN_ESCALATION_RUNGS:
-        allowed = ", ".join(str(r) for r in KNOWN_ESCALATION_RUNGS)
-        raise AgenticSettingsError(
-            f"orchestration.escalation.respawnAfterRung must be one of: {allowed}: {source}"
-        )
-    return respawn_after_rung
 
 
 # 260731-EFA-L7 R10: verbatim L7 split; unchanged branch, out of this leaf's behavior scope (mcp/src/agents_remember/kernel/_agentic_settings_sections.py:457).

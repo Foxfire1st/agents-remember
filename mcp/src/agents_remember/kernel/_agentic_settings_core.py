@@ -43,7 +43,6 @@ KNOWN_ORCHESTRATION_FIELDS = frozenset(
         # alias for ``agentNotifier`` with a loud deprecation, then removed with the window.
         "supervisor",
         "agentNotifier",
-        "escalation",
         "qualityGate",
     }
 )
@@ -94,7 +93,8 @@ KNOWN_ROLE_KNOB_FIELDS = frozenset(
 KNOWN_CONCURRENCY_FIELDS = frozenset({"maxParallelMasters", "maxParallelLeaves", "maxSubAgents"})
 KNOWN_SPAWN_FIELDS = frozenset({"harness"})
 # R1/R5 (260707-HFX2-L2): the deterministic agent-notifier sweep's own knobs -- interval, enable
-# flag, self-liveness staleness cutoff, inbox redelivery rate limit, and owner-signal cooldown.
+# flag, self-liveness staleness cutoff, inbox redelivery rate limit, owner-signal cooldown, and
+# the per-sweep load-shed budgets.
 KNOWN_AGENT_NOTIFIER_FIELDS = frozenset(
     {
         "enabled",
@@ -106,78 +106,26 @@ KNOWN_AGENT_NOTIFIER_FIELDS = frozenset(
         "escalationBudget",
     }
 )
-# R1 (260707-HFX2-L4): the escalation ladder's own knobs -- per-kind ack SLA, per-rung timings,
-# the renudge rate limit (reusing the OrchestrationNudgeStore rate-limit pattern), and the rung a
-# silent seat is marked suspect-for-respawn at (R3).
-KNOWN_ESCALATION_FIELDS = frozenset(
-    {"slaSeconds", "rungSeconds", "nudgeRateLimitSeconds", "respawnAfterRung"}
-)
 DEFAULT_AGENT_NOTIFIER_INTERVAL_SECONDS = 10.0
 DEFAULT_AGENT_NOTIFIER_STALE_CUTOFF_SECONDS = 60.0
 DEFAULT_AGENT_NOTIFIER_REDELIVER_BUDGET = 1
-# CS-6 D1 (260707-HFX2-L12): per-sweep cap on escalation-rung emission, the twin of the redeliver
-# budget. Bounds the synchronous hosted pastes + escalation.rung event appends one sweep can do;
-# deferred rows re-fire next sweep (rung_due is level-triggered) so nothing is lost.
+# CS-6 D1 (260707-HFX2-L12): per-sweep cap on owner-signal emission (seat-liveness +
+# dead-upstream), the twin of the redeliver budget. Bounds the synchronous hosted pastes one
+# sweep can do; deferred findings re-fire next sweep (level-triggered) so nothing is lost.
 DEFAULT_AGENT_NOTIFIER_ESCALATION_BUDGET = 250
 # R2 (260707-HFX2-L1): the expectation-row kinds every dispatch surface writes a durable
 # what-must-happen-by-when row for, and their default SLAs (schema: docs/reference/settings-json.md,
 # Orchestration Expectations). Kept as a plain string set here (not imported from
 # controlplane.expectation_rows) to avoid a kernel<->controlplane import cycle; the two must be kept
 # in sync -- ``ExpectationKind`` in expectation_rows.py is the sole other definition. The record
-# Literal additionally keeps ``turn-report-by`` for legacy-row parse compatibility; it is retired
-# from this settings surface with the catalog-truth relay.
-KNOWN_EXPECTATION_KINDS = frozenset({"briefed-by", "verdict-by", "ack-by"})
+# Literal additionally keeps the retired ``ack-by``/``turn-report-by`` values for legacy-row parse
+# compatibility; they are not settable here.
+KNOWN_EXPECTATION_KINDS = frozenset({"briefed-by", "verdict-by"})
 KNOWN_EXPECTATIONS_FIELDS = frozenset({"defaults"})
 DEFAULT_EXPECTATION_SLA_SECONDS: dict[str, float] = {
     "briefed-by": 120.0,
     "verdict-by": 1800.0,
-    # Mirrors AGENT_PICKUP_TTL_SECONDS (interaction_retention.py) -- the existing dashboard
-    # pickup-staleness convention for an unacked signal.
-    "ack-by": 300.0,
 }
-
-# R1 (260707-HFX2-L4): the escalation ladder's own per-``message_kind`` ack SLA -- how long a
-# PENDING operator-inbox row sits unacked, past HFX2-L2's own redelivery attempts, before the
-# ladder walker (``controlplane/escalation_ladder.py``) fires rung 1. Kept as a plain string set
-# (not imported from operator_inbox_records) for the same kernel<->controlplane cycle reason as
-# ``KNOWN_EXPECTATION_KINDS``; the two must be kept in sync with ``InboxMessageKind``.
-KNOWN_ESCALATION_MESSAGE_KINDS = frozenset(
-    {
-        "message",
-        "gate-response",
-        "turn-report",
-        "master-handover",
-        "nudge",
-        "escalation",
-        "degradation-alert",
-        "decision-item",
-        "decision-ruling",
-        "dispatch-brief",
-        "state-signal",
-    }
-)
-DEFAULT_ESCALATION_SLA_SECONDS: dict[str, float] = {
-    "message": 600.0,
-    "gate-response": 600.0,
-    "turn-report": 1800.0,
-    "master-handover": 1800.0,
-    "nudge": 300.0,
-    "escalation": 300.0,
-    "degradation-alert": 300.0,
-    "decision-item": 900.0,
-    "decision-ruling": 900.0,
-    "dispatch-brief": 300.0,
-    "state-signal": 300.0,
-}
-# Conservative-by-default rung timings (R1): seconds a row may sit at its CURRENT rung, past its
-# ``escalatedAt`` anchor, before the walker advances it to the next one. Rung 1 = renudge; rung 2 =
-# skip-level; rung 3 = developer attention (terminal -- the walker re-surfaces at this cadence but
-# never advances past it, R5).
-DEFAULT_ESCALATION_RUNG_SECONDS: dict[int, float] = {1: 300.0, 2: 900.0, 3: 1800.0}
-KNOWN_ESCALATION_RUNGS = (1, 2, 3)
-# R3: a seat addressed by a row that reaches this rung with no ack and no catalog turn-state
-# change is marked suspect for respawn -- rung 2 (skip-level failed to raise it) per the leaf spec.
-DEFAULT_RESPAWN_AFTER_RUNG = 2
 
 # The BUILTIN registry ids (claude|codex|pi). Harness references (roles.<role>.harness,
 # spawn.harness) are validated against the EFFECTIVE id set -- these plus any
@@ -259,11 +207,11 @@ class ConcurrencySettings:
 
 @dataclass(frozen=True)
 class ExpectationSettings:
-    """``orchestration.expectations`` -- per-kind default SLA seconds (R2, 260707-HFX2-L1).
+    """``orchestration.expectations`` -- owner-visible deadline SLAs (R2, 260707-HFX2-L1).
 
-    Every dispatch surface (spawn, leaf dispatch, gate open, signal post) writes a durable
-    expectation row at write time; the SLA (seconds until ``dueAt``) is configurable per kind
-    here, defaulting to :data:`DEFAULT_EXPECTATION_SLA_SECONDS`.
+    The relay never evaluates these rows; they are an owner-visible deadline surface written at
+    dispatch-brief (``briefed-by``) and gate open (``verdict-by``), configurable per kind here and
+    defaulting to :data:`DEFAULT_EXPECTATION_SLA_SECONDS`.
     """
 
     sla_seconds: dict[str, float] = field(
@@ -279,7 +227,10 @@ class AgentNotifierSettings:
     """``orchestration.agentNotifier`` -- the deterministic sweep's knobs (R1/R5, 260707-HFX2-L2).
 
     ``redeliver_rate_limit_seconds`` of ``None`` inherits ``OperatorInboxStore.list_redeliverable``'s
-    own default. ``signal_cooldown_seconds`` controls agent-notifier pane/seat-liveness signal posts.
+    own default. ``signal_cooldown_seconds`` controls agent-notifier pane/seat-liveness signal
+    posts. ``redeliver_budget``/``escalation_budget`` are per-sweep load-shed caps: they bound how
+    many redeliveries and owner-signal emissions one sweep performs; shed findings re-fire next
+    sweep (level-triggered), so nothing is lost.
     """
 
     enabled: bool = True
@@ -289,34 +240,6 @@ class AgentNotifierSettings:
     signal_cooldown_seconds: float = DEFAULT_RATE_LIMIT_SECONDS
     redeliver_budget: int = DEFAULT_AGENT_NOTIFIER_REDELIVER_BUDGET
     escalation_budget: int = DEFAULT_AGENT_NOTIFIER_ESCALATION_BUDGET
-
-
-@dataclass(frozen=True)
-class EscalationSettings:
-    """``orchestration.escalation`` -- the P-15 tier-3 ladder's own knobs (R1, 260707-HFX2-L4).
-
-    ``sla_seconds`` gates rung 1 (how long a pending row sits unacked, past ``escalatedAt``,
-    before the first renudge); ``rung_seconds`` gates every rung's OWN dwell time thereafter
-    (keyed 1/2/3, re-anchored at every transition -- see the control plane's
-    ``operator_inbox_transitions.advance_rung``).
-    """
-
-    sla_seconds: dict[str, float] = field(
-        default_factory=lambda: dict(DEFAULT_ESCALATION_SLA_SECONDS)
-    )
-    rung_seconds: dict[int, float] = field(
-        default_factory=lambda: dict(DEFAULT_ESCALATION_RUNG_SECONDS)
-    )
-    nudge_rate_limit_seconds: int = 900
-    respawn_after_rung: int = DEFAULT_RESPAWN_AFTER_RUNG
-
-    def sla_for(self, message_kind: str) -> float:
-        return self.sla_seconds.get(
-            message_kind, DEFAULT_ESCALATION_SLA_SECONDS.get(message_kind, 300.0)
-        )
-
-    def rung_dwell(self, rung: int) -> float:
-        return self.rung_seconds.get(rung, DEFAULT_ESCALATION_RUNG_SECONDS.get(rung, 900.0))
 
 
 @dataclass(frozen=True)
@@ -352,7 +275,6 @@ class AgenticSettings:
     concurrency: ConcurrencySettings = field(default_factory=ConcurrencySettings)
     expectations: ExpectationSettings = field(default_factory=ExpectationSettings)
     agent_notifier: AgentNotifierSettings = field(default_factory=AgentNotifierSettings)
-    escalation: EscalationSettings = field(default_factory=EscalationSettings)
     quality_gate: QualityGateSettings = field(default_factory=QualityGateSettings)
     spawn_harness: str | None = None
     # The EFFECTIVE harness registry (260703-L16): the builtin defaults merged with the

@@ -1,8 +1,8 @@
 """What the control plane needs to know about a seat, declared by the control plane.
 
-The routing, ladder and orphan predicates in this package all reason over the terminal
-seat catalog: who spawned whom, which seat is still running, which leaf a seat is bound
-to. They used to reach UP for that vocabulary and import
+The routing and rebind predicates in this package all reason over the terminal seat
+catalog: who spawned whom, which seat is still running, which leaf a seat is bound to.
+They used to reach UP for that vocabulary and import
 ``serving.terminal_catalog.TerminalCatalog`` directly, which put a pure decision inside
 the import closure of an HTTP application and made ``controlplane`` and ``serving``
 mutually dependent -- neither could be loaded, read or tested without the other.

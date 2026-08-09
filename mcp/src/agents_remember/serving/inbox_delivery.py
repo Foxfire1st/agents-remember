@@ -143,7 +143,7 @@ def _delivery_refusal(
         if gate_detail is not None:
             return _DeliveryOutcome("unconfirmed", "rejected", gate_detail)
     # Fail-closed availability gate: state-signal rows are gated BY ROW KIND regardless of
-    # which caller drives the delivery (first post, redelivery, or an escalation rung) --
+    # which caller drives the delivery (first post, redelivery, or a boundary drain) --
     # a mid-turn push would make acceptance terminal without the N1 gate, which is exactly
     # what landed-terminality must never mean. Other kinds use the caller's admission flag.
     if (entry.messageKind == "state-signal" or admission.boundary) and not seat_at_turn_boundary(

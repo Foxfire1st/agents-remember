@@ -26,11 +26,11 @@ sweep that folded once can drive many transitions without re-reading the log per
 
 The argument records below travel with the transitions rather than with the store,
 because each of them describes an INPUT to a decision -- what the adapter reported, what
-one delivery attempt did, what a re-firing condition refreshes, which rung the ladder is
-climbing to -- and the store has no use for any of them. ``RedeliveryFloor`` moved DOWN
-to this module from ``serving/inbox_delivery.py`` in the same change: it is the schedule
-a control-plane row is measured against, so a rank-12 package was declaring a rank-3
-concept, and the transition that reads it lives here.
+one delivery attempt did, what a re-firing condition refreshes, and why a row expires --
+and the store has no use for any of them. ``RedeliveryFloor`` moved DOWN to this module
+from ``serving/inbox_delivery.py`` in the same change: it is the schedule a control-plane
+row is measured against, so a rank-12 package was declaring a rank-3 concept, and the
+transition that reads it lives here.
 """
 
 from __future__ import annotations
@@ -38,7 +38,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime
 
-from agents_remember.controlplane.inbox_backoff import is_ladder_resolved, next_attempt_at
+from agents_remember.controlplane.inbox_backoff import next_attempt_at
 from agents_remember.controlplane.operator_inbox_records import (
     AdapterDeliveryState,
     InboxDeliveryState,
@@ -113,19 +113,6 @@ class AdapterCompletion:
 
     vendor_correlation_id: str | None = None
     detail: str | None = None
-
-
-@dataclass(frozen=True)
-class RungAdvance:
-    """The ladder rung to stamp and, when that rung re-addresses, the owner the row moves to.
-
-    One value because the ladder decides both together (``escalation_ladder.next_step``
-    returns the rung and its addressee as one step) and stamping one without the other
-    would leave a row escalated to nobody.
-    """
-
-    rung: int
-    readdress_to: InboxOwner | None = None
 
 
 @dataclass(frozen=True)
@@ -431,57 +418,6 @@ def record_adapter_completion(
     return completed
 
 
-def mark_escalated(
-    store: OperatorInboxStore,
-    entry_id: str,
-    *,
-    now: str,
-    current: InboxFold = None,
-) -> OperatorInboxEntry:
-    """Stamp ``escalatedAt`` once the ladder (HFX2-L4) escalates an unacked row.
-
-    HFX2-L2 only reserved the field -- it never called this itself; redelivery keeps
-    running until either ack or this mark, per R3.
-    """
-    entry = _require_entry(store, entry_id, current)
-    escalated = entry.model_copy(update={"ts": now, "escalatedAt": now})
-    store.append(escalated)
-    return escalated
-
-
-def advance_rung(
-    store: OperatorInboxStore,
-    entry_id: str,
-    advance: RungAdvance,
-    *,
-    now: str,
-    current: InboxFold = None,
-) -> OperatorInboxEntry:
-    """Stamp the ladder's next rung (260707-HFX2-L4, R1/R2): re-anchors ``escalatedAt`` to
-    ``now`` so the NEXT rung's SLA is measured from this transition, not the row's original
-    creation. Distinct from :func:`mark_escalated` (HFX2-L2's reserved "this row is now
-    escalatable" stamp, rung-agnostic) -- the ladder is the only caller of this function.
-
-    Ruled invariant (developer, 2026-07-09): the ladder climbs by MUTATING this one row --
-    with ``readdress_to`` the row itself moves to the next addressee (skip-level owner,
-    then the developer attention queue). It never mints a sibling row; one root cause is one
-    row for its whole ladder life. (The escalation storm that took the host down was every
-    rung transition posting a new pending row whose own rungs posted more rows.)
-    """
-    entry = _require_entry(store, entry_id, current)
-    update: dict[str, object] = {
-        "ts": now,
-        "rung": advance.rung,
-        "escalatedAt": now,
-        "rungTransitionAt": now,
-    }
-    if advance.readdress_to is not None:
-        update.update(_readdress_fields(advance.readdress_to))
-    advanced = entry.model_copy(update=update)
-    store.append(advanced)
-    return advanced
-
-
 def renew(
     store: OperatorInboxStore,
     entry_id: str,
@@ -511,28 +447,3 @@ def renew(
     renewed = entry.model_copy(update=update)
     store.append(renewed)
     return renewed
-
-
-def mark_ladder_resolved(
-    store: OperatorInboxStore,
-    entry_id: str,
-    *,
-    now: str,
-    reason: str,
-    current: InboxFold = None,
-) -> tuple[OperatorInboxEntry, bool]:
-    """Terminally resolve a ladder-complete row without treating it as an ack."""
-    entry = _require_entry(store, entry_id, current)
-    if is_ladder_resolved(entry):
-        return entry, False
-    resolved = entry.model_copy(
-        update={
-            "ts": now,
-            "state": "ladder-resolved",
-            "ladderResolvedAt": now,
-            "ladderResolvedReason": reason,
-            "nextAttemptAt": None,
-        }
-    )
-    store.append(resolved)
-    return resolved, True

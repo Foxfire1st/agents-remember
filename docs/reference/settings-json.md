@@ -354,7 +354,7 @@ with every parameter, vocabulary, and refusal is
 
 Hosted role dispatch uses the exact id through three states: `spawn_agent_session` returns
 `spawned-unbriefed`; `hosted_session_readiness` alone advances the exact seat to harness-ready;
-one durable exact-agent `dispatch-brief` starts the brief/turn-report clocks. Spawned-only and
+one durable exact-agent `dispatch-brief` starts the briefed-by deadline row. Spawned-only and
 not-ready seats are not active work. Briefed requires both `deliveryState=delivered` and
 `deliveryDetail=harness-log-confirmed`; failure leaves the original row pending without duplicate
 brief or respawn.
@@ -416,7 +416,7 @@ the safe defaults.
 | `redeliverRateLimitSeconds` | store default (`900`) | Per-row floor between redelivery attempts. Values below `900` seconds are refused. |
 | `signalCooldownSeconds` | `900` | Minimum interval between repeated pane/seat-liveness owner signals for the same target, leaf, finding kind, and detail. Values below `900` seconds are refused. |
 | `redeliverBudget` | `1` | Maximum inbox redelivery attempts per sweep. Harness-log confirmation is synchronous and bounded per input, so backlogs drain across sweeps without multiplying that wait inside one heartbeat tick. |
-| `escalationBudget` | `250` | Reserved (N3): the timed escalation ladder is demolished as policy -- inbox rows resolve by the 5-attempt ceiling (`unresolved`), the 5-minute rebind grace, or explicit supersession. This knob no longer gates sweep behavior and is removed with the demolition leaf. |
+| `escalationBudget` | `250` | Per-sweep load-shed cap on owner-signal emissions (seat-liveness + dead-upstream), the twin of `redeliverBudget`. Shed findings re-fire next sweep (level-triggered). Not a policy knob: the timed escalation ladder is retired. |
 
 `enabled: false` is the emergency kill switch for the agent-notifier loop. During the
 2026-07-09 redelivery-cadence incident the global coordinator settings disabled

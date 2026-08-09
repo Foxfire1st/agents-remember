@@ -71,7 +71,7 @@ def _find_coalescible(
 ) -> OperatorInboxEntry | None:
     """The ruled coalescing lookup (developer, 2026-07-09): an agent-notifier-authored condition that
     is still pending under the SAME ask identity is the row to renew -- matched on content, not
-    address, so a row the ladder has re-addressed still coalesces with its re-firing root
+    address, so a row the rebind machinery has re-addressed still coalesces with its re-firing root
     condition, and a legacy-prefix row still coalesces with a new-prefix re-fire."""
     for row in entries.values():
         if (
@@ -101,7 +101,7 @@ def _post_owner_signal(
     Ruled invariant (developer, 2026-07-09): one row per root cause. A condition that re-fires
     while its row is still pending RENEWS that row (bumped date, refreshed detail) instead of
     appending a duplicate -- the storm that took the host down was this function minting a new
-    pending row per re-fire, each of which the ladder then escalated into more rows.
+    pending row per re-fire, each of which then escalated into more rows.
     """
     sweep = options.sweep
     now = options.now

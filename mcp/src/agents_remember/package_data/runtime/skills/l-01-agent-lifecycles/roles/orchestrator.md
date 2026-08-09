@@ -454,7 +454,7 @@ task, fill small blanks, escalate real deltas).
 - **Stdin push** — the L2 agent-notifier's injector (HFX2-L3, the one standard wake mechanism) delivers
   into hosted sessions (echo-confirmed paste) on the sweep's own tick; the inbox is the non-hosted
   equivalent, never a hand-rolled poll of this seat's own.
-- **Idle is safe** — silence is supervised (the L2 sweep + L4 escalation ladder), so
+- **Idle is safe** — silence is supervised (the L2 sweep + the state-signal relay), so
   `lifecycle_turn_end_notification` / ending a turn with nothing pending is the correct move, not a
   risk to be covered by watching. **Watcher ban (uniform-mechanism ruling 2026-07-07):** never
   build a seat-local watcher of any kind.

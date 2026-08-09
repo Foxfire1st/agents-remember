@@ -135,7 +135,7 @@ def start_dispatch_expectations(
     entry: OperatorInboxEntry,
     target: TerminalCatalogEntry,
 ) -> None:
-    """Start the briefed-by clock from the one durable dispatch row.
+    """Start the briefed-by deadline row from the one durable dispatch row.
 
     The turn-report-by clock is retired: completion truth comes from the catalog turn
     projection, never from artifact/clock inference.
@@ -206,7 +206,7 @@ def delivery_is_briefed(entry: OperatorInboxEntry) -> bool:
 
 
 def dispatch_stays_on_exact_session(entry: OperatorInboxEntry) -> bool:
-    """Pending dispatch rows never enter a ladder that can readdress their exact agent id."""
+    """Pending dispatch rows are exact-pinned: they never rebind or readdress away."""
 
     return entry.messageKind == DISPATCH_BRIEF_KIND and entry.state == "pending"
 

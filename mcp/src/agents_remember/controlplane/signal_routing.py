@@ -144,7 +144,7 @@ def derive_leaf_manager_owner(
     attached to the same qualified master or currently parenting a seat bound to the same leaf.
     Only an unambiguous single live manager is used without a leaf/master anchor. If no concrete
     current manager can be proven, return the role-only manager mailbox; never fall directly to an
-    orchestrator or architect because the ladder owns later escalation.
+    orchestrator or architect -- dead-owner rows surface through the rebind/mailbox machinery.
     """
     direct_manager = _direct_live_manager(catalog, sender_agent_id)
     if direct_manager is not None:
@@ -280,40 +280,11 @@ def derive_signal_owner(
     )
 
 
-def _derive_spawn_owner(
-    catalog: SeatDirectory,
-    *,
-    sender_agent_id: str | None,
-    message_kind: InboxMessageKind,
-) -> RoutedOwner:
-    """One historical provenance hop for the escalation ladder only.
-
-    Initial signal addressing uses :func:`derive_signal_owner` and refuses stale managers. Once a
-    manager has failed, the ladder still needs the recorded edge in order to climb past that dead
-    seat to its owner; replacing this with current-manager routing would erase the path it must walk.
-    """
-    if message_kind == "decision-item":
-        return RoutedOwner(role="architect")
-    if sender_agent_id is None:
-        return RoutedOwner()
-    entry = catalog.get(sender_agent_id)
-    if entry is None or entry.spawn_role is None:
-        return RoutedOwner()
-    owner_role = _OWNER_ROLE_BY_SENDER_SPAWN_ROLE.get(entry.spawn_role)
-    if owner_role is None:
-        return RoutedOwner()
-    return RoutedOwner(
-        role=owner_role,
-        agent_id=entry.spawned_by_session,
-        lifecycle_id=entry.spawned_by_lifecycle,
-    )
-
-
 def is_seat_dead(catalog: SeatDirectory, agent_id: str | None) -> bool:
     """Whether ``agent_id`` cannot receive a delivery: unknown to the catalog, or not ``running``
     (260707-HFX2-L4). A row with no catalog trace at all (never spawned through the harness path,
-    a role-only mailbox) counts as dead here -- there is nothing live to skip TO it, so the ladder
-    walk (below) treats "no evidence of life" the same as "confirmed dead"."""
+    a role-only mailbox) counts as dead here -- there is nothing live to address, so the rebind
+    machinery treats "no evidence of life" the same as "confirmed dead"."""
     if agent_id is None:
         return True
     entry = catalog.get(agent_id)
@@ -485,46 +456,3 @@ def _owner_for_stamped_role(
     if entry.ownerRole == "architect":
         return derive_architect_owner(catalog, leaf_key=entry.leafKey)
     return RoutedOwner()
-
-
-def derive_skip_level_owner(
-    catalog: SeatDirectory,
-    *,
-    sender_agent_id: str | None,
-    message_kind: InboxMessageKind,
-) -> RoutedOwner:
-    """R2/R4 (260707-HFX2-L4): the SENDER's owner's owner -- two spawn-provenance hops, walking
-    PAST any dead node encountered along the way rather than landing a signal on it.
-
-    This is deliberately a second, separate function rather than a parameter on
-    :func:`derive_signal_owner` (whose one-hop invariant a test locks: "no layer is addressed its
-    grandchildren's noise" -- that rule is about who ADDRESSES whom, not about how many hops THIS
-    walker takes to find a live address for the SAME sender). Two hops means: hop 1 is
-    ``derive_signal_owner(sender)`` (the ordinary owner -- the rung-1 addressee); hop 2 is
-    ``derive_signal_owner(hop-1's owner)`` (the owner's owner -- the rung-2/skip-level and R4
-    grandparent-signal target). If landing on a hop is dead, the walk continues FROM that hop
-    exactly as if it had answered -- so a dead direct owner is transparently skipped (its own
-    owner becomes the effective rung-1 stand-in) and a dead owner's-owner is walked past too (the
-    walk never stops on a confirmed-dead address). A cycle or an exhausted chain (no further owner
-    role mapping -- e.g. the top is an orchestrator, which has none) returns whatever the walk last
-    resolved, ``RoutedOwner()`` if nothing did.
-    """
-    seen: set[str] = set()
-    current_agent_id = sender_agent_id
-    hops_done = 0
-    owner = RoutedOwner()
-    while True:
-        if current_agent_id is None or current_agent_id in seen:
-            return owner if hops_done >= 2 else RoutedOwner()
-        seen.add(current_agent_id)
-        owner = _derive_spawn_owner(
-            catalog, sender_agent_id=current_agent_id, message_kind=message_kind
-        )
-        if owner.agent_id is None:
-            return owner
-        current_agent_id = owner.agent_id
-        hops_done += 1
-        if hops_done >= 2 and not is_seat_dead(catalog, owner.agent_id):
-            return owner
-        if len(seen) > 64:  # pathological-chain guard; never hangs on a corrupt catalog
-            return owner

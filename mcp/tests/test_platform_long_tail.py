@@ -236,8 +236,9 @@ class MemoryBaselineParserTests(unittest.TestCase):
         self.assertEqual(args.topology, "external")
 
 
-class EscalationSettingsTests(unittest.TestCase):
-    """``orchestration.escalation`` timings, read from developer-owned settings text."""
+class RetiredEscalationSettingsTests(unittest.TestCase):
+    """The ``orchestration.escalation`` ladder family is demolished: any file that sets it
+    fails loud as an unknown key."""
 
     def settings_root(self, escalation: dict[str, Any]) -> Path:
         tmp = tempfile.TemporaryDirectory()
@@ -250,36 +251,21 @@ class EscalationSettingsTests(unittest.TestCase):
         )
         return root
 
-    def test_a_non_numeric_rung_key_is_refused_by_name(self) -> None:
-        """JSON object keys are strings, so a rung can be anything. One that is not a
-        number must be named in the refusal rather than silently ignored -- a dropped
-        rung is a dwell time that never takes effect."""
-        root = self.settings_root({"rungSeconds": {"soon": 30}})
+    def test_escalation_family_is_refused_loud(self) -> None:
+        root = self.settings_root({})
 
         with self.assertRaises(AgenticSettingsError) as raised:
             load_agentic_settings(root)
 
-        self.assertIn("rungSeconds key 'soon' must be one of", str(raised.exception))
+        self.assertIn("escalation", str(raised.exception))
 
-    def test_a_numeric_but_unknown_rung_is_refused(self) -> None:
-        root = self.settings_root({"rungSeconds": {"99": 30}})
+    def test_respawn_after_rung_is_refused_with_the_family(self) -> None:
+        root = self.settings_root({"respawnAfterRung": 2})
 
         with self.assertRaises(AgenticSettingsError) as raised:
             load_agentic_settings(root)
 
-        self.assertIn("rungSeconds key '99' must be one of", str(raised.exception))
-
-    def test_omitting_respawn_after_rung_keeps_the_default(self) -> None:
-        root = self.settings_root({"rungSeconds": {"1": 30}})
-        default_root = self.settings_root({})
-
-        settings = load_agentic_settings(root)
-
-        self.assertEqual(
-            settings.escalation.respawn_after_rung,
-            load_agentic_settings(default_root).escalation.respawn_after_rung,
-        )
-        self.assertEqual(settings.escalation.rung_seconds[1], 30)
+        self.assertIn("escalation", str(raised.exception))
 
 
 class InboxRenewalTests(unittest.TestCase):

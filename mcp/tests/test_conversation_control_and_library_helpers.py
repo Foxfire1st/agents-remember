@@ -63,6 +63,7 @@ from agents_remember.serving.conversation.models import (
     OperationFingerprint,
     ToolInputBlock,
     ToolOutputBlock,
+    UnknownVendorBlock,
     operation_fingerprint,
 )
 from agents_remember.serving.conversation.projectors import projector_for
@@ -933,7 +934,7 @@ class ActiveProjectorPollLoopTests(unittest.IsolatedAsyncioTestCase):
         assert sentinel is projector_facade.CLOSE_SENTINEL
         assert projector._closed is True
 
-    async def test_an_unmappable_native_frame_emits_an_ordering_fault_gap(self) -> None:
+    async def test_an_unmappable_native_frame_degrades_without_an_ordering_fault_gap(self) -> None:
         bridge = _ScriptedBridge()
         bridge.native_frames = [
             NativeEvidenceFrame(
@@ -945,13 +946,16 @@ class ActiveProjectorPollLoopTests(unittest.IsolatedAsyncioTestCase):
         ]
         projector = self._projector(bridge)
 
-        with mock.patch.object(projector_facade, "POLL_INTERVAL_SECONDS", 0.0):
-            queue = await self._run_until_stopped(projector)
+        page = await projector.page(before_ordinal=None, limit=10)
 
-        envelope, sentinel = await self._drain(queue)
-        assert envelope.mutation.reason == "ordering-fault"  # type: ignore[attr-defined]
-        assert sentinel is projector_facade.CLOSE_SENTINEL
-        assert projector._closed is True
+        (item,) = page.items
+        assert item.item_id == "n1"
+        assert item.turn_id == "turn-1"
+        (block,) = item.blocks
+        assert isinstance(block, UnknownVendorBlock)
+        assert block.vendor_type == "codex:malformed"
+        assert projector._closed is False
+        assert all(envelope.mutation.op != "gap" for envelope in projector.retained_after(0))
 
     async def test_repeated_control_failures_gap_only_at_the_read_failure_ceiling(self) -> None:
         bridge = _ScriptedBridge()

@@ -35,7 +35,6 @@ from agents_remember.controlplane.operator_inbox_transitions import (
     AdapterReceipt,
     DeliveryAttempt,
     RedeliveryFloor,
-    RungAdvance,
 )
 from agents_remember.mcp.tools import operator_inbox as inbox_tools
 from agents_remember.serving.dispatch_brief import HostedDelivery
@@ -348,64 +347,50 @@ class OperatorInboxStoreTests(unittest.TestCase):
         # N16: consume no longer stops redelivery -- only landing/terminal resolution does.
         self.assertEqual([entry.id for entry in self.store.list_redeliverable(now=now)], ["A"])
 
-    def test_mark_escalated_stamps_the_reserved_field(self) -> None:
+    def test_legacy_ladder_resolved_row_is_terminal_without_ack(self) -> None:
+        """The pre-formal-vocabulary terminal state stays parse-compatible and terminal."""
         self.store.append(self._entry("A"))
-        escalated = inbox_transitions.mark_escalated(self.store, "A", now=T2)
-        self.assertEqual(escalated.escalatedAt, T2)
-
-    def test_advance_rung_stamps_rung_and_reanchors_escalated_at(self) -> None:
-        self.store.append(self._entry("A"))
-        advanced = inbox_transitions.advance_rung(self.store, "A", RungAdvance(rung=1), now=T2)
-        self.assertEqual(advanced.rung, 1)
-        self.assertEqual(advanced.escalatedAt, T2)
-        self.assertEqual(advanced.rungTransitionAt, T2)
-        T3 = "2026-06-23T10:20:00+00:00"
-        advanced_again = inbox_transitions.advance_rung(
-            self.store, "A", RungAdvance(rung=2), now=T3
+        self.store.append(
+            self._entry("A").model_copy(
+                update={
+                    "state": "ladder-resolved",
+                    "terminalAt": T2,
+                    "ladderResolvedAt": T2,
+                    "ladderResolvedReason": "legacy ladder-resolved row",
+                    "nextAttemptAt": None,
+                }
+            )
         )
-        self.assertEqual(advanced_again.rung, 2)
-        self.assertEqual(advanced_again.escalatedAt, T3)
-        self.assertEqual(advanced_again.rungTransitionAt, T3)
-
-    def test_advance_rung_unknown_entry_raises(self) -> None:
-        with self.assertRaises(KeyError):
-            inbox_transitions.advance_rung(self.store, "missing", RungAdvance(rung=1), now=T2)
-
-    def test_ladder_resolved_is_terminal_without_ack(self) -> None:
-        self.store.append(self._entry("A"))
-        resolved, resolved_now = inbox_transitions.mark_ladder_resolved(
-            self.store,
-            "A",
-            now=T2,
-            reason="terminal ladder rung reached for non-live target seat",
-        )
-        self.assertTrue(resolved_now)
-        self.assertEqual(resolved.state, "ladder-resolved")
-        self.assertEqual(resolved.ladderResolvedAt, T2)
-        self.assertIsNone(resolved.nextAttemptAt)
+        current = self.store.current()["A"]
+        self.assertEqual(current.state, "ladder-resolved")
+        self.assertEqual(current.ladderResolvedAt, T2)
+        self.assertIsNone(current.nextAttemptAt)
         consumed, consumed_now = self.store.consume(
             "A", now="2026-06-23T10:10:00+00:00", consumed_by="model", consumed_via="cli"
         )
         self.assertFalse(consumed_now)
         self.assertEqual(consumed.state, "ladder-resolved")
 
-    def test_resolving_an_already_resolved_ladder_row_is_idempotent(self) -> None:
-        # The agent-notifier sweep is level-triggered and re-decides the same finding on every
-        # pass, so this is the ordinary case rather than a corner: the second call must
-        # report `resolved_now=False` and append nothing, or one dead seat would grow the
-        # log a row per sweep.
-        self.store.append(self._entry("A"))
-        inbox_transitions.mark_ladder_resolved(self.store, "A", now=T2, reason="first pass")
-        rows_after_first = len(self.store.read())
-
-        again, resolved_now = inbox_transitions.mark_ladder_resolved(
-            self.store, "A", now="2026-06-23T10:30:00+00:00", reason="second pass"
+    def test_legacy_ladder_resolved_row_stays_terminal_across_folds(self) -> None:
+        self.store.append(
+            self._entry("A").model_copy(
+                update={
+                    "state": "ladder-resolved",
+                    "terminalAt": T2,
+                    "ladderResolvedAt": T2,
+                    "nextAttemptAt": None,
+                }
+            )
         )
-
-        self.assertFalse(resolved_now)
-        self.assertEqual(again.ladderResolvedAt, T2)
-        self.assertEqual(again.ladderResolvedReason, "first pass")
-        self.assertEqual(len(self.store.read()), rows_after_first)
+        # A physically later stale pending snapshot cannot resurrect the terminal state.
+        self.store.append(
+            self._entry("A").model_copy(
+                update={"ts": "2026-06-23T10:30:00+00:00", "state": "pending"}
+            )
+        )
+        folded = self.store.current()["A"]
+        self.assertEqual(folded.state, "ladder-resolved")
+        self.assertEqual(folded.ladderResolvedAt, T2)
 
     def test_compaction_keeps_an_ancient_pending_row_for_the_sweep_to_expire(self) -> None:
         # §9/N13: the pending TTL is a resolution boundary owned by the sweep -- an older
@@ -463,15 +448,17 @@ class OperatorInboxStoreTests(unittest.TestCase):
         self.assertIn(f"row-{total - 1:04d}", kept_ids)
 
     def test_compaction_prunes_ladder_resolved_rows(self) -> None:
-        self.store.append(self._entry("A"))
-        inbox_transitions.mark_ladder_resolved(
-            self.store,
-            "A",
-            now=T2,
-            reason="terminal ladder rung reached for non-live target seat",
+        self.store.append(
+            self._entry("A").model_copy(
+                update={
+                    "state": "ladder-resolved",
+                    "terminalAt": "2020-01-01T00:00:00+00:00",
+                    "nextAttemptAt": None,
+                }
+            )
         )
         removed = self.store.compact(now=datetime.now(UTC))
-        self.assertEqual(removed, 2)
+        self.assertEqual(removed, 1)
         self.assertEqual(self.store.read(), [])
 
     def test_compaction_still_prunes_a_stale_consumed_row(self) -> None:

@@ -1,4 +1,4 @@
-"""Tests for R2 durable expectation rows (260707-HFX2-L1): store semantics + settings SLAs."""
+"""Tests for R2 durable owner-visible expectation rows: store semantics + settings SLAs."""
 
 from __future__ import annotations
 
@@ -34,13 +34,13 @@ class ExpectationRowRecordTests(unittest.TestCase):
     def test_create_is_pending_with_dueAt_from_sla(self) -> None:
         now = datetime.fromisoformat(T1)
         row = create_expectation_row(
-            Expectation(kind="ack-by", source_id="entry-1"),
+            Expectation(kind="verdict-by", source_id="gate-1"),
             row_id="R1",
             now=T1,
             due_at=due_at_from_sla(now=now, sla_seconds=300.0),
         )
         self.assertEqual(row.state, "pending")
-        self.assertEqual(row.kind, "ack-by")
+        self.assertEqual(row.kind, "verdict-by")
         self.assertEqual(row.dueAt, "2026-06-23T10:05:00+00:00")
 
     def test_mark_met_is_idempotent(self) -> None:
@@ -55,7 +55,7 @@ class ExpectationRowRecordTests(unittest.TestCase):
 
     def test_mark_missed_is_idempotent_and_wont_overwrite_met(self) -> None:
         row = create_expectation_row(
-            Expectation(kind="turn-report-by", source_id="session-1"),
+            Expectation(kind="briefed-by", source_id="session-1"),
             row_id="R1",
             now=T1,
             due_at=T1,
@@ -91,7 +91,7 @@ class ExpectationRowStoreTests(unittest.TestCase):
     def test_pending_excludes_met_rows(self) -> None:
         write_expectation_row(
             self.store,
-            Expectation(kind="ack-by", source_id="entry-1"),
+            Expectation(kind="briefed-by", source_id="entry-1"),
             row_id="R1",
             now=datetime.fromisoformat(T1),
             sla_seconds=300.0,
@@ -102,14 +102,14 @@ class ExpectationRowStoreTests(unittest.TestCase):
     def test_overdue_returns_only_rows_past_dueAt(self) -> None:
         write_expectation_row(
             self.store,
-            Expectation(kind="ack-by", source_id="entry-1"),
+            Expectation(kind="verdict-by", source_id="gate-1"),
             row_id="R1",
             now=datetime.fromisoformat(T1),
             sla_seconds=60.0,
         )
         write_expectation_row(
             self.store,
-            Expectation(kind="ack-by", source_id="entry-2"),
+            Expectation(kind="verdict-by", source_id="gate-2"),
             row_id="R2",
             now=datetime.fromisoformat(T1),
             sla_seconds=3600.0,
@@ -121,18 +121,18 @@ class ExpectationRowStoreTests(unittest.TestCase):
     def test_find_by_source_matches_kind_and_source(self) -> None:
         write_expectation_row(
             self.store,
-            Expectation(kind="ack-by", source_id="entry-1"),
+            Expectation(kind="briefed-by", source_id="entry-1"),
             row_id="R1",
             now=datetime.fromisoformat(T1),
             sla_seconds=300.0,
         )
-        found = self.store.find_by_source("entry-1", kind="ack-by")
+        found = self.store.find_by_source("entry-1", kind="briefed-by")
         assert found is not None
         self.assertEqual(found.id, "R1")
         self.assertIsNone(self.store.find_by_source("entry-1", kind="verdict-by"))
         self.assertIsNone(self.store.find_by_source("nope"))
 
-    def test_mark_missed_via_store_is_reserved_for_the_ladder(self) -> None:
+    def test_mark_missed_via_store_is_an_owner_side_primitive(self) -> None:
         write_expectation_row(
             self.store,
             Expectation(kind="verdict-by", source_id="gate-1"),
@@ -153,14 +153,19 @@ class ExpectationSettingsParserTests(unittest.TestCase):
     def test_absent_block_returns_documented_defaults(self) -> None:
         settings = _parse_expectations(None, source="<none>")
         self.assertEqual(settings.sla_seconds, DEFAULT_EXPECTATION_SLA_SECONDS)
-        self.assertEqual(settings.sla_for("ack-by"), 300.0)
+        self.assertEqual(settings.sla_for("briefed-by"), 120.0)
+        self.assertEqual(settings.sla_for("verdict-by"), 1800.0)
 
     def test_override_replaces_only_the_named_kind(self) -> None:
-        settings = _parse_expectations({"defaults": {"ack-by": 60.0}}, source="<test>")
-        self.assertEqual(settings.sla_for("ack-by"), 60.0)
+        settings = _parse_expectations({"defaults": {"verdict-by": 60.0}}, source="<test>")
+        self.assertEqual(settings.sla_for("verdict-by"), 60.0)
         self.assertEqual(
             settings.sla_for("briefed-by"), DEFAULT_EXPECTATION_SLA_SECONDS["briefed-by"]
         )
+
+    def test_retired_kind_fails_loud(self) -> None:
+        with self.assertRaises(AgenticSettingsError):
+            _parse_expectations({"defaults": {"ack-by": 60.0}}, source="<test>")
 
     def test_unknown_kind_fails_loud(self) -> None:
         with self.assertRaises(AgenticSettingsError):
@@ -168,7 +173,7 @@ class ExpectationSettingsParserTests(unittest.TestCase):
 
     def test_non_positive_sla_fails_loud(self) -> None:
         with self.assertRaises(AgenticSettingsError):
-            _parse_expectations({"defaults": {"ack-by": 0}}, source="<test>")
+            _parse_expectations({"defaults": {"briefed-by": 0}}, source="<test>")
 
     def test_unknown_top_level_field_fails_loud(self) -> None:
         with self.assertRaises(AgenticSettingsError):

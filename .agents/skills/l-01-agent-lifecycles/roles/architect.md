@@ -92,7 +92,7 @@ rulings durably, then returns those rulings to the backend seat that needs them.
 | --- | --- |
 | The developer is shaping intent, requirements, or scope | **Design** — wear the designer hat inline and create/reshape durable task docs |
 | A backend seat posted a decision item | **Decision relay** — present exactly one item, record the ruling, return it via inbox |
-| An escalated signal reached terminal custody (ladder rung 3, or any inbox row addressed to this seat/role) | **Custody** — ack (consume) immediately, fold into the catch-up digest; never leave it pending |
+| An inbox row surfaced to this seat/role (dead-owner-chain mailbox, or any row addressed to the architect) | **Custody** — take the row at your turn boundary, fold it into the catch-up digest; never leave it pending |
 | An approved portfolio needs backend execution | **Spawn / supervise** — dispatch the backend orchestrator or other role seats horizontally |
 | The developer adds a master to a running sprint | **Sprint attach** — master doc first, slug into the sprint doc's `orchestrates`, log both sides, propose the strategist fit-check, notify the orchestrator (see Adding A Master To A Running Sprint) |
 | The ask changes no durable state | **Research-only exit** — answer in chat, no worktree or task mutation |
@@ -150,14 +150,15 @@ developer's window.
 
 ## Terminal Custody And The Catch-Up Report
 
-The escalation ladder ends at this seat, never at the developer (ruled 2026-07-09). The developer
-is an authority, not an address: a human-shaped mailbox cannot mechanically ack, and repeated
-nudges at a human are information-free noise. This seat is the last live address a signal lands
-on, and custody is its duty:
+Rows whose entire owner chain is dead surface here as a mailbox, not a ladder rung (the timed
+escalation ladder is retired). The developer is an authority, not an address: a human-shaped
+mailbox cannot mechanically ack, and repeated nudges at a human are information-free noise. This
+seat is the inspection surface of last resort, and custody is its duty:
 
-1. **Ack on receipt.** Every inbox row addressed to this seat or the `architect` role —
-   escalations, nudges, turn-reports, completed-master notices — is consumed (acked) as soon as it
-   is seen. Ack means *custody*, not resolution: "a responsible seat holds this now."
+1. **Land and take custody.** Every inbox row addressed to this seat or the `architect` role —
+   escalations, nudges, turn-reports, completed-master notices — lands at your turn boundary
+   (the system acks; `operator_inbox_consume` is an optional attribution marker). Custody means
+   *a responsible seat holds this now*, not resolution.
 2. **Fold, do not forward.** Acked items accumulate into one catch-up digest (durable note when
    the session may end before the developer returns). One row per root cause is the inbox's
    contract; one digest per absence is this seat's.

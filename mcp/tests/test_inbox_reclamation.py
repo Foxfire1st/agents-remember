@@ -27,7 +27,6 @@ from agents_remember.controlplane.operator_inbox_records import (
     create_operator_inbox_entry,
 )
 from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
-from agents_remember.controlplane.orchestration_nudges import OrchestrationNudgeStore
 from agents_remember.observer.store import EventStore
 from agents_remember.serving.agent_notifier import run_agent_notifier_sweep
 from agents_remember.serving.agent_notifier_heartbeat import AgentNotifierHeartbeatStore
@@ -190,11 +189,15 @@ class ReconcileAndCompactTests(unittest.TestCase):
     def test_terminal_fold_dominates_a_physically_later_stale_pending_snapshot(self) -> None:
         pending = _inbox_entry("n1")
         self.store.append(pending)
-        inbox_transitions.mark_ladder_resolved(
-            self.store,
-            "n1",
-            now=(NOW + timedelta(seconds=1)).isoformat(),
-            reason=CONFIRMED_GONE_REASON,
+        self.store.append(
+            pending.model_copy(
+                update={
+                    "ts": (NOW + timedelta(seconds=1)).isoformat(),
+                    "state": "ladder-resolved",
+                    "ladderResolvedAt": (NOW + timedelta(seconds=1)).isoformat(),
+                    "nextAttemptAt": None,
+                }
+            )
         )
         self.store.append(
             pending.model_copy(update={"ts": (NOW + timedelta(seconds=2)).isoformat()})
@@ -279,7 +282,6 @@ class AgentNotifierReclamationIntegrationTests(unittest.TestCase):
                 paster=cast(TerminalPaster, _Paster()),
                 inbox_store=inbox_store,
                 expectation_store=ExpectationRowStore(observer_root),
-                nudge_store=OrchestrationNudgeStore(observer_root),
                 signal_cooldown_store=AgentNotifierSignalCooldownStore(observer_root),
                 event_store=event_store,
                 heartbeat_store=AgentNotifierHeartbeatStore(observer_root),
@@ -341,7 +343,6 @@ class AgentNotifierReclamationIntegrationTests(unittest.TestCase):
                 paster=cast(TerminalPaster, _Paster()),
                 inbox_store=inbox_store,
                 expectation_store=ExpectationRowStore(observer_root),
-                nudge_store=OrchestrationNudgeStore(observer_root),
                 signal_cooldown_store=AgentNotifierSignalCooldownStore(observer_root),
                 event_store=event_store,
                 heartbeat_store=AgentNotifierHeartbeatStore(observer_root),

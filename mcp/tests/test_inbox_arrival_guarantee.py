@@ -34,7 +34,6 @@ from agents_remember.controlplane.operator_inbox_records import (
     create_operator_inbox_entry,
 )
 from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
-from agents_remember.controlplane.orchestration_nudges import OrchestrationNudgeStore
 from agents_remember.controlplane.signal_routing import (
     RoutedOwner,
     derive_architect_owner,
@@ -425,7 +424,6 @@ class TtlAndCapEvictionTests(unittest.TestCase):
             paster=cast("object", None),  # type: ignore[arg-type]
             inbox_store=self.inbox_store,
             expectation_store=ExpectationRowStore(self.observer_root),
-            nudge_store=OrchestrationNudgeStore(self.observer_root),
             signal_cooldown_store=AgentNotifierSignalCooldownStore(self.observer_root),
             event_store=self.event_store,
             heartbeat_store=self.heartbeat_store,
