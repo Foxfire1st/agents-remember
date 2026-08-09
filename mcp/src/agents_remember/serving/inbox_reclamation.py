@@ -7,7 +7,10 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Literal
 
-from agents_remember.controlplane.operator_inbox_records import OperatorInboxEntry
+from agents_remember.controlplane.operator_inbox_records import (
+    OperatorInboxEntry,
+    state_signal_landed,
+)
 from agents_remember.serving.terminal_catalog import TerminalCatalogEntry
 
 CONFIRMED_GONE_REASON = "subject-session-confirmed-gone"
@@ -137,6 +140,7 @@ def _eligible(entry: OperatorInboxEntry) -> bool:
         # Both values are the same relay-authored alert until the rename window closes.
         and entry.createdBy in {"supervisor", "agent-notifier"}
         and entry.messageKind in ("nudge", "escalation")
+        and not state_signal_landed(entry)
         and entry.subjectAgentId is not None
     )
 

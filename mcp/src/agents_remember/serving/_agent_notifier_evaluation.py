@@ -2,19 +2,25 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from pathlib import Path
 
 from agents_remember.controlplane.escalation_ladder import MAX_RUNG, rung_due
 from agents_remember.controlplane.expectation_rows import ExpectationRow, ExpectationRowStore
-from agents_remember.controlplane.operator_inbox_records import OperatorInboxEntry
+from agents_remember.controlplane.operator_inbox_records import (
+    OperatorInboxEntry,
+    state_signal_landed,
+)
 from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
-from agents_remember.controlplane.orchestration_artifacts import turn_report_artifact
-from agents_remember.controlplane.orchestration_nudges import missing_artifact
 from agents_remember.controlplane.signal_routing import is_seat_dead, leaf_chain_has_progress
 from agents_remember.serving.agent_notifier_models import AgentNotifierContext, AgentNotifierFinding
 from agents_remember.serving.agent_notifier_models import SweepState as _SweepState
 from agents_remember.serving.dispatch_brief import dispatch_stays_on_exact_session
 from agents_remember.serving.pane_signals import classify_pane_signal
+from agents_remember.serving.state_signals import (
+    evaluate_boundary_drain_findings,
+    evaluate_non_reaction_findings,
+    evaluate_state_signal_findings,
+    state_signal_held_on_boundary,
+)
 from agents_remember.serving.terminal_catalog import TerminalCatalog, TerminalCatalogEntry
 from agents_remember.serving.terminal_paste import capture_pane as default_capture_pane
 
@@ -26,7 +32,7 @@ through ``operator_inbox_transitions.mark_escalated``. What walks it from there 
 ``controlplane.escalation_ladder``, which anchors every rung's dwell on the ``escalatedAt``
 that transition stamps."""
 
-_INACTIVE_EXPECTATION_KINDS = frozenset({"briefed-by", "verdict-by", "ack-by"})
+_INACTIVE_EXPECTATION_KINDS = frozenset({"verdict-by", "ack-by"})
 
 # 260713-TES-L1 rename window: the seat-liveness ask prefix changed from "Supervisor observed
 # seat-liveness:" to "Agent notifier observed seat-liveness:". Both prefixes name the SAME
@@ -68,8 +74,8 @@ def evaluate_expectation_findings(
     now: datetime,
     catalog: TerminalCatalog | None = None,
 ) -> list[AgentNotifierFinding]:
-    """R2b: expectation-deadline expiry (briefed-by / verdict-by / ack-by; turn-report-by is
-    handled by :func:`evaluate_turn_report_findings` instead, since it needs a second check)."""
+    """R2b: expectation-deadline expiry (verdict-by / ack-by; dispatch-time SLA findings on the
+    worker→manager path are retired with the turn-truth relay)."""
     return [
         AgentNotifierFinding(
             kind="expectation-overdue",
@@ -83,53 +89,6 @@ def evaluate_expectation_findings(
         if row.kind in _INACTIVE_EXPECTATION_KINDS
         and not _expectation_chain_progressed(catalog, row)
     ]
-
-
-def turn_report_path_for_leaf_key(coordination_root: Path, leaf_key: str) -> Path | None:
-    """The standard worker turn-report path for a qualified ``repo/master/leaf-id`` key, or
-    ``None`` when the key is not in that shape (a malformed/legacy row -- never guessed at)."""
-    parts = leaf_key.split("/", 2)
-    if len(parts) != 3 or not all(parts):
-        return None
-    repo, master, doc_id = parts
-    task_root = coordination_root / "tasks" / repo / master
-    artifact = turn_report_artifact(task_root, doc_id, title=doc_id, runtime_root=coordination_root)
-    return Path(artifact.path)
-
-
-# 260731-EFA-L7 R10: verbatim L7 split (L7-OQ1 Option A serving scope); unchanged edge branch, out of this leaf's behavior scope (mcp/src/agents_remember/serving/_agent_notifier_evaluation.py:91).
-def evaluate_turn_report_findings(  # pragma: no cover
-    store: ExpectationRowStore,
-    *,
-    coordination_root: Path,
-    now: datetime,
-    catalog: TerminalCatalog | None = None,
-) -> list[AgentNotifierFinding]:
-    """R2c: turn-report staleness -- ``missing_artifact()`` finally gets its caller.
-
-    An overdue ``turn-report-by`` row alone is R2b's job; this predicate additionally confirms the
-    artifact itself is missing/empty before firing, so a worker who wrote the report but hasn't
-    yet had the row consumed does not trip a stale-report action.
-    """
-    findings: list[AgentNotifierFinding] = []
-    for row in store.overdue(now=now):
-        if row.kind != "turn-report-by" or row.leafKey is None:
-            continue
-        if _expectation_chain_progressed(catalog, row):
-            continue
-        path = turn_report_path_for_leaf_key(coordination_root, row.leafKey)
-        if path is not None and missing_artifact(path):
-            findings.append(
-                AgentNotifierFinding(
-                    kind="turn-report-stale",
-                    detail=str(path),
-                    session_id=row.subjectAgentId,
-                    leaf_key=row.leafKey,
-                    seat_role=row.seatRole,
-                    source_id=row.id,
-                )
-            )
-    return findings
 
 
 # 260731-EFA-L7 R10: verbatim L7 split (L7-OQ1 Option A serving scope); unchanged edge branch, out of this leaf's behavior scope (mcp/src/agents_remember/serving/_agent_notifier_evaluation.py:125).
@@ -345,6 +304,10 @@ def evaluate_escalation_findings(
     findings: list[AgentNotifierFinding] = []
     entries = store.current() if current is None else current
     for entry in entries.values():
+        if state_signal_landed(entry):
+            continue
+        if catalog is not None and state_signal_held_on_boundary(catalog, entry):
+            continue
         if catalog is not None and _inactivity_signal_chain_progressed(catalog, entry):
             continue
         if _delivery_failure_still_retrying(entry):
@@ -399,12 +362,6 @@ def evaluate_predicates(  # pragma: no cover
     findings: list[AgentNotifierFinding] = []
     inbox_current = sweep.inbox_current if sweep is not None else None
     findings += evaluate_expectation_findings(ctx.expectation_store, now=now, catalog=ctx.catalog)
-    findings += evaluate_turn_report_findings(
-        ctx.expectation_store,
-        coordination_root=ctx.coordination_root,
-        now=now,
-        catalog=ctx.catalog,
-    )
     findings += evaluate_ladder_terminal_findings(
         ctx.inbox_store, ctx.catalog, current=inbox_current
     )
@@ -422,6 +379,7 @@ def evaluate_predicates(  # pragma: no cover
             for entry in sweep.redeliverable_entries
             if not _ladder_terminal_and_dead(ctx.catalog, entry)
             and not _inactivity_signal_chain_progressed(ctx.catalog, entry)
+            and not state_signal_held_on_boundary(ctx.catalog, entry)
         ][: sweep.redeliver_budget]
         findings += [
             AgentNotifierFinding(
@@ -449,4 +407,11 @@ def evaluate_predicates(  # pragma: no cover
         ),
     )[: max(1, ctx.escalation_budget)]
     findings += evaluate_dead_upstream_findings(ctx.catalog)
+    findings += evaluate_state_signal_findings(ctx.catalog)
+    findings += evaluate_non_reaction_findings(ctx.catalog, ctx.inbox_store, now=now)
+    findings += evaluate_boundary_drain_findings(
+        ctx.catalog,
+        sweep.inbox_current if sweep is not None else {},
+        limit=max(1, ctx.redeliver_budget),
+    )
     return findings

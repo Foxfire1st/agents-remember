@@ -27,12 +27,14 @@ from agents_remember.serving.terminal_paste import TerminalPaster
 FindingKind = Literal[
     "pane-signal",
     "expectation-overdue",
-    "turn-report-stale",
     "inbox-redeliverable",
     "inbox-ladder-terminal",
     "seat-liveness",
     "escalation-due",
     "dead-upstream",
+    "state-signal-due",
+    "non-reaction-due",
+    "boundary-drain",
 ]
 ActionKind = Literal[
     "redeliver",
@@ -41,6 +43,9 @@ ActionKind = Literal[
     "signal-emit",
     "escalate-rung",
     "signal-manager",
+    "state-signal",
+    "non-reaction",
+    "boundary-drain",
     "none",
 ]
 

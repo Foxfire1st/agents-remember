@@ -7,7 +7,10 @@ import threading
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
-from typing import Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Protocol, cast, runtime_checkable
+
+if TYPE_CHECKING:
+    from agents_remember.serving.conversation.models import HarnessId
 
 from agents_remember.errors import HarnessControlError
 from agents_remember.serving.harness_control_client import read_control_snapshot
@@ -17,13 +20,24 @@ from agents_remember.serving.hosted_control_projection import (
     project_control_snapshot,
     snapshot_turn_state,
 )
+from agents_remember.serving.seat_turn_truth import (
+    record_terminal_cursors,
+    record_turn_projection,
+)
 from agents_remember.serving.terminal_catalog import (
     DEFAULT_LIVENESS_HYSTERESIS,
+    CatalogTurnEvidence,
     SeatTurnState,
     TerminalCatalog,
     TerminalCatalogEntry,
     TerminalCatalogLivenessConfig,
     TerminalLivenessEvidence,
+)
+from agents_remember.serving.terminal_evidence import (
+    TerminalEvidenceProjection,
+    TerminalEvidenceRead,
+    interrupted_origin,
+    read_entry_terminal_evidence,
 )
 from agents_remember.serving.terminal_paste import capture_pane as _default_capture_pane
 from agents_remember.serving.terminal_tmux import TmuxProbeResult
@@ -33,6 +47,7 @@ logger = logging.getLogger(__name__)
 
 PaneCapturer = Callable[[str], str]
 SnapshotReader = Callable[[TerminalCatalogEntry], AdapterSnapshot]
+TerminalEvidenceReader = Callable[[TerminalCatalogEntry], TerminalEvidenceRead]
 ControlSnapshotObserver = Callable[[TerminalCatalogEntry, AdapterSnapshot], None]
 
 DEFAULT_STARTING_SWEEP_INTERVAL_SECONDS = 1.0
@@ -81,6 +96,7 @@ class LivenessProbe:
     hysteresis: TerminalCatalogLivenessConfig = DEFAULT_LIVENESS_HYSTERESIS
     pane_capturer: PaneCapturer | None = None
     snapshot_reader: SnapshotReader = read_control_snapshot
+    terminal_reader: TerminalEvidenceReader = read_entry_terminal_evidence
     on_control_snapshot: ControlSnapshotObserver | None = None
     # When set (the sweeps' deferred drain), the synchronizer's evidence is APPENDED here
     # inside the catalog batch and the side effect runs after the commit; None (direct
@@ -358,6 +374,10 @@ def _observe_alive(
             pane_diagnostic=pane_diagnostic,
             checked_at=checked_at,
         )
+    # Read the terminal evidence BEFORE persisting the advanced snapshot pointer: the
+    # terminal cursors advance only on a successful read, so a failed read leaves the
+    # row at the pre-window position and the next sweep re-reads the same evidence.
+    terminal_read = _terminal_evidence(probe, entry)
     projected = project_control_snapshot(catalog, entry, snapshot)
     projected = replace(
         projected,
@@ -365,6 +385,14 @@ def _observe_alive(
     )
     previous_sync_error = (entry.control_raw or {}).get("interactionSyncError")
     catalog.upsert(projected)
+    if terminal_read is not None:
+        record_terminal_cursors(
+            catalog,
+            entry.id,
+            evidence_sequence=terminal_read.evidence_sequence,
+            native_cursor=terminal_read.native_cursor,
+        )
+    terminal_projection = terminal_read.projection if terminal_read is not None else None
     if probe.on_control_snapshot is not None:
         prior_error = previous_sync_error if isinstance(previous_sync_error, str) else None
         if probe.sync_collector is not None:
@@ -386,9 +414,32 @@ def _observe_alive(
     return _record_adapter_turn_state(
         catalog,
         projected,
-        snapshot_turn_state(snapshot, previous=projected.turn_state),
+        snapshot_turn_state(
+            snapshot,
+            cast("HarnessId | None", entry.harness),
+            previous=projected.turn_state,
+            terminal=terminal_projection.evidence if terminal_projection is not None else None,
+        ),
         checked_at,
+        terminal=terminal_projection,
     )
+
+
+def _terminal_evidence(
+    probe: LivenessProbe,
+    entry: TerminalCatalogEntry,
+) -> TerminalEvidenceRead | None:
+    """Lift the newest per-vendor terminal outcome for one catalog row.
+
+    The daemon surfaces are bounded working surfaces: a failed read means no new terminal
+    claim AND no cursor advance this sweep, so the next sweep re-reads the same window
+    (no evidence is ever skipped). A failed snapshot read is handled by the caller's
+    hysteresis; a failed terminal read must not fail the sweep.
+    """
+    try:
+        return probe.terminal_reader(entry)
+    except HarnessControlError:
+        return None
 
 
 def _observe_control_read_failure(
@@ -509,6 +560,8 @@ def _record_adapter_turn_state(
     entry: TerminalCatalogEntry,
     state: SeatTurnState | None,
     checked_at: datetime,
+    *,
+    terminal: TerminalEvidenceProjection | None = None,
 ) -> TerminalLivenessObservation:
     # A None projection makes NO seat claim this sweep (a healthy
     # boot or a fresh ready-idle chat) — the row keeps its last claim (or none) and no
@@ -516,7 +569,27 @@ def _record_adapter_turn_state(
     if state is None:
         return TerminalLivenessObservation(entry=entry, alive=True)
     previous_state = entry.turn_state
-    updated = catalog.record_turn_state(entry.id, state, changed_at=checked_at.isoformat())
+    # A sweep without new terminal evidence preserves the lifted outcome: terminal truth,
+    # once observed, is not un-written by a later non-terminal snapshot.
+    stamp = CatalogTurnEvidence(
+        state=state,
+        changed_at=checked_at.isoformat(),
+        terminal_outcome=(
+            terminal.evidence.outcome if terminal is not None else entry.terminal_outcome
+        ),
+        terminal_outcome_at=(
+            terminal.observed_at if terminal is not None else entry.terminal_outcome_at
+        ),
+        terminal_evidence_id=(
+            terminal.evidence_id if terminal is not None else entry.terminal_evidence_id
+        ),
+        interrupted_by=(
+            interrupted_origin(entry, terminal.evidence)
+            if terminal is not None
+            else entry.interrupted_by
+        ),
+    )
+    updated = record_turn_projection(catalog, entry.id, stamp)
     resolved = updated or entry
     changed = updated is not None and updated.turn_state != previous_state
     return TerminalLivenessObservation(entry=resolved, alive=True, turn_state_changed=changed)

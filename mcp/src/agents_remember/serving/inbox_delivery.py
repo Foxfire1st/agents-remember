@@ -30,7 +30,11 @@ from agents_remember.serving.harness_control_client import (
 )
 from agents_remember.serving.harness_control_models import ReconciliationResult, SubmissionReceipt
 from agents_remember.serving.hosted_session_runtime import HostedSessionRuntime
-from agents_remember.serving.terminal_catalog import TerminalCatalog, TerminalCatalogEntry
+from agents_remember.serving.terminal_catalog import (
+    TerminalCatalog,
+    TerminalCatalogEntry,
+    seat_at_turn_boundary,
+)
 from agents_remember.serving.terminal_paste import TerminalPaster
 
 
@@ -85,11 +89,14 @@ class DeliveryAdmission:
     """Whether this push is allowed to reach the wire at all.
 
     Both checks settle before any adapter call: ``submit`` is the caller's commitment to a real
-    adapter submission, and ``dispatch_gate`` is the exact-once gate a durable brief must pass.
+    adapter submission, ``dispatch_gate`` is the exact-once gate a durable brief must pass, and
+    ``boundary`` is the availability gate state signals hold behind until the target seat is at
+    a turn boundary (turn-ended / awaiting-input / ready-idle).
     """
 
     submit: bool = True
     dispatch_gate: DispatchBriefGate | None = None
+    boundary: bool = False
 
 
 _NO_ADAPTER_CORRELATION = _AdapterCorrelation()
@@ -135,6 +142,23 @@ def _delivery_refusal(
         )
         if gate_detail is not None:
             return _DeliveryOutcome("unconfirmed", "rejected", gate_detail)
+    # Fail-closed availability gate: state-signal rows are gated BY ROW KIND regardless of
+    # which caller drives the delivery (first post, redelivery, or an escalation rung) --
+    # a mid-turn push would make acceptance terminal without the N1 gate, which is exactly
+    # what landed-terminality must never mean. Other kinds use the caller's admission flag.
+    if (entry.messageKind == "state-signal" or admission.boundary) and not seat_at_turn_boundary(
+        target
+    ):
+        reason = (
+            "availability gate: state-signal rows push only at a turn boundary"
+            if entry.messageKind == "state-signal"
+            else "availability gate: target seat is not at a turn boundary"
+        )
+        return _DeliveryOutcome(
+            "queued",
+            "queued",
+            reason,
+        )
     return None
 
 
@@ -309,6 +333,14 @@ def _target_session(
     catalog: TerminalCatalog,
     entry: OperatorInboxEntry,
 ) -> TerminalCatalogEntry | None:
+    return target_session_for_entry(catalog, entry)
+
+
+def target_session_for_entry(
+    catalog: TerminalCatalog,
+    entry: OperatorInboxEntry,
+) -> TerminalCatalogEntry | None:
+    """The running catalog session a durable row is addressed to, by exact agent id first."""
     if entry.messageKind == DISPATCH_BRIEF_KIND:
         if entry.agentId is None:
             return None

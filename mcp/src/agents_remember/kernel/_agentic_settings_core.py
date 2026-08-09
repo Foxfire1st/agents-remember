@@ -123,12 +123,13 @@ DEFAULT_AGENT_NOTIFIER_ESCALATION_BUDGET = 250
 # what-must-happen-by-when row for, and their default SLAs (schema: docs/reference/settings-json.md,
 # Orchestration Expectations). Kept as a plain string set here (not imported from
 # controlplane.expectation_rows) to avoid a kernel<->controlplane import cycle; the two must be kept
-# in sync -- ``ExpectationKind`` in expectation_rows.py is the sole other definition.
-KNOWN_EXPECTATION_KINDS = frozenset({"briefed-by", "turn-report-by", "verdict-by", "ack-by"})
+# in sync -- ``ExpectationKind`` in expectation_rows.py is the sole other definition. The record
+# Literal additionally keeps ``turn-report-by`` for legacy-row parse compatibility; it is retired
+# from this settings surface with the catalog-truth relay.
+KNOWN_EXPECTATION_KINDS = frozenset({"briefed-by", "verdict-by", "ack-by"})
 KNOWN_EXPECTATIONS_FIELDS = frozenset({"defaults"})
 DEFAULT_EXPECTATION_SLA_SECONDS: dict[str, float] = {
     "briefed-by": 120.0,
-    "turn-report-by": 3600.0,
     "verdict-by": 1800.0,
     # Mirrors AGENT_PICKUP_TTL_SECONDS (interaction_retention.py) -- the existing dashboard
     # pickup-staleness convention for an unacked signal.

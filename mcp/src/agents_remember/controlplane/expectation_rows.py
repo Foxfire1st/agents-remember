@@ -1,8 +1,8 @@
 """R2 (260707-HFX2-L1): durable what-must-happen-by-when rows, written atomically at dispatch.
 
-Every dispatch surface -- a durable ``dispatch-brief`` inbox row (briefed-by, and turn-report-by
-when the target claims a leaf), a gate opening (verdict-by), and every operator-inbox post
-(ack-by) -- writes one durable :class:`ExpectationRow` in the SAME call that performs the
+Every dispatch surface -- a durable ``dispatch-brief`` inbox row (briefed-by), a gate opening
+(verdict-by), and every operator-inbox post (ack-by) -- writes one durable :class:`ExpectationRow`
+in the SAME call that performs the
 dispatch, never as a follow-up step a caller could forget. Seat spawn and readiness waiting start
 no assignment clock. Deadlines are ROWS an L2 sweep scans, never in-memory timers -- the Restate
 durable-timer lesson (R2): a row survives a daemon/MCP restart; a timer does not.
@@ -51,7 +51,7 @@ class ExpectationRow(DurableRecord):
     createdAt: str
     dueAt: str
     # The dispatch surface's own id this row rides beside -- the dispatch-brief inbox entry id
-    # (briefed-by / turn-report-by / ack-by) or a gate id (verdict-by). Lets a sweep or dashboard
+    # (briefed-by / ack-by) or a gate id (verdict-by). Lets a sweep or dashboard
     # resolve straight back to the thing it is a deadline FOR.
     sourceId: str
     subjectAgentId: str | None = None

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import contextlib
 from collections.abc import Callable
-from dataclasses import dataclass
 from datetime import datetime
 
 from agents_remember.controlplane import operator_inbox_transitions as inbox_transitions
@@ -13,18 +12,10 @@ from agents_remember.controlplane.agent_notifier_signals import (
 )
 from agents_remember.controlplane.escalation_ladder import next_step, seat_is_suspect
 from agents_remember.controlplane.operator_inbox_records import (
-    InboxAddress,
-    InboxDeliveryState,
-    InboxMessage,
-    InboxMessageKind,
     InboxOwner,
-    InboxPoster,
-    InboxRouting,
-    InboxSubject,
     OperatorInboxEntry,
-    create_operator_inbox_entry,
 )
-from agents_remember.controlplane.operator_inbox_transitions import InboxRenewal, RungAdvance
+from agents_remember.controlplane.operator_inbox_transitions import RungAdvance
 from agents_remember.controlplane.orchestration_nudges import (
     NudgeReason,
     OrchestrationNudgeRecord,
@@ -32,7 +23,6 @@ from agents_remember.controlplane.orchestration_nudges import (
 )
 from agents_remember.controlplane.orphan_policy import find_orphaned_workers
 from agents_remember.controlplane.signal_routing import (
-    RoutedOwner,
     derive_leaf_manager_owner,
     derive_signal_owner,
 )
@@ -41,7 +31,6 @@ from agents_remember.observer.ulid import new_ulid
 from agents_remember.serving._agent_notifier_evaluation import (
     PERSISTENT_FAILURE_ATTEMPTS,
     _ladder_terminal_and_dead,
-    _seat_liveness_ask_identity,
 )
 from agents_remember.serving.agent_notifier_models import (
     AgentNotifierActionResult,
@@ -56,11 +45,26 @@ from agents_remember.serving.dispatch_brief import (
 )
 from agents_remember.serving.hosted_session_runtime import HostedSessionRuntime
 from agents_remember.serving.inbox_delivery import (
+    DEFAULT_DELIVERY_ADMISSION,
+    DeliveryAdmission,
     InboxDeliveryLog,
     RedeliveryFloor,
     deliver_inbox_entry,
 )
+from agents_remember.serving.owner_signals import (
+    OwnerSignal,
+    OwnerSignalOptions,
+    _post_owner_signal,
+)
 from agents_remember.serving.retire import SeatClosure, retire_entry
+from agents_remember.serving.seat_turn_truth import (
+    record_non_reaction_emitted,
+    record_state_signal_emitted,
+)
+from agents_remember.serving.state_signals import (
+    non_reaction_response,
+    state_signal_response,
+)
 
 # The one event-rename seam for the compatibility window (260713-TES-L1): every agent-notifier
 # event is emitted under BOTH the current and the legacy name so observer-river consumers and
@@ -103,6 +107,11 @@ def _redeliver(  # pragma: no cover
         return AgentNotifierActionResult("redeliver", finding, "skipped", "entry not pending")
     if _ladder_terminal_and_dead(ctx.catalog, entry):
         return _resolve_ladder_terminal(ctx, finding, now=now, sweep=sweep)
+    admission = (
+        DeliveryAdmission(boundary=True)
+        if entry.messageKind == "state-signal"
+        else DEFAULT_DELIVERY_ADMISSION
+    )
     updated = deliver_inbox_entry(
         InboxDeliveryLog(
             store=ctx.inbox_store,
@@ -114,6 +123,7 @@ def _redeliver(  # pragma: no cover
         ),
         sessions=HostedSessionRuntime(catalog=ctx.catalog, host=ctx.host),
         paster=ctx.paster,
+        admission=admission,
     )
     sweep.remember(updated)
     fulfill_briefed_expectation(
@@ -200,10 +210,6 @@ def _escalate_inbox_entry(  # pragma: no cover
     )
 
 
-def _nudge_reason(finding: AgentNotifierFinding) -> NudgeReason:
-    return "missing-turn-report" if finding.kind == "turn-report-stale" else "inactive"
-
-
 def _auto_nudge(
     ctx: AgentNotifierContext,
     finding: AgentNotifierFinding,
@@ -219,13 +225,9 @@ def _auto_nudge(
     )
     if owner.agent_id is None and owner.lifecycle_id is None and owner.role is None:
         return AgentNotifierActionResult("auto-nudge", finding, "skipped", "no routable owner")
-    reason = _nudge_reason(finding)
+    reason: NudgeReason = "inactive"
     subject = finding.leaf_key or finding.session_id or finding.detail
-    message = nudge_message(
-        reason,
-        subject=subject,
-        artifact_path=finding.detail if finding.kind == "turn-report-stale" else None,
-    )
+    message = nudge_message(reason, subject=subject)
     record = ctx.nudge_store.record(
         OrchestrationNudgeRecord(
             id=new_ulid(),
@@ -236,7 +238,7 @@ def _auto_nudge(
             targetLifecycleId=owner.lifecycle_id,
             subjectAgentId=finding.session_id,
             subjectLifecycleId=None,
-            artifactPath=finding.detail if finding.kind == "turn-report-stale" else None,
+            artifactPath=None,
             message=message,
         ),
         rate_limit_seconds=ctx.nudge_rate_limit_seconds,
@@ -268,8 +270,7 @@ def _auto_nudge(
             seat_role=finding.seat_role,
             subject_agent_id=finding.session_id,
         ),
-        now=now,
-        sweep=sweep,
+        OwnerSignalOptions(now=now, sweep=sweep),
     )
     _mark_expectation_missed(ctx, finding, now=now, sweep=sweep)
     return AgentNotifierActionResult("auto-nudge", finding, "sent", delivered)
@@ -297,138 +298,6 @@ def _mark_expectation_missed(  # pragma: no cover
         )
         if sweep is not None:
             sweep.remember_expectation(marked)
-
-
-def _find_coalescible(
-    entries: dict[str, OperatorInboxEntry],
-    *,
-    ask: str,
-    message_kind: InboxMessageKind,
-    leaf_key: str | None,
-    seat_role: str | None,
-) -> OperatorInboxEntry | None:
-    """The ruled coalescing lookup (developer, 2026-07-09): an agent-notifier-authored condition that
-    is still pending under the SAME ask identity is the row to renew -- matched on content, not
-    address, so a row the ladder has re-addressed still coalesces with its re-firing root
-    condition, and a legacy-prefix row still coalesces with a new-prefix re-fire."""
-    for row in entries.values():
-        if (
-            row.state == "pending"
-            # Legacy rows created before the rename window carry "supervisor"; both are the
-            # same relay-authored condition and must coalesce until the window closes.
-            and row.createdBy in {"supervisor", "agent-notifier"}
-            and row.messageKind == message_kind
-            # The ask prefix was renamed too; both prefixes are one signal identity, so a
-            # new-format re-fire renews a legacy-format pending row (one row per root cause).
-            and _seat_liveness_ask_identity(row.ask) == _seat_liveness_ask_identity(ask)
-            and row.leafKey == leaf_key
-            and row.seatRole == seat_role
-        ):
-            return row
-    return None
-
-
-@dataclass(frozen=True)
-class OwnerSignal:
-    """One owner-addressed signal: what is being said, and about which seat.
-
-    The message and its subject are inseparable here -- coalescing looks up an existing row by
-    (ask, kind, leaf, role), and renewal rewrites the subject from the same value, so a message
-    carrying someone else's subject silently renews the wrong row.
-    """
-
-    message_kind: InboxMessageKind
-    ask: str
-    response: str
-    leaf_key: str | None = None
-    seat_role: str | None = None
-    subject_agent_id: str | None = None
-
-
-# 260731-EFA-L7 R10: verbatim L7 split (L7-OQ1 Option A serving scope); unchanged edge branch, out of this leaf's behavior scope (mcp/src/agents_remember/serving/_agent_notifier_actions.py:323).
-def _post_owner_signal(  # pragma: no cover
-    ctx: AgentNotifierContext,
-    owner: RoutedOwner,
-    signal: OwnerSignal,
-    *,
-    now: datetime,
-    sweep: _SweepState | None = None,
-) -> InboxDeliveryState:
-    """R4c: emit one owner-addressed signal row (L1 routing), attempt hosted delivery, and write
-    its ack-by expectation row -- the same atomic-at-post shape every other dispatch surface uses.
-
-    Ruled invariant (developer, 2026-07-09): one row per root cause. A condition that re-fires
-    while its row is still pending RENEWS that row (bumped date, refreshed detail) instead of
-    appending a duplicate -- the storm that took the host down was this function minting a new
-    pending row per re-fire, each of which the ladder then escalated into more rows."""
-    entries = sweep.inbox_current if sweep is not None else ctx.inbox_store.current()
-    subject = InboxSubject(
-        leaf_key=signal.leaf_key, seat_role=signal.seat_role, agent_id=signal.subject_agent_id
-    )
-    existing = _find_coalescible(
-        entries,
-        ask=signal.ask,
-        message_kind=signal.message_kind,
-        leaf_key=signal.leaf_key,
-        seat_role=signal.seat_role,
-    )
-    if existing is not None:
-        entry = inbox_transitions.renew(
-            ctx.inbox_store,
-            existing.id,
-            InboxRenewal(
-                response=signal.response,
-                subject=subject,
-                readdress_to=InboxOwner(
-                    role=owner.role, agent_id=owner.agent_id, lifecycle_id=owner.lifecycle_id
-                ),
-            ),
-            now=now.isoformat(),
-            current=entries,
-        )
-    else:
-        entry = create_operator_inbox_entry(
-            InboxMessage(
-                ask=signal.ask,
-                response=signal.response,
-                message_kind=signal.message_kind,
-                subject=subject,
-            ),
-            entry_id=new_ulid(),
-            now=now.isoformat(),
-            routing=InboxRouting(
-                address=InboxAddress(
-                    lifecycle_id=owner.lifecycle_id,
-                    agent_id=owner.agent_id,
-                    recipient_role=owner.role,
-                ),
-                owner=InboxOwner(
-                    role=owner.role, agent_id=owner.agent_id, lifecycle_id=owner.lifecycle_id
-                ),
-            ),
-            poster=InboxPoster(
-                created_by="agent-notifier", created_via="cli", sender_role="system"
-            ),
-        )
-        ctx.inbox_store.append(entry)
-    if sweep is not None:
-        sweep.remember(entry)
-    delivered = deliver_inbox_entry(
-        InboxDeliveryLog(
-            store=ctx.inbox_store,
-            entry=entry,
-            at=now.isoformat(),
-            floor=RedeliveryFloor(
-                current=sweep.inbox_current if sweep is not None else None,
-                seconds=ctx.redeliver_rate_limit_seconds,
-            ),
-        ),
-        sessions=HostedSessionRuntime(catalog=ctx.catalog, host=ctx.host),
-        paster=ctx.paster,
-    )
-    if sweep is not None:
-        sweep.remember(delivered)
-    return delivered.deliveryState
 
 
 def _signal_emit(
@@ -479,8 +348,7 @@ def _signal_emit(
             seat_role=finding.seat_role,
             subject_agent_id=finding.session_id,
         ),
-        now=now,
-        sweep=sweep,
+        OwnerSignalOptions(now=now, sweep=sweep),
     )
     signal_record = AgentNotifierSignalRecord(
         id=new_ulid(),
@@ -571,6 +439,11 @@ def _escalate_rung(  # pragma: no cover
         current=sweep.inbox_current,
     )
     sweep.remember(advanced)
+    admission = (
+        DeliveryAdmission(boundary=True)
+        if advanced.messageKind == "state-signal"
+        else DEFAULT_DELIVERY_ADMISSION
+    )
     delivered = deliver_inbox_entry(
         InboxDeliveryLog(
             store=ctx.inbox_store,
@@ -582,6 +455,7 @@ def _escalate_rung(  # pragma: no cover
         ),
         sessions=HostedSessionRuntime(catalog=ctx.catalog, host=ctx.host),
         paster=ctx.paster,
+        admission=admission,
     )
     sweep.remember(delivered)
     delivery_state = delivered.deliveryState
@@ -667,8 +541,7 @@ def _respawn_suspect(  # pragma: no cover
             ctx,
             owner,
             OwnerSignal(message_kind="escalation", ask=ask, response=response),
-            now=now,
-            sweep=sweep,
+            OwnerSignalOptions(now=now, sweep=sweep),
         )
     _log_event(
         ctx,
@@ -721,8 +594,7 @@ def _signal_dead_upstream(  # pragma: no cover
             seat_role=finding.seat_role,
             subject_agent_id=finding.session_id,
         ),
-        now=now,
-        sweep=sweep,
+        OwnerSignalOptions(now=now, sweep=sweep),
     )
     _log_event(
         ctx,
@@ -739,6 +611,131 @@ def _signal_dead_upstream(  # pragma: no cover
     return AgentNotifierActionResult("signal-manager", finding, delivery_state)
 
 
+def _emit_state_signal(  # pragma: no cover
+    ctx: AgentNotifierContext,
+    finding: AgentNotifierFinding,
+    *,
+    now: datetime,
+    sweep: _SweepState,
+) -> AgentNotifierActionResult:
+    """Emit exactly one durable state-signal for a completed/interrupted seat turn.
+
+    The row is persisted before the marker is set, so a crash between the two leaves a
+    pending row that the next sweep coalesces/renews rather than a duplicate. Delivery
+    rides the availability gate: a working manager holds the row on its durable schedule.
+    """
+    if finding.session_id is None:
+        return AgentNotifierActionResult("state-signal", finding, "skipped", "no seat row")
+    entry = ctx.catalog.get(finding.session_id)
+    if (
+        entry is None
+        or entry.terminal_evidence_id is None
+        or entry.state_signal_emitted_for == entry.terminal_evidence_id
+    ):
+        return AgentNotifierActionResult("state-signal", finding, "skipped", "already emitted")
+    owner = derive_leaf_manager_owner(
+        ctx.catalog, sender_agent_id=finding.session_id, leaf_key=finding.leaf_key
+    )
+    if owner.agent_id is None and owner.lifecycle_id is None and owner.role is None:
+        return AgentNotifierActionResult("state-signal", finding, "skipped", "no routable owner")
+    delivery_state = _post_owner_signal(
+        ctx,
+        owner,
+        OwnerSignal(
+            message_kind="state-signal",
+            ask=(
+                f"Agent notifier observed state-signal: {entry.terminal_outcome or 'unknown'} "
+                f"({entry.terminal_evidence_id})"
+            ),
+            response=state_signal_response(entry),
+            leaf_key=finding.leaf_key,
+            seat_role=finding.seat_role,
+            subject_agent_id=finding.session_id,
+        ),
+        OwnerSignalOptions(now=now, sweep=sweep, admission=DeliveryAdmission(boundary=True)),
+    )
+    record_state_signal_emitted(ctx.catalog, finding.session_id, entry.terminal_evidence_id)
+    _log_event(
+        ctx,
+        "orchestration.agent-notifier.state-signal",
+        {
+            "sessionId": finding.session_id,
+            "leafKey": finding.leaf_key,
+            "terminalOutcome": entry.terminal_outcome,
+            "terminalEvidenceId": entry.terminal_evidence_id,
+            "ownerRole": owner.role,
+            "ownerAgentId": owner.agent_id,
+            "deliveryState": delivery_state,
+        },
+    )
+    return AgentNotifierActionResult(
+        "state-signal", finding, delivery_state, entry.terminal_outcome
+    )
+
+
+def _emit_non_reaction(  # pragma: no cover
+    ctx: AgentNotifierContext,
+    finding: AgentNotifierFinding,
+    *,
+    now: datetime,
+    sweep: _SweepState,
+) -> AgentNotifierActionResult:
+    """Relay the non-reaction residue fact to the seat's owner, once per landed-row episode."""
+    if finding.session_id is None or finding.source_id is None:
+        return AgentNotifierActionResult("non-reaction", finding, "skipped", "no seat row")
+    entry = ctx.catalog.get(finding.session_id)
+    row = sweep.inbox_current.get(finding.source_id)
+    if entry is None or row is None:
+        return AgentNotifierActionResult("non-reaction", finding, "skipped", "row not pending")
+    if entry.non_reaction_emitted_for == finding.source_id:
+        return AgentNotifierActionResult("non-reaction", finding, "skipped", "already emitted")
+    owner = derive_leaf_manager_owner(
+        ctx.catalog, sender_agent_id=finding.session_id, leaf_key=finding.leaf_key
+    )
+    if owner.agent_id is None and owner.lifecycle_id is None and owner.role is None:
+        return AgentNotifierActionResult("non-reaction", finding, "skipped", "no routable owner")
+    delivery_state = _post_owner_signal(
+        ctx,
+        owner,
+        OwnerSignal(
+            message_kind="state-signal",
+            ask="Agent notifier observed state-signal: non-reaction",
+            response=non_reaction_response(entry, row),
+            leaf_key=finding.leaf_key,
+            seat_role=finding.seat_role,
+            subject_agent_id=finding.session_id,
+        ),
+        OwnerSignalOptions(now=now, sweep=sweep, admission=DeliveryAdmission(boundary=True)),
+    )
+    record_non_reaction_emitted(ctx.catalog, finding.session_id, finding.source_id)
+    _log_event(
+        ctx,
+        "orchestration.agent-notifier.state-signal",
+        {
+            "sessionId": finding.session_id,
+            "leafKey": finding.leaf_key,
+            "terminalOutcome": "non-reaction",
+            "landedRowId": finding.source_id,
+            "ownerRole": owner.role,
+            "ownerAgentId": owner.agent_id,
+            "deliveryState": delivery_state,
+        },
+    )
+    return AgentNotifierActionResult("non-reaction", finding, delivery_state, finding.source_id)
+
+
+def _drain_boundary(  # pragma: no cover
+    ctx: AgentNotifierContext,
+    finding: AgentNotifierFinding,
+    *,
+    now: datetime,
+    sweep: _SweepState,
+) -> AgentNotifierActionResult:
+    """Push one pending row whose target crossed a turn boundary after the last attempt."""
+    result = _redeliver(ctx, finding, now=now, sweep=sweep)
+    return AgentNotifierActionResult("boundary-drain", finding, result.outcome, result.detail)
+
+
 _FindingAction = Callable[..., AgentNotifierActionResult]
 
 # One predicate kind -> the one act-phase handler that answers it. A finding kind with no entry
@@ -748,10 +745,12 @@ _FINDING_ACTIONS: dict[str, _FindingAction] = {
     "inbox-redeliverable": _redeliver,
     "inbox-ladder-terminal": _resolve_ladder_terminal,
     "expectation-overdue": _auto_nudge,
-    "turn-report-stale": _auto_nudge,
     "escalation-due": _escalate_rung,
     "dead-upstream": _signal_dead_upstream,
     "seat-liveness": _signal_emit,
+    "state-signal-due": _emit_state_signal,
+    "non-reaction-due": _emit_non_reaction,
+    "boundary-drain": _drain_boundary,
 }
 
 

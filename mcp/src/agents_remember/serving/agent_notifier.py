@@ -1,10 +1,10 @@
 """P-15 tiers 1+2: the deterministic agent-notifier sweep (260707-HFX2-L2).
 
 "The model is never the polling layer." Every intervention the pilot run needed was detectable by
-a MECHANICAL predicate (P-15: pane-state, expectation-deadline expiry, turn-report staleness,
-unacked-row redelivery, seat-liveness). This module sweeps the authoritative stores on its own
-cadence, evaluates those predicates, and acts -- redeliver, auto-nudge, signal-emit, escalate --
-with zero tokens spent and zero model calls anywhere in the loop.
+a MECHANICAL predicate (P-15: pane-state, expectation-deadline expiry, unacked-row redelivery,
+seat-liveness, turn-truth state signals). This module sweeps the authoritative stores on its own
+cadence, evaluates those predicates, and acts -- redeliver, auto-nudge, signal-emit, escalate,
+state-signal -- with zero tokens spent and zero model calls anywhere in the loop.
 
 R3 (#22 root-cause rule, non-negotiable): every predicate reads :class:`TerminalCatalog` /
 :class:`OperatorInboxStore` / :class:`ExpectationRowStore` / the nudge store DIRECTLY. The
@@ -26,16 +26,15 @@ from agents_remember.controlplane.inbox_backoff import require_redelivery_floor_
 from agents_remember.controlplane.operator_inbox_records import OperatorInboxEntry
 from agents_remember.serving._agent_notifier_actions import (
     _FINDING_ACTIONS,
-    OwnerSignal,
     _auto_nudge,
+    _drain_boundary,
+    _emit_non_reaction,
+    _emit_state_signal,
     _escalate_inbox_entry,
     _escalate_rung,
-    _find_coalescible,
     _FindingAction,
     _log_event,
     _mark_expectation_missed,
-    _nudge_reason,
-    _post_owner_signal,
     _redeliver,
     _resolve_ladder_terminal,
     _respawn_suspect,
@@ -64,8 +63,6 @@ from agents_remember.serving._agent_notifier_evaluation import (
     evaluate_pane_findings,
     evaluate_predicates,
     evaluate_seat_liveness_findings,
-    evaluate_turn_report_findings,
-    turn_report_path_for_leaf_key,
 )
 from agents_remember.serving.agent_notifier_models import (
     AgentNotifierActionResult,
@@ -77,6 +74,19 @@ from agents_remember.serving.agent_notifier_models import SweepState as _SweepSt
 from agents_remember.serving.inbox_reclamation import (
     InboxReclamationPlan,
     plan_confirmed_gone_reclamation,
+)
+from agents_remember.serving.owner_signals import (
+    OwnerSignal,
+    _find_coalescible,
+    _post_owner_signal,
+)
+from agents_remember.serving.state_signals import (
+    NON_REACTION_WINDOW_SECONDS,
+    evaluate_boundary_drain_findings,
+    evaluate_non_reaction_findings,
+    evaluate_state_signal_findings,
+    non_reaction_response,
+    state_signal_response,
 )
 
 # R1 (260707-HFX2-L4): conservative built-in fallbacks when a caller (a test, or a context built
@@ -198,6 +208,7 @@ def run_agent_notifier_sweep(
 __all__ = [
     "DEFAULT_ESCALATION_RUNG_SECONDS",
     "DEFAULT_ESCALATION_SLA_SECONDS",
+    "NON_REACTION_WINDOW_SECONDS",
     "PERSISTENT_FAILURE_ATTEMPTS",
     "_FINDING_ACTIONS",
     "_INACTIVE_EXPECTATION_KINDS",
@@ -209,6 +220,9 @@ __all__ = [
     "_age_seconds",
     "_auto_nudge",
     "_delivery_failure_still_retrying",
+    "_drain_boundary",
+    "_emit_non_reaction",
+    "_emit_state_signal",
     "_escalate_inbox_entry",
     "_escalate_rung",
     "_expectation_chain_progressed",
@@ -217,7 +231,6 @@ __all__ = [
     "_ladder_terminal_and_dead",
     "_log_event",
     "_mark_expectation_missed",
-    "_nudge_reason",
     "_post_owner_signal",
     "_redeliver",
     "_resolve_ladder_terminal",
@@ -227,15 +240,18 @@ __all__ = [
     "_signal_emit",
     "_stale_turn_state_due",
     "act_on_finding",
+    "evaluate_boundary_drain_findings",
     "evaluate_dead_upstream_findings",
     "evaluate_escalation_findings",
     "evaluate_expectation_findings",
     "evaluate_inbox_findings",
     "evaluate_ladder_terminal_findings",
+    "evaluate_non_reaction_findings",
     "evaluate_pane_findings",
     "evaluate_predicates",
     "evaluate_seat_liveness_findings",
-    "evaluate_turn_report_findings",
+    "evaluate_state_signal_findings",
+    "non_reaction_response",
     "run_agent_notifier_sweep",
-    "turn_report_path_for_leaf_key",
+    "state_signal_response",
 ]

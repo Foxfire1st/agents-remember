@@ -342,6 +342,17 @@ class TerminalCatalogEntryWire(WireResponse):
     spawned_label: str | None = None
     turn_state: str | None = None
     turn_state_changed_at: str | None = None
+    terminal_outcome: Literal["completed", "interrupted", "failed", "unknown"] | None = None
+    terminal_outcome_at: str | None = None
+    terminal_evidence_id: str | None = None
+    interrupted_by: Literal["developer", "unknown"] | None = None
+    terminal_evidence_sequence: int | None = None
+    terminal_native_cursor: str | None = None
+    interrupt_requested_by: Literal["developer"] | None = None
+    interrupt_requested_at: str | None = None
+    interrupt_requested_turn_id: str | None = None
+    state_signal_emitted_for: str | None = None
+    non_reaction_emitted_for: str | None = None
     liveness_failures: int | None = None
     exit_evidence: Literal["tmux-command-failed", "pane-gone"] | None = None
 

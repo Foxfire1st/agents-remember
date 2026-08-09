@@ -803,7 +803,7 @@ class Cs6SweepScalingTests(unittest.TestCase):
                 write_expectation_row(
                     self.expectation_store,
                     Expectation(
-                        kind="briefed-by",
+                        kind="ack-by",
                         source_id=f"seat-{index}",
                         subject=ExpectationSubject(
                             agent_id="worker-1", leaf_key="repo/260707_master/leaf-1"

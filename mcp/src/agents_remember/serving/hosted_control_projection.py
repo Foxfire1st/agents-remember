@@ -16,6 +16,7 @@ from agents_remember.serving.terminal_catalog import (
 )
 
 if TYPE_CHECKING:
+    from agents_remember.serving.conversation.active.status import TurnTerminalEvidence
     from agents_remember.serving.conversation.models import HarnessId
 
 
@@ -80,6 +81,7 @@ def snapshot_turn_state(
     harness_id: HarnessId | None = None,
     *,
     previous: SeatTurnState | None = None,
+    terminal: TurnTerminalEvidence | None = None,
 ) -> SeatTurnState | None:
     """Project adapter evidence onto the seat vocabulary through the canonical
     conversation status authority.
@@ -89,6 +91,8 @@ def snapshot_turn_state(
     single seat projection rule translates it. ``previous`` is the catalog row's
     current seat claim — it feeds only the settle/boot hysteresis; a ``None``
     return makes no new claim and the row keeps its last one.
+    ``terminal`` is the lifted per-vendor turn settlement (``TurnTerminalEvidence``);
+    the canonical authority's terminal precedence applies for that observation.
     """
 
     # Deferred import: terminal_liveness imports this module, and the
@@ -98,4 +102,4 @@ def snapshot_turn_state(
         snapshot_seat_turn_state,
     )
 
-    return snapshot_seat_turn_state(snapshot, harness_id, previous=previous)
+    return snapshot_seat_turn_state(snapshot, harness_id, previous=previous, terminal=terminal)

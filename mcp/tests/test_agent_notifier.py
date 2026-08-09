@@ -40,8 +40,6 @@ from agents_remember.serving.agent_notifier import (
     evaluate_inbox_findings,
     evaluate_ladder_terminal_findings,
     evaluate_pane_findings,
-    evaluate_turn_report_findings,
-    turn_report_path_for_leaf_key,
 )
 from agents_remember.serving.terminal_catalog import (
     TerminalCatalog,
@@ -139,13 +137,13 @@ class PanePredicateTests(unittest.TestCase):
 
 
 class ExpectationPredicateTests(unittest.TestCase):
-    def test_overdue_briefed_by_row_fires(self) -> None:
+    def test_overdue_ack_by_row_fires(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             store = ExpectationRowStore(Path(tmp))
             write_expectation_row(
                 store,
                 Expectation(
-                    kind="briefed-by", source_id="s1", subject=ExpectationSubject(agent_id="s1")
+                    kind="ack-by", source_id="s1", subject=ExpectationSubject(agent_id="s1")
                 ),
                 row_id="r1",
                 now=NOW - timedelta(minutes=10),
@@ -160,7 +158,7 @@ class ExpectationPredicateTests(unittest.TestCase):
             store = ExpectationRowStore(Path(tmp))
             write_expectation_row(
                 store,
-                Expectation(kind="briefed-by", source_id="s1"),
+                Expectation(kind="ack-by", source_id="s1"),
                 row_id="r1",
                 now=NOW,
                 sla_seconds=3600.0,
@@ -168,56 +166,41 @@ class ExpectationPredicateTests(unittest.TestCase):
             self.assertEqual(evaluate_expectation_findings(store, now=NOW), [])
 
 
-class TurnReportStalenessTests(unittest.TestCase):
-    def test_missing_report_fires_when_row_is_overdue(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            coordination_root = Path(tmp) / "ar-coordination"
-            store = ExpectationRowStore(coordination_root / "logs" / "observer")
-            write_expectation_row(
-                store,
-                Expectation(
-                    kind="turn-report-by",
-                    source_id="s1",
-                    subject=ExpectationSubject(
-                        agent_id="s1", leaf_key="repo-a/260707_master/leaf-9"
-                    ),
-                ),
-                row_id="r1",
-                now=NOW - timedelta(hours=2),
-                sla_seconds=60.0,
-            )
-            findings = evaluate_turn_report_findings(
-                store, coordination_root=coordination_root, now=NOW
-            )
-            self.assertEqual(len(findings), 1)
-            self.assertEqual(findings[0].kind, "turn-report-stale")
+class RetiredDispatchExpectationTests(unittest.TestCase):
+    """Briefed-by / turn-report-by no longer drive expectation findings on this path."""
 
-    def test_present_report_does_not_fire(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            coordination_root = Path(tmp) / "ar-coordination"
-            store = ExpectationRowStore(coordination_root / "logs" / "observer")
-            write_expectation_row(
-                store,
-                Expectation(
-                    kind="turn-report-by",
-                    source_id="s1",
-                    subject=ExpectationSubject(leaf_key="repo-a/260707_master/leaf-9"),
-                ),
-                row_id="r1",
-                now=NOW - timedelta(hours=2),
-                sla_seconds=60.0,
-            )
-            path = turn_report_path_for_leaf_key(coordination_root, "repo-a/260707_master/leaf-9")
-            assert path is not None
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text("# turn report\n", encoding="utf-8")
-            findings = evaluate_turn_report_findings(
-                store, coordination_root=coordination_root, now=NOW
-            )
-            self.assertEqual(findings, [])
+    def _store(self) -> ExpectationRowStore:
+        return ExpectationRowStore(Path(tempfile.mkdtemp()))
 
-    def test_malformed_leaf_key_is_skipped_not_guessed(self) -> None:
-        self.assertIsNone(turn_report_path_for_leaf_key(Path("/coord"), "not-a-qualified-key"))
+    def test_overdue_turn_report_by_row_is_silent(self) -> None:
+        store = self._store()
+        write_expectation_row(
+            store,
+            Expectation(
+                kind="turn-report-by",
+                source_id="s1",
+                subject=ExpectationSubject(agent_id="s1", leaf_key="repo-a/260707_master/leaf-9"),
+            ),
+            row_id="r1",
+            now=NOW - timedelta(hours=2),
+            sla_seconds=60.0,
+        )
+        self.assertEqual(evaluate_expectation_findings(store, now=NOW), [])
+
+    def test_overdue_briefed_by_row_is_silent(self) -> None:
+        store = self._store()
+        write_expectation_row(
+            store,
+            Expectation(
+                kind="briefed-by",
+                source_id="s1",
+                subject=ExpectationSubject(agent_id="s1", leaf_key="repo-a/260707_master/leaf-9"),
+            ),
+            row_id="r1",
+            now=NOW - timedelta(minutes=10),
+            sla_seconds=60.0,
+        )
+        self.assertEqual(evaluate_expectation_findings(store, now=NOW), [])
 
 
 class InboxPredicateTests(unittest.TestCase):

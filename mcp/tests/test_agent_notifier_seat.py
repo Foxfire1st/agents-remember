@@ -203,11 +203,11 @@ class SweepIntegrationTests(unittest.TestCase):
         )
         self.inbox_store.append(inbox_entry)
 
-        # R2b: an overdue briefed-by row for the worker.
+        # R2b: an overdue ack-by row for the worker.
         write_expectation_row(
             self.expectation_store,
             Expectation(
-                kind="briefed-by",
+                kind="ack-by",
                 source_id="worker-1",
                 subject=ExpectationSubject(
                     agent_id="worker-1", leaf_key="repo-a/260707_master/leaf-9"
@@ -275,7 +275,7 @@ class SweepIntegrationTests(unittest.TestCase):
         write_expectation_row(
             self.expectation_store,
             Expectation(
-                kind="briefed-by",
+                kind="ack-by",
                 source_id="orphan-1",
                 subject=ExpectationSubject(agent_id="orphan-1"),
             ),

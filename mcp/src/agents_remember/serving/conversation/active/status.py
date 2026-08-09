@@ -207,20 +207,38 @@ def snapshot_seat_turn_state(
     harness_id: HarnessId | None = None,
     *,
     previous: SeatTurnState | None = None,
+    terminal: TurnTerminalEvidence | None = None,
 ) -> SeatTurnState | None:
     """Canonical status -> seat state for the catalog projection consumer.
 
     ``previous`` is the catalog row's current seat claim; it feeds only the
     settle/boot hysteresis above, never a fabricated state.
+    ``terminal`` is the per-vendor turn settlement observed on the evidence stream; it takes
+    precedence over the snapshot's own turn classification for that observation (the same
+    precedence the canonical status service applies), so an interrupted/failed settlement is
+    never re-read as a clean end.
     """
 
     classification = classify_snapshot(snapshot, harness_id)
+    if terminal is not None:
+        return seat_turn_state_for(
+            classification.process, _terminal_turn_state(terminal), previous=previous
+        )
     turn_state = (
         CANONICAL_TURN_STATE_BY_EVIDENCE[classification.turn.evidence]
         if classification.turn is not None
         else None
     )
     return seat_turn_state_for(classification.process, turn_state, previous=previous)
+
+
+def _terminal_turn_state(terminal: TurnTerminalEvidence) -> ConversationTurnState:
+    """The canonical turn state one terminal observation settles into."""
+    if terminal.outcome == "interrupted":
+        return "interrupted"
+    if terminal.outcome == "failed":
+        return "failed"
+    return "settling"
 
 
 def _active_turn_id(
@@ -368,7 +386,7 @@ class ConversationStatusService:
         changed = classification.process != self._process
         self._process = classification.process
         if terminal is not None:
-            state = self._terminal_turn_state(terminal)
+            state = _terminal_turn_state(terminal)
             return (
                 self._set_turn(
                     TurnTransition(
@@ -432,16 +450,6 @@ class ConversationStatusService:
         self._turn_strength = strength
         self._turn_reason = reason
         return True
-
-    @staticmethod
-    def _terminal_turn_state(
-        terminal: TurnTerminalEvidence,
-    ) -> ConversationTurnState:
-        if terminal.outcome == "interrupted":
-            return "interrupted"
-        if terminal.outcome == "failed":
-            return "failed"
-        return "settling"
 
     @staticmethod
     def _waiting_for(turn: TurnEvidence) -> ConversationTurnWaiting | None:

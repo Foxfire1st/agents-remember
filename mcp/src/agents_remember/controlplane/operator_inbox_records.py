@@ -40,6 +40,7 @@ InboxMessageKind = Literal[
     "decision-item",
     "decision-ruling",
     "dispatch-brief",
+    "state-signal",
 ]
 InboxDeliveryState = Literal["queued", "no-hosted-session", "delivered", "unconfirmed"]
 AdapterDeliveryState = Literal[
@@ -48,6 +49,18 @@ AdapterDeliveryState = Literal[
 OPERATOR_INBOX_FORWARD_COMPATIBLE_FIELDS = frozenset(
     {"adapterDeliveryState", "adapterDeliveryDetail"}
 )
+
+
+def state_signal_landed(entry: OperatorInboxEntry) -> bool:
+    """Whether a state-signal row is terminal on the relay path: correlated adapter
+    acceptance at a turn boundary (the N1 gate). ``acceptance=queued`` from a busy adapter is
+    NOT this; only an accepted push at a boundary is a landing."""
+    return (
+        entry.messageKind == "state-signal"
+        and entry.state == "pending"
+        and entry.deliveryState == "delivered"
+        and entry.adapterDeliveryState == "accepted"
+    )
 
 
 @dataclass(frozen=True)

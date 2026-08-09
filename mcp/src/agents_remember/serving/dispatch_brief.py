@@ -9,7 +9,6 @@ from typing import TYPE_CHECKING
 
 from agents_remember.controlplane.expectation_rows import (
     Expectation,
-    ExpectationKind,
     ExpectationRow,
     ExpectationRowStore,
     ExpectationSubject,
@@ -136,36 +135,34 @@ def start_dispatch_expectations(
     entry: OperatorInboxEntry,
     target: TerminalCatalogEntry,
 ) -> None:
-    """Start assignment clocks from the one durable dispatch row."""
+    """Start the briefed-by clock from the one durable dispatch row.
+
+    The turn-report-by clock is retired: completion truth comes from the catalog turn
+    projection, never from artifact/clock inference.
+    """
 
     store = expectation_store(config)
     created_at = datetime.fromisoformat(entry.createdAt)
     leaf_key = target.binding_leaf_key
-    rows: list[tuple[ExpectationKind, str]] = [
-        ("briefed-by", f"briefed-by: {target.label} ({target.spawn_role or target.kind})")
-    ]
-    if leaf_key is not None:
-        rows.append(("turn-report-by", f"turn-report-by: {leaf_key}"))
-    for kind, note in rows:
-        if store.find_by_source(entry.id, kind=kind) is not None:
-            continue
-        write_expectation_row(
-            store,
-            Expectation(
-                kind=kind,
-                source_id=entry.id,
-                subject=ExpectationSubject(
-                    agent_id=target.id,
-                    lifecycle_id=target.lifecycle_id,
-                    leaf_key=leaf_key,
-                    seat_role=target.binding_role,
-                ),
-                note=note,
+    if store.find_by_source(entry.id, kind="briefed-by") is not None:
+        return
+    write_expectation_row(
+        store,
+        Expectation(
+            kind="briefed-by",
+            source_id=entry.id,
+            subject=ExpectationSubject(
+                agent_id=target.id,
+                lifecycle_id=target.lifecycle_id,
+                leaf_key=leaf_key,
+                seat_role=target.binding_role,
             ),
-            row_id=new_ulid(),
-            now=created_at,
-            sla_seconds=expectation_sla_seconds(config, kind),
-        )
+            note=f"briefed-by: {target.label} ({target.spawn_role or target.kind})",
+        ),
+        row_id=new_ulid(),
+        now=created_at,
+        sla_seconds=expectation_sla_seconds(config, "briefed-by"),
+    )
 
 
 def fulfill_dispatch_expectation(config: McpRuntimeConfig, entry: OperatorInboxEntry) -> None:

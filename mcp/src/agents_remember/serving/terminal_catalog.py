@@ -47,10 +47,25 @@ TerminalLivenessEvidence = Literal["tmux-command-failed", "pane-gone"]
 # marker was seen (the model ended its turn); "awaiting-input" = a harness-specific waiting-on-you
 # marker; "stale" = no classifiable marker for long enough that the state itself is suspect.
 SeatTurnState = Literal["working", "turn-ended", "awaiting-input", "stale"]
+# Canonical terminal outcome carried from per-vendor turn evidence into the seat truth.
+TerminalOutcome = Literal["completed", "interrupted", "failed", "unknown"]
+InterruptOrigin = Literal["developer", "unknown"]
 # The leaf-uniqueness role: a plain shell (``kind == "terminal"``) is a TERMINAL; any agent harness
 # is a CHAT. Uniqueness is per (leaf, role) -- at most one running chat AND one running terminal per
 # leaf -- so an agent chat and a scratch terminal can share a leaf without colliding (L5 fix 2).
 TerminalSessionRole = Literal["chat", "terminal"]
+
+
+@dataclass(frozen=True)
+class CatalogTurnEvidence:
+    """One seat-turn projection: the seat state plus the lifted terminal outcome."""
+
+    state: SeatTurnState
+    changed_at: str
+    terminal_outcome: TerminalOutcome | None = None
+    terminal_outcome_at: str | None = None
+    terminal_evidence_id: str | None = None
+    interrupted_by: InterruptOrigin | None = None
 
 
 @dataclass(frozen=True)
@@ -75,6 +90,16 @@ DEFAULT_LIVENESS_HYSTERESIS = TerminalCatalogLivenessConfig()
 def role_for_kind(kind: TerminalSessionKind) -> TerminalSessionRole:
     """The leaf-uniqueness role for a launch ``kind``: a shell is a terminal, a harness is a chat."""
     return "terminal" if kind == "terminal" else "chat"
+
+
+def seat_at_turn_boundary(entry: TerminalCatalogEntry) -> bool:
+    """Whether a running seat may be pushed at a turn boundary (turn-ended / awaiting-input /
+    ready-idle). Working and stale seats hold; dead/archived rows never accept a push."""
+    if entry.status != "running":
+        return False
+    if entry.turn_state in {"turn-ended", "awaiting-input"}:
+        return True
+    return entry.turn_state is None and entry.control_state == "ready"
 
 
 @dataclass(frozen=True)
@@ -182,6 +207,27 @@ class TerminalCatalogEntry:
     # unclassified, not a fabricated state).
     turn_state: SeatTurnState | None = None
     turn_state_changed_at: str | None = None
+    # Terminal turn truth (projection lift): the canonical per-vendor outcome observed on the
+    # evidence stream, when it landed and under which identity, plus interrupt-origin provenance.
+    # Written only when a terminal observation lands; legacy rows read back as None.
+    terminal_outcome: TerminalOutcome | None = None
+    terminal_outcome_at: str | None = None
+    terminal_evidence_id: str | None = None
+    interrupted_by: InterruptOrigin | None = None
+    # Terminal-evidence cursors: the last successfully processed evidence/native position.
+    # They advance ONLY on a successful read, so a failed read is retried from the same
+    # window instead of skipping evidence (no-loss retry).
+    terminal_evidence_sequence: int | None = None
+    terminal_native_cursor: str | None = None
+    # Dashboard/interface interrupt provenance, stamped at the interrupt request (N9): the seat
+    # truth that later attributes an interrupted terminal outcome to a developer action.
+    interrupt_requested_by: Literal["developer"] | None = None
+    interrupt_requested_at: str | None = None
+    interrupt_requested_turn_id: str | None = None
+    # State-signal emission dedupe: the terminal evidence identity already relayed, and the
+    # landed inbox row id already relayed as the non-reaction residue fact. One per episode.
+    state_signal_emitted_for: str | None = None
+    non_reaction_emitted_for: str | None = None
 
     @classmethod
     def from_json(cls, data: dict[str, object]) -> TerminalCatalogEntry:
@@ -250,6 +296,19 @@ class TerminalCatalogEntry:
             spawned_label=_optional_str(data, "spawnedLabel"),
             turn_state=_turn_state(data.get("turnState")),
             turn_state_changed_at=_optional_str(data, "turnStateChangedAt"),
+            terminal_outcome=_terminal_outcome(data.get("terminalOutcome")),
+            terminal_outcome_at=_optional_str(data, "terminalOutcomeAt"),
+            terminal_evidence_id=_optional_str(data, "terminalEvidenceId"),
+            interrupted_by=_interrupt_origin(data.get("interruptedBy")),
+            terminal_evidence_sequence=_optional_non_negative_int(
+                data.get("terminalEvidenceSequence")
+            ),
+            terminal_native_cursor=_optional_str(data, "terminalNativeCursor"),
+            interrupt_requested_by=_interrupt_requested_by(data.get("interruptRequestedBy")),
+            interrupt_requested_at=_optional_str(data, "interruptRequestedAt"),
+            interrupt_requested_turn_id=_optional_str(data, "interruptRequestedTurnId"),
+            state_signal_emitted_for=_optional_str(data, "stateSignalEmittedFor"),
+            non_reaction_emitted_for=_optional_str(data, "nonReactionEmittedFor"),
         )
 
     def to_json(self) -> dict[str, object]:
@@ -314,6 +373,17 @@ class TerminalCatalogEntry:
                     "spawnedLabel": self.spawned_label,
                     "turnState": self.turn_state,
                     "turnStateChangedAt": self.turn_state_changed_at,
+                    "terminalOutcome": self.terminal_outcome,
+                    "terminalOutcomeAt": self.terminal_outcome_at,
+                    "terminalEvidenceId": self.terminal_evidence_id,
+                    "interruptedBy": self.interrupted_by,
+                    "terminalEvidenceSequence": self.terminal_evidence_sequence,
+                    "terminalNativeCursor": self.terminal_native_cursor,
+                    "interruptRequestedBy": self.interrupt_requested_by,
+                    "interruptRequestedAt": self.interrupt_requested_at,
+                    "interruptRequestedTurnId": self.interrupt_requested_turn_id,
+                    "stateSignalEmittedFor": self.state_signal_emitted_for,
+                    "nonReactionEmittedFor": self.non_reaction_emitted_for,
                 }
             )
         )
@@ -919,6 +989,22 @@ def _turn_state(raw: object) -> SeatTurnState | None:
     if raw in ("working", "turn-ended", "awaiting-input", "stale"):
         return raw  # type: ignore[return-value]
     return None
+
+
+def _terminal_outcome(raw: object) -> TerminalOutcome | None:
+    if raw in ("completed", "interrupted", "failed", "unknown"):
+        return raw  # type: ignore[return-value]
+    return None
+
+
+def _interrupt_origin(raw: object) -> InterruptOrigin | None:
+    if raw in ("developer", "unknown"):
+        return raw  # type: ignore[return-value]
+    return None
+
+
+def _interrupt_requested_by(raw: object) -> Literal["developer"] | None:
+    return "developer" if raw == "developer" else None
 
 
 def _non_negative_int(raw: object) -> int:

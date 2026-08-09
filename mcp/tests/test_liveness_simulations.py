@@ -192,8 +192,8 @@ class _LivenessSimulationCase(unittest.TestCase):
         )
 
 
-class NeverBriefedSeatTests(_LivenessSimulationCase):
-    """Scenario 1 (P-5/P-14): a spawned seat whose ``briefed-by`` expectation row is never met."""
+class NeverAckedSeatTests(_LivenessSimulationCase):
+    """Scenario 1 (P-5/P-14): a spawned seat whose ``ack-by`` expectation row is never met."""
 
     def test_never_briefed_worker_nudges_then_escalates_to_the_ladder(self) -> None:
         self.catalog.upsert(replace(_entry("orchestrator-1"), spawn_role="orchestrator"))
@@ -207,27 +207,27 @@ class NeverBriefedSeatTests(_LivenessSimulationCase):
                 spawned_by_session="manager-1",
             )
         )
-        # The spawn-time expectation row (HFX2-L1) that a real dispatch writes atomically -- never
-        # met because the worker's very first paste (the brief) never landed.
+        # The dispatch-time expectation row (HFX2-L1) that a real post writes atomically -- never
+        # met because the worker's inbox row never lands.
         write_expectation_row(
             self.expectation_store,
             Expectation(
-                kind="briefed-by",
+                kind="ack-by",
                 source_id="worker-1",
                 subject=ExpectationSubject(
                     agent_id="worker-1", leaf_key="repo-a/260707_master/leaf-9"
                 ),
             ),
-            row_id="briefed-worker-1",
+            row_id="acked-worker-1",
             now=NOW - timedelta(minutes=10),
             sla_seconds=60.0,
         )
         ctx = self._ctx()
 
-        # Tick 1: the sweep sees the overdue briefed-by row, auto-nudges the owner (worker-1's
+        # Tick 1: the sweep sees the overdue ack-by row, auto-nudges the owner (worker-1's
         # manager, via spawn provenance), and marks the expectation row missed.
         run_agent_notifier_sweep(ctx, now=NOW)
-        self.assertEqual(self.expectation_store.current()["briefed-worker-1"].state, "missed")
+        self.assertEqual(self.expectation_store.current()["acked-worker-1"].state, "missed")
         self.assertIn("orchestration.nudge", self._events())
         nudges = [e for e in self.inbox_store.current().values() if e.messageKind == "nudge"]
         self.assertEqual(len(nudges), 1)

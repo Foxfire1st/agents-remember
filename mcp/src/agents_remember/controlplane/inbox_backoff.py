@@ -15,7 +15,10 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 
-from agents_remember.controlplane.operator_inbox_records import OperatorInboxEntry
+from agents_remember.controlplane.operator_inbox_records import (
+    OperatorInboxEntry,
+    state_signal_landed,
+)
 
 # Exponential-ish backoff ladder, seconds; the last entry is the steady-state ceiling so a
 # long-pending row does not retry every few seconds forever (26898-style thundering redelivery).
@@ -74,9 +77,7 @@ def next_attempt_at(
 
 def is_due(entry: OperatorInboxEntry, *, now: datetime) -> bool:
     """Whether ``entry`` is a pending row whose backoff window has elapsed."""
-    if is_ladder_resolved(entry):
-        return False
-    if entry.state != "pending":
+    if is_ladder_resolved(entry) or entry.state != "pending" or state_signal_landed(entry):
         return False
     if entry.deliveryState not in _REDELIVERABLE_DELIVERY_STATES:
         return False

@@ -11,6 +11,7 @@ idiom — raw 500s are never a routine refusal path (L0 reviewer obligation O4).
 
 from __future__ import annotations
 
+import asyncio
 import json
 from typing import Annotated, Literal, cast
 
@@ -71,6 +72,7 @@ from agents_remember.serving.conversation.response_contract import (
 )
 from agents_remember.serving.harness_control_models import MAX_SUBMIT_ASSET_BYTES
 from agents_remember.serving.response_contract import StatusRefusal
+from agents_remember.serving.seat_turn_truth import record_interrupt_request
 
 router = APIRouter(
     prefix="/api/terminal/{ar_session_id}",
@@ -174,6 +176,17 @@ async def conversation_interrupt(
             turn_id=body.turn_id,
             request_id=body.request_id,
         )
+        if operation.acknowledgement != "rejected":  # pragma: no cover - rejected-ack seam
+            # The dashboard/interface interrupt action stamps provenance on the seat so the
+            # lifted terminal truth can attribute origin when the turn settles interrupted.
+            await asyncio.to_thread(
+                record_interrupt_request,
+                runtime.catalog,
+                ar_session_id,
+                by="developer",
+                at=operation.requested_at,
+                turn_id=operation.turn_id,
+            )
     except _TYPED_ERRORS as exc:
         return _map_typed_error(exc)
     return JSONResponse(

@@ -45,6 +45,7 @@ from agents_remember.controlplane.operator_inbox_records import (
     InboxOwner,
     InboxSubject,
     OperatorInboxEntry,
+    state_signal_landed,
 )
 from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
 
@@ -176,35 +177,39 @@ def record_delivery(
     delivery_state = attempt.delivery_state
     adapter = attempt.adapter
     attempt_count = entry.attemptCount + 1
-    delivered = entry.model_copy(
-        update={
-            "ts": now,
-            "deliveryState": delivery_state,
-            "deliveredAt": now if delivery_state == "delivered" else entry.deliveredAt,
-            "deliveredToSession": attempt.delivered_to_session,
-            "deliveryDetail": attempt.detail,
-            "adapterDeliveryState": adapter.delivery_state or entry.adapterDeliveryState,
-            "adapterRequestId": adapter.request_id or entry.adapterRequestId,
-            "adapterVendorCorrelationId": (
-                adapter.vendor_correlation_id or entry.adapterVendorCorrelationId
-            ),
-            "adapterAcceptedAt": adapter.accepted_at or entry.adapterAcceptedAt,
-            "adapterDeliveryDetail": (
-                adapter.detail if adapter.detail is not None else entry.adapterDeliveryDetail
-            ),
-            "attemptCount": attempt_count,
-            "lastAttemptAt": now,
-            "nextAttemptAt": (
-                next_attempt_at(
-                    now=datetime.fromisoformat(now),
-                    attempt_count=attempt_count,
-                    redelivery_floor_seconds=floor.seconds,
-                )
-                if entry.state == "pending"
-                else entry.nextAttemptAt
-            ),
-        }
+    update: dict[str, object] = {
+        "ts": now,
+        "deliveryState": delivery_state,
+        "deliveredAt": now if delivery_state == "delivered" else entry.deliveredAt,
+        "deliveredToSession": attempt.delivered_to_session,
+        "deliveryDetail": attempt.detail,
+        "adapterDeliveryState": adapter.delivery_state or entry.adapterDeliveryState,
+        "adapterRequestId": adapter.request_id or entry.adapterRequestId,
+        "adapterVendorCorrelationId": (
+            adapter.vendor_correlation_id or entry.adapterVendorCorrelationId
+        ),
+        "adapterAcceptedAt": adapter.accepted_at or entry.adapterAcceptedAt,
+        "adapterDeliveryDetail": (
+            adapter.detail if adapter.detail is not None else entry.adapterDeliveryDetail
+        ),
+        "attemptCount": attempt_count,
+        "lastAttemptAt": now,
+    }
+    landed = state_signal_landed(entry.model_copy(update=update))
+    update["nextAttemptAt"] = (
+        None
+        if landed
+        else (
+            next_attempt_at(
+                now=datetime.fromisoformat(now),
+                attempt_count=attempt_count,
+                redelivery_floor_seconds=floor.seconds,
+            )
+            if entry.state == "pending"
+            else entry.nextAttemptAt
+        )
     )
+    delivered = entry.model_copy(update=update)
     store.append(delivered)
     return delivered
 

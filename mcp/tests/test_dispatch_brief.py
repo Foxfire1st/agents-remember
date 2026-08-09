@@ -152,7 +152,7 @@ def test_ready_dispatch_is_inbox_rooted_and_starts_expectation_clocks(tmp_path: 
     assert durable.state == "pending"
     expectations = ExpectationRowStore(observer_root(config)).current()
     by_kind = {row.kind: row for row in expectations.values()}
-    assert set(by_kind) == {"ack-by", "briefed-by", "turn-report-by"}
+    assert set(by_kind) == {"ack-by", "briefed-by"}
     assert by_kind["briefed-by"].state == "met"
     assert by_kind["ack-by"].state == "pending"
 

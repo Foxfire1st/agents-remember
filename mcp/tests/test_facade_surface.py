@@ -81,6 +81,19 @@ RENAMED_FACADE_NAMES: dict[str, dict[str, str]] = {
     },
 }
 
+# 260713-TES-L2: names deliberately removed from the worker→manager relay surface (the
+# turn-report artifact/SLA predicates retire with the catalog-truth relay). The pin would
+# otherwise fail the removal; these are intended deletions, not lost split names.
+REMOVED_FACADE_NAMES: dict[str, frozenset[str]] = {
+    "agents_remember.serving.agent_notifier": frozenset(
+        {
+            "_nudge_reason",
+            "evaluate_turn_report_findings",
+            "turn_report_path_for_leaf_key",
+        }
+    ),
+}
+
 
 def base_top_level_names(path: str, source: str | None = None) -> list[str]:
     """Every top-level class, function, constant, and type alias at the base commit."""
@@ -138,9 +151,12 @@ class FacadeSurfaceTests(unittest.TestCase):
         for module, path in FACADES:
             facade = importlib.import_module(module)
             renamed = RENAMED_FACADE_NAMES.get(module, {})
+            removed = REMOVED_FACADE_NAMES.get(module, frozenset())
             missing = []
             for name in base_top_level_names(BASE_PATH_RENAMES.get(path, path)):
                 if hasattr(facade, name):
+                    continue
+                if name in removed:
                     continue
                 target = renamed.get(name)
                 if target is not None and hasattr(facade, target):
