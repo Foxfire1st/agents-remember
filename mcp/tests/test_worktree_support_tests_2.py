@@ -505,7 +505,11 @@ class WorktreeSupport2(WorktreeSupportTests):
             )
             self.assertEqual(
                 payload["memory_quality"]["closeoutPhases"]["beforeMetadataRefresh"],
-                ["style.citations.range_resolution", "style.citations.claim_reopen"],
+                [
+                    "style.document_shape.entity_catalog_alignment",
+                    "style.citations.range_resolution",
+                    "style.citations.claim_reopen",
+                ],
             )
             self.assertIn(
                 "style.citations.claim_reopen",

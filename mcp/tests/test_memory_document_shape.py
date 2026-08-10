@@ -572,6 +572,7 @@ class StyleSurfaceTests(unittest.TestCase):
                     "style.citations.claim_reopen",
                     "style.citations.range_resolution",
                     "style.document_shape.diff_markers",
+                    "style.document_shape.entity_catalog_alignment",
                     "style.document_shape.tables",
                     "style.update_history.history_order",
                 ],

@@ -20,7 +20,7 @@ from agents_remember.kernel.git_command import GIT_REPOSITORY_SELECTOR_ENV
 from agents_remember.worktrees import git_worktree_manager as worktree_manager
 from agents_remember.worktrees.modules import closeout as closeout_module
 from agents_remember.worktrees.modules import code_quality_gate
-from agents_remember.worktrees.modules.git import commit_if_dirty
+from agents_remember.worktrees.modules.git import commit_if_dirty, commit_verified_staged
 from agents_remember.worktrees.worktree_contract import (
     ContractTask,
     LeafIdentity,
@@ -423,7 +423,7 @@ class CodeQualityGateTests(unittest.TestCase):
 
 class CloseoutCodeQualityGateTests(unittest.TestCase):
     def test_memory_preflight_failure_never_starts_the_code_quality_gate(self) -> None:
-        """A broken sidecar must abort before Ruff, Pyright, or pytest can start."""
+        """A broken entity catalog must abort before hooks, Ruff, Pyright, or pytest."""
         with tempfile.TemporaryDirectory() as tmp:
             contract = dirty_open_external_contract_fixture(Path(tmp))
             failed_quality = {
@@ -431,9 +431,9 @@ class CloseoutCodeQualityGateTests(unittest.TestCase):
                 "findingCount": 1,
                 "findings": [
                     {
-                        "code": "citation_claim_reopened",
-                        "path": "feature.txt.md",
-                        "message": "stale claim",
+                        "code": "entity_fingerprint_without_inventory",
+                        "path": "entities.md",
+                        "message": "orphaned entity fingerprint",
                     }
                 ],
             }
@@ -447,11 +447,13 @@ class CloseoutCodeQualityGateTests(unittest.TestCase):
                     "run_check",
                     return_value=failed_quality,
                 ),
+                mock.patch.object(closeout_module, "run_pre_commit_hook_if_configured") as hook,
                 mock.patch.object(closeout_module, "run_strict_code_quality_gate") as gate,
-                self.assertRaisesRegex(RuntimeError, "citation_claim_reopened"),
+                self.assertRaisesRegex(RuntimeError, "entity_fingerprint_without_inventory"),
             ):
                 worktree_manager.command_closeout(closeout_args(contract))
 
+            hook.assert_not_called()
             gate.assert_not_called()
             self.assertEqual(
                 git(contract.code_worktree, "rev-parse", "HEAD"), contract.code_base_commit
@@ -473,6 +475,10 @@ class CloseoutCodeQualityGateTests(unittest.TestCase):
             order = payload["closeout_order"]
             self.assertLess(
                 order.index("run-working-tree-memory-quality-preflight-before-code-quality"),
+                order.index("run-configured-pre-commit-hook-once-and-restage-hook-edits"),
+            )
+            self.assertLess(
+                order.index("run-configured-pre-commit-hook-once-and-restage-hook-edits"),
                 order.index("run-strict-code-quality-over-that-staged-content"),
             )
             self.assertIn("before Pyright or pytest", payload["summary"])
@@ -564,7 +570,7 @@ class CloseoutCodeQualityGateTests(unittest.TestCase):
             self.assertEqual((contract.memory_worktree / "memory.md").read_bytes(), ledger_before)
             self.assertEqual(load_contract(contract.contract_path).closeout_status, "not-started")
 
-    def test_success_runs_quality_before_code_commit(self) -> None:
+    def test_success_runs_hook_then_quality_then_verified_code_commit(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             contract = dirty_open_external_contract_fixture(Path(tmp))
             events: list[str] = []
@@ -583,10 +589,13 @@ class CloseoutCodeQualityGateTests(unittest.TestCase):
                     "diffBase": diff_base,
                 }
 
-            def record_commit(repo: Path, message: str) -> str:
-                if repo == contract.code_worktree:
-                    events.append("code-commit")
-                return commit_if_dirty(repo, message)
+            def run_hook(_repo: Path) -> bool:
+                events.append("pre-commit-hook")
+                return False
+
+            def record_verified_commit(repo: Path, message: str) -> str:
+                events.append("verified-code-commit")
+                return commit_verified_staged(repo, message)
 
             with (
                 mock.patch.object(
@@ -597,12 +606,21 @@ class CloseoutCodeQualityGateTests(unittest.TestCase):
                     "run_strict_code_quality_gate",
                     side_effect=run_gate,
                 ),
-                mock.patch.object(closeout_module, "commit_if_dirty", side_effect=record_commit),
+                mock.patch.object(
+                    closeout_module,
+                    "run_pre_commit_hook_if_configured",
+                    side_effect=run_hook,
+                ),
+                mock.patch.object(
+                    closeout_module,
+                    "commit_verified_staged",
+                    side_effect=record_verified_commit,
+                ),
                 redirect_stdout(io.StringIO()),
             ):
                 self.assertEqual(worktree_manager.command_closeout(closeout_args(contract)), 0)
 
-            self.assertEqual(events[:2], ["quality", "code-commit"])
+            self.assertEqual(events[:3], ["pre-commit-hook", "quality", "verified-code-commit"])
 
 
 CREATED_FILE = "pkg/leaf_addition.py"
@@ -829,6 +847,41 @@ def _task_worktree(root: Path) -> tuple[Path, Path]:
     return repo, worktree
 
 
+class CertifiedIndexCommitTests(unittest.TestCase):
+    def test_pre_commit_hook_runs_once_before_gate_and_not_during_verified_commit(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            _repo, worktree = _task_worktree(Path(tmp))
+            hooks = worktree / ".githooks"
+            hooks.mkdir()
+            marker = worktree / "hook-runs.txt"
+            hook = hooks / "pre-commit"
+            hook.write_text(
+                f"#!/bin/sh\nprintf 'run\\n' >> '{marker.as_posix()}'\n",
+                encoding="utf-8",
+            )
+            hook.chmod(0o755)
+            git(worktree, "config", "core.hooksPath", ".githooks")
+            (worktree / "tracked.txt").write_text("two\n", encoding="utf-8")
+
+            with mock.patch.object(
+                closeout_module,
+                "run_strict_code_quality_gate",
+                return_value={"required": True, "passed": True},
+            ):
+                result = closeout_module._gate_staged_code(worktree, diff_base="HEAD")
+            (worktree / "tracked.txt").write_text("three\n", encoding="utf-8")
+            commit_verified_staged(worktree, "Commit the certified index")
+
+            self.assertEqual(result["preCommitHook"], "passed")
+            self.assertEqual(marker.read_text(encoding="utf-8").splitlines(), ["run"])
+            self.assertEqual(git(worktree, "show", "HEAD:tracked.txt"), "two")
+            self.assertEqual((worktree / "tracked.txt").read_text(encoding="utf-8"), "three\n")
+            self.assertEqual(
+                commit_verified_staged(worktree, "No staged changes"),
+                git(worktree, "rev-parse", "HEAD"),
+            )
+
+
 def _conflicted_task_worktree(root: Path) -> Path:
     repo, worktree = _task_worktree(root)
     git(repo, "checkout", "-b", "side")
@@ -932,10 +985,11 @@ class TaskWorktreePreconditionTests(unittest.TestCase):
             with mock.patch.object(
                 closeout_module, "run_strict_code_quality_gate", return_value=verdict
             ):
-                self.assertEqual(
-                    closeout_module._gate_staged_code(worktree, diff_base="HEAD"), verdict
-                )
+                result = closeout_module._gate_staged_code(worktree, diff_base="HEAD")
 
+            self.assertEqual(result["required"], verdict["required"])
+            self.assertEqual(result["passed"], verdict["passed"])
+            self.assertEqual(result["preCommitHook"], "not-configured")
             self.assertIn("created.py", git(worktree, "ls-files"))
 
     def test_a_refused_gate_leaves_the_task_worktree_staged(self) -> None:

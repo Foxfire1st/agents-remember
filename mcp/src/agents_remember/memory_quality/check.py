@@ -20,7 +20,11 @@ from agents_remember.memory_quality.integrity.onboarding_drift_check.summary imp
     run_drift_summary,
 )
 from agents_remember.memory_quality.style.citations import claim_reopen, range_resolution
-from agents_remember.memory_quality.style.document_shape import diff_markers, tables
+from agents_remember.memory_quality.style.document_shape import (
+    diff_markers,
+    entity_catalog_alignment,
+    tables,
+)
 from agents_remember.memory_quality.style.update_history import history_order
 
 DRIFT_CHECK_NAME = "integrity.onboarding_drift_check.summary"
@@ -59,6 +63,9 @@ STYLE_CHECKS: dict[str, CheckRunner] = {
         unstamped_code_commit=inputs.unstamped_code_commit,
     ),
     diff_markers.CHECK_NAME: onboarding_only(diff_markers.check_onboarding_root),
+    entity_catalog_alignment.CHECK_NAME: onboarding_only(
+        entity_catalog_alignment.check_onboarding_root
+    ),
     history_order.CHECK_NAME: onboarding_only(history_order.check_onboarding_root),
     range_resolution.CHECK_NAME: lambda inputs: range_resolution.check_onboarding_root(
         inputs.onboarding_root, inputs.code_repository_root
@@ -69,15 +76,19 @@ INTEGRITY_CHECKS = (DRIFT_CHECK_NAME,)
 AVAILABLE_CHECKS = (*INTEGRITY_CHECKS, *STYLE_CHECKS)
 DEFAULT_STYLE_CHECKS = tuple(STYLE_CHECKS)
 DEFAULT_CONTEXT_CHECKS = (*INTEGRITY_CHECKS, *DEFAULT_STYLE_CHECKS)
-# Closeout's citation gate runs before the code commit and the strict test wrapper: the
-# citation checks are working-tree semantics (pointer validity plus the construct-diff review
-# surface), so they need no commit to clear, and a failure here rejects in seconds instead of
-# after the expensive suite. The curator runs the same `memory_quality_check` during the leaf;
-# the gate is its fallback, so findings here are the exception, not the rule. The post-commit
-# phase repeats citations without temporary provenance and runs drift, document shape, and
-# history order over the single ordinary metadata refresh. Repeating citations is what proves
-# every temporarily based, unstamped card received a real code-commit stamp before memory commits.
-BEFORE_METADATA_REFRESH_CHECKS = (range_resolution.CHECK_NAME, claim_reopen.CHECK_NAME)
+# Closeout first checks entity-catalog structure, then citations, before the code commit and the
+# strict test wrapper. Those are working-tree semantics, so they need no commit to clear and a
+# failure rejects in seconds instead of after the expensive suite. The curator runs the same
+# `memory_quality_check` during the leaf; the gate is its fallback, so findings here are the
+# exception, not the rule. The post-commit phase repeats citations without temporary provenance
+# and runs drift, document shape, and history order over the single ordinary metadata refresh.
+# Repeating citations proves every temporarily based, unstamped card received a real code-commit
+# stamp before memory commits.
+BEFORE_METADATA_REFRESH_CHECKS = (
+    entity_catalog_alignment.CHECK_NAME,
+    range_resolution.CHECK_NAME,
+    claim_reopen.CHECK_NAME,
+)
 AFTER_METADATA_REFRESH_CHECKS = DEFAULT_CONTEXT_CHECKS
 
 

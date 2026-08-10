@@ -30,10 +30,12 @@ from agents_remember.worktrees.modules.git import (
     changed_worktree_paths,
     commit_date,
     commit_if_dirty,
+    commit_verified_staged,
     committed_changed_paths,
     head_commit,
     is_ancestor,
     require_git,
+    run_pre_commit_hook_if_configured,
     worktree_dirty,
 )
 from agents_remember.worktrees.modules.guidance import (
@@ -377,12 +379,15 @@ def closeout_preview_payload(contract, args: WorktreeArgs) -> dict[str, object]:
         "summary": (
             "Closeout preview only; no commits were created. For external memory, the "
             "working-tree memory-quality preflight runs before staging or any code-quality "
-            "subprocess, so a broken citation aborts before Pyright or pytest. The staging "
+            "subprocess, so a structurally invalid entity catalog or broken citation aborts "
+            "before Pyright or pytest. The staging "
             "step and its two refusals belong to the leaf change-set-scoped quality gate: "
             "when code would commit and this checkout carries the quality wrapper, closeout "
             "refuses a non-task checkout or unresolved conflicts; otherwise it stages the "
-            "whole task worktree and runs the leaf's targeted contract over exactly what it "
-            "will commit. The full wrapper runs once per master at the memory-capped master "
+            "whole task worktree, runs its configured fast hook once, restages any hook edits, "
+            "and runs the leaf's targeted contract over exactly what it will commit. The code "
+            "commit bypasses hooks so nothing restarts after the wrapper's pytest-final phase. "
+            "The full wrapper runs once per master at the memory-capped master "
             "integration gate. After the code commit, external-memory closeout refreshes "
             "onboarding and entity metadata plus route overviews and indexes, reruns memory "
             "quality without the preflight's temporary base provenance, and only then commits "
@@ -407,8 +412,9 @@ def closeout_preview_payload(contract, args: WorktreeArgs) -> dict[str, object]:
             "refuse-if-gate-would-run-and-code-checkout-is-not-the-tasks-own-worktree",
             "refuse-if-gate-would-run-and-code-worktree-has-unresolved-merge-conflicts",
             "reset-and-stage-whole-task-worktree-if-gate-would-run",
+            "run-configured-pre-commit-hook-once-and-restage-hook-edits",
             "run-strict-code-quality-over-that-staged-content",
-            "commit-code",
+            "commit-exactly-certified-code-index-without-rerunning-hooks",
             "refresh-onboarding-metadata-and-entity-fingerprints",
             "refresh-route-overview-metadata-and-indexes",
             "run-post-refresh-memory-quality-check",
@@ -812,7 +818,7 @@ def _refuse_conflicted_worktree(code_worktree: Path) -> None:
 
 
 def _gate_staged_code(code_worktree: Path, *, diff_base: str) -> dict[str, object]:
-    """Reset and stage the task worktree, then run the targeted leaf gate over exactly what it commits.
+    """Stage, run the configured fast hook, then gate exactly what closeout commits.
 
     Every rail of the gate reads the index. ``derive_scope`` lists what ruff and pyright
     are given with ``git ls-files``; ``diff_coverage`` diffs the base against the tracked
@@ -867,9 +873,18 @@ def _gate_staged_code(code_worktree: Path, *, diff_base: str) -> dict[str, objec
     _refuse_conflicted_worktree(code_worktree)
     require_git(code_worktree, ["reset", "--mixed", "--quiet", "HEAD"])
     require_git(code_worktree, ["add", "-A"])
-    return run_strict_code_quality_gate(
+    pre_commit_hook_ran = run_pre_commit_hook_if_configured(code_worktree)
+    if pre_commit_hook_ran:
+        # A formatter in the hook may update tracked files.  Rebuild the index before
+        # the authoritative wrapper so the wrapper and the eventual commit see one tree.
+        require_git(code_worktree, ["add", "-A"])
+    result = run_strict_code_quality_gate(
         code_worktree, diff_base=diff_base, plan=QualityGatePlan(mode="targeted")
     )
+    return {
+        **result,
+        "preCommitHook": "passed" if pre_commit_hook_ran else "not-configured",
+    }
 
 
 @dataclass(frozen=True)
@@ -991,7 +1006,10 @@ def closeout_result(args: WorktreeArgs) -> WorktreeCommandResult:
             before_checks,
             unstamped_code_commit=contract.code_base_commit,
         )
-    if requires_strict_code_quality(contract.code_worktree, code_would_commit=code_would_commit):
+    strict_code_quality_required = requires_strict_code_quality(
+        contract.code_worktree, code_would_commit=code_would_commit
+    )
+    if strict_code_quality_required:
         code_quality_gate = _gate_staged_code(
             contract.code_worktree, diff_base=contract.code_base_commit
         )
@@ -1002,7 +1020,11 @@ def closeout_result(args: WorktreeArgs) -> WorktreeCommandResult:
     # consumed. Do not move this line down past the commit -- that is R3, and it is what let a
     # closeout finish its mutations and leave the approval spendable.
     gate_guard = _claim_closeout_gate(contract, args)
-    code_commit = commit_if_dirty(contract.code_worktree, args.code_commit_message)
+    code_commit = (
+        commit_verified_staged(contract.code_worktree, args.code_commit_message)
+        if strict_code_quality_required
+        else commit_if_dirty(contract.code_worktree, args.code_commit_message)
+    )
     code_commit_date = commit_date(contract.code_worktree, code_commit)
     memory = _MemoryCloseoutOutcome()
     if contract.memory_mode == "external":

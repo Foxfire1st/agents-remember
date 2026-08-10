@@ -86,6 +86,30 @@ def commit_if_dirty(repo: Path, message: str) -> str:
     return head_commit(repo)
 
 
+def run_pre_commit_hook_if_configured(repo: Path) -> bool:
+    """Run the checkout's configured pre-commit hook, or report that none exists."""
+    hook_path = Path(require_git(repo, ["rev-parse", "--git-path", "hooks/pre-commit"]))
+    if not hook_path.is_absolute():
+        hook_path = repo / hook_path
+    if not hook_path.is_file():
+        return False
+    require_git(repo, ["hook", "run", "pre-commit"])
+    return True
+
+
+def commit_verified_staged(repo: Path, message: str) -> str:
+    """Commit exactly the staged tree a preceding strict gate certified.
+
+    The caller has already staged and verified the index.  In particular, this helper
+    must neither restage the working tree nor rerun a hook after the gate's pytest-final
+    subprocess.
+    """
+    if run_git(repo, ["diff", "--cached", "--quiet"]).returncode == 0:
+        return head_commit(repo)
+    require_git(repo, ["commit", "--no-verify", "-m", message])
+    return head_commit(repo)
+
+
 def commit_date(repo: Path, commit: str) -> str:
     return require_git(repo, ["show", "-s", "--format=%cI", commit])
 

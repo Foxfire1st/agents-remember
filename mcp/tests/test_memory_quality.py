@@ -16,7 +16,11 @@ from agents_remember.kernel.primitives.runtime_config import (
     load_config,
 )
 from agents_remember.mcp.tools import memory_quality_check_payload
-from agents_remember.memory_quality.check import run_memory_quality_check
+from agents_remember.memory_quality.check import (
+    BEFORE_METADATA_REFRESH_CHECKS,
+    run_memory_quality_check,
+)
+from agents_remember.memory_quality.style.document_shape import entity_catalog_alignment
 from agents_remember.memory_quality.style.update_history import history_order_fix
 from agents_remember.memory_quality.style.update_history.history_order import (
     check_onboarding_root,
@@ -85,7 +89,109 @@ def write_file_level_onboarding(
     )
 
 
+def write_entity_catalog(path: Path, *, inventory: list[str], fingerprints: list[str]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    inventory_lines = [line for name in inventory for line in (f"### `{name}`", "", "Fixture.", "")]
+    fingerprint_lines = [
+        f"| `{name}` | `git-blob-set-sha256-v1` | `abc` | `README.md` |" for name in fingerprints
+    ]
+    path.write_text(
+        "\n".join(
+            [
+                "# Repository Entity Catalog",
+                "",
+                "## Entity Inventory",
+                "",
+                *inventory_lines,
+                "## Entity Fingerprints",
+                "",
+                "| Entity | Algorithm | Fingerprint | Evidence Paths |",
+                "| --- | --- | --- | --- |",
+                *fingerprint_lines,
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+
 class MemoryQualityTests(unittest.TestCase):
+    def test_entity_catalog_alignment_rejects_orphaned_fingerprint_before_code_rails(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            onboarding = Path(tmp_dir) / "onboarding"
+            write_entity_catalog(
+                onboarding / "entities.md",
+                inventory=["Present"],
+                fingerprints=["Present", "Orphan"],
+            )
+
+            result = run_memory_quality_check(
+                onboarding, checks=[entity_catalog_alignment.CHECK_NAME]
+            )
+
+            self.assertFalse(result["ok"])
+            self.assertEqual(result["findingCount"], 1)
+            self.assertEqual(result["findings"][0]["code"], "entity_fingerprint_without_inventory")
+            self.assertEqual(BEFORE_METADATA_REFRESH_CHECKS[0], entity_catalog_alignment.CHECK_NAME)
+
+    def test_entity_catalog_alignment_rejects_inventory_without_fingerprint(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            onboarding = Path(tmp_dir) / "onboarding"
+            write_entity_catalog(onboarding / "entities.md", inventory=["Missing"], fingerprints=[])
+
+            result = run_memory_quality_check(
+                onboarding, checks=[entity_catalog_alignment.CHECK_NAME]
+            )
+
+            self.assertFalse(result["ok"])
+            self.assertEqual(result["findings"][0]["code"], "entity_inventory_without_fingerprint")
+
+    def test_entity_catalog_alignment_accepts_one_fingerprint_per_inventory_entry(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            onboarding = Path(tmp_dir) / "onboarding"
+            write_entity_catalog(
+                onboarding / "entities.md", inventory=["Aligned"], fingerprints=["Aligned"]
+            )
+
+            result = run_memory_quality_check(onboarding)
+
+            self.assertTrue(result["ok"])
+            self.assertIn(entity_catalog_alignment.CHECK_NAME, result["checks"])
+
+    def test_entity_catalog_alignment_rejects_missing_sections_and_duplicate_rows(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            onboarding = Path(tmp_dir) / "onboarding"
+            catalog = onboarding / "entities.md"
+            catalog.parent.mkdir(parents=True)
+            catalog.write_text("# Repository Entity Catalog\n", encoding="utf-8")
+
+            missing = run_memory_quality_check(
+                onboarding, checks=[entity_catalog_alignment.CHECK_NAME]
+            )
+
+            self.assertEqual(
+                {finding["code"] for finding in missing["findings"]},
+                {"entity_inventory_section_missing", "entity_fingerprint_section_missing"},
+            )
+            self.assertEqual(
+                entity_catalog_alignment._entity_line(
+                    ["# Catalog", "", "## Entity Inventory"],
+                    entity_catalog_alignment.INVENTORY_HEADING,
+                    "Absent",
+                ),
+                3,
+            )
+
+            write_entity_catalog(
+                catalog, inventory=["Duplicate"], fingerprints=["Duplicate", "Duplicate"]
+            )
+            duplicate = run_memory_quality_check(
+                onboarding, checks=[entity_catalog_alignment.CHECK_NAME]
+            )
+            self.assertEqual(duplicate["findings"][0]["code"], "entity_fingerprint_duplicate")
+
     def test_update_history_accepts_newest_first_entries(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)
