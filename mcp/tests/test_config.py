@@ -557,7 +557,7 @@ class ProviderDegradationSettingsTests(unittest.TestCase):
 
 
 class RetirementSettingsTests(unittest.TestCase):
-    """260707-HFX2-L11: the auto-land hook gates, both default ON."""
+    """Completion cleanup edge gates plus the default-on ARG-L1 close behavior."""
 
     def _load(self, retirement: object | None) -> McpRuntimeConfig:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -573,11 +573,19 @@ class RetirementSettingsTests(unittest.TestCase):
         config = self._load(None)
         self.assertTrue(config.retirement.auto_land_on_integration)
         self.assertTrue(config.retirement.auto_land_on_finalize)
+        self.assertTrue(config.retirement.auto_close_completed_seats)
 
     def test_parses_both_flags_explicitly_off(self) -> None:
         config = self._load({"autoLandOnIntegration": False, "autoLandOnFinalize": False})
         self.assertFalse(config.retirement.auto_land_on_integration)
         self.assertFalse(config.retirement.auto_land_on_finalize)
+        self.assertTrue(config.retirement.auto_close_completed_seats)
+
+    def test_auto_close_can_restore_the_previous_landed_behavior(self) -> None:
+        config = self._load({"autoCloseCompletedSeats": False})
+        self.assertFalse(config.retirement.auto_close_completed_seats)
+        self.assertTrue(config.retirement.auto_land_on_integration)
+        self.assertTrue(config.retirement.auto_land_on_finalize)
 
     def test_parses_legacy_auto_retire_flags_as_aliases(self) -> None:
         config = self._load({"autoRetireOnIntegration": False, "autoRetireOnFinalize": False})
@@ -595,6 +603,10 @@ class RetirementSettingsTests(unittest.TestCase):
     def test_auto_land_on_finalize_must_be_a_boolean(self) -> None:
         with self.assertRaisesRegex(ConfigError, "autoLandOnFinalize must be a boolean"):
             self._load({"autoLandOnFinalize": 1})
+
+    def test_auto_close_completed_seats_must_be_a_boolean(self) -> None:
+        with self.assertRaisesRegex(ConfigError, "autoCloseCompletedSeats must be a boolean"):
+            self._load({"autoCloseCompletedSeats": "yes"})
 
     def test_legacy_auto_retire_alias_must_be_a_boolean(self) -> None:
         with self.assertRaisesRegex(ConfigError, "autoRetireOnIntegration must be a boolean"):

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
+from pydantic import Field
+
 from agents_remember.models.base import FlexibleToolResponse, StrictResponseModel
 
 # Every vocabulary below is imported from whoever produces it, never retyped here. Retyped
@@ -122,6 +124,12 @@ class WorktreeCloseoutApplyResponse(WorktreeCommandResponse):
 
 class WorktreeIntegrateResponse(WorktreeCommandResponse):
     operation: Literal["worktree_integrate"] = "worktree_integrate"
+    # Declared even though the worktree envelope is intentionally flexible: these are stable
+    # completion-cleanup products, not incidental worktree-module details.
+    autoClosedSeats: list[str] = Field(default_factory=list)
+    autoCloseDeferredSeats: list[str] = Field(default_factory=list)
+    autoCloseFailedSeats: list[str] = Field(default_factory=list)
+    autoLandedSeats: list[str] = Field(default_factory=list)
 
 
 class WorktreeCleanupResponse(WorktreeCommandResponse):

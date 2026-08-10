@@ -139,6 +139,16 @@ dashboard_checks() {
     echo "[$label] npm not found; cannot run the dashboard rail." >&2
     return 1
   fi
+  # Panda's generated styled-system tree is checkout-local and ignored. Linked
+  # worktrees may share node_modules with the primary checkout while correctly
+  # having no generated tree of their own, so typecheck must generate its declared
+  # input instead of failing every fresh worktree with TS2307 import errors.
+  echo "[$label] npm run codegen (dashboard)..."
+  if ! npm --prefix dashboard run codegen --silent; then
+    echo "[$label] result: dashboard-codegen FAIL" >&2
+    return 1
+  fi
+  echo "[$label] result: dashboard-codegen PASS"
   for step in lint typecheck test; do
     echo "[$label] npm run $step (dashboard)..."
     if ! npm --prefix dashboard run "$step" --silent; then
@@ -197,7 +207,7 @@ run_fast_checks() {
 run_targeted_checks() {
   report_wrapper_tier || return 1
   generated_copy_checks || return 1
-  echo "[$label] running change-set-scoped quality wrapper (ruff + format + Pyright with reverse-import closure + targeted pytest + CRAP over changed modules + diff coverage)..."
+  echo "[$label] running change-set-scoped quality wrapper (cheap rails first; targeted pytest final; then CRAP + diff coverage from its artifact)..."
   if "$py" -m agents_remember.code_quality.check --targeted; then
     echo "[$label] result: targeted quality wrapper PASS"
     return 0
@@ -209,7 +219,7 @@ run_targeted_checks() {
 run_full_checks() {
   report_wrapper_tier || return 1
   generated_copy_checks || return 1
-  echo "[$label] running full quality wrapper (ruff + format + Pyright + pytest + CRAP + diff coverage + file-size)..."
+  echo "[$label] running full quality wrapper (cheap rails first; full pytest final; then CRAP + diff coverage from its artifact)..."
   if "$py" -m agents_remember.code_quality.check; then
     echo "[$label] result: full quality wrapper PASS"
   else

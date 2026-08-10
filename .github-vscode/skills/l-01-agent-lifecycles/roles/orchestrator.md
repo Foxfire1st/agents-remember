@@ -311,16 +311,20 @@ handover you cannot honestly decide escalates to the architect as a decision ite
 4. Carry memory + map the ledger (C-11; duplicate memory single-sided; memory quality before the
    memory edge lands).
 5. Record the new super tips in durable notes; mark next masters ready.
-6. **Land the completed master's spent seats** —
-   `lifecycle_finalize_task` auto-lands the master's manager + any master-level reviewer seats into
-   the dashboard's landed/archive group (config-gated, default ON) the moment the master finalizes
-   into super. Their transcripts remain inspectable and non-active; use the landed archive cleanup
-   button when those rows should be closed. You hold the **only** portfolio-wide retire authority
-   for exceptional stuck/abandoned/duplicate seats: unlike a manager (scoped to its own master's
-   worker/reviewer seats), you may retire ANY seat in the portfolio, including a completed manager —
+6. **Close completed subordinate seats; retain the manager owner** —
+   `lifecycle_finalize_task` retries the default-on completion cleanup for report-bearing
+   worker/reviewer/curator seats of its exact leaf: normal retirement kills tmux while preserving
+   transcripts and durable reports; a missing report leaves the seat live and deferred. Managers
+   and orchestrators are never automatic cleanup targets because they carry ongoing coordination
+   state. After consuming the completed manager's handover and finishing its seam, retire that
+   manager explicitly. You hold the **only** portfolio-wide retire authority for exceptional
+   stuck/abandoned/duplicate seats: unlike a manager (scoped to its own master's
+   worker/reviewer/curator seats), you may retire ANY seat in the portfolio, including a completed manager —
    `session_retire(actor_session_id=<your own session>, session_id=<the seat>, reason=...)`.
    Owner-never-self-retires still holds (you can never retire your own seat). Use
    this by hand for a stuck/abandoned seat the automation missed; transcripts are never deleted.
+   Setting `retirement.autoCloseCompletedSeats=false` restores landed/archive behavior for the
+   three automatic leaf-altitude roles; it never makes manager/orchestrator automatic targets.
 
 **Quality altitude ladder (260731-EFA-L17).** The full quality wrapper is owned by the master
 integration gate: `worktree_integrate` on a master/series contract runs it exactly once, inside
@@ -328,6 +332,15 @@ the integration step, memory-capped (`orchestration.qualityGate.memoryCapBytes`,
 the rlimit fallback). Leaf closeouts and leaf integrations run only the change-set-scoped
 contract (`--targeted`), and `memory_quality_check` stays a per-leaf closeout gate. Do not run a
 separate full wrapper per leaf — that is the waste the ladder removes.
+
+The wrapper itself runs inexpensive rails first and pytest as its final subprocess; CRAP and
+changed-lines coverage then score the new pytest coverage artifact. If pytest passed and only a
+coverage-derived rail refused, a later local invocation may reuse the content-addressed proof:
+an exact tree skips pytest, while a test-only delta strips those tests' old contexts and reruns
+only those modules. Source/config/environment changes fail closed to the normal suite, and a
+delta that cannot prove the coverage rails automatically falls back to one full pytest run. This
+is pipeline behavior, not a manager/worker discretion or a reason to skip the wrapper. CI always
+runs fresh; `AR_QUALITY_NO_RETRY=1` is the explicit local diagnostic escape hatch.
 
 **The topology (single home — this section owns it):**
 

@@ -237,11 +237,16 @@ stop` path. Threshold keys are `memoryDegradedRatio`, `memoryCriticalRatio`,
 `setupFailureCriticalStreak`, and `recentSampleLimit`. Unknown
 `providerDegradation` keys are rejected.
 
-`retirement` (optional) configures the auto-land hooks for worktree-backed tmux
+`retirement` (optional) configures completion cleanup for worktree-backed tmux
 seats. `autoLandOnIntegration` and `autoLandOnFinalize` (both default `true`)
-gate whether integrating a leaf or finalizing a master marks spent hosted seats
-as landed/archive. Landing leaves transcripts inspectable and non-active; it
-does not close tmux. The legacy `autoRetireOnIntegration` and
+gate whether cleanup runs after integrating a leaf or finalizing a master.
+`autoCloseCompletedSeats` defaults `true`: worker, reviewer, and curator seats
+with a durable turn report for that exact leaf are retired through the normal
+graceful-stop/tmux-kill path; their transcripts remain inspectable. A seat with
+no durable report remains live and is returned as deferred. Setting
+`autoCloseCompletedSeats` to `false` restores the previous landed/archive
+behavior, which removes those roles from the active rail without closing tmux.
+Manager and orchestrator seats are never included. The legacy `autoRetireOnIntegration` and
 `autoRetireOnFinalize` keys are accepted as aliases for existing settings files.
 Unknown `retirement` keys are rejected.
 

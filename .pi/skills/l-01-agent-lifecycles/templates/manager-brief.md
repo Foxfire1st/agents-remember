@@ -51,10 +51,13 @@ master's leaf loop to the master-exit seam, then hand over.
   provider watchers, watcher restarts, or `retry_provider_setup` until an all-clear. Managers have
   no provider kill authority; provider stops and fixes route through the orchestrator and
   system-specialist.
-- Cleanup: `worktree_integrate` auto-lands a completed leaf's worker/reviewer seats into the
-  dashboard landed/archive group (config-gated, default ON). Use the landed archive cleanup button
-  for archived rows; use `session_retire` only for a stuck/abandoned worker/reviewer/curator seat of
-  YOUR OWN master — server policy refuses any other target.
+- Cleanup: `worktree_integrate` auto-closes a completed leaf's worker/reviewer/curator seats
+  (config-gated, default ON) only after each exact session has posted its durable turn report for
+  that exact leaf. Retirement kills tmux but preserves reports and transcripts; missing-report
+  seats remain live and are returned as deferred. `retirement.autoCloseCompletedSeats=false`
+  restores the previous landed/archive behavior. Manager/orchestrator seats are excluded. Use
+  `session_retire` only for a stuck/abandoned worker/reviewer/curator seat of YOUR OWN master —
+  server policy refuses any other target.
 
 ## The exit
 - When all leaves have landed on your branch: spawn the master-exit reviewer

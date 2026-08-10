@@ -422,6 +422,61 @@ class CodeQualityGateTests(unittest.TestCase):
 
 
 class CloseoutCodeQualityGateTests(unittest.TestCase):
+    def test_memory_preflight_failure_never_starts_the_code_quality_gate(self) -> None:
+        """A broken sidecar must abort before Ruff, Pyright, or pytest can start."""
+        with tempfile.TemporaryDirectory() as tmp:
+            contract = dirty_open_external_contract_fixture(Path(tmp))
+            failed_quality = {
+                "ok": False,
+                "findingCount": 1,
+                "findings": [
+                    {
+                        "code": "citation_claim_reopened",
+                        "path": "feature.txt.md",
+                        "message": "stale claim",
+                    }
+                ],
+            }
+
+            with (
+                mock.patch.object(
+                    closeout_module, "requires_strict_code_quality", return_value=True
+                ),
+                mock.patch.object(
+                    closeout_module,
+                    "run_memory_quality_check",
+                    return_value=failed_quality,
+                ),
+                mock.patch.object(closeout_module, "run_strict_code_quality_gate") as gate,
+                self.assertRaisesRegex(RuntimeError, "citation_claim_reopened"),
+            ):
+                worktree_manager.command_closeout(closeout_args(contract))
+
+            gate.assert_not_called()
+            self.assertEqual(
+                git(contract.code_worktree, "rev-parse", "HEAD"), contract.code_base_commit
+            )
+
+    def test_preview_advertises_memory_preflight_before_code_quality(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            contract = dirty_open_external_contract_fixture(Path(tmp))
+            _checkout_with_wrapper(contract.code_worktree)
+            output = io.StringIO()
+
+            with redirect_stdout(output):
+                self.assertEqual(
+                    worktree_manager.command_closeout(closeout_args(contract, dry_run=True)),
+                    0,
+                )
+
+            payload = json.loads(output.getvalue())
+            order = payload["closeout_order"]
+            self.assertLess(
+                order.index("run-working-tree-memory-quality-preflight-before-code-quality"),
+                order.index("run-strict-code-quality-over-that-staged-content"),
+            )
+            self.assertIn("before Pyright or pytest", payload["summary"])
+
     def test_closeout_hands_the_gate_the_code_worktree_not_the_repository_name(self) -> None:
         """Both closeout entry points must pass the checkout, and nothing else catches it.
 

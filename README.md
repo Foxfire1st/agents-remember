@@ -246,6 +246,17 @@ run the targeted tier before creating an Agents Remember code commit even when
 hooks are not configured. See CONTRIBUTING.md for the tier table and the
 staged-content stash contract.
 
+The wrapper orders cheap deterministic rails before the expensive test rail:
+Ruff, formatting, file size, Pyright, Radon reports, then pytest. CRAP and changed-lines
+coverage are fast calculations over pytest's branch-coverage artifact and run last. When a
+local run's pytest rail passes but a coverage-derived rail fails, the wrapper stores a
+content-addressed proof under the worktree's common Git directory. An exact retry reuses that
+proof; a test-only retry removes the edited tests' coverage contexts and runs only those test
+modules. Any source, configuration, selected-suite, Python/tool, environment, or artifact
+change refuses reuse. A conservative delta-coverage failure triggers one conclusive full
+pytest fallback. CI never reuses local proof. Set `AR_QUALITY_NO_RETRY=1` to force a fresh
+local run while diagnosing the retry mechanism.
+
 Every rail prints one provenance line naming its actual input, resolved config,
 and unit count. A manual dirty-tree run also lists non-ignored untracked files
 inside source, test, script, generated-copy, and dashboard roots as **not in the

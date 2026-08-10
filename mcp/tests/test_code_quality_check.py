@@ -61,18 +61,18 @@ class CodeQualityCheckTests(unittest.TestCase):
                 [
                     "ruff",
                     "ruff",
+                    "agents_remember.code_quality.file_size",
                     "pyright",
                     "radon",
                     "radon",
                     "pytest",
-                    "agents_remember.code_quality.file_size",
                 ],
             )
-            pyright_command = commands[2]
+            pyright_command = commands[3]
             self.assertIn("--pythonpath", pyright_command)
             self.assertIn(sys.executable, pyright_command)
             self.assertIn(source.as_posix(), pyright_command)
-            self.assertIn((root / "tests").as_posix(), commands[5])
+            self.assertIn((root / "tests").as_posix(), commands[6])
             self.assertTrue(any("CRAP-Calculator" in line for line in output))
             # Both post-pytest rails score the one coverage report the run produced.
             self.assertTrue(any("## diff-coverage" in line for line in output))
@@ -82,14 +82,16 @@ class CodeQualityCheckTests(unittest.TestCase):
             root = Path(tmp)
             source = write_sample_source(root)
             coverage_json = root / "coverage.json"
+            commands: list[list[str]] = []
 
             exit_code = check.run_quality_check(
                 sample_config(root, source),
-                runner=fake_runner([], coverage_json, failing_step="ruff"),
+                runner=fake_runner(commands, coverage_json, failing_step="ruff"),
                 printer=lambda message: None,
             )
 
             self.assertEqual(exit_code, 1)
+            self.assertNotIn("pytest", command_modules(commands))
 
     def test_quality_check_fails_when_coverage_json_is_missing(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

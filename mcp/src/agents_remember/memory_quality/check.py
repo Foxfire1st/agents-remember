@@ -41,6 +41,7 @@ class StyleCheckInputs:
 
     onboarding_root: Path
     code_repository_root: Path | None = None
+    unstamped_code_commit: str | None = None
 
 
 CheckRunner = Callable[[StyleCheckInputs], dict[str, Any]]
@@ -53,7 +54,9 @@ def onboarding_only(runner: Callable[[Path], dict[str, Any]]) -> CheckRunner:
 
 STYLE_CHECKS: dict[str, CheckRunner] = {
     claim_reopen.CHECK_NAME: lambda inputs: claim_reopen.check_onboarding_root(
-        inputs.onboarding_root, inputs.code_repository_root
+        inputs.onboarding_root,
+        inputs.code_repository_root,
+        unstamped_code_commit=inputs.unstamped_code_commit,
     ),
     diff_markers.CHECK_NAME: onboarding_only(diff_markers.check_onboarding_root),
     history_order.CHECK_NAME: onboarding_only(history_order.check_onboarding_root),
@@ -71,12 +74,11 @@ DEFAULT_CONTEXT_CHECKS = (*INTEGRITY_CHECKS, *DEFAULT_STYLE_CHECKS)
 # surface), so they need no commit to clear, and a failure here rejects in seconds instead of
 # after the expensive suite. The curator runs the same `memory_quality_check` during the leaf;
 # the gate is its fallback, so findings here are the exception, not the rule. The post-commit
-# phase keeps the remaining checks (drift, document shape, history order) as the sanity pass
-# over the single ordinary metadata refresh.
+# phase repeats citations without temporary provenance and runs drift, document shape, and
+# history order over the single ordinary metadata refresh. Repeating citations is what proves
+# every temporarily based, unstamped card received a real code-commit stamp before memory commits.
 BEFORE_METADATA_REFRESH_CHECKS = (range_resolution.CHECK_NAME, claim_reopen.CHECK_NAME)
-AFTER_METADATA_REFRESH_CHECKS = tuple(
-    check for check in DEFAULT_CONTEXT_CHECKS if check not in BEFORE_METADATA_REFRESH_CHECKS
-)
+AFTER_METADATA_REFRESH_CHECKS = DEFAULT_CONTEXT_CHECKS
 
 
 @dataclass(frozen=True)
@@ -84,6 +86,7 @@ class DriftCheckContext:
     code_repository_root: Path
     context: Any
     detail_limit: int = 50
+    unstamped_code_commit: str | None = None
 
 
 def run_memory_quality_check(
@@ -127,6 +130,9 @@ def run_check(
                 onboarding_root=onboarding_root,
                 code_repository_root=(
                     None if drift_context is None else drift_context.code_repository_root
+                ),
+                unstamped_code_commit=(
+                    None if drift_context is None else drift_context.unstamped_code_commit
                 ),
             )
         )

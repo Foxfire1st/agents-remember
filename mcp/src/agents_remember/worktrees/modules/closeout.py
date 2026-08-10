@@ -379,7 +379,21 @@ def closeout_preview_payload(contract, args: WorktreeArgs) -> dict[str, object]:
         "state": "would-closeout",
         **status_payload(contract),
         "phase": "commit-approval-pending",
-        "summary": "Closeout preview only; no commits were created. The staging step and its two refusals belong to the leaf change-set-scoped quality gate, so they apply exactly when this preview reports the gate as enforced: when code would commit and this checkout carries the quality wrapper, closeout refuses outright if the code checkout is not the task's own worktree or has unresolved merge conflicts; otherwise it resets the index and stages the whole task worktree so the gate's scope is the commit's content -- files the task created included, not only the ones it edited -- and runs the leaf's targeted quality contract (--targeted: changed files + reverse-import closure + derived test subset) over exactly that. The full wrapper is not a leaf gate; it runs once per master at the master integration gate, memory-capped. A refused gate leaves the worktree staged and commits nothing; nothing is unstaged, because a retry resets and restages from the working tree and so reaches the same content a first run would. A checkout carrying no wrapper runs no gate, stages nothing early, and commits as it always has. memory_quality_check stays a per-leaf closeout gate. External-memory closeout then refreshes onboarding verification metadata, affected entity fingerprints, route overview metadata, and route indexes to that code commit, runs memory_quality_check, and commits memory and ledger.",
+        "summary": (
+            "Closeout preview only; no commits were created. For external memory, the "
+            "working-tree memory-quality preflight runs before staging or any code-quality "
+            "subprocess, so a broken citation aborts before Pyright or pytest. The staging "
+            "step and its two refusals belong to the leaf change-set-scoped quality gate: "
+            "when code would commit and this checkout carries the quality wrapper, closeout "
+            "refuses a non-task checkout or unresolved conflicts; otherwise it stages the "
+            "whole task worktree and runs the leaf's targeted contract over exactly what it "
+            "will commit. The full wrapper runs once per master at the memory-capped master "
+            "integration gate. After the code commit, external-memory closeout refreshes "
+            "onboarding and entity metadata plus route overviews and indexes, reruns memory "
+            "quality without the preflight's temporary base provenance, and only then commits "
+            "memory and ledger. A refusal commits nothing; a refused code gate may leave the "
+            "disposable task worktree staged because its retry resets and restages it."
+        ),
         **recovery_guidance(
             "request_commit_approval",
             tool="worktree_closeout_apply",
@@ -394,6 +408,7 @@ def closeout_preview_payload(contract, args: WorktreeArgs) -> dict[str, object]:
         "commit_approval_required": True,
         "approval_question": "Approve creating the code, memory, and ledger commits with these messages?",
         "closeout_order": [
+            "run-working-tree-memory-quality-preflight-before-code-quality",
             "refuse-if-gate-would-run-and-code-checkout-is-not-the-tasks-own-worktree",
             "refuse-if-gate-would-run-and-code-worktree-has-unresolved-merge-conflicts",
             "reset-and-stage-whole-task-worktree-if-gate-would-run",
@@ -401,7 +416,7 @@ def closeout_preview_payload(contract, args: WorktreeArgs) -> dict[str, object]:
             "commit-code",
             "refresh-onboarding-metadata-and-entity-fingerprints",
             "refresh-route-overview-metadata-and-indexes",
-            "run-memory-quality-check",
+            "run-post-refresh-memory-quality-check",
             "commit-memory-content",
             "update-ledger",
             "commit-ledger",
@@ -609,7 +624,12 @@ def _memory_quality_failure_message(result: dict[str, Any]) -> str:
     )
 
 
-def _run_memory_quality_phase(context, checks: tuple[str, ...]) -> dict[str, Any]:
+def _run_memory_quality_phase(
+    context,
+    checks: tuple[str, ...],
+    *,
+    unstamped_code_commit: str | None = None,
+) -> dict[str, Any]:
     result = run_memory_quality_check(
         context.onboarding_root,
         checks=checks,
@@ -617,6 +637,7 @@ def _run_memory_quality_phase(context, checks: tuple[str, ...]) -> dict[str, Any
             code_repository_root=context.code_repository_root,
             context=context,
             detail_limit=50,
+            unstamped_code_commit=unstamped_code_commit,
         ),
     )
     if not result.get("ok", False):
@@ -968,7 +989,9 @@ def closeout_result(args: WorktreeArgs) -> WorktreeCommandResult:
     memory_quality_before_refresh: dict[str, Any] = {}
     if contract.memory_mode == "external":
         memory_quality_before_refresh = _run_memory_quality_phase(
-            _closeout_contract_context(contract), BEFORE_METADATA_REFRESH_CHECKS
+            _closeout_contract_context(contract),
+            BEFORE_METADATA_REFRESH_CHECKS,
+            unstamped_code_commit=contract.code_base_commit,
         )
     if requires_strict_code_quality(contract.code_worktree, code_would_commit=code_would_commit):
         code_quality_gate = _gate_staged_code(

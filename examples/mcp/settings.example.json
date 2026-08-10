@@ -29,6 +29,7 @@
   },
   "retirement": {
     "autoLandOnIntegration": true,
-    "autoLandOnFinalize": true
+    "autoLandOnFinalize": true,
+    "autoCloseCompletedSeats": true
   }
 }

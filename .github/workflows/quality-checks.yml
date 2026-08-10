@@ -49,11 +49,10 @@ jobs:
           git config --global user.email "ci@agents-remember.invalid"
           git config --global user.name "Agents Remember CI"
 
-      # Enforce Ruff (including C901/PLR0911/PLR0912/PLR0915), Ruff format, Pyright,
-      # full pytest, CRAP, changed-lines coverage, and the File Size Budget rail without
-      # baselines or allowlists. Radon CC/MI remain labelled reports. The wrapper prints
-      # its selected diff base.
-      - name: Run quality wrapper (ruff + format + Pyright + pytest + CRAP + diff coverage + file-size)
+      # Enforce cheap deterministic rails first, full pytest as the final subprocess, then
+      # CRAP and changed-lines coverage from pytest's artifact. CI explicitly runs fresh;
+      # content-addressed delta proof reuse is local retry behavior only.
+      - name: Run quality wrapper (cheap rails, pytest, then coverage-derived rails)
         env:
           AR_QUALITY_INVOCATION: ci
         run: python -m agents_remember.code_quality.check

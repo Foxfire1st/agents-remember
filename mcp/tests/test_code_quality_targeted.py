@@ -402,7 +402,10 @@ class TargetedWrapperRunTests(unittest.TestCase):
             self.assertTrue(any("targeted test subset (2 file(s))" in line for line in output))
             ruff = commands[0]
             self.assertEqual(ruff[2:], ["ruff", "check", "src/pkg/module.py"])
-            pyright = commands[2]
+            file_size = commands[2]
+            self.assertEqual(file_size[2], "agents_remember.code_quality.file_size")
+            self.assertIn("src/pkg/module.py", file_size)
+            pyright = commands[3]
             self.assertIn("--pythonpath", pyright)
             self.assertIn("src/pkg/module.py", pyright)
             self.assertIn("src/pkg/importer.py", pyright)
@@ -410,18 +413,14 @@ class TargetedWrapperRunTests(unittest.TestCase):
             # Radon report rails consume the changed production module FILES, not
             # the pytest package roots: a module name would resolve to nothing at
             # the repo root and make the report rail vacuous.
-            radon_cc = commands[3]
+            radon_cc = commands[4]
             self.assertEqual(radon_cc[4], "src/pkg/module.py")
-            radon_mi = commands[4]
+            radon_mi = commands[5]
             self.assertEqual(radon_mi[4], "src/pkg/module.py")
-            pytest = commands[5]
+            pytest = commands[6]
             self.assertIn("tests/test_module.py", pytest)
             self.assertIn("--cov=pkg", pytest)
             self.assertNotIn("--cov=src/pkg", pytest)
-            # The file-size rail is change-set-scoped in a targeted run.
-            file_size = commands[6]
-            self.assertEqual(file_size[2], "agents_remember.code_quality.file_size")
-            self.assertIn("src/pkg/module.py", file_size)
             # CRAP is scoped to the changed production module, not the whole package.
             crap_scope = next(line for line in output if line.startswith("scope: CRAP-Calculator"))
             self.assertIn("1 functions", crap_scope)
@@ -557,7 +556,7 @@ class TargetedWrapperRunTests(unittest.TestCase):
             self.assertEqual(exit_code, 0)
             self.assertEqual(
                 [command[2] for command in commands],
-                ["ruff", "ruff", "pyright", "pytest", "agents_remember.code_quality.file_size"],
+                ["ruff", "ruff", "agents_remember.code_quality.file_size", "pyright", "pytest"],
             )
             self.assertTrue(
                 any("radon report and CRAP rails are not applicable" in line for line in output)
@@ -594,7 +593,7 @@ class TargetedWrapperRunTests(unittest.TestCase):
             self.assertEqual(exit_code, 0)
             self.assertEqual(
                 [command[2] for command in commands],
-                ["ruff", "ruff", "pyright", "agents_remember.code_quality.file_size"],
+                ["ruff", "ruff", "agents_remember.code_quality.file_size", "pyright"],
             )
             self.assertTrue(
                 any("radon report and CRAP rails are not applicable" in line for line in output)

@@ -167,11 +167,14 @@ stops belong to the orchestrator via the system-specialist protocol.
   (`orchestration.qualityGate.memoryCapBytes`). `memory_quality_check` is NOT part of that move:
   it stays a per-leaf closeout gate, and a leaf closeout that skips its required checks is
   refused, not passed.
-- **Seat cleanup** — a completed leaf's worker/reviewer chats have no further active purpose;
-  `worktree_integrate` auto-lands them into the dashboard's landed/archive group (config-gated,
-  default ON) the moment the leaf lands, preserving transcript inspection without holding the leaf
-  active. Use the landed archive cleanup button when those archived rows should be closed. When a
-  leaf's worker/reviewer/curator seat goes stuck or abandoned before integration (a dead-end
+- **Seat cleanup** — a completed leaf's worker/reviewer/curator chats have no further active
+  purpose. `worktree_integrate` auto-closes each one (config-gated, default ON) only after that
+  exact session's turn report is durable for the exact leaf; retirement gracefully stops control,
+  kills tmux, preserves the transcript/report, and stamps auto-close provenance. A missing report
+  defers that seat and leaves it live. Setting `retirement.autoCloseCompletedSeats=false` restores
+  the previous landed/archive behavior for all three roles. Manager and orchestrator seats are
+  never automatic cleanup targets. When a leaf's worker/reviewer/curator seat goes stuck or
+  abandoned before integration (a dead-end
   retry, a duplicate spawn), retire it by hand:
   `session_retire(actor_session_id=<your own session>, session_id=<the seat>, reason=...)`. Server
   policy enforces the authority split: **you may retire only worker/reviewer/curator seats of your

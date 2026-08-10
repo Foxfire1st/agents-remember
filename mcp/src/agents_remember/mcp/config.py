@@ -42,13 +42,15 @@ DEFAULT_DASHBOARD_PORT = 8765
 # Same fail-loud discipline as timeoutCaps: a typo ("autostart") must surface at
 # boot, not silently leave the daemon unsupervised.
 KNOWN_DASHBOARD_FIELDS = frozenset({"autoStart", "port"})
-# 260707-HFX2-L11: the auto-land hooks are boot-snapshot, MCP-authority-file settings (unlike
-# orchestration.gateDelegation, which moved to the global agentic settings file). The legacy
-# autoRetire* names are accepted as migration aliases for existing local authority files.
+# Completion-seat cleanup is boot-snapshot MCP authority. The two historical edge gates keep
+# their names for compatibility; ``autoCloseCompletedSeats`` selects retire (default) versus the
+# old landed/archive behavior when an enabled completion edge runs. The legacy autoRetire* names
+# remain migration aliases for the edge gates in existing local authority files.
 KNOWN_RETIREMENT_FIELDS = frozenset(
     {
         "autoLandOnIntegration",
         "autoLandOnFinalize",
+        "autoCloseCompletedSeats",
         "autoRetireOnIntegration",
         "autoRetireOnFinalize",
     }
@@ -100,14 +102,16 @@ class OrchestrationSettings:
 
 @dataclass(frozen=True)
 class RetirementSettings:
-    """The optional ``retirement`` settings object: auto-land hook gates.
+    """The optional ``retirement`` settings object: completion-seat cleanup.
 
-    Both default ON: a completed leaf/master lands spent chats into an inspectable non-active
-    archive. Explicit retire / group cleanup remains the path that closes sessions.
+    The edge gates and auto-close behavior default ON. A successful completion edge therefore
+    retires report-bearing leaf-altitude seats and frees their tmux processes. Turning only
+    ``auto_close_completed_seats`` off restores the prior landed/archive behavior end to end.
     """
 
     auto_land_on_integration: bool = True
     auto_land_on_finalize: bool = True
+    auto_close_completed_seats: bool = True
 
 
 @dataclass(frozen=True)
@@ -473,6 +477,7 @@ def parse_retirement_settings(raw: object) -> RetirementSettings:
     return RetirementSettings(
         auto_land_on_integration=auto_land_on_integration,
         auto_land_on_finalize=auto_land_on_finalize,
+        auto_close_completed_seats=raw.get("autoCloseCompletedSeats", True),
     )
 
 

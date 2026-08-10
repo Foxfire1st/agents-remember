@@ -638,9 +638,12 @@ class WrapperIntegrationTests(unittest.TestCase):
             report = coverage_report(
                 root, {"pkg/module.py": {"executed_lines": [5], "missing_lines": [6]}}
             )
+            report_payload = report.read_text(encoding="utf-8")
             output: list[str] = []
 
             def runner(name: str, command: list[str], cwd: Path, env: object) -> check.StepResult:
+                if name == "pytest":
+                    report.write_text(report_payload, encoding="utf-8")
                 return check.StepResult(name=name, return_code=0, command=command)
 
             config = check.CheckConfig(

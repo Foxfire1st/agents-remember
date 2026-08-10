@@ -627,6 +627,17 @@ class ToolResponseConformanceTests(unittest.TestCase):
                     f"{tool_name} ({model.__name__}) must use extra={expected!r}",
                 )
 
+    def test_completion_cleanup_fields_are_declared_on_both_edge_models(self) -> None:
+        expected = {
+            "autoClosedSeats",
+            "autoCloseDeferredSeats",
+            "autoCloseFailedSeats",
+            "autoLandedSeats",
+        }
+        for tool_name in ("worktree_integrate", "lifecycle_finalize_task"):
+            with self.subTest(tool=tool_name):
+                self.assertLessEqual(expected, set(TOOL_RESPONSE_MODELS[tool_name].model_fields))
+
 
 if __name__ == "__main__":
     unittest.main()

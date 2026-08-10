@@ -87,6 +87,14 @@ gate. A leaf closeout that tries to skip its required checks — a changed produ
 derived test subset, a failed targeted run, or a missing wrapper — is refused loudly, never passed
 silently.
 
+The wrapper runs its cheap deterministic rails before pytest. When pytest itself passed but a
+coverage-derived rail refused, a retry may consume the wrapper's content-addressed proof: an
+exact tree skips pytest, while a test-only change reruns only the changed test modules after
+their old Coverage.py contexts are removed. This is automatic wrapper behavior. Source,
+configuration, selected-suite, runtime/environment, or artifact drift forces the ordinary
+derived suite, and an inconclusive delta automatically falls back to one full pytest selection.
+CI never reuses this local proof. `AR_QUALITY_NO_RETRY=1` forces a fresh diagnostic run.
+
 Staging is **not** undone if the gate refuses. The worktree stays fully staged, nothing is
 committed, and that is the intended end state rather than a gap: the checkout being staged is the
 task's own worktree, created by `worktree_start` and destroyed by `lifecycle_finalize_task`, so no

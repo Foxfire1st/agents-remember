@@ -445,17 +445,10 @@ def _demote_preexisting_provenance_debt(
     enforced -- touch it, own it. Missing stamps stay enforced everywhere: a new or stamp-less
     document has no pre-existing anything. Returns ``(enforced, debt)``.
     """
-    completed = run_git(memory_root, ["status", "--porcelain", "-uall"])
-    if completed.returncode != 0:
+    modified = _modified_onboarding_paths(memory_root)
+    if modified is None:
         # No git view, no demotion: fail closed and leave every finding enforced.
         return findings, []
-    modified: set[str] = set()
-    for line in completed.stdout.splitlines():
-        path = line[3:]
-        if " -> " in path:
-            path = path.split(" -> ", 1)[1]
-        if path.startswith("onboarding/"):
-            modified.add(path[len("onboarding/") :])
     enforced: list[QualityFinding] = []
     debt: list[QualityFinding] = []
     for finding in findings:
@@ -477,6 +470,21 @@ def _demote_preexisting_provenance_debt(
         else:
             enforced.append(finding)
     return enforced, debt
+
+
+def _modified_onboarding_paths(memory_root: Path) -> set[str] | None:
+    """Return dirty sidecar paths relative to ``onboarding/``, or ``None`` without Git truth."""
+    completed = run_git(memory_root, ["status", "--porcelain", "-uall"])
+    if completed.returncode != 0:
+        return None
+    modified: set[str] = set()
+    for line in completed.stdout.splitlines():
+        path = line[3:]
+        if " -> " in path:
+            path = path.split(" -> ", 1)[1]
+        if path.startswith("onboarding/"):
+            modified.add(path[len("onboarding/") :])
+    return modified
 
 
 def dependency_changes(
@@ -605,8 +613,17 @@ def evaluate_claim(
 def check_onboarding_root(
     onboarding_root: Path,
     code_repository_root: Path | None = None,
+    *,
+    unstamped_code_commit: str | None = None,
 ) -> dict[str, Any]:
-    """Compare every complete claim against its own historical provenance."""
+    """Compare every complete claim against its own historical provenance.
+
+    Closeout may supply the leaf base as temporary provenance for a dirty, unstamped card.
+    That breaks the new-card deadlock without inventing a verification stamp: the preflight
+    still resolves every claim against the base and working tree, and the post-refresh pass
+    supplies no fallback, so metadata refresh must write the real code commit before memory
+    can commit. Standalone checks remain strict about every missing stamp.
+    """
     documents = model.documents_in(onboarding_root)
     if code_repository_root is None:
         return {
@@ -623,6 +640,7 @@ def check_onboarding_root(
     source_views = SourceViews()
     findings: list[QualityFinding] = []
     claims_checked = 0
+    modified = _modified_onboarding_paths(memory_root)
     grouped: dict[str, list[tuple[str, tuple[model.Claim, ...]]]] = {}
     for document in documents:
         _lines, claims = claims_in(document)
@@ -632,16 +650,19 @@ def check_onboarding_root(
         relative = rel(document, onboarding_root)
         stamp = parse_table_metadata(document).get("lastVerifiedCommitHash", "").strip()
         if not stamp:
-            findings.extend(
-                provenance_finding(
-                    relative,
-                    claim,
-                    MISSING,
-                    "the document has no lastVerifiedCommitHash",
+            if unstamped_code_commit is not None and modified is not None and relative in modified:
+                stamp = unstamped_code_commit
+            else:
+                findings.extend(
+                    provenance_finding(
+                        relative,
+                        claim,
+                        MISSING,
+                        "the document has no lastVerifiedCommitHash",
+                    )
+                    for claim in claims
                 )
-                for claim in claims
-            )
-            continue
+                continue
         if STAMP.fullmatch(stamp) is None:
             findings.extend(
                 provenance_finding(

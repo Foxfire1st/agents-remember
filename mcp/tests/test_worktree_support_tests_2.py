@@ -505,7 +505,7 @@ class WorktreeSupport2(WorktreeSupportTests):
                 payload["memory_quality"]["closeoutPhases"]["beforeMetadataRefresh"],
                 ["style.citations.range_resolution", "style.citations.claim_reopen"],
             )
-            self.assertNotIn(
+            self.assertIn(
                 "style.citations.claim_reopen",
                 payload["memory_quality"]["closeoutPhases"]["afterMetadataRefresh"],
             )

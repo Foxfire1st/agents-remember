@@ -104,8 +104,12 @@ class ProvenanceTree:
         self.memory_file("memory.md", ledger_to_text(ledger))
         self.commit(self.memory, "record ledger")
 
-    def run(self) -> dict[str, object]:
-        return claim_reopen.check_onboarding_root(self.onboarding, self.code)
+    def run(self, *, unstamped_code_commit: str | None = None) -> dict[str, object]:
+        return claim_reopen.check_onboarding_root(
+            self.onboarding,
+            self.code,
+            unstamped_code_commit=unstamped_code_commit,
+        )
 
 
 class ChangeDetectionCase(unittest.TestCase):
@@ -237,6 +241,34 @@ class CodeProvenanceTests(ChangeDetectionCase):
             ["citation_provenance_invalid"] * 2 + ["citation_provenance_missing"] * 2,
         )
         self.assertEqual(result["findingCount"], 4)
+
+    def test_closeout_preflight_uses_the_base_only_for_a_dirty_unstamped_card(self) -> None:
+        self.tree.code_file("README.md", "baseline\n")
+        baseline = self.tree.commit(self.tree.code, "baseline")
+        self.tree.code_file("pkg/later.py", "def later():\n    return 1\n")
+        self.tree.card(
+            "pkg/later.py",
+            ["| Added later. | `later` | pkg/later.py:1-2 |"],
+            last_verified=None,
+        )
+
+        result = self.tree.run(unstamped_code_commit=baseline)
+
+        self.assert_clean(result)
+        self.assertEqual(result["surfacedFindings"][0]["code"], "citation_claim_reopened")  # type: ignore[index]
+
+    def test_closeout_preflight_does_not_forgive_committed_unstamped_debt(self) -> None:
+        baseline = self.baseline()
+        self.tree.card(
+            "pkg/rules.py",
+            ["| Stable behaviour. | `stable` | pkg/rules.py:1-4 |"],
+            last_verified=None,
+        )
+        self.tree.commit(self.tree.memory, "commit unstamped debt")
+
+        result = self.tree.run(unstamped_code_commit=baseline)
+
+        self.assertEqual(self.codes(result), ["citation_provenance_missing"])
 
     def test_a_new_source_surfaces_report_only_when_current(self) -> None:
         """Whole new file added after the stamp: once-resolving-in-range is report-only."""

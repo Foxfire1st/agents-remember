@@ -28,6 +28,10 @@ class LifecycleFinalizeTaskResponse(ToolResponse):
     taskUpdates: dict[str, Any] = Field(default_factory=dict)
     taskArchive: dict[str, Any] = Field(default_factory=dict)
     summary: str = ""
-    # Session ids auto-landed at this master->super finalize edge (config-gated, default ON). Empty
-    # when the gate is off, nothing matched, or this call was a dry run.
+    # Completion-seat cleanup is additive to finalization truth. Default-on auto-close reports the
+    # exact retired, missing-report, and per-seat-failure sets; the explicit settings opt-out uses
+    # the historical landed/archive field instead. All are empty on a dry run or disabled edge.
+    autoClosedSeats: list[str] = Field(default_factory=list)
+    autoCloseDeferredSeats: list[str] = Field(default_factory=list)
+    autoCloseFailedSeats: list[str] = Field(default_factory=list)
     autoLandedSeats: list[str] = Field(default_factory=list)
