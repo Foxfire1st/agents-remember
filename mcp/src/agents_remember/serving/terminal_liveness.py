@@ -10,7 +10,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Protocol, cast, runtime_checkable
 
 if TYPE_CHECKING:
-    from agents_remember.serving.conversation.models import HarnessId
+    from agents_remember.models.conversations.identity import HarnessId
 
 from agents_remember.errors import HarnessControlError
 from agents_remember.models.conversations.control_wire import (

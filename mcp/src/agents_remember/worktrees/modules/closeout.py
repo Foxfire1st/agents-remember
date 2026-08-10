@@ -971,6 +971,18 @@ def _amended_closeout_contract(
     )
 
 
+def _memory_quality_before_refresh(contract) -> dict[str, Any]:
+    """Run the external-memory citation preflight before the expensive code gate."""
+    if contract.memory_mode != "external":
+        return {}
+    before_checks, _ = worktree_services().memory_quality.check_groups()
+    return _run_memory_quality_phase(
+        _closeout_contract_context(contract),
+        before_checks,
+        unstamped_code_commit=contract.code_base_commit,
+    )
+
+
 def closeout_result(args: WorktreeArgs) -> WorktreeCommandResult:
     """Run closeout for real, in the order the preview promised.
 
@@ -995,17 +1007,7 @@ def closeout_result(args: WorktreeArgs) -> WorktreeCommandResult:
         diff_base=contract.code_base_commit,
         plan=QualityGatePlan(mode="targeted"),
     )
-    # The citation gate is working-tree semantics and rejects in seconds, so it runs BEFORE the
-    # expensive wrapper and the code commit: the curator clears it during the leaf with the same
-    # memory_quality_check, and a failure here is the exception, not the rule.
-    memory_quality_before_refresh: dict[str, Any] = {}
-    if contract.memory_mode == "external":
-        before_checks, _ = worktree_services().memory_quality.check_groups()
-        memory_quality_before_refresh = _run_memory_quality_phase(
-            _closeout_contract_context(contract),
-            before_checks,
-            unstamped_code_commit=contract.code_base_commit,
-        )
+    memory_quality_before_refresh = _memory_quality_before_refresh(contract)
     strict_code_quality_required = requires_strict_code_quality(
         contract.code_worktree, code_would_commit=code_would_commit
     )

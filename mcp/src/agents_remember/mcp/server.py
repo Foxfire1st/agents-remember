@@ -6,10 +6,10 @@ from typing import Any
 from mcp.server.fastmcp import FastMCP
 from mcp.server.fastmcp.server import Settings as FastMCPSettings
 
-from agents_remember.application.server_startup import (
-    initialize_mcp_application,
-    prepare_mcp_process,
-)
+from agents_remember.application import server_startup
+
+# Application owns process trust and startup composition; transport only invokes it.
+# Server factories stay state-free for in-process tests.
 from agents_remember.application.worktree_services import (
     bind_worktree_services,
     build_default_worktree_services,
@@ -34,7 +34,7 @@ def create_server(config: McpRuntimeConfig) -> Any:
     bind_worktree_services(build_default_worktree_services())
     # One ambient lifecycle per server process; the _tool_payload choke point
     # tags tool calls onto it once a lifecycle is started.
-    initialize_mcp_application(config)
+    server_startup.initialize_mcp_application(config)
     _complete_fastmcp_settings()
     server = FastMCP("Agents Remember")
     # The tool surface itself lives in `.registration`, one module per family; this loop is
@@ -57,17 +57,17 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
+    # The trust declaration must precede config loading.  Without it, code
+    # imported from a task worktree is checkout CLI code and receives only that
+    # leaf's disposable dev coordinator.
+    server_startup.declare_mcp_process()
     try:
         config = load_config(args.config)
     except ConfigError as error:
         parser.error(str(error))
 
-    # Which of the two concurrent durable-store writers THIS PROCESS is
-    # (controlplane/durable_store.py). Declared here, at the process entry point, and
-    # deliberately not in create_server: the role is a fact about the process, and a factory
-    # that tests call in-process would stamp this one onto whatever ran next.
-    # Boot-time dashboard supervision (dashboard.autoStart) is part of the same application
-    # operation and remains total/threaded: it must never delay or break the stdio handshake.
-    prepare_mcp_process(config)
+    # Preparation idempotently retains the process declaration, then owns boot-time dashboard
+    # supervision.  It remains total/threaded so it cannot delay or break the stdio handshake.
+    server_startup.prepare_mcp_process(config)
     run_server(config)
     return 0

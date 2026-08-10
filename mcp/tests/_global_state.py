@@ -7,7 +7,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Any
 
-from agents_remember.controlplane import durable_store
+from agents_remember.kernel.primitives import checkout_coordination
 
 
 @dataclass(frozen=True)
@@ -19,20 +19,20 @@ class OwnedMutableState:
     restore: Any
 
 
-def _declared_snapshot() -> dict[str, durable_store.ProcessRole]:
-    return dict(durable_store._declared)
+def _declared_snapshot() -> dict[str, checkout_coordination.ExecutionMode]:
+    return dict(checkout_coordination._declared)
 
 
-def _declared_restore(snapshot: dict[str, durable_store.ProcessRole]) -> None:
-    durable_store._declared.clear()
-    durable_store._declared.update(snapshot)
+def _declared_restore(snapshot: dict[str, checkout_coordination.ExecutionMode]) -> None:
+    checkout_coordination._declared.clear()
+    checkout_coordination._declared.update(snapshot)
 
 
 # This is an ownership register, not a scan. Add a row only after proving that a mutable global
 # carries state from one test into another. The detector makes no claim about globals not listed.
 OWNED_MUTABLE_STATES = (
     OwnedMutableState(
-        name="agents_remember.controlplane.durable_store._declared",
+        name="agents_remember.kernel.primitives.checkout_coordination._declared",
         snapshot=_declared_snapshot,
         restore=_declared_restore,
     ),

@@ -1,8 +1,7 @@
 """Runtime configuration loading for the Agents Remember server.
 
-The runtime configuration record and its parsing live in kernel: every layer
-above reads the same record, and kernel is the package that may be imported by
-all of them.
+The runtime configuration record and parser live in kernel, which every layer
+may import without reversing the package dependency direction.
 """
 
 from __future__ import annotations
@@ -20,6 +19,7 @@ from agents_remember.kernel.agentic_settings import (
     load_agentic_settings,
     parse_gate_delegation,
 )
+from agents_remember.kernel.primitives import checkout_coordination
 from agents_remember.kernel.primitives.gate_policy import DEFAULT_GATE_POLICY, GatePolicy
 from agents_remember.kernel.primitives.identity import (
     explicit_provider_instance_id,
@@ -147,14 +147,14 @@ class McpRuntimeConfig:
 
 
 def load_config(config_path: str | Path) -> McpRuntimeConfig:
-    path = require_config_path(config_path)
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError as error:
-        raise ConfigError(f"cannot parse MCP settings JSON: {path}: {error}") from error
-    if not isinstance(data, dict):
-        raise ConfigError(f"MCP settings must be a JSON object: {path}")
-    return config_from_mapping(data, path)
+    """Load trusted authority or the leaf-local synthetic checkout config."""
+    # Checkout selection precedes reads so a live authority path supplied by unpublished
+    # worktree code cannot leak into the candidate writer.
+    candidate = _config_for_execution(config_path)
+    if isinstance(candidate, McpRuntimeConfig):
+        return candidate
+    path = candidate
+    return config_from_mapping(_read_config_mapping(path), path)
 
 
 @dataclass(frozen=True)
@@ -648,3 +648,59 @@ def path_is_relative_to(path: Path, root: Path) -> bool:
     except ValueError:
         return False
     return True
+
+
+def _config_for_execution(config_path: str | Path) -> Path | McpRuntimeConfig:
+    try:
+        checkout = checkout_coordination.checkout_cli_location()
+    except checkout_coordination.CheckoutCoordinationError as error:
+        raise ConfigError(str(error)) from error
+    if checkout is None:
+        return require_config_path(config_path)
+    return _checkout_runtime_config(
+        checkout_root=checkout.checkout_root,
+        worktree_group=checkout.worktree_group,
+        coordination_root=checkout.coordination_root,
+        synthetic_config_path=checkout.synthetic_config_path,
+    )
+
+
+def _read_config_mapping(path: Path) -> dict[str, Any]:
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as error:
+        raise ConfigError(f"cannot parse MCP settings JSON: {path}: {error}") from error
+    if not isinstance(data, dict):
+        raise ConfigError(f"MCP settings must be a JSON object: {path}")
+    return data
+
+
+def _checkout_runtime_config(
+    *,
+    checkout_root: Path,
+    worktree_group: Path,
+    coordination_root: Path,
+    synthetic_config_path: Path,
+) -> McpRuntimeConfig:
+    """Build the minimal non-authority config for an unpublished linked checkout."""
+    repository = RepositoryScope(
+        repo_id="agents-remember",
+        path=checkout_root,
+        memory_root=coordination_root / "memory-repos" / "ar-agents-remember",
+    )
+    return McpRuntimeConfig(
+        config_path=synthetic_config_path,
+        coordination_root=coordination_root,
+        workspace_root=worktree_group,
+        transcript_root=coordination_root / "logs" / "mcp",
+        repositories={"agents-remember": repository},
+        providers={},
+        benchmarks_enabled=False,
+        dashboard=DashboardSettings(auto_start=False),
+        orchestration=OrchestrationSettings(),
+        retirement=RetirementSettings(
+            auto_land_on_integration=False,
+            auto_land_on_finalize=False,
+            auto_close_completed_seats=False,
+        ),
+    )

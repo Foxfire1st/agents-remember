@@ -1,12 +1,8 @@
 """Session-wide test setup that keeps the suite hermetic and safe to run anywhere.
 
-Several fixtures create throwaway git repositories and ``git commit`` into them.
-They run ``git`` with ``cwd=<temp repo>`` but inherit the process environment, so
-if the suite is launched with git's repo-pointer variables set -- most commonly
-inside a ``git`` hook, which exports ``GIT_DIR``, or with a stray ``GIT_DIR`` /
-``GIT_WORK_TREE`` in the environment -- those fixture ``git`` commands act on
-whatever real repository those variables point at instead of their temp dir, and
-clobber it.
+Fixtures commit in throwaway repositories but inherit the process environment. Git
+repo-pointer variables from a hook or shell can redirect those commands from their
+temporary ``cwd`` into a real repository and clobber it.
 
 Stripping those variables from ``os.environ`` here, at conftest import (before
 any test is collected or run), makes every fixture ``git`` call -- in any test
@@ -37,6 +33,10 @@ import pytest
 # the worktree candidate and report green against the wrong source tree.
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
+
+from agents_remember.kernel.primitives.checkout_coordination import declare_test_process
+
+declare_test_process()
 
 from agents_remember.application.worktree_services import (
     bind_worktree_services,

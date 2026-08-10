@@ -19,7 +19,12 @@ def initialize_mcp_application(config: McpRuntimeConfig) -> None:
     install_ambient(AmbientLifecycle(EventStore(observer_root(config))))
 
 
+def declare_mcp_process() -> None:
+    """Declare trusted MCP execution before authority settings are loaded."""
+    declare_process_role("mcp")
+
+
 def prepare_mcp_process(config: McpRuntimeConfig) -> None:
     """Declare MCP store ownership, then start optional dashboard supervision."""
-    declare_process_role("mcp")
+    declare_mcp_process()
     maybe_autostart_dashboard(config)

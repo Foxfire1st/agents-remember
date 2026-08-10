@@ -21,8 +21,8 @@ class GlobalStateLeakDetectionTests(unittest.TestCase):
         self.assertEqual(
             changed,
             [
-                "agents_remember.controlplane.durable_store._declared: "
-                "before={}, after={'role': 'dashboard'}"
+                "agents_remember.kernel.primitives.checkout_coordination._declared: "
+                "before={'mode': 'test'}, after={'mode': 'dashboard'}"
             ],
         )
         self.assertIsNone(
@@ -34,7 +34,7 @@ class GlobalStateLeakDetectionTests(unittest.TestCase):
     def test_the_owned_state_register_does_not_claim_to_scan_unknown_globals(self) -> None:
         self.assertEqual(
             list(snapshot_owned_mutable_state()),
-            ["agents_remember.controlplane.durable_store._declared"],
+            ["agents_remember.kernel.primitives.checkout_coordination._declared"],
         )
 
 

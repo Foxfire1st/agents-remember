@@ -7,8 +7,7 @@ Contract:
 - compaction ownership is advisory, while the lock is unconditional;
 - the MCP and dashboard processes must share a local POSIX filesystem.
 
-``exclusive_access`` verifies that each lockfile actually excludes a second file
-description. A filesystem whose lock probe succeeds twice is refused with
+``exclusive_access`` probes each lockfile. A double success is refused with
 ``UnsafeLockFilesystemError``.
 
 Read policy is part of each store's authority contract:
@@ -38,6 +37,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, field_validator
 
 from agents_remember.kernel.atomic_write import atomic_write_text
+from agents_remember.kernel.primitives import checkout_coordination
 
 DURABLE_STORE_CONTRACT = "ar-durable-store/1.0"
 """The contract these stores implement, as declared in the front matter above."""
@@ -70,7 +70,7 @@ class UnsafeLockFilesystemError(DurableStoreError):
     """``flock`` on the coordination root does not actually exclude, so it cannot be relied on."""
 
 
-_declared: dict[str, ProcessRole] = {}
+# Kernel owns execution mode; this module exposes only the daemon-role view.
 
 
 def declare_process_role(role: ProcessRole) -> None:
@@ -81,12 +81,12 @@ def declare_process_role(role: ProcessRole) -> None:
     ``_dev_app`` because it starts in a fresh interpreter. Undeclared CLI and test processes skip
     advisory writer checks; unconditional log locking still protects their writes.
     """
-    _declared["role"] = role
+    checkout_coordination.declare_execution_mode(role)
 
 
 def declared_process_role() -> ProcessRole | None:
-    """This process's declared role, or ``None`` for a CLI/test invocation that declared none."""
-    return _declared.get("role")
+    """Return the daemon role; CLI and explicit test modes have no store role."""
+    return checkout_coordination.declared_daemon_role()
 
 
 @dataclass(frozen=True)
@@ -112,7 +112,7 @@ class StoreOwnership:
         the dashboard, where the writer set is a claim this contract makes; it guarantees nothing
         anywhere else, and the log's lock is what keeps those processes safe.
         """
-        role = _declared.get("role")
+        role = declared_process_role()
         if role is not None and role not in self.writers:
             raise CompactionOwnerError(
                 f"{self.store}: written by {'/'.join(self.writers)}, not by the {role} process. "
@@ -128,7 +128,7 @@ class StoreOwnership:
         Long-lived MCP/dashboard entry points, including the dashboard reload worker, must declare
         their role. Ownership selects who reclaims; unconditional locking provides write safety.
         """
-        role = _declared.get("role")
+        role = declared_process_role()
         return role is None or self.compaction_owner is None or role == self.compaction_owner
 
 
@@ -383,7 +383,7 @@ def exclusive_access(log_path: Path, ownership: StoreOwnership) -> Iterator[None
     deadlocked the serving daemon in production on 2026-08-05 -- an ABBA no single store's own
     ordering rule could see, because each store's order was internally correct.
     """
-    path = lock_path_for(log_path)
+    path = _checked_lock_path_for(log_path)
     path.parent.mkdir(parents=True, exist_ok=True)
     depth = _lock_depth.depth.get(path, 0)
     if depth:
@@ -440,7 +440,7 @@ def append_line(log_path: Path, line: str) -> None:
     page cache is not durable across a host loss, and every store here exists to survive exactly
     the restart that a durable timer would not.
     """
-    log_path.parent.mkdir(parents=True, exist_ok=True)
+    _prepare_append_target(log_path)
     with log_path.open("a", encoding="utf-8") as handle:
         handle.write(line + "\n")
         handle.flush()
@@ -453,5 +453,20 @@ def rewrite_lines(log_path: Path, lines: list[str], ownership: StoreOwnership) -
     The caller must already hold this log's exclusive store lock. An empty record set writes
     an empty file and never unlinks the destination.
     """
-    require_lock_held(log_path, ownership.store)
+    _require_rewrite_access(log_path, ownership.store)
     atomic_write_text(log_path, "".join(f"{line}\n" for line in lines))
+
+
+def _checked_lock_path_for(log_path: Path) -> Path:
+    checkout_coordination.require_durable_write_target(log_path)
+    return lock_path_for(log_path)
+
+
+def _prepare_append_target(log_path: Path) -> None:
+    checkout_coordination.require_durable_write_target(log_path)
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+
+
+def _require_rewrite_access(log_path: Path, store: str) -> None:
+    checkout_coordination.require_durable_write_target(log_path)
+    require_lock_held(log_path, store)
