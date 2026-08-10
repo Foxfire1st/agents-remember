@@ -6,9 +6,17 @@ from dataclasses import dataclass
 from typing import Literal, Protocol
 
 from agents_remember.serving.seat_binding import attach_seat_role
+from agents_remember.serving.sprint_role_binding import sprint_binding_for_attachment
 from agents_remember.serving.terminal_catalog import TerminalCatalog
 
-LeafAssignmentStatus = Literal["attached", "leaf-taken", "unknown-session", "role-required"]
+LeafAssignmentStatus = Literal[
+    "attached",
+    "leaf-taken",
+    "unknown-session",
+    "role-required",
+    "sprint-binding-required",
+    "sprint-binding-conflict",
+]
 
 
 class LeafAssignmentHost(Protocol):
@@ -82,6 +90,19 @@ def assign_terminal_session_to_leaf(
             previous_seat_role=entry.binding_role,
             role=entry.role,
         )
+    binding, binding_refusal = sprint_binding_for_attachment(
+        seat_role, leaf_key=leaf_key, entry=entry
+    )
+    if binding_refusal is not None:
+        return LeafAssignmentResult(
+            status=binding_refusal,
+            session_id=session_id,
+            leaf_key=leaf_key,
+            previous_leaf_key=entry.leaf_key,
+            role=entry.role,
+            seat_role=seat_role,
+            previous_seat_role=entry.binding_role,
+        )
     owner = leaf_conflict_owner(
         catalog,
         leaf_key=leaf_key,
@@ -102,7 +123,14 @@ def assign_terminal_session_to_leaf(
         )
     previous_leaf_key = entry.leaf_key
     previous_seat_role = entry.binding_role
-    catalog.upsert(entry.with_leaf_binding(leaf_key, seat_role))
+    catalog.upsert(
+        entry.with_leaf_binding(
+            leaf_key,
+            seat_role,
+            spawn_repo=binding.repo if binding is not None else None,
+            spawn_sprint=binding.sprint if binding is not None else None,
+        )
+    )
     return LeafAssignmentResult(
         status="attached",
         session_id=session_id,

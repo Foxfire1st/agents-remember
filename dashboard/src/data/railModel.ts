@@ -1,39 +1,45 @@
-import type { AgentPickupNode, GateNode, LifecycleProjection, TaskDocNode } from "../types/projection";
-import { sessionHasPendingInteraction, sessionSeatRole, type OpenSession } from "./sessions";
-import { seatVisualState } from "./stateGrammar";
-import { pathDir } from "./taskHierarchy";
-import { qualifiedLeafKey } from "./taskIdentity";
+import type {
+  AgentPickupNode,
+  GateNode,
+  LifecycleProjection,
+  TaskDocNode,
+} from '../types/projection';
+import { sessionHasPendingInteraction, sessionSeatRole, type OpenSession } from './sessions';
+import { seatVisualState } from './stateGrammar';
+import { pathDir } from './taskHierarchy';
+import { qualifiedLeafKey } from './taskIdentity';
 
-// The session-rail model (260715-FEUI-L2 S4) — pure derivations, RULED 2026-07-16 (spec §1.6b):
-// role-driven hierarchy, never spawn-edge nesting. Architect / orchestrator / manager render as a
-// FLAT command spine in that order; only leaf agents indent, clustered per leaf under their
-// manager, base order worker → reviewer → curator with the ACTIVE seat sorted to the top.
+// The session-rail model: pure role-driven derivations, never spawn-edge nesting. Bound
+// architect / orchestrator / manager seats render flat inside their sprint command group; only
+// leaf agents indent, clustered per leaf under their manager, base order worker → reviewer →
+// curator with the ACTIVE seat sorted to the top.
 // Completed seats fold into a per-master collapsed folder; bulk end lives at master AND sprint
-// level with honest preview counts. Consumes the 260713_chat-rail-role-hierarchy analysis (flat
-// spine; the landed spawn-edge forest in SessionList.orderedVisibleMembers is the diagnosed
-// defect) — that master's formal roll-in stays pending the developer's call.
+// level with honest preview counts. The top-level spine is migration compatibility for legacy
+// unbound rows, never canonical global architecture.
 
 /** Three-letter role codes (RULED): ARC/ORC/MGR/WKR/REV/CUR; other known roles keep the pattern. */
 const ROLE_CODES: Record<string, string> = {
-  architect: "ARC",
-  orchestrator: "ORC",
-  manager: "MGR",
-  worker: "WKR",
-  reviewer: "REV",
-  curator: "CUR",
-  strategist: "STR",
-  designer: "DSG",
-  "system-specialist": "SYS",
+  architect: 'ARC',
+  orchestrator: 'ORC',
+  manager: 'MGR',
+  worker: 'WKR',
+  reviewer: 'REV',
+  curator: 'CUR',
+  strategist: 'STR',
+  designer: 'DSG',
+  'system-specialist': 'SYS',
 };
 
 /** The rail chip code for a seat's spawn role — absent when the seat has no spawn role (R6). */
-export function roleCode(session: Pick<OpenSession, "kind" | "seatRole" | "spawnRole">): string | undefined {
+export function roleCode(
+  session: Pick<OpenSession, 'kind' | 'seatRole' | 'spawnRole'>,
+): string | undefined {
   const role = session.spawnRole ?? session.seatRole;
-  if (!role || role === "chat" || role === "terminal") return undefined;
+  if (!role || role === 'chat' || role === 'terminal') return undefined;
   return ROLE_CODES[role] ?? role.slice(0, 3).toUpperCase();
 }
 
-// Spine order (RULED): architect → orchestrator → (strategist/designer) → unresolvable managers.
+// Migration-spine order: architect → orchestrator → (strategist/designer) → unresolvable managers.
 const SPINE_RANK: Record<string, number> = {
   architect: 0,
   orchestrator: 1,
@@ -48,11 +54,10 @@ const CLUSTER_RANK: Record<string, number> = {
   worker: 0,
   reviewer: 1,
   curator: 2,
-  "system-specialist": 3,
+  'system-specialist': 3,
 };
 
-const isWorking = (session: OpenSession): boolean =>
-  seatVisualState(session).key === "working";
+const isWorking = (session: OpenSession): boolean => seatVisualState(session).key === 'working';
 
 /**
  * In-cluster comparator (RULED): the ACTIVE seat (turnState working) sorts to the top; ties keep
@@ -74,11 +79,13 @@ function compareSpine(left: OpenSession, right: OpenSession): number {
 }
 
 function masterKeyOf(session: OpenSession): string | undefined {
-  const parts = session.leafKey?.split("/").filter(Boolean);
+  if (session.spawnRepo && session.spawnSprint)
+    return `${session.spawnRepo}/${session.spawnSprint}`;
+  const parts = session.leafKey?.split('/').filter(Boolean);
   return parts && parts.length >= 3 ? `${parts[0]}/${parts[1]}` : undefined;
 }
 
-const isLive = (session: OpenSession): boolean => (session.status ?? "running") === "running";
+const isLive = (session: OpenSession): boolean => (session.status ?? 'running') === 'running';
 
 export interface RailLeafCluster {
   /** The qualified leaf key (cluster identity). */
@@ -92,15 +99,15 @@ export interface RailMasterSection {
   /** `repo/master`. */
   key: string;
   label: string;
-  /** Managers render flat (never indented) at the section top. */
-  managers: OpenSession[];
+  /** Sprint-bound command seats render flat (never indented) at the section top. */
+  commandSeats: OpenSession[];
   clusters: RailLeafCluster[];
   /** Landed seats of this master — the collapsed completed folder (R17). */
   completed: OpenSession[];
 }
 
 export interface RailModel {
-  /** Architect / orchestrator (/ strategist / designer / master-less managers) — flat, in order. */
+  /** Legacy-unbound command seats kept only for migration compatibility, flat and in order. */
   spine: OpenSession[];
   masters: RailMasterSection[];
   /** Live seats with no leaf claim and no command role. */
@@ -120,8 +127,8 @@ export interface RailModelLabels {
 export function masterLabels(taskDocuments: readonly TaskDocNode[]): Map<string, string> {
   const labels = new Map<string, string>();
   for (const doc of taskDocuments) {
-    if (doc.kind !== "master" || !doc.repository || !doc.title) continue;
-    const folder = pathDir(doc.docPath).split("/").filter(Boolean).pop() ?? "";
+    if (doc.kind !== 'master' || !doc.repository || !doc.title) continue;
+    const folder = pathDir(doc.docPath).split('/').filter(Boolean).pop() ?? '';
     const key = folder ? `${doc.repository}/${folder}` : undefined;
     if (key && !labels.has(key)) labels.set(key, doc.title);
   }
@@ -129,7 +136,7 @@ export function masterLabels(taskDocuments: readonly TaskDocNode[]): Map<string,
 }
 
 interface MasterAccumulator {
-  managers: OpenSession[];
+  commandSeats: OpenSession[];
   leaf: Map<string, OpenSession[]>;
   completed: OpenSession[];
 }
@@ -160,19 +167,15 @@ function bucketSession(
   completedUnattached: OpenSession[],
   sectionFor: (masterKey: string) => MasterAccumulator,
 ): void {
-  if (session.status === "terminated") return; // tombstones never render
+  if (session.status === 'terminated') return;
   const role = sessionSeatRole(session);
   const masterKey = masterKeyOf(session);
-  if (session.status === "landed") {
-    // Completed folder per master (RULED, restores the regressed behavior) — command seats too:
-    // a landed seat is done regardless of rank.
-    if (masterKey) sectionFor(masterKey).completed.push(session);
-    else completedUnattached.push(session);
+  if (session.status === 'landed') {
+    bucketCompleted(session, masterKey, completedUnattached, sectionFor);
     return;
   }
-  if (role === "manager") {
-    if (masterKey) sectionFor(masterKey).managers.push(session);
-    else spine.push(session); // a master-less manager still outranks the leaf level
+  if (isSprintCommandSeat(role, masterKey)) {
+    sectionFor(masterKey).commandSeats.push(session);
     return;
   }
   if (SPINE_ROLES.has(role)) {
@@ -189,6 +192,23 @@ function bucketSession(
   }
 }
 
+function bucketCompleted(
+  session: OpenSession,
+  masterKey: string | undefined,
+  completedUnattached: OpenSession[],
+  sectionFor: (masterKey: string) => MasterAccumulator,
+): void {
+  if (masterKey) sectionFor(masterKey).completed.push(session);
+  else completedUnattached.push(session);
+}
+
+function isSprintCommandSeat(role: string, masterKey: string | undefined): masterKey is string {
+  return (
+    masterKey !== undefined &&
+    (role === 'manager' || role === 'architect' || role === 'orchestrator')
+  );
+}
+
 export function buildRailModel(sessions: OpenSession[], labels: RailModelLabels = {}): RailModel {
   const spine: OpenSession[] = [];
   const unattached: OpenSession[] = [];
@@ -198,7 +218,7 @@ export function buildRailModel(sessions: OpenSession[], labels: RailModelLabels 
   const sectionFor = (masterKey: string): MasterAccumulator => {
     const existing = byMaster.get(masterKey);
     if (existing) return existing;
-    const created: MasterAccumulator = { managers: [], leaf: new Map(), completed: [] };
+    const created: MasterAccumulator = { commandSeats: [], leaf: new Map(), completed: [] };
     byMaster.set(masterKey, created);
     return created;
   };
@@ -208,21 +228,22 @@ export function buildRailModel(sessions: OpenSession[], labels: RailModelLabels 
   }
 
   spine.sort(compareSpine);
-  unattached.sort((left, right) =>
-    Number(isLive(right)) - Number(isLive(left)) || left.id.localeCompare(right.id),
+  unattached.sort(
+    (left, right) =>
+      Number(isLive(right)) - Number(isLive(left)) || left.id.localeCompare(right.id),
   );
 
   const masters: RailMasterSection[] = [...byMaster.entries()]
     .sort(([left], [right]) => left.localeCompare(right))
     .map(([key, section]) => ({
       key,
-      label: labels.masterLabel?.(key) ?? key.split("/").pop() ?? key,
-      managers: [...section.managers].sort((l, r) => l.id.localeCompare(r.id)),
+      label: labels.masterLabel?.(key) ?? key.split('/').pop() ?? key,
+      commandSeats: [...section.commandSeats].sort(compareSpine),
       clusters: [...section.leaf.entries()]
         .sort(([left], [right]) => left.localeCompare(right))
         .map(([leafKey, seats]) => ({
           key: leafKey,
-          label: labels.leafLabel?.(leafKey) ?? leafKey.split("/").pop() ?? leafKey,
+          label: labels.leafLabel?.(leafKey) ?? leafKey.split('/').pop() ?? leafKey,
           seats: [...seats].sort(compareClusterSeats),
         })),
       completed: [...section.completed].sort((l, r) => l.id.localeCompare(r.id)),
@@ -238,7 +259,7 @@ export function buildRailModel(sessions: OpenSession[], labels: RailModelLabels 
 export function railCycleOrder(model: RailModel): string[] {
   const ids: string[] = model.spine.map((session) => session.id);
   for (const master of model.masters) {
-    for (const manager of master.managers) ids.push(manager.id);
+    for (const commandSeat of master.commandSeats) ids.push(commandSeat.id);
     for (const cluster of master.clusters) for (const seat of cluster.seats) ids.push(seat.id);
   }
   for (const session of model.unattached) ids.push(session.id);
@@ -255,7 +276,7 @@ export interface SpawnTreeRow {
 }
 
 export function buildSpawnTree(sessions: OpenSession[]): SpawnTreeRow[] {
-  const visible = sessions.filter((session) => session.status !== "terminated");
+  const visible = sessions.filter((session) => session.status !== 'terminated');
   const byParent = new Map<string, OpenSession[]>();
   const ids = new Set(visible.map((session) => session.id));
   const roots: OpenSession[] = [];
@@ -282,8 +303,8 @@ export function buildSpawnTree(sessions: OpenSession[]): SpawnTreeRow[] {
 // dot | role | title | status | End. Truncation: dot + role + title ALWAYS survive; the status
 // chip is the only elidable segment and its truth stays reachable via the row tooltip.
 
-export const ROW_SEGMENTS = ["dot", "role", "title", "status", "end"] as const;
-export const ROW_ELIDABLE_SEGMENTS: readonly (typeof ROW_SEGMENTS)[number][] = ["status"];
+export const ROW_SEGMENTS = ['dot', 'role', 'title', 'status', 'end'] as const;
+export const ROW_ELIDABLE_SEGMENTS: readonly (typeof ROW_SEGMENTS)[number][] = ['status'];
 
 /** The full untruncated row truth — the tooltip the elided status chip falls back to. */
 export function railRowTooltip(session: OpenSession, leafLabel?: string): string {
@@ -295,7 +316,7 @@ export function railRowTooltip(session: OpenSession, leafLabel?: string): string
   if (leafLabel) parts.push(`leaf: ${leafLabel}`);
   if (session.landedReason) parts.push(`landed: ${session.landedReason}`);
   if (session.retiredReason) parts.push(`retired: ${session.retiredReason}`);
-  return parts.join(" · ");
+  return parts.join(' · ');
 }
 
 // ── Fleet attention (R12) ───────────────────────────────────────────────────────────────────
@@ -319,11 +340,11 @@ export function attentionRollup(
     live.filter((session) => seatVisualState(session).key === key).map((session) => session.id);
   const liveIds = new Set(live.map((session) => session.id));
   return {
-    needsInput: byKey("awaiting-input"),
-    failed: byKey("failed"),
+    needsInput: byKey('awaiting-input'),
+    failed: byKey('failed'),
     unacked: (joins.unackedSessionIds ?? []).filter((id) => liveIds.has(id)),
     criticalBus: (joins.criticalBusSessionIds ?? []).filter((id) => liveIds.has(id)),
-    working: byKey("working"),
+    working: byKey('working'),
   };
 }
 
@@ -348,8 +369,8 @@ export function jumpToAttentionTarget(
   const byId = new Map(sessions.map((session) => [session.id, session]));
   const oldestFirst = (ids: string[]): string | undefined =>
     [...ids].sort((left, right) => {
-      const l = byId.get(left)?.turnStateChangedAt ?? byId.get(left)?.createdAt ?? "";
-      const r = byId.get(right)?.turnStateChangedAt ?? byId.get(right)?.createdAt ?? "";
+      const l = byId.get(left)?.turnStateChangedAt ?? byId.get(left)?.createdAt ?? '';
+      const r = byId.get(right)?.turnStateChangedAt ?? byId.get(right)?.createdAt ?? '';
       return l.localeCompare(r) || left.localeCompare(right);
     })[0];
   return (
@@ -366,15 +387,15 @@ export function jumpToAttentionTarget(
 export function masterAttentionBadge(
   master: RailMasterSection,
   rollup: AttentionRollup,
-): { glyph: string; count: number; kind: "needsInput" | "failed" } | null {
+): { glyph: string; count: number; kind: 'needsInput' | 'failed' } | null {
   const memberIds = new Set<string>([
-    ...master.managers.map((session) => session.id),
+    ...master.commandSeats.map((session) => session.id),
     ...master.clusters.flatMap((cluster) => cluster.seats.map((seat) => seat.id)),
   ]);
   const needsInput = rollup.needsInput.filter((id) => memberIds.has(id)).length;
-  if (needsInput > 0) return { glyph: "❗", count: needsInput, kind: "needsInput" };
+  if (needsInput > 0) return { glyph: '❗', count: needsInput, kind: 'needsInput' };
   const failed = rollup.failed.filter((id) => memberIds.has(id)).length;
-  if (failed > 0) return { glyph: "✖", count: failed, kind: "failed" };
+  if (failed > 0) return { glyph: '✖', count: failed, kind: 'failed' };
   return null;
 }
 
@@ -386,12 +407,12 @@ export function masterAttentionBadge(
  */
 export function smartDefaultFocus(sessions: OpenSession[]): string | null {
   const live = sessions.filter(isLive);
-  const stamp = (session: OpenSession) => session.turnStateChangedAt ?? session.createdAt ?? "";
+  const stamp = (session: OpenSession) => session.turnStateChangedAt ?? session.createdAt ?? '';
   const oldest = (list: OpenSession[]) =>
     [...list].sort((l, r) => stamp(l).localeCompare(stamp(r)) || l.id.localeCompare(r.id))[0];
-  const waiting = live.filter((session) => seatVisualState(session).key === "awaiting-input");
+  const waiting = live.filter((session) => seatVisualState(session).key === 'awaiting-input');
   if (waiting.length > 0) return oldest(waiting).id;
-  const failed = live.filter((session) => seatVisualState(session).key === "failed");
+  const failed = live.filter((session) => seatVisualState(session).key === 'failed');
   if (failed.length > 0) return oldest(failed).id;
   if (live.length > 0) {
     const newest = [...live].sort(
@@ -414,7 +435,7 @@ export function heldGatesByLeafKey(
     if (!doc.lifecycleId) continue;
     const gate = lifecycles[doc.lifecycleId]?.gate;
     // An open gate (no decision recorded) is the held/decision-pending state.
-    if (!gate || gate.state !== "open") continue;
+    if (!gate || gate.state !== 'open') continue;
     const leafKey = qualifiedLeafKey(doc);
     if (leafKey) held.set(leafKey, gate);
   }
@@ -430,8 +451,8 @@ export function briefPendingSessionIds(
 ): Set<string> {
   const pending = new Set<string>();
   for (const pickup of pickups) {
-    if (pickup.messageKind !== "dispatch-brief") continue;
-    if (pickup.state !== "waiting-for-agent" && pickup.state !== "check-chat") continue;
+    if (pickup.messageKind !== 'dispatch-brief') continue;
+    if (pickup.state !== 'waiting-for-agent' && pickup.state !== 'check-chat') continue;
     const target = pickupTargetSession(pickup, sessions);
     if (target) pending.add(target.id);
   }
@@ -445,7 +466,7 @@ export function criticalBusSessionIds(
 ): Set<string> {
   const critical = new Set<string>();
   for (const pickup of pickups) {
-    const escalated = pickup.state === "check-chat";
+    const escalated = pickup.state === 'check-chat';
     const aging = pickupAging(pickup);
     if (!escalated && !aging) continue;
     const target = pickupTargetSession(pickup, sessions);
@@ -462,9 +483,9 @@ export function interactionPromptPreview(
   maxLength = 120,
 ): string | undefined {
   if (!pendingInteraction) return undefined;
-  const candidate = ["prompt", "question", "message", "title"]
+  const candidate = ['prompt', 'question', 'message', 'title']
     .map((key) => pendingInteraction[key])
-    .find((value): value is string => typeof value === "string" && value.length > 0);
+    .find((value): value is string => typeof value === 'string' && value.length > 0);
   if (!candidate) return undefined;
   return candidate.length > maxLength ? `${candidate.slice(0, maxLength - 1)}…` : candidate;
 }
@@ -473,9 +494,10 @@ export function interactionPromptPreview(
 export function waitingSeats(sessions: OpenSession[]): OpenSession[] {
   return sessions
     .filter((session) => isLive(session) && sessionHasPendingInteraction(session))
-    .sort((l, r) =>
-      (r.turnStateChangedAt ?? r.createdAt ?? "").localeCompare(
-        l.turnStateChangedAt ?? l.createdAt ?? "",
-      ) || l.id.localeCompare(r.id),
+    .sort(
+      (l, r) =>
+        (r.turnStateChangedAt ?? r.createdAt ?? '').localeCompare(
+          l.turnStateChangedAt ?? l.createdAt ?? '',
+        ) || l.id.localeCompare(r.id),
     );
 }

@@ -22,12 +22,15 @@ lifecycle, and no role reads another role's file.
 3. **Else** (a developer opened this session) → you are the developer-facing **free chat** — a
    launcher, not a role seat (ruled 2026-07-09). Research-only questions are answered inline with
    no role taken. The moment the ask is role-shaped (a sprint, a task, any durable change), do NOT
-   assume the architect role in this chat: **spawn the architect into its own chat**
+   assume the architect role in this chat: resolve the target sprint, then **spawn the architect
+   into its own chat bound to that sprint**
    (`spawn_agent_session` with `AR_SPAWN_ROLE=architect`; the profile — harness/model/effort —
-   comes from `orchestration.roles.architect` in settings, never from this session's guess) and
-   point the developer at that chat. A clean startup with the settings-owned profile removes all
-   profile ambiguity. The spawned architect runs `roles/architect.md` and owns the developer
-   conversation from there.
+   comes from `orchestration.roles.architect` in settings, never from this session's guess; its
+   leaf reference supplies immutable repository+sprint provenance) and point the developer at
+   that chat. A clean startup with the settings-owned profile removes all profile ambiguity. The
+   spawned architect runs `roles/architect.md` and owns that sprint's developer conversation.
+   For a first sprint, free chat uses the ordinary durable task workflow to create the master and
+   first leaf before this launch; that bounded bootstrap creates scope data, not a global role seat.
 
 There is no fourth entry, and the edge cases are decided: an **unresolvable `AR_SPAWN_ROLE`
 value** (no matching `roles/<value>.md`) falls through to condition 2 (the brief); a role-env
@@ -35,7 +38,8 @@ session **whose brief never arrives** announces itself on the inbox and waits �
 improvises a task; `AR_SPAWN_ROLE=orchestrator` is valid only as a spawned backend seat or a
 backend takeover chair — the developer still talks to the **architect**, not the orchestrator.
 The spool-up chain is fixed and self-driving (ruled 2026-07-09): free chat spawns the
-**architect**; the architect spawns the **orchestrator** for portfolio execution; the
+**architect for the resolved sprint**; the architect spawns the **orchestrator** for that sprint's
+portfolio execution; the
 orchestrator spawns **managers** per the approved plan and the concurrency settings; managers
 spawn their **workers**. No seat waits to be told "spawn this, spawn that" — each level spawns
 its next level from the plan. Only two spool-up decisions ever go back to the developer, both as
@@ -96,11 +100,11 @@ fit is unclear.
 
 | Role | Seat | Lifecycle file |
 | --- | --- | --- |
-| **architect** | the developer-facing owner seat; design conversation, decision-item relay, and drawing board | `roles/architect.md` |
-| **orchestrator** | spawned backend portfolio/orchestration seat; never developer-facing | `roles/orchestrator.md` |
+| **architect** | sprint-local developer-facing owner seat; design conversation, decision-item relay, and drawing board | `roles/architect.md` |
+| **orchestrator** | sprint-local spawned backend portfolio/orchestration seat; never developer-facing | `roles/orchestrator.md` |
 | **designer** | a HAT the architect pulls inline (front of the pipeline or mid-flight; separate chair optional) | `roles/designer.md` |
 | **strategist** | the sprint planner, SPAWN-FIRST when the developer approves the architect's propose-first question; its deliverable is the orchestration task draft (sprint plan + scope); spawn value `strategist` | `roles/strategist.md` |
-| **manager** | one coordination leaf per master; drives that master's leaf loop | `roles/manager.md` |
+| **manager** | sprint-local coordination seat per master; drives that master's leaf loop | `roles/manager.md` |
 | **worker** | one leaf worktree, short-lived, fresh session | `roles/worker.md` |
 | **curator** | fresh per leaf after builder/reviewer; writes onboarding only from task docs, notes, and code diff | `roles/curator.md` |
 | **system-specialist** | backend provider-degradation investigator; report first, fixes only after explicit orchestrator order; spawn value `system-specialist` | `roles/system-specialist.md` |

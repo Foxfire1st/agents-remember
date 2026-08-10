@@ -2,8 +2,8 @@ import type { TerminalCatalogRow } from "../../types/terminalCatalog";
 
 // Catalog-row fixtures in the FULL wire shape (`TerminalCatalogEntry.to_json()`),
 // placed under src/test/fixtures so multiple test suites can import them. `catalogRow` builds one
-// row with sane defaults; `FLEET` is the mockup-mirroring scenario (flat command spine, two leaf
-// clusters, a completed folder, an awaiting-input scout, a failed launch, a landed probe).
+// row with sane defaults; `FLEET` is the mockup-mirroring scenario (a sprint-local command group,
+// two leaf clusters, a completed folder, an awaiting-input scout, a failed launch, a landed probe).
 
 let counter = 0;
 
@@ -35,6 +35,9 @@ export const FLEET: TerminalCatalogRow[] = [
     label: "architect",
     spawnRole: "architect",
     seatRole: "architect",
+    leafKey: `${MASTER}/00_series-management`,
+    spawnRepo: "agents-remember",
+    spawnSprint: "260714_own-adapter-capability",
     turnState: "turn-ended",
     turnStateChangedAt: "2026-07-16T09:00:00Z",
     controlState: "ready",
@@ -45,6 +48,9 @@ export const FLEET: TerminalCatalogRow[] = [
     spawnRole: "orchestrator",
     seatRole: "orchestrator",
     spawnedBySession: "architect",
+    leafKey: `${MASTER}/00_series-management`,
+    spawnRepo: "agents-remember",
+    spawnSprint: "260714_own-adapter-capability",
     turnState: "working",
     turnStateChangedAt: "2026-07-16T09:05:00Z",
     controlState: "ready",

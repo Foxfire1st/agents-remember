@@ -4,18 +4,23 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
+from typing import Any, cast
+from unittest import mock
 
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
 from agents_remember.mcp.config import McpRuntimeConfig
 from agents_remember.mcp.tools.terminal import attach_terminal_session_to_leaf_payload
+from agents_remember.serving import _app_terminal_routes as terminal_routes
 from agents_remember.serving.terminal_catalog import (
     TerminalCatalog,
     TerminalCatalogEntry,
     terminal_catalog_path,
 )
 from agents_remember.serving.terminal_leaf_assignment import assign_terminal_session_to_leaf
+from agents_remember.serving.terminal_opener import OpenTerminalResult
 from agents_remember.tasks import TaskDocument, write_task_doc
 
 
@@ -211,6 +216,104 @@ class TerminalLeafAssignmentTests(unittest.TestCase):
             self.assertEqual(result.status, "attached")
             self.assertEqual(_require_entry(catalog, "worker").binding_role, "worker")
             self.assertEqual(_require_entry(catalog, "architect").binding_role, "architect")
+
+    def test_root_architect_attachment_binds_once_and_rejects_cross_sprint_mutation(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            catalog = TerminalCatalog(Path(tmp) / "terminal-sessions.json")
+            catalog.upsert(_entry("architect"))
+            host = _Host("ar-architect")
+
+            first = assign_terminal_session_to_leaf(
+                catalog,
+                host,
+                session_id="architect",
+                leaf_key="repo-a/sprint-a/leaf-1",
+                role="architect",
+            )
+            second = assign_terminal_session_to_leaf(
+                catalog,
+                host,
+                session_id="architect",
+                leaf_key="repo-b/sprint-b/leaf-1",
+                role="architect",
+            )
+
+            row = _require_entry(catalog, "architect")
+            self.assertEqual(first.status, "attached")
+            self.assertEqual(second.status, "sprint-binding-conflict")
+            self.assertEqual(
+                (row.leaf_key, row.sprint_key), ("repo-a/sprint-a/leaf-1", "repo-a/sprint-a")
+            )
+
+    def test_unbound_non_root_named_attachment_refuses_without_mutation(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            catalog = TerminalCatalog(Path(tmp) / "terminal-sessions.json")
+            catalog.upsert(_entry("manager"))
+
+            result = assign_terminal_session_to_leaf(
+                catalog,
+                _Host("ar-manager"),
+                session_id="manager",
+                leaf_key="repo-a/sprint-a/leaf-1",
+                role="manager",
+            )
+
+            self.assertEqual(result.status, "sprint-binding-required")
+            self.assertIsNone(_require_entry(catalog, "manager").leaf_key)
+
+    def test_http_routes_expose_named_scope_refusals(self) -> None:
+        runtime = cast(
+            Any,
+            SimpleNamespace(
+                config=SimpleNamespace(
+                    workspace_root=Path("/workspace"), coordination_root=Path("/tmp")
+                ),
+                catalog=TerminalCatalog(Path(tempfile.gettempdir()) / "scope-route-catalog.json"),
+                host=_Host(),
+            ),
+        )
+        request = terminal_routes.TerminalOpenRequest(kind="terminal")
+        with (
+            mock.patch.object(
+                terminal_routes, "resolve_terminal_open_selection", return_value=None
+            ),
+            mock.patch.object(
+                terminal_routes,
+                "open_terminal_session",
+                return_value=OpenTerminalResult(status="sprint-binding-required"),
+            ),
+        ):
+            response = terminal_routes._open_terminal_response(runtime, "architect", request)
+        self.assertEqual(response.status_code, 400)
+        self.assertIn(b"sprint-binding-required", response.body)
+
+        with (
+            mock.patch.object(
+                terminal_routes, "_resolve_request_leaf_key", return_value="repo/sprint/leaf"
+            ),
+            mock.patch.object(
+                terminal_routes,
+                "assign_terminal_session_to_leaf",
+                return_value=SimpleNamespace(status="sprint-binding-conflict"),
+            ),
+        ):
+            attached = terminal_routes._attach_leaf_response(
+                runtime,
+                "architect",
+                terminal_routes.TerminalAttachLeafRequest(
+                    leafKey="repo/sprint/leaf", role="architect"
+                ),
+            )
+        self.assertEqual(attached.status_code, 409)
+        self.assertIn(b"sprint-binding-conflict", attached.body)
+
+        taken = terminal_routes._open_terminal_refusal_response(
+            OpenTerminalResult(status="leaf-taken", owner_session_id="other"),
+            "repo/sprint/leaf",
+        )
+        assert taken is not None
+        self.assertEqual(taken.status_code, 409)
+        self.assertIn(b"leaf-taken", taken.body)
 
     def test_role_suffixed_leaf_ref_is_rejected_with_pair_guidance(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

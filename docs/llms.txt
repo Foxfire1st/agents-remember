@@ -298,8 +298,9 @@ worktree and thrown away with it.
 Memory is only as good as the discipline that keeps it honest, and that
 discipline is the second half of the product. Sessions route by role through
 one skill (`l-01-agent-lifecycles`): a spawned agent follows the role brief
-that spawned it, and a developer-facing session is the **architect**, whose
-lifecycle runs
+that spawned it, and a developer-facing session is **free chat**. It answers
+research inline, creates or resolves the first durable sprint and leaf when needed,
+then launches that sprint-bound architect lifecycle:
 
 ```text
 request → trust-checkpoint → reframe-research → decide → build → close

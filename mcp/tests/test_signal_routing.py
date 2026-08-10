@@ -257,12 +257,22 @@ class SignalRoutingTests(unittest.TestCase):
         self.assertEqual(owner.agent_id, "manager-1")
         self.assertNotEqual(owner.agent_id, "orchestrator-1")
 
-    def test_decision_item_routes_to_architect_regardless_of_provenance(self) -> None:
-        self._upsert(id="orchestrator-1", spawn_role="orchestrator")
+    def test_decision_item_routes_to_its_sprint_architect_with_an_exact_address(self) -> None:
+        leaf_key = "repo-a/sprint-a/leaf-1"
+        self._upsert(id="orchestrator-1", spawn_role="orchestrator", leaf_key=leaf_key)
+        self._upsert(
+            id="architect-a",
+            spawn_role="architect",
+            seat_role="architect",
+            spawn_repo="repo-a",
+            spawn_sprint="sprint-a",
+        )
         owner = derive_signal_owner(
             self.catalog, sender_agent_id="orchestrator-1", message_kind="decision-item"
         )
-        self.assertEqual(owner, RoutedOwner(role="architect"))
+        self.assertEqual(
+            owner, RoutedOwner(role="architect", agent_id="architect-a", lifecycle_id="L1")
+        )
 
     def test_unknown_sender_derives_no_route(self) -> None:
         owner = derive_signal_owner(self.catalog, sender_agent_id="ghost", message_kind="message")

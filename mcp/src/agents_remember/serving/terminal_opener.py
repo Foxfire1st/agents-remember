@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import os
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Literal, NamedTuple
 
@@ -49,6 +49,10 @@ from agents_remember.serving.harnesses import (
 )
 from agents_remember.serving.hosted_session_runtime import HostedSessionRuntime
 from agents_remember.serving.seat_binding import migrated_seat_role
+from agents_remember.serving.sprint_role_binding import (
+    SprintOpenBindingRequest,
+    sprint_binding_for_reopen,
+)
 from agents_remember.serving.terminal import (
     TerminalHost,
     TerminalSessionBinding,
@@ -61,7 +65,14 @@ from agents_remember.serving.terminal_catalog import (
 from agents_remember.serving.terminal_leaf_assignment import leaf_conflict_owner
 from agents_remember.serving.terminal_tmux import tmux_session_name
 
-OpenTerminalStatus = Literal["opened", "leaf-taken", "launch-conflict", "bad-kind"]
+OpenTerminalStatus = Literal[
+    "opened",
+    "leaf-taken",
+    "launch-conflict",
+    "bad-kind",
+    "sprint-binding-required",
+    "sprint-binding-conflict",
+]
 
 
 @dataclass(frozen=True)
@@ -158,6 +169,8 @@ class SpawnProvenance:
     spawned_by_lifecycle: str | None = None
     spawn_level: str | None = None
     spawn_level_source: str | None = None
+    spawn_repo: str | None = None
+    spawn_sprint: str | None = None
 
 
 NO_SPAWN_PROVENANCE = SpawnProvenance()
@@ -294,7 +307,7 @@ def _preserved(
 ) -> Any:
     """Keep write-once spawn provenance when a session is reopened."""
 
-    return new_value or _previous(existing, name)
+    return _previous(existing, name) or new_value
 
 
 def _live_launch_conflict(
@@ -548,6 +561,8 @@ def _opened_catalog_entry(
         session_commands=tuple(knobs.session_commands) if knobs.session_commands else None,
         spawn_level=provenance.spawn_level,
         spawn_level_source=provenance.spawn_level_source,
+        spawn_repo=_preserved(existing, provenance.spawn_repo, "spawn_repo"),
+        spawn_sprint=_preserved(existing, provenance.spawn_sprint, "spawn_sprint"),
         resolved_model=resolved_model,
         resolved_effort=resolved_effort,
         control_state=control_state,
@@ -592,6 +607,19 @@ def _open_terminal_transaction(
         spawn_role=spawn_env.get("AR_SPAWN_ROLE") or (existing.spawn_role if existing else None),
         kind=resolved_kind,
     )
+    binding, binding_refusal = sprint_binding_for_reopen(
+        SprintOpenBindingRequest(
+            role=seat_role,
+            leaf_key=provenance.leaf_key,
+            replacement_for_leaf=provenance.replacement_for_leaf,
+            existing=existing,
+            spawned_by_session=provenance.spawned_by_session,
+            spawn_repo=provenance.spawn_repo,
+            spawn_sprint=provenance.spawn_sprint,
+        )
+    )
+    if binding_refusal is not None:
+        return OpenTerminalResult(status=binding_refusal)
     owner = leaf_conflict_owner(
         catalog,
         leaf_key=provenance.leaf_key,
@@ -634,7 +662,12 @@ def _open_terminal_transaction(
         ),
         reopen=reopen,
         launch=launch,
-        provenance=provenance,
+        provenance=replace(
+            provenance,
+            spawn_repo=provenance.spawn_repo or (binding.repo if binding is not None else None),
+            spawn_sprint=provenance.spawn_sprint
+            or (binding.sprint if binding is not None else None),
+        ),
     )
     catalog.upsert(entry)
     return OpenTerminalResult(

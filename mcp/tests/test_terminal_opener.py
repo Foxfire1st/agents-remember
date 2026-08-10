@@ -293,13 +293,12 @@ class OpenTerminalSessionTests(unittest.TestCase):
         self.assertEqual(entry.to_json()["controlEndpoint"], str(endpoint))
 
     def test_reopen_preserves_spawn_role_and_hand_open_records_none(self) -> None:
-        # Role provenance is set once at first spawn and survives a role-less re-open (the same
-        # `replace`-preserving rule as leaf_key); a hand-opened session records no role at all.
-        self._open(env={"AR_SPAWN_ROLE": "manager"})
+        # Non-named role provenance is set once at first spawn and survives a role-less re-open.
+        self._open(env={"AR_SPAWN_ROLE": "worker"})
         self._open()  # re-open with no env — must not drop the recorded role
         entry = self.catalog.get("worker-1")
         assert entry is not None
-        self.assertEqual(entry.spawn_role, "manager")
+        self.assertEqual(entry.spawn_role, "worker")
 
         self._open(session_id="hand-opened")
         hand_opened = self.catalog.get("hand-opened")
@@ -365,7 +364,8 @@ class OpenTerminalSessionTests(unittest.TestCase):
                 leaf_key=leaf,
                 env={"AR_SPAWN_ROLE": role},
             )
-            self.assertEqual(result.status, "opened")
+            expected = "sprint-binding-required" if role == "manager" else "opened"
+            self.assertEqual(result.status, expected)
 
         live = {
             entry.id: entry.binding_role
@@ -378,7 +378,6 @@ class OpenTerminalSessionTests(unittest.TestCase):
                 "curator": "curator",
                 "worker-2": "worker",
                 "reviewer": "reviewer",
-                "manager": "manager",
             },
         )
 

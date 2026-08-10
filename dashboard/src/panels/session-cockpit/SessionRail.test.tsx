@@ -158,19 +158,19 @@ describe("rail-state matrix (R14 — one grammar on real DOM)", () => {
 });
 
 describe("ruled hierarchy (R5)", () => {
-  it("architect/orchestrator render flat on the spine, managers flat inside their master box", () => {
+  it("bound architect/orchestrator/manager seats render flat inside their sprint box", () => {
     const { getByTestId } = renderRail();
     const rail = getByTestId("session-rail");
     const architect = getByTestId("rail-row-architect");
-    expect(architect.closest("[data-testid^='rail-master-']")).toBeNull(); // never boxed
+    const masterBox = getByTestId(
+      "rail-master-agents-remember/260714_own-adapter-capability",
+    );
+    expect(architect.closest("[data-testid^='rail-master-']")).toBe(masterBox);
     expect(
       getByTestId("rail-row-orchestrator").closest(
         "[data-testid^='rail-master-']",
       ),
-    ).toBeNull();
-    const masterBox = getByTestId(
-      "rail-master-agents-remember/260714_own-adapter-capability",
-    );
+    ).toBe(masterBox);
     expect(within(masterBox).getByTestId("rail-row-manager-l4")).toBeDefined();
     expect(rail.contains(architect)).toBe(true);
   });

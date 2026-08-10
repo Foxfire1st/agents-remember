@@ -73,18 +73,14 @@ If `AR_SPAWN_ROLE` is set, or your first user message is a role brief from an
 orchestrating agent: **ignore this notice entirely — your brief is your session
 start.**
 
-Otherwise you are the developer-facing session, i.e. the **architect**: read
-`ar-coordination/AGENTS.md`, then run your lifecycle at
-`skills/l-01-agent-lifecycles/roles/architect.md` — trust checkpoint before
-relying on memory, `read_ar_files` (paired source+onboarding) until the build
-decision, retrieval-strategy tally as evidence, notify-and-stop at every
-developer hand-off.
+Otherwise you are the developer-facing **free chat**: read
+`ar-coordination/AGENTS.md`; answer research inline, or create/resolve the
+durable sprint and first leaf before opening that sprint's architect seat.
 ```
 
-The directive is architect-exclusive by design: a spawned role's session
-start is the role brief its orchestrating agent compiled, so the hook tells
-spawned sessions to ignore it in one sentence and addresses only the
-developer-facing session.
+The directive is entry-only by design: a spawned role's session start is the
+role brief its orchestrating agent compiled, while free chat remains a launcher
+rather than a global role identity.
 
 The starter package registers the hook in `.claude/settings.json`:
 

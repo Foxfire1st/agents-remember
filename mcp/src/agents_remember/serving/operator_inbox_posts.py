@@ -86,13 +86,15 @@ def _signal_route(
 ) -> tuple[RoutedOwner, str | None]:
     if catalog is None:
         return RoutedOwner(), None
+    leaf_key = signal_leaf_key(catalog, sender_agent_id=sender_agent_id)
     return (
         derive_signal_owner(
             catalog,
             sender_agent_id=sender_agent_id,
             message_kind=message_kind,
+            leaf_key=leaf_key,
         ),
-        signal_leaf_key(catalog, sender_agent_id=sender_agent_id),
+        leaf_key,
     )
 
 
@@ -116,6 +118,12 @@ def _post_address(
     )
     if message_kind == "dispatch-brief" or not has_owner or catalog is None:
         return address
+    if message_kind == "decision-item":
+        return InboxAddress(
+            lifecycle_id=owner.lifecycle_id,
+            agent_id=owner.agent_id,
+            recipient_role=owner.role,
+        )
     if not _is_owner_addressed(catalog, owner, address):
         return address
     return InboxAddress(
@@ -236,6 +244,12 @@ def post_operator_inbox_entry(
         sender_agent_id=poster.sender_agent_id,
         message_kind=message.message_kind,
     )
+    if message.message_kind == "decision-item" and catalog is not None and owner.agent_id is None:
+        return {
+            "ok": False,
+            "operation": "operator_inbox_post",
+            "status": "sprint-owner-required",
+        }
     leaf_key, seat_role, subject_agent_id = _dispatch_entry_fields(
         dispatch_target,
         routed_leaf_key=routed_leaf_key,

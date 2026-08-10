@@ -60,7 +60,7 @@ const ROUTER: FlowModel = {
   takeaway:
     "l-01-agent-lifecycles routes every session by EXACTLY three conditions: AR_SPAWN_ROLE set → " +
     "run that role's lifecycle; else a fresh-session role brief as first message → that role " +
-    "(the brief IS the session start); else the session is developer-facing → the ARCHITECT. Edge cases are " +
+    "(the brief IS the session start); else the session is developer-facing free chat. Edge cases are " +
     "decided: an unresolvable role value falls through to the brief; a brief that never arrives " +
     "means announce-and-wait, never improvise. The invariant ladder binds every path: approved " +
     "task doc → branch (intent) → worktree only where something is built — and chat is never a " +
@@ -74,7 +74,7 @@ const ROUTER: FlowModel = {
         { line: "1 · AR_SPAWN_ROLE set → run roles/<value>.md   (designer = the same hat in another chair)" },
         { line: "⟁ unresolvable value → fall through to condition 2 · no brief arrives → announce on the inbox and WAIT", junction: true },
         { line: "2 · first message is a role brief in a fresh session → that role" },
-        { line: "3 · otherwise: developer-facing session → roles/architect.md (solo = architect-only hat collapse)" },
+        { line: "3 · otherwise: free chat → create/resolve sprint + first leaf → sprint-bound architect" },
       ],
     },
     { kind: "divider", label: "— the owner loop (architect): route each developer event —" },
@@ -100,19 +100,19 @@ const ROUTER: FlowModel = {
   ],
 };
 
-// --- architect (developer-facing owner seat) -----------------------------------------------------
+// --- architect (sprint-local owner seat) ----------------------------------------------------------
 
 const ARCHITECT: FlowModel = {
   id: "architect",
   label: "Architect",
-  title: "architect — developer-facing owner, drawing board, decision relay",
+  title: "architect — sprint-local owner, drawing board, decision relay",
   takeaway:
-    "The architect is the developer-facing lifecycle. It owns design conversation, drawing-board " +
+    "The architect is the sprint-local developer lifecycle. It owns design conversation, drawing-board " +
     "rounds, decision pacing, and durable rulings back to backend seats. Backend churn happens in " +
     "spawned role chats; developer-worthy backend questions arrive as one decision item at a time " +
     "over the existing inbox.",
   segments: [
-    { kind: "start", label: "▸ developer-facing session — trust checkpoint + portfolio/decision orientation", next: "route", nextStatus: "current" },
+    { kind: "start", label: "▸ sprint-bound architect seat — trust checkpoint + portfolio/decision orientation", next: "route", nextStatus: "current" },
     {
       kind: "rundown",
       title: "route the event",

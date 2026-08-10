@@ -15,13 +15,11 @@ code repository for resolver, onboarding, workflow, and closeout commands.
 
 ## Start Here — Route By Role
 
-Sessions route by role through the `l-01-agent-lifecycles` skill — the lifecycle
-roof this checkout routes into. A **spawned agent** (the `AR_SPAWN_ROLE` env var
-is set, or the first message is a role brief) follows its brief — the brief is
-its session start, and the rest of this section is not addressed to it. A
-**developer-facing session** is the **architect**: it runs
-`skills/l-01-agent-lifecycles/roles/architect.md`, whose phase axis is
-request → trust-checkpoint → reframe-research → decide → build → close.
+Sessions route by role through the `l-01-agent-lifecycles` skill. A spawned
+agent follows its brief. A developer-facing session is free chat: it answers
+research inline and, for role-shaped work, creates or resolves a durable sprint
+and first leaf before launching that sprint's architect. It is never a global
+architect identity.
 Classify the job (bug / feature / triage / research) as a *lens* during
 reframe-research — a hint, re-pickable, never a gate.
 

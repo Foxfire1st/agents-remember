@@ -315,6 +315,8 @@ class TerminalCatalogEntryWire(WireResponse):
     session_commands: list[str] | None = None
     spawn_level: str | None = None
     spawn_level_source: str | None = None
+    spawn_repo: str | None = None
+    spawn_sprint: str | None = None
     resolved_model: str | None = None
     resolved_effort: str | None = None
     session_log_entry_id: str | None = None

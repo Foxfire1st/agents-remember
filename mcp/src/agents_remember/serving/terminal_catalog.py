@@ -155,6 +155,11 @@ class TerminalCatalogEntry:
     # resolution input (260703-L16, ruling 2026-07-07T08:15). Written-only-when-set.
     spawn_level: str | None = None
     spawn_level_source: str | None = None
+    # Named orchestration seats are scoped to one repository+sprint at their first spawn. This
+    # survives respawns independently of a mutable leaf assignment, so role routing never has to
+    # guess whether a similarly named seat belongs to another live sprint.
+    spawn_repo: str | None = None
+    spawn_sprint: str | None = None
     # Settings-resolved knobs are pinned on harness argv/session commands. Acceptance provenance is
     # the unique id-bearing input and the harness-owned JSONL file that recorded it.
     resolved_model: str | None = None
@@ -266,6 +271,8 @@ class TerminalCatalogEntry:
             session_commands=_string_tuple(data.get("sessionCommands")),
             spawn_level=_optional_str(data, "spawnLevel"),
             spawn_level_source=_optional_str(data, "spawnLevelSource"),
+            spawn_repo=_optional_str(data, "spawnRepo"),
+            spawn_sprint=_optional_str(data, "spawnSprint"),
             resolved_model=_optional_str(data, "resolvedModel"),
             resolved_effort=_optional_str(data, "resolvedEffort"),
             session_log_entry_id=_optional_str(data, "sessionLogEntryId"),
@@ -350,6 +357,8 @@ class TerminalCatalogEntry:
                     "sessionCommands": _optional_list(self.session_commands),
                     "spawnLevel": self.spawn_level,
                     "spawnLevelSource": self.spawn_level_source,
+                    "spawnRepo": self.spawn_repo,
+                    "spawnSprint": self.spawn_sprint,
                     "resolvedModel": self.resolved_model,
                     "resolvedEffort": self.resolved_effort,
                     "sessionLogEntryId": self.session_log_entry_id,
@@ -426,10 +435,23 @@ class TerminalCatalogEntry:
         """A copy bound to ``leaf_key`` (or unbound when ``None``); the leaf-attach write point."""
         return replace(self, leaf_key=leaf_key)
 
-    def with_leaf_binding(self, leaf_key: str, seat_role: str) -> TerminalCatalogEntry:
+    def with_leaf_binding(
+        self,
+        leaf_key: str,
+        seat_role: str,
+        *,
+        spawn_repo: str | None = None,
+        spawn_sprint: str | None = None,
+    ) -> TerminalCatalogEntry:
         """A copy moved to one ``(leaf_key, seat_role)`` binding in a single catalog write."""
 
-        return replace(self, leaf_key=leaf_key, seat_role=seat_role)
+        return replace(
+            self,
+            leaf_key=leaf_key,
+            seat_role=seat_role,
+            spawn_repo=self.spawn_repo or spawn_repo,
+            spawn_sprint=self.spawn_sprint or spawn_sprint,
+        )
 
     def with_retirement(
         self,
@@ -583,6 +605,14 @@ class TerminalCatalogEntry:
         """The leaf this seat works for, including an unbound replacement's declared target."""
 
         return self.leaf_key or self.replacement_for_leaf
+
+    @property
+    def sprint_key(self) -> str | None:
+        """The immutable named-seat scope, if this row was spawned with one."""
+
+        if self.spawn_repo is None or self.spawn_sprint is None:
+            return None
+        return f"{self.spawn_repo}/{self.spawn_sprint}"
 
 
 def terminal_catalog_path(coordination_root: Path) -> Path:

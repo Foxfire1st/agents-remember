@@ -61,13 +61,13 @@ describe("FlowTab canvas (unified l-01-agent-lifecycles)", () => {
       getByText(/task doc \(approved\) → branch \(intent\) → worktree \(only where something is built\)/),
     ).not.toBeNull();
     expect(getByText(/⟁ chat is never a build route — small code work takes the minimal w-02 artifact/)).not.toBeNull();
-    expect(getByText(/developer-facing session → roles\/architect.md/)).not.toBeNull();
+    expect(getByText(/otherwise: free chat → create\/resolve sprint \+ first leaf → sprint-bound architect/)).not.toBeNull();
   });
 
-  it("draws the architect as the developer-facing owner and decision relay", () => {
+  it("draws the architect as the sprint-bound owner and decision relay", () => {
     const { getByTestId, getByText } = render(<FlowTab initialModel="architect" />);
     expect(getByTestId("flow-tab").getAttribute("data-model")).toBe("architect");
-    expect(getByText(/developer-facing owner, drawing board, decision relay/)).not.toBeNull();
+    expect(getByText(/sprint-local owner, drawing board, decision relay/)).not.toBeNull();
     expect(getByText(/backend decision-item → present ONE item, record the durable ruling/)).not.toBeNull();
     expect(getByText(/roles expand horizontally into new chats/)).not.toBeNull();
   });

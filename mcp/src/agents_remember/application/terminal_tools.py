@@ -57,6 +57,10 @@ from agents_remember.serving.retire_policy import (
     check_retire_authority,
 )
 from agents_remember.serving.seat_events import log_rename_event, log_retire_event
+from agents_remember.serving.sprint_role_binding import (
+    SprintBindingRefusal,
+    sprint_binding_for_spawn,
+)
 from agents_remember.serving.terminal import TerminalHost
 from agents_remember.serving.terminal_catalog import (
     TerminalCatalog,
@@ -189,6 +193,11 @@ def attach_terminal_session_to_leaf_tool(
             "role": result.role,
             "seatRole": result.seat_role,
             "previousSeatRole": result.previous_seat_role,
+            "detail": (
+                "named role seats require a matching immutable repository+sprint binding"
+                if result.status.startswith("sprint-binding-")
+                else None
+            ),
         },
     )
 
@@ -658,6 +667,10 @@ def _open_terminal_refusal(
         return _spawn_refusal("bad-kind", harness, kind, detail=result.detail)
     if result.status == "launch-conflict":
         return _spawn_refusal("launch-selection-invalid", harness, kind, detail=result.detail)
+    if result.status == "sprint-binding-required":
+        return _spawn_refusal("sprint-binding-required", harness, kind)
+    if result.status == "sprint-binding-conflict":
+        return _spawn_refusal("sprint-binding-conflict", harness, kind)
     if result.status == "leaf-taken":
         return _result(
             "spawn_agent_session",
@@ -829,6 +842,17 @@ def spawn_agent_session_tool(
 
     sid = overrides.session_id or uuid4().hex
     catalog = TerminalCatalog(terminal_catalog_path(config.coordination_root))
+    parent = catalog.get(spawned_by.session_id) if spawned_by.session_id is not None else None
+    role = seat.env.get("AR_SPAWN_ROLE") if seat.env is not None else None
+    sprint_binding, binding_refusal = sprint_binding_for_spawn(
+        role,
+        leaf_key=leaf_key,
+        replacement_for_leaf=replacement_for_leaf,
+        parent=parent,
+        parent_session_id=spawned_by.session_id,
+    )
+    if binding_refusal is not None:
+        return _sprint_binding_refusal(binding_refusal, plan.harness, seat.kind)
     spawn_host = overrides.host if overrides.host is not None else TerminalHost()
     result = open_terminal_session(
         runtime=HostedSessionRuntime(catalog=catalog, host=spawn_host),
@@ -840,6 +864,8 @@ def spawn_agent_session_tool(
             replacement_for_leaf=replacement_for_leaf,
             spawn_level=plan.spawn_level,
             spawn_level_source=plan.spawn_level_source,
+            spawn_repo=sprint_binding.repo if sprint_binding is not None else None,
+            spawn_sprint=sprint_binding.sprint if sprint_binding is not None else None,
             spawned_by_session=spawned_by.session_id,
             spawned_by_lifecycle=spawned_by.lifecycle_id or _ambient_lifecycle_id(),
         ),
@@ -879,6 +905,8 @@ def _spawned_payload(entry: TerminalCatalogEntry, delivery: _SpawnDelivery) -> d
         # The resolved dispatch level + how it was supplied (rolesPerLevel resolution input).
         "spawnLevel": entry.spawn_level,
         "spawnLevelSource": entry.spawn_level_source,
+        "spawnRepo": entry.spawn_repo,
+        "spawnSprint": entry.spawn_sprint,
         "resolvedModel": entry.resolved_model,
         "resolvedEffort": entry.resolved_effort,
         # Free-form spawn provenance (260703-L16), echoed as recorded on the catalog row.
@@ -919,6 +947,17 @@ def _spawn_refusal(
             "detail": detail,
         },
     )
+
+
+def _sprint_binding_refusal(
+    status: SprintBindingRefusal, harness: str | None, kind: str
+) -> dict[str, Any]:
+    """Return the refusal for a named role without constructing a terminal."""
+
+    detail = "named role seats require the caller's or request's repository+sprint binding"
+    if status == "sprint-binding-required":
+        return _spawn_refusal("sprint-binding-required", harness, kind, detail=detail)
+    return _spawn_refusal("sprint-binding-conflict", harness, kind, detail=detail)
 
 
 # ``SessionRetireResponse.ok`` by its own documented rule, in one place: the two idempotent

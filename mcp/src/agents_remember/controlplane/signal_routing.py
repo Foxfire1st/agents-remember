@@ -260,7 +260,8 @@ def derive_signal_owner(
 ) -> RoutedOwner:
     """The owner address for a signal from ``sender_agent_id``, or an empty :class:`RoutedOwner`."""
     if message_kind == "decision-item":
-        return RoutedOwner(role="architect")
+        sender_leaf = signal_leaf_key(catalog, sender_agent_id=sender_agent_id)
+        return derive_architect_owner(catalog, leaf_key=leaf_key or sender_leaf)
     if sender_agent_id is None:
         return RoutedOwner()
     entry = catalog.get(sender_agent_id)
@@ -332,6 +333,8 @@ def _seat_in_scope(
     master: str | None,
 ) -> bool:
     """Whether a seat's binding or replacement target falls inside ``master``'s scope."""
+    if entry.sprint_key is not None:
+        return master is not None and entry.sprint_key == master
     for anchor in (entry.binding_leaf_key, entry.replacement_for_leaf):
         if anchor is None:
             continue

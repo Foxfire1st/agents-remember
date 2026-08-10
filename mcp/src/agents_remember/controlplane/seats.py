@@ -89,6 +89,9 @@ class SeatRow(Protocol):
     @property
     def binding_leaf_key(self) -> str | None: ...
 
+    @property
+    def sprint_key(self) -> str | None: ...
+
 
 class SeatDirectory(Protocol):
     """The seat catalog, as the control plane reads it: two pure reads and nothing else.

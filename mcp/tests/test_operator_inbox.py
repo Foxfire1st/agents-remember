@@ -36,7 +36,9 @@ from agents_remember.controlplane.operator_inbox_transitions import (
     DeliveryAttempt,
     RedeliveryFloor,
 )
+from agents_remember.controlplane.signal_routing import RoutedOwner
 from agents_remember.mcp.tools import operator_inbox as inbox_tools
+from agents_remember.serving import operator_inbox_posts
 from agents_remember.serving.dispatch_brief import HostedDelivery
 from agents_remember.serving.harness_control_models import SubmissionReceipt
 from agents_remember.serving.hosted_session_runtime import HostedSessionRuntime
@@ -576,6 +578,58 @@ class OperatorInboxToolTests(unittest.TestCase):
         )
         self.assertEqual(posted_ruling["messageKind"], "decision-ruling")
         self.assertEqual(posted_ruling["recipientRole"], "orchestrator")
+
+    def test_decision_item_pins_the_resolved_architect_or_refuses_without_one(self) -> None:
+        catalog = TerminalCatalog(self.store.root / "terminal-sessions.json")
+        exact = operator_inbox_posts._post_address(
+            catalog,
+            RoutedOwner(role="architect", agent_id="architect-a", lifecycle_id="L-architect"),
+            message_kind="decision-item",
+            address=InboxAddress(recipient_role="architect"),
+        )
+        self.assertEqual(
+            exact,
+            InboxAddress(
+                lifecycle_id="L-architect", agent_id="architect-a", recipient_role="architect"
+            ),
+        )
+        catalog.upsert(
+            TerminalCatalogEntry(
+                id="manager-a",
+                label="Manager",
+                kind="harness",
+                harness="claude",
+                lifecycle_id="L-manager",
+                cwd=self.store.root,
+                tmux_name="ar-manager-a",
+                command=("claude",),
+                created_at=T1,
+                last_attached_at=T1,
+                status="running",
+                leaf_key="repo-a/sprint-a/leaf-1",
+                spawn_role="manager",
+                seat_role="manager",
+                spawn_repo="repo-a",
+                spawn_sprint="sprint-a",
+            )
+        )
+        refused = operator_inbox_posts.post_operator_inbox_entry(
+            operator_inbox_posts.OperatorInboxPostContext(
+                config=None,
+                store=self.store,
+                delivery=HostedDelivery(enabled=False, catalog=catalog),
+            ),
+            address=InboxAddress(recipient_role="architect"),
+            message=InboxMessage(ask="Decide", response="Context", message_kind="decision-item"),
+            poster=InboxPoster(
+                created_by="manager",
+                created_via="cli",
+                sender_agent_id="manager-a",
+                sender_role="manager",
+            ),
+        )
+        self.assertEqual(refused["status"], "sprint-owner-required")
+        self.assertEqual(self.store.read(), [])
 
     def test_plain_message_addressed_to_architect_and_curator_succeeds(self) -> None:
         for role in ("architect", "curator"):

@@ -82,8 +82,10 @@ def _register_session_spawn_tools(server: FastMCP, config: McpRuntimeConfig) -> 
         overridden), resolve the role knobs from developer-owned agentic settings, seed resolved
         `model`/`effort` into spawn env, map them onto the harness argv per-harness via the registry,
         and return the exact catalog session id as `spawned-unbriefed`. Ordinary callers declare the
-        seat (`env.AR_SPAWN_ROLE`) and dispatch `level`; they do not choose harness/model/effort or
-        direct launch/session spend controls. Legacy non-null `context` or `submit=true` returns
+        seat (`env.AR_SPAWN_ROLE`) and dispatch `level`; architect, orchestrator, and manager seats
+        also require a repository+sprint scope from their leaf reference or spawning seat. They do
+        not choose harness/model/effort or direct launch/session spend controls. Legacy non-null
+        `context` or `submit=true` returns
         `brief-delivery-separate` before settings, catalog, or terminal side effects. The caller must
         then obtain `hosted_session_readiness(...)=ready` for the returned id and post one exact-agent
         durable `dispatch-brief`; only `delivered` plus adapter acceptance proves brief delivery.
@@ -109,7 +111,7 @@ def _register_session_spawn_tools(server: FastMCP, config: McpRuntimeConfig) -> 
         render the orchestration tree. Status `spawned-unbriefed` on success;
         `brief-delivery-separate`, `spend-override-unsupported`, `harness-unknown`/
         `harness-not-detected`/`effort-invalid`/`model-invalid`/`launch-selection-invalid`/
-        `level-invalid`/`bad-kind` are
+        `level-invalid`/`sprint-binding-required`/`sprint-binding-conflict`/`bad-kind` are
         pre-spawn refusals."""
         return spawn_agent_session_payload(
             config,

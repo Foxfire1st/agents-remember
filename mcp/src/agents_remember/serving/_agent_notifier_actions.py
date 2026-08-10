@@ -55,6 +55,8 @@ from agents_remember.serving.state_signals import (
     compound_idle_response,
     compound_idle_sets,
     compound_idle_signature,
+    current_non_reaction_finding,
+    current_state_signal_finding,
     non_reaction_response,
     state_signal_response,
 )
@@ -431,17 +433,16 @@ def _emit_state_signal(  # pragma: no cover
     pending row that the next sweep coalesces/renews rather than a duplicate. Delivery
     rides the availability gate: a working manager holds the row on its durable schedule.
     """
-    if finding.session_id is None:
+    if finding.session_id is None or finding.source_id is None:
         return AgentNotifierActionResult("state-signal", finding, "skipped", "no seat row")
-    entry = ctx.catalog.get(finding.session_id)
-    if (
-        entry is None
-        or entry.terminal_evidence_id is None
-        or entry.state_signal_emitted_for == entry.terminal_evidence_id
-    ):
-        return AgentNotifierActionResult("state-signal", finding, "skipped", "already emitted")
+    current = current_state_signal_finding(
+        ctx.catalog, session_id=finding.session_id, source_id=finding.source_id
+    )
+    if current is None:
+        return AgentNotifierActionResult("state-signal", finding, "skipped", "no longer due")
+    entry, current_finding = current
     owner = derive_leaf_manager_owner(
-        ctx.catalog, sender_agent_id=finding.session_id, leaf_key=finding.leaf_key
+        ctx.catalog, sender_agent_id=current_finding.session_id, leaf_key=current_finding.leaf_key
     )
     if owner.agent_id is None and owner.lifecycle_id is None and owner.role is None:
         return AgentNotifierActionResult("state-signal", finding, "skipped", "no routable owner")
@@ -455,19 +456,20 @@ def _emit_state_signal(  # pragma: no cover
                 f"({entry.terminal_evidence_id})"
             ),
             response=state_signal_response(entry),
-            leaf_key=finding.leaf_key,
-            seat_role=finding.seat_role,
-            subject_agent_id=finding.session_id,
+            leaf_key=current_finding.leaf_key,
+            seat_role=current_finding.seat_role,
+            subject_agent_id=current_finding.session_id,
         ),
         OwnerSignalOptions(now=now, sweep=sweep, admission=DeliveryAdmission(boundary=True)),
     )
+    assert entry.terminal_evidence_id is not None
     record_state_signal_emitted(ctx.catalog, finding.session_id, entry.terminal_evidence_id)
     _log_event(
         ctx,
         "orchestration.agent-notifier.state-signal",
         {
-            "sessionId": finding.session_id,
-            "leafKey": finding.leaf_key,
+            "sessionId": current_finding.session_id,
+            "leafKey": current_finding.leaf_key,
             "terminalOutcome": entry.terminal_outcome,
             "terminalEvidenceId": entry.terminal_evidence_id,
             "ownerRole": owner.role,
@@ -549,12 +551,15 @@ def _emit_non_reaction(  # pragma: no cover
     """Relay the non-reaction residue fact to the seat's owner, once per landed-row episode."""
     if finding.session_id is None or finding.source_id is None:
         return AgentNotifierActionResult("non-reaction", finding, "skipped", "no seat row")
-    entry = ctx.catalog.get(finding.session_id)
-    row = sweep.inbox_current.get(finding.source_id)
-    if entry is None or row is None:
-        return AgentNotifierActionResult("non-reaction", finding, "skipped", "row not pending")
-    if entry.non_reaction_emitted_for == finding.source_id:
-        return AgentNotifierActionResult("non-reaction", finding, "skipped", "already emitted")
+    current = current_non_reaction_finding(
+        ctx.catalog,
+        ctx.inbox_store,
+        finding,
+        now=now,
+    )
+    if current is None:
+        return AgentNotifierActionResult("non-reaction", finding, "skipped", "no longer due")
+    entry, row, current_finding = current
     if entry.binding_role == "manager":
         owner = derive_signal_owner(
             ctx.catalog, sender_agent_id=finding.session_id, message_kind="state-signal"
@@ -565,7 +570,9 @@ def _emit_non_reaction(  # pragma: no cover
             )
     else:
         owner = derive_leaf_manager_owner(
-            ctx.catalog, sender_agent_id=finding.session_id, leaf_key=finding.leaf_key
+            ctx.catalog,
+            sender_agent_id=current_finding.session_id,
+            leaf_key=current_finding.leaf_key,
         )
     if owner.agent_id is None and owner.lifecycle_id is None and owner.role is None:
         return AgentNotifierActionResult("non-reaction", finding, "skipped", "no routable owner")
@@ -576,9 +583,9 @@ def _emit_non_reaction(  # pragma: no cover
             message_kind="state-signal",
             ask="Agent notifier observed state-signal: non-reaction",
             response=non_reaction_response(entry, row),
-            leaf_key=finding.leaf_key,
-            seat_role=finding.seat_role,
-            subject_agent_id=finding.session_id,
+            leaf_key=current_finding.leaf_key,
+            seat_role=current_finding.seat_role,
+            subject_agent_id=current_finding.session_id,
         ),
         OwnerSignalOptions(now=now, sweep=sweep, admission=DeliveryAdmission(boundary=True)),
     )
@@ -587,8 +594,8 @@ def _emit_non_reaction(  # pragma: no cover
         ctx,
         "orchestration.agent-notifier.state-signal",
         {
-            "sessionId": finding.session_id,
-            "leafKey": finding.leaf_key,
+            "sessionId": current_finding.session_id,
+            "leafKey": current_finding.leaf_key,
             "terminalOutcome": "non-reaction",
             "landedRowId": finding.source_id,
             "ownerRole": owner.role,

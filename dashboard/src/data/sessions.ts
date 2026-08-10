@@ -53,6 +53,8 @@ export interface OpenSession {
   /** The RESOLVED dispatch level (leaf|master|portfolio) + explicit-vs-default provenance. */
   spawnLevel?: string;
   spawnLevelSource?: string;
+  spawnRepo?: string;
+  spawnSprint?: string;
   // The settings-resolved model/effort pinned at launch — REQUESTED provenance, never proof of
   // the effective pair (evidence tiers live in sessionCockpitStore).
   resolvedModel?: string;
@@ -581,6 +583,8 @@ const OPTIONAL_SESSION_FIELDS: {
   { from: "spawnedLabel", to: "spawnedLabel" },
   { from: "spawnLevel", to: "spawnLevel" },
   { from: "spawnLevelSource", to: "spawnLevelSource" },
+  { from: "spawnRepo", to: "spawnRepo" },
+  { from: "spawnSprint", to: "spawnSprint" },
   { from: "resolvedModel", to: "resolvedModel" },
   { from: "resolvedEffort", to: "resolvedEffort" },
   { from: "turnState", to: "turnState" },

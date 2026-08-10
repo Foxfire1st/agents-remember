@@ -134,6 +134,14 @@ def _idle_worker(
     )
 
 
+def _idle_subordinate(session_id: str, role: str, **overrides: object) -> TerminalCatalogEntry:
+    leaf_key = overrides.pop("leaf_key", LEAF_A)
+    assert isinstance(leaf_key, str) or leaf_key is None
+    return replace(
+        _idle_worker(session_id, leaf_key=leaf_key, **overrides), spawn_role=role, seat_role=role
+    )
+
+
 class _FakeHost:
     def has_session(self, _tmux_name: str) -> bool:
         return True
@@ -256,6 +264,108 @@ class CompoundIdleRelayTests(unittest.TestCase):
         )
         run_agent_notifier_sweep(self._ctx(), now=NOW)
         self.assertEqual(self._state_signals(), [])
+
+    def test_owned_reviewer_and_curator_share_the_compound_idle_episode_and_rearm_once(
+        self,
+    ) -> None:
+        self.catalog.upsert(_orchestrator())
+        self.catalog.upsert(_manager())
+        self.catalog.upsert(_idle_worker("worker-1"))
+        self.catalog.upsert(_idle_subordinate("reviewer-1", "reviewer", leaf_key=LEAF_B))
+        self.catalog.upsert(_idle_subordinate("curator-1", "curator", leaf_key=LEAF_B))
+        ctx = self._ctx()
+        run_agent_notifier_sweep(ctx, now=NOW)
+        self.assertEqual(len(self._state_signals()), 1)
+        self.assertIn("reviewer-1", self._state_signals()[0].response)
+        self.assertIn("curator-1", self._state_signals()[0].response)
+
+        reviewer = self.catalog.get("reviewer-1")
+        assert reviewer is not None
+        self.catalog.upsert(
+            replace(
+                reviewer,
+                turn_state="working",
+                turn_state_changed_at=(NOW + timedelta(seconds=1)).isoformat(),
+            )
+        )
+        run_agent_notifier_sweep(ctx, now=NOW + timedelta(seconds=1))
+        self.assertEqual(len(self._state_signals()), 1)
+
+        self.catalog.upsert(
+            replace(
+                reviewer,
+                turn_state="turn-ended",
+                turn_state_changed_at=(NOW + timedelta(seconds=2)).isoformat(),
+            )
+        )
+        run_agent_notifier_sweep(ctx, now=NOW + timedelta(seconds=2))
+        self.assertEqual(len(self._state_signals()), 2)
+
+    def test_owned_curator_working_blocks_then_rearms_one_compound_idle_wake(self) -> None:
+        self.catalog.upsert(_orchestrator())
+        self.catalog.upsert(_manager())
+        self.catalog.upsert(_idle_worker("worker-1"))
+        curator = _idle_subordinate("curator-1", "curator", turn_state="working")
+        self.catalog.upsert(curator)
+        ctx = self._ctx()
+
+        run_agent_notifier_sweep(ctx, now=NOW)
+        self.assertEqual(self._state_signals(), [])
+        self.catalog.upsert(
+            replace(
+                curator,
+                turn_state="turn-ended",
+                turn_state_changed_at=(NOW + timedelta(seconds=1)).isoformat(),
+            )
+        )
+        run_agent_notifier_sweep(ctx, now=NOW + timedelta(seconds=1))
+        self.assertEqual(len(self._state_signals()), 1)
+        run_agent_notifier_sweep(ctx, now=NOW + timedelta(seconds=2))
+        self.assertEqual(len(self._state_signals()), 1)
+
+    def test_future_manager_owned_leaf_role_blocks_then_joins_without_duplicates(self) -> None:
+        self.catalog.upsert(_orchestrator())
+        self.catalog.upsert(_manager())
+        self.catalog.upsert(_idle_worker("worker-1"))
+        future = _idle_subordinate(
+            "analyst-1",
+            "analyst",
+            leaf_key=LEAF_B,
+            turn_state="working",
+        )
+        self.catalog.upsert(future)
+        ctx = self._ctx()
+        run_agent_notifier_sweep(ctx, now=NOW)
+        self.assertEqual(self._state_signals(), [])
+
+        self.catalog.upsert(
+            replace(
+                future,
+                turn_state="awaiting-input",
+                turn_state_changed_at=(NOW + timedelta(seconds=1)).isoformat(),
+            )
+        )
+        run_agent_notifier_sweep(ctx, now=NOW + timedelta(seconds=1))
+        self.assertEqual(len(self._state_signals()), 1)
+        self.assertIn("analyst-1", self._state_signals()[0].response)
+        run_agent_notifier_sweep(ctx, now=NOW + timedelta(seconds=2))
+        self.assertEqual(len(self._state_signals()), 1)
+
+    def test_owner_tier_and_cross_master_children_are_structurally_excluded(self) -> None:
+        self.catalog.upsert(_orchestrator())
+        self.catalog.upsert(_manager())
+        self.catalog.upsert(_idle_worker("worker-1"))
+        self.catalog.upsert(_idle_subordinate("architect-child", "architect", leaf_key=LEAF_B))
+        self.catalog.upsert(
+            _idle_subordinate("other-master-child", "analyst", leaf_key=OTHER_MASTER_LEAF)
+        )
+
+        run_agent_notifier_sweep(self._ctx(), now=NOW)
+        signals = self._state_signals()
+        self.assertEqual(len(signals), 1)
+        self.assertIn("worker-1", signals[0].response)
+        self.assertNotIn("architect-child", signals[0].response)
+        self.assertNotIn("other-master-child", signals[0].response)
 
     def test_unknown_member_fail_closed_no_signal(self) -> None:
         self.catalog.upsert(_orchestrator())
@@ -397,17 +507,16 @@ class CompoundIdleRelayTests(unittest.TestCase):
             self.assertEqual(submit.call_count, 1)
             self.assertEqual(len(self._state_signals()), 1)
 
-    def test_member_identity_same_master_binding_counts(self) -> None:
+    def test_member_identity_same_master_without_manager_ownership_is_excluded(self) -> None:
         self.catalog.upsert(_orchestrator())
         self.catalog.upsert(_manager())
-        # Same master via binding, spawned by a different manager: still a member of the set.
+        # A sibling manager's subordinate must not join this manager's idle episode.
         self.catalog.upsert(
             _idle_worker("worker-bound", leaf_key=LEAF_A, spawned_by_session="other-manager")
         )
         run_agent_notifier_sweep(self._ctx(), now=NOW)
         signals = self._state_signals()
-        self.assertEqual(len(signals), 1)
-        self.assertIn("worker-bound", signals[0].response)
+        self.assertEqual(len(signals), 0)
 
     def test_member_identity_other_master_worker_not_in_set(self) -> None:
         self.catalog.upsert(_orchestrator())

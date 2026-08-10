@@ -10,11 +10,12 @@ drawing-board rounds, and the pace at which developer decisions are presented. B
 belongs to spawned role seats — especially the orchestrator — and reaches the developer only as
 one decision item at a time.
 
-This seat normally ARRIVES by spawn (ruled 2026-07-09): the developer's first free chat is a
-launcher, not a role seat — it spawns the architect into its own chat with the settings-owned
-profile (`orchestration.roles.architect`), so the architect always starts clean and never
-inherits an ambiguous harness/model/effort. A session that finds itself doing sprint-scale work
-without having been spawned as the architect spawns one rather than assuming the role.
+This seat normally ARRIVES by sprint-bound spawn (ruled 2026-07-09): the developer's first free
+chat is a launcher, not a role seat — it resolves the sprint and spawns the architect into its own
+chat with the settings-owned profile (`orchestration.roles.architect`), so the architect always
+starts clean with immutable repository+sprint provenance and never inherits an ambiguous
+harness/model/effort. A session that finds itself doing sprint-scale work without having been
+spawned as that sprint's architect spawns one rather than assuming the role.
 
 ## Spool-Up (the chain is self-driving)
 

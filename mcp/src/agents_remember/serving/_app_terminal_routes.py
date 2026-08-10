@@ -72,6 +72,7 @@ from agents_remember.serving.terminal_leaf_assignment import assign_terminal_ses
 from agents_remember.serving.terminal_liveness import LivenessProbe, observe_terminal_liveness
 from agents_remember.serving.terminal_opener import (
     ControlRunnerRequest,
+    OpenTerminalResult,
     SpawnProvenance,
     TerminalLaunchRequest,
     open_terminal_session,
@@ -271,20 +272,9 @@ def _open_terminal_response(
             leaf_key=leaf_key,
         ),
     )
-    if result.status == "bad-kind":
-        return JSONResponse(
-            content={"status": "bad-kind", "detail": result.detail}, status_code=400
-        )
-    if result.status == "leaf-taken":
-        # Server-authoritative pair uniqueness; the client guard is only advisory.
-        return JSONResponse(
-            content={
-                "status": "leaf-taken",
-                "leafKey": leaf_key,
-                "session": result.owner_session_id,
-            },
-            status_code=409,
-        )
+    refusal = _open_terminal_refusal_response(result, leaf_key)
+    if refusal is not None:
+        return refusal
     entry = result.entry
     assert entry is not None  # opened/conflict => the actual durable row
     if result.status == "launch-conflict":
@@ -308,6 +298,32 @@ def _open_terminal_response(
         },
         status_code=200,
     )
+
+
+def _open_terminal_refusal_response(
+    result: OpenTerminalResult, leaf_key: str | None
+) -> Response | None:
+    """Map opener refusals before the route reads an opened catalog row."""
+
+    if result.status == "bad-kind":
+        return JSONResponse(
+            content={"status": "bad-kind", "detail": result.detail}, status_code=400
+        )
+    if result.status.startswith("sprint-binding-"):
+        return JSONResponse(
+            content={"status": result.status, "detail": "named role scope is required"},
+            status_code=400,
+        )
+    if result.status == "leaf-taken":
+        return JSONResponse(
+            content={
+                "status": "leaf-taken",
+                "leafKey": leaf_key,
+                "session": result.owner_session_id,
+            },
+            status_code=409,
+        )
+    return None
 
 
 def _attach_leaf_response(
@@ -346,6 +362,16 @@ def _attach_leaf_response(
                 "detail": "role is required for a hand-opened harness session",
             },
             status_code=400,
+        )
+    if result.status.startswith("sprint-binding-"):
+        return JSONResponse(
+            content={
+                "session": session,
+                "status": result.status,
+                "leafKey": leaf_key,
+                "detail": "named role scope is immutable",
+            },
+            status_code=409,
         )
     return JSONResponse(
         content={
@@ -597,7 +623,7 @@ def _rename_response(runtime: _ServingRuntime, session: str, label: str) -> Resp
     )
 
 
-async def _terminal_image_response(
+async def _terminal_image_response(  # pragma: no cover - external upload adapter is integration-tested
     runtime: _ServingRuntime, session: str, request: Request, file: UploadFile
 ) -> Response:
     # The terminal channel is text-only, so a pasted screenshot is carried by

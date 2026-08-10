@@ -52,6 +52,9 @@ export interface TerminalCatalogRow {
   /** The RESOLVED dispatch level (leaf|master|portfolio) + whether it was explicit or defaulted. */
   spawnLevel?: string;
   spawnLevelSource?: string;
+  /** Immutable repository+sprint provenance for named orchestration seats. */
+  spawnRepo?: string;
+  spawnSprint?: string;
   // Settings-resolved model/effort pinned on the harness argv at launch — REQUESTED provenance,
   // never proof of the effective pair (evidence tiers live in the cockpit store, L4).
   resolvedModel?: string;

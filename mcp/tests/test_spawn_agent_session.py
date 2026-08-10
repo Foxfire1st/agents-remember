@@ -329,12 +329,9 @@ class SpawnAgentSessionTests(unittest.TestCase):
             ),
             encoding="utf-8",
         )
-        payload = self._spawn(env={"AR_SPAWN_ROLE": "manager"})
-        self.assertEqual(payload["status"], "spawned-unbriefed")
-        self.assertEqual(payload["spawnRole"], "manager")
-        row = self.catalog.get("worker-1")
-        assert row is not None
-        self.assertEqual(row.spawn_role, "manager")
+        payload = self._spawn(env={"AR_SPAWN_ROLE": "manager"}, leaf_key="repo/master/leaf-1")
+        self.assertEqual(payload["status"], "sprint-binding-required")
+        self.assertIsNone(self.catalog.get("worker-1"))
 
     def test_spawn_normalizes_legacy_leaf_slug_before_persisting(self) -> None:
         payload = self._spawn(leaf_key="leaf-1")

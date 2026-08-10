@@ -26,7 +26,7 @@ package skill folder. The pre-commit and pre-push hooks run
 
 | Skill | Purpose |
 | --- | --- |
-| `l-01-agent-lifecycles` | The agent lifecycles, one per agent type under one roof. Routes every session by exactly three conditions (spawn-role env → fresh role brief → otherwise architect), carries the minimal lifecycle frame (the six lifecycle signals every session shares), and houses the self-contained per-role lifecycles (architect · backend orchestrator · designer · strategist · manager · worker · curator · system-specialist · adversarial reviewer) plus the report-template library and the reviewer criteria catalogs. The architect lifecycle (request → trust-checkpoint → reframe-research → decide → build → close) owns the developer-facing research-only exit and build decision; backend orchestrators run as spawned seats. |
+| `l-01-agent-lifecycles` | The agent lifecycles, one per agent type under one roof. Routes every session by exactly three conditions (spawn-role env → fresh role brief → otherwise free chat), carries the minimal lifecycle frame (the six lifecycle signals every session shares), and houses the self-contained per-role lifecycles (architect · backend orchestrator · designer · strategist · manager · worker · curator · system-specialist · adversarial reviewer) plus the report-template library and the reviewer criteria catalogs. Free chat is the developer entry; it resolves a sprint before spawning its architect. Architect, orchestrator, and manager seats are sprint-local; backend orchestrators run as spawned seats. |
 | `w-02-light-task-workflow` | Durable one-page task plan with approval gate and live checklist; escalates to a master + light sub-task series for larger work. |
 
 ## Core Skills

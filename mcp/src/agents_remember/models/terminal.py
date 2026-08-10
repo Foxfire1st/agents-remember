@@ -23,6 +23,8 @@ LeafAssignmentStatus = Literal[
     "leaf-taken",
     "unknown-session",
     "role-required",
+    "sprint-binding-required",
+    "sprint-binding-conflict",
     LeafRefStatus,
 ]
 
@@ -65,6 +67,8 @@ SpawnAgentSessionStatus = Literal[
     "spend-override-unsupported",
     # 260703-L16 (ruling 2026-07-07T08:15): the dispatch level is outside leaf|master|portfolio.
     "level-invalid",
+    "sprint-binding-required",
+    "sprint-binding-conflict",
     # Raised by `LeafRefResolutionError` and copied onto the refusal by `leaf_ref_refusal_payload`.
     LeafRefStatus,
     "bad-kind",
@@ -101,6 +105,8 @@ class SpawnAgentSessionResponse(ToolResponse):
     # (260703-L16, ruling 2026-07-07T08:15), recorded on the catalog row.
     spawnLevel: str | None = None
     spawnLevelSource: str | None = None
+    spawnRepo: str | None = None
+    spawnSprint: str | None = None
     resolvedModel: str | None = None
     resolvedEffort: str | None = None
     # Free-form spawn provenance (260703-L16): launchArgs rode the base launch argv verbatim;
